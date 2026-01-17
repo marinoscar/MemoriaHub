@@ -12,8 +12,8 @@ MemoriaHub is a monorepo with three core runtimes:
 graph TD
   U[User / Sync Client] -->|HTTPS| N[Nginx / Reverse Proxy]
   N -->|root path| W[Web UI (React)]
-  N -->|/api path| A[API Service (Node)]
-  N -->|/dav path| D[WebDAV Endpoint]
+  N -->|"/api path"| A[API Service (Node)]
+  N -->|"/dav path"| D[WebDAV Endpoint]
 
   A --> P[(PostgreSQL)]
   D --> S[(S3 Object Storage)]
