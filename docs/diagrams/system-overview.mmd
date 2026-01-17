@@ -1,0 +1,15 @@
+%% Mermaid diagram source (agent-editable)
+%% Copy into ARCHITECTURE.md if needed
+
+graph TD
+  U[User] --> N[Nginx]
+  N --> W[Web]
+  N --> A[API]
+  N --> D[WebDAV]
+  A --> P[(Postgres)]
+  D --> S[(S3)]
+  D --> P
+  A --> Q[(Queue)]
+  Q --> R[Worker]
+  R --> P
+  R --> S
