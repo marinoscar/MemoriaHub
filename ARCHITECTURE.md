@@ -1,19 +1,19 @@
 # MemoriaHub Architecture
 
 ## High-level design
-MemoriaHub is a monorepo with three core runtimes:
+MemoriaHub is a monorepo with three core runtimes: 
 - **web**: React UI
 - **api**: REST API + WebDAV ingestion
-- **worker**: background processing pipeline
+- **worker**:  background processing pipeline
 
 ## System diagram
 
 ```mermaid
 graph TD
   U[User / Sync Client] -->|HTTPS| N[Nginx / Reverse Proxy]
-  N -->|/| W[Web UI (React)]
-  N -->|/api| A[API Service (Node)]
-  N -->|/dav| D[WebDAV Endpoint]
+  N -->|root path| W[Web UI (React)]
+  N -->|/api path| A[API Service (Node)]
+  N -->|/dav path| D[WebDAV Endpoint]
 
   A --> P[(PostgreSQL)]
   D --> S[(S3 Object Storage)]
@@ -46,10 +46,10 @@ graph TD
 - API: `https://<domain>/api`
 - WebDAV: `https://<domain>/dav`
 
-This reduces CORS complexity and keeps deployments simple.
+This reduces CORS complexity and keeps deployments simple. 
 
 ### 2) Event-driven processing pipeline
-Uploads create an **IngestionEvent** and enqueue **ProcessingJobs**. A fallback reconciler handles orphaned work.
+Uploads create an **IngestionEvent** and enqueue **ProcessingJobs**. A fallback reconciler handles orphaned work. 
 
 ### 3) Storage abstraction
 A `StorageAdapter` interface supports:
@@ -60,13 +60,13 @@ A `StorageAdapter` interface supports:
 ### 4) Service boundaries
 - API handles auth, libraries, metadata APIs, search, and job enqueue.
 - WebDAV endpoint validates uploads and emits ingestion events.
-- Worker performs CPU-heavy work and retries safely.
+- Worker performs CPU-heavy work and retries safely. 
 
 ## Data model (conceptual)
 
 ### Core entities
-- **User**: OAuth identity mapping
-- **Library**: owner, visibility, members
+- **User**:  OAuth identity mapping
+- **Library**:  owner, visibility, members
 - **MediaAsset**: object storage keys, metadata, status
 - **IngestionEvent**: upload tracking + client details
 - **ProcessingJob**: pipeline steps, attempts, last error
@@ -89,7 +89,7 @@ sequenceDiagram
   participant Q as Queue
   participant W as Worker
 
-  C->>D: PUT /dav/{libraryId}/file.jpg
+  C->>D:  PUT /dav/{libraryId}/file.jpg
   D->>S: stream upload
   D->>P: create MediaAsset + IngestionEvent (traceId)
   D->>Q: enqueue jobs (EXIF, thumb, enrich)
