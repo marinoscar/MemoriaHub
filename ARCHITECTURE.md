@@ -9,34 +9,35 @@ MemoriaHub is a monorepo with three core runtimes:
 ## System diagram
 
 ```mermaid
-graph TD
-  U[User  Sync Client] -->|HTTPS| N[Nginx  Reverse Proxy]
-  N -->|root path| W[Web UI (React)]
-  N -->|api path| A[API Service (Node)]
-  N -->|dav path| D[WebDAV Endpoint]
+graph TD;
+  U[User Sync Client] -->|HTTPS| N[Nginx Reverse Proxy];
 
-  A --> P[(PostgreSQL)]
-  D --> S[(S3 Object Storage)]
-  D --> P
+  N -->|root path| W[Web UI - React];
+  N -->|api path| A[API Service - Node];
+  N -->|dav path| D[WebDAV Endpoint];
 
-  A --> Q[(Job Queue / DB-backed queue)]
-  Q --> R[Worker Service]
+  A --> P[(PostgreSQL)];
+  D --> S[(S3 Object Storage)];
+  D --> P;
 
-  R --> P
-  R --> S
+  A --> Q[(Job Queue)];
+  Q --> R[Worker Service];
+
+  R --> P;
+  R --> S;
 
   subgraph Observability
-    OT[OpenTelemetry] --> PR[Prometheus]
-    OT --> J[Jaeger]
-    OT --> L[Loki]
-    G[Grafana] --> PR
-    G --> J
-    G --> L
-  end
+    OT[OpenTelemetry] --> PR[Prometheus];
+    OT --> J[Jaeger];
+    OT --> L[Loki];
+    G[Grafana] --> PR;
+    G --> J;
+    G --> L;
+  end;
 
-  A --> OT
-  D --> OT
-  R --> OT
+  A --> OT;
+  D --> OT;
+  R --> OT;
 ```
 
 ## Key architectural decisions
