@@ -33,7 +33,7 @@ interface UserMenuProps {
 export function UserMenu({ user }: UserMenuProps) {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const { logout } = useAuth();
-  const { mode, toggleTheme, isDarkMode } = useTheme();
+  const { toggleTheme, isDarkMode } = useTheme();
   const navigate = useNavigate();
   const open = Boolean(anchorEl);
 
