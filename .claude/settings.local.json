@@ -3,7 +3,9 @@
     "allow": [
       "Bash(dir:*)",
       "Bash(tree:*)",
-      "Bash(git ls-tree:*)"
+      "Bash(git ls-tree:*)",
+      "Bash(npm install)",
+      "Bash(docker compose:*)"
     ]
   }
 }

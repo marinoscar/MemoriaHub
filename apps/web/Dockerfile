@@ -25,7 +25,12 @@ COPY apps/web/package*.json ./apps/web/
 COPY packages/shared/package*.json ./packages/shared/
 
 # Install all dependencies (including devDependencies for build)
-RUN npm ci --workspace=apps/web --workspace=packages/shared
+# Use npm install if no lock file exists, npm ci if it does
+RUN if [ -f package-lock.json ]; then \
+      npm ci --workspace=apps/web --workspace=packages/shared; \
+    else \
+      npm install --workspace=apps/web --workspace=packages/shared; \
+    fi
 
 # =============================================================================
 # Development Stage: Vite dev server with HMR

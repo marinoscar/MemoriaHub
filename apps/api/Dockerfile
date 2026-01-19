@@ -25,7 +25,12 @@ COPY apps/api/package*.json ./apps/api/
 COPY packages/shared/package*.json ./packages/shared/
 
 # Install all dependencies (including devDependencies for build)
-RUN npm ci --workspace=apps/api --workspace=packages/shared
+# Use npm install if no lock file exists, npm ci if it does
+RUN if [ -f package-lock.json ]; then \
+      npm ci --workspace=apps/api --workspace=packages/shared; \
+    else \
+      npm install --workspace=apps/api --workspace=packages/shared; \
+    fi
 
 # =============================================================================
 # Development Stage: Hot-reload development server

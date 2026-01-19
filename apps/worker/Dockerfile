@@ -30,7 +30,12 @@ COPY apps/worker/package*.json ./apps/worker/
 COPY packages/shared/package*.json ./packages/shared/
 
 # Install all dependencies (including devDependencies for build)
-RUN npm ci --workspace=apps/worker --workspace=packages/shared
+# Use npm install if no lock file exists, npm ci if it does
+RUN if [ -f package-lock.json ]; then \
+      npm ci --workspace=apps/worker --workspace=packages/shared; \
+    else \
+      npm install --workspace=apps/worker --workspace=packages/shared; \
+    fi
 
 # =============================================================================
 # Development Stage: Hot-reload development server
