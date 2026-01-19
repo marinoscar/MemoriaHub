@@ -472,6 +472,7 @@ WORKER_CONCURRENCY=4
 - [SECURITY.md](SECURITY.md) - Security requirements and threat model
 - [OBSERVABILITY.md](OBSERVABILITY.md) - Telemetry standards
 - [ROADMAP.md](ROADMAP.md) - Milestones and priorities
+- [docs/DATABASE.md](docs/DATABASE.md) - Database configuration, migrations, and governance
 
 ## Troubleshooting
 
