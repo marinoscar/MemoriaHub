@@ -127,6 +127,177 @@ export class UploadService {
   }
 
   /**
+   * Proxy upload - receives file directly and uploads to S3
+   * This avoids CORS issues with presigned URLs by proxying through the API
+   * @param userId User initiating the upload
+   * @param libraryId Target library
+   * @param file File buffer and metadata
+   * @param source Upload source (web, webdav, api)
+   * @returns Completed asset
+   */
+  async proxyUpload(
+    userId: string,
+    libraryId: string,
+    file: { buffer: Buffer; originalname: string; mimetype: string; size: number },
+    source: FileSource = 'web'
+  ): Promise<MediaAssetDTO> {
+    const traceId = getTraceId();
+    const startTime = Date.now();
+
+    // Verify user has upload permission to library
+    const canUpload = await libraryService.canUserUploadToLibrary(userId, libraryId);
+    if (!canUpload) {
+      throw new ForbiddenError('You do not have permission to upload to this library');
+    }
+
+    // Determine media type
+    const mediaType = getMediaTypeFromMimeType(file.mimetype);
+    if (!mediaType) {
+      throw new ValidationError('Unsupported file type');
+    }
+
+    // Generate asset ID and storage key
+    const assetId = uuidv4();
+    const extension = this.getFileExtension(file.originalname);
+    const storageKey = this.generateStorageKey(libraryId, assetId, extension);
+
+    // Create asset record
+    const assetInput: CreateMediaAssetInput = {
+      id: assetId,
+      libraryId,
+      storageKey,
+      storageBucket: storageConfig.bucket,
+      originalFilename: file.originalname,
+      mediaType,
+      mimeType: file.mimetype,
+      fileSize: file.size,
+      fileSource: source,
+      traceId,
+    };
+
+    const asset = await mediaAssetRepository.create(assetInput);
+
+    // Create ingestion event
+    await ingestionEventRepository.create({
+      assetId: asset.id,
+      source,
+      traceId: traceId || undefined,
+      clientInfo: {
+        userId,
+        filename: file.originalname,
+        mimeType: file.mimetype,
+        fileSize: file.size,
+      },
+    });
+
+    logger.info({
+      eventType: 'upload.proxy.started',
+      assetId: asset.id,
+      libraryId,
+      filename: file.originalname,
+      mediaType,
+      fileSize: file.size,
+      source,
+      userId,
+      traceId,
+    }, 'Proxy upload started');
+
+    // Upload to S3
+    try {
+      await this.storage.putObject(
+        storageConfig.bucket,
+        storageKey,
+        file.buffer,
+        {
+          contentType: file.mimetype,
+          metadata: {
+            originalFilename: file.originalname,
+            uploadedBy: userId,
+          },
+        }
+      );
+    } catch (error) {
+      // Mark as failed
+      await ingestionEventRepository.fail(assetId, 'Failed to upload to storage');
+      await mediaAssetRepository.updateStatus(assetId, 'ERROR', 'Failed to upload to storage');
+      throw error;
+    }
+
+    // Extract metadata and complete upload
+    let extractedMetadata: ExtractedMetadata | null = null;
+    let geocodingResult: GeocodingResult | null = null;
+
+    try {
+      // Extract EXIF from the buffer we already have
+      extractedMetadata = await exifService.extractMetadata(file.buffer, file.mimetype);
+
+      // Reverse geocode if we have GPS coordinates
+      if (extractedMetadata.latitude && extractedMetadata.longitude) {
+        geocodingResult = await geocodingService.reverseGeocode(
+          extractedMetadata.latitude,
+          extractedMetadata.longitude
+        );
+      }
+    } catch (error) {
+      logger.warn({
+        eventType: 'upload.proxy.metadata_extraction_failed',
+        assetId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        traceId,
+      }, 'Failed to extract metadata from file');
+      // Continue anyway - metadata extraction is best-effort
+    }
+
+    // Update asset with extracted metadata
+    const updateData: Parameters<typeof mediaAssetRepository.update>[1] = {
+      status: 'METADATA_EXTRACTED',
+    };
+
+    if (extractedMetadata) {
+      if (extractedMetadata.width) updateData.width = extractedMetadata.width;
+      if (extractedMetadata.height) updateData.height = extractedMetadata.height;
+      if (extractedMetadata.durationSeconds) updateData.durationSeconds = extractedMetadata.durationSeconds;
+      if (extractedMetadata.cameraMake) updateData.cameraMake = extractedMetadata.cameraMake;
+      if (extractedMetadata.cameraModel) updateData.cameraModel = extractedMetadata.cameraModel;
+      if (extractedMetadata.latitude) updateData.latitude = extractedMetadata.latitude;
+      if (extractedMetadata.longitude) updateData.longitude = extractedMetadata.longitude;
+      if (extractedMetadata.capturedAtUtc) updateData.capturedAtUtc = extractedMetadata.capturedAtUtc;
+      if (extractedMetadata.timezoneOffset !== null) updateData.timezoneOffset = extractedMetadata.timezoneOffset;
+      if (extractedMetadata.exifData) updateData.exifData = extractedMetadata.exifData;
+    }
+
+    if (geocodingResult) {
+      if (geocodingResult.country) updateData.country = geocodingResult.country;
+      if (geocodingResult.state) updateData.state = geocodingResult.state;
+      if (geocodingResult.city) updateData.city = geocodingResult.city;
+      if (geocodingResult.locationName) updateData.locationName = geocodingResult.locationName;
+    }
+
+    const updatedAsset = await mediaAssetRepository.update(assetId, updateData);
+
+    // Mark ingestion as completed
+    await ingestionEventRepository.complete(assetId);
+
+    // Queue processing jobs
+    await this.queueProcessingJobs(assetId, traceId ?? null);
+
+    logger.info({
+      eventType: 'upload.proxy.completed',
+      assetId,
+      libraryId,
+      filename: file.originalname,
+      hasExif: !!extractedMetadata,
+      hasGps: !!extractedMetadata?.latitude,
+      hasGeocoding: !!geocodingResult?.country,
+      userId,
+      durationMs: Date.now() - startTime,
+      traceId,
+    }, 'Proxy upload completed');
+
+    return this.assetToDTO(updatedAsset!);
+  }
+
+  /**
    * Complete an upload - verify file exists, extract metadata, queue processing
    * @param userId User completing the upload
    * @param assetId Asset ID from initiate step

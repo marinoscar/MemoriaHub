@@ -59,6 +59,7 @@ export const mediaApi = {
 
   /**
    * Initiate an upload and get a presigned URL
+   * @deprecated Use uploadFile which now uses proxy upload
    */
   async initiateUpload(input: InitiateUploadInput): Promise<PresignedUploadResponse> {
     const response = await apiClient.post<ApiResponse<PresignedUploadResponse>>(
@@ -70,7 +71,7 @@ export const mediaApi = {
 
   /**
    * Upload a file to S3 using the presigned URL
-   * This bypasses the API client since it goes directly to S3
+   * @deprecated Use uploadFile which now uses proxy upload
    */
   async uploadToS3(
     uploadUrl: string,
@@ -92,6 +93,7 @@ export const mediaApi = {
 
   /**
    * Complete an upload after file has been uploaded to S3
+   * @deprecated Use uploadFile which now uses proxy upload
    */
   async completeUpload(assetId: string): Promise<MediaAssetDTO> {
     const response = await apiClient.post<ApiResponse<MediaAssetDTO>>(
@@ -102,26 +104,35 @@ export const mediaApi = {
   },
 
   /**
-   * Full upload flow: initiate -> S3 upload -> complete
+   * Upload a file through the API proxy (avoids S3 CORS issues)
+   * File is uploaded to the API server, which then forwards it to S3
    */
   async uploadFile(
     libraryId: string,
     file: File,
     onProgress?: UploadProgressCallback
   ): Promise<MediaAssetDTO> {
-    // 1. Initiate upload
-    const { uploadUrl, assetId } = await this.initiateUpload({
-      libraryId,
-      filename: file.name,
-      mimeType: file.type,
-      fileSize: file.size,
-    });
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('libraryId', libraryId);
 
-    // 2. Upload to S3
-    await this.uploadToS3(uploadUrl, file, onProgress);
+    const response = await apiClient.post<ApiResponse<MediaAssetDTO>>(
+      '/media/upload/proxy',
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        onUploadProgress: (progressEvent) => {
+          if (onProgress && progressEvent.total) {
+            const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            onProgress(progress);
+          }
+        },
+      }
+    );
 
-    // 3. Complete upload
-    return this.completeUpload(assetId);
+    return response.data.data;
   },
 
   // ===========================================================================

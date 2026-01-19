@@ -47,6 +47,49 @@ export class MediaController {
   }
 
   /**
+   * POST /api/media/upload/proxy
+   * Upload a file directly through the API server (proxied to S3)
+   * This avoids CORS issues with direct S3 uploads
+   */
+  async proxyUpload(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const userId = req.user!.id;
+      const libraryId = req.body.libraryId as string;
+      const file = req.file;
+
+      if (!file) {
+        res.status(400).json({
+          error: { code: 'MISSING_FILE', message: 'No file provided' },
+        });
+        return;
+      }
+
+      if (!libraryId) {
+        res.status(400).json({
+          error: { code: 'MISSING_LIBRARY_ID', message: 'libraryId is required' },
+        });
+        return;
+      }
+
+      const asset = await uploadService.proxyUpload(userId, libraryId, {
+        buffer: file.buffer,
+        originalname: file.originalname,
+        mimetype: file.mimetype,
+        size: file.size,
+      });
+
+      const response: ApiResponse<MediaAssetDTO> = { data: asset };
+      res.status(201).json(response);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
    * POST /api/media/upload/complete
    * Complete an upload after file has been uploaded to S3
    */
