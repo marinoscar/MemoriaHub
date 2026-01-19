@@ -102,20 +102,6 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-      minio:
-        image: minio/minio:latest
-        ports:
-          - 9000:9000
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        # MinIO server command
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -125,6 +111,23 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
+
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:latest server /data
+          # Wait for MinIO to be ready
+          for i in {1..30}; do
+            if curl -sf http://localhost:9000/minio/health/live; then
+              echo "MinIO is ready"
+              break
+            fi
+            echo "Waiting for MinIO... ($i/30)"
+            sleep 1
+          done
 
       - name: Install dependencies
         run: npm ci
@@ -147,6 +150,10 @@ jobs:
           S3_SECRET_KEY: minioadmin
           S3_BUCKET: memoriahub-test
           JWT_SECRET: test-jwt-secret-for-ci
+
+      - name: Stop MinIO
+        if: always()
+        run: docker stop minio || true
 
   build:
     name: Build
