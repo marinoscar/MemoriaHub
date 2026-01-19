@@ -198,6 +198,67 @@ CREATE INDEX idx_processing_jobs_retry
 | `priority` | 2 | 2 seconds | 5 min | User-initiated re-processing |
 | `ai` | 1 | 10 seconds | 10 min | ML/AI tasks (disabled by default) |
 
+### Parallel vs Sequential Execution
+
+Jobs run **in parallel** within each queue's concurrency limit, not strictly sequentially:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         WORKER SERVICE                                   │
+│                                                                          │
+│  DEFAULT QUEUE (concurrency: 4)                                          │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐                    │
+│  │ Slot 1   │ │ Slot 2   │ │ Slot 3   │ │ Slot 4   │                    │
+│  │ thumbnail│ │ thumbnail│ │ preview  │ │ preview  │  ← 4 jobs running  │
+│  │ asset-A  │ │ asset-B  │ │ asset-A  │ │ asset-C  │    simultaneously  │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘                    │
+│                                                                          │
+│  AI QUEUE (concurrency: 1)                                               │
+│  ┌──────────┐                                                           │
+│  │ Slot 1   │  ← Only one AI job runs at a time (sequential)            │
+│  │ face     │                                                           │
+│  │ detect   │                                                           │
+│  └──────────┘                                                           │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key points:**
+
+1. **Within a queue**: Jobs run in parallel up to the concurrency limit
+2. **Job selection order**: Higher priority first, then oldest first
+3. **No per-asset sequencing**: Thumbnail and preview for the same asset can run simultaneously
+4. **Sequential queues**: `large_files` (concurrency: 1) and `ai` (concurrency: 1) process one job at a time
+
+**Example**: If you upload 10 photos, up to 4 thumbnail/preview jobs will process simultaneously in the default queue.
+
+### Enforcing Sequential Processing
+
+If you need jobs for the same asset to run in order (e.g., metadata extraction before AI), you have two options:
+
+**Option 1: Use a Sequential Queue**
+```typescript
+// AI queue has concurrency: 1, so jobs run one at a time
+{ jobType: 'detect_faces', queue: 'ai', priority: 2 }
+```
+
+**Option 2: Chain Jobs (handler creates next job on completion)**
+```typescript
+// In a handler's process() method:
+async process(context: JobContext): Promise<ProcessingJobResult> {
+  // Do work...
+
+  // Queue the next job in the pipeline
+  await processingJobRepository.create({
+    assetId: context.job.assetId,
+    jobType: 'detect_faces',
+    queue: 'ai',
+    traceId: context.job.traceId,
+  });
+
+  return result;
+}
+```
+
 ---
 
 ## Job Lifecycle
