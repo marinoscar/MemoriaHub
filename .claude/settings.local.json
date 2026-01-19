@@ -23,7 +23,9 @@
       "Bash(npm run lint:*)",
       "Bash(npm cache clean:*)",
       "Bash(git check-ignore:*)",
-      "Bash(npm run test:integration:*)"
+      "Bash(npm run test:integration:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }
