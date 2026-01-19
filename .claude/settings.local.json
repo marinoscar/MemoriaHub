@@ -18,7 +18,8 @@
       "Bash(exit 0)",
       "Bash(npx vitest:*)",
       "Bash(npm run test:coverage:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(npm run test)"
     ]
   }
 }
