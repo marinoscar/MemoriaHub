@@ -13,6 +13,41 @@ Build MemoriaHub in **small, testable, observable increments**. Every change mus
 
 **Operating Model**: You (human) are the Architect and Acceptance Authority. Claude Code implements, tests, and documents.
 
+## Specialized Agents
+
+This project has 6 specialized agents in `.claude/agents/` for domain-specific tasks. Use them proactively.
+
+| Agent | Purpose | When to Use |
+|-------|---------|-------------|
+| **backend** | Express routes, services, repositories, middleware | New API endpoints, business logic |
+| **frontend** | React components, MUI styling, state management | New pages, components, UI features |
+| **database** | PostgreSQL schema, migrations, queries | Schema changes, query optimization |
+| **testing** | Unit tests, integration tests, coverage | After code changes (proactive) |
+| **security** | Vulnerability detection, auth review (read-only) | After code changes (proactive) |
+| **documentation** | Technical docs, API docs, user guides | After feature completion |
+
+### Agent Workflows
+
+**After implementing code:**
+1. Use **testing** agent to create/update tests and run typecheck
+2. Use **security** agent to review for vulnerabilities
+
+**For feature development:**
+```
+backend/frontend → testing → security → documentation
+```
+
+**Database changes:**
+```
+database (migration) → backend (repository) → testing → security
+```
+
+### Proactive Agent Usage
+
+- **testing**: Always after code changes - includes mandatory `npm run typecheck`
+- **security**: Always after code touching auth, input handling, or data access
+- **documentation**: After completing features that change user-facing behavior
+
 ## Project Overview
 
 MemoriaHub is a privacy-first family photo platform with:
@@ -395,11 +430,12 @@ describe('LibraryService', () => {
 ## PR Workflow
 
 ### Before Creating PR
-1. [ ] All tests pass locally
+1. [ ] All tests pass locally (`npm run typecheck && npm run test -- --run`)
 2. [ ] Lint + typecheck pass
 3. [ ] Observability added (logs, metrics, traces)
-4. [ ] Security reviewed (auth, validation, no secrets)
+4. [ ] **Security agent** reviewed (auth, validation, no secrets)
 5. [ ] OpenAPI spec updated (if API changed)
+6. [ ] **Testing agent** verified coverage targets met
 
 ### PR Description Template
 ```markdown
@@ -452,12 +488,13 @@ Target: 1-3 commits per task, each independently deployable.
 
 A feature is DONE when:
 - [ ] Code merged to main
-- [ ] All tests passing in CI
+- [ ] All tests passing in CI (`npm run typecheck && npm run test -- --run`)
 - [ ] OpenAPI spec updated and in sync
 - [ ] Telemetry flowing (logs visible, metrics scraped, traces linked)
 - [ ] Documentation updated (if behavior changed)
 - [ ] No secrets in code or logs
-- [ ] Security review passed
+- [ ] **Testing agent** verified tests and typecheck pass
+- [ ] **Security agent** reviewed code (no findings or all addressed)
 
 ## Entity Status Lifecycle
 
