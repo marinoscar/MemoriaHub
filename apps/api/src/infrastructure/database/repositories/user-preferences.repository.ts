@@ -122,7 +122,10 @@ export class UserPreferencesRepository implements IUserPreferencesRepository {
     const current = await this.getOrCreate(userId);
 
     // Deep merge the input with current preferences
-    const merged = deepMerge(current.preferences, input.preferences as Partial<UserPreferences>);
+    const merged = deepMerge(
+      current.preferences as unknown as Record<string, unknown>,
+      input.preferences as unknown as Partial<Record<string, unknown>>
+    ) as unknown as UserPreferences;
 
     // Update in database
     const result = await query<UserPreferencesDbRow>(

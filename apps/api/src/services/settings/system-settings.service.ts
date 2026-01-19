@@ -34,13 +34,14 @@ import { ValidationError } from '../../domain/errors/ValidationError.js';
 
 /**
  * Default settings by category
+ * Cast to Record<string, unknown> to satisfy type constraints
  */
 const DEFAULT_SETTINGS: Record<SystemSettingsCategory, Record<string, unknown>> = {
-  smtp: DEFAULT_SMTP_SETTINGS,
-  push: DEFAULT_PUSH_SETTINGS,
+  smtp: DEFAULT_SMTP_SETTINGS as unknown as Record<string, unknown>,
+  push: DEFAULT_PUSH_SETTINGS as unknown as Record<string, unknown>,
   storage: { defaultBackend: 's3' },
-  features: DEFAULT_FEATURE_SETTINGS,
-  general: DEFAULT_GENERAL_SETTINGS,
+  features: DEFAULT_FEATURE_SETTINGS as unknown as Record<string, unknown>,
+  general: DEFAULT_GENERAL_SETTINGS as unknown as Record<string, unknown>,
 };
 
 /**
@@ -205,14 +206,16 @@ export class SystemSettingsService {
    * Get SMTP settings (decrypted, for internal use)
    */
   async getSmtpSettings(): Promise<SmtpSettings> {
-    return this.getByCategory<SmtpSettings>('smtp', false);
+    const settings = await this.getByCategory<Record<string, unknown>>('smtp', false);
+    return settings as unknown as SmtpSettings;
   }
 
   /**
    * Get push notification settings (decrypted, for internal use)
    */
   async getPushSettings(): Promise<PushSettings> {
-    return this.getByCategory<PushSettings>('push', false);
+    const settings = await this.getByCategory<Record<string, unknown>>('push', false);
+    return settings as unknown as PushSettings;
   }
 
   /**
@@ -222,24 +225,25 @@ export class SystemSettingsService {
     const cacheKey = CacheKeys.featureFlags();
 
     // Feature flags are checked frequently, use dedicated cache
-    const cached = settingsCache.get<FeatureSettings>(cacheKey);
+    const cached = settingsCache.get<Record<string, unknown>>(cacheKey);
     if (cached) {
-      return cached;
+      return cached as unknown as FeatureSettings;
     }
 
-    const settings = await this.getByCategory<FeatureSettings>('features', false);
+    const settings = await this.getByCategory<Record<string, unknown>>('features', false);
 
     // Cache with shorter TTL for feature flags
     settingsCache.set(cacheKey, settings, CacheTTL.featureFlags);
 
-    return settings;
+    return settings as unknown as FeatureSettings;
   }
 
   /**
    * Get general settings
    */
   async getGeneralSettings(): Promise<GeneralSettings> {
-    return this.getByCategory<GeneralSettings>('general', false);
+    const settings = await this.getByCategory<Record<string, unknown>>('general', false);
+    return settings as unknown as GeneralSettings;
   }
 
   /**

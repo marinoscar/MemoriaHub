@@ -141,7 +141,7 @@ export class GoogleOAuthProvider implements IOAuthProvider {
         emailVerified: payload.email_verified ?? false,
         displayName: payload.name,
         avatarUrl: payload.picture,
-        rawPayload: payload as Record<string, unknown>,
+        rawPayload: payload as unknown as Record<string, unknown>,
       };
     } catch (error) {
       if (error instanceof AuthError) {
