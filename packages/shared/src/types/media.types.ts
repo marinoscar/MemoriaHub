@@ -106,10 +106,12 @@ export interface ExifData {
 
 /**
  * Media asset entity (internal representation)
+ * Note: Media is owned by a user (ownerId), not a library.
+ * Libraries are linked via the library_assets junction table.
  */
 export interface MediaAsset {
   id: string;
-  libraryId: string;
+  ownerId: string; // User who owns this media
 
   // Storage
   storageKey: string;
@@ -164,7 +166,9 @@ export interface MediaAsset {
  */
 export interface MediaAssetDTO {
   id: string;
-  libraryId: string;
+  ownerId: string;
+  ownerName?: string;
+  ownerEmail?: string;
   originalFilename: string;
   mediaType: MediaType;
   mimeType: string;
@@ -232,12 +236,13 @@ export interface TagData {
 
 /**
  * Input for initiating an upload
+ * Note: libraryId is optional - if provided, the asset will be added to the library after upload
  */
 export interface InitiateUploadInput {
-  libraryId: string;
   filename: string;
   mimeType: string;
   fileSize: number;
+  libraryId?: string; // Optional - add to library after upload
 }
 
 /**
@@ -259,9 +264,11 @@ export interface CompleteUploadInput {
 
 /**
  * Input for listing media assets
+ * Note: libraryId is optional - if not provided, returns all accessible media
  */
 export interface ListMediaInput {
-  libraryId: string;
+  libraryId?: string; // Optional - filter by library
+  ownerId?: string; // Optional - filter by owner
   page?: number;
   limit?: number;
   status?: MediaAssetStatus;
@@ -401,3 +408,115 @@ export const DEFAULT_MAX_UPLOAD_SIZE = 100 * 1024 * 1024;
  * Default presigned URL expiration (1 hour)
  */
 export const DEFAULT_PRESIGNED_URL_EXPIRATION = 3600;
+
+// =============================================================================
+// Media Sharing Types
+// =============================================================================
+
+/**
+ * Media share entity (internal representation)
+ * Represents direct user-to-user sharing of a media asset
+ */
+export interface MediaShare {
+  id: string;
+  assetId: string;
+  sharedWithUserId: string;
+  sharedByUserId: string;
+  createdAt: Date;
+}
+
+/**
+ * Media share DTO for API responses
+ */
+export interface MediaShareDTO {
+  id: string;
+  assetId: string;
+  sharedWithUserId: string;
+  sharedWithUserEmail: string;
+  sharedWithUserName?: string;
+  sharedByUserId: string;
+  sharedByUserEmail?: string;
+  sharedByUserName?: string;
+  createdAt: string;
+}
+
+/**
+ * Input for sharing media with users
+ */
+export interface ShareMediaInput {
+  userIds: string[]; // Users to share with
+}
+
+/**
+ * Input for revoking a share
+ */
+export interface RevokeShareInput {
+  userId: string;
+}
+
+// =============================================================================
+// Library-Asset Junction Types
+// =============================================================================
+
+/**
+ * Library asset entity (internal representation)
+ * Represents the many-to-many relationship between libraries and assets
+ */
+export interface LibraryAsset {
+  id: string;
+  libraryId: string;
+  assetId: string;
+  addedByUserId: string;
+  createdAt: Date;
+}
+
+/**
+ * Library asset DTO for API responses
+ */
+export interface LibraryAssetDTO {
+  id: string;
+  libraryId: string;
+  assetId: string;
+  addedByUserId: string;
+  addedByUserEmail?: string;
+  addedByUserName?: string;
+  createdAt: string;
+}
+
+/**
+ * Input for adding an asset to a library
+ */
+export interface AddAssetToLibraryInput {
+  assetId: string;
+}
+
+/**
+ * Input for adding multiple assets to a library
+ */
+export interface AddAssetsToLibraryInput {
+  assetIds: string[];
+}
+
+/**
+ * Input for removing an asset from a library
+ */
+export interface RemoveAssetFromLibraryInput {
+  assetId: string;
+}
+
+// =============================================================================
+// Access Control Types
+// =============================================================================
+
+/**
+ * How the user has access to a media asset
+ */
+export type MediaAccessType = 'owner' | 'shared' | 'library_member' | 'public';
+
+/**
+ * Media asset with access information
+ */
+export interface MediaAssetWithAccess extends MediaAsset {
+  accessType: MediaAccessType;
+  libraryIds?: string[]; // Libraries this asset belongs to that the user can access
+}

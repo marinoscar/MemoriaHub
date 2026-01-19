@@ -144,3 +144,39 @@ export interface LibraryAuditEvent {
  */
 export const DEFAULT_LIBRARY_VISIBILITY: LibraryVisibility = 'private';
 export const DEFAULT_MEMBER_ROLE: LibraryMemberRole = 'viewer';
+
+// =============================================================================
+// Library Asset Management Types
+// =============================================================================
+
+/**
+ * Input for listing assets in a library
+ */
+export interface ListLibraryAssetsInput {
+  page?: number;
+  limit?: number;
+  sortBy?: 'addedAt' | 'capturedAt' | 'filename';
+  sortOrder?: 'asc' | 'desc';
+}
+
+/**
+ * Library event types for audit logging (extended)
+ */
+export type LibraryAssetEventType =
+  | 'asset_added'
+  | 'asset_removed';
+
+/**
+ * Library asset audit event
+ */
+export interface LibraryAssetAuditEvent {
+  id: string;
+  libraryId: string | null;
+  assetId: string | null;
+  eventType: LibraryAssetEventType;
+  performedBy: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  traceId: string | null;
+  createdAt: Date;
+}
