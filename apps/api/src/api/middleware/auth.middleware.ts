@@ -1,7 +1,8 @@
 import type { Request, Response, NextFunction } from 'express';
 import { ErrorCodes } from '@memoriahub/shared';
+import type { UserRole } from '@memoriahub/shared';
 import { tokenService } from '../../services/auth/index.js';
-import { AuthError } from '../../domain/errors/index.js';
+import { AuthError, ForbiddenError } from '../../domain/errors/index.js';
 import { logger, LogEventTypes } from '../../infrastructure/logging/logger.js';
 import { setUserId, getTraceId } from '../../infrastructure/logging/request-context.js';
 
@@ -14,6 +15,7 @@ declare global {
       user?: {
         id: string;
         email: string;
+        role: UserRole;
       };
     }
   }
@@ -50,6 +52,7 @@ export function authMiddleware(req: Request, _res: Response, next: NextFunction)
     req.user = {
       id: payload.sub,
       email: payload.email,
+      role: payload.role,
     };
 
     // Set user ID in request context for logging
@@ -59,6 +62,7 @@ export function authMiddleware(req: Request, _res: Response, next: NextFunction)
       {
         eventType: 'auth.verified',
         userId: payload.sub,
+        role: payload.role,
         traceId: getTraceId(),
       },
       'Token verified'
