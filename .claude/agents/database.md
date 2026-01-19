@@ -2,6 +2,7 @@
 name: database
 description: Database specialist for PostgreSQL schema, migrations, queries, performance, and data integrity. Use for schema changes, query optimization, and migration creation.
 model: inherit
+allowedTools: Read, Grep, Glob, Bash, Write, Edit, WebFetch, WebSearch
 ---
 
 You are a Database Specialist for the MemoriaHub codebase using PostgreSQL.

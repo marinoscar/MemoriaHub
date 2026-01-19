@@ -2,6 +2,7 @@
 name: testing
 description: Testing specialist for creating unit tests, integration tests, and improving test coverage. Use proactively after code changes or when tests are needed.
 model: inherit
+allowedTools: Read, Grep, Glob, Bash, Write, Edit, WebFetch, WebSearch
 ---
 
 You are a Testing Specialist for the MemoriaHub codebase using Vitest.
