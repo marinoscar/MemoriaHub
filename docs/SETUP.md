@@ -53,11 +53,19 @@ cp infra/compose/.env.example infra/compose/.env
 # 4. Generate package-lock.json (required for Docker builds)
 npm install
 
-# 5. Start all services
-docker compose -f infra/compose/dev.compose.yml up -d
+# 5. Start all services using the dev script
+# Linux/macOS:
+./scripts/dev.sh start
+
+# Windows (PowerShell):
+.\scripts\dev.ps1 start
 
 # 6. Wait for services to be healthy (check with)
-docker compose -f infra/compose/dev.compose.yml ps
+# Linux/macOS:
+./scripts/dev.sh status
+
+# Windows (PowerShell):
+.\scripts\dev.ps1 status
 
 # 7. Open browser
 # App: http://localhost:5173
@@ -222,7 +230,64 @@ curl http://localhost:3000/api/auth/providers
 
 ## Development Workflow
 
-### Starting Services
+### Development Scripts
+
+MemoriaHub includes convenience scripts to manage the development environment:
+
+**Linux/macOS:**
+```bash
+./scripts/dev.sh <action> [service]
+```
+
+**Windows (PowerShell):**
+```powershell
+.\scripts\dev.ps1 <action> [service]
+```
+
+**Available Actions:**
+
+| Action | Description |
+|--------|-------------|
+| `start` | Start all services (or specific service) |
+| `stop` | Stop all services (or specific service) |
+| `restart` | Restart all services (or specific service) |
+| `rebuild` | Rebuild and restart all services (or specific service) |
+| `logs` | Show logs (follow mode) |
+| `status` | Show status of all services |
+| `clean` | Stop services and remove volumes (resets database) |
+| `help` | Show help message |
+
+**Examples:**
+
+```bash
+# Start all services
+./scripts/dev.sh start          # Linux/macOS
+.\scripts\dev.ps1 start         # Windows
+
+# Rebuild everything after code changes
+./scripts/dev.sh rebuild        # Linux/macOS
+.\scripts\dev.ps1 rebuild       # Windows
+
+# Rebuild only the API service
+./scripts/dev.sh rebuild api    # Linux/macOS
+.\scripts\dev.ps1 rebuild api   # Windows
+
+# View API logs
+./scripts/dev.sh logs api       # Linux/macOS
+.\scripts\dev.ps1 logs api      # Windows
+
+# Check service status
+./scripts/dev.sh status         # Linux/macOS
+.\scripts\dev.ps1 status        # Windows
+
+# Reset everything (destroys data)
+./scripts/dev.sh clean          # Linux/macOS
+.\scripts\dev.ps1 clean         # Windows
+```
+
+### Manual Docker Commands
+
+If you prefer using Docker Compose directly:
 
 ```bash
 # Start all services
@@ -230,42 +295,18 @@ docker compose -f infra/compose/dev.compose.yml up -d
 
 # Start specific services
 docker compose -f infra/compose/dev.compose.yml up -d api web postgres
-```
 
-### Viewing Logs
-
-```bash
-# All services
-docker compose -f infra/compose/dev.compose.yml logs -f
-
-# Specific service
+# View logs
 docker compose -f infra/compose/dev.compose.yml logs -f api
 
-# Last 50 lines
-docker compose -f infra/compose/dev.compose.yml logs --tail=50 api
-```
-
-### Stopping Services
-
-```bash
 # Stop all services (preserves data)
 docker compose -f infra/compose/dev.compose.yml down
 
 # Stop and remove volumes (resets database)
 docker compose -f infra/compose/dev.compose.yml down -v
-```
 
-### Rebuilding After Changes
-
-```bash
-# Rebuild specific service
-docker compose -f infra/compose/dev.compose.yml up -d --build api
-
-# Rebuild all services
+# Rebuild and restart
 docker compose -f infra/compose/dev.compose.yml up -d --build
-
-# Force recreate containers (pick up env changes)
-docker compose -f infra/compose/dev.compose.yml up -d --force-recreate api
 ```
 
 ### Hot Reload
