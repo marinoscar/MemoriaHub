@@ -2,13 +2,16 @@
  * Settings Controller Tests
  *
  * Tests for settings HTTP endpoints.
- * Covers system settings, user preferences, and authorization.
+ * Covers system settings and user preferences.
+ *
+ * Note: Authentication (authMiddleware) and admin authorization (adminMiddleware)
+ * are handled at the route level, not in the controller. The controller assumes
+ * that req.user is always populated by the time a request reaches it.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Request, Response, NextFunction } from 'express';
 import { SettingsController } from '../../../src/api/controllers/settings.controller.js';
-import { ForbiddenError } from '../../../src/domain/errors/index.js';
 
 // Mock settings services
 const mockGetAllSystemSettings = vi.fn();
@@ -74,13 +77,7 @@ describe('SettingsController', () => {
       expect(mockRes.json).toHaveBeenCalledWith({ data: mockSettings });
     });
 
-    it('throws ForbiddenError when not authenticated', async () => {
-      mockReq.user = undefined;
-
-      await controller.getAllSystemSettings(mockReq as Request, mockRes as Response, mockNext);
-
-      expect(mockNext).toHaveBeenCalledWith(expect.any(ForbiddenError));
-    });
+    // Note: Authentication/admin authorization is handled by middleware, not controller
   });
 
   describe('getSystemSettingsByCategory', () => {
@@ -97,14 +94,7 @@ describe('SettingsController', () => {
       });
     });
 
-    it('throws ForbiddenError when not authenticated', async () => {
-      mockReq.user = undefined;
-      mockReq.params = { category: 'smtp' };
-
-      await controller.getSystemSettingsByCategory(mockReq as Request, mockRes as Response, mockNext);
-
-      expect(mockNext).toHaveBeenCalledWith(expect.any(ForbiddenError));
-    });
+    // Note: Authentication/admin authorization is handled by middleware, not controller
 
     it('handles different categories', async () => {
       mockReq.params = { category: 'features' };
