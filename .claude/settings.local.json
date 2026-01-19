@@ -21,7 +21,8 @@
       "Bash(findstr:*)",
       "Bash(npm run test)",
       "Bash(npm run lint:*)",
-      "Bash(npm cache clean:*)"
+      "Bash(npm cache clean:*)",
+      "Bash(git check-ignore:*)"
     ]
   }
 }
