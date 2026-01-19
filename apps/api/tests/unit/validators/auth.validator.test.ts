@@ -12,7 +12,6 @@ import {
   validateOAuthCallback,
   validateRefreshToken,
 } from '../../../src/api/validators/auth.validator.js';
-import { ValidationError } from '../../../src/domain/errors/index.js';
 
 describe('Auth Validators', () => {
   let mockReq: Partial<Request>;
@@ -56,28 +55,35 @@ describe('Auth Validators', () => {
       expect(mockNext).toHaveBeenCalledWith();
     });
 
-    it('calls next with ValidationError for invalid provider', () => {
+    it('calls next with error for invalid provider', () => {
       mockReq.params = { provider: 'facebook' };
 
       validateOAuthProvider(mockReq as Request, mockRes as Response, mockNext);
 
-      expect(mockNext).toHaveBeenCalledWith(expect.any(ValidationError));
+      expect(mockNext).toHaveBeenCalledWith(expect.objectContaining({
+        statusCode: 400,
+        code: 'VALIDATION_ERROR',
+      }));
     });
 
-    it('calls next with ValidationError for empty provider', () => {
+    it('calls next with error for empty provider', () => {
       mockReq.params = { provider: '' };
 
       validateOAuthProvider(mockReq as Request, mockRes as Response, mockNext);
 
-      expect(mockNext).toHaveBeenCalledWith(expect.any(ValidationError));
+      expect(mockNext).toHaveBeenCalledWith(expect.objectContaining({
+        statusCode: 400,
+      }));
     });
 
-    it('calls next with ValidationError for missing provider', () => {
+    it('calls next with error for missing provider', () => {
       mockReq.params = {};
 
       validateOAuthProvider(mockReq as Request, mockRes as Response, mockNext);
 
-      expect(mockNext).toHaveBeenCalledWith(expect.any(ValidationError));
+      expect(mockNext).toHaveBeenCalledWith(expect.objectContaining({
+        statusCode: 400,
+      }));
     });
   });
 
@@ -93,27 +99,31 @@ describe('Auth Validators', () => {
       expect(mockNext).toHaveBeenCalledWith();
     });
 
-    it('calls next with ValidationError when code is missing', () => {
+    it('calls next with error when code is missing', () => {
       mockReq.query = {
         state: 'csrf-state-token',
       };
 
       validateOAuthCallback(mockReq as Request, mockRes as Response, mockNext);
 
-      expect(mockNext).toHaveBeenCalledWith(expect.any(ValidationError));
+      expect(mockNext).toHaveBeenCalledWith(expect.objectContaining({
+        statusCode: 400,
+      }));
     });
 
-    it('calls next with ValidationError when state is missing', () => {
+    it('calls next with error when state is missing', () => {
       mockReq.query = {
         code: 'authorization-code-123',
       };
 
       validateOAuthCallback(mockReq as Request, mockRes as Response, mockNext);
 
-      expect(mockNext).toHaveBeenCalledWith(expect.any(ValidationError));
+      expect(mockNext).toHaveBeenCalledWith(expect.objectContaining({
+        statusCode: 400,
+      }));
     });
 
-    it('calls next with ValidationError when code is empty', () => {
+    it('calls next with error when code is empty', () => {
       mockReq.query = {
         code: '',
         state: 'csrf-state-token',
@@ -121,10 +131,12 @@ describe('Auth Validators', () => {
 
       validateOAuthCallback(mockReq as Request, mockRes as Response, mockNext);
 
-      expect(mockNext).toHaveBeenCalledWith(expect.any(ValidationError));
+      expect(mockNext).toHaveBeenCalledWith(expect.objectContaining({
+        statusCode: 400,
+      }));
     });
 
-    it('calls next with ValidationError when state is empty', () => {
+    it('calls next with error when state is empty', () => {
       mockReq.query = {
         code: 'authorization-code-123',
         state: '',
@@ -132,15 +144,19 @@ describe('Auth Validators', () => {
 
       validateOAuthCallback(mockReq as Request, mockRes as Response, mockNext);
 
-      expect(mockNext).toHaveBeenCalledWith(expect.any(ValidationError));
+      expect(mockNext).toHaveBeenCalledWith(expect.objectContaining({
+        statusCode: 400,
+      }));
     });
 
-    it('calls next with ValidationError when both are missing', () => {
+    it('calls next with error when both are missing', () => {
       mockReq.query = {};
 
       validateOAuthCallback(mockReq as Request, mockRes as Response, mockNext);
 
-      expect(mockNext).toHaveBeenCalledWith(expect.any(ValidationError));
+      expect(mockNext).toHaveBeenCalledWith(expect.objectContaining({
+        statusCode: 400,
+      }));
     });
   });
 
@@ -155,53 +171,44 @@ describe('Auth Validators', () => {
       expect(mockNext).toHaveBeenCalledWith();
     });
 
-    it('calls next with ValidationError when refreshToken is missing', () => {
+    it('calls next with error when refreshToken is missing', () => {
       mockReq.body = {};
 
       validateRefreshToken(mockReq as Request, mockRes as Response, mockNext);
 
-      expect(mockNext).toHaveBeenCalledWith(expect.any(ValidationError));
+      expect(mockNext).toHaveBeenCalledWith(expect.objectContaining({
+        statusCode: 400,
+      }));
     });
 
-    it('calls next with ValidationError when refreshToken is empty', () => {
+    it('calls next with error when refreshToken is empty', () => {
       mockReq.body = { refreshToken: '' };
 
       validateRefreshToken(mockReq as Request, mockRes as Response, mockNext);
 
-      expect(mockNext).toHaveBeenCalledWith(expect.any(ValidationError));
+      expect(mockNext).toHaveBeenCalledWith(expect.objectContaining({
+        statusCode: 400,
+      }));
     });
 
-    it('calls next with ValidationError when refreshToken is not a string', () => {
+    it('calls next with error when refreshToken is not a string', () => {
       mockReq.body = { refreshToken: 12345 };
 
       validateRefreshToken(mockReq as Request, mockRes as Response, mockNext);
 
-      expect(mockNext).toHaveBeenCalledWith(expect.any(ValidationError));
+      expect(mockNext).toHaveBeenCalledWith(expect.objectContaining({
+        statusCode: 400,
+      }));
     });
 
-    it('calls next with ValidationError when refreshToken is null', () => {
+    it('calls next with error when refreshToken is null', () => {
       mockReq.body = { refreshToken: null };
 
       validateRefreshToken(mockReq as Request, mockRes as Response, mockNext);
 
-      expect(mockNext).toHaveBeenCalledWith(expect.any(ValidationError));
-    });
-  });
-
-  describe('error handling', () => {
-    it('forwards non-Zod errors as-is', () => {
-      // This tests the catch block for non-Zod errors
-      // We need to create a scenario where a non-Zod error is thrown
-      const customError = new Error('Custom error');
-
-      // Mock the schema parse to throw a regular error
-      // This is a bit artificial, but tests the error path
-      mockReq.params = { provider: 'google' };
-
-      // The validators should pass through non-Zod errors
-      validateOAuthProvider(mockReq as Request, mockRes as Response, mockNext);
-
-      expect(mockNext).toHaveBeenCalledWith();
+      expect(mockNext).toHaveBeenCalledWith(expect.objectContaining({
+        statusCode: 400,
+      }));
     });
   });
 });

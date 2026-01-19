@@ -5,23 +5,30 @@
  * Covers authorization URL generation, token exchange, and user info retrieval.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { GoogleOAuthProvider } from '../../../../src/services/auth/providers/google.provider.js';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { AuthError } from '../../../../src/domain/errors/index.js';
 
-// Mock google-auth-library
-const mockGenerateAuthUrl = vi.fn();
-const mockGetToken = vi.fn();
-const mockVerifyIdToken = vi.fn();
-const mockRevokeToken = vi.fn();
+// Use vi.hoisted to create mocks that can be referenced in vi.mock
+const { mockGenerateAuthUrl, mockGetToken, mockVerifyIdToken, mockRevokeToken, mockOAuth2Client } =
+  vi.hoisted(() => {
+    const mockGenerateAuthUrl = vi.fn();
+    const mockGetToken = vi.fn();
+    const mockVerifyIdToken = vi.fn();
+    const mockRevokeToken = vi.fn();
 
+    const mockOAuth2Client = vi.fn().mockImplementation(() => ({
+      generateAuthUrl: mockGenerateAuthUrl,
+      getToken: mockGetToken,
+      verifyIdToken: mockVerifyIdToken,
+      revokeToken: mockRevokeToken,
+    }));
+
+    return { mockGenerateAuthUrl, mockGetToken, mockVerifyIdToken, mockRevokeToken, mockOAuth2Client };
+  });
+
+// Mock google-auth-library
 vi.mock('google-auth-library', () => ({
-  OAuth2Client: vi.fn().mockImplementation(() => ({
-    generateAuthUrl: mockGenerateAuthUrl,
-    getToken: mockGetToken,
-    verifyIdToken: mockVerifyIdToken,
-    revokeToken: mockRevokeToken,
-  })),
+  OAuth2Client: mockOAuth2Client,
 }));
 
 // Mock OAuth config
@@ -45,6 +52,9 @@ vi.mock('../../../../src/infrastructure/logging/logger.js', () => ({
     error: vi.fn(),
   },
 }));
+
+// Import after mocks
+import { GoogleOAuthProvider } from '../../../../src/services/auth/providers/google.provider.js';
 
 describe('GoogleOAuthProvider', () => {
   let provider: GoogleOAuthProvider;
@@ -356,33 +366,30 @@ describe('GoogleOAuthProvider', () => {
     });
   });
 
-  describe('disabled provider', () => {
-    it('reports disabled when config says disabled', () => {
-      vi.resetModules();
-      vi.doMock('../../../../src/config/index.js', () => ({
-        oauthConfig: {
-          google: {
-            enabled: false,
-            clientId: 'test-client-id',
-            clientSecret: 'test-client-secret',
-            redirectUri: 'http://localhost:3000/api/auth/google/callback',
-          },
-        },
-      }));
-    });
+  describe('edge cases', () => {
+    it('handles missing optional fields in user info', async () => {
+      mockVerifyIdToken.mockResolvedValue({
+        getPayload: () => ({
+          sub: 'google-user-123',
+          email: 'user@gmail.com',
+          email_verified: true,
+          // No name or picture
+        }),
+      });
 
-    it('reports disabled when client ID missing', () => {
-      vi.resetModules();
-      vi.doMock('../../../../src/config/index.js', () => ({
-        oauthConfig: {
-          google: {
-            enabled: true,
-            clientId: '',
-            clientSecret: 'test-client-secret',
-            redirectUri: 'http://localhost:3000/api/auth/google/callback',
-          },
-        },
-      }));
+      const validTokens = {
+        accessToken: 'google-access-token',
+        idToken: 'google-id-token',
+        expiresIn: 3600,
+        tokenType: 'Bearer',
+      };
+
+      const result = await provider.getUserInfo(validTokens);
+
+      expect(result.subject).toBe('google-user-123');
+      expect(result.email).toBe('user@gmail.com');
+      expect(result.displayName).toBeUndefined();
+      expect(result.avatarUrl).toBeUndefined();
     });
   });
 });

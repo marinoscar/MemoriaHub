@@ -402,13 +402,14 @@ describe('AuthService', () => {
 
       const result = await authService.getCurrentUser('user-123');
 
+      // UserDTO only includes: id, email, displayName, avatarUrl, oauthProvider, createdAt
+      // Note: emailVerified is NOT included in UserDTO
       expect(result).toEqual({
         id: 'user-123',
         email: 'test@example.com',
         displayName: 'Test User',
         avatarUrl: 'https://example.com/avatar.jpg',
         oauthProvider: 'google',
-        emailVerified: true,
         createdAt: expect.any(String),
       });
     });

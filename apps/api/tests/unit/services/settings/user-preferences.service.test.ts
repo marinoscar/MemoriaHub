@@ -55,24 +55,29 @@ describe('UserPreferencesService', () => {
       notifications: {
         email: {
           enabled: true,
-          newSharing: true,
+          digest: 'daily' as const,
+          newShares: true,
           comments: true,
-          weeklyDigest: false,
+          albumUpdates: true,
+          systemAlerts: true,
         },
         push: {
           enabled: true,
-          newSharing: true,
+          newShares: true,
           comments: false,
+          albumUpdates: true,
         },
       },
       ui: {
         theme: 'dark' as const,
-        compactMode: false,
-        defaultView: 'grid' as const,
+        gridSize: 'medium' as const,
+        autoPlayVideos: true,
+        showMetadata: true,
       },
       privacy: {
         showOnlineStatus: true,
-        allowFaceRecognition: true,
+        allowTagging: true,
+        defaultAlbumVisibility: 'private' as const,
       },
     },
     createdAt: new Date('2024-01-01'),
@@ -143,7 +148,7 @@ describe('UserPreferencesService', () => {
 
       // Should have default fields filled in
       expect(result.preferences.ui.theme).toBe('light');
-      expect(result.preferences.ui).toHaveProperty('compactMode');
+      expect(result.preferences.ui).toHaveProperty('gridSize');
       expect(result.preferences.privacy).toHaveProperty('showOnlineStatus');
     });
   });
@@ -183,7 +188,7 @@ describe('UserPreferencesService', () => {
       vi.mocked(mockRepository.update).mockResolvedValue(mockPreferencesRow);
 
       await service.updatePreferences('user-123', {
-        ui: { compactMode: true },
+        ui: { showMetadata: false },
       });
 
       expect(mockCacheInvalidate).toHaveBeenCalledWith('user:user-123:preferences');
@@ -211,12 +216,12 @@ describe('UserPreferencesService', () => {
       vi.mocked(mockRepository.update).mockResolvedValue(mockPreferencesRow);
 
       await service.updatePreferences('user-123', {
-        privacy: { allowFaceRecognition: false },
+        privacy: { allowTagging: false },
       });
 
       expect(mockRepository.update).toHaveBeenCalledWith('user-123', {
         preferences: {
-          privacy: { allowFaceRecognition: false },
+          privacy: { allowTagging: false },
         },
       });
     });
@@ -247,11 +252,11 @@ describe('UserPreferencesService', () => {
         ...mockPreferencesRow,
         preferences: {
           notifications: {
-            email: { enabled: true, newSharing: true, comments: true, weeklyDigest: false },
-            push: { enabled: true, newSharing: true, comments: true },
+            email: { enabled: true, digest: 'daily', newShares: true, comments: true, albumUpdates: true, systemAlerts: true },
+            push: { enabled: true, newShares: true, comments: true, albumUpdates: true },
           },
-          ui: { theme: 'dark', compactMode: false, defaultView: 'grid' },
-          privacy: { showOnlineStatus: true, allowFaceRecognition: true },
+          ui: { theme: 'dark', gridSize: 'medium', autoPlayVideos: true, showMetadata: true },
+          privacy: { showOnlineStatus: true, allowTagging: true, defaultAlbumVisibility: 'private' },
         },
       });
 
@@ -375,7 +380,8 @@ describe('UserPreferencesService', () => {
 
       const result = await service.getPreferences('user-123');
 
-      expect(result.preferences.notifications.email).toHaveProperty('newSharing');
+      // Should fill in default fields: newShares, comments, albumUpdates, systemAlerts, digest
+      expect(result.preferences.notifications.email).toHaveProperty('newShares');
       expect(result.preferences.notifications.email).toHaveProperty('comments');
     });
 
@@ -395,8 +401,9 @@ describe('UserPreferencesService', () => {
 
       const result = await service.getPreferences('user-123');
 
-      expect(result.preferences.ui).toHaveProperty('compactMode');
-      expect(result.preferences.ui).toHaveProperty('defaultView');
+      // Should fill in default fields: gridSize, autoPlayVideos, showMetadata
+      expect(result.preferences.ui).toHaveProperty('gridSize');
+      expect(result.preferences.ui).toHaveProperty('autoPlayVideos');
     });
 
     it('preserves user values over defaults', async () => {
@@ -405,10 +412,10 @@ describe('UserPreferencesService', () => {
         ...mockPreferencesRow,
         preferences: {
           notifications: {
-            email: { enabled: false, newSharing: false },
+            email: { enabled: false, newShares: false },
             push: { enabled: false },
           },
-          ui: { theme: 'light', compactMode: true },
+          ui: { theme: 'light', gridSize: 'large' },
           privacy: { showOnlineStatus: false },
         },
       });
@@ -416,7 +423,7 @@ describe('UserPreferencesService', () => {
       const result = await service.getPreferences('user-123');
 
       expect(result.preferences.ui.theme).toBe('light');
-      expect(result.preferences.ui.compactMode).toBe(true);
+      expect(result.preferences.ui.gridSize).toBe('large');
       expect(result.preferences.notifications.email.enabled).toBe(false);
     });
   });

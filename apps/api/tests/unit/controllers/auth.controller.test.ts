@@ -122,7 +122,7 @@ describe('AuthController', () => {
       mockReq.params = { provider: 'unknown' };
 
       const { getOAuthProvider } = await import('../../../src/services/auth/index.js');
-      vi.mocked(getOAuthProvider).mockImplementation(() => {
+      vi.mocked(getOAuthProvider).mockImplementationOnce(() => {
         throw new Error('Unknown provider');
       });
 
@@ -175,8 +175,9 @@ describe('AuthController', () => {
       expect(mockRes.redirect).toHaveBeenCalledWith(
         expect.stringContaining('http://localhost:5173/auth/callback')
       );
+      // URLSearchParams encodes spaces as + not %20
       expect(mockRes.redirect).toHaveBeenCalledWith(
-        expect.stringContaining('error=User%20denied%20access')
+        expect.stringContaining('error=User+denied+access')
       );
       expect(mockHandleOAuthCallback).not.toHaveBeenCalled();
     });
@@ -192,8 +193,9 @@ describe('AuthController', () => {
       expect(mockRes.redirect).toHaveBeenCalledWith(
         expect.stringContaining('http://localhost:5173/auth/callback')
       );
+      // URLSearchParams encodes spaces as + not %20
       expect(mockRes.redirect).toHaveBeenCalledWith(
-        expect.stringContaining('error=Invalid%20state')
+        expect.stringContaining('error=Invalid+state')
       );
     });
 

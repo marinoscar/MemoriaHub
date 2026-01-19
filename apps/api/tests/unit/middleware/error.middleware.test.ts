@@ -12,12 +12,15 @@ import { errorMiddleware, notFoundHandler } from '../../../src/api/middleware/er
 import { AuthError, ValidationError, NotFoundError, ForbiddenError } from '../../../src/domain/errors/index.js';
 
 // Mock logger
+const mockLoggerWarn = vi.fn();
+const mockLoggerError = vi.fn();
+
 vi.mock('../../../src/infrastructure/logging/logger.js', () => ({
   logger: {
     info: vi.fn(),
     debug: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
+    warn: (...args: unknown[]) => mockLoggerWarn(...args),
+    error: (...args: unknown[]) => mockLoggerError(...args),
   },
   LogEventTypes: {
     HTTP_REQUEST_ERROR: 'http.request.error',
@@ -207,12 +210,11 @@ describe('Error Middleware', () => {
       });
 
       it('logs unknown errors with stack trace', () => {
-        const { logger } = require('../../../src/infrastructure/logging/logger.js');
         const error = new Error('Unknown error');
 
         errorMiddleware(error, mockReq as Request, mockRes as Response, mockNext);
 
-        expect(logger.error).toHaveBeenCalledWith(
+        expect(mockLoggerError).toHaveBeenCalledWith(
           expect.objectContaining({
             errorMessage: 'Unknown error',
             errorStack: expect.any(String),
@@ -224,12 +226,11 @@ describe('Error Middleware', () => {
 
     describe('logging', () => {
       it('logs application errors at warn level', () => {
-        const { logger } = require('../../../src/infrastructure/logging/logger.js');
         const error = new AuthError('Invalid token', 'INVALID_TOKEN');
 
         errorMiddleware(error, mockReq as Request, mockRes as Response, mockNext);
 
-        expect(logger.warn).toHaveBeenCalledWith(
+        expect(mockLoggerWarn).toHaveBeenCalledWith(
           expect.objectContaining({
             errorCode: 'INVALID_TOKEN',
             errorMessage: 'Invalid token',
@@ -240,12 +241,11 @@ describe('Error Middleware', () => {
       });
 
       it('includes request and trace IDs in log', () => {
-        const { logger } = require('../../../src/infrastructure/logging/logger.js');
         const error = new AuthError('Test error', 'TEST');
 
         errorMiddleware(error, mockReq as Request, mockRes as Response, mockNext);
 
-        expect(logger.warn).toHaveBeenCalledWith(
+        expect(mockLoggerWarn).toHaveBeenCalledWith(
           expect.objectContaining({
             requestId: 'request-123',
             traceId: 'trace-456',
