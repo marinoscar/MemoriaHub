@@ -59,6 +59,8 @@ export function LibraryGalleryPage() {
   const { library, isLoading: libraryLoading, error: libraryError } = useLibrary(libraryId);
 
   // Fetch media with filters
+  // Note: Not filtering by status='READY' since worker may not have processed assets yet
+  // Assets show after metadata extraction (thumbnail uses originalUrl as fallback)
   const {
     media,
     isLoading: mediaLoading,
@@ -69,7 +71,6 @@ export function LibraryGalleryPage() {
     refresh: refreshMedia,
   } = useMedia({
     libraryId,
-    status: 'READY',
     mediaType: filters.mediaType === 'all' ? undefined : filters.mediaType,
     sortBy: filters.sortBy,
     sortOrder: filters.sortOrder,

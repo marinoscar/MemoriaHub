@@ -68,9 +68,9 @@ describe('useMedia', () => {
 
     expect(result.current.media).toHaveLength(1);
     expect(result.current.media[0].id).toBe('media-1');
+    // Note: No default status filter - shows all assets regardless of processing state
     expect(mediaApi.listMedia).toHaveBeenCalledWith('lib-1', expect.objectContaining({
       page: 1,
-      status: 'READY',
     }));
   });
 

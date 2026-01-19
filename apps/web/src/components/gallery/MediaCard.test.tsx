@@ -96,4 +96,30 @@ describe('MediaCard', () => {
     const button = screen.getByRole('button');
     expect(button).toHaveAttribute('aria-label', 'View photo.jpg');
   });
+
+  it('falls back to originalUrl when thumbnailUrl is null', () => {
+    const mediaWithoutThumbnail: MediaAssetDTO = {
+      ...mockImageMedia,
+      thumbnailUrl: null,
+      previewUrl: null,
+    };
+    render(<MediaCard media={mediaWithoutThumbnail} onClick={vi.fn()} />);
+
+    const img = screen.getByRole('img');
+    expect(img).toHaveAttribute('src', 'https://example.com/original.jpg');
+  });
+
+  it('shows fallback icon when both thumbnailUrl and originalUrl fail to load', () => {
+    const mediaWithoutThumbnail: MediaAssetDTO = {
+      ...mockImageMedia,
+      thumbnailUrl: null,
+    };
+    render(<MediaCard media={mediaWithoutThumbnail} onClick={vi.fn()} />);
+
+    const img = screen.getByRole('img');
+    fireEvent.error(img);
+
+    // After error, broken image icon should appear
+    expect(screen.getByTestId('BrokenImageIcon')).toBeInTheDocument();
+  });
 });

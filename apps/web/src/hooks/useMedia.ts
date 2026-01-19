@@ -29,15 +29,18 @@ export interface UseMediaOptions {
 }
 
 const DEFAULT_LIMIT = 24;
-const DEFAULT_STATUS = 'READY';
 
 /**
  * Hook for fetching and managing media assets in a library
+ *
+ * Note: By default, no status filter is applied so all uploaded assets
+ * are visible. This ensures assets show up even before the worker has
+ * processed them (e.g., METADATA_EXTRACTED status).
  */
 export function useMedia(options: UseMediaOptions) {
   const {
     libraryId,
-    status = DEFAULT_STATUS,
+    status,
     mediaType,
     sortBy = 'capturedAt',
     sortOrder = 'desc',

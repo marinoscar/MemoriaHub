@@ -16,13 +16,17 @@ interface MediaCardProps {
 /**
  * Thumbnail card for a single media asset
  * Square aspect ratio with lazy loading and video indicator
+ *
+ * Note: Falls back to originalUrl if thumbnailUrl is not available
+ * (e.g., when worker hasn't generated thumbnails yet)
  */
 export function MediaCard({ media, onClick }: MediaCardProps) {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
 
   const isVideo = media.mediaType === 'video';
-  const thumbnailUrl = media.thumbnailUrl;
+  // Use thumbnail if available, otherwise fall back to original
+  const imageUrl = media.thumbnailUrl ?? media.originalUrl;
 
   const handleClick = () => {
     onClick(media.id);
@@ -82,10 +86,10 @@ export function MediaCard({ media, onClick }: MediaCardProps) {
       )}
 
       {/* Thumbnail image or fallback */}
-      {thumbnailUrl && !imageError ? (
+      {imageUrl && !imageError ? (
         <Box
           component="img"
-          src={thumbnailUrl}
+          src={imageUrl}
           alt={media.originalFilename}
           onLoad={handleImageLoad}
           onError={handleImageError}
