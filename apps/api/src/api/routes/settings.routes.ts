@@ -26,6 +26,7 @@ import {
   validateSystemSettingsUpdate,
   validateUserPreferencesUpdate,
 } from '../validators/settings.validator.js';
+import { asyncHandler } from '../utils/async-handler.js';
 
 export function createSettingsRoutes(): Router {
   const router = Router();
@@ -34,25 +35,25 @@ export function createSettingsRoutes(): Router {
   // Feature Flags (Public - optional auth for personalization)
   // ===========================================================================
 
-  router.get('/features', optionalAuthMiddleware, (req, res, next) =>
+  router.get('/features', optionalAuthMiddleware, asyncHandler((req, res, next) =>
     settingsController.getFeatureFlags(req, res, next)
-  );
+  ));
 
   // ===========================================================================
   // System Settings (Admin required)
   // ===========================================================================
 
   // Get all system settings
-  router.get('/system', authMiddleware, (req, res, next) =>
+  router.get('/system', authMiddleware, asyncHandler((req, res, next) =>
     settingsController.getAllSystemSettings(req, res, next)
-  );
+  ));
 
   // Get system settings by category
   router.get(
     '/system/:category',
     authMiddleware,
     validateSystemSettingsCategory,
-    (req, res, next) => settingsController.getSystemSettingsByCategory(req, res, next)
+    asyncHandler((req, res, next) => settingsController.getSystemSettingsByCategory(req, res, next))
   );
 
   // Update system settings by category
@@ -61,7 +62,7 @@ export function createSettingsRoutes(): Router {
     authMiddleware,
     validateSystemSettingsCategory,
     validateSystemSettingsUpdate,
-    (req, res, next) => settingsController.updateSystemSettings(req, res, next)
+    asyncHandler((req, res, next) => settingsController.updateSystemSettings(req, res, next))
   );
 
   // ===========================================================================
@@ -69,27 +70,27 @@ export function createSettingsRoutes(): Router {
   // ===========================================================================
 
   // Get current user's preferences
-  router.get('/preferences', authMiddleware, (req, res, next) =>
+  router.get('/preferences', authMiddleware, asyncHandler((req, res, next) =>
     settingsController.getUserPreferences(req, res, next)
-  );
+  ));
 
   // Update current user's preferences
   router.patch(
     '/preferences',
     authMiddleware,
     validateUserPreferencesUpdate,
-    (req, res, next) => settingsController.updateUserPreferences(req, res, next)
+    asyncHandler((req, res, next) => settingsController.updateUserPreferences(req, res, next))
   );
 
   // Reset preferences to defaults
-  router.post('/preferences/reset', authMiddleware, (req, res, next) =>
+  router.post('/preferences/reset', authMiddleware, asyncHandler((req, res, next) =>
     settingsController.resetUserPreferences(req, res, next)
-  );
+  ));
 
   // Get just theme (optimized for initial load)
-  router.get('/preferences/theme', authMiddleware, (req, res, next) =>
+  router.get('/preferences/theme', authMiddleware, asyncHandler((req, res, next) =>
     settingsController.getTheme(req, res, next)
-  );
+  ));
 
   return router;
 }

@@ -69,8 +69,8 @@ function setupGracefulShutdown(server: any): void {
     }, 30000);
   }
 
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
 }
 
 // Handle unhandled rejections
@@ -79,4 +79,7 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // Start the application
-bootstrap();
+bootstrap().catch((error) => {
+  logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Bootstrap failed');
+  process.exit(1);
+});

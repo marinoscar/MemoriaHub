@@ -173,7 +173,7 @@ export function UserMenu({ user }: UserMenuProps) {
         <Divider />
 
         {/* Logout */}
-        <MenuItem onClick={handleLogout}>
+        <MenuItem onClick={() => void handleLogout()}>
           <ListItemIcon>
             <LogoutIcon fontSize="small" />
           </ListItemIcon>

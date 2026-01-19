@@ -41,7 +41,7 @@ export function OAuthCallback() {
       }
     };
 
-    handleCallback();
+    void handleCallback();
   }, [searchParams, login, navigate]);
 
   if (error) {

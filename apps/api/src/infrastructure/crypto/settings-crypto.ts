@@ -13,7 +13,8 @@ import { logger } from '../logging/logger.js';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
-const AUTH_TAG_LENGTH = 16;
+// AUTH_TAG_LENGTH is implicitly 16 bytes for GCM mode - kept for documentation
+const _AUTH_TAG_LENGTH = 16;
 
 /**
  * Encryption key from environment

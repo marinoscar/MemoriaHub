@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'crypto';
+import { randomBytes } from 'crypto';
 import type { OAuthProvider, UserDTO } from '@memoriahub/shared';
 import { ErrorCodes } from '@memoriahub/shared';
 import type { IUserRepository, IOAuthProvider, ITokenService, TokenPair } from '../../interfaces/index.js';
@@ -221,7 +221,7 @@ export class AuthService {
   /**
    * Logout user
    */
-  async logout(userId: string, refreshToken?: string): Promise<void> {
+  async logout(userId: string, _refreshToken?: string): Promise<void> {
     // Clear refresh token hash from database
     await this.userRepository.update(userId, { refreshTokenHash: null });
 

@@ -6,6 +6,7 @@ import {
   validateOAuthCallback,
   validateRefreshToken,
 } from '../validators/auth.validator.js';
+import { asyncHandler } from '../utils/async-handler.js';
 
 /**
  * Authentication routes
@@ -16,32 +17,32 @@ export function createAuthRoutes(): Router {
   const router = Router();
 
   // List available OAuth providers
-  router.get('/providers', (req, res) => authController.getProviders(req, res));
+  router.get('/providers', asyncHandler((req, res) => authController.getProviders(req, res)));
 
   // Get current user (requires auth) - must be before /:provider
-  router.get('/me', authMiddleware, (req, res, next) =>
+  router.get('/me', authMiddleware, asyncHandler((req, res, next) =>
     authController.getCurrentUser(req, res, next)
-  );
+  ));
 
   // Refresh token
-  router.post('/refresh', validateRefreshToken, (req, res, next) =>
+  router.post('/refresh', validateRefreshToken, asyncHandler((req, res, next) =>
     authController.refreshToken(req, res, next)
-  );
+  ));
 
   // Logout (requires auth)
-  router.post('/logout', authMiddleware, (req, res, next) =>
+  router.post('/logout', authMiddleware, asyncHandler((req, res, next) =>
     authController.logout(req, res, next)
-  );
+  ));
 
   // Initiate OAuth flow - parameterized route must come after static routes
-  router.get('/:provider', validateOAuthProvider, (req, res, next) =>
+  router.get('/:provider', validateOAuthProvider, asyncHandler((req, res, next) =>
     authController.initiateOAuth(req, res, next)
-  );
+  ));
 
   // OAuth callback
-  router.get('/:provider/callback', validateOAuthProvider, validateOAuthCallback, (req, res, next) =>
+  router.get('/:provider/callback', validateOAuthProvider, validateOAuthCallback, asyncHandler((req, res, next) =>
     authController.handleCallback(req, res, next)
-  );
+  ));
 
   return router;
 }

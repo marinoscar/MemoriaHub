@@ -43,7 +43,7 @@ export class AuthController {
    * GET /api/auth/:provider/callback
    * Handle OAuth callback from provider
    */
-  async handleCallback(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async handleCallback(req: Request, res: Response, _next: NextFunction): Promise<void> {
     try {
       const providerId = req.params.provider as OAuthProvider;
       const provider = getOAuthProvider(providerId);

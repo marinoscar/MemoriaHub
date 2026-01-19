@@ -15,7 +15,6 @@ import type {
 } from '@memoriahub/shared';
 import { systemSettingsService, userPreferencesService } from '../../services/settings/index.js';
 import { ForbiddenError } from '../../domain/errors/ForbiddenError.js';
-import { NotFoundError } from '../../domain/errors/NotFoundError.js';
 
 /**
  * Settings controller

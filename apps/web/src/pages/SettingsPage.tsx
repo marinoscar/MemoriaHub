@@ -61,13 +61,7 @@ export function SettingsPage() {
   const [success, setSuccess] = useState<string | null>(null);
 
   // Load preferences on mount
-  useEffect(() => {
-    if (isAuthenticated) {
-      loadPreferences();
-    }
-  }, [isAuthenticated]);
-
-  const loadPreferences = async () => {
+  const loadPreferences = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -86,7 +80,13 @@ export function SettingsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [isDarkMode, setTheme]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      void loadPreferences();
+    }
+  }, [isAuthenticated, loadPreferences]);
 
   const updatePreference = useCallback(
     async (path: string[], value: unknown) => {
@@ -178,7 +178,7 @@ export function SettingsPage() {
         <Button
           variant="outlined"
           startIcon={<RestoreIcon />}
-          onClick={handleResetPreferences}
+          onClick={() => void handleResetPreferences()}
           disabled={saving}
           size="small"
         >
@@ -211,7 +211,7 @@ export function SettingsPage() {
             <FormControl size="small" sx={{ minWidth: 120 }}>
               <Select
                 value={prefs?.ui.theme || 'dark'}
-                onChange={(e) => handleThemeChange(e.target.value as 'dark' | 'light' | 'system')}
+                onChange={(e) => void handleThemeChange(e.target.value as 'dark' | 'light' | 'system')}
                 disabled={saving}
               >
                 <MenuItem value="dark">Dark</MenuItem>
@@ -233,7 +233,7 @@ export function SettingsPage() {
             <FormControl size="small" sx={{ minWidth: 120 }}>
               <Select
                 value={prefs?.ui.gridSize || 'medium'}
-                onChange={(e) => updatePreference(['ui', 'gridSize'], e.target.value)}
+                onChange={(e) => void updatePreference(['ui', 'gridSize'], e.target.value)}
                 disabled={saving}
               >
                 {GRID_SIZES.map((size) => (
@@ -256,7 +256,7 @@ export function SettingsPage() {
             />
             <Switch
               checked={prefs?.ui.showMetadata ?? true}
-              onChange={(e) => updatePreference(['ui', 'showMetadata'], e.target.checked)}
+              onChange={(e) => void updatePreference(['ui', 'showMetadata'], e.target.checked)}
               disabled={saving}
               edge="end"
             />
@@ -284,7 +284,7 @@ export function SettingsPage() {
             <Switch
               checked={prefs?.notifications.email.enabled ?? false}
               onChange={(e) =>
-                updatePreference(['notifications', 'email', 'enabled'], e.target.checked)
+                void updatePreference(['notifications', 'email', 'enabled'], e.target.checked)
               }
               disabled={saving}
               edge="end"
@@ -302,7 +302,7 @@ export function SettingsPage() {
                 <Select
                   value={prefs?.notifications.email.digest || 'daily'}
                   onChange={(e) =>
-                    updatePreference(['notifications', 'email', 'digest'], e.target.value)
+                    void updatePreference(['notifications', 'email', 'digest'], e.target.value)
                   }
                   disabled={saving}
                 >
@@ -327,7 +327,7 @@ export function SettingsPage() {
             <Switch
               checked={prefs?.notifications.push.enabled ?? false}
               onChange={(e) =>
-                updatePreference(['notifications', 'push', 'enabled'], e.target.checked)
+                void updatePreference(['notifications', 'push', 'enabled'], e.target.checked)
               }
               disabled={saving}
               edge="end"
@@ -355,7 +355,7 @@ export function SettingsPage() {
               <Select
                 value={prefs?.privacy.defaultAlbumVisibility || 'private'}
                 onChange={(e) =>
-                  updatePreference(['privacy', 'defaultAlbumVisibility'], e.target.value)
+                  void updatePreference(['privacy', 'defaultAlbumVisibility'], e.target.value)
                 }
                 disabled={saving}
               >
@@ -376,7 +376,7 @@ export function SettingsPage() {
             />
             <Switch
               checked={prefs?.privacy.allowTagging ?? true}
-              onChange={(e) => updatePreference(['privacy', 'allowTagging'], e.target.checked)}
+              onChange={(e) => void updatePreference(['privacy', 'allowTagging'], e.target.checked)}
               disabled={saving}
               edge="end"
             />

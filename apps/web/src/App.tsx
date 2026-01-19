@@ -13,7 +13,7 @@ export function App() {
 
   // Check authentication status on app load
   useEffect(() => {
-    checkAuth();
+    void checkAuth();
   }, [checkAuth]);
 
   return (
