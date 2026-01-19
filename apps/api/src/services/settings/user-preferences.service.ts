@@ -17,7 +17,6 @@ import type { IUserPreferencesRepository } from '../../interfaces/index.js';
 import { settingsCache, CacheKeys, CachePatterns, CacheTTL } from '../../infrastructure/cache/settings-cache.js';
 import { logger } from '../../infrastructure/logging/logger.js';
 import { ValidationError } from '../../domain/errors/ValidationError.js';
-import { NotFoundError } from '../../domain/errors/NotFoundError.js';
 
 /**
  * User preferences service
@@ -143,14 +142,6 @@ export class UserPreferencesService {
   async getTheme(userId: string): Promise<'dark' | 'light' | 'system'> {
     const prefs = await this.getPreferences(userId);
     return prefs.preferences.ui.theme;
-  }
-
-  /**
-   * Get user's language preference
-   */
-  async getLanguage(userId: string): Promise<string> {
-    const prefs = await this.getPreferences(userId);
-    return prefs.preferences.ui.language;
   }
 
   /**
