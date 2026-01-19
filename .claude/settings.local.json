@@ -19,7 +19,8 @@
       "Bash(npx vitest:*)",
       "Bash(npm run test:coverage:*)",
       "Bash(findstr:*)",
-      "Bash(npm run test)"
+      "Bash(npm run test)",
+      "Bash(npm run lint:*)"
     ]
   }
 }
