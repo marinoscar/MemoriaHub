@@ -70,9 +70,10 @@ export const mimeTypeSchema = z
 
 /**
  * Initiate upload input schema
+ * Note: libraryId is optional - if provided, asset will be added to library after upload
  */
 export const initiateUploadSchema = z.object({
-  libraryId: z.string().uuid('Invalid library ID'),
+  libraryId: z.string().uuid('Invalid library ID').optional(),
   filename: z
     .string()
     .min(1, 'Filename is required')
@@ -158,6 +159,25 @@ export const moveMediaSchema = z.object({
   targetLibraryId: z.string().uuid('Invalid library ID'),
 });
 
+// =============================================================================
+// Media Sharing Schemas
+// =============================================================================
+
+/**
+ * Share media with users schema
+ */
+export const shareMediaSchema = z.object({
+  userIds: z.array(z.string().uuid('Invalid user ID')).min(1, 'At least one user ID is required'),
+});
+
+/**
+ * Revoke share params schema
+ */
+export const revokeShareParamsSchema = z.object({
+  id: z.string().uuid('Invalid asset ID'),
+  userId: z.string().uuid('Invalid user ID'),
+});
+
 // Type exports
 export type MediaAssetStatusInput = z.infer<typeof mediaAssetStatusSchema>;
 export type MediaTypeInput = z.infer<typeof mediaTypeSchema>;
@@ -172,6 +192,8 @@ export type ListMediaByLibraryParamsInput = z.infer<typeof listMediaByLibraryPar
 export type BulkDeleteMediaInput = z.infer<typeof bulkDeleteMediaSchema>;
 export type UpdateMediaMetadataInput = z.infer<typeof updateMediaMetadataSchema>;
 export type MoveMediaInput = z.infer<typeof moveMediaSchema>;
+export type ShareMediaInput = z.infer<typeof shareMediaSchema>;
+export type RevokeShareParamsInput = z.infer<typeof revokeShareParamsSchema>;
 
 /**
  * Helper to determine media type from MIME type

@@ -5,21 +5,15 @@
  */
 
 import type { Request, Response, NextFunction } from 'express';
-import { z, ZodError } from 'zod';
+import { ZodError } from 'zod';
 import {
   initiateUploadSchema,
   completeUploadSchema,
   listMediaQuerySchema,
   listMediaByLibraryParamsSchema,
+  shareMediaSchema,
 } from '@memoriahub/shared';
 import { ValidationError } from '../../domain/errors/ValidationError.js';
-
-/**
- * Schema for sharing media with users
- */
-const shareMediaSchema = z.object({
-  userIds: z.array(z.string().uuid()).min(1, 'At least one user ID is required'),
-});
 
 /**
  * Helper to check if an error is a ZodError

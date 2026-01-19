@@ -99,6 +99,32 @@ export const listLibrariesQuerySchema = z.object({
   sortOrder: z.enum(['asc', 'desc']).optional().default('desc'),
 });
 
+// =============================================================================
+// Library Asset Schemas (many-to-many relationship)
+// =============================================================================
+
+/**
+ * Add single asset to library schema
+ */
+export const addAssetToLibrarySchema = z.object({
+  assetId: z.string().uuid('Invalid asset ID'),
+});
+
+/**
+ * Add multiple assets to library schema
+ */
+export const addAssetsToLibrarySchema = z.object({
+  assetIds: z.array(z.string().uuid('Invalid asset ID')).min(1, 'At least one asset ID is required'),
+});
+
+/**
+ * Library asset params schema (for remove operations)
+ */
+export const libraryAssetParamsSchema = z.object({
+  id: z.string().uuid('Invalid library ID'),
+  assetId: z.string().uuid('Invalid asset ID'),
+});
+
 // Type exports
 export type LibraryVisibilityInput = z.infer<typeof libraryVisibilitySchema>;
 export type LibraryMemberRoleInput = z.infer<typeof libraryMemberRoleSchema>;
@@ -109,3 +135,6 @@ export type UpdateLibraryMemberInput = z.infer<typeof updateLibraryMemberSchema>
 export type LibraryIdParamInput = z.infer<typeof libraryIdParamSchema>;
 export type LibraryMemberParamsInput = z.infer<typeof libraryMemberParamsSchema>;
 export type ListLibrariesQueryInput = z.infer<typeof listLibrariesQuerySchema>;
+export type AddAssetToLibraryInput = z.infer<typeof addAssetToLibrarySchema>;
+export type AddAssetsToLibraryInput = z.infer<typeof addAssetsToLibrarySchema>;
+export type LibraryAssetParamsInput = z.infer<typeof libraryAssetParamsSchema>;

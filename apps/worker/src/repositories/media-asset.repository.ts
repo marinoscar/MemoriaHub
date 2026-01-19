@@ -7,7 +7,7 @@ import { logger } from '../infrastructure/logging/index.js';
  */
 interface MediaAssetRow {
   id: string;
-  library_id: string;
+  owner_id: string;
   storage_key: string;
   storage_bucket: string;
   thumbnail_key: string | null;
@@ -46,7 +46,7 @@ interface MediaAssetRow {
 function rowToMediaAsset(row: MediaAssetRow): MediaAsset {
   return {
     id: row.id,
-    libraryId: row.library_id,
+    ownerId: row.owner_id,
     storageKey: row.storage_key,
     storageBucket: row.storage_bucket,
     thumbnailKey: row.thumbnail_key,

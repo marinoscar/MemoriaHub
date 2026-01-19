@@ -51,7 +51,7 @@ class ThumbnailHandler extends BaseHandler {
     const thumbnail = await imageProcessor.generateThumbnail(inputBuffer);
 
     // Build storage key
-    const thumbnailKey = this.buildDerivativeKey(asset.libraryId, asset.id, 'thumbnails');
+    const thumbnailKey = this.buildDerivativeKey(asset.ownerId, asset.id, 'thumbnails');
 
     // Upload to S3
     await this.uploadDerivative(

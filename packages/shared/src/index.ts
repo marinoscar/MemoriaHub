@@ -174,6 +174,20 @@ export type {
   ProcessingJob,
   ExtractedMetadata,
   GeocodingResult,
+  // Media sharing types
+  MediaShare,
+  MediaShareDTO,
+  ShareMediaInput,
+  RevokeShareInput,
+  // Library-asset junction types
+  LibraryAsset,
+  LibraryAssetDTO,
+  AddAssetToLibraryInput,
+  AddAssetsToLibraryInput,
+  RemoveAssetFromLibraryInput,
+  // Access control types
+  MediaAccessType,
+  MediaAssetWithAccess,
 } from './types/media.types.js';
 export {
   ALLOWED_IMAGE_MIME_TYPES,
@@ -194,6 +208,9 @@ export {
   libraryIdParamSchema,
   libraryMemberParamsSchema,
   listLibrariesQuerySchema,
+  addAssetToLibrarySchema,
+  addAssetsToLibrarySchema,
+  libraryAssetParamsSchema,
 } from './validation/library.schema.js';
 
 export type {
@@ -206,6 +223,9 @@ export type {
   LibraryIdParamInput,
   LibraryMemberParamsInput,
   ListLibrariesQueryInput,
+  AddAssetToLibraryInput as AddAssetToLibrarySchemaInput,
+  AddAssetsToLibraryInput as AddAssetsToLibrarySchemaInput,
+  LibraryAssetParamsInput,
 } from './validation/library.schema.js';
 
 // Validation schemas - Media
@@ -224,6 +244,8 @@ export {
   bulkDeleteMediaSchema,
   updateMediaMetadataSchema,
   moveMediaSchema,
+  shareMediaSchema,
+  revokeShareParamsSchema,
   getMediaTypeFromMimeType,
   isAllowedMimeType,
 } from './validation/media.schema.js';
@@ -242,6 +264,8 @@ export type {
   BulkDeleteMediaInput,
   UpdateMediaMetadataInput,
   MoveMediaInput,
+  ShareMediaInput as ShareMediaSchemaInput,
+  RevokeShareParamsInput,
 } from './validation/media.schema.js';
 
 // Constants

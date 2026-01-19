@@ -12,6 +12,8 @@ import {
   addLibraryMemberSchema,
   updateLibraryMemberSchema,
   listLibrariesQuerySchema,
+  addAssetToLibrarySchema,
+  addAssetsToLibrarySchema,
 } from '@memoriahub/shared';
 import { ValidationError } from '../../domain/errors/ValidationError.js';
 
@@ -113,6 +115,46 @@ export function validateListLibrariesQuery(
 ): void {
   try {
     listLibrariesQuerySchema.parse(req.query);
+    next();
+  } catch (error) {
+    if (isZodError(error)) {
+      next(ValidationError.fromZodError(error));
+      return;
+    }
+    next(error);
+  }
+}
+
+/**
+ * Validate add asset to library request body
+ */
+export function validateAddAssetToLibrary(
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): void {
+  try {
+    addAssetToLibrarySchema.parse(req.body);
+    next();
+  } catch (error) {
+    if (isZodError(error)) {
+      next(ValidationError.fromZodError(error));
+      return;
+    }
+    next(error);
+  }
+}
+
+/**
+ * Validate add multiple assets to library request body
+ */
+export function validateAddAssetsToLibrary(
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): void {
+  try {
+    addAssetsToLibrarySchema.parse(req.body);
     next();
   } catch (error) {
     if (isZodError(error)) {

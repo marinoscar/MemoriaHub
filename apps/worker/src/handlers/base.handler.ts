@@ -107,13 +107,14 @@ export abstract class BaseHandler implements JobHandler {
 
   /**
    * Build storage key for derivative
+   * Uses owner-based path structure: users/{ownerId}/{type}/{assetId}.jpg
    */
   protected buildDerivativeKey(
-    libraryId: string,
+    ownerId: string,
     assetId: string,
     type: 'thumbnails' | 'previews'
   ): string {
-    return `libraries/${libraryId}/${type}/${assetId}.jpg`;
+    return `users/${ownerId}/${type}/${assetId}.jpg`;
   }
 
   /**
