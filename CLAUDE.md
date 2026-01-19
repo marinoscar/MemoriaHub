@@ -52,7 +52,16 @@ memoriahub/
 ├── scripts/              # Dev scripts, DB migrations, seeds, utilities
 │   ├── dev.ps1           # Windows development script
 │   └── dev.sh            # Linux/macOS development script
-└── docs/
+└── docs/                 # All documentation
+    ├── PROJECT.md        # Vision, requirements, roadmap
+    ├── ARCHITECTURE.md   # System design
+    ├── SECURITY.md       # Security requirements
+    ├── OBSERVABILITY.md  # Telemetry standards
+    ├── SETUP.md          # First-time setup
+    ├── DATABASE.md       # DB configuration
+    ├── USER_GUIDE.md     # End-user docs
+    ├── ADMIN_GUIDE.md    # Admin docs
+    ├── TROUBLESHOOTING.md
     └── diagrams/         # Mermaid diagrams
 ```
 
