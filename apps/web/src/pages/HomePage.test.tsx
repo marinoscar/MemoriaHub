@@ -140,7 +140,9 @@ describe('HomePage', () => {
 
       expect(screen.getByText(/Library creation and management/)).toBeInTheDocument();
       expect(screen.getByText(/WebDAV upload support/)).toBeInTheDocument();
-      expect(screen.getByText(/AI-powered search/)).toBeInTheDocument();
+      // Multiple elements match "AI-powered search" - feature card and coming soon list
+      const aiSearchElements = screen.getAllByText(/AI-powered search/);
+      expect(aiSearchElements.length).toBeGreaterThan(0);
     });
   });
 

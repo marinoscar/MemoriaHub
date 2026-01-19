@@ -69,16 +69,15 @@ describe('OAuthCallback', () => {
     });
 
     it('handles URL-encoded tokens', async () => {
-      const encodedToken = 'token%2Bwith%2Bspecial%3Dchars';
-      mockSearchParams = new URLSearchParams();
-      mockSearchParams.set('access_token', encodedToken);
-      mockSearchParams.set('refresh_token', 'refresh-token');
+      // When URLSearchParams is initialized from a URL query string, it decodes values
+      // Use the constructor with a query string to simulate real URL behavior
+      mockSearchParams = new URLSearchParams('access_token=token%2Bwith%2Bspecial%3Dchars&refresh_token=refresh-token');
       mockLogin.mockResolvedValue(undefined);
 
       render(<OAuthCallback />);
 
       await waitFor(() => {
-        // URLSearchParams automatically decodes
+        // URLSearchParams automatically decodes URL-encoded values
         expect(mockLogin).toHaveBeenCalledWith('token+with+special=chars', 'refresh-token');
       });
     });

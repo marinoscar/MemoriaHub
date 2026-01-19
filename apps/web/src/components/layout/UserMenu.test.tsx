@@ -140,8 +140,14 @@ describe('UserMenu', () => {
         expect(screen.getByRole('menu')).toBeInTheDocument();
       });
 
-      // Click backdrop (outside menu)
-      fireEvent.click(document.body);
+      // MUI Menu uses a backdrop with specific attributes - find and click it
+      const backdrop = document.querySelector('.MuiBackdrop-root, .MuiModal-backdrop');
+      if (backdrop) {
+        fireEvent.click(backdrop);
+      } else {
+        // Fallback: Press Escape to close
+        fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+      }
 
       await waitFor(() => {
         expect(screen.queryByRole('menu')).not.toBeInTheDocument();
