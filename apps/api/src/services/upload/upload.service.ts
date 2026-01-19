@@ -17,6 +17,7 @@ import {
 } from '../../infrastructure/database/repositories/media-asset.repository.js';
 import { ingestionEventRepository } from '../../infrastructure/database/repositories/ingestion-event.repository.js';
 import { processingJobRepository } from '../../infrastructure/database/repositories/processing-job.repository.js';
+import { libraryAssetRepository } from '../../infrastructure/database/repositories/library-asset.repository.js';
 import { libraryService } from '../library/library.service.js';
 import { exifService } from '../media/exif.service.js';
 import { geocodingService } from '../media/geocoding.service.js';
@@ -33,8 +34,9 @@ export class UploadService {
 
   /**
    * Initiate an upload - creates asset record and returns presigned URL
-   * @param userId User initiating the upload
-   * @param input Upload parameters
+   * Media is owned by the user. Optionally adds to a library.
+   * @param userId User initiating the upload (becomes owner)
+   * @param input Upload parameters (libraryId is optional)
    * @param source Upload source (web, webdav, api)
    * @returns Presigned URL and asset info
    */
@@ -46,10 +48,12 @@ export class UploadService {
     const traceId = getTraceId();
     const startTime = Date.now();
 
-    // Verify user has upload permission to library
-    const canUpload = await libraryService.canUserUploadToLibrary(userId, input.libraryId);
-    if (!canUpload) {
-      throw new ForbiddenError('You do not have permission to upload to this library');
+    // If libraryId provided, verify user has upload permission to library
+    if (input.libraryId) {
+      const canUpload = await libraryService.canUserUploadToLibrary(userId, input.libraryId);
+      if (!canUpload) {
+        throw new ForbiddenError('You do not have permission to upload to this library');
+      }
     }
 
     // Determine media type
@@ -58,15 +62,15 @@ export class UploadService {
       throw new ValidationError('Unsupported file type');
     }
 
-    // Generate asset ID and storage key
+    // Generate asset ID and storage key (user-based path)
     const assetId = uuidv4();
     const extension = this.getFileExtension(input.filename);
-    const storageKey = this.generateStorageKey(input.libraryId, assetId, extension);
+    const storageKey = this.generateStorageKey(userId, assetId, extension);
 
-    // Create asset record
+    // Create asset record (owned by user)
     const assetInput: CreateMediaAssetInput = {
       id: assetId,
-      libraryId: input.libraryId,
+      ownerId: userId,
       storageKey,
       storageBucket: storageConfig.bucket,
       originalFilename: input.filename,
@@ -79,6 +83,15 @@ export class UploadService {
 
     const asset = await mediaAssetRepository.create(assetInput);
 
+    // If libraryId provided, add asset to library
+    if (input.libraryId) {
+      await libraryAssetRepository.add({
+        libraryId: input.libraryId,
+        assetId: asset.id,
+        addedByUserId: userId,
+      });
+    }
+
     // Create ingestion event
     await ingestionEventRepository.create({
       assetId: asset.id,
@@ -89,6 +102,7 @@ export class UploadService {
         filename: input.filename,
         mimeType: input.mimeType,
         fileSize: input.fileSize,
+        libraryId: input.libraryId,
       },
     });
 
@@ -108,7 +122,8 @@ export class UploadService {
     logger.info({
       eventType: 'upload.initiated',
       assetId: asset.id,
-      libraryId: input.libraryId,
+      ownerId: userId,
+      libraryId: input.libraryId || null,
       filename: input.filename,
       mediaType,
       fileSize: input.fileSize,
@@ -129,25 +144,28 @@ export class UploadService {
   /**
    * Proxy upload - receives file directly and uploads to S3
    * This avoids CORS issues with presigned URLs by proxying through the API
-   * @param userId User initiating the upload
-   * @param libraryId Target library
+   * Media is owned by the user. Optionally adds to a library.
+   * @param userId User initiating the upload (becomes owner)
+   * @param libraryId Target library (optional)
    * @param file File buffer and metadata
    * @param source Upload source (web, webdav, api)
    * @returns Completed asset
    */
   async proxyUpload(
     userId: string,
-    libraryId: string,
+    libraryId: string | null,
     file: { buffer: Buffer; originalname: string; mimetype: string; size: number },
     source: FileSource = 'web'
   ): Promise<MediaAssetDTO> {
     const traceId = getTraceId();
     const startTime = Date.now();
 
-    // Verify user has upload permission to library
-    const canUpload = await libraryService.canUserUploadToLibrary(userId, libraryId);
-    if (!canUpload) {
-      throw new ForbiddenError('You do not have permission to upload to this library');
+    // If libraryId provided, verify user has upload permission to library
+    if (libraryId) {
+      const canUpload = await libraryService.canUserUploadToLibrary(userId, libraryId);
+      if (!canUpload) {
+        throw new ForbiddenError('You do not have permission to upload to this library');
+      }
     }
 
     // Determine media type
@@ -156,15 +174,15 @@ export class UploadService {
       throw new ValidationError('Unsupported file type');
     }
 
-    // Generate asset ID and storage key
+    // Generate asset ID and storage key (user-based path)
     const assetId = uuidv4();
     const extension = this.getFileExtension(file.originalname);
-    const storageKey = this.generateStorageKey(libraryId, assetId, extension);
+    const storageKey = this.generateStorageKey(userId, assetId, extension);
 
-    // Create asset record
+    // Create asset record (owned by user)
     const assetInput: CreateMediaAssetInput = {
       id: assetId,
-      libraryId,
+      ownerId: userId,
       storageKey,
       storageBucket: storageConfig.bucket,
       originalFilename: file.originalname,
@@ -177,6 +195,15 @@ export class UploadService {
 
     const asset = await mediaAssetRepository.create(assetInput);
 
+    // If libraryId provided, add asset to library
+    if (libraryId) {
+      await libraryAssetRepository.add({
+        libraryId,
+        assetId: asset.id,
+        addedByUserId: userId,
+      });
+    }
+
     // Create ingestion event
     await ingestionEventRepository.create({
       assetId: asset.id,
@@ -187,13 +214,15 @@ export class UploadService {
         filename: file.originalname,
         mimeType: file.mimetype,
         fileSize: file.size,
+        libraryId,
       },
     });
 
     logger.info({
       eventType: 'upload.proxy.started',
       assetId: asset.id,
-      libraryId,
+      ownerId: userId,
+      libraryId: libraryId || null,
       filename: file.originalname,
       mediaType,
       fileSize: file.size,
@@ -284,7 +313,8 @@ export class UploadService {
     logger.info({
       eventType: 'upload.proxy.completed',
       assetId,
-      libraryId,
+      ownerId: userId,
+      libraryId: libraryId || null,
       filename: file.originalname,
       hasExif: !!extractedMetadata,
       hasGps: !!extractedMetadata?.latitude,
@@ -313,9 +343,8 @@ export class UploadService {
       throw new NotFoundError('Asset not found');
     }
 
-    // Verify user has access
-    const canUpload = await libraryService.canUserUploadToLibrary(userId, asset.libraryId);
-    if (!canUpload) {
+    // Verify user owns the asset
+    if (asset.ownerId !== userId) {
       throw new ForbiddenError('You do not have permission to this asset');
     }
 
@@ -410,7 +439,7 @@ export class UploadService {
     logger.info({
       eventType: 'upload.completed',
       assetId,
-      libraryId: asset.libraryId,
+      ownerId: asset.ownerId,
       filename: asset.originalFilename,
       hasExif: !!extractedMetadata,
       hasGps: !!extractedMetadata?.latitude,
@@ -425,6 +454,7 @@ export class UploadService {
 
   /**
    * Get a media asset
+   * User must own, have direct share, or have library access
    */
   async getAsset(userId: string, assetId: string): Promise<MediaAssetDTO> {
     const asset = await mediaAssetRepository.findById(assetId);
@@ -432,8 +462,8 @@ export class UploadService {
       throw new NotFoundError('Asset not found');
     }
 
-    // Verify access
-    const hasAccess = await libraryService.canUserAccessLibrary(userId, asset.libraryId);
+    // Verify access (owns, shared, or library member)
+    const hasAccess = await mediaAssetRepository.canAccess(assetId, userId);
     if (!hasAccess) {
       throw new NotFoundError('Asset not found');
     }
@@ -442,9 +472,9 @@ export class UploadService {
   }
 
   /**
-   * List assets in a library
+   * List assets in a library (via junction table)
    */
-  async listAssets(
+  async listAssetsInLibrary(
     userId: string,
     libraryId: string,
     options: {
@@ -463,18 +493,63 @@ export class UploadService {
       sortOrder?: 'asc' | 'desc';
     } = {}
   ): Promise<{ assets: MediaAssetDTO[]; total: number; page: number; limit: number }> {
-    // Verify access
+    // Verify access to library
     const hasAccess = await libraryService.canUserAccessLibrary(userId, libraryId);
     if (!hasAccess) {
       throw new NotFoundError('Library not found');
     }
 
-    const result = await mediaAssetRepository.findByLibraryId({
-      libraryId,
+    const result = await mediaAssetRepository.findByLibraryId(libraryId, {
       page: options.page,
       limit: options.limit,
-      status: options.status as Parameters<typeof mediaAssetRepository.findByLibraryId>[0]['status'],
-      mediaType: options.mediaType as Parameters<typeof mediaAssetRepository.findByLibraryId>[0]['mediaType'],
+      status: options.status as Parameters<typeof mediaAssetRepository.findByLibraryId>[1]['status'],
+      mediaType: options.mediaType as Parameters<typeof mediaAssetRepository.findByLibraryId>[1]['mediaType'],
+      country: options.country,
+      state: options.state,
+      city: options.city,
+      cameraMake: options.cameraMake,
+      cameraModel: options.cameraModel,
+      startDate: options.startDate ? new Date(options.startDate) : undefined,
+      endDate: options.endDate ? new Date(options.endDate) : undefined,
+      sortBy: options.sortBy,
+      sortOrder: options.sortOrder,
+    });
+
+    return {
+      assets: await Promise.all(result.assets.map((a) => this.assetToDTO(a))),
+      total: result.total,
+      page: options.page || 1,
+      limit: options.limit || 50,
+    };
+  }
+
+  /**
+   * List all accessible media for a user (owned + shared + via libraries)
+   */
+  async listAllAccessibleAssets(
+    userId: string,
+    options: {
+      page?: number;
+      limit?: number;
+      status?: string;
+      mediaType?: string;
+      country?: string;
+      state?: string;
+      city?: string;
+      cameraMake?: string;
+      cameraModel?: string;
+      startDate?: string;
+      endDate?: string;
+      sortBy?: 'capturedAt' | 'createdAt' | 'filename' | 'fileSize';
+      sortOrder?: 'asc' | 'desc';
+    } = {}
+  ): Promise<{ assets: MediaAssetDTO[]; total: number; page: number; limit: number }> {
+    const result = await mediaAssetRepository.findAllAccessible({
+      userId,
+      page: options.page,
+      limit: options.limit,
+      status: options.status as Parameters<typeof mediaAssetRepository.findAllAccessible>[0]['status'],
+      mediaType: options.mediaType as Parameters<typeof mediaAssetRepository.findAllAccessible>[0]['mediaType'],
       country: options.country,
       state: options.state,
       city: options.city,
@@ -496,6 +571,7 @@ export class UploadService {
 
   /**
    * Delete a media asset
+   * Only the owner can delete their media
    */
   async deleteAsset(userId: string, assetId: string): Promise<void> {
     const traceId = getTraceId();
@@ -505,10 +581,9 @@ export class UploadService {
       throw new NotFoundError('Asset not found');
     }
 
-    // Verify user has upload permission (can delete what they can upload)
-    const canUpload = await libraryService.canUserUploadToLibrary(userId, asset.libraryId);
-    if (!canUpload) {
-      throw new ForbiddenError('You do not have permission to delete this asset');
+    // Only the owner can delete their media
+    if (asset.ownerId !== userId) {
+      throw new ForbiddenError('Only the owner can delete this asset');
     }
 
     // Delete from S3
@@ -532,14 +607,13 @@ export class UploadService {
     // Cancel any pending processing jobs
     await processingJobRepository.cancelByAssetId(assetId);
 
-    // Delete from database (cascades to ingestion events and processing jobs)
+    // Delete from database (cascades to ingestion events, processing jobs, library_assets, media_shares)
     await mediaAssetRepository.delete(assetId);
 
     logger.info({
       eventType: 'upload.asset_deleted',
       assetId,
-      libraryId: asset.libraryId,
-      userId,
+      ownerId: userId,
       traceId,
     }, 'Asset deleted');
   }
@@ -548,10 +622,11 @@ export class UploadService {
 
   /**
    * Generate storage key for an asset
+   * Uses user-based path since media is owned by users, not libraries
    */
-  private generateStorageKey(libraryId: string, assetId: string, extension: string): string {
-    // Format: libraries/{libraryId}/originals/{assetId}.{ext}
-    return `libraries/${libraryId}/originals/${assetId}${extension ? `.${extension}` : ''}`;
+  private generateStorageKey(ownerId: string, assetId: string, extension: string): string {
+    // Format: users/{ownerId}/originals/{assetId}.{ext}
+    return `users/${ownerId}/originals/${assetId}${extension ? `.${extension}` : ''}`;
   }
 
   /**
@@ -610,7 +685,7 @@ export class UploadService {
 
     return {
       id: asset.id,
-      libraryId: asset.libraryId,
+      ownerId: asset.ownerId,
       originalFilename: asset.originalFilename,
       mediaType: asset.mediaType,
       mimeType: asset.mimeType,
