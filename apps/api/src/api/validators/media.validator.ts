@@ -5,7 +5,7 @@
  */
 
 import type { Request, Response, NextFunction } from 'express';
-import { ZodError } from 'zod';
+import { z, ZodError } from 'zod';
 import {
   initiateUploadSchema,
   completeUploadSchema,
@@ -13,6 +13,13 @@ import {
   listMediaByLibraryParamsSchema,
 } from '@memoriahub/shared';
 import { ValidationError } from '../../domain/errors/ValidationError.js';
+
+/**
+ * Schema for sharing media with users
+ */
+const shareMediaSchema = z.object({
+  userIds: z.array(z.string().uuid()).min(1, 'At least one user ID is required'),
+});
 
 /**
  * Helper to check if an error is a ZodError
@@ -71,10 +78,32 @@ export function validateListMediaQuery(
   next: NextFunction
 ): void {
   try {
-    // Validate path params (libraryId)
-    listMediaByLibraryParamsSchema.parse(req.params);
+    // Only validate path params if libraryId exists (it's optional now)
+    if (req.params.libraryId) {
+      listMediaByLibraryParamsSchema.parse(req.params);
+    }
     // Validate query params
     listMediaQuerySchema.parse(req.query);
+    next();
+  } catch (error) {
+    if (isZodError(error)) {
+      next(ValidationError.fromZodError(error));
+      return;
+    }
+    next(error);
+  }
+}
+
+/**
+ * Validate share media request body
+ */
+export function validateShareMedia(
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): void {
+  try {
+    shareMediaSchema.parse(req.body);
     next();
   } catch (error) {
     if (isZodError(error)) {

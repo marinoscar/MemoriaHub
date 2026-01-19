@@ -13,16 +13,27 @@
  *   GET    /api/media/library/:libraryId   - List media in a library
  *   GET    /api/media/:id                  - Get single media asset
  *   DELETE /api/media/:id                  - Delete media asset (owner only)
+ *
+ * Media Sharing (direct user-to-user):
+ *   POST   /api/media/:id/share            - Share media with user(s)
+ *   DELETE /api/media/:id/share/:userId    - Revoke share from user
+ *   GET    /api/media/:id/shares           - List shares for media
+ *
+ * Media Libraries:
+ *   GET    /api/media/:id/libraries        - Get libraries containing this media
  */
 
 import { Router } from 'express';
 import multer from 'multer';
 import { mediaController } from '../controllers/media.controller.js';
+import { mediaShareController } from '../controllers/media-share.controller.js';
+import { libraryAssetController } from '../controllers/library-asset.controller.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
 import {
   validateInitiateUpload,
   validateCompleteUpload,
   validateListMediaQuery,
+  validateShareMedia,
 } from '../validators/media.validator.js';
 import { asyncHandler } from '../utils/async-handler.js';
 import { storageConfig } from '../../config/storage.config.js';
@@ -103,6 +114,39 @@ export function createMediaRoutes(): Router {
   router.delete(
     '/:id',
     asyncHandler((req, res, next) => mediaController.deleteMedia(req, res, next))
+  );
+
+  // ===========================================================================
+  // Media Sharing (direct user-to-user)
+  // ===========================================================================
+
+  // Share media with user(s)
+  router.post(
+    '/:id/share',
+    validateShareMedia,
+    asyncHandler((req, res, next) => mediaShareController.shareMedia(req, res, next))
+  );
+
+  // Revoke share from user
+  router.delete(
+    '/:id/share/:userId',
+    asyncHandler((req, res, next) => mediaShareController.revokeShare(req, res, next))
+  );
+
+  // List shares for media
+  router.get(
+    '/:id/shares',
+    asyncHandler((req, res, next) => mediaShareController.getShares(req, res, next))
+  );
+
+  // ===========================================================================
+  // Media Libraries
+  // ===========================================================================
+
+  // Get libraries containing this media
+  router.get(
+    '/:id/libraries',
+    asyncHandler((req, res, next) => libraryAssetController.getLibrariesForAsset(req, res, next))
   );
 
   return router;
