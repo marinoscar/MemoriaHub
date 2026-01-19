@@ -527,6 +527,72 @@ DELETE FROM schema_migrations WHERE version = 'old_name';
 
 ---
 
+## Settings Schema
+
+MemoriaHub uses a flexible settings architecture with two types of settings:
+
+### System Settings (Admin)
+
+System-wide configuration stored by category with JSONB flexibility:
+
+```sql
+CREATE TABLE system_settings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    category VARCHAR(50) NOT NULL UNIQUE,  -- 'smtp', 'push', 'features', 'general'
+    settings JSONB NOT NULL DEFAULT '{}',
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_by UUID REFERENCES users(id)
+);
+```
+
+**Categories:**
+- `smtp` - Email server configuration (host, port, credentials)
+- `push` - Push notification settings (provider, keys)
+- `features` - Feature flags (aiSearch, faceRecognition, webdavSync, etc.)
+- `general` - Site name, description, upload limits
+
+### User Preferences
+
+Per-user settings with JSONB for flexibility:
+
+```sql
+CREATE TABLE user_settings (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    preferences JSONB DEFAULT '{}',  -- notifications, ui, privacy settings
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+**Preference Categories:**
+- `notifications.email` - Email notification preferences
+- `notifications.push` - Push notification preferences
+- `ui` - Theme, language, grid size, metadata display
+- `privacy` - Album visibility, tagging preferences
+
+### Settings Audit Trail
+
+All settings changes are tracked for security:
+
+```sql
+CREATE TABLE audit_settings_changes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    settings_type VARCHAR(20) NOT NULL,  -- 'system' or 'user'
+    category VARCHAR(50),
+    user_id UUID,
+    action VARCHAR(20) NOT NULL,
+    previous_value JSONB,
+    new_value JSONB,
+    changed_fields TEXT[],
+    changed_by UUID,
+    ip_address INET,
+    trace_id VARCHAR(64),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+---
+
 ## File Reference
 
 | File | Purpose |
@@ -535,6 +601,7 @@ DELETE FROM schema_migrations WHERE version = 'old_name';
 | `apps/api/src/infrastructure/database/client.ts` | PostgreSQL connection pool and query utilities |
 | `apps/api/src/infrastructure/database/migrator.ts` | Migration runner logic |
 | `apps/api/src/infrastructure/database/migrations/*.sql` | Individual migration files |
+| `apps/api/src/infrastructure/database/repositories/` | Repository implementations |
 | `apps/api/src/index.ts` | Application bootstrap (calls `runMigrations()`) |
 | `infra/compose/.env.example` | Environment variable template |
 
