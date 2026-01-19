@@ -50,6 +50,7 @@ export class MediaController {
    * POST /api/media/upload/proxy
    * Upload a file directly through the API server (proxied to S3)
    * This avoids CORS issues with direct S3 uploads
+   * libraryId is optional - if provided, asset will be added to library
    */
   async proxyUpload(
     req: Request,
@@ -58,7 +59,7 @@ export class MediaController {
   ): Promise<void> {
     try {
       const userId = req.user!.id;
-      const libraryId = req.body.libraryId as string;
+      const libraryId = req.body.libraryId as string | undefined;
       const file = req.file;
 
       if (!file) {
@@ -68,14 +69,7 @@ export class MediaController {
         return;
       }
 
-      if (!libraryId) {
-        res.status(400).json({
-          error: { code: 'MISSING_LIBRARY_ID', message: 'libraryId is required' },
-        });
-        return;
-      }
-
-      const asset = await uploadService.proxyUpload(userId, libraryId, {
+      const asset = await uploadService.proxyUpload(userId, libraryId || null, {
         buffer: file.buffer,
         originalname: file.originalname,
         mimetype: file.mimetype,
@@ -117,9 +111,9 @@ export class MediaController {
 
   /**
    * GET /api/media/library/:libraryId
-   * List media assets in a library
+   * List media assets in a library (via library_assets junction table)
    */
-  async listMedia(
+  async listMediaInLibrary(
     req: Request,
     res: Response,
     next: NextFunction
@@ -129,7 +123,50 @@ export class MediaController {
       const libraryId = req.params.libraryId;
       const query = req.query as Record<string, string | undefined>;
 
-      const result = await uploadService.listAssets(userId, libraryId, {
+      const result = await uploadService.listAssetsInLibrary(userId, libraryId, {
+        page: query.page ? parseInt(query.page, 10) : undefined,
+        limit: query.limit ? parseInt(query.limit, 10) : undefined,
+        status: query.status,
+        mediaType: query.mediaType as 'image' | 'video' | undefined,
+        country: query.country,
+        state: query.state,
+        city: query.city,
+        cameraMake: query.cameraMake,
+        cameraModel: query.cameraModel,
+        startDate: query.startDate,
+        endDate: query.endDate,
+        sortBy: query.sortBy as 'capturedAt' | 'createdAt' | 'filename' | 'fileSize' | undefined,
+        sortOrder: query.sortOrder as 'asc' | 'desc' | undefined,
+      });
+
+      const response: ApiResponse<MediaAssetDTO[]> = {
+        data: result.assets,
+        meta: {
+          page: result.page,
+          limit: result.limit,
+          total: result.total,
+        },
+      };
+      res.json(response);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /api/media
+   * List all accessible media for the current user (owned + shared + via libraries)
+   */
+  async listAllAccessibleMedia(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const userId = req.user!.id;
+      const query = req.query as Record<string, string | undefined>;
+
+      const result = await uploadService.listAllAccessibleAssets(userId, {
         page: query.page ? parseInt(query.page, 10) : undefined,
         limit: query.limit ? parseInt(query.limit, 10) : undefined,
         status: query.status,

@@ -4,14 +4,15 @@
  * Routes for media upload and management.
  *
  * Upload:
- *   POST   /api/media/upload/initiate   - Get presigned upload URL
- *   POST   /api/media/upload/proxy      - Upload file through API proxy (avoids CORS)
+ *   POST   /api/media/upload/initiate   - Get presigned upload URL (libraryId optional)
+ *   POST   /api/media/upload/proxy      - Upload file through API proxy (libraryId optional)
  *   POST   /api/media/upload/complete   - Complete upload after S3 upload
  *
  * Media Assets:
+ *   GET    /api/media                      - List all accessible media (owned + shared + library)
  *   GET    /api/media/library/:libraryId   - List media in a library
  *   GET    /api/media/:id                  - Get single media asset
- *   DELETE /api/media/:id                  - Delete media asset
+ *   DELETE /api/media/:id                  - Delete media asset (owner only)
  */
 
 import { Router } from 'express';
@@ -77,11 +78,19 @@ export function createMediaRoutes(): Router {
   // Media Assets
   // ===========================================================================
 
-  // List media in a library
+  // List all accessible media for user (owned + shared + via libraries)
+  // IMPORTANT: This route must come BEFORE /:id to avoid "library" being treated as an ID
+  router.get(
+    '/',
+    validateListMediaQuery,
+    asyncHandler((req, res, next) => mediaController.listAllAccessibleMedia(req, res, next))
+  );
+
+  // List media in a library (via library_assets junction table)
   router.get(
     '/library/:libraryId',
     validateListMediaQuery,
-    asyncHandler((req, res, next) => mediaController.listMedia(req, res, next))
+    asyncHandler((req, res, next) => mediaController.listMediaInLibrary(req, res, next))
   );
 
   // Get single media asset
@@ -90,7 +99,7 @@ export function createMediaRoutes(): Router {
     asyncHandler((req, res, next) => mediaController.getMedia(req, res, next))
   );
 
-  // Delete media asset
+  // Delete media asset (owner only)
   router.delete(
     '/:id',
     asyncHandler((req, res, next) => mediaController.deleteMedia(req, res, next))

@@ -141,7 +141,7 @@ export class LibraryService {
       throw new ForbiddenError('Only the library owner can delete it');
     }
 
-    // Delete library (cascades to media_assets, library_members)
+    // Delete library (cascades to library_assets and library_members - media assets are NOT deleted)
     await libraryRepository.delete(libraryId);
 
     logger.info({
