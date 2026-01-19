@@ -112,12 +112,52 @@ export function optionalAuthMiddleware(req: Request, _res: Response, next: NextF
     req.user = {
       id: payload.sub,
       email: payload.email,
+      role: payload.role,
     };
 
     setUserId(payload.sub);
   } catch {
     // Token invalid, but that's okay for optional auth
   }
+
+  next();
+}
+
+/**
+ * Admin authorization middleware
+ * Requires authentication and admin role
+ * Must be used after authMiddleware
+ */
+export function adminMiddleware(req: Request, _res: Response, next: NextFunction): void {
+  if (!req.user) {
+    next(new AuthError('Authentication required', ErrorCodes.UNAUTHORIZED));
+    return;
+  }
+
+  if (req.user.role !== 'admin') {
+    logger.warn(
+      {
+        eventType: 'auth.admin.denied',
+        userId: req.user.id,
+        role: req.user.role,
+        path: req.path,
+        method: req.method,
+        traceId: getTraceId(),
+      },
+      'Non-admin user attempted admin action'
+    );
+    next(new ForbiddenError('Admin access required'));
+    return;
+  }
+
+  logger.debug(
+    {
+      eventType: 'auth.admin.verified',
+      userId: req.user.id,
+      traceId: getTraceId(),
+    },
+    'Admin access verified'
+  );
 
   next();
 }

@@ -20,7 +20,7 @@
 
 import { Router } from 'express';
 import { settingsController } from '../controllers/settings.controller.js';
-import { authMiddleware, optionalAuthMiddleware } from '../middleware/auth.middleware.js';
+import { authMiddleware, optionalAuthMiddleware, adminMiddleware } from '../middleware/auth.middleware.js';
 import {
   validateSystemSettingsCategory,
   validateSystemSettingsUpdate,
@@ -44,7 +44,7 @@ export function createSettingsRoutes(): Router {
   // ===========================================================================
 
   // Get all system settings
-  router.get('/system', authMiddleware, asyncHandler((req, res, next) =>
+  router.get('/system', authMiddleware, adminMiddleware, asyncHandler((req, res, next) =>
     settingsController.getAllSystemSettings(req, res, next)
   ));
 
@@ -52,6 +52,7 @@ export function createSettingsRoutes(): Router {
   router.get(
     '/system/:category',
     authMiddleware,
+    adminMiddleware,
     validateSystemSettingsCategory,
     asyncHandler((req, res, next) => settingsController.getSystemSettingsByCategory(req, res, next))
   );
@@ -60,6 +61,7 @@ export function createSettingsRoutes(): Router {
   router.patch(
     '/system/:category',
     authMiddleware,
+    adminMiddleware,
     validateSystemSettingsCategory,
     validateSystemSettingsUpdate,
     asyncHandler((req, res, next) => settingsController.updateSystemSettings(req, res, next))

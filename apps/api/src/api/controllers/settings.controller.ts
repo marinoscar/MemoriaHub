@@ -14,7 +14,6 @@ import type {
   UserPreferencesDTO,
 } from '@memoriahub/shared';
 import { systemSettingsService, userPreferencesService } from '../../services/settings/index.js';
-import { ForbiddenError } from '../../domain/errors/ForbiddenError.js';
 
 /**
  * Settings controller
@@ -29,13 +28,12 @@ export class SettingsController {
    * Get all system settings
    */
   async getAllSystemSettings(
-    req: Request,
+    _req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> {
     try {
-      this.requireAdmin(req);
-
+      // Admin check is handled by adminMiddleware in routes
       const settings = await systemSettingsService.getAll(true); // Masked for API
 
       const response: ApiResponse<SystemSettingsDTO[]> = { data: settings };
@@ -55,8 +53,7 @@ export class SettingsController {
     next: NextFunction
   ): Promise<void> {
     try {
-      this.requireAdmin(req);
-
+      // Admin check is handled by adminMiddleware in routes
       const category = req.params.category as SystemSettingsCategory;
       const settings = await systemSettingsService.getByCategory(category, true);
 
@@ -79,8 +76,7 @@ export class SettingsController {
     next: NextFunction
   ): Promise<void> {
     try {
-      this.requireAdmin(req);
-
+      // Admin check is handled by adminMiddleware in routes
       const category = req.params.category as SystemSettingsCategory;
       const settings = req.body.settings as Record<string, unknown>;
       const userId = req.user!.id;
@@ -200,29 +196,6 @@ export class SettingsController {
     }
   }
 
-  // ===========================================================================
-  // Admin Check
-  // ===========================================================================
-
-  /**
-   * Check if the current user is an admin
-   *
-   * For MemoriaHub's self-hosted model, we use a simple approach:
-   * - In a fresh install, the first user to sign up becomes the admin
-   * - This can be expanded later with explicit roles in the users table
-   *
-   * For now, we'll assume any authenticated user can manage system settings.
-   * TODO: Add proper role-based access control
-   */
-  private requireAdmin(req: Request): void {
-    if (!req.user) {
-      throw new ForbiddenError('Admin access required');
-    }
-
-    // TODO: Check if user has admin role
-    // For now, all authenticated users can manage settings (self-hosted = typically one user)
-    // This should be replaced with proper RBAC when user roles are implemented
-  }
 }
 
 // Export singleton instance
