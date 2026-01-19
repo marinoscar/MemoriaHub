@@ -46,11 +46,10 @@ export interface PushSettings {
 }
 
 /**
- * Storage configuration (for future expansion beyond default S3)
+ * Storage configuration (S3-only for cloud-first architecture)
  */
 export interface StorageSettings {
-  defaultBackend: 'local' | 's3';
-  localPath?: string;
+  defaultBackend: 's3';
   // S3 settings are typically from env vars, but can be overridden
   s3Endpoint?: string;
   s3Bucket?: string;

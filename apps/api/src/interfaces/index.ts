@@ -25,3 +25,12 @@ export type {
   IUserPreferencesRepository,
   UpdateUserPreferencesInput,
 } from './repositories/IUserPreferencesRepository.js';
+
+export type {
+  IStorageProvider,
+  StorageObject,
+  PutObjectOptions,
+  PresignedUrlOptions,
+  ListObjectsOptions,
+  ListObjectsResult,
+} from './storage/IStorageProvider.js';

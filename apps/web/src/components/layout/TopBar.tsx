@@ -8,8 +8,9 @@ import {
 } from '@mui/material';
 import { Menu as MenuIcon, PhotoLibrary as LogoIcon } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../hooks';
+import { useAuth, useLibraries } from '../../hooks';
 import { UserMenu } from './UserMenu';
+import { UploadButton } from '../upload';
 
 interface TopBarProps {
   /** Handler for menu button click */
@@ -23,6 +24,7 @@ interface TopBarProps {
  */
 export function TopBar({ onMenuClick, drawerWidth }: TopBarProps) {
   const { isAuthenticated, user } = useAuth();
+  const { libraries, refresh: refreshLibraries } = useLibraries();
   const navigate = useNavigate();
 
   return (
@@ -72,7 +74,14 @@ export function TopBar({ onMenuClick, drawerWidth }: TopBarProps) {
         {/* User menu or login button */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           {isAuthenticated && user ? (
-            <UserMenu user={user} />
+            <>
+              <UploadButton
+                libraries={libraries}
+                onUploadComplete={refreshLibraries}
+                onLibraryCreated={refreshLibraries}
+              />
+              <UserMenu user={user} />
+            </>
           ) : (
             <Button
               variant="outlined"

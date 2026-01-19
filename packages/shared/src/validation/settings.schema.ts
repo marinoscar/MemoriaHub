@@ -37,11 +37,10 @@ export const pushSettingsSchema = z.object({
 });
 
 /**
- * Storage settings validation
+ * Storage settings validation (S3-only)
  */
 export const storageSettingsSchema = z.object({
-  defaultBackend: z.enum(['local', 's3']).optional(),
-  localPath: z.string().max(500).optional(),
+  defaultBackend: z.literal('s3').optional(),
   s3Endpoint: z.string().url().optional(),
   s3Bucket: z.string().max(63).optional(),
   s3Region: z.string().max(50).optional(),

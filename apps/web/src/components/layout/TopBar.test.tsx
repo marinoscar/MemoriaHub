@@ -19,6 +19,12 @@ vi.mock('../../hooks', () => ({
     user: mockUser,
     isAuthenticated: mockIsAuthenticated,
   }),
+  useLibraries: () => ({
+    libraries: [],
+    isLoading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
 }));
 
 // Mock UserMenu
@@ -26,6 +32,11 @@ vi.mock('./UserMenu', () => ({
   UserMenu: ({ user }: { user: UserDTO }) => (
     <div data-testid="user-menu">{user.displayName}</div>
   ),
+}));
+
+// Mock UploadButton
+vi.mock('../upload', () => ({
+  UploadButton: () => <button data-testid="upload-button">Upload</button>,
 }));
 
 // Mock navigate
@@ -45,11 +56,8 @@ const createMockUser = (overrides: Partial<UserDTO> = {}): UserDTO => ({
   displayName: 'John Doe',
   avatarUrl: null,
   oauthProvider: 'google',
-  emailVerified: true,
   role: 'user',
-  isActive: true,
   createdAt: '2024-01-01T00:00:00Z',
-  updatedAt: '2024-01-01T00:00:00Z',
   ...overrides,
 });
 

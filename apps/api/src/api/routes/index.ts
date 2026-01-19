@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { createAuthRoutes } from './auth.routes.js';
 import { createSettingsRoutes } from './settings.routes.js';
+import { createLibraryRoutes } from './libraries.routes.js';
+import { createMediaRoutes } from './media.routes.js';
 
 /**
  * Create all API routes
@@ -14,10 +16,11 @@ export function createApiRoutes(): Router {
   // Settings routes
   router.use('/settings', createSettingsRoutes());
 
-  // Future routes:
-  // router.use('/users', createUserRoutes());
-  // router.use('/libraries', createLibraryRoutes());
-  // router.use('/media', createMediaRoutes());
+  // Library routes
+  router.use('/libraries', createLibraryRoutes());
+
+  // Media routes
+  router.use('/media', createMediaRoutes());
 
   return router;
 }

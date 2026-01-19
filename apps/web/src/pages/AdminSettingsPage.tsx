@@ -451,11 +451,10 @@ export function AdminSettingsPage() {
                 />
                 <FormControl size="small" sx={{ width: 150 }}>
                   <Select
-                    value={storageSettings?.defaultBackend || 'local'}
+                    value={storageSettings?.defaultBackend || 's3'}
                     onChange={(e) => void updateSetting('storage', 'defaultBackend', e.target.value)}
                     disabled={saving}
                   >
-                    <MenuItem value="local">Local</MenuItem>
                     <MenuItem value="s3">S3</MenuItem>
                   </Select>
                 </FormControl>

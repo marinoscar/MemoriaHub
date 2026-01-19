@@ -130,6 +130,118 @@ export type {
   TestPushRequestInput,
 } from './validation/settings.schema.js';
 
+// Types - Library
+export type {
+  LibraryVisibility,
+  LibraryMemberRole,
+  Library,
+  LibraryDTO,
+  LibraryMember,
+  LibraryMemberDTO,
+  CreateLibraryInput,
+  UpdateLibraryInput,
+  AddLibraryMemberInput,
+  UpdateLibraryMemberInput,
+  LibraryWithStats,
+  LibraryEventType,
+  LibraryAuditEvent,
+} from './types/library.types.js';
+export {
+  DEFAULT_LIBRARY_VISIBILITY,
+  DEFAULT_MEMBER_ROLE,
+} from './types/library.types.js';
+
+// Types - Media
+export type {
+  MediaAssetStatus,
+  MediaType,
+  FileSource,
+  ProcessingJobType,
+  ProcessingJobStatus,
+  IngestionStatus,
+  ExifData,
+  MediaAsset,
+  MediaAssetDTO,
+  FaceData,
+  TagData,
+  InitiateUploadInput,
+  PresignedUploadResponse,
+  CompleteUploadInput,
+  ListMediaInput,
+  IngestionEvent,
+  ProcessingJob,
+  ExtractedMetadata,
+  GeocodingResult,
+} from './types/media.types.js';
+export {
+  ALLOWED_IMAGE_MIME_TYPES,
+  ALLOWED_VIDEO_MIME_TYPES,
+  ALLOWED_MEDIA_MIME_TYPES,
+  DEFAULT_MAX_UPLOAD_SIZE,
+  DEFAULT_PRESIGNED_URL_EXPIRATION,
+} from './types/media.types.js';
+
+// Validation schemas - Library
+export {
+  libraryVisibilitySchema,
+  libraryMemberRoleSchema,
+  createLibrarySchema,
+  updateLibrarySchema,
+  addLibraryMemberSchema,
+  updateLibraryMemberSchema,
+  libraryIdParamSchema,
+  libraryMemberParamsSchema,
+  listLibrariesQuerySchema,
+} from './validation/library.schema.js';
+
+export type {
+  LibraryVisibilityInput,
+  LibraryMemberRoleInput,
+  CreateLibraryInput as CreateLibrarySchemaInput,
+  UpdateLibraryInput as UpdateLibrarySchemaInput,
+  AddLibraryMemberInput as AddLibraryMemberSchemaInput,
+  UpdateLibraryMemberInput as UpdateLibraryMemberSchemaInput,
+  LibraryIdParamInput,
+  LibraryMemberParamsInput,
+  ListLibrariesQueryInput,
+} from './validation/library.schema.js';
+
+// Validation schemas - Media
+export {
+  mediaAssetStatusSchema,
+  mediaTypeSchema,
+  fileSourceSchema,
+  processingJobTypeSchema,
+  processingJobStatusSchema,
+  mimeTypeSchema,
+  initiateUploadSchema,
+  completeUploadSchema,
+  mediaAssetIdParamSchema,
+  listMediaQuerySchema,
+  listMediaByLibraryParamsSchema,
+  bulkDeleteMediaSchema,
+  updateMediaMetadataSchema,
+  moveMediaSchema,
+  getMediaTypeFromMimeType,
+  isAllowedMimeType,
+} from './validation/media.schema.js';
+
+export type {
+  MediaAssetStatusInput,
+  MediaTypeInput,
+  FileSourceInput,
+  ProcessingJobTypeInput,
+  ProcessingJobStatusInput,
+  InitiateUploadInput as InitiateUploadSchemaInput,
+  CompleteUploadInput as CompleteUploadSchemaInput,
+  MediaAssetIdParamInput,
+  ListMediaQueryInput,
+  ListMediaByLibraryParamsInput,
+  BulkDeleteMediaInput,
+  UpdateMediaMetadataInput,
+  MoveMediaInput,
+} from './validation/media.schema.js';
+
 // Constants
 export {
   HttpStatus,
