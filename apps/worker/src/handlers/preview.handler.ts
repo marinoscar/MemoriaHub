@@ -51,7 +51,7 @@ class PreviewHandler extends BaseHandler {
     const preview = await imageProcessor.generatePreview(inputBuffer);
 
     // Build storage key
-    const previewKey = this.buildDerivativeKey(asset.libraryId, asset.id, 'previews');
+    const previewKey = this.buildDerivativeKey(asset.ownerId, asset.id, 'previews');
 
     // Upload to S3
     await this.uploadDerivative(
