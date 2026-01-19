@@ -1,13 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as fs from 'fs/promises';
 
-// Mock fluent-ffmpeg before imports
-const mockFfmpeg = vi.fn();
-const mockFfprobe = vi.fn();
-const mockGetAvailableFormats = vi.fn();
+// Mock fluent-ffmpeg before imports - define callbacks at module level
+let mockFfprobeCallback: ((inputPath: string, callback: (err: Error | null, metadata: { format?: { duration?: number } }) => void) => void) | null = null;
+let mockGetAvailableFormatsCallback: ((callback: (err: Error | null) => void) => void) | null = null;
 
 vi.mock('fluent-ffmpeg', () => {
-  const ffmpegFn = (inputPath: string) => {
+  const ffmpegFn = () => {
     const instance = {
       seekInput: vi.fn().mockReturnThis(),
       frames: vi.fn().mockReturnThis(),
@@ -24,12 +22,24 @@ vi.mock('fluent-ffmpeg', () => {
       }),
       run: vi.fn(),
     };
-    mockFfmpeg.mockReturnValue(instance);
     return instance;
   };
 
-  ffmpegFn.ffprobe = mockFfprobe;
-  ffmpegFn.getAvailableFormats = mockGetAvailableFormats;
+  ffmpegFn.ffprobe = (inputPath: string, callback: (err: Error | null, metadata: { format?: { duration?: number } }) => void) => {
+    if (mockFfprobeCallback) {
+      mockFfprobeCallback(inputPath, callback);
+    } else {
+      callback(null, { format: {} });
+    }
+  };
+
+  ffmpegFn.getAvailableFormats = (callback: (err: Error | null) => void) => {
+    if (mockGetAvailableFormatsCallback) {
+      mockGetAvailableFormatsCallback(callback);
+    } else {
+      callback(null);
+    }
+  };
 
   return {
     default: ffmpegFn,
