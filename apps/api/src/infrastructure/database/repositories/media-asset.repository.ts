@@ -16,7 +16,7 @@ import { getTraceId } from '../../logging/request-context.js';
  */
 interface MediaAssetRow {
   id: string;
-  library_id: string;
+  owner_id: string;
   storage_key: string;
   storage_bucket: string;
   thumbnail_key: string | null;
@@ -55,7 +55,7 @@ interface MediaAssetRow {
 function rowToMediaAsset(row: MediaAssetRow): MediaAsset {
   return {
     id: row.id,
-    libraryId: row.library_id,
+    ownerId: row.owner_id,
     storageKey: row.storage_key,
     storageBucket: row.storage_bucket,
     thumbnailKey: row.thumbnail_key,
@@ -94,7 +94,7 @@ function rowToMediaAsset(row: MediaAssetRow): MediaAsset {
  */
 export interface CreateMediaAssetInput {
   id?: string;
-  libraryId: string;
+  ownerId: string;
   storageKey: string;
   storageBucket: string;
   originalFilename: string;
@@ -136,7 +136,28 @@ export interface UpdateMediaAssetInput {
  * Options for listing media assets
  */
 export interface ListMediaAssetsOptions {
-  libraryId: string;
+  ownerId?: string;
+  libraryId?: string; // Filter by library (via library_assets junction)
+  page?: number;
+  limit?: number;
+  status?: MediaAssetStatus;
+  mediaType?: MediaType;
+  country?: string;
+  state?: string;
+  city?: string;
+  cameraMake?: string;
+  cameraModel?: string;
+  startDate?: Date;
+  endDate?: Date;
+  sortBy?: 'capturedAt' | 'createdAt' | 'filename' | 'fileSize';
+  sortOrder?: 'asc' | 'desc';
+}
+
+/**
+ * Options for finding all accessible media for a user
+ */
+export interface FindAllAccessibleOptions {
+  userId: string;
   page?: number;
   limit?: number;
   status?: MediaAssetStatus;
@@ -173,13 +194,13 @@ export class MediaAssetRepository {
   }
 
   /**
-   * Find media assets by library ID with filtering and pagination
+   * Find media assets by owner ID with filtering and pagination
    */
-  async findByLibraryId(
+  async findByOwnerId(
     options: ListMediaAssetsOptions
   ): Promise<{ assets: MediaAsset[]; total: number }> {
     const {
-      libraryId,
+      ownerId,
       page = 1,
       limit = 50,
       status,
@@ -194,11 +215,16 @@ export class MediaAssetRepository {
       sortBy = 'capturedAt',
       sortOrder = 'desc',
     } = options;
+
+    if (!ownerId) {
+      throw new Error('ownerId is required for findByOwnerId');
+    }
+
     const offset = (page - 1) * limit;
 
     // Build WHERE clause
-    const conditions: string[] = ['library_id = $1'];
-    const params: unknown[] = [libraryId];
+    const conditions: string[] = ['owner_id = $1'];
+    const params: unknown[] = [ownerId];
     let paramIndex = 2;
 
     if (status) {
@@ -272,6 +298,231 @@ export class MediaAssetRepository {
   }
 
   /**
+   * Find media assets by library ID (via junction table) with filtering and pagination
+   */
+  async findByLibraryId(
+    libraryId: string,
+    options: Omit<ListMediaAssetsOptions, 'libraryId' | 'ownerId'> = {}
+  ): Promise<{ assets: MediaAsset[]; total: number }> {
+    const {
+      page = 1,
+      limit = 50,
+      status,
+      mediaType,
+      country,
+      state,
+      city,
+      cameraMake,
+      cameraModel,
+      startDate,
+      endDate,
+      sortBy = 'capturedAt',
+      sortOrder = 'desc',
+    } = options;
+    const offset = (page - 1) * limit;
+
+    // Build WHERE clause (joining via library_assets)
+    const conditions: string[] = ['la.library_id = $1'];
+    const params: unknown[] = [libraryId];
+    let paramIndex = 2;
+
+    if (status) {
+      conditions.push(`ma.status = $${paramIndex++}`);
+      params.push(status);
+    }
+    if (mediaType) {
+      conditions.push(`ma.media_type = $${paramIndex++}`);
+      params.push(mediaType);
+    }
+    if (country) {
+      conditions.push(`ma.country = $${paramIndex++}`);
+      params.push(country);
+    }
+    if (state) {
+      conditions.push(`ma.state = $${paramIndex++}`);
+      params.push(state);
+    }
+    if (city) {
+      conditions.push(`ma.city = $${paramIndex++}`);
+      params.push(city);
+    }
+    if (cameraMake) {
+      conditions.push(`ma.camera_make = $${paramIndex++}`);
+      params.push(cameraMake);
+    }
+    if (cameraModel) {
+      conditions.push(`ma.camera_model = $${paramIndex++}`);
+      params.push(cameraModel);
+    }
+    if (startDate) {
+      conditions.push(`ma.captured_at_utc >= $${paramIndex++}`);
+      params.push(startDate);
+    }
+    if (endDate) {
+      conditions.push(`ma.captured_at_utc <= $${paramIndex++}`);
+      params.push(endDate);
+    }
+
+    const whereClause = conditions.join(' AND ');
+
+    // Map sortBy to column
+    const sortColumnMap: Record<string, string> = {
+      capturedAt: 'COALESCE(ma.captured_at_utc, ma.created_at)',
+      createdAt: 'ma.created_at',
+      filename: 'ma.original_filename',
+      fileSize: 'ma.file_size',
+    };
+    const sortColumn = sortColumnMap[sortBy] || 'COALESCE(ma.captured_at_utc, ma.created_at)';
+
+    // Get total count
+    const countResult = await query<{ count: string }>(
+      `SELECT COUNT(*)::text as count
+       FROM media_assets ma
+       JOIN library_assets la ON ma.id = la.asset_id
+       WHERE ${whereClause}`,
+      params
+    );
+    const total = parseInt(countResult.rows[0].count, 10);
+
+    // Get assets
+    const result = await query<MediaAssetRow>(
+      `SELECT ma.*
+       FROM media_assets ma
+       JOIN library_assets la ON ma.id = la.asset_id
+       WHERE ${whereClause}
+       ORDER BY ${sortColumn} ${sortOrder.toUpperCase()}
+       LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
+      [...params, limit, offset]
+    );
+
+    return {
+      assets: result.rows.map(rowToMediaAsset),
+      total,
+    };
+  }
+
+  /**
+   * Find all media accessible to a user (owned + shared + via libraries)
+   */
+  async findAllAccessible(
+    options: FindAllAccessibleOptions
+  ): Promise<{ assets: MediaAsset[]; total: number }> {
+    const {
+      userId,
+      page = 1,
+      limit = 50,
+      status,
+      mediaType,
+      country,
+      state,
+      city,
+      cameraMake,
+      cameraModel,
+      startDate,
+      endDate,
+      sortBy = 'capturedAt',
+      sortOrder = 'desc',
+    } = options;
+    const offset = (page - 1) * limit;
+
+    // Build additional filter conditions
+    const filterConditions: string[] = [];
+    const params: unknown[] = [userId];
+    let paramIndex = 2;
+
+    if (status) {
+      filterConditions.push(`ma.status = $${paramIndex++}`);
+      params.push(status);
+    }
+    if (mediaType) {
+      filterConditions.push(`ma.media_type = $${paramIndex++}`);
+      params.push(mediaType);
+    }
+    if (country) {
+      filterConditions.push(`ma.country = $${paramIndex++}`);
+      params.push(country);
+    }
+    if (state) {
+      filterConditions.push(`ma.state = $${paramIndex++}`);
+      params.push(state);
+    }
+    if (city) {
+      filterConditions.push(`ma.city = $${paramIndex++}`);
+      params.push(city);
+    }
+    if (cameraMake) {
+      filterConditions.push(`ma.camera_make = $${paramIndex++}`);
+      params.push(cameraMake);
+    }
+    if (cameraModel) {
+      filterConditions.push(`ma.camera_model = $${paramIndex++}`);
+      params.push(cameraModel);
+    }
+    if (startDate) {
+      filterConditions.push(`ma.captured_at_utc >= $${paramIndex++}`);
+      params.push(startDate);
+    }
+    if (endDate) {
+      filterConditions.push(`ma.captured_at_utc <= $${paramIndex++}`);
+      params.push(endDate);
+    }
+
+    const filterClause = filterConditions.length > 0
+      ? `AND ${filterConditions.join(' AND ')}`
+      : '';
+
+    // Map sortBy to column
+    const sortColumnMap: Record<string, string> = {
+      capturedAt: 'COALESCE(ma.captured_at_utc, ma.created_at)',
+      createdAt: 'ma.created_at',
+      filename: 'ma.original_filename',
+      fileSize: 'ma.file_size',
+    };
+    const sortColumn = sortColumnMap[sortBy] || 'COALESCE(ma.captured_at_utc, ma.created_at)';
+
+    // Query for all accessible media:
+    // 1. Owned by user
+    // 2. Directly shared with user
+    // 3. In a library the user owns or is a member of or is public
+    const accessibleQuery = `
+      SELECT DISTINCT ma.*
+      FROM media_assets ma
+      LEFT JOIN media_shares ms ON ma.id = ms.asset_id AND ms.shared_with_user_id = $1
+      LEFT JOIN library_assets la ON ma.id = la.asset_id
+      LEFT JOIN libraries l ON la.library_id = l.id
+      LEFT JOIN library_members lm ON l.id = lm.library_id AND lm.user_id = $1
+      WHERE (
+        ma.owner_id = $1                           -- Owned by user
+        OR ms.shared_with_user_id IS NOT NULL      -- Directly shared
+        OR l.owner_id = $1                         -- Owner of library containing asset
+        OR lm.user_id IS NOT NULL                  -- Member of library containing asset
+        OR l.visibility = 'public'                 -- Public library containing asset
+      )
+      ${filterClause}
+    `;
+
+    // Get total count
+    const countResult = await query<{ count: string }>(
+      `SELECT COUNT(*) as count FROM (${accessibleQuery}) as accessible`,
+      params
+    );
+    const total = parseInt(countResult.rows[0].count, 10);
+
+    // Get assets with pagination
+    const result = await query<MediaAssetRow>(
+      `${accessibleQuery}
+       ORDER BY ${sortColumn} ${sortOrder.toUpperCase()}
+       LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
+      [...params, limit, offset]
+    );
+
+    return {
+      assets: result.rows.map(rowToMediaAsset),
+      total,
+    };
+  }
+
+  /**
    * Create a new media asset
    */
   async create(input: CreateMediaAssetInput): Promise<MediaAsset> {
@@ -279,7 +530,7 @@ export class MediaAssetRepository {
 
     const result = await query<MediaAssetRow>(
       `INSERT INTO media_assets (
-        id, library_id, storage_key, storage_bucket,
+        id, owner_id, storage_key, storage_bucket,
         original_filename, media_type, mime_type, file_size, file_source,
         status, trace_id
       )
@@ -289,7 +540,7 @@ export class MediaAssetRepository {
        RETURNING *`,
       [
         input.id || null,
-        input.libraryId,
+        input.ownerId,
         input.storageKey,
         input.storageBucket,
         input.originalFilename,
@@ -306,7 +557,7 @@ export class MediaAssetRepository {
     logger.info({
       eventType: 'media_asset.created',
       assetId: asset.id,
-      libraryId: asset.libraryId,
+      ownerId: asset.ownerId,
       filename: asset.originalFilename,
       mediaType: asset.mediaType,
       traceId,
@@ -542,14 +793,44 @@ export class MediaAssetRepository {
   }
 
   /**
-   * Count assets by status in a library
+   * Count assets by status for an owner
    */
-  async countByStatus(libraryId: string): Promise<Record<MediaAssetStatus, number>> {
+  async countByStatusForOwner(ownerId: string): Promise<Record<MediaAssetStatus, number>> {
     const result = await query<{ status: MediaAssetStatus; count: string }>(
       `SELECT status, COUNT(*)::text as count
        FROM media_assets
-       WHERE library_id = $1
+       WHERE owner_id = $1
        GROUP BY status`,
+      [ownerId]
+    );
+
+    const counts: Record<MediaAssetStatus, number> = {
+      UPLOADED: 0,
+      METADATA_EXTRACTED: 0,
+      DERIVATIVES_READY: 0,
+      ENRICHED: 0,
+      INDEXED: 0,
+      READY: 0,
+      ERROR: 0,
+    };
+
+    for (const row of result.rows) {
+      counts[row.status] = parseInt(row.count, 10);
+    }
+
+    return counts;
+  }
+
+  /**
+   * Count assets by status in a library (via junction table)
+   */
+  async countByStatusForLibrary(libraryId: string): Promise<Record<MediaAssetStatus, number>> {
+    const result = await query<{ status: MediaAssetStatus; count: string }>(
+      `SELECT ma.status, COUNT(*)::text as count
+       FROM media_assets ma
+       JOIN library_assets la ON ma.id = la.asset_id
+       WHERE la.library_id = $1
+       GROUP BY ma.status`,
       [libraryId]
     );
 
@@ -568,6 +849,58 @@ export class MediaAssetRepository {
     }
 
     return counts;
+  }
+
+  /**
+   * Check if user owns the asset
+   */
+  async isOwner(assetId: string, userId: string): Promise<boolean> {
+    const result = await query<{ is_owner: boolean }>(
+      `SELECT EXISTS(
+        SELECT 1 FROM media_assets WHERE id = $1 AND owner_id = $2
+      ) as is_owner`,
+      [assetId, userId]
+    );
+
+    return result.rows[0].is_owner;
+  }
+
+  /**
+   * Check if user can access the asset (owns, has share, or has library access)
+   */
+  async canAccess(assetId: string, userId: string): Promise<boolean> {
+    const result = await query<{ can_access: boolean }>(
+      `SELECT EXISTS(
+        SELECT 1 FROM media_assets ma
+        LEFT JOIN media_shares ms ON ma.id = ms.asset_id AND ms.shared_with_user_id = $2
+        LEFT JOIN library_assets la ON ma.id = la.asset_id
+        LEFT JOIN libraries l ON la.library_id = l.id
+        LEFT JOIN library_members lm ON l.id = lm.library_id AND lm.user_id = $2
+        WHERE ma.id = $1
+        AND (
+          ma.owner_id = $2                       -- Owns asset
+          OR ms.shared_with_user_id IS NOT NULL  -- Has direct share
+          OR l.owner_id = $2                     -- Owns library containing asset
+          OR lm.user_id IS NOT NULL              -- Member of library containing asset
+          OR l.visibility = 'public'             -- Asset is in public library
+        )
+      ) as can_access`,
+      [assetId, userId]
+    );
+
+    return result.rows[0].can_access;
+  }
+
+  /**
+   * Count total assets owned by a user
+   */
+  async countByOwnerId(ownerId: string): Promise<number> {
+    const result = await query<{ count: string }>(
+      'SELECT COUNT(*)::text as count FROM media_assets WHERE owner_id = $1',
+      [ownerId]
+    );
+
+    return parseInt(result.rows[0].count, 10);
   }
 }
 
