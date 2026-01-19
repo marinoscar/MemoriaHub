@@ -294,6 +294,76 @@ The development setup includes hot reload:
 
 ---
 
+## Database Management
+
+### Connecting with pgAdmin
+
+You can connect to the PostgreSQL database using pgAdmin or any PostgreSQL client.
+
+**Connection Details:**
+
+| Setting | Value |
+|---------|-------|
+| Host | `localhost` |
+| Port | `5432` |
+| Database | `memoriahub` |
+| Username | `memoriahub` |
+| Password | `memoriahub_dev` |
+
+**pgAdmin Setup:**
+
+1. Open pgAdmin
+2. Right-click **Servers** → **Register** → **Server**
+3. **General tab**:
+   - Name: `MemoriaHub Local`
+4. **Connection tab**:
+   - Host: `localhost`
+   - Port: `5432`
+   - Maintenance database: `memoriahub`
+   - Username: `memoriahub`
+   - Password: `memoriahub_dev`
+   - Save password: ✓ (optional)
+5. Click **Save**
+
+**Alternative: Command Line:**
+
+```bash
+# Using Docker (no local psql needed)
+docker compose -f infra/compose/dev.compose.yml exec postgres psql -U memoriahub
+
+# Using local psql client
+psql -h localhost -p 5432 -U memoriahub -d memoriahub
+```
+
+**Useful Queries:**
+
+```sql
+-- List all tables
+\dt
+
+-- View users
+SELECT id, email, display_name, created_at FROM users;
+
+-- View system settings
+SELECT category, updated_at FROM system_settings;
+
+-- Check migrations
+SELECT * FROM schema_migrations ORDER BY version;
+```
+
+### Other Database Tools
+
+These connection details work with any PostgreSQL client:
+
+- **DBeaver**: Create PostgreSQL connection with the same settings
+- **DataGrip**: Add PostgreSQL data source
+- **VS Code**: Use PostgreSQL extension with connection string:
+  ```
+  postgresql://memoriahub:memoriahub_dev@localhost:5432/memoriahub
+  ```
+
+---
+
 ## Common Issues
 
 See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for detailed solutions to common problems.
