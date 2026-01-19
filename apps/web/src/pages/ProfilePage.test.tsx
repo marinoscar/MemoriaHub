@@ -86,7 +86,9 @@ describe('ProfilePage', () => {
 
       render(<ProfilePage />);
 
-      expect(screen.getByText('Jane Smith')).toBeInTheDocument();
+      // Display name appears in header h5 and in account details
+      const displayNames = screen.getAllByText('Jane Smith');
+      expect(displayNames.length).toBeGreaterThan(0);
     });
 
     it('renders user email', () => {
