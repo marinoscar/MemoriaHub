@@ -47,7 +47,7 @@ interface NavItem {
  */
 const mainNavItems: NavItem[] = [
   { label: 'Home', path: '/', icon: <HomeIcon /> },
-  { label: 'Libraries', path: '/libraries', icon: <LibraryIcon />, disabled: true },
+  { label: 'Libraries', path: '/libraries', icon: <LibraryIcon /> },
   { label: 'Search', path: '/search', icon: <SearchIcon />, disabled: true },
   { label: 'People', path: '/people', icon: <PeopleIcon />, disabled: true },
   { label: 'Tags', path: '/tags', icon: <TagIcon />, disabled: true },

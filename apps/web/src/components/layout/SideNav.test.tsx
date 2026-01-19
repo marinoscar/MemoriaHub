@@ -66,15 +66,11 @@ describe('SideNav', () => {
       expect(homeItems.length).toBeGreaterThan(0);
     });
 
-    it('renders Libraries nav item (disabled)', () => {
+    it('renders Libraries nav item (enabled)', () => {
       render(<SideNav {...defaultProps} />);
 
       const librariesItems = screen.getAllByText('Libraries');
       expect(librariesItems.length).toBeGreaterThan(0);
-
-      // Check for "Soon" badge indicating disabled
-      const soonBadges = screen.getAllByText('Soon');
-      expect(soonBadges.length).toBeGreaterThan(0);
     });
 
     it('renders Search nav item (disabled)', () => {
@@ -179,33 +175,43 @@ describe('SideNav', () => {
       expect(mockNavigate).toHaveBeenCalledWith('/settings');
     });
 
-    it('does not navigate on disabled item click', () => {
+    it('navigates to /libraries on Libraries click', () => {
       render(<SideNav {...defaultProps} />);
 
       const librariesItems = screen.getAllByText('Libraries');
       const librariesButton = librariesItems[0].closest('div[role="button"]') || librariesItems[0].closest('button');
       fireEvent.click(librariesButton!);
 
-      expect(mockNavigate).not.toHaveBeenCalledWith('/libraries');
+      expect(mockNavigate).toHaveBeenCalledWith('/libraries');
+    });
+
+    it('does not navigate on disabled item click', () => {
+      render(<SideNav {...defaultProps} />);
+
+      const searchItems = screen.getAllByText('Search');
+      const searchButton = searchItems[0].closest('div[role="button"]') || searchItems[0].closest('button');
+      fireEvent.click(searchButton!);
+
+      expect(mockNavigate).not.toHaveBeenCalledWith('/search');
     });
   });
 
   describe('disabled state', () => {
-    it('shows disabled styling on Libraries', () => {
+    it('shows disabled styling on Search', () => {
       render(<SideNav {...defaultProps} />);
 
-      const librariesItems = screen.getAllByText('Libraries');
-      const librariesButton = librariesItems[0].closest('div[role="button"]') || librariesItems[0].closest('button');
-      expect(librariesButton).toHaveClass('Mui-disabled');
+      const searchItems = screen.getAllByText('Search');
+      const searchButton = searchItems[0].closest('div[role="button"]') || searchItems[0].closest('button');
+      expect(searchButton).toHaveClass('Mui-disabled');
     });
 
     it('shows "Soon" badge on disabled items', () => {
       render(<SideNav {...defaultProps} />);
 
-      // Libraries, Search, People, Tags are disabled - each appears twice (mobile + desktop drawer)
+      // Search, People, Tags are disabled - each appears twice (mobile + desktop drawer)
       const soonBadges = screen.getAllByText('Soon');
-      // 4 disabled items * 2 drawers = 8
-      expect(soonBadges.length).toBe(8);
+      // 3 disabled items * 2 drawers = 6
+      expect(soonBadges.length).toBe(6);
     });
 
     it('prevents click events on disabled items', () => {

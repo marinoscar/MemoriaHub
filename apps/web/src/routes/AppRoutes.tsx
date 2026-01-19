@@ -8,6 +8,8 @@ import {
   ProfilePage,
   SettingsPage,
   NotFoundPage,
+  LibrariesPage,
+  LibraryGalleryPage,
 } from '../pages';
 
 /**
@@ -51,8 +53,11 @@ export function AppRoutes() {
           }
         />
 
+        {/* Libraries routes */}
+        <Route path="libraries" element={<LibrariesPage />} />
+        <Route path="libraries/:libraryId" element={<LibraryGalleryPage />} />
+
         {/* Future routes (placeholders) */}
-        <Route path="libraries" element={<div>Libraries (Coming Soon)</div>} />
         <Route path="search" element={<div>Search (Coming Soon)</div>} />
         <Route path="people" element={<div>People (Coming Soon)</div>} />
         <Route path="tags" element={<div>Tags (Coming Soon)</div>} />

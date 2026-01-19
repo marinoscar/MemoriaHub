@@ -40,7 +40,7 @@ MemoriaHub uses a clean, modern interface with:
 | Section | Description | Status |
 |---------|-------------|--------|
 | **Home** | Dashboard with overview and quick actions | Available |
-| **Libraries** | Your photo collections and albums | Coming Soon |
+| **Libraries** | Your photo collections and albums | Available |
 | **Search** | Find photos by keywords, faces, or dates | Coming Soon |
 | **People** | Photos organized by recognized faces | Coming Soon |
 | **Tags** | Browse photos by tags and categories | Coming Soon |
@@ -170,14 +170,52 @@ Enable or disable application features:
 
 ## Features
 
-### Photo Management
+### Libraries
 
-*(Coming Soon)*
+Create and manage photo libraries to organize your memories:
 
-- Upload photos and videos
-- Organize into albums and libraries
-- Add tags and descriptions
-- View photo metadata (EXIF)
+1. **Navigate to Libraries** from the side menu
+2. **Create a new library** by clicking the "Create Library" button
+3. **Set visibility**: Private (only you), Shared (invited members), or Public (anyone with link)
+4. **Add a description** to help you remember what the library contains
+
+### Photo Gallery
+
+View and browse your photos:
+
+1. **Click on a library** to open its gallery
+2. **Browse thumbnails** in a responsive grid (4 columns on desktop, 2 on mobile)
+3. **Filter by type**: Show all, images only, or videos only
+4. **Sort by date**: Capture date or upload date, newest or oldest first
+5. **Load more**: Click "Load More" to see additional photos
+
+### Lightbox (Full-Size Viewing)
+
+View photos and videos in detail:
+
+1. **Click any thumbnail** to open the lightbox
+2. **Navigate** using arrow buttons or keyboard (Left/Right arrows)
+3. **View metadata** including filename, capture date, location, camera info, and dimensions
+4. **Play videos** with full controls
+5. **Close** by clicking the X button, pressing Escape, or clicking outside
+
+### Keyboard Shortcuts in Lightbox
+
+| Shortcut | Action |
+|----------|--------|
+| Arrow Left/Up | Previous photo |
+| Arrow Right/Down/Space | Next photo |
+| Escape | Close lightbox |
+
+### Photo Upload
+
+Upload photos and videos to your libraries:
+
+1. **Open a library** and click the "Upload" button
+2. **Drag and drop** files or click to browse
+3. **Supported formats**: JPEG, PNG, GIF, WebP, HEIC, MP4, MOV, AVI, WebM
+4. **Maximum file size**: 100MB per file
+5. **Track progress** as files upload
 
 ### Sharing
 
@@ -242,15 +280,22 @@ Visit our [GitHub Issues](https://github.com/marinoscar/MemoriaHub/issues) page 
 
 ## Keyboard Shortcuts
 
+### Lightbox Navigation
+
+| Shortcut | Action |
+|----------|--------|
+| Arrow Left/Up | Previous photo |
+| Arrow Right/Down/Space | Next photo |
+| Escape | Close lightbox |
+
+### General (Coming Soon)
+
 | Shortcut | Action |
 |----------|--------|
 | `?` | Show keyboard shortcuts help |
 | `g h` | Go to Home |
 | `g s` | Go to Settings |
 | `/` | Focus search |
-| `Esc` | Close modal/dialog |
-
-*(Keyboard shortcuts coming soon)*
 
 ---
 
@@ -262,4 +307,4 @@ Visit our [GitHub Issues](https://github.com/marinoscar/MemoriaHub/issues) page 
 
 ---
 
-*Last updated: January 2024*
+*Last updated: January 2026*
