@@ -39,6 +39,23 @@ describe('UserRepository', () => {
     email_verified: true,
     display_name: 'Test User',
     avatar_url: 'https://example.com/avatar.jpg',
+    role: 'user',
+    refresh_token_hash: null,
+    is_active: true,
+    created_at: new Date('2024-01-01'),
+    updated_at: new Date('2024-01-02'),
+    last_login_at: null,
+  };
+
+  const mockAdminUserRow = {
+    id: 'admin-123',
+    oauth_provider: 'google' as OAuthProvider,
+    oauth_subject: 'google-admin-456',
+    email: 'admin@example.com',
+    email_verified: true,
+    display_name: 'Admin User',
+    avatar_url: 'https://example.com/admin-avatar.jpg',
+    role: 'admin',
     refresh_token_hash: null,
     is_active: true,
     created_at: new Date('2024-01-01'),
@@ -65,6 +82,22 @@ describe('UserRepository', () => {
         'SELECT * FROM users WHERE id = $1 AND is_active = true',
         ['user-123']
       );
+    });
+
+    it('returns user with role field', async () => {
+      mockQuery.mockResolvedValue({ rows: [mockUserRow] });
+
+      const result = await repository.findById('user-123');
+
+      expect(result?.role).toBe('user');
+    });
+
+    it('returns admin user with admin role', async () => {
+      mockQuery.mockResolvedValue({ rows: [mockAdminUserRow] });
+
+      const result = await repository.findById('admin-123');
+
+      expect(result?.role).toBe('admin');
     });
 
     it('returns null for non-existent ID', async () => {
@@ -100,6 +133,14 @@ describe('UserRepository', () => {
         'SELECT * FROM users WHERE oauth_provider = $1 AND oauth_subject = $2 AND is_active = true',
         ['google', 'google-subject-456']
       );
+    });
+
+    it('returns user with role field', async () => {
+      mockQuery.mockResolvedValue({ rows: [mockUserRow] });
+
+      const result = await repository.findByOAuthIdentity('google', 'google-subject-456');
+
+      expect(result?.role).toBe('user');
     });
 
     it('returns null for non-existent OAuth identity', async () => {
@@ -334,6 +375,7 @@ describe('UserRepository', () => {
       const mockClient = {
         query: vi.fn()
           .mockResolvedValueOnce({ rows: [] }) // SELECT FOR UPDATE (not found)
+          .mockResolvedValueOnce({ rows: [{ count: '1' }] }) // COUNT query (not first user)
           .mockResolvedValueOnce({ rows: [mockUserRow] }), // INSERT
       };
 
@@ -353,6 +395,62 @@ describe('UserRepository', () => {
       expect(mockClient.query).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO users'),
         expect.any(Array)
+      );
+    });
+
+    it('assigns admin role to first user when database is empty', async () => {
+      const mockClient = {
+        query: vi.fn()
+          .mockResolvedValueOnce({ rows: [] }) // SELECT FOR UPDATE (not found)
+          .mockResolvedValueOnce({ rows: [{ count: '0' }] }) // COUNT query (no users - first user)
+          .mockResolvedValueOnce({ rows: [mockAdminUserRow] }), // INSERT returns admin user
+      };
+
+      mockWithTransaction.mockImplementation(async (fn) => fn(mockClient));
+
+      const input = {
+        oauthProvider: 'google' as OAuthProvider,
+        oauthSubject: 'first-user-subject',
+        email: 'first@example.com',
+        emailVerified: true,
+        displayName: 'First User',
+      };
+
+      const result = await repository.findOrCreate(input);
+
+      expect(result.created).toBe(true);
+      // Verify INSERT was called with admin role
+      expect(mockClient.query).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO users'),
+        expect.arrayContaining(['admin'])
+      );
+    });
+
+    it('assigns user role to subsequent users', async () => {
+      const mockClient = {
+        query: vi.fn()
+          .mockResolvedValueOnce({ rows: [] }) // SELECT FOR UPDATE (not found)
+          .mockResolvedValueOnce({ rows: [{ count: '5' }] }) // COUNT query (5 existing users)
+          .mockResolvedValueOnce({ rows: [mockUserRow] }), // INSERT returns regular user
+      };
+
+      mockWithTransaction.mockImplementation(async (fn) => fn(mockClient));
+
+      const input = {
+        oauthProvider: 'google' as OAuthProvider,
+        oauthSubject: 'new-user-subject',
+        email: 'newuser@example.com',
+        emailVerified: true,
+        displayName: 'New User',
+      };
+
+      const result = await repository.findOrCreate(input);
+
+      expect(result.created).toBe(true);
+      // Verify INSERT was called with user role
+      expect(mockClient.query).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO users'),
+        expect.arrayContaining(['user'])
       );
     });
 
