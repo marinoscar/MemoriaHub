@@ -1,4 +1,4 @@
-import type { OAuthProvider, User } from '@memoriahub/shared';
+import type { OAuthProvider, User, UserRole } from '@memoriahub/shared';
 import type { IUserRepository, CreateUserInput, UpdateUserInput } from '../../../interfaces/index.js';
 import { query, withTransaction } from '../client.js';
 import { rowToUser } from '../../../domain/entities/User.js';
@@ -18,6 +18,7 @@ export class UserRepository implements IUserRepository {
       display_name: string | null;
       avatar_url: string | null;
       refresh_token_hash: string | null;
+      role: UserRole;
       is_active: boolean;
       created_at: Date;
       updated_at: Date;
@@ -44,6 +45,7 @@ export class UserRepository implements IUserRepository {
       display_name: string | null;
       avatar_url: string | null;
       refresh_token_hash: string | null;
+      role: UserRole;
       is_active: boolean;
       created_at: Date;
       updated_at: Date;
@@ -70,6 +72,7 @@ export class UserRepository implements IUserRepository {
       display_name: string | null;
       avatar_url: string | null;
       refresh_token_hash: string | null;
+      role: UserRole;
       is_active: boolean;
       created_at: Date;
       updated_at: Date;
@@ -96,6 +99,7 @@ export class UserRepository implements IUserRepository {
       display_name: string | null;
       avatar_url: string | null;
       refresh_token_hash: string | null;
+      role: UserRole;
       is_active: boolean;
       created_at: Date;
       updated_at: Date;
@@ -178,6 +182,7 @@ export class UserRepository implements IUserRepository {
       display_name: string | null;
       avatar_url: string | null;
       refresh_token_hash: string | null;
+      role: UserRole;
       is_active: boolean;
       created_at: Date;
       updated_at: Date;
@@ -206,6 +211,7 @@ export class UserRepository implements IUserRepository {
         display_name: string | null;
         avatar_url: string | null;
         refresh_token_hash: string | null;
+        role: UserRole;
         is_active: boolean;
         created_at: Date;
         updated_at: Date;
@@ -226,6 +232,7 @@ export class UserRepository implements IUserRepository {
           display_name: string | null;
           avatar_url: string | null;
           refresh_token_hash: string | null;
+          role: UserRole;
           is_active: boolean;
           created_at: Date;
           updated_at: Date;
@@ -251,6 +258,13 @@ export class UserRepository implements IUserRepository {
         return { user: rowToUser(updated.rows[0]), created: false };
       }
 
+      // Check if this is the first user (should be admin)
+      const countResult = await client.query<{ count: string }>(
+        'SELECT COUNT(*) as count FROM users'
+      );
+      const userCount = parseInt(countResult.rows[0].count, 10);
+      const role: UserRole = userCount === 0 ? 'admin' : 'user';
+
       // Create new user
       const created = await client.query<{
         id: string;
@@ -261,13 +275,14 @@ export class UserRepository implements IUserRepository {
         display_name: string | null;
         avatar_url: string | null;
         refresh_token_hash: string | null;
+        role: UserRole;
         is_active: boolean;
         created_at: Date;
         updated_at: Date;
         last_login_at: Date | null;
       }>(
-        `INSERT INTO users (oauth_provider, oauth_subject, email, email_verified, display_name, avatar_url, last_login_at)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        `INSERT INTO users (oauth_provider, oauth_subject, email, email_verified, display_name, avatar_url, role, last_login_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
          RETURNING *`,
         [
           input.oauthProvider,
@@ -276,6 +291,7 @@ export class UserRepository implements IUserRepository {
           input.emailVerified,
           input.displayName ?? null,
           input.avatarUrl ?? null,
+          role,
         ]
       );
 
@@ -287,8 +303,9 @@ export class UserRepository implements IUserRepository {
           userId: user.id,
           email: user.email,
           oauthProvider: user.oauthProvider,
+          role: user.role,
         },
-        'User created'
+        `User created${role === 'admin' ? ' as admin (first user)' : ''}`
       );
 
       return { user, created: true };
