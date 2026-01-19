@@ -4,8 +4,10 @@ import { z } from 'zod';
  * Storage configuration schema
  */
 const storageConfigSchema = z.object({
-  /** S3-compatible endpoint URL */
+  /** S3-compatible endpoint URL (internal, for server-side operations) */
   endpoint: z.string().url(),
+  /** Public endpoint URL for presigned URLs (accessible from browser) */
+  publicEndpoint: z.string().url().optional(),
   /** Access key ID */
   accessKey: z.string().min(1),
   /** Secret access key */
@@ -61,8 +63,13 @@ function getEnvNumber(key: string, defaultValue: number): number {
  * Load storage configuration from environment variables
  */
 function loadStorageConfig(): StorageConfig {
+  const endpoint = getEnv('S3_ENDPOINT', 'http://localhost:9000');
+  const publicEndpoint = process.env.S3_PUBLIC_ENDPOINT;
+
   const config = {
-    endpoint: getEnv('S3_ENDPOINT', 'http://localhost:9000'),
+    endpoint,
+    // Use public endpoint for presigned URLs if set, otherwise fall back to endpoint
+    publicEndpoint: publicEndpoint || undefined,
     accessKey: getEnv('S3_ACCESS_KEY', 'memoriahub'),
     secretKey: getEnv('S3_SECRET_KEY', 'memoriahub_dev_secret'),
     bucket: getEnv('S3_BUCKET', 'memoriahub'),
