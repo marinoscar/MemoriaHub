@@ -10,6 +10,7 @@ import {
   initiateUploadSchema,
   completeUploadSchema,
   listMediaQuerySchema,
+  listMediaByLibraryParamsSchema,
 } from '@memoriahub/shared';
 import { ValidationError } from '../../domain/errors/ValidationError.js';
 
@@ -62,7 +63,7 @@ export function validateCompleteUpload(
 }
 
 /**
- * Validate list media query parameters
+ * Validate list media query parameters and path params
  */
 export function validateListMediaQuery(
   req: Request,
@@ -70,6 +71,9 @@ export function validateListMediaQuery(
   next: NextFunction
 ): void {
   try {
+    // Validate path params (libraryId)
+    listMediaByLibraryParamsSchema.parse(req.params);
+    // Validate query params
     listMediaQuerySchema.parse(req.query);
     next();
   } catch (error) {

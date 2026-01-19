@@ -104,10 +104,10 @@ export const mediaAssetIdParamSchema = z.object({
 });
 
 /**
- * List media query schema
+ * List media query schema (query parameters only)
+ * Note: libraryId comes from URL path params, not query params
  */
 export const listMediaQuerySchema = z.object({
-  libraryId: z.string().uuid('Invalid library ID'),
   page: z.coerce.number().int().min(1).optional().default(1),
   limit: z.coerce.number().int().min(1).max(100).optional().default(50),
   status: mediaAssetStatusSchema.optional(),
