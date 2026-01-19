@@ -72,6 +72,23 @@ describe('AuthService', () => {
     emailVerified: true,
     displayName: 'Test User',
     avatarUrl: 'https://example.com/avatar.jpg',
+    role: 'user',
+    refreshTokenHash: null,
+    isActive: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    lastLoginAt: null,
+  };
+
+  const mockAdminUser: User = {
+    id: 'admin-123',
+    oauthProvider: 'google',
+    oauthSubject: 'google-admin-456',
+    email: 'admin@example.com',
+    emailVerified: true,
+    displayName: 'Admin User',
+    avatarUrl: 'https://example.com/admin-avatar.jpg',
+    role: 'admin',
     refreshTokenHash: null,
     isActive: true,
     createdAt: new Date(),
@@ -314,6 +331,68 @@ describe('AuthService', () => {
         refreshTokenHash: 'hashed-refresh-token',
       });
     });
+
+    it('passes user role to token generation', async () => {
+      const { state } = authService.initiateOAuth(mockOAuthProvider);
+
+      const mockOAuthTokens = {
+        accessToken: 'google-access-token',
+        idToken: 'google-id-token',
+        expiresIn: 3600,
+        tokenType: 'Bearer',
+      };
+
+      const mockUserInfo = {
+        subject: 'google-subject-456',
+        email: 'test@example.com',
+        emailVerified: true,
+        rawPayload: {},
+      };
+
+      vi.mocked(mockOAuthProvider.exchangeCodeForTokens).mockResolvedValue(mockOAuthTokens);
+      vi.mocked(mockOAuthProvider.getUserInfo).mockResolvedValue(mockUserInfo);
+      vi.mocked(mockUserRepository.findOrCreate).mockResolvedValue({ user: mockUser, created: false });
+      vi.mocked(mockUserRepository.update).mockResolvedValue(mockUser);
+
+      await authService.handleOAuthCallback(mockOAuthProvider, 'auth-code', state);
+
+      expect(mockTokenService.generateTokenPair).toHaveBeenCalledWith({
+        userId: 'user-123',
+        email: 'test@example.com',
+        role: 'user',
+      });
+    });
+
+    it('passes admin role to token generation for admin user', async () => {
+      const { state } = authService.initiateOAuth(mockOAuthProvider);
+
+      const mockOAuthTokens = {
+        accessToken: 'google-access-token',
+        idToken: 'google-id-token',
+        expiresIn: 3600,
+        tokenType: 'Bearer',
+      };
+
+      const mockUserInfo = {
+        subject: 'google-admin-456',
+        email: 'admin@example.com',
+        emailVerified: true,
+        rawPayload: {},
+      };
+
+      vi.mocked(mockOAuthProvider.exchangeCodeForTokens).mockResolvedValue(mockOAuthTokens);
+      vi.mocked(mockOAuthProvider.getUserInfo).mockResolvedValue(mockUserInfo);
+      vi.mocked(mockUserRepository.findOrCreate).mockResolvedValue({ user: mockAdminUser, created: false });
+      vi.mocked(mockUserRepository.update).mockResolvedValue(mockAdminUser);
+
+      await authService.handleOAuthCallback(mockOAuthProvider, 'auth-code', state);
+
+      expect(mockTokenService.generateTokenPair).toHaveBeenCalledWith({
+        userId: 'admin-123',
+        email: 'admin@example.com',
+        role: 'admin',
+      });
+    });
   });
 
   describe('refreshToken', () => {
@@ -335,6 +414,28 @@ describe('AuthService', () => {
       expect(result.accessToken).toBe('new-access-token');
       expect(result.expiresIn).toBe(900);
       expect(mockTokenService.verifyRefreshToken).toHaveBeenCalledWith('valid-refresh-token');
+    });
+
+    it('generates new access token with correct role', async () => {
+      vi.mocked(mockTokenService.verifyRefreshToken).mockReturnValue({
+        sub: 'admin-123',
+        type: 'refresh',
+        jti: 'token-id',
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        iss: 'memoriahub',
+        aud: 'memoriahub',
+      });
+      vi.mocked(mockUserRepository.findById).mockResolvedValue(mockAdminUser);
+      vi.mocked(mockTokenService.generateAccessToken).mockReturnValue('new-admin-access-token');
+
+      await authService.refreshToken('valid-refresh-token');
+
+      expect(mockTokenService.generateAccessToken).toHaveBeenCalledWith({
+        userId: 'admin-123',
+        email: 'admin@example.com',
+        role: 'admin',
+      });
     });
 
     it('throws error for invalid refresh token', async () => {
@@ -402,16 +503,24 @@ describe('AuthService', () => {
 
       const result = await authService.getCurrentUser('user-123');
 
-      // UserDTO only includes: id, email, displayName, avatarUrl, oauthProvider, createdAt
-      // Note: emailVerified is NOT included in UserDTO
+      // UserDTO includes: id, email, displayName, avatarUrl, oauthProvider, role, createdAt
       expect(result).toEqual({
         id: 'user-123',
         email: 'test@example.com',
         displayName: 'Test User',
         avatarUrl: 'https://example.com/avatar.jpg',
         oauthProvider: 'google',
+        role: 'user',
         createdAt: expect.any(String),
       });
+    });
+
+    it('returns admin role in DTO for admin user', async () => {
+      vi.mocked(mockUserRepository.findById).mockResolvedValue(mockAdminUser);
+
+      const result = await authService.getCurrentUser('admin-123');
+
+      expect(result.role).toBe('admin');
     });
 
     it('throws error when user not found', async () => {

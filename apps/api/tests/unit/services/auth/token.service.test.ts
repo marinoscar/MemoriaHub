@@ -319,6 +319,7 @@ describe('TokenService', () => {
       const result = tokenService.generateTokenPair({
         userId: 'user-123',
         email: 'test@example.com',
+        role: 'user' as const,
       });
 
       // Default is 15m = 900 seconds
@@ -331,6 +332,7 @@ describe('TokenService', () => {
       const token = tokenService.generateAccessToken({
         userId: 'user-123',
         email: 'test@example.com',
+        role: 'user' as const,
       });
 
       const payload = jwt.decode(token) as Record<string, unknown>;
@@ -342,8 +344,8 @@ describe('TokenService', () => {
     });
 
     it('generates unique jti for each refresh token', () => {
-      const pair1 = tokenService.generateTokenPair({ userId: 'user-123', email: 'a@b.com' });
-      const pair2 = tokenService.generateTokenPair({ userId: 'user-123', email: 'a@b.com' });
+      const pair1 = tokenService.generateTokenPair({ userId: 'user-123', email: 'a@b.com', role: 'user' as const });
+      const pair2 = tokenService.generateTokenPair({ userId: 'user-123', email: 'a@b.com', role: 'user' as const });
 
       const payload1 = jwt.decode(pair1.refreshToken) as jwt.JwtPayload;
       const payload2 = jwt.decode(pair2.refreshToken) as jwt.JwtPayload;
