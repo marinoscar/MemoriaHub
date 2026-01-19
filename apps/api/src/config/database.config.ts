@@ -71,7 +71,8 @@ function buildConnectionString(): { connectionString: string; ssl: boolean } {
   const isCloudConnection = host !== '' &&
     host !== 'localhost' &&
     host !== '127.0.0.1' &&
-    host !== 'postgres'; // Docker service name
+    host !== 'postgres' && // Docker service name
+    host !== 'host.docker.internal'; // Docker host gateway to local machine
 
   if (isCloudConnection) {
     // Cloud connection - use SSL by default
