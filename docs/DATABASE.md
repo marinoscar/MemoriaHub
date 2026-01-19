@@ -553,22 +553,22 @@ CREATE TABLE system_settings (
 
 ### User Preferences
 
-Per-user settings with JSONB for flexibility:
+Per-user settings with JSONB for flexibility (same approach as system_settings):
 
 ```sql
 CREATE TABLE user_settings (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    preferences JSONB DEFAULT '{}',  -- notifications, ui, privacy settings
+    preferences JSONB NOT NULL DEFAULT '{...}',  -- Full default preferences JSON
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 ```
 
 **Preference Categories:**
-- `notifications.email` - Email notification preferences
-- `notifications.push` - Push notification preferences
-- `ui` - Theme, language, grid size, metadata display
-- `privacy` - Album visibility, tagging preferences
+- `notifications.email` - Email notification preferences (enabled, digest, newShares, comments, etc.)
+- `notifications.push` - Push notification preferences (enabled, newShares, comments, etc.)
+- `ui` - Theme, grid size, autoPlayVideos, showMetadata
+- `privacy` - Album visibility, tagging preferences, online status
 
 ### Settings Audit Trail
 
