@@ -34,27 +34,46 @@ export class S3StorageProvider implements IStorageProvider {
   private presignClient: S3Client;
 
   constructor() {
-    this.client = new S3Client({
-      endpoint: storageConfig.endpoint,
-      region: storageConfig.region,
-      credentials: {
-        accessKeyId: storageConfig.accessKey,
-        secretAccessKey: storageConfig.secretKey,
-      },
-      forcePathStyle: storageConfig.forcePathStyle,
-    });
+    // For AWS S3, don't set endpoint - let SDK use default
+    // For S3-compatible services (MinIO), set endpoint explicitly
+    const isAwsS3 = storageConfig.endpoint.includes('s3.amazonaws.com') ||
+                    storageConfig.endpoint.includes('s3.') && storageConfig.endpoint.includes('.amazonaws.com');
 
-    // Use public endpoint for presigned URLs if configured, otherwise use internal endpoint
-    const presignEndpoint = storageConfig.publicEndpoint || storageConfig.endpoint;
-    this.presignClient = new S3Client({
-      endpoint: presignEndpoint,
+    const clientConfig: ConstructorParameters<typeof S3Client>[0] = {
       region: storageConfig.region,
       credentials: {
         accessKeyId: storageConfig.accessKey,
         secretAccessKey: storageConfig.secretKey,
       },
       forcePathStyle: storageConfig.forcePathStyle,
-    });
+    };
+
+    // Only set endpoint for non-AWS S3 services
+    if (!isAwsS3) {
+      clientConfig.endpoint = storageConfig.endpoint;
+    }
+
+    this.client = new S3Client(clientConfig);
+
+    // Use public endpoint for presigned URLs if configured, otherwise use same config
+    const presignEndpoint = storageConfig.publicEndpoint || storageConfig.endpoint;
+    const isPresignAwsS3 = presignEndpoint.includes('s3.amazonaws.com') ||
+                           presignEndpoint.includes('s3.') && presignEndpoint.includes('.amazonaws.com');
+
+    const presignConfig: ConstructorParameters<typeof S3Client>[0] = {
+      region: storageConfig.region,
+      credentials: {
+        accessKeyId: storageConfig.accessKey,
+        secretAccessKey: storageConfig.secretKey,
+      },
+      forcePathStyle: storageConfig.forcePathStyle,
+    };
+
+    if (!isPresignAwsS3) {
+      presignConfig.endpoint = presignEndpoint;
+    }
+
+    this.presignClient = new S3Client(presignConfig);
 
     logger.info({
       eventType: 's3.provider.initialized',
