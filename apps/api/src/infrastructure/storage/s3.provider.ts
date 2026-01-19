@@ -30,6 +30,8 @@ import { getTraceId } from '../logging/request-context.js';
 export class S3StorageProvider implements IStorageProvider {
   readonly providerName = 's3';
   private client: S3Client;
+  /** Separate client for presigned URLs using public endpoint (if configured) */
+  private presignClient: S3Client;
 
   constructor() {
     this.client = new S3Client({
@@ -42,9 +44,22 @@ export class S3StorageProvider implements IStorageProvider {
       forcePathStyle: storageConfig.forcePathStyle,
     });
 
+    // Use public endpoint for presigned URLs if configured, otherwise use internal endpoint
+    const presignEndpoint = storageConfig.publicEndpoint || storageConfig.endpoint;
+    this.presignClient = new S3Client({
+      endpoint: presignEndpoint,
+      region: storageConfig.region,
+      credentials: {
+        accessKeyId: storageConfig.accessKey,
+        secretAccessKey: storageConfig.secretKey,
+      },
+      forcePathStyle: storageConfig.forcePathStyle,
+    });
+
     logger.info({
       eventType: 's3.provider.initialized',
       endpoint: storageConfig.endpoint,
+      publicEndpoint: storageConfig.publicEndpoint || '(using internal endpoint)',
       bucket: storageConfig.bucket,
       region: storageConfig.region,
     }, 'S3 storage provider initialized');
@@ -380,7 +395,8 @@ export class S3StorageProvider implements IStorageProvider {
         ContentType: options?.contentType,
       });
 
-      const url = await getSignedUrl(this.client, command, {
+      // Use presignClient which may have a different (public) endpoint
+      const url = await getSignedUrl(this.presignClient, command, {
         expiresIn: options?.expiresIn || storageConfig.presignedUrlExpiration,
       });
 
@@ -421,7 +437,8 @@ export class S3StorageProvider implements IStorageProvider {
         ResponseContentDisposition: options?.contentDisposition,
       });
 
-      const url = await getSignedUrl(this.client, command, {
+      // Use presignClient which may have a different (public) endpoint
+      const url = await getSignedUrl(this.presignClient, command, {
         expiresIn: options?.expiresIn || storageConfig.presignedUrlExpiration,
       });
 
