@@ -83,24 +83,12 @@ Configure how you receive updates:
 
 > **Note**: Email notifications require SMTP to be configured by the administrator.
 
-#### Language & Region
-
-| Setting | Options | Description |
-|---------|---------|-------------|
-| **Language** | English, Spanish, French, German, Portuguese | Interface language |
-
 #### Privacy
 
 | Setting | Options | Description |
 |---------|---------|-------------|
 | **Default Album Visibility** | Private, Shared, Public | Default privacy for new albums |
 | **Allow Tagging** | On/Off | Let others tag you in photos |
-
-#### Security
-
-| Setting | Status | Description |
-|---------|--------|-------------|
-| **Two-Factor Authentication** | Coming Soon | Additional login security |
 
 ### Resetting Preferences
 
