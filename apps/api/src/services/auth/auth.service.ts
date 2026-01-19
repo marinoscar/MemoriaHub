@@ -122,6 +122,7 @@ export class AuthService {
       const jwtTokens = this.tokenService.generateTokenPair({
         userId: user.id,
         email: user.email,
+        role: user.role,
       });
 
       // Store refresh token hash
@@ -192,6 +193,7 @@ export class AuthService {
       const accessToken = this.tokenService.generateAccessToken({
         userId: user.id,
         email: user.email,
+        role: user.role,
       });
 
       // Log audit event
