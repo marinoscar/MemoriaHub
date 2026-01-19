@@ -217,7 +217,7 @@ describe('Settings Routes Integration Tests', () => {
         const response = await request(app)
           .patch('/api/settings/system/general')
           .set('Authorization', `Bearer ${adminToken}`)
-          .send({ siteName: 'Updated Name' });
+          .send({ settings: { siteName: 'Updated Name' } });
 
         expect(response.status).toBe(200);
       });
@@ -226,7 +226,7 @@ describe('Settings Routes Integration Tests', () => {
         const response = await request(app)
           .patch('/api/settings/system/general')
           .set('Authorization', `Bearer ${userToken}`)
-          .send({ siteName: 'Updated Name' });
+          .send({ settings: { siteName: 'Updated Name' } });
 
         expect(response.status).toBe(403);
         expect(response.body.error.message).toBe('Admin access required');
@@ -235,7 +235,7 @@ describe('Settings Routes Integration Tests', () => {
       it('returns 401 for unauthenticated request', async () => {
         const response = await request(app)
           .patch('/api/settings/system/general')
-          .send({ siteName: 'Updated Name' });
+          .send({ settings: { siteName: 'Updated Name' } });
 
         expect(response.status).toBe(401);
       });

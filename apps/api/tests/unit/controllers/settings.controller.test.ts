@@ -125,15 +125,7 @@ describe('SettingsController', () => {
       expect(mockRes.json).toHaveBeenCalledWith({ data: mockUpdated });
     });
 
-    it('throws ForbiddenError when not authenticated', async () => {
-      mockReq.user = undefined;
-      mockReq.params = { category: 'smtp' };
-      mockReq.body = { settings: { enabled: false } };
-
-      await controller.updateSystemSettings(mockReq as Request, mockRes as Response, mockNext);
-
-      expect(mockNext).toHaveBeenCalledWith(expect.any(ForbiddenError));
-    });
+    // Note: Authentication/admin authorization is handled by middleware, not controller
 
     it('passes error to next on service failure', async () => {
       mockReq.params = { category: 'smtp' };
@@ -256,23 +248,8 @@ describe('SettingsController', () => {
     });
   });
 
-  describe('requireAdmin (private method)', () => {
-    it('allows authenticated users (current implementation)', async () => {
-      mockGetAllSystemSettings.mockResolvedValue([]);
-
-      await controller.getAllSystemSettings(mockReq as Request, mockRes as Response, mockNext);
-
-      // Should not throw - current implementation allows any authenticated user
-      expect(mockGetAllSystemSettings).toHaveBeenCalled();
-    });
-
-    it('blocks unauthenticated users', async () => {
-      mockReq.user = undefined;
-
-      await controller.getAllSystemSettings(mockReq as Request, mockRes as Response, mockNext);
-
-      expect(mockNext).toHaveBeenCalledWith(expect.any(ForbiddenError));
-      expect(mockGetAllSystemSettings).not.toHaveBeenCalled();
-    });
-  });
+  // Note: The requireAdmin method was removed from the controller.
+  // Admin authorization is now handled by adminMiddleware at the route level.
+  // See tests/unit/middleware/admin.middleware.test.ts for admin authorization tests.
+  // See tests/integration/settings.routes.test.ts for end-to-end authorization tests.
 });
