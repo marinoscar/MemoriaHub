@@ -65,6 +65,8 @@ Use the convenience scripts for common operations:
 ```bash
 # Linux/macOS
 ./scripts/dev.sh start      # Start all services
+./scripts/dev.sh stop       # Stop all services
+./scripts/dev.sh restart    # Restart services
 ./scripts/dev.sh rebuild    # Rebuild and restart all services
 ./scripts/dev.sh logs api   # View API logs
 ./scripts/dev.sh status     # Check service status
@@ -73,11 +75,21 @@ Use the convenience scripts for common operations:
 
 # Windows (PowerShell)
 .\scripts\dev.ps1 start
+.\scripts\dev.ps1 stop
+.\scripts\dev.ps1 restart
 .\scripts\dev.ps1 rebuild
 .\scripts\dev.ps1 logs api
 .\scripts\dev.ps1 status
 .\scripts\dev.ps1 clean
 .\scripts\dev.ps1 help
+
+# Testing via dev scripts
+.\scripts\dev.ps1 test              # Run all tests once
+.\scripts\dev.ps1 test ui           # Open Vitest UI in browser
+.\scripts\dev.ps1 test watch        # Run tests in watch mode
+.\scripts\dev.ps1 test coverage     # Run with coverage report
+.\scripts\dev.ps1 test unit         # Run only unit tests
+.\scripts\dev.ps1 test integration  # Run only integration tests
 ```
 
 ### Docker Compose (Manual)
