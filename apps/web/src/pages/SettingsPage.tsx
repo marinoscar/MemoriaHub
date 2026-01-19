@@ -24,7 +24,6 @@ import {
   Notifications as NotificationsIcon,
   Email as EmailIcon,
   PhoneAndroid as PushIcon,
-  Language as LanguageIcon,
   Security as SecurityIcon,
   GridView as GridViewIcon,
   Restore as RestoreIcon,
@@ -32,17 +31,6 @@ import {
 import { useTheme, useAuth } from '../hooks';
 import { settingsApi } from '../services/api/settings.api';
 import type { UserPreferencesDTO } from '@memoriahub/shared';
-
-/**
- * Available languages
- */
-const LANGUAGES = [
-  { code: 'en', name: 'English' },
-  { code: 'es', name: 'Español' },
-  { code: 'fr', name: 'Français' },
-  { code: 'de', name: 'Deutsch' },
-  { code: 'pt', name: 'Português' },
-];
 
 /**
  * Grid size options
@@ -57,13 +45,12 @@ const GRID_SIZES = [
  * Settings page
  *
  * Allows users to configure their preferences:
- * - Appearance (theme, grid size)
+ * - Appearance (theme, grid size, metadata)
  * - Notifications (email, push)
- * - Language & Region
- * - Privacy settings
+ * - Privacy settings (album visibility, tagging)
  */
 export function SettingsPage() {
-  const { isDarkMode, toggleTheme, setTheme } = useTheme();
+  const { isDarkMode, setTheme } = useTheme();
   const { isAuthenticated } = useAuth();
 
   // State
@@ -349,38 +336,6 @@ export function SettingsPage() {
         </List>
       </Paper>
 
-      {/* Language & Region */}
-      <Paper sx={{ mb: 3 }}>
-        <Box sx={{ px: 3, py: 2 }}>
-          <Typography variant="h6">Language & Region</Typography>
-        </Box>
-        <Divider />
-        <List>
-          <ListItem>
-            <ListItemIcon>
-              <LanguageIcon />
-            </ListItemIcon>
-            <ListItemText
-              primary="Language"
-              secondary="Application display language"
-            />
-            <FormControl size="small" sx={{ minWidth: 150 }}>
-              <Select
-                value={prefs?.ui.language || 'en'}
-                onChange={(e) => updatePreference(['ui', 'language'], e.target.value)}
-                disabled={saving}
-              >
-                {LANGUAGES.map((lang) => (
-                  <MenuItem key={lang.code} value={lang.code}>
-                    {lang.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </ListItem>
-        </List>
-      </Paper>
-
       {/* Privacy */}
       <Paper sx={{ mb: 3 }}>
         <Box sx={{ px: 3, py: 2 }}>
@@ -425,26 +380,6 @@ export function SettingsPage() {
               disabled={saving}
               edge="end"
             />
-          </ListItem>
-        </List>
-      </Paper>
-
-      {/* Security (placeholder for future) */}
-      <Paper>
-        <Box sx={{ px: 3, py: 2 }}>
-          <Typography variant="h6">Security</Typography>
-        </Box>
-        <Divider />
-        <List>
-          <ListItem>
-            <ListItemIcon>
-              <SecurityIcon />
-            </ListItemIcon>
-            <ListItemText
-              primary="Two-Factor Authentication"
-              secondary="Coming soon - Add an extra layer of security"
-            />
-            <Switch disabled edge="end" />
           </ListItem>
         </List>
       </Paper>
