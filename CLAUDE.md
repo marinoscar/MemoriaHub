@@ -480,6 +480,8 @@ WORKER_CONCURRENCY=4
 - [docs/SETUP.md](docs/SETUP.md) - **First-time setup guide**
 - [docs/DATABASE.md](docs/DATABASE.md) - Database configuration, migrations, and governance
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - Common issues and solutions
+- [docs/USER_GUIDE.md](docs/USER_GUIDE.md) - End-user documentation
+- [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md) - Administrator documentation
 
 ## Troubleshooting
 
