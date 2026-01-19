@@ -16,8 +16,9 @@ export default defineConfig({
     host: true, // Listen on all interfaces for Docker
     proxy: {
       // Proxy API requests to backend during development
+      // Use 'api' for Docker container networking, fallback to localhost for local dev
       '/api': {
-        target: 'http://localhost:3000',
+        target: process.env.VITE_API_PROXY_TARGET || 'http://api:3000',
         changeOrigin: true,
       },
     },

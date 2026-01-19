@@ -114,8 +114,8 @@ services:
       # OAuth configuration - set these in .env file
       OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID:-}
       OAUTH_GOOGLE_CLIENT_SECRET: ${OAUTH_GOOGLE_CLIENT_SECRET:-}
-      OAUTH_CALLBACK_BASE_URL: http://localhost/api/auth
-      FRONTEND_URL: http://localhost:5173
+      OAUTH_CALLBACK_BASE_URL: ${OAUTH_CALLBACK_BASE_URL:-http://localhost:5173/api/auth}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
       CORS_ORIGINS: http://localhost:5173,http://localhost
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       OTEL_SERVICE_NAME: memoriahub-api
@@ -183,7 +183,8 @@ services:
       - "5173:5173"
     environment:
       NODE_ENV: development
-      VITE_API_URL: http://localhost/api
+      # Use relative URL so requests go through Vite proxy in development
+      VITE_API_URL: /api
     volumes:
       - ../../apps/web:/app/apps/web
       - ../../packages:/app/packages
