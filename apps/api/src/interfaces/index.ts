@@ -15,3 +15,13 @@ export type {
   CreateUserInput,
   UpdateUserInput,
 } from './repositories/IUserRepository.js';
+
+export type {
+  ISystemSettingsRepository,
+  UpdateSystemSettingsInput,
+} from './repositories/ISystemSettingsRepository.js';
+
+export type {
+  IUserPreferencesRepository,
+  UpdateUserPreferencesInput,
+} from './repositories/IUserPreferencesRepository.js';

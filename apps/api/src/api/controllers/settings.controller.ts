@@ -1,0 +1,230 @@
+/**
+ * Settings Controller
+ *
+ * Handles HTTP requests for system settings and user preferences.
+ * System settings require admin privileges.
+ * User preferences are per-user and can only be accessed by the owning user.
+ */
+
+import type { Request, Response, NextFunction } from 'express';
+import type {
+  ApiResponse,
+  SystemSettingsCategory,
+  SystemSettingsDTO,
+  UserPreferencesDTO,
+} from '@memoriahub/shared';
+import { systemSettingsService, userPreferencesService } from '../../services/settings/index.js';
+import { ForbiddenError } from '../../domain/errors/ForbiddenError.js';
+import { NotFoundError } from '../../domain/errors/NotFoundError.js';
+
+/**
+ * Settings controller
+ */
+export class SettingsController {
+  // ===========================================================================
+  // System Settings (Admin only)
+  // ===========================================================================
+
+  /**
+   * GET /api/settings/system
+   * Get all system settings
+   */
+  async getAllSystemSettings(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      this.requireAdmin(req);
+
+      const settings = await systemSettingsService.getAll(true); // Masked for API
+
+      const response: ApiResponse<SystemSettingsDTO[]> = { data: settings };
+      res.json(response);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /api/settings/system/:category
+   * Get settings for a specific category
+   */
+  async getSystemSettingsByCategory(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      this.requireAdmin(req);
+
+      const category = req.params.category as SystemSettingsCategory;
+      const settings = await systemSettingsService.getByCategory(category, true);
+
+      const response: ApiResponse<{ category: string; settings: unknown }> = {
+        data: { category, settings },
+      };
+      res.json(response);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * PATCH /api/settings/system/:category
+   * Update settings for a specific category
+   */
+  async updateSystemSettings(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      this.requireAdmin(req);
+
+      const category = req.params.category as SystemSettingsCategory;
+      const settings = req.body.settings as Record<string, unknown>;
+      const userId = req.user!.id;
+
+      const updated = await systemSettingsService.update(category, settings, userId);
+
+      const response: ApiResponse<SystemSettingsDTO> = { data: updated };
+      res.json(response);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /api/settings/features
+   * Get feature flags (public endpoint, no admin required)
+   */
+  async getFeatureFlags(
+    _req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const features = await systemSettingsService.getFeatureFlags();
+
+      const response: ApiResponse<typeof features> = { data: features };
+      res.json(response);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ===========================================================================
+  // User Preferences
+  // ===========================================================================
+
+  /**
+   * GET /api/settings/preferences
+   * Get current user's preferences
+   */
+  async getUserPreferences(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const userId = req.user!.id;
+      const preferences = await userPreferencesService.getPreferences(userId);
+
+      const response: ApiResponse<UserPreferencesDTO> = { data: preferences };
+      res.json(response);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * PATCH /api/settings/preferences
+   * Update current user's preferences
+   */
+  async updateUserPreferences(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const userId = req.user!.id;
+      const input = req.body as Record<string, unknown>;
+
+      const updated = await userPreferencesService.updatePreferences(userId, input);
+
+      const response: ApiResponse<UserPreferencesDTO> = { data: updated };
+      res.json(response);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /api/settings/preferences/reset
+   * Reset current user's preferences to defaults
+   */
+  async resetUserPreferences(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const userId = req.user!.id;
+
+      const reset = await userPreferencesService.resetPreferences(userId);
+
+      const response: ApiResponse<UserPreferencesDTO> = { data: reset };
+      res.json(response);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /api/settings/preferences/theme
+   * Get just the theme preference (for initial load optimization)
+   */
+  async getTheme(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const userId = req.user!.id;
+      const theme = await userPreferencesService.getTheme(userId);
+
+      const response: ApiResponse<{ theme: string }> = { data: { theme } };
+      res.json(response);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ===========================================================================
+  // Admin Check
+  // ===========================================================================
+
+  /**
+   * Check if the current user is an admin
+   *
+   * For MemoriaHub's self-hosted model, we use a simple approach:
+   * - In a fresh install, the first user to sign up becomes the admin
+   * - This can be expanded later with explicit roles in the users table
+   *
+   * For now, we'll assume any authenticated user can manage system settings.
+   * TODO: Add proper role-based access control
+   */
+  private requireAdmin(req: Request): void {
+    if (!req.user) {
+      throw new ForbiddenError('Admin access required');
+    }
+
+    // TODO: Check if user has admin role
+    // For now, all authenticated users can manage settings (self-hosted = typically one user)
+    // This should be replaced with proper RBAC when user roles are implemented
+  }
+}
+
+// Export singleton instance
+export const settingsController = new SettingsController();
