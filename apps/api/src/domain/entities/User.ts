@@ -1,4 +1,4 @@
-import type { OAuthProvider, User, UserDTO } from '@memoriahub/shared';
+import type { OAuthProvider, User, UserDTO, UserRole } from '@memoriahub/shared';
 
 /**
  * Convert database row to User entity
@@ -12,6 +12,7 @@ export function rowToUser(row: {
   display_name: string | null;
   avatar_url: string | null;
   refresh_token_hash: string | null;
+  role: UserRole;
   is_active: boolean;
   created_at: Date;
   updated_at: Date;
@@ -25,6 +26,7 @@ export function rowToUser(row: {
     emailVerified: row.email_verified,
     displayName: row.display_name,
     avatarUrl: row.avatar_url,
+    role: row.role,
     isActive: row.is_active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -42,6 +44,7 @@ export function userToDTO(user: User): UserDTO {
     displayName: user.displayName,
     avatarUrl: user.avatarUrl,
     oauthProvider: user.oauthProvider,
+    role: user.role,
     createdAt: user.createdAt.toISOString(),
   };
 }
