@@ -75,3 +75,4 @@ credentials/
 
 # Optional: Ignore infra/compose/.env but keep .env.example
 infra/compose/.env
+nul
