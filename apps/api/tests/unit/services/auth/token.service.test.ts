@@ -44,6 +44,7 @@ describe('TokenService', () => {
       const input = {
         userId: 'user-123',
         email: 'test@example.com',
+        role: 'user' as const,
       };
 
       const result = tokenService.generateTokenPair(input);
@@ -58,6 +59,7 @@ describe('TokenService', () => {
       const input = {
         userId: 'user-123',
         email: 'test@example.com',
+        role: 'user' as const,
       };
 
       const result = tokenService.generateTokenPair(input);
@@ -66,11 +68,25 @@ describe('TokenService', () => {
       expect(accessPayload.sub).toBe('user-123');
       expect(accessPayload.email).toBe('test@example.com');
       expect(accessPayload.type).toBe('access');
+      expect(accessPayload.role).toBe('user');
 
       const refreshPayload = jwt.decode(result.refreshToken) as jwt.JwtPayload;
       expect(refreshPayload.sub).toBe('user-123');
       expect(refreshPayload.type).toBe('refresh');
       expect(refreshPayload.jti).toBeDefined(); // Unique token ID
+    });
+
+    it('includes role in access token payload', () => {
+      const input = {
+        userId: 'admin-123',
+        email: 'admin@example.com',
+        role: 'admin' as const,
+      };
+
+      const result = tokenService.generateTokenPair(input);
+
+      const accessPayload = jwt.decode(result.accessToken) as jwt.JwtPayload;
+      expect(accessPayload.role).toBe('admin');
     });
   });
 
@@ -79,6 +95,7 @@ describe('TokenService', () => {
       const input = {
         userId: 'user-456',
         email: 'another@example.com',
+        role: 'user' as const,
       };
 
       const token = tokenService.generateAccessToken(input);
@@ -88,14 +105,27 @@ describe('TokenService', () => {
       expect(payload.sub).toBe('user-456');
       expect(payload.email).toBe('another@example.com');
       expect(payload.type).toBe('access');
+      expect(payload.role).toBe('user');
       expect(payload.iss).toBe('memoriahub-test');
       expect(payload.aud).toBe('memoriahub-test');
+    });
+
+    it('includes role in payload', () => {
+      const token = tokenService.generateAccessToken({
+        userId: 'admin-123',
+        email: 'admin@example.com',
+        role: 'admin' as const,
+      });
+
+      const payload = jwt.decode(token) as jwt.JwtPayload;
+      expect(payload.role).toBe('admin');
     });
 
     it('includes expiration time', () => {
       const token = tokenService.generateAccessToken({
         userId: 'user-123',
         email: 'test@example.com',
+        role: 'user' as const,
       });
 
       const payload = jwt.decode(token) as jwt.JwtPayload;
@@ -110,6 +140,7 @@ describe('TokenService', () => {
       const token = tokenService.generateAccessToken({
         userId: 'user-123',
         email: 'test@example.com',
+        role: 'user' as const,
       });
 
       const payload = tokenService.verifyAccessToken(token);
@@ -117,6 +148,19 @@ describe('TokenService', () => {
       expect(payload.sub).toBe('user-123');
       expect(payload.email).toBe('test@example.com');
       expect(payload.type).toBe('access');
+      expect(payload.role).toBe('user');
+    });
+
+    it('returns role from payload for admin user', () => {
+      const token = tokenService.generateAccessToken({
+        userId: 'admin-123',
+        email: 'admin@example.com',
+        role: 'admin' as const,
+      });
+
+      const payload = tokenService.verifyAccessToken(token);
+
+      expect(payload.role).toBe('admin');
     });
 
     it('throws AuthError for expired token', () => {
@@ -185,6 +229,7 @@ describe('TokenService', () => {
       const pair = tokenService.generateTokenPair({
         userId: 'user-123',
         email: 'test@example.com',
+        role: 'user' as const,
       });
 
       const payload = tokenService.verifyRefreshToken(pair.refreshToken);
@@ -209,6 +254,7 @@ describe('TokenService', () => {
       const accessToken = tokenService.generateAccessToken({
         userId: 'user-123',
         email: 'test@example.com',
+        role: 'user' as const,
       });
 
       expect(() => tokenService.verifyRefreshToken(accessToken)).toThrow(AuthError);

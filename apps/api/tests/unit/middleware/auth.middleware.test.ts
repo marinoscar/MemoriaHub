@@ -62,6 +62,7 @@ describe('Auth Middleware', () => {
       mockVerifyAccessToken.mockReturnValue({
         sub: 'user-123',
         email: 'test@example.com',
+        role: 'user',
         type: 'access',
       });
 
@@ -71,8 +72,31 @@ describe('Auth Middleware', () => {
       expect(mockReq.user).toEqual({
         id: 'user-123',
         email: 'test@example.com',
+        role: 'user',
       });
       expect(mockSetUserId).toHaveBeenCalledWith('user-123');
+    });
+
+    it('attaches role from token to req.user', () => {
+      mockReq.headers = {
+        authorization: 'Bearer admin-token',
+      };
+
+      mockVerifyAccessToken.mockReturnValue({
+        sub: 'admin-123',
+        email: 'admin@example.com',
+        role: 'admin',
+        type: 'access',
+      });
+
+      authMiddleware(mockReq as Request, mockRes as Response, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith();
+      expect(mockReq.user).toEqual({
+        id: 'admin-123',
+        email: 'admin@example.com',
+        role: 'admin',
+      });
     });
 
     it('calls next with error when no authorization header', () => {
@@ -159,6 +183,7 @@ describe('Auth Middleware', () => {
       mockVerifyAccessToken.mockReturnValue({
         sub: 'user-123',
         email: 'test@example.com',
+        role: 'user',
         type: 'access',
       });
 
@@ -209,6 +234,7 @@ describe('Auth Middleware', () => {
       mockVerifyAccessToken.mockReturnValue({
         sub: 'user-456',
         email: 'optional@example.com',
+        role: 'user',
         type: 'access',
       });
 
@@ -218,8 +244,31 @@ describe('Auth Middleware', () => {
       expect(mockReq.user).toEqual({
         id: 'user-456',
         email: 'optional@example.com',
+        role: 'user',
       });
       expect(mockSetUserId).toHaveBeenCalledWith('user-456');
+    });
+
+    it('attaches role when valid token provided', () => {
+      mockReq.headers = {
+        authorization: 'Bearer admin-token',
+      };
+
+      mockVerifyAccessToken.mockReturnValue({
+        sub: 'admin-456',
+        email: 'admin@example.com',
+        role: 'admin',
+        type: 'access',
+      });
+
+      optionalAuthMiddleware(mockReq as Request, mockRes as Response, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith();
+      expect(mockReq.user).toEqual({
+        id: 'admin-456',
+        email: 'admin@example.com',
+        role: 'admin',
+      });
     });
 
     it('continues without error when token is invalid', () => {
