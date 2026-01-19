@@ -455,15 +455,20 @@ WORKER_CONCURRENCY=4
 ## Quick Reference
 
 ### Ports (Development)
-| Service | Port |
-|---------|------|
-| Web (Vite) | 5173 |
-| API | 3000 |
-| PostgreSQL | 5432 |
-| MinIO | 9000/9001 |
-| Grafana | 3001 |
-| Prometheus | 9090 |
-| Jaeger | 16686 |
+| Service | Port | Notes |
+|---------|------|-------|
+| Web (Vite) | 5173 | Main development URL |
+| API | 3000 | Direct API access |
+| Nginx | 8888 | Reverse proxy (production-like) |
+| PostgreSQL | 5432 | Database |
+| MinIO API | 9000 | S3-compatible storage |
+| MinIO Console | 9001 | Storage web UI |
+| Grafana | 3001 | Dashboards (admin/admin) |
+| Prometheus | 9090 | Metrics |
+| Jaeger | 16686 | Distributed tracing |
+| Loki | 3100 | Log aggregation |
+
+**Note:** Port 80/8080 are often reserved on Windows. Use port 8888 for nginx.
 
 ### Key Documentation
 - [VISION.md](VISION.md) - Product vision and principles
@@ -472,34 +477,62 @@ WORKER_CONCURRENCY=4
 - [SECURITY.md](SECURITY.md) - Security requirements and threat model
 - [OBSERVABILITY.md](OBSERVABILITY.md) - Telemetry standards
 - [ROADMAP.md](ROADMAP.md) - Milestones and priorities
+- [docs/SETUP.md](docs/SETUP.md) - **First-time setup guide**
 - [docs/DATABASE.md](docs/DATABASE.md) - Database configuration, migrations, and governance
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - Common issues and solutions
 
 ## Troubleshooting
 
-### Docker Issues
+For detailed troubleshooting, see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
+### Quick Fixes
+
 ```bash
-# Reset everything
+# Reset everything (nuclear option)
 docker compose -f infra/compose/dev.compose.yml down -v
 docker compose -f infra/compose/dev.compose.yml up -d --build
 
-# Check logs
+# Check logs for errors
 docker compose -f infra/compose/dev.compose.yml logs -f api
+
+# Force recreate container (picks up env var changes)
+docker compose -f infra/compose/dev.compose.yml up -d --force-recreate api
+
+# Verify env vars are correct
+docker compose -f infra/compose/dev.compose.yml exec api printenv | grep OAUTH
 ```
 
-### Database Issues
+### Common Issues
+
+| Issue | Quick Fix |
+|-------|-----------|
+| Port in use | Check `netstat -ano \| findstr :PORT` and kill process |
+| OAuth 404 callback | Set `OAUTH_CALLBACK_BASE_URL=http://localhost:5173/api/auth` and recreate API |
+| CORS errors | Set `VITE_API_URL=/api` (relative path) and recreate web |
+| Env vars not updating | Use `--force-recreate` not `restart` |
+| npm ci fails | Run `npm install` from repo root to generate lock file |
+
+### Database Quick Commands
 ```bash
 # Connect to PostgreSQL
 docker compose -f infra/compose/dev.compose.yml exec postgres psql -U memoriahub
 
-# Reset database
-npm run db:reset
+# Check migrations
+SELECT * FROM schema_migrations;
+
+# Reset database (destroys data)
+docker compose -f infra/compose/dev.compose.yml down -v
+docker compose -f infra/compose/dev.compose.yml up -d postgres
 ```
 
-### Observability Issues
+### Observability Quick Commands
 ```bash
-# Check if metrics are being scraped
+# Check Prometheus targets
 curl http://localhost:9090/api/v1/targets
 
-# Check Jaeger for traces
+# View Jaeger traces
 open http://localhost:16686
+
+# View Grafana dashboards
+open http://localhost:3001  # admin/admin
 ```
