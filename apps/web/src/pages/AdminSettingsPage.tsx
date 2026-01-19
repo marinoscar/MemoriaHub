@@ -192,9 +192,9 @@ export function AdminSettingsPage() {
                 <TextField
                   size="small"
                   type="number"
-                  value={generalSettings?.maxUploadSizeMb || 100}
+                  value={generalSettings?.maxUploadSizeMB ?? 100}
                   onChange={(e) =>
-                    void updateSetting('general', 'maxUploadSizeMb', parseInt(e.target.value, 10))
+                    void updateSetting('general', 'maxUploadSizeMB', parseInt(e.target.value, 10))
                   }
                   disabled={saving}
                   sx={{ width: 100 }}
