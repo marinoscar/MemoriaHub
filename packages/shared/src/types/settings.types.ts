@@ -142,7 +142,6 @@ export interface PushNotificationPreferences {
  */
 export interface UIPreferences {
   theme: 'dark' | 'light' | 'system';
-  language: string;
   gridSize: 'small' | 'medium' | 'large';
   autoPlayVideos: boolean;
   showMetadata: boolean;
@@ -271,7 +270,6 @@ export const DEFAULT_PUSH_NOTIFICATION_PREFS: PushNotificationPreferences = {
  */
 export const DEFAULT_UI_PREFERENCES: UIPreferences = {
   theme: 'dark',
-  language: 'en',
   gridSize: 'medium',
   autoPlayVideos: true,
   showMetadata: true,

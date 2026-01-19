@@ -1,5 +1,8 @@
 # MemoriaHub
 
+![CI](https://github.com/marinoscar/MemoriaHub/actions/workflows/ci.yml/badge.svg)
+[![codecov](https://codecov.io/gh/marinoscar/MemoriaHub/branch/main/graph/badge.svg)](https://codecov.io/gh/marinoscar/MemoriaHub)
+
 MemoriaHub is a **family memory hub**: a privacy-first photo + media platform that keeps your library searchable, shareable (when you choose), and resilient through redundancy.
 
 This repo is intentionally **optimized for coding agents** (Claude Code, Codex, etc.): predictable structure, explicit requirements, tight definitions of done, and minimal ambiguity.
@@ -180,9 +183,29 @@ Agent tasks should prioritize making these scripts reliable.
   - emit metrics
 
 ### Testing
+
+Run tests using the dev scripts or npm:
+
+```bash
+# Using dev scripts (recommended)
+./scripts/dev.sh test              # Run all tests once
+./scripts/dev.sh test ui           # Open Vitest UI (visual test browser)
+./scripts/dev.sh test watch        # Run tests in watch mode
+./scripts/dev.sh test coverage     # Run tests with coverage report
+
+# Windows PowerShell
+.\scripts\dev.ps1 test ui
+
+# Using npm directly
+npm run test                       # Run tests in watch mode
+npm run test:unit                  # Run all tests once
+npm run test:ui                    # Open Vitest UI
+npm run test:coverage              # Run with coverage report
+```
+
 - Unit tests: fast, hermetic
 - Integration tests: DB + S3 mocked or containerized
-- “No test, no merge” (see `CLAUDE.md` Definition of Done)
+- "No test, no merge" (see `CLAUDE.md` Definition of Done)
 
 ---
 

@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
@@ -26,5 +27,27 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+  },
+  // Vitest configuration (shared with Vite)
+  test: {
+    name: 'web',
+    root: resolve(__dirname),
+    environment: 'jsdom',
+    include: ['src/**/*.test.{ts,tsx}'],
+    exclude: ['**/node_modules/**', '**/dist/**'],
+    setupFiles: ['./src/test/setup.ts'],
+    globals: true,
+    // CSS handling
+    css: true,
+    // Coverage for this workspace
+    coverage: {
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        'src/**/*.d.ts',
+        'src/main.tsx', // Entry point
+        'src/vite-env.d.ts',
+        'src/test/**',
+      ],
+    },
   },
 });

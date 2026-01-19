@@ -112,7 +112,6 @@ export const pushNotificationPreferencesSchema = z.object({
  */
 export const uiPreferencesSchema = z.object({
   theme: z.enum(['dark', 'light', 'system']).optional(),
-  language: z.string().min(2).max(10).optional(),
   gridSize: z.enum(['small', 'medium', 'large']).optional(),
   autoPlayVideos: z.boolean().optional(),
   showMetadata: z.boolean().optional(),

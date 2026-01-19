@@ -49,14 +49,38 @@ memoriahub/
 │   │   └── prod.compose.yml
 │   ├── nginx/            # Reverse proxy config
 │   └── observability/    # Prometheus/Grafana/Loki/Jaeger
-├── scripts/              # DB migrations, seeds, utilities
+├── scripts/              # Dev scripts, DB migrations, seeds, utilities
+│   ├── dev.ps1           # Windows development script
+│   └── dev.sh            # Linux/macOS development script
 └── docs/
     └── diagrams/         # Mermaid diagrams
 ```
 
 ## Common Commands
 
-### Docker Compose (Development)
+### Development Scripts (Recommended)
+
+Use the convenience scripts for common operations:
+
+```bash
+# Linux/macOS
+./scripts/dev.sh start      # Start all services
+./scripts/dev.sh rebuild    # Rebuild and restart all services
+./scripts/dev.sh logs api   # View API logs
+./scripts/dev.sh status     # Check service status
+./scripts/dev.sh clean      # Reset everything (destroys data)
+./scripts/dev.sh help       # Show all available commands
+
+# Windows (PowerShell)
+.\scripts\dev.ps1 start
+.\scripts\dev.ps1 rebuild
+.\scripts\dev.ps1 logs api
+.\scripts\dev.ps1 status
+.\scripts\dev.ps1 clean
+.\scripts\dev.ps1 help
+```
+
+### Docker Compose (Manual)
 ```bash
 # Start all services (from repo root)
 docker compose -f infra/compose/dev.compose.yml up -d

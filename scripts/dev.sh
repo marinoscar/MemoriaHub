@@ -3,9 +3,9 @@
 # MemoriaHub Development Script for Linux/macOS
 #
 # Manages the MemoriaHub development environment using Docker Compose.
-# Supports starting, stopping, rebuilding, and viewing logs.
+# Supports starting, stopping, rebuilding, viewing logs, and running tests.
 #
-# Usage: ./dev.sh <action> [service]
+# Usage: ./dev.sh <action> [service/option]
 #
 # Actions:
 #   start     Start all services (or specific service)
@@ -14,6 +14,7 @@
 #   rebuild   Rebuild and restart all services (or specific service)
 #   logs      Show logs (follow mode). Optionally specify service
 #   status    Show status of all services
+#   test      Run tests. Options: run, ui, coverage, unit, integration
 #   clean     Stop services and remove volumes (resets database)
 #   help      Show this help message
 #
@@ -22,6 +23,8 @@
 #   ./dev.sh rebuild         # Rebuild and start all services
 #   ./dev.sh rebuild api     # Rebuild only the API service
 #   ./dev.sh logs api        # Follow API logs
+#   ./dev.sh test            # Run all tests once
+#   ./dev.sh test ui         # Open Vitest UI in browser
 #   ./dev.sh status          # Show service status
 #   ./dev.sh clean           # Reset everything (destroys data)
 
@@ -59,7 +62,7 @@ show_help() {
     info "MemoriaHub Development Script"
     echo "=============================="
     echo ""
-    echo "Usage: ./dev.sh <action> [service]"
+    echo "Usage: ./dev.sh <action> [service/option]"
     echo ""
     echo "Actions:"
     echo "  start     Start all services (or specific service)"
@@ -68,16 +71,26 @@ show_help() {
     echo "  rebuild   Rebuild and restart all services (or specific service)"
     echo "  logs      Show logs (follow mode). Optionally specify service"
     echo "  status    Show status of all services"
+    echo "  test      Run tests. Options: run, ui, coverage, unit, integration"
     echo "  clean     Stop services and remove volumes (resets database)"
     echo "  help      Show this help message"
     echo ""
     echo "Services: api, web, worker, postgres, minio, nginx, grafana, prometheus, jaeger"
+    echo ""
+    echo "Test Options:"
+    echo "  ./dev.sh test              # Run all tests once"
+    echo "  ./dev.sh test ui           # Open Vitest UI (visual test browser)"
+    echo "  ./dev.sh test watch        # Run tests in watch mode"
+    echo "  ./dev.sh test coverage     # Run tests with coverage report"
+    echo "  ./dev.sh test unit         # Run only unit tests"
+    echo "  ./dev.sh test integration  # Run only integration tests"
     echo ""
     echo "Examples:"
     echo "  ./dev.sh start           # Start all services"
     echo "  ./dev.sh rebuild         # Rebuild and start all services"
     echo "  ./dev.sh rebuild api     # Rebuild only the API service"
     echo "  ./dev.sh logs api        # Follow API logs"
+    echo "  ./dev.sh test ui         # Open test UI in browser"
     echo "  ./dev.sh status          # Show service status"
     echo "  ./dev.sh clean           # Reset everything (destroys data)"
     echo ""
@@ -88,6 +101,7 @@ show_help() {
     echo "  Grafana:      http://localhost:3001 (admin/admin)"
     echo "  Jaeger:       http://localhost:16686"
     echo "  MinIO:        http://localhost:9001 (memoriahub/memoriahub_dev_secret)"
+    echo "  Test UI:      http://localhost:51204/__vitest__/ (when running test ui)"
     echo ""
 }
 
@@ -169,6 +183,39 @@ clean_services() {
     fi
 }
 
+run_tests() {
+    cd "$REPO_ROOT"
+
+    case "${SERVICE,,}" in
+        ui)
+            info "Opening Vitest UI..."
+            info "Test UI will be available at: http://localhost:51204/__vitest__/"
+            npm run test:ui
+            ;;
+        watch)
+            info "Running tests in watch mode..."
+            npm run test
+            ;;
+        coverage)
+            info "Running tests with coverage..."
+            npm run test:coverage
+            success "Coverage report generated in ./coverage/"
+            ;;
+        unit)
+            info "Running unit tests..."
+            npm run test:unit
+            ;;
+        integration)
+            info "Running integration tests..."
+            npm run test:integration
+            ;;
+        *)
+            info "Running all tests..."
+            npm run test:unit
+            ;;
+    esac
+}
+
 # Main execution
 case "$ACTION" in
     start)   start_services ;;
@@ -177,6 +224,7 @@ case "$ACTION" in
     rebuild) rebuild_services ;;
     logs)    show_logs ;;
     status)  show_status ;;
+    test)    run_tests ;;
     clean)   clean_services ;;
     help)    show_help ;;
     *)       show_help ;;
