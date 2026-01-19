@@ -103,7 +103,7 @@ services:
       LOG_LEVEL: debug
       PORT: 3000
       # Database connection - uses local PostgreSQL on host machine
-      POSTGRES_HOST: host.docker.internal
+      POSTGRES_HOST: localhost
       POSTGRES_PORT: 5432
       POSTGRES_USER: memoriahub
       POSTGRES_PASSWORD: memoriahub_dev
