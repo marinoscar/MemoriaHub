@@ -2,6 +2,7 @@
 export type {
   User,
   UserDTO,
+  UserRole,
   UpdateUserProfileInput,
   UserSettings,
   OAuthProvider,
