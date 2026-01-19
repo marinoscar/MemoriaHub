@@ -26,7 +26,8 @@
       "Bash(npm run test:integration:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(npm ls:*)"
     ]
   }
 }
