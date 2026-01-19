@@ -16,7 +16,8 @@
       "Bash(npm run test:*)",
       "Bash(taskkill:*)",
       "Bash(exit 0)",
-      "Bash(npx vitest:*)"
+      "Bash(npx vitest:*)",
+      "Bash(npm run test:coverage:*)"
     ]
   }
 }
