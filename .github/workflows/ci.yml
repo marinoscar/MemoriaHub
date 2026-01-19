@@ -141,7 +141,7 @@ jobs:
           DATABASE_URL: postgresql://memoriahub:memoriahub@localhost:5432/memoriahub_test
 
       - name: Run integration tests
-        run: npm run test:integration -- --reporter=github-actions
+        run: npm run test:integration --workspace=apps/api -- --reporter=github-actions
         env:
           NODE_ENV: test
           DATABASE_URL: postgresql://memoriahub:memoriahub@localhost:5432/memoriahub_test
