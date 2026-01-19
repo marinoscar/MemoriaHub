@@ -87,8 +87,8 @@ describe('ThumbnailHandler', () => {
   function createMockAsset(overrides?: Partial<MediaAsset>): MediaAsset {
     return {
       id: 'asset-456',
-      libraryId: 'library-123',
-      storageKey: 'libraries/library-123/originals/asset-456.jpg',
+      ownerId: 'owner-123',
+      storageKey: 'users/owner-123/originals/asset-456.jpg',
       storageBucket: 'memoriahub',
       thumbnailKey: null,
       previewKey: null,
@@ -96,7 +96,7 @@ describe('ThumbnailHandler', () => {
       mediaType: 'image',
       mimeType: 'image/jpeg',
       fileSize: 1024000,
-      fileSource: 'upload',
+      fileSource: 'web',
       width: 1920,
       height: 1080,
       durationSeconds: null,
@@ -168,12 +168,12 @@ describe('ThumbnailHandler', () => {
       expect(mediaAssetRepository.findById).toHaveBeenCalledWith('asset-456');
       expect(s3StorageProvider.getObject).toHaveBeenCalledWith(
         'memoriahub',
-        'libraries/library-123/originals/asset-456.jpg'
+        'users/owner-123/originals/asset-456.jpg'
       );
       expect(imageProcessor.generateThumbnail).toHaveBeenCalledWith(originalBuffer);
       expect(s3StorageProvider.putObject).toHaveBeenCalledWith(
         'memoriahub',
-        'libraries/library-123/thumbnails/asset-456.jpg',
+        'users/owner-123/thumbnails/asset-456.jpg',
         thumbnailBuffer,
         expect.objectContaining({
           contentType: 'image/jpeg',
@@ -184,7 +184,7 @@ describe('ThumbnailHandler', () => {
         'libraries/library-123/thumbnails/asset-456.jpg'
       );
 
-      expect(result.outputKey).toBe('libraries/library-123/thumbnails/asset-456.jpg');
+      expect(result.outputKey).toBe('users/owner-123/thumbnails/asset-456.jpg');
       expect(result.outputSize).toBe(thumbnailBuffer.length);
       expect(result.outputWidth).toBe(300);
       expect(result.outputHeight).toBe(300);

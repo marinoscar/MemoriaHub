@@ -18,12 +18,24 @@ vi.mock('../../../../src/services/library/library.service.js', () => ({
   },
 }));
 
+const mockLibraryAssetAdd = vi.fn();
+
+vi.mock('../../../../src/infrastructure/database/repositories/library-asset.repository.js', () => ({
+  libraryAssetRepository: {
+    add: (...args: unknown[]) => mockLibraryAssetAdd(...args),
+  },
+}));
+
 const mockMediaAssetCreate = vi.fn();
 const mockMediaAssetFindById = vi.fn();
 const mockMediaAssetUpdate = vi.fn();
 const mockMediaAssetUpdateStatus = vi.fn();
 const mockMediaAssetDelete = vi.fn();
+const mockMediaAssetFindByOwnerId = vi.fn();
+const mockMediaAssetCanAccess = vi.fn();
+const mockMediaAssetIsOwner = vi.fn();
 const mockMediaAssetFindByLibraryId = vi.fn();
+const mockMediaAssetFindAllAccessible = vi.fn();
 
 vi.mock('../../../../src/infrastructure/database/repositories/media-asset.repository.js', () => ({
   mediaAssetRepository: {
@@ -32,7 +44,11 @@ vi.mock('../../../../src/infrastructure/database/repositories/media-asset.reposi
     update: (...args: unknown[]) => mockMediaAssetUpdate(...args),
     updateStatus: (...args: unknown[]) => mockMediaAssetUpdateStatus(...args),
     delete: (...args: unknown[]) => mockMediaAssetDelete(...args),
+    findByOwnerId: (...args: unknown[]) => mockMediaAssetFindByOwnerId(...args),
+    canAccess: (...args: unknown[]) => mockMediaAssetCanAccess(...args),
+    isOwner: (...args: unknown[]) => mockMediaAssetIsOwner(...args),
     findByLibraryId: (...args: unknown[]) => mockMediaAssetFindByLibraryId(...args),
+    findAllAccessible: (...args: unknown[]) => mockMediaAssetFindAllAccessible(...args),
   },
 }));
 
