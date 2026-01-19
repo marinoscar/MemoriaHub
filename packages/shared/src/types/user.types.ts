@@ -4,6 +4,11 @@
 export type OAuthProvider = 'google' | 'microsoft' | 'github';
 
 /**
+ * User role for authorization
+ */
+export type UserRole = 'user' | 'admin';
+
+/**
  * User entity as stored in the database
  */
 export interface User {
@@ -14,6 +19,7 @@ export interface User {
   emailVerified: boolean;
   displayName: string | null;
   avatarUrl: string | null;
+  role: UserRole;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -29,6 +35,7 @@ export interface UserDTO {
   displayName: string | null;
   avatarUrl: string | null;
   oauthProvider: OAuthProvider;
+  role: UserRole;
   createdAt: string;
 }
 

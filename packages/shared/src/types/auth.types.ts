@@ -1,4 +1,4 @@
-import type { OAuthProvider, UserDTO } from './user.types.js';
+import type { OAuthProvider, UserDTO, UserRole } from './user.types.js';
 
 /**
  * OAuth provider information for login page
@@ -57,6 +57,7 @@ export interface LoginResponse {
 export interface AccessTokenPayload {
   sub: string;
   email: string;
+  role: UserRole;
   type: 'access';
   iat: number;
   exp: number;

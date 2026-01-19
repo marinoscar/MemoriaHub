@@ -1,4 +1,4 @@
-import type { AccessTokenPayload, RefreshTokenPayload } from '@memoriahub/shared';
+import type { AccessTokenPayload, RefreshTokenPayload, UserRole } from '@memoriahub/shared';
 
 /**
  * Token generation input
@@ -8,6 +8,8 @@ export interface GenerateTokenInput {
   userId: string;
   /** User email */
   email: string;
+  /** User role */
+  role: UserRole;
 }
 
 /**
