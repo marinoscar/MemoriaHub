@@ -13,10 +13,14 @@ export function useAuth() {
   const checkAuth = useAuthStore((state) => state.checkAuth);
   const clearError = useAuthStore((state) => state.clearError);
 
+  // Computed: check if current user is an admin
+  const isAdmin = user?.role === 'admin';
+
   return {
     user,
     isAuthenticated,
     isLoading,
+    isAdmin,
     error,
     login,
     logout,
