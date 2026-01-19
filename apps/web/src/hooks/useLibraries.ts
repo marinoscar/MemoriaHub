@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import type { LibraryDTO, CreateLibraryInput, UpdateLibraryInput } from '@memoriahub/shared';
 import { libraryApi, type ListLibrariesParams } from '../services/api';
 
@@ -27,6 +27,13 @@ export function useLibraries(params: ListLibrariesParams = {}) {
     limit: params.limit || 20,
   });
 
+  // Use a ref to hold the latest params without causing re-renders
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
+
+  // Track if initial fetch has been done
+  const initialFetchDone = useRef(false);
+
   /**
    * Fetch libraries
    */
@@ -35,7 +42,7 @@ export function useLibraries(params: ListLibrariesParams = {}) {
 
     try {
       const result = await libraryApi.listLibraries({
-        ...params,
+        ...paramsRef.current,
         ...fetchParams,
       });
 
@@ -54,7 +61,7 @@ export function useLibraries(params: ListLibrariesParams = {}) {
         error: error instanceof Error ? error.message : 'Failed to fetch libraries',
       }));
     }
-  }, [params]);
+  }, []);
 
   /**
    * Create a new library
@@ -103,9 +110,12 @@ export function useLibraries(params: ListLibrariesParams = {}) {
     return fetchLibraries();
   }, [fetchLibraries]);
 
-  // Fetch on mount
+  // Fetch on mount only (empty dependency array)
   useEffect(() => {
-    void fetchLibraries();
+    if (!initialFetchDone.current) {
+      initialFetchDone.current = true;
+      void fetchLibraries();
+    }
   }, [fetchLibraries]);
 
   return {
