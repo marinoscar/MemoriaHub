@@ -28,7 +28,9 @@
       "Bash(git commit:*)",
       "Bash(git rm:*)",
       "Bash(npm ls:*)",
-      "Bash(npx eslint:*)"
+      "Bash(npx eslint:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(ls -la \"c:\\\\git\\\\MemoriaHub\\\\apps\\\\web\\\\src\\\\test\"\" 2>nul || echo \"Web test directory info \")"
     ]
   }
 }
