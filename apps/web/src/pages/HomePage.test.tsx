@@ -4,7 +4,7 @@
  * Tests for the dashboard/home page rendering.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen } from '@testing-library/react';
 import { render } from '../test/utils';
 import { HomePage } from './HomePage';
@@ -25,11 +25,8 @@ const createMockUser = (overrides: Partial<UserDTO> = {}): UserDTO => ({
   displayName: 'John Doe',
   avatarUrl: null,
   oauthProvider: 'google',
-  emailVerified: true,
   role: 'user',
-  isActive: true,
   createdAt: '2024-01-01T00:00:00Z',
-  updatedAt: '2024-01-01T00:00:00Z',
   ...overrides,
 });
 

@@ -21,20 +21,28 @@ const ThrowError = ({ shouldThrow }: { shouldThrow: boolean }) => {
 const originalLocation = window.location;
 
 describe('ErrorBoundary', () => {
-  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let consoleSpy: any;
 
   beforeEach(() => {
     // Suppress console.error for expected errors
     consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     // Mock window.location
-    delete (window as { location?: Location }).location;
-    window.location = { href: '' } as Location;
+    Object.defineProperty(window, 'location', {
+      value: { href: '' },
+      writable: true,
+      configurable: true,
+    });
   });
 
   afterEach(() => {
     consoleSpy.mockRestore();
-    window.location = originalLocation;
+    Object.defineProperty(window, 'location', {
+      value: originalLocation,
+      writable: true,
+      configurable: true,
+    });
   });
 
   describe('normal rendering', () => {

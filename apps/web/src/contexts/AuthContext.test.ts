@@ -6,7 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act } from '@testing-library/react';
-import { useAuthStore, type AuthState } from './AuthContext';
+import { useAuthStore } from './AuthContext';
 
 // Mock dependencies
 vi.mock('../services/api', () => ({
@@ -42,11 +42,8 @@ const mockUser = {
   displayName: 'Test User',
   avatarUrl: 'https://example.com/avatar.jpg',
   oauthProvider: 'google' as const,
-  emailVerified: true,
   role: 'user' as const,
-  isActive: true,
   createdAt: '2024-01-01T00:00:00Z',
-  updatedAt: '2024-01-01T00:00:00Z',
 };
 
 describe('useAuthStore', () => {
@@ -359,6 +356,8 @@ describe('useAuthStore', () => {
       mockAuthApi.refresh.mockResolvedValue({
         accessToken: 'new-access-token',
         refreshToken: 'new-refresh-token',
+        tokenType: 'Bearer',
+        expiresIn: 900,
       });
 
       await act(async () => {
@@ -402,6 +401,8 @@ describe('useAuthStore', () => {
       mockAuthApi.refresh.mockResolvedValue({
         accessToken: 'new-access-token',
         refreshToken: 'new-refresh-token',
+        tokenType: 'Bearer',
+        expiresIn: 900,
       });
 
       await act(async () => {
@@ -416,6 +417,8 @@ describe('useAuthStore', () => {
       mockAuthApi.refresh.mockResolvedValue({
         accessToken: 'new-access-token',
         refreshToken: 'new-refresh-token',
+        tokenType: 'Bearer',
+        expiresIn: 900,
       });
 
       await act(async () => {
@@ -430,6 +433,8 @@ describe('useAuthStore', () => {
       mockAuthApi.refresh.mockResolvedValue({
         accessToken: 'new-access-token',
         refreshToken: 'new-refresh-token',
+        tokenType: 'Bearer',
+        expiresIn: 900,
       });
 
       await act(async () => {
@@ -444,6 +449,8 @@ describe('useAuthStore', () => {
       mockAuthApi.refresh.mockResolvedValue({
         accessToken: 'new-access-token',
         refreshToken: 'new-refresh-token',
+        tokenType: 'Bearer',
+        expiresIn: 900,
       });
 
       let result: boolean = false;

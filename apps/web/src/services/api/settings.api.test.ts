@@ -18,7 +18,11 @@ vi.mock('./client', () => ({
 
 import { apiClient } from './client';
 
-const mockApiClient = vi.mocked(apiClient);
+const mockApiClient = apiClient as unknown as {
+  get: ReturnType<typeof vi.fn>;
+  post: ReturnType<typeof vi.fn>;
+  patch: ReturnType<typeof vi.fn>;
+};
 
 describe('settingsApi', () => {
   beforeEach(() => {

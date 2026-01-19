@@ -43,6 +43,7 @@ const createMockPreferences = (overrides: Partial<UserPreferencesDTO['preference
     ui: {
       theme: 'dark',
       gridSize: 'medium',
+      autoPlayVideos: true,
       showMetadata: true,
       ...overrides.ui,
     },
@@ -50,13 +51,21 @@ const createMockPreferences = (overrides: Partial<UserPreferencesDTO['preference
       email: {
         enabled: false,
         digest: 'daily',
+        newShares: true,
+        comments: true,
+        albumUpdates: true,
+        systemAlerts: true,
       },
       push: {
         enabled: false,
+        newShares: true,
+        comments: true,
+        albumUpdates: true,
       },
       ...overrides.notifications,
     },
     privacy: {
+      showOnlineStatus: true,
       defaultAlbumVisibility: 'private',
       allowTagging: true,
       ...overrides.privacy,
@@ -115,7 +124,7 @@ describe('SettingsPage', () => {
   describe('theme sync', () => {
     it('syncs theme context with server preference (dark)', async () => {
       mockIsDarkMode = false; // Currently light
-      mockGetPreferences.mockResolvedValue(createMockPreferences({ ui: { theme: 'dark', gridSize: 'medium', showMetadata: true } }));
+      mockGetPreferences.mockResolvedValue(createMockPreferences({ ui: { theme: 'dark', gridSize: 'medium', autoPlayVideos: true, showMetadata: true } }));
 
       render(<SettingsPage />);
 
@@ -126,7 +135,7 @@ describe('SettingsPage', () => {
 
     it('syncs theme context with server preference (light)', async () => {
       mockIsDarkMode = true; // Currently dark
-      mockGetPreferences.mockResolvedValue(createMockPreferences({ ui: { theme: 'light', gridSize: 'medium', showMetadata: true } }));
+      mockGetPreferences.mockResolvedValue(createMockPreferences({ ui: { theme: 'light', gridSize: 'medium', autoPlayVideos: true, showMetadata: true } }));
 
       render(<SettingsPage />);
 
@@ -137,7 +146,7 @@ describe('SettingsPage', () => {
 
     it('does not call setTheme if already matches', async () => {
       mockIsDarkMode = true;
-      mockGetPreferences.mockResolvedValue(createMockPreferences({ ui: { theme: 'dark', gridSize: 'medium', showMetadata: true } }));
+      mockGetPreferences.mockResolvedValue(createMockPreferences({ ui: { theme: 'dark', gridSize: 'medium', autoPlayVideos: true, showMetadata: true } }));
 
       render(<SettingsPage />);
 
@@ -184,7 +193,7 @@ describe('SettingsPage', () => {
     });
 
     it('updates grid size when changed', async () => {
-      mockUpdatePreferences.mockResolvedValue(createMockPreferences({ ui: { theme: 'dark', gridSize: 'large', showMetadata: true } }));
+      mockUpdatePreferences.mockResolvedValue(createMockPreferences({ ui: { theme: 'dark', gridSize: 'large', autoPlayVideos: true, showMetadata: true } }));
 
       render(<SettingsPage />);
 
@@ -216,7 +225,7 @@ describe('SettingsPage', () => {
     });
 
     it('updates show metadata when toggled', async () => {
-      mockUpdatePreferences.mockResolvedValue(createMockPreferences({ ui: { theme: 'dark', gridSize: 'medium', showMetadata: false } }));
+      mockUpdatePreferences.mockResolvedValue(createMockPreferences({ ui: { theme: 'dark', gridSize: 'medium', autoPlayVideos: true, showMetadata: false } }));
 
       render(<SettingsPage />);
 
@@ -249,8 +258,8 @@ describe('SettingsPage', () => {
     it('updates email notifications when toggled', async () => {
       mockUpdatePreferences.mockResolvedValue(createMockPreferences({
         notifications: {
-          email: { enabled: true, digest: 'daily' },
-          push: { enabled: false },
+          email: { enabled: true, digest: 'daily', newShares: true, comments: true, albumUpdates: true, systemAlerts: true },
+          push: { enabled: false, newShares: true, comments: true, albumUpdates: true },
         },
       }));
 
@@ -307,7 +316,7 @@ describe('SettingsPage', () => {
 
     it('updates allow tagging when toggled', async () => {
       mockUpdatePreferences.mockResolvedValue(createMockPreferences({
-        privacy: { defaultAlbumVisibility: 'private', allowTagging: false },
+        privacy: { showOnlineStatus: true, defaultAlbumVisibility: 'private', allowTagging: false },
       }));
 
       render(<SettingsPage />);
@@ -330,7 +339,7 @@ describe('SettingsPage', () => {
 
   describe('preference updates', () => {
     it('calls API with correct nested path for theme', async () => {
-      mockUpdatePreferences.mockResolvedValue(createMockPreferences({ ui: { theme: 'light', gridSize: 'medium', showMetadata: true } }));
+      mockUpdatePreferences.mockResolvedValue(createMockPreferences({ ui: { theme: 'light', gridSize: 'medium', autoPlayVideos: true, showMetadata: true } }));
 
       render(<SettingsPage />);
 
@@ -429,7 +438,7 @@ describe('SettingsPage', () => {
     });
 
     it('reloads preferences after reset', async () => {
-      const resetPrefs = createMockPreferences({ ui: { theme: 'dark', gridSize: 'medium', showMetadata: true } });
+      const resetPrefs = createMockPreferences({ ui: { theme: 'dark', gridSize: 'medium', autoPlayVideos: true, showMetadata: true } });
       mockResetPreferences.mockResolvedValue(resetPrefs);
 
       render(<SettingsPage />);

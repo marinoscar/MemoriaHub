@@ -46,7 +46,10 @@ vi.mock('../storage/token.storage', () => ({
 import { tokenStorage } from '../storage/token.storage';
 
 const mockTokenStorage = vi.mocked(tokenStorage);
-const mockAxios = vi.mocked(axios);
+const mockAxios = axios as unknown as {
+  create: ReturnType<typeof vi.fn>;
+  post: ReturnType<typeof vi.fn>;
+};
 
 // Store interceptor callbacks for testing
 let requestInterceptor: (config: InternalAxiosRequestConfig) => InternalAxiosRequestConfig;
@@ -82,15 +85,22 @@ describe('apiClient', () => {
     mockAxios.create.mockReturnValue(mockApiClient as unknown as ReturnType<typeof axios.create>);
 
     // Mock window.location
-    delete (window as { location?: Location }).location;
-    window.location = { href: '' } as Location;
+    Object.defineProperty(window, 'location', {
+      value: { href: '' },
+      writable: true,
+      configurable: true,
+    });
 
     // Import fresh module to capture interceptors
     vi.resetModules();
   });
 
   afterEach(() => {
-    window.location = originalLocation;
+    Object.defineProperty(window, 'location', {
+      value: originalLocation,
+      writable: true,
+      configurable: true,
+    });
     vi.resetModules();
   });
 

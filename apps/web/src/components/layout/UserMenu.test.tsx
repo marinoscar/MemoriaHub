@@ -40,11 +40,8 @@ const createMockUser = (overrides: Partial<UserDTO> = {}): UserDTO => ({
   displayName: 'John Doe',
   avatarUrl: null,
   oauthProvider: 'google',
-  emailVerified: true,
   role: 'user',
-  isActive: true,
   createdAt: '2024-01-01T00:00:00Z',
-  updatedAt: '2024-01-01T00:00:00Z',
   ...overrides,
 });
 

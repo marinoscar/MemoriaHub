@@ -6,15 +6,15 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { renderHook, act } from '@testing-library/react';
-import { ThemeProvider, ThemeContext, type ThemeMode } from './ThemeContext';
+import { renderHook } from '@testing-library/react';
+import { ThemeProvider, ThemeContext } from './ThemeContext';
 import { useContext } from 'react';
 
 // Mock localStorage
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
   return {
-    getItem: vi.fn((key: string) => store[key] ?? null),
+    getItem: vi.fn((_key: string): string | null => store[_key] ?? null),
     setItem: vi.fn((key: string, value: string) => {
       store[key] = value;
     }),

@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent, within } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
 import { render } from '../../test/utils';
 import { SideNav } from './SideNav';
 
@@ -56,14 +56,6 @@ describe('SideNav', () => {
     mockPathname = '/';
     mockUseMediaQuery.mockReturnValue(false); // Desktop by default
   });
-
-  // Helper to get the permanent drawer (desktop) content
-  const getPermanentDrawer = () => {
-    const nav = screen.getByRole('navigation');
-    // Permanent drawer has display: block on sm+
-    const drawers = nav.querySelectorAll('.MuiDrawer-root');
-    return drawers[drawers.length - 1]; // Last drawer is permanent
-  };
 
   describe('navigation items', () => {
     it('renders Home nav item', () => {
