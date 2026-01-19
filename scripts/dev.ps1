@@ -194,9 +194,29 @@ function Clean-Services {
     }
 }
 
+function Test-TypeCheck {
+    Write-Info "Running TypeScript type check..."
+    npm run typecheck
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "TypeScript type check failed!"
+        return $false
+    }
+    Write-Success "Type check passed!"
+    return $true
+}
+
 function Run-Tests {
     Push-Location $RepoRoot
     try {
+        # Skip typecheck for UI and watch modes (interactive)
+        $skipTypeCheck = @("ui", "watch")
+        if ($Service.ToLower() -notin $skipTypeCheck) {
+            if (-not (Test-TypeCheck)) {
+                exit 1
+            }
+            Write-Host ""
+        }
+
         switch ($Service.ToLower()) {
             "ui" {
                 Write-Info "Opening Vitest UI..."

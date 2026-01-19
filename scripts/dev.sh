@@ -183,8 +183,31 @@ clean_services() {
     fi
 }
 
+run_typecheck() {
+    info "Running TypeScript type check..."
+    if npm run typecheck; then
+        success "Type check passed!"
+        return 0
+    else
+        error "TypeScript type check failed!"
+        return 1
+    fi
+}
+
 run_tests() {
     cd "$REPO_ROOT"
+
+    # Skip typecheck for UI and watch modes (interactive)
+    case "${SERVICE,,}" in
+        ui|watch)
+            ;;
+        *)
+            if ! run_typecheck; then
+                exit 1
+            fi
+            echo ""
+            ;;
+    esac
 
     case "${SERVICE,,}" in
         ui)
