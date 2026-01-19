@@ -158,6 +158,8 @@ export type {
   FileSource,
   ProcessingJobType,
   ProcessingJobStatus,
+  ProcessingJobQueue,
+  ProcessingJobResult,
   IngestionStatus,
   ExifData,
   MediaAsset,

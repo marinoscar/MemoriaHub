@@ -293,18 +293,36 @@ export interface IngestionEvent {
 }
 
 /**
+ * Processing job queue types
+ */
+export type ProcessingJobQueue = 'default' | 'large_files' | 'priority' | 'ai';
+
+/**
+ * Processing job result (stored after completion)
+ */
+export interface ProcessingJobResult {
+  outputKey?: string;
+  outputSize?: number;
+  durationMs?: number;
+  [key: string]: unknown;
+}
+
+/**
  * Processing job entity
  */
 export interface ProcessingJob {
   id: string;
   assetId: string;
   jobType: ProcessingJobType;
+  queue: ProcessingJobQueue;
   priority: number;
   payload: Record<string, unknown>;
   status: ProcessingJobStatus;
   attempts: number;
   maxAttempts: number;
   lastError: string | null;
+  workerId: string | null;
+  result: ProcessingJobResult | null;
   traceId: string | null;
   createdAt: Date;
   startedAt: Date | null;

@@ -16,11 +16,18 @@
   },
   "dependencies": {
     "@memoriahub/shared": "*",
+    "@aws-sdk/client-s3": "^3.500.0",
+    "fluent-ffmpeg": "^2.1.2",
+    "pg": "^8.11.3",
     "pino": "^8.17.2",
-    "pino-pretty": "^10.3.1"
+    "pino-pretty": "^10.3.1",
+    "sharp": "^0.33.2",
+    "zod": "^3.22.4"
   },
   "devDependencies": {
+    "@types/fluent-ffmpeg": "^2.1.24",
     "@types/node": "^20.10.6",
+    "@types/pg": "^8.10.9",
     "@typescript-eslint/eslint-plugin": "^6.18.0",
     "@typescript-eslint/parser": "^6.18.0",
     "eslint": "^8.56.0",

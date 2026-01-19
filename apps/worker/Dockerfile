@@ -6,7 +6,7 @@
 # =============================================================================
 FROM node:20-alpine AS base
 
-# Install security updates and dependencies for image processing
+# Install security updates and dependencies for image/video processing
 RUN apk add --no-cache \
     curl \
     dumb-init \
@@ -15,6 +15,8 @@ RUN apk add --no-cache \
     fftw-dev \
     build-base \
     python3 \
+    # Video processing (FFmpeg for video thumbnails)
+    ffmpeg \
     && rm -rf /var/cache/apk/*
 
 WORKDIR /app
@@ -90,7 +92,11 @@ RUN apk add --no-cache \
     curl \
     dumb-init \
     vips \
+    ffmpeg \
     && rm -rf /var/cache/apk/*
+
+# Create temp directory for video processing
+RUN mkdir -p /tmp/worker
 
 WORKDIR /app
 

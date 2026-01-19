@@ -3,6 +3,7 @@ import { createAuthRoutes } from './auth.routes.js';
 import { createSettingsRoutes } from './settings.routes.js';
 import { createLibraryRoutes } from './libraries.routes.js';
 import { createMediaRoutes } from './media.routes.js';
+import adminRoutes from './admin.routes.js';
 
 /**
  * Create all API routes
@@ -21,6 +22,9 @@ export function createApiRoutes(): Router {
 
   // Media routes
   router.use('/media', createMediaRoutes());
+
+  // Admin routes (requires admin role)
+  router.use('/admin', adminRoutes);
 
   return router;
 }
