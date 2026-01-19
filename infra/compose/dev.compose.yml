@@ -76,7 +76,7 @@ services:
     container_name: memoriahub-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "8888:80"  # Use 8888 on host since 80/8080 are often reserved on Windows
     volumes:
       - ../nginx/dev.conf:/etc/nginx/nginx.conf:ro
     depends_on:

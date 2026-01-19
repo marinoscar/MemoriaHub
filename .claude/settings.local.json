@@ -5,7 +5,9 @@
       "Bash(tree:*)",
       "Bash(git ls-tree:*)",
       "Bash(npm install)",
-      "Bash(docker compose:*)"
+      "Bash(docker compose:*)",
+      "Bash(docker logs:*)",
+      "Bash(curl:*)"
     ]
   }
 }
