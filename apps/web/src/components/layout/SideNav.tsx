@@ -18,8 +18,10 @@ import {
   People as PeopleIcon,
   Label as TagIcon,
   Settings as SettingsIcon,
+  AdminPanelSettings as AdminIcon,
 } from '@mui/icons-material';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../../hooks';
 
 interface SideNavProps {
   /** Drawer width */
@@ -51,12 +53,6 @@ const mainNavItems: NavItem[] = [
   { label: 'Tags', path: '/tags', icon: <TagIcon />, disabled: true },
 ];
 
-/**
- * Bottom navigation items
- */
-const bottomNavItems: NavItem[] = [
-  { label: 'Settings', path: '/settings', icon: <SettingsIcon /> },
-];
 
 /**
  * Side navigation drawer
@@ -66,6 +62,13 @@ export function SideNav({ drawerWidth, mobileOpen, onClose }: SideNavProps) {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const location = useLocation();
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
+
+  // Build bottom navigation items dynamically based on user role
+  const bottomNavItems: NavItem[] = [
+    { label: 'Settings', path: '/settings', icon: <SettingsIcon /> },
+    ...(isAdmin ? [{ label: 'Admin', path: '/admin', icon: <AdminIcon /> }] : []),
+  ];
 
   const handleNavigation = (path: string, disabled?: boolean) => {
     if (disabled) return;

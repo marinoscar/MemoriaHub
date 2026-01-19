@@ -1,7 +1,8 @@
 import { Routes, Route } from 'react-router-dom';
-import { ProtectedRoute, OAuthCallback } from '../components/auth';
+import { ProtectedRoute, OAuthCallback, AdminRoute } from '../components/auth';
 import { AppLayout } from '../components/layout';
 import {
+  AdminSettingsPage,
   LoginPage,
   HomePage,
   ProfilePage,
@@ -39,6 +40,16 @@ export function AppRoutes() {
         <Route index element={<HomePage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="settings" element={<SettingsPage />} />
+
+        {/* Admin routes */}
+        <Route
+          path="admin"
+          element={
+            <AdminRoute>
+              <AdminSettingsPage />
+            </AdminRoute>
+          }
+        />
 
         {/* Future routes (placeholders) */}
         <Route path="libraries" element={<div>Libraries (Coming Soon)</div>} />

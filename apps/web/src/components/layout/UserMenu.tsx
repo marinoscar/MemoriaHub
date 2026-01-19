@@ -16,6 +16,7 @@ import {
 import {
   Person as PersonIcon,
   Settings as SettingsIcon,
+  AdminPanelSettings as AdminIcon,
   Logout as LogoutIcon,
   DarkMode as DarkModeIcon,
   LightMode as LightModeIcon,
@@ -32,7 +33,7 @@ interface UserMenuProps {
  */
 export function UserMenu({ user }: UserMenuProps) {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  const { logout } = useAuth();
+  const { logout, isAdmin } = useAuth();
   const { toggleTheme, isDarkMode } = useTheme();
   const navigate = useNavigate();
   const open = Boolean(anchorEl);
@@ -154,6 +155,16 @@ export function UserMenu({ user }: UserMenuProps) {
           </ListItemIcon>
           <ListItemText>Settings</ListItemText>
         </MenuItem>
+
+        {/* Admin Settings - only visible to admins */}
+        {isAdmin && (
+          <MenuItem onClick={() => handleNavigate('/admin')}>
+            <ListItemIcon>
+              <AdminIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Admin Settings</ListItemText>
+          </MenuItem>
+        )}
 
         <Divider />
 
