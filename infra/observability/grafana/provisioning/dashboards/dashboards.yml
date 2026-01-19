@@ -1,0 +1,17 @@
+# Grafana Dashboard Provisioning for MemoriaHub
+# Auto-loads dashboards from JSON files on startup
+
+apiVersion: 1
+
+providers:
+  - name: 'MemoriaHub Dashboards'
+    orgId: 1
+    folder: 'MemoriaHub'
+    folderUid: 'memoriahub'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json
+      foldersFromFilesStructure: false

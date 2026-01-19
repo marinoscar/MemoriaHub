@@ -1,0 +1,124 @@
+# Promtail Configuration for MemoriaHub
+# Collects and ships logs from Docker containers to Loki
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Docker container logs
+  - job_name: containers
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: containerlogs
+          __path__: /var/lib/docker/containers/*/*log
+
+    pipeline_stages:
+      # Parse Docker JSON log format
+      - json:
+          expressions:
+            output: log
+            stream: stream
+            timestamp: time
+            attrs: attrs
+
+      # Parse JSON logs from our services (structured logging)
+      - json:
+          expressions:
+            level: level
+            service: service
+            traceId: traceId
+            requestId: requestId
+            eventType: eventType
+            message: message
+            userId: userId
+            libraryId: libraryId
+            assetId: assetId
+            jobId: jobId
+            durationMs: durationMs
+            error: error
+          source: output
+
+      # Set labels from parsed JSON
+      - labels:
+          level:
+          service:
+          eventType:
+
+      # Use the output field as the log line
+      - output:
+          source: output
+
+      # Parse timestamp
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+
+    # Relabel configs to add container labels
+    relabel_configs:
+      - source_labels: ['__path__']
+        regex: '/var/lib/docker/containers/([^/]+)/.*'
+        target_label: 'container_id'
+        replacement: '$1'
+
+  # Docker socket for container discovery (alternative approach)
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+
+    relabel_configs:
+      # Only collect logs from memoriahub containers
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(memoriahub-.+)'
+        action: keep
+
+      # Extract container name
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+
+      # Extract service name from container name
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/memoriahub-(.*)'
+        target_label: 'service'
+
+      # Add compose project label
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
+        target_label: 'project'
+
+      # Add compose service label
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: 'compose_service'
+
+    pipeline_stages:
+      # Parse Docker JSON log format
+      - docker: {}
+
+      # Try to parse structured JSON logs
+      - match:
+          selector: '{service=~"api|worker"}'
+          stages:
+            - json:
+                expressions:
+                  level: level
+                  traceId: traceId
+                  requestId: requestId
+                  eventType: eventType
+                  userId: userId
+                  libraryId: libraryId
+                  assetId: assetId
+                  jobId: jobId
+                  durationMs: durationMs
+
+            - labels:
+                level:
+                eventType:

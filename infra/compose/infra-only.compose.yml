@@ -1,0 +1,162 @@
+# MemoriaHub Infrastructure-Only Docker Compose
+# Use this when developing apps locally (outside Docker) but need infrastructure
+# Usage: docker compose -f infra/compose/infra-only.compose.yml up -d
+
+name: memoriahub-infra
+
+services:
+  # =============================================================================
+  # Core Infrastructure
+  # =============================================================================
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: memoriahub-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: memoriahub
+      POSTGRES_PASSWORD: memoriahub_dev
+      POSTGRES_DB: memoriahub
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memoriahub -d memoriahub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - memoriahub-network
+
+  minio:
+    image: minio/minio:latest
+    container_name: memoriahub-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: memoriahub
+      MINIO_ROOT_PASSWORD: memoriahub_dev_secret
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Console UI
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - memoriahub-network
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: memoriahub-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minio:9000 memoriahub memoriahub_dev_secret;
+      mc mb myminio/memoriahub --ignore-existing;
+      mc anonymous set none myminio/memoriahub;
+      echo 'Bucket memoriahub created successfully';
+      exit 0;
+      "
+    networks:
+      - memoriahub-network
+
+  # =============================================================================
+  # Observability Stack
+  # =============================================================================
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.53
+    container_name: memoriahub-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+    networks:
+      - memoriahub-network
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: memoriahub-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../observability/prometheus/prometheus-local.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - memoriahub-network
+
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: memoriahub-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ../observability/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    networks:
+      - memoriahub-network
+
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: memoriahub-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: http://localhost:3001
+    ports:
+      - "3001:3000"
+    volumes:
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+      - jaeger
+    networks:
+      - memoriahub-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+
+volumes:
+  postgres_data:
+    name: memoriahub-postgres-data
+  minio_data:
+    name: memoriahub-minio-data
+  prometheus_data:
+    name: memoriahub-prometheus-data
+  loki_data:
+    name: memoriahub-loki-data
+  grafana_data:
+    name: memoriahub-grafana-data
+
+# =============================================================================
+# Networks
+# =============================================================================
+
+networks:
+  memoriahub-network:
+    name: memoriahub-network
+    driver: bridge

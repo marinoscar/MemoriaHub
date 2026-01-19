@@ -69,39 +69,86 @@ memoriahub/
 
 ## Local development (recommended path)
 
-### Prereqs
-- Node.js 20+ (or 18+), npm or pnpm
-- Docker + Docker Compose
-- PostgreSQL client tools (optional)
+### Prerequisites
+- Node.js 20+
+- Docker Desktop (with Docker Compose v2)
+- Git
 
-### 1) Configure environment
-Create `.env` files:
-- `apps/api/.env`
-- `apps/worker/.env`
-- `apps/web/.env`
+### Quick Start
 
-See `REQUIREMENTS.md` and `SECURITY.md` for required secrets and safe handling.
+**Option A: Infrastructure only (apps run locally)**
 
-### 2) Start dependencies
-From repo root:
+Best for active development with hot-reload:
 
 ```bash
+# Start PostgreSQL, MinIO, and observability stack
+docker compose -f infra/compose/infra-only.compose.yml up -d
+
+# In separate terminals, run each service:
+cd apps/api && npm install && npm run dev
+cd apps/worker && npm install && npm run dev
+cd apps/web && npm install && npm run dev
+```
+
+**Option B: Full containerized stack**
+
+Best for testing the complete system:
+
+```bash
+# Start everything in containers
 docker compose -f infra/compose/dev.compose.yml up -d
+
+# View logs
+docker compose -f infra/compose/dev.compose.yml logs -f
 ```
 
-### 3) Run services
-In separate terminals:
+### Access Points
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| Web UI | http://localhost:5173 | React frontend (Vite) |
+| API | http://localhost:3000 | REST API |
+| API (via Nginx) | http://localhost/api | Proxied API |
+| OpenAPI Docs | http://localhost:3000/api/docs | API documentation |
+| MinIO Console | http://localhost:9001 | S3 storage admin |
+| Grafana | http://localhost:3001 | Dashboards (admin/admin) |
+| Prometheus | http://localhost:9090 | Metrics |
+| Jaeger | http://localhost:16686 | Distributed tracing |
+
+### Environment Configuration
+
+1. Copy the environment template:
+   ```bash
+   cp infra/compose/.env.example infra/compose/.env
+   ```
+
+2. Edit `.env` with your configuration (OAuth credentials, secrets, etc.)
+
+3. For local development, create service-specific `.env` files:
+   - `apps/api/.env`
+   - `apps/worker/.env`
+   - `apps/web/.env`
+
+See `SECURITY.md` for secret management guidelines.
+
+### Docker Commands
 
 ```bash
-cd apps/api && npm i && npm run dev
-cd apps/worker && npm i && npm run dev
-cd apps/web && npm i && npm run dev
-```
+# Start services
+docker compose -f infra/compose/dev.compose.yml up -d
 
-Open:
-- Web UI: `http://localhost:5173`
-- API: `http://localhost:8080`
-- OpenAPI: `http://localhost:8080/api/docs`
+# Stop services
+docker compose -f infra/compose/dev.compose.yml down
+
+# View logs
+docker compose -f infra/compose/dev.compose.yml logs -f [service]
+
+# Rebuild after changes
+docker compose -f infra/compose/dev.compose.yml up -d --build
+
+# Reset everything (including volumes)
+docker compose -f infra/compose/dev.compose.yml down -v
+```
 
 ---
 

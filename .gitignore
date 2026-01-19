@@ -1,0 +1,77 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+
+# Environment files (contain secrets)
+.env
+.env.local
+.env.*.local
+*.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Docker volumes (local development)
+.docker-data/
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+.cache/
+
+# Package manager locks (keep one, usually package-lock.json)
+# Uncomment if using pnpm or yarn exclusively
+# package-lock.json
+# pnpm-lock.yaml
+# yarn.lock
+
+# Secrets (never commit these)
+*.pem
+*.key
+*.crt
+secrets/
+credentials/
+
+# Database files
+*.sqlite
+*.db
+
+# Editor directories and files
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Optional: Ignore infra/compose/.env but keep .env.example
+infra/compose/.env

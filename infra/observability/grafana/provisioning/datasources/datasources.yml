@@ -1,0 +1,66 @@
+# Grafana Datasources Configuration for MemoriaHub
+# Auto-provisions data sources on startup
+
+apiVersion: 1
+
+datasources:
+  # Prometheus - Metrics
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      httpMethod: POST
+      timeInterval: "15s"
+
+  # Loki - Logs
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+    jsonData:
+      maxLines: 1000
+      derivedFields:
+        # Link trace IDs to Jaeger
+        - datasourceUid: jaeger
+          matcherRegex: '"traceId":"([a-f0-9]+)"'
+          name: TraceID
+          url: '$${__value.raw}'
+
+  # Jaeger - Traces
+  - name: Jaeger
+    uid: jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    editable: false
+    jsonData:
+      tracesToLogs:
+        datasourceUid: loki
+        tags: ['service', 'traceId']
+        mappedTags: [{ key: 'service.name', value: 'service' }]
+        mapTagNamesEnabled: true
+        spanStartTimeShift: '-1h'
+        spanEndTimeShift: '1h'
+        filterByTraceID: true
+        filterBySpanID: false
+      tracesToMetrics:
+        datasourceUid: prometheus
+        tags: [{ key: 'service.name', value: 'service' }]
+        queries:
+          - name: 'Request rate'
+            query: 'sum(rate(http_requests_total{$$__tags}[5m]))'
+          - name: 'Request duration p95'
+            query: 'histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{$$__tags}[5m])) by (le))'
+      nodeGraph:
+        enabled: true
+      serviceMap:
+        datasourceUid: prometheus
+      search:
+        hide: false
+      spanBar:
+        type: 'Tag'
+        tag: 'http.status_code'
