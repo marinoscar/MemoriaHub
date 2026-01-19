@@ -1,14 +1,14 @@
-import pino from 'pino';
+import pino, { type Logger } from 'pino';
 import { serverConfig } from '../../config/index.js';
 
 /**
  * Structured JSON logger using Pino
  * All logs include: timestamp, level, service, env
  */
-export const logger = pino({
+export const logger: Logger = pino({
   level: serverConfig.logLevel,
   formatters: {
-    level: (label) => ({ level: label }),
+    level: (label: string) => ({ level: label }),
   },
   timestamp: () => `,"timestamp":"${new Date().toISOString()}"`,
   base: {

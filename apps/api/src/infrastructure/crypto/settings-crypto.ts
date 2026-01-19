@@ -13,8 +13,7 @@ import { logger } from '../logging/logger.js';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
-// AUTH_TAG_LENGTH is implicitly 16 bytes for GCM mode - kept for documentation
-const _AUTH_TAG_LENGTH = 16;
+// Note: AUTH_TAG_LENGTH is implicitly 16 bytes for GCM mode
 
 /**
  * Encryption key from environment
@@ -166,19 +165,19 @@ export function encryptSettingsFields<T extends Record<string, unknown>>(
   settings: T,
   sensitiveFields: string[]
 ): T {
-  const result = { ...settings };
+  const result: Record<string, unknown> = { ...settings };
 
   for (const field of sensitiveFields) {
     const value = result[field];
     if (typeof value === 'string' && value.length > 0) {
       // Only encrypt if not already encrypted
       if (!value.startsWith('enc:') && !value.startsWith('plain:')) {
-        result[field] = encryptSensitive(value) as T[keyof T];
+        result[field] = encryptSensitive(value);
       }
     }
   }
 
-  return result;
+  return result as T;
 }
 
 /**
@@ -192,13 +191,13 @@ export function decryptSettingsFields<T extends Record<string, unknown>>(
   settings: T,
   sensitiveFields: string[]
 ): T {
-  const result = { ...settings };
+  const result: Record<string, unknown> = { ...settings };
 
   for (const field of sensitiveFields) {
     const value = result[field];
     if (typeof value === 'string' && value.length > 0) {
       try {
-        result[field] = decryptSensitive(value) as T[keyof T];
+        result[field] = decryptSensitive(value);
       } catch (error) {
         logger.error(
           { field, error },
@@ -209,7 +208,7 @@ export function decryptSettingsFields<T extends Record<string, unknown>>(
     }
   }
 
-  return result;
+  return result as T;
 }
 
 /**
@@ -223,7 +222,7 @@ export function maskSettingsFields<T extends Record<string, unknown>>(
   settings: T,
   maskedFields: string[]
 ): T {
-  const result = { ...settings };
+  const result: Record<string, unknown> = { ...settings };
 
   for (const field of maskedFields) {
     const value = result[field];
@@ -237,9 +236,9 @@ export function maskSettingsFields<T extends Record<string, unknown>>(
           // If decryption fails, mask the raw value
         }
       }
-      result[field] = maskSensitive(plainValue) as T[keyof T];
+      result[field] = maskSensitive(plainValue);
     }
   }
 
-  return result;
+  return result as T;
 }
