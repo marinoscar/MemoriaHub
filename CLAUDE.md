@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working on this
 ## Prime Directive
 
 Build MemoriaHub in **small, testable, observable increments**. Every change must:
-1. Meet acceptance criteria from REQUIREMENTS.md
+1. Meet acceptance criteria from docs/PROJECT.md
 2. Include tests (unit + integration where applicable)
 3. Include observability (logs, metrics, traces)
 4. Pass lint + typecheck
@@ -513,12 +513,10 @@ WORKER_CONCURRENCY=4
 **Note:** Port 80/8080 are often reserved on Windows. Use port 8888 for nginx.
 
 ### Key Documentation
-- [VISION.md](VISION.md) - Product vision and principles
-- [REQUIREMENTS.md](REQUIREMENTS.md) - Functional and non-functional requirements
-- [ARCHITECTURE.md](ARCHITECTURE.md) - System design and data model
-- [SECURITY.md](SECURITY.md) - Security requirements and threat model
-- [OBSERVABILITY.md](OBSERVABILITY.md) - Telemetry standards
-- [ROADMAP.md](ROADMAP.md) - Milestones and priorities
+- [docs/PROJECT.md](docs/PROJECT.md) - Product vision, requirements, and roadmap
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System design and data model
+- [docs/SECURITY.md](docs/SECURITY.md) - Security requirements and threat model
+- [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) - Telemetry standards
 - [docs/SETUP.md](docs/SETUP.md) - **First-time setup guide**
 - [docs/DATABASE.md](docs/DATABASE.md) - Database configuration, migrations, and governance
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - Common issues and solutions
