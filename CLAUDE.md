@@ -121,10 +121,10 @@ cd apps/web && npm install && npm run dev
 
 ### Testing & Quality
 ```bash
-# Run tests
-npm run test              # All tests
-npm run test:unit         # Unit tests only
-npm run test:integration  # Integration tests
+# Run tests (IMPORTANT: use --run flag to avoid watch mode)
+npm run test -- --run --reporter=default    # All tests (single run)
+npm run test:unit -- --run                  # Unit tests only
+npm run test:integration -- --run           # Integration tests only
 
 # Linting and type checking
 npm run lint
@@ -354,6 +354,12 @@ Track sensitive actions (append-only):
 2. **Integration tests**: With DB + S3 (containerized)
 3. **API tests**: Full request/response cycle
 4. **E2E tests**: Critical user flows
+
+### Running Tests
+**IMPORTANT**: Always use `--run` flag to avoid watch mode:
+```bash
+npm run test -- --run --reporter=default
+```
 
 ### Rules
 - **No test = No merge** (enforced in CI)
