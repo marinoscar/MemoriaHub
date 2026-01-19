@@ -2,10 +2,12 @@
  * SideNav Component Tests
  *
  * Tests for navigation drawer, route highlighting, and responsive behavior.
+ * Note: SideNav renders both mobile (temporary) and desktop (permanent) drawers,
+ * so we use getAllBy* queries to handle duplicate elements.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent, within } from '@testing-library/react';
 import { render } from '../../test/utils';
 import { SideNav } from './SideNav';
 
@@ -55,45 +57,60 @@ describe('SideNav', () => {
     mockUseMediaQuery.mockReturnValue(false); // Desktop by default
   });
 
+  // Helper to get the permanent drawer (desktop) content
+  const getPermanentDrawer = () => {
+    const nav = screen.getByRole('navigation');
+    // Permanent drawer has display: block on sm+
+    const drawers = nav.querySelectorAll('.MuiDrawer-root');
+    return drawers[drawers.length - 1]; // Last drawer is permanent
+  };
+
   describe('navigation items', () => {
     it('renders Home nav item', () => {
       render(<SideNav {...defaultProps} />);
 
-      expect(screen.getByText('Home')).toBeInTheDocument();
+      // Both drawers render the items, use getAllBy
+      const homeItems = screen.getAllByText('Home');
+      expect(homeItems.length).toBeGreaterThan(0);
     });
 
     it('renders Libraries nav item (disabled)', () => {
       render(<SideNav {...defaultProps} />);
 
-      const librariesItem = screen.getByText('Libraries');
-      expect(librariesItem).toBeInTheDocument();
+      const librariesItems = screen.getAllByText('Libraries');
+      expect(librariesItems.length).toBeGreaterThan(0);
 
       // Check for "Soon" badge indicating disabled
-      expect(screen.getAllByText('Soon').length).toBeGreaterThan(0);
+      const soonBadges = screen.getAllByText('Soon');
+      expect(soonBadges.length).toBeGreaterThan(0);
     });
 
     it('renders Search nav item (disabled)', () => {
       render(<SideNav {...defaultProps} />);
 
-      expect(screen.getByText('Search')).toBeInTheDocument();
+      const searchItems = screen.getAllByText('Search');
+      expect(searchItems.length).toBeGreaterThan(0);
     });
 
     it('renders People nav item (disabled)', () => {
       render(<SideNav {...defaultProps} />);
 
-      expect(screen.getByText('People')).toBeInTheDocument();
+      const peopleItems = screen.getAllByText('People');
+      expect(peopleItems.length).toBeGreaterThan(0);
     });
 
     it('renders Tags nav item (disabled)', () => {
       render(<SideNav {...defaultProps} />);
 
-      expect(screen.getByText('Tags')).toBeInTheDocument();
+      const tagsItems = screen.getAllByText('Tags');
+      expect(tagsItems.length).toBeGreaterThan(0);
     });
 
     it('renders Settings nav item', () => {
       render(<SideNav {...defaultProps} />);
 
-      expect(screen.getByText('Settings')).toBeInTheDocument();
+      const settingsItems = screen.getAllByText('Settings');
+      expect(settingsItems.length).toBeGreaterThan(0);
     });
   });
 
@@ -103,10 +120,11 @@ describe('SideNav', () => {
 
       render(<SideNav {...defaultProps} />);
 
-      // Find the Home button and check it has selected styling
-      const homeButtons = screen.getAllByRole('button');
-      const homeButton = homeButtons.find(btn => btn.textContent?.includes('Home'));
-      expect(homeButton).toHaveClass('Mui-selected');
+      // Find buttons with selected class
+      const allButtons = screen.getAllByRole('button');
+      const homeButtons = allButtons.filter(btn => btn.textContent?.includes('Home'));
+      const selectedHome = homeButtons.find(btn => btn.classList.contains('Mui-selected'));
+      expect(selectedHome).toBeDefined();
     });
 
     it('highlights Settings when on /settings route', () => {
@@ -114,9 +132,10 @@ describe('SideNav', () => {
 
       render(<SideNav {...defaultProps} />);
 
-      const buttons = screen.getAllByRole('button');
-      const settingsButton = buttons.find(btn => btn.textContent?.includes('Settings'));
-      expect(settingsButton).toHaveClass('Mui-selected');
+      const allButtons = screen.getAllByRole('button');
+      const settingsButtons = allButtons.filter(btn => btn.textContent?.includes('Settings'));
+      const selectedSettings = settingsButtons.find(btn => btn.classList.contains('Mui-selected'));
+      expect(selectedSettings).toBeDefined();
     });
 
     it('does not highlight Home when on /settings', () => {
@@ -124,9 +143,10 @@ describe('SideNav', () => {
 
       render(<SideNav {...defaultProps} />);
 
-      const buttons = screen.getAllByRole('button');
-      const homeButton = buttons.find(btn => btn.textContent?.includes('Home'));
-      expect(homeButton).not.toHaveClass('Mui-selected');
+      const allButtons = screen.getAllByRole('button');
+      const homeButtons = allButtons.filter(btn => btn.textContent?.includes('Home'));
+      const selectedHome = homeButtons.filter(btn => btn.classList.contains('Mui-selected'));
+      expect(selectedHome.length).toBe(0);
     });
 
     it('highlights item for nested routes', () => {
@@ -134,9 +154,10 @@ describe('SideNav', () => {
 
       render(<SideNav {...defaultProps} />);
 
-      const buttons = screen.getAllByRole('button');
-      const settingsButton = buttons.find(btn => btn.textContent?.includes('Settings'));
-      expect(settingsButton).toHaveClass('Mui-selected');
+      const allButtons = screen.getAllByRole('button');
+      const settingsButtons = allButtons.filter(btn => btn.textContent?.includes('Settings'));
+      const selectedSettings = settingsButtons.find(btn => btn.classList.contains('Mui-selected'));
+      expect(selectedSettings).toBeDefined();
     });
   });
 
@@ -146,8 +167,9 @@ describe('SideNav', () => {
 
       render(<SideNav {...defaultProps} />);
 
-      const homeButton = screen.getByText('Home').closest('button') ||
-                         screen.getByText('Home').closest('[role="button"]');
+      // Get first Home button (from permanent drawer on desktop)
+      const homeItems = screen.getAllByText('Home');
+      const homeButton = homeItems[0].closest('div[role="button"]') || homeItems[0].closest('button');
       fireEvent.click(homeButton!);
 
       expect(mockNavigate).toHaveBeenCalledWith('/');
@@ -158,8 +180,8 @@ describe('SideNav', () => {
 
       render(<SideNav {...defaultProps} />);
 
-      const settingsButton = screen.getByText('Settings').closest('button') ||
-                             screen.getByText('Settings').closest('[role="button"]');
+      const settingsItems = screen.getAllByText('Settings');
+      const settingsButton = settingsItems[0].closest('div[role="button"]') || settingsItems[0].closest('button');
       fireEvent.click(settingsButton!);
 
       expect(mockNavigate).toHaveBeenCalledWith('/settings');
@@ -168,8 +190,8 @@ describe('SideNav', () => {
     it('does not navigate on disabled item click', () => {
       render(<SideNav {...defaultProps} />);
 
-      const librariesButton = screen.getByText('Libraries').closest('button') ||
-                              screen.getByText('Libraries').closest('[role="button"]');
+      const librariesItems = screen.getAllByText('Libraries');
+      const librariesButton = librariesItems[0].closest('div[role="button"]') || librariesItems[0].closest('button');
       fireEvent.click(librariesButton!);
 
       expect(mockNavigate).not.toHaveBeenCalledWith('/libraries');
@@ -180,24 +202,25 @@ describe('SideNav', () => {
     it('shows disabled styling on Libraries', () => {
       render(<SideNav {...defaultProps} />);
 
-      const librariesButton = screen.getByText('Libraries').closest('button') ||
-                              screen.getByText('Libraries').closest('[role="button"]');
+      const librariesItems = screen.getAllByText('Libraries');
+      const librariesButton = librariesItems[0].closest('div[role="button"]') || librariesItems[0].closest('button');
       expect(librariesButton).toHaveClass('Mui-disabled');
     });
 
     it('shows "Soon" badge on disabled items', () => {
       render(<SideNav {...defaultProps} />);
 
-      // Libraries, Search, People, Tags are all disabled
+      // Libraries, Search, People, Tags are disabled - each appears twice (mobile + desktop drawer)
       const soonBadges = screen.getAllByText('Soon');
-      expect(soonBadges.length).toBe(4);
+      // 4 disabled items * 2 drawers = 8
+      expect(soonBadges.length).toBe(8);
     });
 
     it('prevents click events on disabled items', () => {
       render(<SideNav {...defaultProps} />);
 
-      const searchButton = screen.getByText('Search').closest('button') ||
-                           screen.getByText('Search').closest('[role="button"]');
+      const searchItems = screen.getAllByText('Search');
+      const searchButton = searchItems[0].closest('div[role="button"]') || searchItems[0].closest('button');
       fireEvent.click(searchButton!);
 
       expect(mockNavigate).not.toHaveBeenCalledWith('/search');
@@ -209,11 +232,11 @@ describe('SideNav', () => {
       mockUseMediaQuery.mockReturnValue(true); // Mobile
     });
 
-    it('renders temporary drawer on mobile', () => {
+    it('renders drawer content on mobile', () => {
       render(<SideNav {...defaultProps} mobileOpen={true} />);
 
-      // Mobile drawer should be visible when mobileOpen is true
-      expect(screen.getByText('Home')).toBeInTheDocument();
+      const homeItems = screen.getAllByText('Home');
+      expect(homeItems.length).toBeGreaterThan(0);
     });
 
     it('calls onClose when navigation occurs on mobile', () => {
@@ -221,8 +244,8 @@ describe('SideNav', () => {
 
       render(<SideNav {...defaultProps} mobileOpen={true} onClose={onClose} />);
 
-      const homeButton = screen.getByText('Home').closest('button') ||
-                         screen.getByText('Home').closest('[role="button"]');
+      const homeItems = screen.getAllByText('Home');
+      const homeButton = homeItems[0].closest('div[role="button"]') || homeItems[0].closest('button');
       fireEvent.click(homeButton!);
 
       expect(onClose).toHaveBeenCalled();
@@ -234,10 +257,11 @@ describe('SideNav', () => {
       mockUseMediaQuery.mockReturnValue(false); // Desktop
     });
 
-    it('renders permanent drawer on desktop', () => {
+    it('renders drawer content on desktop', () => {
       render(<SideNav {...defaultProps} />);
 
-      expect(screen.getByText('Home')).toBeInTheDocument();
+      const homeItems = screen.getAllByText('Home');
+      expect(homeItems.length).toBeGreaterThan(0);
     });
 
     it('does not call onClose on navigation (desktop)', () => {
@@ -245,8 +269,8 @@ describe('SideNav', () => {
 
       render(<SideNav {...defaultProps} onClose={onClose} />);
 
-      const homeButton = screen.getByText('Home').closest('button') ||
-                         screen.getByText('Home').closest('[role="button"]');
+      const homeItems = screen.getAllByText('Home');
+      const homeButton = homeItems[0].closest('div[role="button"]') || homeItems[0].closest('button');
       fireEvent.click(homeButton!);
 
       expect(onClose).not.toHaveBeenCalled();
@@ -257,8 +281,9 @@ describe('SideNav', () => {
     it('renders icon for Home nav item', () => {
       render(<SideNav {...defaultProps} />);
 
-      // MUI icons are rendered as SVGs
-      const homeListItem = screen.getByText('Home').closest('li');
+      // MUI icons are rendered as SVGs within list items
+      const homeItems = screen.getAllByText('Home');
+      const homeListItem = homeItems[0].closest('li');
       const svg = homeListItem?.querySelector('svg');
       expect(svg).toBeInTheDocument();
     });
@@ -266,17 +291,17 @@ describe('SideNav', () => {
     it('renders icon for Settings nav item', () => {
       render(<SideNav {...defaultProps} />);
 
-      const settingsListItem = screen.getByText('Settings').closest('li');
+      const settingsItems = screen.getAllByText('Settings');
+      const settingsListItem = settingsItems[0].closest('li');
       const svg = settingsListItem?.querySelector('svg');
       expect(svg).toBeInTheDocument();
     });
   });
 
-  describe('drawer width', () => {
-    it('applies specified drawer width', () => {
-      render(<SideNav {...defaultProps} drawerWidth={300} />);
+  describe('drawer structure', () => {
+    it('renders navigation element', () => {
+      render(<SideNav {...defaultProps} />);
 
-      // The nav element should exist
       const nav = screen.getByRole('navigation');
       expect(nav).toBeInTheDocument();
     });
