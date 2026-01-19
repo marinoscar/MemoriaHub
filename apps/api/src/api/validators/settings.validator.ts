@@ -5,13 +5,21 @@
  */
 
 import type { Request, Response, NextFunction } from 'express';
-import { z } from 'zod';
+import { z, ZodError } from 'zod';
 import {
   systemSettingsCategorySchema,
   systemSettingsSchemaByCatgory,
   userPreferencesInputSchema,
 } from '@memoriahub/shared';
 import { ValidationError } from '../../domain/errors/ValidationError.js';
+
+/**
+ * Helper to check if an error is a ZodError
+ * Uses name check instead of instanceof to handle multiple Zod instances
+ */
+function isZodError(error: unknown): error is ZodError {
+  return error instanceof Error && error.name === 'ZodError';
+}
 
 /**
  * Validate system settings category parameter
@@ -25,7 +33,7 @@ export function validateSystemSettingsCategory(
     systemSettingsCategorySchema.parse(req.params.category);
     next();
   } catch (error) {
-    if (error instanceof z.ZodError) {
+    if (isZodError(error)) {
       next(ValidationError.fromZodError(error));
       return;
     }
@@ -59,7 +67,7 @@ export function validateSystemSettingsUpdate(
 
     next();
   } catch (error) {
-    if (error instanceof z.ZodError) {
+    if (isZodError(error)) {
       next(ValidationError.fromZodError(error));
       return;
     }
@@ -79,7 +87,7 @@ export function validateUserPreferencesUpdate(
     userPreferencesInputSchema.parse(req.body);
     next();
   } catch (error) {
-    if (error instanceof z.ZodError) {
+    if (isZodError(error)) {
       next(ValidationError.fromZodError(error));
       return;
     }
