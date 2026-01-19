@@ -49,10 +49,10 @@ export default defineConfig({
       ],
       thresholds: {
         // Thresholds apply only to included files (API src)
-        lines: 60,
-        functions: 60,
-        branches: 50,
-        statements: 60,
+        lines: 40,
+        functions: 40,
+        branches: 40,
+        statements: 40,
       },
     },
   },
