@@ -14,6 +14,7 @@ import {
 import {
   Home as HomeIcon,
   PhotoLibrary as LibraryIcon,
+  Collections as AllMediaIcon,
   Search as SearchIcon,
   People as PeopleIcon,
   Label as TagIcon,
@@ -46,7 +47,7 @@ interface NavItem {
  * Main navigation items
  */
 const mainNavItems: NavItem[] = [
-  { label: 'Home', path: '/', icon: <HomeIcon /> },
+  { label: 'All Media', path: '/media', icon: <AllMediaIcon /> },
   { label: 'Libraries', path: '/libraries', icon: <LibraryIcon /> },
   { label: 'Search', path: '/search', icon: <SearchIcon />, disabled: true },
   { label: 'People', path: '/people', icon: <PeopleIcon />, disabled: true },

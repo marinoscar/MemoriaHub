@@ -11,6 +11,7 @@ import {
 import {
   Add as AddIcon,
   Photo as PhotoIcon,
+  CloudUpload as UploadIcon,
   CreateNewFolder as CreateFolderIcon,
 } from '@mui/icons-material';
 import type { LibraryDTO } from '@memoriahub/shared';
@@ -74,6 +75,12 @@ export function UploadButton({
 
   const handleClose = () => {
     setAnchorEl(null);
+  };
+
+  const handleUploadWithoutLibrary = () => {
+    handleClose();
+    setUploadLibrary(null);
+    setUploadDialogOpen(true);
   };
 
   const handleUploadToLibrary = (library: LibraryDTO) => {
@@ -144,6 +151,14 @@ export function UploadButton({
           sx: { minWidth: 200, mt: 1 },
         }}
       >
+        {/* Upload without library (to My Media) */}
+        <MenuItem onClick={handleUploadWithoutLibrary}>
+          <ListItemIcon>
+            <UploadIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText primary="Upload" />
+        </MenuItem>
+
         {/* Upload to library options */}
         {libraries.length > 0 && (
           <>
@@ -176,18 +191,16 @@ export function UploadButton({
       </Menu>
 
       {/* Upload dialog */}
-      {uploadLibrary && (
-        <UploadDialog
-          open={uploadDialogOpen}
-          onClose={() => {
-            setUploadDialogOpen(false);
-            setUploadLibrary(null);
-          }}
-          libraryId={uploadLibrary.id}
-          libraryName={uploadLibrary.name}
-          onUploadComplete={handleUploadComplete}
-        />
-      )}
+      <UploadDialog
+        open={uploadDialogOpen}
+        onClose={() => {
+          setUploadDialogOpen(false);
+          setUploadLibrary(null);
+        }}
+        libraryId={uploadLibrary?.id}
+        libraryName={uploadLibrary?.name}
+        onUploadComplete={handleUploadComplete}
+      />
 
       {/* Create library dialog */}
       <CreateLibraryDialog
