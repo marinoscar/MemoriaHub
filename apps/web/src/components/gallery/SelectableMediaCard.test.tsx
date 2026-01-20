@@ -1,41 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { SelectableMediaCard } from '../SelectableMediaCard';
-import type { MediaAssetDTO } from '@memoriahub/shared';
+import { SelectableMediaCard } from './SelectableMediaCard';
+import { createMockMedia } from '../../test/test-helpers';
 
 // Mock media asset
-const mockMedia: MediaAssetDTO = {
-  id: 'asset-1',
-  userId: 'user-1',
-  libraryId: null,
-  filename: 'test-image.jpg',
+const mockMedia = createMockMedia('asset-1', {
   originalFilename: 'test-image.jpg',
-  mimeType: 'image/jpeg',
-  fileSize: 1024000,
-  storageBucket: 'test-bucket',
-  storageKey: 'test/key.jpg',
   thumbnailUrl: 'https://example.com/thumb.jpg',
   previewUrl: 'https://example.com/preview.jpg',
   fullUrl: 'https://example.com/full.jpg',
-  status: 'ready',
-  width: 1920,
-  height: 1080,
-  capturedAtUtc: '2024-01-01T12:00:00Z',
-  latitude: null,
-  longitude: null,
-  country: null,
-  state: null,
-  city: null,
-  locationName: null,
-  cameraMake: null,
-  cameraModel: null,
-  fNumber: null,
-  exposureTime: null,
-  focalLength: null,
-  iso: null,
-  createdAt: '2024-01-01T12:00:00Z',
-  updatedAt: '2024-01-01T12:00:00Z',
-};
+});
 
 describe('SelectableMediaCard', () => {
   describe('rendering', () => {
@@ -112,12 +86,10 @@ describe('SelectableMediaCard', () => {
     });
 
     it('displays video icon for video media', () => {
-      const videoMedia: MediaAssetDTO = {
-        ...mockMedia,
+      const videoMedia = createMockMedia('asset-video', {
         mimeType: 'video/mp4',
-        filename: 'test-video.mp4',
         originalFilename: 'test-video.mp4',
-      };
+      });
 
       const onClick = vi.fn();
       const onToggleSelection = vi.fn();
@@ -283,10 +255,9 @@ describe('SelectableMediaCard', () => {
 
   describe('edge cases', () => {
     it('handles missing thumbnail URL gracefully', () => {
-      const mediaWithoutThumb: MediaAssetDTO = {
-        ...mockMedia,
+      const mediaWithoutThumb = createMockMedia('asset-no-thumb', {
         thumbnailUrl: null,
-      };
+      });
 
       const onClick = vi.fn();
       const onToggleSelection = vi.fn();
@@ -301,16 +272,14 @@ describe('SelectableMediaCard', () => {
       );
 
       // Should render without crashing
-      const image = screen.queryByAltText(mediaWithoutThumb.filename);
+      const image = screen.queryByAltText(mediaWithoutThumb.originalFilename);
       expect(image).toBeInTheDocument();
     });
 
     it('handles very long filenames', () => {
-      const mediaWithLongName: MediaAssetDTO = {
-        ...mockMedia,
-        filename: 'this-is-a-very-long-filename-that-should-be-truncated-properly.jpg',
+      const mediaWithLongName = createMockMedia('asset-long-name', {
         originalFilename: 'this-is-a-very-long-filename-that-should-be-truncated-properly.jpg',
-      };
+      });
 
       const onClick = vi.fn();
       const onToggleSelection = vi.fn();
@@ -324,7 +293,7 @@ describe('SelectableMediaCard', () => {
         />
       );
 
-      const image = screen.getByAltText(mediaWithLongName.filename);
+      const image = screen.getByAltText(mediaWithLongName.originalFilename);
       expect(image).toBeInTheDocument();
     });
 
@@ -361,10 +330,9 @@ describe('SelectableMediaCard', () => {
 
   describe('media type handling', () => {
     it('identifies image media correctly', () => {
-      const imageMedia: MediaAssetDTO = {
-        ...mockMedia,
+      const imageMedia = createMockMedia('asset-image', {
         mimeType: 'image/png',
-      };
+      });
 
       const onClick = vi.fn();
       const onToggleSelection = vi.fn();
@@ -383,10 +351,9 @@ describe('SelectableMediaCard', () => {
     });
 
     it('identifies video media correctly', () => {
-      const videoMedia: MediaAssetDTO = {
-        ...mockMedia,
+      const videoMedia = createMockMedia('asset-video-webm', {
         mimeType: 'video/webm',
-      };
+      });
 
       const onClick = vi.fn();
       const onToggleSelection = vi.fn();
