@@ -52,11 +52,6 @@ export function AddToLibraryDialog({
     onClose();
   };
 
-  // Filter to only show owned or writable libraries
-  const writableLibraries = libraries.filter(
-    (lib) => lib.role === 'owner' || lib.role === 'editor'
-  );
-
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
       <DialogTitle>Add to Library</DialogTitle>
@@ -66,9 +61,9 @@ export function AddToLibraryDialog({
           Add {selectedCount} selected items to a library
         </Typography>
 
-        {writableLibraries.length === 0 ? (
+        {libraries.length === 0 ? (
           <Alert severity="info">
-            You don't have any libraries where you can add media. Create a library first.
+            You don't have any libraries. Create a library first.
           </Alert>
         ) : (
           <FormControl fullWidth>
@@ -80,19 +75,9 @@ export function AddToLibraryDialog({
               label="Select Library"
               onChange={(e) => setSelectedLibraryId(e.target.value)}
             >
-              {writableLibraries.map((library) => (
+              {libraries.map((library) => (
                 <MenuItem key={library.id} value={library.id}>
                   {library.name}
-                  {library.role && (
-                    <Typography
-                      component="span"
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ ml: 1 }}
-                    >
-                      ({library.role})
-                    </Typography>
-                  )}
                 </MenuItem>
               ))}
             </Select>
@@ -105,7 +90,7 @@ export function AddToLibraryDialog({
         <Button
           variant="contained"
           onClick={handleAdd}
-          disabled={!selectedLibraryId || writableLibraries.length === 0}
+          disabled={!selectedLibraryId || libraries.length === 0}
         >
           Add to Library
         </Button>
