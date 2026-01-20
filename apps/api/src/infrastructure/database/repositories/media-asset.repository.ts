@@ -487,8 +487,27 @@ export class MediaAssetRepository {
     // 1. Owned by user
     // 2. Directly shared with user
     // 3. In a library the user owns or is a member of or is public
+    // Note: We include the sort expression in SELECT for DISTINCT compatibility
     const accessibleQuery = `
-      SELECT DISTINCT ma.*
+      SELECT DISTINCT ma.*, ${sortColumn} as sort_key
+      FROM media_assets ma
+      LEFT JOIN media_shares ms ON ma.id = ms.asset_id AND ms.shared_with_user_id = $1
+      LEFT JOIN library_assets la ON ma.id = la.asset_id
+      LEFT JOIN libraries l ON la.library_id = l.id
+      LEFT JOIN library_members lm ON l.id = lm.library_id AND lm.user_id = $1
+      WHERE (
+        ma.owner_id = $1                           -- Owned by user
+        OR ms.shared_with_user_id IS NOT NULL      -- Directly shared
+        OR l.owner_id = $1                         -- Owner of library containing asset
+        OR lm.user_id IS NOT NULL                  -- Member of library containing asset
+        OR l.visibility = 'public'                 -- Public library containing asset
+      )
+      ${filterClause}
+    `;
+
+    // Count query without sort_key (not needed for count)
+    const countQuery = `
+      SELECT DISTINCT ma.id
       FROM media_assets ma
       LEFT JOIN media_shares ms ON ma.id = ms.asset_id AND ms.shared_with_user_id = $1
       LEFT JOIN library_assets la ON ma.id = la.asset_id
@@ -506,15 +525,15 @@ export class MediaAssetRepository {
 
     // Get total count
     const countResult = await query<{ count: string }>(
-      `SELECT COUNT(*) as count FROM (${accessibleQuery}) as accessible`,
+      `SELECT COUNT(*) as count FROM (${countQuery}) as accessible`,
       params
     );
     const total = parseInt(countResult.rows[0].count, 10);
 
-    // Get assets with pagination
-    const result = await query<MediaAssetRow>(
+    // Get assets with pagination (sort_key is included in SELECT for DISTINCT ORDER BY compatibility)
+    const result = await query<MediaAssetRow & { sort_key: unknown }>(
       `${accessibleQuery}
-       ORDER BY ${sortColumn} ${sortOrder.toUpperCase()}
+       ORDER BY sort_key ${sortOrder.toUpperCase()}
        LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
       [...params, limit, offset]
     );
