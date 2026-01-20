@@ -64,6 +64,30 @@ export function LibraryGalleryPage() {
   // Upload dialog state
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
 
+  // Selection state
+  const {
+    selectedIds,
+    toggleSelection,
+    selectAll,
+    clearSelection,
+    selectedCount,
+  } = useMediaSelection();
+
+  // Fetch all libraries for "Add to Library" action
+  const { libraries } = useLibraries();
+
+  // Dialog state
+  const [addToLibraryDialogOpen, setAddToLibraryDialogOpen] = useState(false);
+  const [editMetadataDialogOpen, setEditMetadataDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+
+  // Snackbar state
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
+    open: false,
+    message: '',
+    severity: 'success',
+  });
+
   // Fetch library data
   const { library, isLoading: libraryLoading, error: libraryError } = useLibrary(libraryId);
 
