@@ -38,26 +38,27 @@ const mockUseAllMedia = {
   media: mockMediaList,
   isLoading: false,
   isLoadingMore: false,
-  error: null,
+  error: null as string | null,
   hasMore: false,
   total: mockMediaList.length,
   page: 1,
   limit: 50,
-  loadMore: vi.fn(),
-  refresh: vi.fn(),
+  loadMore: vi.fn().mockResolvedValue(undefined),
+  refresh: vi.fn().mockResolvedValue(undefined),
 };
 
 const mockUseLibraries = {
   libraries: mockLibraries,
   isLoading: false,
-  error: null,
+  error: null as string | null,
   total: mockLibraries.length,
   page: 1,
   limit: 20,
-  fetchLibraries: vi.fn(),
-  createLibrary: vi.fn(),
-  updateLibrary: vi.fn(),
-  deleteLibrary: vi.fn(),
+  fetchLibraries: vi.fn().mockResolvedValue(undefined),
+  createLibrary: vi.fn().mockResolvedValue({} as any),
+  updateLibrary: vi.fn().mockResolvedValue({} as any),
+  deleteLibrary: vi.fn().mockResolvedValue(undefined),
+  refresh: vi.fn().mockResolvedValue(undefined),
 };
 
 describe('AllMediaPage - Integration Tests', () => {

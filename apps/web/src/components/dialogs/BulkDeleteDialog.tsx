@@ -32,7 +32,6 @@ export function BulkDeleteDialog({
 }: BulkDeleteDialogProps) {
   const handleConfirm = () => {
     onConfirm();
-    onClose();
   };
 
   return (

@@ -142,7 +142,7 @@ export function BulkMetadataDialog({
 
       <DialogContent>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          Update metadata for {selectedCount} selected items. Check the fields you want to update.
+          Update metadata for {selectedCount} selected {selectedCount === 1 ? 'item' : 'items'}. Check the fields you want to update.
         </Typography>
 
         <Stack spacing={2}>
@@ -156,7 +156,7 @@ export function BulkMetadataDialog({
                   size="small"
                 />
               }
-              label="Captured Date/Time"
+              label="Captured At"
             />
             <TextField
               fullWidth
@@ -166,6 +166,7 @@ export function BulkMetadataDialog({
               value={values.capturedAtUtc}
               onChange={(e) => handleValueChange('capturedAtUtc', e.target.value)}
               sx={{ mt: 1 }}
+              label="Captured At"
             />
           </Box>
 
@@ -185,6 +186,7 @@ export function BulkMetadataDialog({
               fullWidth
               type="number"
               size="small"
+              label="Latitude"
               placeholder="-90 to 90"
               disabled={!enabledFields.latitude}
               value={values.latitude}
@@ -210,6 +212,7 @@ export function BulkMetadataDialog({
               fullWidth
               type="number"
               size="small"
+              label="Longitude"
               placeholder="-180 to 180"
               disabled={!enabledFields.longitude}
               value={values.longitude}
@@ -234,6 +237,7 @@ export function BulkMetadataDialog({
             <TextField
               fullWidth
               size="small"
+              label="Country"
               placeholder="e.g., United States"
               disabled={!enabledFields.country}
               value={values.country}
@@ -252,11 +256,12 @@ export function BulkMetadataDialog({
                   size="small"
                 />
               }
-              label="State/Province"
+              label="State"
             />
             <TextField
               fullWidth
               size="small"
+              label="State"
               placeholder="e.g., California"
               disabled={!enabledFields.state}
               value={values.state}
@@ -280,6 +285,7 @@ export function BulkMetadataDialog({
             <TextField
               fullWidth
               size="small"
+              label="City"
               placeholder="e.g., San Francisco"
               disabled={!enabledFields.city}
               value={values.city}
@@ -303,6 +309,7 @@ export function BulkMetadataDialog({
             <TextField
               fullWidth
               size="small"
+              label="Location Name"
               placeholder="e.g., Golden Gate Park"
               disabled={!enabledFields.locationName}
               value={values.locationName}
@@ -320,7 +327,7 @@ export function BulkMetadataDialog({
           onClick={handleApply}
           disabled={!hasEnabledFields}
         >
-          Apply Changes
+          Apply to {selectedCount} {selectedCount === 1 ? 'Item' : 'Items'}
         </Button>
       </DialogActions>
     </Dialog>
