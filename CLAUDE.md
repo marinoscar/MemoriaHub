@@ -13,40 +13,115 @@ Build MemoriaHub in **small, testable, observable increments**. Every change mus
 
 **Operating Model**: You (human) are the Architect and Acceptance Authority. Claude Code implements, tests, and documents.
 
-## Specialized Agents
+## Specialized Agents (MANDATORY)
 
-This project has 6 specialized agents in `.claude/agents/` for domain-specific tasks. Use them proactively.
+> **CRITICAL**: This project uses specialized agents via the `Task` tool. You MUST invoke these agents - they are NOT optional. Failure to invoke agents when required is a workflow violation.
 
-| Agent | Purpose | When to Use |
-|-------|---------|-------------|
-| **backend** | Express routes, services, repositories, middleware | New API endpoints, business logic |
-| **frontend** | React components, MUI styling, state management | New pages, components, UI features |
-| **database** | PostgreSQL schema, migrations, queries | Schema changes, query optimization |
-| **testing** | Unit tests, integration tests, coverage | After code changes (proactive) |
-| **security** | Vulnerability detection, auth review (read-only) | After code changes (proactive) |
-| **documentation** | Technical docs, API docs, user guides | After feature completion |
+### Agent Invocation Syntax
 
-### Agent Workflows
+To invoke an agent, use the `Task` tool with the appropriate `subagent_type`:
 
-**After implementing code:**
-1. Use **testing** agent to create/update tests and run typecheck
-2. Use **security** agent to review for vulnerabilities
-
-**For feature development:**
 ```
-backend/frontend → testing → security → documentation
+Task(subagent_type="testing", prompt="Write tests for the new LibraryService.create method")
+Task(subagent_type="security", prompt="Review the authentication changes in auth.controller.ts")
 ```
 
-**Database changes:**
+### Available Agents
+
+| Agent | Purpose | MUST Invoke When |
+|-------|---------|------------------|
+| **backend** | Express routes, services, repositories, middleware | Creating/modifying API endpoints, services, or repositories |
+| **frontend** | React components, MUI styling, state management | Creating/modifying React components, pages, or hooks |
+| **database** | PostgreSQL schema, migrations, queries | Any schema change, new migration, or query optimization |
+| **testing** | Unit tests, integration tests, coverage | **ALWAYS after ANY code change** (non-negotiable) |
+| **security** | Vulnerability detection, auth review | **ALWAYS after code touching auth, input, data access, or secrets** |
+| **documentation** | Technical docs, API docs, user guides | After completing features that change user-facing behavior |
+
+### MANDATORY Agent Workflow
+
+**You MUST follow this workflow. No exceptions.**
+
 ```
-database (migration) → backend (repository) → testing → security
+┌─────────────────────────────────────────────────────────────────────┐
+│  AFTER WRITING OR MODIFYING ANY CODE, YOU MUST:                     │
+│                                                                     │
+│  1. STOP and invoke the **testing** agent                          │
+│     → Creates/updates tests                                         │
+│     → Runs `npm run typecheck`                                      │
+│     → Runs `npm run test -- --run`                                 │
+│                                                                     │
+│  2. STOP and invoke the **security** agent (if applicable)         │
+│     → Reviews for vulnerabilities                                   │
+│     → Checks auth, input validation, data access                   │
+│                                                                     │
+│  3. Only THEN is the implementation complete                        │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-### Proactive Agent Usage
+### Workflow By Task Type
 
-- **testing**: Always after code changes - includes mandatory `npm run typecheck`
-- **security**: Always after code touching auth, input handling, or data access
-- **documentation**: After completing features that change user-facing behavior
+**Feature Development (API):**
+```
+1. backend agent → implement endpoint
+2. testing agent → MANDATORY: write tests, run typecheck
+3. security agent → MANDATORY: review for vulnerabilities
+4. documentation agent → if user-facing changes
+```
+
+**Feature Development (UI):**
+```
+1. frontend agent → implement component
+2. testing agent → MANDATORY: write tests, run typecheck
+3. security agent → if handles user input or auth
+4. documentation agent → if user-facing changes
+```
+
+**Database Changes:**
+```
+1. database agent → create migration, update schema
+2. backend agent → update repository if needed
+3. testing agent → MANDATORY: write tests, run typecheck
+4. security agent → MANDATORY: review data access patterns
+```
+
+**Bug Fixes:**
+```
+1. Fix the bug directly (or via backend/frontend agent)
+2. testing agent → MANDATORY: add regression test
+3. security agent → if fix touches auth/input/data
+```
+
+### Agent Invocation Checklist
+
+Before marking ANY task as complete, verify:
+
+- [ ] **testing** agent invoked? (REQUIRED for all code changes)
+- [ ] **security** agent invoked? (REQUIRED if code touches auth, input validation, data access, or secrets)
+- [ ] **documentation** agent invoked? (Required if user-facing behavior changed)
+
+### Examples of Required Agent Invocations
+
+| You Just Did This | You MUST Invoke |
+|-------------------|-----------------|
+| Added a new API endpoint | `testing` then `security` |
+| Modified a React component | `testing` |
+| Changed authentication logic | `testing` then `security` |
+| Added a database migration | `testing` then `security` |
+| Fixed a bug in a service | `testing` |
+| Added input validation | `testing` then `security` |
+| Modified user permissions | `testing` then `security` |
+| Updated a form component | `testing` |
+| Changed how data is fetched | `testing` then `security` |
+
+### What Happens If You Skip Agents
+
+If you complete code changes WITHOUT invoking the required agents:
+1. Tests may be missing → bugs slip through
+2. Type errors may exist → build failures
+3. Security vulnerabilities may be introduced → data breaches
+4. The task is NOT actually complete
+
+**The testing agent is your quality gate. The security agent is your safety net. USE THEM.**
 
 ## Project Overview
 
@@ -494,8 +569,10 @@ A feature is DONE when:
 - [ ] Telemetry flowing (logs visible, metrics scraped, traces linked)
 - [ ] Documentation updated (if behavior changed)
 - [ ] No secrets in code or logs
-- [ ] **Testing agent** verified tests and typecheck pass
-- [ ] **Security agent** reviewed code (no findings or all addressed)
+- [ ] **MANDATORY: `testing` agent was invoked** and verified tests + typecheck pass
+- [ ] **MANDATORY: `security` agent was invoked** (if code touches auth/input/data) and no findings or all addressed
+
+> **REMINDER**: If you did not invoke the `testing` and `security` agents via the Task tool, the feature is NOT done. Go back and invoke them now.
 
 ## Entity Status Lifecycle
 
