@@ -108,13 +108,15 @@ export const mediaApi = {
    * File is uploaded to the API server, which then forwards it to S3
    */
   async uploadFile(
-    libraryId: string,
+    libraryId: string | undefined,
     file: File,
     onProgress?: UploadProgressCallback
   ): Promise<MediaAssetDTO> {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('libraryId', libraryId);
+    if (libraryId) {
+      formData.append('libraryId', libraryId);
+    }
 
     const response = await apiClient.post<ApiResponse<MediaAssetDTO>>(
       '/media/upload/proxy',
