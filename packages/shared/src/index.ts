@@ -188,6 +188,11 @@ export type {
   // Access control types
   MediaAccessType,
   MediaAssetWithAccess,
+  // Bulk operations types
+  BulkUpdateMetadataInput,
+  BulkUpdateMetadataResult,
+  BulkDeleteInput,
+  BulkDeleteResult,
 } from './types/media.types.js';
 export {
   ALLOWED_IMAGE_MIME_TYPES,
@@ -243,6 +248,7 @@ export {
   listMediaByLibraryParamsSchema,
   bulkDeleteMediaSchema,
   updateMediaMetadataSchema,
+  bulkUpdateMediaMetadataSchema,
   moveMediaSchema,
   shareMediaSchema,
   revokeShareParamsSchema,
@@ -263,6 +269,7 @@ export type {
   ListMediaByLibraryParamsInput,
   BulkDeleteMediaInput,
   UpdateMediaMetadataInput,
+  BulkUpdateMediaMetadataInput,
   MoveMediaInput,
   ShareMediaInput as ShareMediaSchemaInput,
   RevokeShareParamsInput,
