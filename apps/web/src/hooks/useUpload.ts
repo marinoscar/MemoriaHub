@@ -68,8 +68,9 @@ export function isWithinSizeLimit(file: File): boolean {
 
 /**
  * Hook for managing file uploads
+ * @param libraryId Library ID to upload to (optional - if not provided, uploads to user's media)
  */
-export function useUpload(libraryId: string) {
+export function useUpload(libraryId?: string) {
   const [state, setState] = useState<UseUploadState>({
     files: [],
     isUploading: false,

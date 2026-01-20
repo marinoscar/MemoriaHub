@@ -140,11 +140,14 @@ export const mediaApi = {
   // ===========================================================================
 
   /**
-   * List media assets in a library
+   * List media assets
+   * If libraryId is provided, lists media in that library.
+   * If libraryId is undefined, lists all accessible media.
    */
-  async listMedia(libraryId: string, params: ListMediaParams = {}): Promise<PaginatedResponse<MediaAssetDTO>> {
+  async listMedia(libraryId: string | undefined, params: ListMediaParams = {}): Promise<PaginatedResponse<MediaAssetDTO>> {
+    const url = libraryId ? `/media/library/${libraryId}` : '/media';
     const response = await apiClient.get<ApiResponse<MediaAssetDTO[]>>(
-      `/media/library/${libraryId}`,
+      url,
       { params }
     );
     return {
