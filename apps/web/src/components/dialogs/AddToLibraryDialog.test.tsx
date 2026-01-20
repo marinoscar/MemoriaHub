@@ -430,16 +430,13 @@ describe('AddToLibraryDialog', () => {
     });
 
     it('handles many libraries', () => {
-      const manyLibraries: LibraryDTO[] = Array.from({ length: 50 }, (_, i) => ({
-        id: `lib-${i}`,
-        userId: 'user-1',
-        name: `Library ${i}`,
-        description: `Description ${i}`,
-        visibility: 'private' as const,
-        assetCount: i * 10,
-        createdAt: '2024-01-01T00:00:00Z',
-        updatedAt: '2024-01-01T00:00:00Z',
-      }));
+      const manyLibraries: LibraryDTO[] = Array.from({ length: 50 }, (_, i) =>
+        createMockLibrary(`lib-${i}`, `Library ${i}`, {
+          description: `Description ${i}`,
+          visibility: 'private',
+          assetCount: i * 10,
+        })
+      );
 
       const onClose = vi.fn();
       const onAdd = vi.fn();

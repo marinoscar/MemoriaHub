@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { BulkActionsToolbar } from '../BulkActionsToolbar';
+import { BulkActionsToolbar } from './BulkActionsToolbar';
 
 describe('BulkActionsToolbar', () => {
   describe('rendering', () => {

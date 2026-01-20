@@ -8,7 +8,7 @@ const mockMedia = createMockMedia('asset-1', {
   originalFilename: 'test-image.jpg',
   thumbnailUrl: 'https://example.com/thumb.jpg',
   previewUrl: 'https://example.com/preview.jpg',
-  fullUrl: 'https://example.com/full.jpg',
+  originalUrl: 'https://example.com/full.jpg',
 });
 
 describe('SelectableMediaCard', () => {

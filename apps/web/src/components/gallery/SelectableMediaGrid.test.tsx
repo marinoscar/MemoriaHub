@@ -150,7 +150,7 @@ describe('SelectableMediaGrid', () => {
       const onToggleSelection = vi.fn();
       const selectedIds = new Set<string>();
 
-      const { container } = render(
+      render(
         <SelectableMediaGrid
           media={mockMediaList}
           isLoading={false}
@@ -284,7 +284,7 @@ describe('SelectableMediaGrid', () => {
 
     it('handles large number of items', () => {
       const largeMediaList = Array.from({ length: 100 }, (_, i) =>
-        createMockMedia(`asset-${i}`, `image${i}.jpg`)
+        createMockMedia(`asset-${i}`, { originalFilename: `image${i}.jpg` })
       );
 
       const onMediaClick = vi.fn();

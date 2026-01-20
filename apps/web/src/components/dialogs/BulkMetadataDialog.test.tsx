@@ -394,7 +394,7 @@ describe('BulkMetadataDialog', () => {
       const onClose = vi.fn();
       const onApply = vi.fn();
 
-      const { rerender, container } = render(
+      const { rerender } = render(
         <BulkMetadataDialog
           open={true}
           selectedCount={5}

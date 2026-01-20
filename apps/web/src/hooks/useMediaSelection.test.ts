@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useMediaSelection } from '../useMediaSelection';
+import { useMediaSelection } from './useMediaSelection';
 
 describe('useMediaSelection', () => {
   describe('initial state', () => {

@@ -1,79 +1,36 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { AllMediaPage } from '../AllMediaPage';
-import { mediaApi } from '../../services/api/media.api';
-import { libraryApi } from '../../services/api/library.api';
+import { AllMediaPage } from './AllMediaPage';
+import { mediaApi } from '../services/api/media.api';
+import { libraryApi } from '../services/api/library.api';
+import { createMockMedia, createMockLibrary } from '../test/test-helpers';
 import type { MediaAssetDTO, LibraryDTO } from '@memoriahub/shared';
 
 // Mock the API modules
-vi.mock('../../services/api/media.api');
-vi.mock('../../services/api/library.api');
-vi.mock('../../hooks/useAllMedia');
-vi.mock('../../hooks/useLibraries');
-
-// Mock media data
-const createMockMedia = (id: string, filename: string): MediaAssetDTO => ({
-  id,
-  userId: 'user-1',
-  libraryId: null,
-  filename,
-  originalFilename: filename,
-  mimeType: 'image/jpeg',
-  fileSize: 1024000,
-  storageBucket: 'test-bucket',
-  storageKey: `test/${id}.jpg`,
-  thumbnailUrl: `https://example.com/${id}-thumb.jpg`,
-  previewUrl: `https://example.com/${id}-preview.jpg`,
-  fullUrl: `https://example.com/${id}-full.jpg`,
-  status: 'ready',
-  width: 1920,
-  height: 1080,
-  capturedAtUtc: '2024-01-01T12:00:00Z',
-  latitude: null,
-  longitude: null,
-  country: null,
-  state: null,
-  city: null,
-  locationName: null,
-  cameraMake: null,
-  cameraModel: null,
-  fNumber: null,
-  exposureTime: null,
-  focalLength: null,
-  iso: null,
-  createdAt: '2024-01-01T12:00:00Z',
-  updatedAt: '2024-01-01T12:00:00Z',
-});
+vi.mock('../services/api/media.api');
+vi.mock('../services/api/library.api');
+vi.mock('../hooks/useAllMedia');
+vi.mock('../hooks/useLibraries');
 
 const mockMediaList: MediaAssetDTO[] = [
-  createMockMedia('asset-1', 'photo1.jpg'),
-  createMockMedia('asset-2', 'photo2.jpg'),
-  createMockMedia('asset-3', 'photo3.jpg'),
-  createMockMedia('asset-4', 'photo4.jpg'),
-  createMockMedia('asset-5', 'photo5.jpg'),
+  createMockMedia('asset-1', { originalFilename: 'photo1.jpg' }),
+  createMockMedia('asset-2', { originalFilename: 'photo2.jpg' }),
+  createMockMedia('asset-3', { originalFilename: 'photo3.jpg' }),
+  createMockMedia('asset-4', { originalFilename: 'photo4.jpg' }),
+  createMockMedia('asset-5', { originalFilename: 'photo5.jpg' }),
 ];
 
 const mockLibraries: LibraryDTO[] = [
-  {
-    id: 'lib-1',
-    userId: 'user-1',
-    name: 'Family Photos',
+  createMockLibrary('lib-1', 'Family Photos', {
     description: 'Family vacation photos',
     visibility: 'private',
     assetCount: 100,
-    createdAt: '2024-01-01T00:00:00Z',
-    updatedAt: '2024-01-01T00:00:00Z',
-  },
-  {
-    id: 'lib-2',
-    userId: 'user-1',
-    name: 'Work Events',
+  }),
+  createMockLibrary('lib-2', 'Work Events', {
     description: 'Company events',
     visibility: 'shared',
     assetCount: 50,
-    createdAt: '2024-01-02T00:00:00Z',
-    updatedAt: '2024-01-02T00:00:00Z',
-  },
+  }),
 ];
 
 // Mock hook implementations
@@ -84,6 +41,8 @@ const mockUseAllMedia = {
   error: null,
   hasMore: false,
   total: mockMediaList.length,
+  page: 1,
+  limit: 50,
   loadMore: vi.fn(),
   refresh: vi.fn(),
 };
@@ -92,16 +51,20 @@ const mockUseLibraries = {
   libraries: mockLibraries,
   isLoading: false,
   error: null,
+  total: mockLibraries.length,
+  page: 1,
+  limit: 20,
+  fetchLibraries: vi.fn(),
   createLibrary: vi.fn(),
   updateLibrary: vi.fn(),
   deleteLibrary: vi.fn(),
 };
 
 describe('AllMediaPage - Integration Tests', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     // Setup hooks
-    vi.mocked(await import('../../hooks/useAllMedia')).useAllMedia = vi.fn(() => mockUseAllMedia);
-    vi.mocked(await import('../../hooks/useLibraries')).useLibraries = vi.fn(() => mockUseLibraries);
+    vi.mocked(await import('../hooks/useAllMedia')).useAllMedia = vi.fn(() => mockUseAllMedia);
+    vi.mocked(await import('../hooks/useLibraries')).useLibraries = vi.fn(() => mockUseLibraries);
 
     // Reset API mocks
     vi.clearAllMocks();
@@ -535,8 +498,8 @@ describe('AllMediaPage - Integration Tests', () => {
   });
 
   describe('edge cases', () => {
-    it('handles empty media list', () => {
-      vi.mocked(await import('../../hooks/useAllMedia')).useAllMedia = vi.fn(() => ({
+    it('handles empty media list', async () => {
+      vi.mocked(await import('../hooks/useAllMedia')).useAllMedia = vi.fn(() => ({
         ...mockUseAllMedia,
         media: [],
         total: 0,
@@ -548,8 +511,8 @@ describe('AllMediaPage - Integration Tests', () => {
       expect(screen.queryByText(/selected/i)).not.toBeInTheDocument();
     });
 
-    it('handles loading state', () => {
-      vi.mocked(await import('../../hooks/useAllMedia')).useAllMedia = vi.fn(() => ({
+    it('handles loading state', async () => {
+      vi.mocked(await import('../hooks/useAllMedia')).useAllMedia = vi.fn(() => ({
         ...mockUseAllMedia,
         isLoading: true,
         media: [],
@@ -561,7 +524,7 @@ describe('AllMediaPage - Integration Tests', () => {
     });
 
     it('handles no libraries available', async () => {
-      vi.mocked(await import('../../hooks/useLibraries')).useLibraries = vi.fn(() => ({
+      vi.mocked(await import('../hooks/useLibraries')).useLibraries = vi.fn(() => ({
         ...mockUseLibraries,
         libraries: [],
       }));
