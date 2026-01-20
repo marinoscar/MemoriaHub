@@ -11,6 +11,8 @@ import type {
   CreateLibraryInput,
   UpdateLibraryInput,
   LibraryMemberRole,
+  LibraryAssetDTO,
+  AddAssetsToLibraryInput,
 } from '@memoriahub/shared';
 import { apiClient } from './client';
 
@@ -137,5 +139,21 @@ export const libraryApi = {
    */
   async removeMember(libraryId: string, userId: string): Promise<void> {
     await apiClient.delete(`/libraries/${libraryId}/members/${userId}`);
+  },
+
+  // ===========================================================================
+  // Library Assets
+  // ===========================================================================
+
+  /**
+   * Add multiple assets to a library
+   */
+  async addAssets(libraryId: string, assetIds: string[]): Promise<LibraryAssetDTO[]> {
+    const input: AddAssetsToLibraryInput = { assetIds };
+    const response = await apiClient.post<ApiResponse<LibraryAssetDTO[]>>(
+      `/libraries/${libraryId}/assets/bulk`,
+      input
+    );
+    return response.data.data;
   },
 };
