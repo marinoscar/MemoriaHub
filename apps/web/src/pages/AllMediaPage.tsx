@@ -100,6 +100,93 @@ export function AllMediaPage() {
     void refreshMedia();
   };
 
+  const handleAddToLibrary = async (libraryId: string) => {
+    try {
+      const assetIds = Array.from(selectedIds);
+      await libraryApi.addAssets(libraryId, assetIds);
+      setSnackbar({
+        open: true,
+        message: `Added ${assetIds.length} items to library`,
+        severity: 'success',
+      });
+      clearSelection();
+      void refreshMedia();
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: error instanceof Error ? error.message : 'Failed to add to library',
+        severity: 'error',
+      });
+    }
+  };
+
+  const handleEditMetadata = async (metadata: BulkMetadataUpdate) => {
+    try {
+      const assetIds = Array.from(selectedIds);
+      const updates = assetIds.map((assetId) => ({ assetId, ...metadata }));
+      const result = await mediaApi.bulkUpdateMetadata({ updates });
+
+      const successCount = result.updated.length;
+      const failCount = result.failed.length;
+
+      if (failCount === 0) {
+        setSnackbar({
+          open: true,
+          message: `Updated ${successCount} items`,
+          severity: 'success',
+        });
+      } else {
+        setSnackbar({
+          open: true,
+          message: `Updated ${successCount} items, ${failCount} failed`,
+          severity: 'error',
+        });
+      }
+
+      clearSelection();
+      void refreshMedia();
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: error instanceof Error ? error.message : 'Failed to update metadata',
+        severity: 'error',
+      });
+    }
+  };
+
+  const handleDelete = async () => {
+    try {
+      const assetIds = Array.from(selectedIds);
+      const result = await mediaApi.bulkDelete({ assetIds });
+
+      const successCount = result.deleted.length;
+      const failCount = result.failed.length;
+
+      if (failCount === 0) {
+        setSnackbar({
+          open: true,
+          message: `Deleted ${successCount} items`,
+          severity: 'success',
+        });
+      } else {
+        setSnackbar({
+          open: true,
+          message: `Deleted ${successCount} items, ${failCount} failed`,
+          severity: 'error',
+        });
+      }
+
+      clearSelection();
+      void refreshMedia();
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: error instanceof Error ? error.message : 'Failed to delete items',
+        severity: 'error',
+      });
+    }
+  };
+
   return (
     <Box>
       {/* Header */}
@@ -139,11 +226,13 @@ export function AllMediaPage() {
       {/* Filters */}
       <GalleryFilters filters={filters} onFilterChange={handleFilterChange} />
 
-      {/* Media grid */}
-      <MediaGrid
+      {/* Media grid with selection */}
+      <SelectableMediaGrid
         media={media}
         isLoading={mediaLoading}
+        selectedIds={selectedIds}
         onMediaClick={handleMediaClick}
+        onToggleSelection={toggleSelection}
         onUploadClick={() => {}}
       />
 
@@ -176,6 +265,46 @@ export function AllMediaPage() {
           onNavigate={handleLightboxNavigate}
         />
       )}
+
+      {/* Bulk actions toolbar */}
+      <BulkActionsToolbar
+        selectedCount={selectedCount}
+        onClose={clearSelection}
+        onAddToLibrary={() => setAddToLibraryDialogOpen(true)}
+        onEditMetadata={() => setEditMetadataDialogOpen(true)}
+        onDelete={() => setDeleteDialogOpen(true)}
+      />
+
+      {/* Bulk operation dialogs */}
+      <AddToLibraryDialog
+        open={addToLibraryDialogOpen}
+        selectedCount={selectedCount}
+        libraries={libraries}
+        onClose={() => setAddToLibraryDialogOpen(false)}
+        onAdd={handleAddToLibrary}
+      />
+
+      <BulkMetadataDialog
+        open={editMetadataDialogOpen}
+        selectedCount={selectedCount}
+        onClose={() => setEditMetadataDialogOpen(false)}
+        onApply={handleEditMetadata}
+      />
+
+      <BulkDeleteDialog
+        open={deleteDialogOpen}
+        selectedCount={selectedCount}
+        onClose={() => setDeleteDialogOpen(false)}
+        onConfirm={handleDelete}
+      />
+
+      {/* Snackbar for notifications */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        message={snackbar.message}
+      />
     </Box>
   );
 }
