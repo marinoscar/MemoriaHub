@@ -14,7 +14,7 @@ import type { MediaAssetDTO, PresignedUploadResponse } from '@memoriahub/shared'
 const mockInitiateUpload = vi.fn();
 const mockProxyUpload = vi.fn();
 const mockCompleteUpload = vi.fn();
-const mockListAssets = vi.fn();
+const mockListAssetsInLibrary = vi.fn();
 const mockGetAsset = vi.fn();
 const mockDeleteAsset = vi.fn();
 
@@ -23,7 +23,7 @@ vi.mock('../../../src/services/upload/upload.service.js', () => ({
     initiateUpload: (...args: unknown[]) => mockInitiateUpload(...args),
     proxyUpload: (...args: unknown[]) => mockProxyUpload(...args),
     completeUpload: (...args: unknown[]) => mockCompleteUpload(...args),
-    listAssets: (...args: unknown[]) => mockListAssets(...args),
+    listAssetsInLibrary: (...args: unknown[]) => mockListAssetsInLibrary(...args),
     getAsset: (...args: unknown[]) => mockGetAsset(...args),
     deleteAsset: (...args: unknown[]) => mockDeleteAsset(...args),
   },
@@ -37,7 +37,7 @@ describe('MediaController', () => {
 
   const mockAssetDTO: MediaAssetDTO = {
     id: 'asset-123',
-    libraryId: 'library-456',
+    ownerId: 'user-123',
     originalFilename: 'test-image.jpg',
     mediaType: 'image',
     mimeType: 'image/jpeg',
@@ -111,6 +111,8 @@ describe('MediaController', () => {
       });
       expect(mockRes.status).toHaveBeenCalledWith(201);
       expect(mockRes.json).toHaveBeenCalledWith({ data: mockAssetDTO });
+      expect(mockRes.status).toHaveBeenCalledWith(201);
+      expect(mockRes.json).toHaveBeenCalledWith({ data: mockAssetDTO });
     });
 
     it('returns 400 when no file is provided', async () => {
@@ -126,7 +128,7 @@ describe('MediaController', () => {
       expect(mockProxyUpload).not.toHaveBeenCalled();
     });
 
-    it('returns 400 when libraryId is missing', async () => {
+    it('uploads file successfully without libraryId (user-owned media)', async () => {
       const mockFile = {
         buffer: Buffer.from('test'),
         originalname: 'test.jpg',
@@ -137,13 +139,18 @@ describe('MediaController', () => {
       mockReq.file = mockFile as Express.Multer.File;
       mockReq.body = {};
 
+      mockProxyUpload.mockResolvedValue(mockAssetDTO);
+
       await controller.proxyUpload(mockReq as Request, mockRes as Response, mockNext);
 
-      expect(mockRes.status).toHaveBeenCalledWith(400);
-      expect(mockRes.json).toHaveBeenCalledWith({
-        error: { code: 'MISSING_LIBRARY_ID', message: 'libraryId is required' },
+      expect(mockProxyUpload).toHaveBeenCalledWith('user-123', null, {
+        buffer: mockFile.buffer,
+        originalname: 'test.jpg',
+        mimetype: 'image/jpeg',
+        size: 1024,
       });
-      expect(mockProxyUpload).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(201);
+      expect(mockRes.json).toHaveBeenCalledWith({ data: mockAssetDTO });
     });
 
     it('passes errors to next middleware', async () => {
@@ -227,7 +234,7 @@ describe('MediaController', () => {
     });
   });
 
-  describe('listMedia', () => {
+  describe('listMediaInLibrary', () => {
     it('lists media assets in library', async () => {
       mockReq.params = { libraryId: 'library-456' };
       mockReq.query = { page: '1', limit: '20' };
@@ -239,11 +246,11 @@ describe('MediaController', () => {
         limit: 20,
       };
 
-      mockListAssets.mockResolvedValue(mockResult);
+      mockListAssetsInLibrary.mockResolvedValue(mockResult);
 
-      await controller.listMedia(mockReq as Request, mockRes as Response, mockNext);
+      await controller.listMediaInLibrary(mockReq as Request, mockRes as Response, mockNext);
 
-      expect(mockListAssets).toHaveBeenCalledWith('user-123', 'library-456', {
+      expect(mockListAssetsInLibrary).toHaveBeenCalledWith('user-123', 'library-456', {
         page: 1,
         limit: 20,
         status: undefined,
@@ -274,11 +281,11 @@ describe('MediaController', () => {
         sortOrder: 'desc',
       };
 
-      mockListAssets.mockResolvedValue({ assets: [], total: 0, page: 1, limit: 50 });
+      mockListAssetsInLibrary.mockResolvedValue({ assets: [], total: 0, page: 1, limit: 50 });
 
-      await controller.listMedia(mockReq as Request, mockRes as Response, mockNext);
+      await controller.listMediaInLibrary(mockReq as Request, mockRes as Response, mockNext);
 
-      expect(mockListAssets).toHaveBeenCalledWith('user-123', 'library-456', expect.objectContaining({
+      expect(mockListAssetsInLibrary).toHaveBeenCalledWith('user-123', 'library-456', expect.objectContaining({
         mediaType: 'image',
         country: 'USA',
         cameraMake: 'Apple',

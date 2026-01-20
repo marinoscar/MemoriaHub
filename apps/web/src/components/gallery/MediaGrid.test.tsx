@@ -6,7 +6,7 @@ import type { MediaAssetDTO } from '@memoriahub/shared';
 const mockMedia: MediaAssetDTO[] = [
   {
     id: 'media-1',
-    libraryId: 'lib-1',
+    ownerId: 'user-1',
     originalFilename: 'photo1.jpg',
     mediaType: 'image',
     mimeType: 'image/jpeg',
@@ -34,7 +34,7 @@ const mockMedia: MediaAssetDTO[] = [
   },
   {
     id: 'media-2',
-    libraryId: 'lib-1',
+    ownerId: 'user-1',
     originalFilename: 'photo2.jpg',
     mediaType: 'image',
     mimeType: 'image/jpeg',

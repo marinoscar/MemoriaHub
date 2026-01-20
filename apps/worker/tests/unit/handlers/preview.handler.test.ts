@@ -181,7 +181,7 @@ describe('PreviewHandler', () => {
       );
       expect(mediaAssetRepository.updatePreviewKey).toHaveBeenCalledWith(
         'asset-456',
-        'libraries/library-123/previews/asset-456.jpg'
+        'users/owner-123/previews/asset-456.jpg'
       );
 
       expect(result.outputKey).toBe('users/owner-123/previews/asset-456.jpg');

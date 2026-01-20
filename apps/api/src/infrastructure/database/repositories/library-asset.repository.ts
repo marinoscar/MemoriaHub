@@ -1,4 +1,4 @@
-import type { LibraryAsset, MediaAsset, MediaType, MediaAssetStatus } from '@memoriahub/shared';
+import type { LibraryAsset, MediaAssetStatus, MediaType } from '@memoriahub/shared';
 import { query } from '../client.js';
 import { logger } from '../../logging/logger.js';
 import { getTraceId } from '../../logging/request-context.js';
@@ -74,44 +74,6 @@ export interface ListLibraryAssetsOptions {
   mediaType?: MediaType;
   sortBy?: 'addedAt' | 'capturedAt' | 'filename';
   sortOrder?: 'asc' | 'desc';
-}
-
-/**
- * Media asset row type (for join queries)
- */
-interface MediaAssetRow {
-  id: string;
-  owner_id: string;
-  storage_key: string;
-  storage_bucket: string;
-  thumbnail_key: string | null;
-  preview_key: string | null;
-  original_filename: string;
-  media_type: MediaType;
-  mime_type: string;
-  file_size: string;
-  file_source: string;
-  width: number | null;
-  height: number | null;
-  duration_seconds: string | null;
-  camera_make: string | null;
-  camera_model: string | null;
-  latitude: string | null;
-  longitude: string | null;
-  country: string | null;
-  state: string | null;
-  city: string | null;
-  location_name: string | null;
-  captured_at_utc: Date | null;
-  timezone_offset: number | null;
-  exif_data: Record<string, unknown>;
-  faces: unknown[];
-  tags: unknown[];
-  status: MediaAssetStatus;
-  error_message: string | null;
-  trace_id: string | null;
-  created_at: Date;
-  updated_at: Date;
 }
 
 /**

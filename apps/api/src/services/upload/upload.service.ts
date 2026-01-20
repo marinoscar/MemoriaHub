@@ -502,8 +502,8 @@ export class UploadService {
     const result = await mediaAssetRepository.findByLibraryId(libraryId, {
       page: options.page,
       limit: options.limit,
-      status: options.status as Parameters<typeof mediaAssetRepository.findByLibraryId>[1]['status'],
-      mediaType: options.mediaType as Parameters<typeof mediaAssetRepository.findByLibraryId>[1]['mediaType'],
+      status: options.status as 'UPLOADED' | 'METADATA_EXTRACTED' | 'DERIVATIVES_READY' | 'ENRICHED' | 'INDEXED' | 'READY' | 'ERROR' | undefined,
+      mediaType: options.mediaType as 'image' | 'video' | undefined,
       country: options.country,
       state: options.state,
       city: options.city,

@@ -110,6 +110,8 @@ vi.mock('../../src/api/validators/media.validator.js', () => ({
   validateInitiateUpload: (_req: unknown, _res: unknown, next: () => void) => next(),
   validateCompleteUpload: (_req: unknown, _res: unknown, next: () => void) => next(),
   validateListMediaQuery: (_req: unknown, _res: unknown, next: () => void) => next(),
+  validateShareMedia: (_req: unknown, _res: unknown, next: () => void) => next(),
+  validateRevokeShare: (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
 
 // Mock upload service
@@ -126,8 +128,28 @@ vi.mock('../../src/services/upload/upload.service.js', () => ({
     proxyUpload: (...args: unknown[]) => mockProxyUpload(...args),
     completeUpload: (...args: unknown[]) => mockCompleteUpload(...args),
     listAssets: (...args: unknown[]) => mockListAssets(...args),
+    listAssetsInLibrary: (...args: unknown[]) => mockListAssets(...args),
+    listAllAccessibleAssets: (...args: unknown[]) => mockListAssets(...args),
     getAsset: (...args: unknown[]) => mockGetAsset(...args),
     deleteAsset: (...args: unknown[]) => mockDeleteAsset(...args),
+  },
+}));
+
+// Mock media share service
+vi.mock('../../src/services/media-share/media-share.service.js', () => ({
+  mediaShareService: {
+    shareMedia: vi.fn().mockResolvedValue([]),
+    revokeShare: vi.fn().mockResolvedValue(undefined),
+    listShares: vi.fn().mockResolvedValue([]),
+  },
+}));
+
+// Mock library asset service
+vi.mock('../../src/services/library-asset/library-asset.service.js', () => ({
+  libraryAssetService: {
+    getLibrariesContainingAsset: vi.fn().mockResolvedValue([]),
+    addAssetToLibrary: vi.fn().mockResolvedValue({}),
+    removeAssetFromLibrary: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -158,7 +180,7 @@ describe('Media Routes Integration Tests', () => {
 
   const mockAssetDTO = {
     id: 'asset-789',
-    libraryId: 'library-456',
+    ownerId: 'user-123',
     originalFilename: 'test-image.jpg',
     mediaType: 'image',
     mimeType: 'image/jpeg',
@@ -244,7 +266,9 @@ describe('Media Routes Integration Tests', () => {
       expect(response.body.error.code).toBe('MISSING_FILE');
     });
 
-    it('returns 400 when libraryId is missing', async () => {
+    it('returns 201 when libraryId is omitted (user-owned media)', async () => {
+      mockProxyUpload.mockResolvedValue(mockAssetDTO);
+
       const response = await request(app)
         .post('/api/media/upload/proxy')
         .set('Authorization', `Bearer ${userToken}`)
@@ -253,8 +277,9 @@ describe('Media Routes Integration Tests', () => {
           contentType: 'image/jpeg',
         });
 
-      expect(response.status).toBe(400);
-      expect(response.body.error.code).toBe('MISSING_LIBRARY_ID');
+      expect(response.status).toBe(201);
+      expect(response.body.data).toBeDefined();
+      expect(mockProxyUpload).toHaveBeenCalledWith('user-123', null, expect.anything());
     });
 
     it('rejects non-media file types', async () => {

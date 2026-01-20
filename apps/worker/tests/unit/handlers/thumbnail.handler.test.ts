@@ -181,7 +181,7 @@ describe('ThumbnailHandler', () => {
       );
       expect(mediaAssetRepository.updateThumbnailKey).toHaveBeenCalledWith(
         'asset-456',
-        'libraries/library-123/thumbnails/asset-456.jpg'
+        'users/owner-123/thumbnails/asset-456.jpg'
       );
 
       expect(result.outputKey).toBe('users/owner-123/thumbnails/asset-456.jpg');

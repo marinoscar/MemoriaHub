@@ -146,8 +146,8 @@ describe('UploadService', () => {
 
   const createMockAsset = (overrides: Partial<MediaAsset> = {}): MediaAsset => ({
     id: 'asset-789',
-    libraryId: mockLibraryId,
-    storageKey: 'libraries/library-456/originals/asset-789.jpg',
+    ownerId: mockUserId,
+    storageKey: 'users/user-123/originals/asset-789.jpg',
     storageBucket: 'test-bucket',
     thumbnailKey: null,
     previewKey: null,
@@ -196,9 +196,7 @@ describe('UploadService', () => {
       size: 1024,
     };
 
-    it('uploads file successfully through proxy', async () => {
-      mockCanUserUploadToLibrary.mockResolvedValue(true);
-
+    it('uploads file successfully through proxy without library', async () => {
       const createdAsset = createMockAsset();
       mockMediaAssetCreate.mockResolvedValue(createdAsset);
       mockIngestionEventCreate.mockResolvedValue({});
@@ -226,14 +224,14 @@ describe('UploadService', () => {
       mockIngestionEventComplete.mockResolvedValue(undefined);
       mockProcessingJobCreateMany.mockResolvedValue(undefined);
 
-      const result = await uploadService.proxyUpload(mockUserId, mockLibraryId, mockFile);
+      // Upload without library (null)
+      const result = await uploadService.proxyUpload(mockUserId, null, mockFile);
 
-      expect(mockCanUserUploadToLibrary).toHaveBeenCalledWith(mockUserId, mockLibraryId);
       expect(mockMediaAssetCreate).toHaveBeenCalled();
       expect(mockIngestionEventCreate).toHaveBeenCalled();
       expect(mockStoragePutObject).toHaveBeenCalledWith(
         'test-bucket',
-        expect.stringContaining('libraries/library-456/originals/'),
+        expect.stringContaining('users/user-123/originals/'),
         mockFile.buffer,
         expect.objectContaining({
           contentType: 'image/jpeg',
@@ -249,7 +247,33 @@ describe('UploadService', () => {
       expect(result.originalFilename).toBe('test-image.jpg');
     });
 
-    it('throws ForbiddenError when user lacks upload permission', async () => {
+    it('uploads file and adds to library when libraryId provided', async () => {
+      mockCanUserUploadToLibrary.mockResolvedValue(true);
+
+      const createdAsset = createMockAsset();
+      mockMediaAssetCreate.mockResolvedValue(createdAsset);
+      mockIngestionEventCreate.mockResolvedValue({});
+      mockStoragePutObject.mockResolvedValue(undefined);
+      mockExtractMetadata.mockResolvedValue({
+        width: 1920,
+        height: 1080,
+        exifData: {},
+      });
+      mockLibraryAssetAdd.mockResolvedValue({});
+
+      const updatedAsset = createMockAsset({ status: 'METADATA_EXTRACTED' });
+      mockMediaAssetUpdate.mockResolvedValue(updatedAsset);
+      mockIngestionEventComplete.mockResolvedValue(undefined);
+      mockProcessingJobCreateMany.mockResolvedValue(undefined);
+
+      const result = await uploadService.proxyUpload(mockUserId, mockLibraryId, mockFile);
+
+      expect(mockCanUserUploadToLibrary).toHaveBeenCalledWith(mockUserId, mockLibraryId);
+      expect(mockLibraryAssetAdd).toHaveBeenCalled();
+      expect(result).toBeDefined();
+    });
+
+    it('throws ForbiddenError when user lacks upload permission to library', async () => {
       mockCanUserUploadToLibrary.mockResolvedValue(false);
 
       await expect(uploadService.proxyUpload(mockUserId, mockLibraryId, mockFile))
@@ -260,8 +284,6 @@ describe('UploadService', () => {
     });
 
     it('throws ValidationError for unsupported file type', async () => {
-      mockCanUserUploadToLibrary.mockResolvedValue(true);
-
       const unsupportedFile = {
         buffer: Buffer.from('test'),
         originalname: 'document.pdf',
@@ -269,21 +291,19 @@ describe('UploadService', () => {
         size: 1024,
       };
 
-      await expect(uploadService.proxyUpload(mockUserId, mockLibraryId, unsupportedFile))
+      await expect(uploadService.proxyUpload(mockUserId, null, unsupportedFile))
         .rejects.toThrow('Unsupported file type');
 
       expect(mockStoragePutObject).not.toHaveBeenCalled();
     });
 
     it('marks asset as failed when S3 upload fails', async () => {
-      mockCanUserUploadToLibrary.mockResolvedValue(true);
-
       const createdAsset = createMockAsset();
       mockMediaAssetCreate.mockResolvedValue(createdAsset);
       mockIngestionEventCreate.mockResolvedValue({});
       mockStoragePutObject.mockRejectedValue(new Error('S3 upload failed'));
 
-      await expect(uploadService.proxyUpload(mockUserId, mockLibraryId, mockFile))
+      await expect(uploadService.proxyUpload(mockUserId, null, mockFile))
         .rejects.toThrow('S3 upload failed');
 
       expect(mockIngestionEventFail).toHaveBeenCalledWith('asset-789', 'Failed to upload to storage');
@@ -291,8 +311,6 @@ describe('UploadService', () => {
     });
 
     it('continues upload even when metadata extraction fails', async () => {
-      mockCanUserUploadToLibrary.mockResolvedValue(true);
-
       const createdAsset = createMockAsset();
       mockMediaAssetCreate.mockResolvedValue(createdAsset);
       mockIngestionEventCreate.mockResolvedValue({});
@@ -304,7 +322,7 @@ describe('UploadService', () => {
       mockIngestionEventComplete.mockResolvedValue(undefined);
       mockProcessingJobCreateMany.mockResolvedValue(undefined);
 
-      const result = await uploadService.proxyUpload(mockUserId, mockLibraryId, mockFile);
+      const result = await uploadService.proxyUpload(mockUserId, null, mockFile);
 
       expect(result).toBeDefined();
       expect(result.id).toBe('asset-789');
@@ -312,8 +330,6 @@ describe('UploadService', () => {
     });
 
     it('performs geocoding when GPS coordinates are present', async () => {
-      mockCanUserUploadToLibrary.mockResolvedValue(true);
-
       const createdAsset = createMockAsset();
       mockMediaAssetCreate.mockResolvedValue(createdAsset);
       mockIngestionEventCreate.mockResolvedValue({});
@@ -346,7 +362,7 @@ describe('UploadService', () => {
       mockIngestionEventComplete.mockResolvedValue(undefined);
       mockProcessingJobCreateMany.mockResolvedValue(undefined);
 
-      await uploadService.proxyUpload(mockUserId, mockLibraryId, mockFile);
+      await uploadService.proxyUpload(mockUserId, null, mockFile);
 
       expect(mockReverseGeocode).toHaveBeenCalledWith(37.7749, -122.4194);
       expect(mockMediaAssetUpdate).toHaveBeenCalledWith(
@@ -360,8 +376,6 @@ describe('UploadService', () => {
     });
 
     it('handles video files correctly', async () => {
-      mockCanUserUploadToLibrary.mockResolvedValue(true);
-
       const videoFile = {
         buffer: Buffer.from('video content'),
         originalname: 'test-video.mp4',
@@ -395,7 +409,7 @@ describe('UploadService', () => {
       mockIngestionEventComplete.mockResolvedValue(undefined);
       mockProcessingJobCreateMany.mockResolvedValue(undefined);
 
-      const result = await uploadService.proxyUpload(mockUserId, mockLibraryId, videoFile);
+      const result = await uploadService.proxyUpload(mockUserId, null, videoFile);
 
       expect(mockStoragePutObject).toHaveBeenCalledWith(
         'test-bucket',
@@ -409,8 +423,6 @@ describe('UploadService', () => {
     });
 
     it('queues processing jobs after successful upload', async () => {
-      mockCanUserUploadToLibrary.mockResolvedValue(true);
-
       const createdAsset = createMockAsset();
       mockMediaAssetCreate.mockResolvedValue(createdAsset);
       mockIngestionEventCreate.mockResolvedValue({});
@@ -422,7 +434,7 @@ describe('UploadService', () => {
       mockIngestionEventComplete.mockResolvedValue(undefined);
       mockProcessingJobCreateMany.mockResolvedValue(undefined);
 
-      await uploadService.proxyUpload(mockUserId, mockLibraryId, mockFile);
+      await uploadService.proxyUpload(mockUserId, null, mockFile);
 
       expect(mockProcessingJobCreateMany).toHaveBeenCalledWith(
         expect.arrayContaining([
@@ -433,8 +445,6 @@ describe('UploadService', () => {
     });
 
     it('accepts custom source parameter', async () => {
-      mockCanUserUploadToLibrary.mockResolvedValue(true);
-
       const createdAsset = createMockAsset({ fileSource: 'api' as FileSource });
       mockMediaAssetCreate.mockResolvedValue(createdAsset);
       mockIngestionEventCreate.mockResolvedValue({});
@@ -446,7 +456,7 @@ describe('UploadService', () => {
       mockIngestionEventComplete.mockResolvedValue(undefined);
       mockProcessingJobCreateMany.mockResolvedValue(undefined);
 
-      await uploadService.proxyUpload(mockUserId, mockLibraryId, mockFile, 'api');
+      await uploadService.proxyUpload(mockUserId, null, mockFile, 'api');
 
       expect(mockMediaAssetCreate).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -458,32 +468,47 @@ describe('UploadService', () => {
 
   describe('initiateUpload', () => {
     const mockInput = {
-      libraryId: mockLibraryId,
       filename: 'test-image.jpg',
       mimeType: 'image/jpeg',
       fileSize: 1024,
     };
 
-    it('creates asset and returns presigned URL', async () => {
+    it('creates asset and returns presigned URL without library', async () => {
+      const createdAsset = createMockAsset();
+      mockMediaAssetCreate.mockResolvedValue(createdAsset);
+      mockIngestionEventCreate.mockResolvedValue({});
+      mockStorageGetPresignedUploadUrl.mockResolvedValue('https://s3.example.com/presigned-upload-url');
+
+      const result = await uploadService.initiateUpload(mockUserId, mockInput, 'web');
+
+      expect(result.assetId).toBe('asset-789');
+      expect(result.uploadUrl).toBe('https://s3.example.com/presigned-upload-url');
+      expect(result.storageKey).toContain('users/user-123/originals/');
+      expect(result.expiresAt).toBeDefined();
+    });
+
+    it('creates asset and adds to library when libraryId provided', async () => {
       mockCanUserUploadToLibrary.mockResolvedValue(true);
 
       const createdAsset = createMockAsset();
       mockMediaAssetCreate.mockResolvedValue(createdAsset);
       mockIngestionEventCreate.mockResolvedValue({});
       mockStorageGetPresignedUploadUrl.mockResolvedValue('https://s3.example.com/presigned-upload-url');
+      mockLibraryAssetAdd.mockResolvedValue({});
 
-      const result = await uploadService.initiateUpload(mockUserId, mockInput);
+      const inputWithLibrary = { ...mockInput, libraryId: mockLibraryId };
+      const result = await uploadService.initiateUpload(mockUserId, inputWithLibrary, 'web');
 
+      expect(mockCanUserUploadToLibrary).toHaveBeenCalledWith(mockUserId, mockLibraryId);
+      expect(mockLibraryAssetAdd).toHaveBeenCalled();
       expect(result.assetId).toBe('asset-789');
-      expect(result.uploadUrl).toBe('https://s3.example.com/presigned-upload-url');
-      expect(result.storageKey).toContain('libraries/library-456/originals/');
-      expect(result.expiresAt).toBeDefined();
     });
 
-    it('throws ForbiddenError when user lacks permission', async () => {
+    it('throws ForbiddenError when user lacks permission to library', async () => {
       mockCanUserUploadToLibrary.mockResolvedValue(false);
 
-      await expect(uploadService.initiateUpload(mockUserId, mockInput))
+      const inputWithLibrary = { ...mockInput, libraryId: mockLibraryId };
+      await expect(uploadService.initiateUpload(mockUserId, inputWithLibrary, 'web'))
         .rejects.toThrow('You do not have permission to upload to this library');
     });
   });
@@ -492,7 +517,7 @@ describe('UploadService', () => {
     it('returns asset DTO with presigned URLs', async () => {
       const asset = createMockAsset({ thumbnailKey: 'thumb.jpg', previewKey: 'preview.jpg' });
       mockMediaAssetFindById.mockResolvedValue(asset);
-      mockCanUserAccessLibrary.mockResolvedValue(true);
+      mockMediaAssetCanAccess.mockResolvedValue(true);
 
       const result = await uploadService.getAsset(mockUserId, 'asset-789');
 
@@ -510,7 +535,7 @@ describe('UploadService', () => {
     it('throws NotFoundError when user lacks access', async () => {
       const asset = createMockAsset();
       mockMediaAssetFindById.mockResolvedValue(asset);
-      mockCanUserAccessLibrary.mockResolvedValue(false);
+      mockMediaAssetCanAccess.mockResolvedValue(false);
 
       await expect(uploadService.getAsset(mockUserId, 'asset-789'))
         .rejects.toThrow('Asset not found');
@@ -518,14 +543,14 @@ describe('UploadService', () => {
   });
 
   describe('deleteAsset', () => {
-    it('deletes asset from storage and database', async () => {
+    it('deletes asset from storage and database when owner', async () => {
       const asset = createMockAsset({ thumbnailKey: 'thumb.jpg', previewKey: 'preview.jpg' });
       mockMediaAssetFindById.mockResolvedValue(asset);
-      mockCanUserUploadToLibrary.mockResolvedValue(true);
       mockStorageDeleteObject.mockResolvedValue(undefined);
       mockProcessingJobCancelByAssetId.mockResolvedValue(undefined);
       mockMediaAssetDelete.mockResolvedValue(undefined);
 
+      // User is the owner (mockUserId matches asset.ownerId)
       await uploadService.deleteAsset(mockUserId, 'asset-789');
 
       expect(mockStorageDeleteObject).toHaveBeenCalledTimes(3); // original, thumbnail, preview
@@ -540,13 +565,12 @@ describe('UploadService', () => {
         .rejects.toThrow('Asset not found');
     });
 
-    it('throws ForbiddenError when user lacks permission', async () => {
-      const asset = createMockAsset();
+    it('throws ForbiddenError when user is not owner', async () => {
+      const asset = createMockAsset({ ownerId: 'different-user' });
       mockMediaAssetFindById.mockResolvedValue(asset);
-      mockCanUserUploadToLibrary.mockResolvedValue(false);
 
       await expect(uploadService.deleteAsset(mockUserId, 'asset-789'))
-        .rejects.toThrow('You do not have permission to delete this asset');
+        .rejects.toThrow('Only the owner can delete this asset');
     });
   });
 });

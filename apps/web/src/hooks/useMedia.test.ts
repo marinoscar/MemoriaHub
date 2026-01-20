@@ -14,7 +14,7 @@ vi.mock('../services/api', () => ({
 const mockMediaList: MediaAssetDTO[] = [
   {
     id: 'media-1',
-    libraryId: 'lib-1',
+    ownerId: 'user-1',
     originalFilename: 'photo1.jpg',
     mediaType: 'image',
     mimeType: 'image/jpeg',
