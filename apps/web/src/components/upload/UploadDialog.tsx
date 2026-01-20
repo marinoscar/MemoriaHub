@@ -33,8 +33,8 @@ import { useUpload, SUPPORTED_FILE_TYPES, type UploadFileStatus } from '../../ho
 interface UploadDialogProps {
   open: boolean;
   onClose: () => void;
-  libraryId: string;
-  libraryName: string;
+  libraryId?: string;
+  libraryName?: string;
   onUploadComplete?: () => void;
 }
 
@@ -153,7 +153,7 @@ export function UploadDialog({
       <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Box>
           <Typography variant="h6" component="span">
-            Upload to {libraryName}
+            {libraryName ? `Upload to ${libraryName}` : 'Upload Media'}
           </Typography>
           {files.length > 0 && (
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
