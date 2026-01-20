@@ -1,40 +1,32 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { AddToLibraryDialog } from '../AddToLibraryDialog';
+import { AddToLibraryDialog } from './AddToLibraryDialog';
+import { createMockLibrary } from '../../test/test-helpers';
 import type { LibraryDTO } from '@memoriahub/shared';
 
 // Mock libraries
 const mockLibraries: LibraryDTO[] = [
-  {
-    id: 'lib-1',
-    userId: 'user-1',
-    name: 'Family Photos',
+  createMockLibrary('lib-1', 'Family Photos', {
     description: 'Family vacation photos',
     visibility: 'private',
     assetCount: 100,
     createdAt: '2024-01-01T00:00:00Z',
     updatedAt: '2024-01-01T00:00:00Z',
-  },
-  {
-    id: 'lib-2',
-    userId: 'user-1',
-    name: 'Work Events',
+  }),
+  createMockLibrary('lib-2', 'Work Events', {
     description: 'Company events and meetings',
     visibility: 'shared',
     assetCount: 50,
     createdAt: '2024-01-02T00:00:00Z',
     updatedAt: '2024-01-02T00:00:00Z',
-  },
-  {
-    id: 'lib-3',
-    userId: 'user-1',
-    name: 'Travel',
+  }),
+  createMockLibrary('lib-3', 'Travel', {
     description: 'Travel photos from around the world',
     visibility: 'private',
     assetCount: 200,
     createdAt: '2024-01-03T00:00:00Z',
     updatedAt: '2024-01-03T00:00:00Z',
-  },
+  }),
 ];
 
 describe('AddToLibraryDialog', () => {

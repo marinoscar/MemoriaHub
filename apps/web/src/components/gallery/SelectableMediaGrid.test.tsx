@@ -1,47 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { SelectableMediaGrid } from '../SelectableMediaGrid';
+import { SelectableMediaGrid } from './SelectableMediaGrid';
+import { createMockMedia } from '../../test/test-helpers';
 import type { MediaAssetDTO } from '@memoriahub/shared';
 
-// Mock media assets
-const createMockMedia = (id: string, filename: string): MediaAssetDTO => ({
-  id,
-  userId: 'user-1',
-  libraryId: null,
-  filename,
-  originalFilename: filename,
-  mimeType: 'image/jpeg',
-  fileSize: 1024000,
-  storageBucket: 'test-bucket',
-  storageKey: `test/${id}.jpg`,
-  thumbnailUrl: `https://example.com/${id}-thumb.jpg`,
-  previewUrl: `https://example.com/${id}-preview.jpg`,
-  fullUrl: `https://example.com/${id}-full.jpg`,
-  status: 'ready',
-  width: 1920,
-  height: 1080,
-  capturedAtUtc: '2024-01-01T12:00:00Z',
-  latitude: null,
-  longitude: null,
-  country: null,
-  state: null,
-  city: null,
-  locationName: null,
-  cameraMake: null,
-  cameraModel: null,
-  fNumber: null,
-  exposureTime: null,
-  focalLength: null,
-  iso: null,
-  createdAt: '2024-01-01T12:00:00Z',
-  updatedAt: '2024-01-01T12:00:00Z',
-});
-
 const mockMediaList: MediaAssetDTO[] = [
-  createMockMedia('asset-1', 'image1.jpg'),
-  createMockMedia('asset-2', 'image2.jpg'),
-  createMockMedia('asset-3', 'image3.jpg'),
-  createMockMedia('asset-4', 'image4.jpg'),
+  createMockMedia('asset-1', { originalFilename: 'image1.jpg' }),
+  createMockMedia('asset-2', { originalFilename: 'image2.jpg' }),
+  createMockMedia('asset-3', { originalFilename: 'image3.jpg' }),
+  createMockMedia('asset-4', { originalFilename: 'image4.jpg' }),
 ];
 
 describe('SelectableMediaGrid', () => {
