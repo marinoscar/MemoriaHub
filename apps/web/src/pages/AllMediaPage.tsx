@@ -38,7 +38,6 @@ export function AllMediaPage() {
   const {
     selectedIds,
     toggleSelection,
-    selectAll,
     clearSelection,
     selectedCount,
   } = useMediaSelection();
@@ -102,7 +101,7 @@ export function AllMediaPage() {
 
   const handleAddToLibrary = async (libraryId: string) => {
     try {
-      const assetIds = Array.from(selectedIds);
+      const assetIds: string[] = Array.from(selectedIds);
       await libraryApi.addAssets(libraryId, assetIds);
       setSnackbar({
         open: true,
@@ -122,7 +121,7 @@ export function AllMediaPage() {
 
   const handleEditMetadata = async (metadata: BulkMetadataUpdate) => {
     try {
-      const assetIds = Array.from(selectedIds);
+      const assetIds: string[] = Array.from(selectedIds);
       const updates = assetIds.map((assetId) => ({ assetId, ...metadata }));
       const result = await mediaApi.bulkUpdateMetadata({ updates });
 
@@ -156,7 +155,7 @@ export function AllMediaPage() {
 
   const handleDelete = async () => {
     try {
-      const assetIds = Array.from(selectedIds);
+      const assetIds: string[] = Array.from(selectedIds);
       const result = await mediaApi.bulkDelete({ assetIds });
 
       const successCount = result.deleted.length;

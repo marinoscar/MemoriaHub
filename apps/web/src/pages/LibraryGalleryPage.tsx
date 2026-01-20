@@ -68,7 +68,6 @@ export function LibraryGalleryPage() {
   const {
     selectedIds,
     toggleSelection,
-    selectAll,
     clearSelection,
     selectedCount,
   } = useMediaSelection();
