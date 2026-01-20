@@ -505,6 +505,49 @@ export interface RemoveAssetFromLibraryInput {
 }
 
 // =============================================================================
+// Bulk Operations Types
+// =============================================================================
+
+/**
+ * Input for bulk updating metadata
+ */
+export interface BulkUpdateMetadataInput {
+  updates: Array<{
+    assetId: string;
+    capturedAtUtc?: string;
+    latitude?: number | null;
+    longitude?: number | null;
+    country?: string | null;
+    state?: string | null;
+    city?: string | null;
+    locationName?: string | null;
+  }>;
+}
+
+/**
+ * Result from bulk metadata update
+ */
+export interface BulkUpdateMetadataResult {
+  updated: string[];
+  failed: Array<{ assetId: string; error: string }>;
+}
+
+/**
+ * Input for bulk delete
+ */
+export interface BulkDeleteInput {
+  assetIds: string[];
+}
+
+/**
+ * Result from bulk delete
+ */
+export interface BulkDeleteResult {
+  deleted: string[];
+  failed: Array<{ assetId: string; error: string }>;
+}
+
+// =============================================================================
 // Access Control Types
 // =============================================================================
 

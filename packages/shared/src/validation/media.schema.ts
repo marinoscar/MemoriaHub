@@ -152,6 +152,24 @@ export const updateMediaMetadataSchema = z.object({
 });
 
 /**
+ * Bulk update media metadata input schema
+ */
+export const bulkUpdateMediaMetadataSchema = z.object({
+  updates: z.array(
+    z.object({
+      assetId: z.string().uuid('Invalid asset ID'),
+      capturedAtUtc: z.string().datetime().optional(),
+      latitude: z.number().min(-90).max(90).nullable().optional(),
+      longitude: z.number().min(-180).max(180).nullable().optional(),
+      country: z.string().max(100).nullable().optional(),
+      state: z.string().max(100).nullable().optional(),
+      city: z.string().max(100).nullable().optional(),
+      locationName: z.string().max(255).nullable().optional(),
+    })
+  ).min(1, 'At least one update is required').max(100, 'Maximum 100 updates allowed'),
+});
+
+/**
  * Move media to library input schema
  */
 export const moveMediaSchema = z.object({
@@ -191,6 +209,7 @@ export type ListMediaQueryInput = z.infer<typeof listMediaQuerySchema>;
 export type ListMediaByLibraryParamsInput = z.infer<typeof listMediaByLibraryParamsSchema>;
 export type BulkDeleteMediaInput = z.infer<typeof bulkDeleteMediaSchema>;
 export type UpdateMediaMetadataInput = z.infer<typeof updateMediaMetadataSchema>;
+export type BulkUpdateMediaMetadataInput = z.infer<typeof bulkUpdateMediaMetadataSchema>;
 export type MoveMediaInput = z.infer<typeof moveMediaSchema>;
 export type ShareMediaInput = z.infer<typeof shareMediaSchema>;
 export type RevokeShareParamsInput = z.infer<typeof revokeShareParamsSchema>;
