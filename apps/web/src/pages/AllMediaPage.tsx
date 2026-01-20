@@ -5,11 +5,19 @@ import {
   Button,
   Alert,
   CircularProgress,
+  Snackbar,
 } from '@mui/material';
 import { useAllMedia } from '../hooks/useAllMedia';
-import { useLibraries } from '../hooks';
-import { MediaGrid, GalleryFilters, MediaLightbox, type FilterState } from '../components/gallery';
+import { useLibraries, useMediaSelection } from '../hooks';
+import { GalleryFilters, MediaLightbox, type FilterState } from '../components/gallery';
+import { SelectableMediaGrid } from '../components/gallery/SelectableMediaGrid';
+import { BulkActionsToolbar } from '../components/gallery/BulkActionsToolbar';
 import { UploadButton } from '../components/upload/UploadButton';
+import { BulkMetadataDialog, type BulkMetadataUpdate } from '../components/dialogs/BulkMetadataDialog';
+import { AddToLibraryDialog } from '../components/dialogs/AddToLibraryDialog';
+import { BulkDeleteDialog } from '../components/dialogs/BulkDeleteDialog';
+import { mediaApi } from '../services/api/media.api';
+import { libraryApi } from '../services/api/library.api';
 
 /**
  * All Media page - landing page showing all accessible media
@@ -25,6 +33,27 @@ export function AllMediaPage() {
 
   // Lightbox state
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
+
+  // Selection state
+  const {
+    selectedIds,
+    toggleSelection,
+    selectAll,
+    clearSelection,
+    selectedCount,
+  } = useMediaSelection();
+
+  // Dialog state
+  const [addToLibraryDialogOpen, setAddToLibraryDialogOpen] = useState(false);
+  const [editMetadataDialogOpen, setEditMetadataDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+
+  // Snackbar state
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
+    open: false,
+    message: '',
+    severity: 'success',
+  });
 
   // Fetch all accessible media with filters
   const {
