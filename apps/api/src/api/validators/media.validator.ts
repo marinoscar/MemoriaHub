@@ -12,6 +12,8 @@ import {
   listMediaQuerySchema,
   listMediaByLibraryParamsSchema,
   shareMediaSchema,
+  bulkUpdateMediaMetadataSchema,
+  bulkDeleteMediaSchema,
 } from '@memoriahub/shared';
 import { ValidationError } from '../../domain/errors/ValidationError.js';
 
@@ -98,6 +100,46 @@ export function validateShareMedia(
 ): void {
   try {
     shareMediaSchema.parse(req.body);
+    next();
+  } catch (error) {
+    if (isZodError(error)) {
+      next(ValidationError.fromZodError(error));
+      return;
+    }
+    next(error);
+  }
+}
+
+/**
+ * Validate bulk update metadata request body
+ */
+export function validateBulkUpdateMetadata(
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): void {
+  try {
+    bulkUpdateMediaMetadataSchema.parse(req.body);
+    next();
+  } catch (error) {
+    if (isZodError(error)) {
+      next(ValidationError.fromZodError(error));
+      return;
+    }
+    next(error);
+  }
+}
+
+/**
+ * Validate bulk delete request body
+ */
+export function validateBulkDelete(
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): void {
+  try {
+    bulkDeleteMediaSchema.parse(req.body);
     next();
   } catch (error) {
     if (isZodError(error)) {
