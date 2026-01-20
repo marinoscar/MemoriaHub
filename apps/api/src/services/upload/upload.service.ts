@@ -7,6 +7,9 @@ import type {
   InitiateUploadInput,
   ExtractedMetadata,
   GeocodingResult,
+  BulkUpdateMetadataInput,
+  BulkUpdateMetadataResult,
+  BulkDeleteResult,
 } from '@memoriahub/shared';
 import { getMediaTypeFromMimeType } from '@memoriahub/shared';
 import { getDefaultStorageProvider } from '../../infrastructure/storage/storage.factory.js';
@@ -712,6 +715,76 @@ export class UploadService {
       createdAt: asset.createdAt.toISOString(),
       updatedAt: asset.updatedAt.toISOString(),
     };
+  }
+
+  /**
+   * Bulk update metadata for multiple assets
+   * @param userId User requesting the update
+   * @param updates Array of asset updates
+   * @returns Result with updated and failed arrays
+   */
+  async bulkUpdateMetadata(
+    userId: string,
+    updates: BulkUpdateMetadataInput['updates']
+  ): Promise<BulkUpdateMetadataResult> {
+    const traceId = getTraceId();
+    const startTime = Date.now();
+
+    logger.info({
+      eventType: 'bulk_update_metadata.started',
+      userId,
+      updateCount: updates.length,
+      traceId,
+    }, `Starting bulk metadata update for ${updates.length} assets`);
+
+    const result = await mediaAssetRepository.bulkUpdateMetadata(userId, updates);
+
+    const durationMs = Date.now() - startTime;
+    logger.info({
+      eventType: 'bulk_update_metadata.completed',
+      userId,
+      updatedCount: result.updated.length,
+      failedCount: result.failed.length,
+      durationMs,
+      traceId,
+    }, `Bulk metadata update completed in ${durationMs}ms`);
+
+    return result;
+  }
+
+  /**
+   * Bulk delete assets
+   * @param userId User requesting the deletion
+   * @param assetIds Array of asset IDs to delete
+   * @returns Result with deleted and failed arrays
+   */
+  async bulkDeleteAssets(
+    userId: string,
+    assetIds: string[]
+  ): Promise<BulkDeleteResult> {
+    const traceId = getTraceId();
+    const startTime = Date.now();
+
+    logger.info({
+      eventType: 'bulk_delete.started',
+      userId,
+      assetCount: assetIds.length,
+      traceId,
+    }, `Starting bulk delete for ${assetIds.length} assets`);
+
+    const result = await mediaAssetRepository.bulkDelete(userId, assetIds);
+
+    const durationMs = Date.now() - startTime;
+    logger.info({
+      eventType: 'bulk_delete.completed',
+      userId,
+      deletedCount: result.deleted.length,
+      failedCount: result.failed.length,
+      durationMs,
+      traceId,
+    }, `Bulk delete completed in ${durationMs}ms`);
+
+    return result;
   }
 }
 

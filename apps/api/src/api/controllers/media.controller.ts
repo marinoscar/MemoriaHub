@@ -13,6 +13,10 @@ import type {
   PresignedUploadResponse,
   InitiateUploadInput,
   CompleteUploadInput,
+  BulkUpdateMetadataInput,
+  BulkUpdateMetadataResult,
+  BulkDeleteInput,
+  BulkDeleteResult,
 } from '@memoriahub/shared';
 import { uploadService } from '../../services/upload/upload.service.js';
 
@@ -234,6 +238,54 @@ export class MediaController {
       await uploadService.deleteAsset(userId, assetId);
 
       res.status(204).send();
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ===========================================================================
+  // Bulk Operations
+  // ===========================================================================
+
+  /**
+   * PATCH /api/media/bulk
+   * Bulk update metadata for multiple assets
+   */
+  async bulkUpdateMetadata(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const userId = req.user!.id;
+      const input = req.body as BulkUpdateMetadataInput;
+
+      const result = await uploadService.bulkUpdateMetadata(userId, input.updates);
+
+      const response: ApiResponse<BulkUpdateMetadataResult> = { data: result };
+      res.status(200).json(response);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * DELETE /api/media/bulk
+   * Bulk delete multiple assets
+   */
+  async bulkDelete(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const userId = req.user!.id;
+      const input = req.body as BulkDeleteInput;
+
+      const result = await uploadService.bulkDeleteAssets(userId, input.assetIds);
+
+      const response: ApiResponse<BulkDeleteResult> = { data: result };
+      res.status(200).json(response);
     } catch (error) {
       next(error);
     }
