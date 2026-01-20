@@ -6,10 +6,13 @@ import type {
   ExifData,
   FaceData,
   TagData,
+  BulkUpdateMetadataResult,
+  BulkDeleteResult,
 } from '@memoriahub/shared';
 import { query } from '../client.js';
 import { logger } from '../../logging/logger.js';
 import { getTraceId } from '../../logging/request-context.js';
+import { s3Service } from '../../storage/s3.service.js';
 
 /**
  * Database row type for media assets
@@ -889,6 +892,238 @@ export class MediaAssetRepository {
     );
 
     return result.rows[0].can_access;
+  }
+
+  /**
+   * Bulk update metadata for multiple assets
+   * Only updates assets owned by the user
+   * Returns partial results with success and failure arrays
+   */
+  async bulkUpdateMetadata(
+    userId: string,
+    updates: Array<{
+      assetId: string;
+      capturedAtUtc?: string;
+      latitude?: number | null;
+      longitude?: number | null;
+      country?: string | null;
+      state?: string | null;
+      city?: string | null;
+      locationName?: string | null;
+    }>
+  ): Promise<BulkUpdateMetadataResult> {
+    const updated: string[] = [];
+    const failed: Array<{ assetId: string; error: string }> = [];
+    const traceId = getTraceId();
+
+    for (const update of updates) {
+      try {
+        // Verify ownership
+        const isOwner = await this.isOwner(update.assetId, userId);
+        if (!isOwner) {
+          failed.push({
+            assetId: update.assetId,
+            error: 'Asset not found or you do not have permission',
+          });
+          continue;
+        }
+
+        // Build update query dynamically
+        const setClauses: string[] = [];
+        const params: unknown[] = [];
+        let paramIndex = 1;
+
+        if (update.capturedAtUtc !== undefined) {
+          setClauses.push(`captured_at_utc = $${paramIndex++}`);
+          params.push(update.capturedAtUtc);
+        }
+        if (update.latitude !== undefined) {
+          setClauses.push(`latitude = $${paramIndex++}`);
+          params.push(update.latitude);
+        }
+        if (update.longitude !== undefined) {
+          setClauses.push(`longitude = $${paramIndex++}`);
+          params.push(update.longitude);
+        }
+        if (update.country !== undefined) {
+          setClauses.push(`country = $${paramIndex++}`);
+          params.push(update.country);
+        }
+        if (update.state !== undefined) {
+          setClauses.push(`state = $${paramIndex++}`);
+          params.push(update.state);
+        }
+        if (update.city !== undefined) {
+          setClauses.push(`city = $${paramIndex++}`);
+          params.push(update.city);
+        }
+        if (update.locationName !== undefined) {
+          setClauses.push(`location_name = $${paramIndex++}`);
+          params.push(update.locationName);
+        }
+
+        if (setClauses.length === 0) {
+          failed.push({
+            assetId: update.assetId,
+            error: 'No fields to update',
+          });
+          continue;
+        }
+
+        // Always update updated_at
+        setClauses.push(`updated_at = $${paramIndex++}`);
+        params.push(new Date());
+
+        // Add asset ID for WHERE clause
+        params.push(update.assetId);
+        const assetIdParam = paramIndex;
+
+        const sql = `
+          UPDATE media_assets
+          SET ${setClauses.join(', ')}
+          WHERE id = $${assetIdParam}
+        `;
+
+        await query(sql, params);
+        updated.push(update.assetId);
+
+        logger.info({
+          eventType: 'media_asset.metadata_updated',
+          assetId: update.assetId,
+          userId,
+          traceId,
+        }, 'Media asset metadata updated');
+      } catch (error) {
+        logger.error({
+          eventType: 'media_asset.update_failed',
+          assetId: update.assetId,
+          userId,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          traceId,
+        }, 'Failed to update media asset metadata');
+
+        failed.push({
+          assetId: update.assetId,
+          error: error instanceof Error ? error.message : 'Update failed',
+        });
+      }
+    }
+
+    logger.info({
+      eventType: 'media_asset.bulk_metadata_updated',
+      updatedCount: updated.length,
+      failedCount: failed.length,
+      userId,
+      traceId,
+    }, `Bulk metadata update completed: ${updated.length} updated, ${failed.length} failed`);
+
+    return { updated, failed };
+  }
+
+  /**
+   * Bulk delete multiple assets
+   * Only deletes assets owned by the user
+   * Returns partial results with success and failure arrays
+   */
+  async bulkDelete(
+    userId: string,
+    assetIds: string[]
+  ): Promise<BulkDeleteResult> {
+    const deleted: string[] = [];
+    const failed: Array<{ assetId: string; error: string }> = [];
+    const traceId = getTraceId();
+
+    for (const assetId of assetIds) {
+      try {
+        // Verify ownership
+        const isOwner = await this.isOwner(assetId, userId);
+        if (!isOwner) {
+          failed.push({
+            assetId,
+            error: 'Asset not found or you do not have permission',
+          });
+          continue;
+        }
+
+        // Get asset for storage cleanup
+        const asset = await this.findById(assetId);
+        if (!asset) {
+          failed.push({
+            assetId,
+            error: 'Asset not found',
+          });
+          continue;
+        }
+
+        // Delete from database (cascades to library_assets and media_shares)
+        const result = await query(
+          'DELETE FROM media_assets WHERE id = $1',
+          [assetId]
+        );
+
+        if ((result.rowCount ?? 0) === 0) {
+          failed.push({
+            assetId,
+            error: 'Failed to delete asset',
+          });
+          continue;
+        }
+
+        deleted.push(assetId);
+
+        logger.info({
+          eventType: 'media_asset.deleted',
+          assetId,
+          userId,
+          storageKey: asset.storageKey,
+          traceId,
+        }, 'Media asset deleted');
+
+        // Storage cleanup (best-effort, don't fail if S3 delete fails)
+        try {
+          await s3Service.deleteObject(asset.storageBucket, asset.storageKey);
+
+          // Also delete derivatives if they exist
+          if (asset.thumbnailKey) {
+            await s3Service.deleteObject(asset.storageBucket, asset.thumbnailKey);
+          }
+          if (asset.previewKey) {
+            await s3Service.deleteObject(asset.storageBucket, asset.previewKey);
+          }
+        } catch (s3Error) {
+          logger.warn({
+            eventType: 'storage.delete_failed',
+            assetId,
+            storageKey: asset.storageKey,
+            error: s3Error instanceof Error ? s3Error.message : 'Unknown error',
+            traceId,
+          }, 'Failed to delete storage objects (non-fatal)');
+        }
+      } catch (error) {
+        logger.error({
+          eventType: 'media_asset.delete_failed',
+          assetId,
+          userId,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          traceId,
+        }, 'Failed to delete media asset');
+
+        failed.push({
+          assetId,
+          error: error instanceof Error ? error.message : 'Delete failed',
+        });
+      }
+    }
+
+    logger.info({
+      eventType: 'media_asset.bulk_deleted',
+      deletedCount: deleted.length,
+      failedCount: failed.length,
+      userId,
+      traceId,
+    }, `Bulk delete completed: ${deleted.length} deleted, ${failed.length} failed`);
+
+    return { deleted, failed };
   }
 
   /**
