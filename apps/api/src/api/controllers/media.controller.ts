@@ -290,6 +290,28 @@ export class MediaController {
       next(error);
     }
   }
+
+  /**
+   * POST /api/media/:id/reset-metadata
+   * Reset metadata to EXIF-extracted values (owner only)
+   */
+  async resetMetadata(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const userId = req.user!.id;
+      const assetId = req.params.id;
+
+      const asset = await uploadService.resetMetadata(userId, assetId);
+
+      const response: ApiResponse<MediaAssetDTO> = { data: asset };
+      res.json(response);
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 // Export singleton instance

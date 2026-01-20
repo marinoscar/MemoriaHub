@@ -125,6 +125,7 @@ const mockGetAsset = vi.fn();
 const mockDeleteAsset = vi.fn();
 const mockBulkUpdateMetadata = vi.fn();
 const mockBulkDeleteAssets = vi.fn();
+const mockResetMetadata = vi.fn();
 
 vi.mock('../../src/services/upload/upload.service.js', () => ({
   uploadService: {
@@ -138,6 +139,7 @@ vi.mock('../../src/services/upload/upload.service.js', () => ({
     deleteAsset: (...args: unknown[]) => mockDeleteAsset(...args),
     bulkUpdateMetadata: (...args: unknown[]) => mockBulkUpdateMetadata(...args),
     bulkDeleteAssets: (...args: unknown[]) => mockBulkDeleteAssets(...args),
+    resetMetadata: (...args: unknown[]) => mockResetMetadata(...args),
   },
 }));
 
@@ -459,6 +461,43 @@ describe('Media Routes Integration Tests', () => {
       const response = await request(app).delete('/api/media/asset-789');
 
       expect(response.status).toBe(401);
+    });
+  });
+
+  describe('POST /api/media/:id/reset-metadata', () => {
+    it('returns 200 with reset asset data', async () => {
+      const resetAssetDTO = {
+        ...mockAssetDTO,
+        country: 'Germany',
+        state: 'Bavaria',
+        city: 'Munich',
+      };
+      mockResetMetadata.mockResolvedValue(resetAssetDTO);
+
+      const response = await request(app)
+        .post('/api/media/asset-789/reset-metadata')
+        .set('Authorization', `Bearer ${userToken}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.data).toEqual(resetAssetDTO);
+      expect(mockResetMetadata).toHaveBeenCalledWith('user-123', 'asset-789');
+    });
+
+    it('returns 401 for unauthenticated request', async () => {
+      const response = await request(app).post('/api/media/asset-789/reset-metadata');
+
+      expect(response.status).toBe(401);
+      expect(mockResetMetadata).not.toHaveBeenCalled();
+    });
+
+    it('propagates service errors', async () => {
+      mockResetMetadata.mockRejectedValue(new Error('Asset not found'));
+
+      const response = await request(app)
+        .post('/api/media/asset-789/reset-metadata')
+        .set('Authorization', `Bearer ${userToken}`);
+
+      expect(response.status).toBe(500);
     });
   });
 });

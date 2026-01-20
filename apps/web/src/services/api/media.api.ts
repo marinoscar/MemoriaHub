@@ -204,4 +204,31 @@ export const mediaApi = {
     );
     return response.data.data;
   },
+
+  /**
+   * Update metadata for a single asset (convenience wrapper for bulk)
+   */
+  async updateMetadata(
+    assetId: string,
+    metadata: {
+      capturedAtUtc?: string;
+      country?: string | null;
+      state?: string | null;
+      city?: string | null;
+    }
+  ): Promise<BulkUpdateMetadataResult> {
+    return this.bulkUpdateMetadata({
+      updates: [{ assetId, ...metadata }],
+    });
+  },
+
+  /**
+   * Reset metadata to EXIF-extracted values
+   */
+  async resetMetadata(assetId: string): Promise<MediaAssetDTO> {
+    const response = await apiClient.post<ApiResponse<MediaAssetDTO>>(
+      `/media/${assetId}/reset-metadata`
+    );
+    return response.data.data;
+  },
 };

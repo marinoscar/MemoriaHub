@@ -17,6 +17,7 @@ const mockCompleteUpload = vi.fn();
 const mockListAssetsInLibrary = vi.fn();
 const mockGetAsset = vi.fn();
 const mockDeleteAsset = vi.fn();
+const mockResetMetadata = vi.fn();
 
 vi.mock('../../../src/services/upload/upload.service.js', () => ({
   uploadService: {
@@ -26,6 +27,7 @@ vi.mock('../../../src/services/upload/upload.service.js', () => ({
     listAssetsInLibrary: (...args: unknown[]) => mockListAssetsInLibrary(...args),
     getAsset: (...args: unknown[]) => mockGetAsset(...args),
     deleteAsset: (...args: unknown[]) => mockDeleteAsset(...args),
+    resetMetadata: (...args: unknown[]) => mockResetMetadata(...args),
   },
 }));
 
@@ -339,6 +341,30 @@ describe('MediaController', () => {
       mockDeleteAsset.mockRejectedValue(error);
 
       await controller.deleteMedia(mockReq as Request, mockRes as Response, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(error);
+    });
+  });
+
+  describe('resetMetadata', () => {
+    it('resets metadata for asset successfully', async () => {
+      mockReq.params = { id: 'asset-123' };
+
+      mockResetMetadata.mockResolvedValue(mockAssetDTO);
+
+      await controller.resetMetadata(mockReq as Request, mockRes as Response, mockNext);
+
+      expect(mockResetMetadata).toHaveBeenCalledWith('user-123', 'asset-123');
+      expect(mockRes.json).toHaveBeenCalledWith({ data: mockAssetDTO });
+    });
+
+    it('passes errors to next middleware', async () => {
+      mockReq.params = { id: 'asset-123' };
+
+      const error = new Error('Reset failed');
+      mockResetMetadata.mockRejectedValue(error);
+
+      await controller.resetMetadata(mockReq as Request, mockRes as Response, mockNext);
 
       expect(mockNext).toHaveBeenCalledWith(error);
     });

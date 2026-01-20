@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -90,6 +90,11 @@ export function AllMediaPage() {
   const handleLightboxNavigate = (mediaId: string) => {
     setSelectedMediaId(mediaId);
   };
+
+  const handleMediaUpdate = useCallback(() => {
+    // Refresh media to get updated data
+    void refreshMedia();
+  }, [refreshMedia]);
 
   const handleFilterChange = (newFilters: FilterState) => {
     setFilters(newFilters);
@@ -262,6 +267,7 @@ export function AllMediaPage() {
           selectedIndex={selectedMediaIndex}
           onClose={handleLightboxClose}
           onNavigate={handleLightboxNavigate}
+          onMediaUpdate={handleMediaUpdate}
         />
       )}
 

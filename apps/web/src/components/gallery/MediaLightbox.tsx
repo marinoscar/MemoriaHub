@@ -25,6 +25,8 @@ interface MediaLightboxProps {
   onClose: () => void;
   /** Handler for navigation */
   onNavigate: (mediaId: string) => void;
+  /** Handler for when media metadata is updated */
+  onMediaUpdate?: (updatedMedia: MediaAssetDTO) => void;
 }
 
 /**
@@ -36,6 +38,7 @@ export function MediaLightbox({
   selectedIndex,
   onClose,
   onNavigate,
+  onMediaUpdate,
 }: MediaLightboxProps) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -212,7 +215,11 @@ export function MediaLightbox({
         </Box>
 
         {/* Metadata panel */}
-        <MediaMetadata media={currentMedia} />
+        <MediaMetadata
+          media={currentMedia}
+          onSave={(updated) => onMediaUpdate?.(updated)}
+          onError={(error) => console.error('Failed to update metadata:', error)}
+        />
       </Box>
 
       {/* Counter */}

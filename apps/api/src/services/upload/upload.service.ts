@@ -786,6 +786,85 @@ export class UploadService {
 
     return result;
   }
+
+  /**
+   * Reset metadata to EXIF-extracted values
+   * Re-downloads the file, extracts EXIF, and updates the asset
+   * @param userId User requesting the reset
+   * @param assetId Asset ID to reset
+   * @returns Updated asset
+   */
+  async resetMetadata(userId: string, assetId: string): Promise<MediaAssetDTO> {
+    const traceId = getTraceId();
+    const startTime = Date.now();
+
+    // Get asset
+    const asset = await mediaAssetRepository.findById(assetId);
+    if (!asset) {
+      throw new NotFoundError('Asset not found');
+    }
+
+    // Verify user owns the asset
+    if (asset.ownerId !== userId) {
+      throw new ForbiddenError('Only the owner can reset metadata');
+    }
+
+    logger.info({
+      eventType: 'media_asset.metadata_reset.started',
+      assetId,
+      userId,
+      traceId,
+    }, 'Starting metadata reset');
+
+    // Download file from S3
+    const { body } = await this.storage.getObject(asset.storageBucket, asset.storageKey);
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of body) {
+      chunks.push(chunk as Uint8Array);
+    }
+    const buffer = Buffer.concat(chunks);
+
+    // Extract EXIF
+    const extractedMetadata = await exifService.extractMetadata(buffer, asset.mimeType);
+
+    // Reverse geocode if we have GPS coordinates
+    let geocodingResult: GeocodingResult | null = null;
+    if (extractedMetadata.latitude && extractedMetadata.longitude) {
+      geocodingResult = await geocodingService.reverseGeocode(
+        extractedMetadata.latitude,
+        extractedMetadata.longitude
+      );
+    }
+
+    // Update asset with extracted metadata (reset all editable fields)
+    const updateData: Parameters<typeof mediaAssetRepository.update>[1] = {
+      // Reset location fields - use null if not available
+      latitude: extractedMetadata.latitude ?? null,
+      longitude: extractedMetadata.longitude ?? null,
+      country: geocodingResult?.country ?? null,
+      state: geocodingResult?.state ?? null,
+      city: geocodingResult?.city ?? null,
+      locationName: geocodingResult?.locationName ?? null,
+      // Reset captured date
+      capturedAtUtc: extractedMetadata.capturedAtUtc ?? null,
+      timezoneOffset: extractedMetadata.timezoneOffset ?? null,
+    };
+
+    const updatedAsset = await mediaAssetRepository.update(assetId, updateData);
+
+    const durationMs = Date.now() - startTime;
+    logger.info({
+      eventType: 'media_asset.metadata_reset',
+      assetId,
+      userId,
+      hasGps: !!extractedMetadata.latitude,
+      hasGeocoding: !!geocodingResult?.country,
+      durationMs,
+      traceId,
+    }, 'Media asset metadata reset to EXIF defaults');
+
+    return this.assetToDTO(updatedAsset!);
+  }
 }
 
 // Export singleton instance

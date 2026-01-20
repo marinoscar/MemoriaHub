@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -128,6 +128,11 @@ export function LibraryGalleryPage() {
   const handleLightboxNavigate = (mediaId: string) => {
     setSelectedMediaId(mediaId);
   };
+
+  const handleMediaUpdate = useCallback((_updatedMedia: import('@memoriahub/shared').MediaAssetDTO) => {
+    // Refresh media to get updated data
+    void refreshMedia();
+  }, [refreshMedia]);
 
   const handleFilterChange = (newFilters: FilterState) => {
     setFilters(newFilters);
@@ -377,6 +382,7 @@ export function LibraryGalleryPage() {
           selectedIndex={selectedMediaIndex}
           onClose={handleLightboxClose}
           onNavigate={handleLightboxNavigate}
+          onMediaUpdate={handleMediaUpdate}
         />
       )}
 
