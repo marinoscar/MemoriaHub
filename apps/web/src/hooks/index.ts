@@ -4,6 +4,8 @@ export { useLibraries } from './useLibraries';
 export { useLibrary } from './useLibrary';
 export { useMedia } from './useMedia';
 export type { UseMediaOptions } from './useMedia';
+export { useMediaSelection } from './useMediaSelection';
+export type { UseMediaSelectionReturn } from './useMediaSelection';
 export { useKeyboardNavigation } from './useKeyboardNavigation';
 export { useUpload, SUPPORTED_FILE_TYPES, MAX_FILE_SIZE, isSupportedFileType, isWithinSizeLimit } from './useUpload';
 export type { UploadFileStatus } from './useUpload';
