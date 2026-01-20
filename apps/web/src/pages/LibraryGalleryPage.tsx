@@ -17,6 +17,7 @@ import {
   Lock as PrivateIcon,
   People as SharedIcon,
   Public as PublicIcon,
+  LibraryAdd as AddExistingIcon,
 } from '@mui/icons-material';
 import { useLibrary, useMedia, useMediaSelection } from '../hooks';
 import { GalleryFilters, MediaLightbox, type FilterState } from '../components/gallery';
@@ -26,6 +27,7 @@ import { UploadDialog } from '../components/upload';
 import { BulkMetadataDialog, type BulkMetadataUpdate } from '../components/dialogs/BulkMetadataDialog';
 import { AddToLibraryDialog } from '../components/dialogs/AddToLibraryDialog';
 import { BulkDeleteDialog } from '../components/dialogs/BulkDeleteDialog';
+import { AddExistingMediaDialog } from '../components/dialogs/AddExistingMediaDialog';
 import { mediaApi } from '../services/api/media.api';
 import { libraryApi } from '../services/api/library.api';
 import { useLibraries } from '../hooks';
@@ -77,6 +79,7 @@ export function LibraryGalleryPage() {
 
   // Dialog state
   const [addToLibraryDialogOpen, setAddToLibraryDialogOpen] = useState(false);
+  const [addExistingMediaDialogOpen, setAddExistingMediaDialogOpen] = useState(false);
   const [editMetadataDialogOpen, setEditMetadataDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
@@ -155,6 +158,17 @@ export function LibraryGalleryPage() {
         severity: 'error',
       });
     }
+  };
+
+  const handleAddExistingMedia = async (assetIds: string[]) => {
+    if (!libraryId) return;
+    await libraryApi.addAssets(libraryId, assetIds);
+    setSnackbar({
+      open: true,
+      message: `Added ${assetIds.length} items to library`,
+      severity: 'success',
+    });
+    void refreshMedia();
   };
 
   const handleEditMetadata = async (metadata: BulkMetadataUpdate) => {
@@ -298,13 +312,22 @@ export function LibraryGalleryPage() {
             {library.assetCount ?? 0} {(library.assetCount ?? 0) === 1 ? 'item' : 'items'}
           </Typography>
         </Box>
-        <Button
-          variant="contained"
-          startIcon={<UploadIcon />}
-          onClick={() => setUploadDialogOpen(true)}
-        >
-          Upload
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            variant="outlined"
+            startIcon={<AddExistingIcon />}
+            onClick={() => setAddExistingMediaDialogOpen(true)}
+          >
+            Add Existing
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<UploadIcon />}
+            onClick={() => setUploadDialogOpen(true)}
+          >
+            Upload
+          </Button>
+        </Box>
       </Box>
 
       {/* Error state for media */}
@@ -396,6 +419,15 @@ export function LibraryGalleryPage() {
         selectedCount={selectedCount}
         onClose={() => setDeleteDialogOpen(false)}
         onConfirm={handleDelete}
+      />
+
+      {/* Add existing media dialog */}
+      <AddExistingMediaDialog
+        open={addExistingMediaDialogOpen}
+        libraryName={library.name}
+        existingAssetIds={new Set(media.map((m) => m.id))}
+        onClose={() => setAddExistingMediaDialogOpen(false)}
+        onAdd={handleAddExistingMedia}
       />
 
       {/* Snackbar for notifications */}

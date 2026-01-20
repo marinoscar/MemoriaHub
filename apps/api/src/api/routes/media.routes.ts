@@ -137,6 +137,12 @@ export function createMediaRoutes(): Router {
     asyncHandler((req, res, next) => mediaController.deleteMedia(req, res, next))
   );
 
+  // Reset metadata to EXIF defaults (owner only)
+  router.post(
+    '/:id/reset-metadata',
+    asyncHandler((req, res, next) => mediaController.resetMetadata(req, res, next))
+  );
+
   // ===========================================================================
   // Media Sharing (direct user-to-user)
   // ===========================================================================
