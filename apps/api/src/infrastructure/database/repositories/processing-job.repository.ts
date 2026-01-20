@@ -676,7 +676,7 @@ export class ProcessingJobRepository {
       params.push(filters.assetId);
     }
     if (filters.libraryId) {
-      conditions.push(`ma.library_id = $${paramIndex++}`);
+      conditions.push(`la.library_id = $${paramIndex++}`);
       params.push(filters.libraryId);
     }
     if (filters.createdAfter) {
@@ -700,10 +700,10 @@ export class ProcessingJobRepository {
     const sortColumn = sortColumnMap[sortBy] || 'pj.created_at';
     const order = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
-    // Need to join with media_assets if filtering by libraryId
+    // Need to join with library_assets if filtering by libraryId
     const needsJoin = filters.libraryId !== undefined;
     const fromClause = needsJoin
-      ? 'FROM processing_jobs pj JOIN media_assets ma ON pj.asset_id = ma.id'
+      ? 'FROM processing_jobs pj JOIN library_assets la ON pj.asset_id = la.asset_id'
       : 'FROM processing_jobs pj';
 
     // Get total count

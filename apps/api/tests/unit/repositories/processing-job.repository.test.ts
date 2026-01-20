@@ -489,6 +489,27 @@ describe('ProcessingJobRepository', () => {
         expect.arrayContaining([20, 40])
       );
     });
+
+    it('joins with library_assets when filtering by libraryId', async () => {
+      mockQuery
+        .mockResolvedValueOnce({ rows: [{ count: '5' }] })
+        .mockResolvedValueOnce({ rows: [] });
+
+      await repository.listJobs(
+        { libraryId: 'library-123' },
+        { page: 1, limit: 50 }
+      );
+
+      // Should join with library_assets and filter by library_id
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('JOIN library_assets la ON pj.asset_id = la.asset_id'),
+        expect.arrayContaining(['library-123'])
+      );
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('la.library_id'),
+        expect.arrayContaining(['library-123'])
+      );
+    });
   });
 
   describe('deleteJob', () => {

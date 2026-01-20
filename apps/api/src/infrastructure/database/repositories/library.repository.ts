@@ -180,10 +180,10 @@ export class LibraryRepository {
       `SELECT l.*,
               u.email as owner_email,
               u.display_name as owner_display_name,
-              COUNT(ma.id)::text as asset_count
+              COUNT(la.id)::text as asset_count
        FROM libraries l
        JOIN users u ON l.owner_id = u.id
-       LEFT JOIN media_assets ma ON ma.library_id = l.id
+       LEFT JOIN library_assets la ON la.library_id = l.id
        WHERE l.id = $1
        GROUP BY l.id, u.email, u.display_name`,
       [id]
@@ -239,10 +239,10 @@ export class LibraryRepository {
       `SELECT l.*,
               u.email as owner_email,
               u.display_name as owner_display_name,
-              COUNT(ma.id)::text as asset_count
+              COUNT(la.id)::text as asset_count
        FROM libraries l
        JOIN users u ON l.owner_id = u.id
-       LEFT JOIN media_assets ma ON ma.library_id = l.id
+       LEFT JOIN library_assets la ON la.library_id = l.id
        WHERE ${whereClause}
        GROUP BY l.id, u.email, u.display_name
        ORDER BY ${sortColumn} ${sortOrder.toUpperCase()}
@@ -300,7 +300,7 @@ export class LibraryRepository {
       `SELECT DISTINCT ON (l.id) l.*,
               u.email as owner_email,
               u.display_name as owner_display_name,
-              (SELECT COUNT(*)::text FROM media_assets ma WHERE ma.library_id = l.id) as asset_count
+              (SELECT COUNT(*)::text FROM library_assets la WHERE la.library_id = l.id) as asset_count
        FROM libraries l
        JOIN users u ON l.owner_id = u.id
        LEFT JOIN library_members lm ON lm.library_id = l.id
