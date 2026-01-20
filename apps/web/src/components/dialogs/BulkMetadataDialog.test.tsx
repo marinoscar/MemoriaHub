@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { BulkMetadataDialog } from '../BulkMetadataDialog';
+import { BulkMetadataDialog } from './BulkMetadataDialog';
 
 describe('BulkMetadataDialog', () => {
   describe('rendering', () => {
