@@ -9,6 +9,7 @@ import {
   Link,
   CircularProgress,
   Chip,
+  Snackbar,
 } from '@mui/material';
 import {
   CloudUpload as UploadIcon,
@@ -17,9 +18,17 @@ import {
   People as SharedIcon,
   Public as PublicIcon,
 } from '@mui/icons-material';
-import { useLibrary, useMedia } from '../hooks';
-import { MediaGrid, GalleryFilters, MediaLightbox, type FilterState } from '../components/gallery';
+import { useLibrary, useMedia, useMediaSelection } from '../hooks';
+import { GalleryFilters, MediaLightbox, type FilterState } from '../components/gallery';
+import { SelectableMediaGrid } from '../components/gallery/SelectableMediaGrid';
+import { BulkActionsToolbar } from '../components/gallery/BulkActionsToolbar';
 import { UploadDialog } from '../components/upload';
+import { BulkMetadataDialog, type BulkMetadataUpdate } from '../components/dialogs/BulkMetadataDialog';
+import { AddToLibraryDialog } from '../components/dialogs/AddToLibraryDialog';
+import { BulkDeleteDialog } from '../components/dialogs/BulkDeleteDialog';
+import { mediaApi } from '../services/api/media.api';
+import { libraryApi } from '../services/api/library.api';
+import { useLibraries } from '../hooks';
 
 /**
  * Get visibility icon
