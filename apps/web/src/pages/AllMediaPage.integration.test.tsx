@@ -9,8 +9,14 @@ import type { MediaAssetDTO, LibraryDTO } from '@memoriahub/shared';
 // Mock the API modules
 vi.mock('../services/api/media.api');
 vi.mock('../services/api/library.api');
-vi.mock('../hooks/useAllMedia');
-vi.mock('../hooks/useLibraries');
+
+/**
+ * Helper to get media card checkbox containers.
+ * The actual toggle handler is on .checkbox-container, not the checkbox input.
+ */
+const getMediaCheckboxContainers = (container: HTMLElement): HTMLElement[] => {
+  return Array.from(container.querySelectorAll('.checkbox-container'));
+};
 
 const mockMediaList: MediaAssetDTO[] = [
   createMockMedia('asset-1', { originalFilename: 'photo1.jpg' }),
@@ -33,6 +39,15 @@ const mockLibraries: LibraryDTO[] = [
   }),
 ];
 
+// Mock functions (declared outside to be spied on)
+const mockLoadMore = vi.fn<[], Promise<void>>().mockResolvedValue(undefined);
+const mockRefreshMedia = vi.fn<[], Promise<void>>().mockResolvedValue(undefined);
+const mockFetchLibraries = vi.fn<[], Promise<void>>().mockResolvedValue(undefined);
+const mockCreateLibrary = vi.fn().mockResolvedValue({});
+const mockUpdateLibrary = vi.fn().mockResolvedValue({});
+const mockDeleteLibrary = vi.fn<[], Promise<void>>().mockResolvedValue(undefined);
+const mockRefreshLibraries = vi.fn<[], Promise<void>>().mockResolvedValue(undefined);
+
 // Mock hook implementations
 const mockUseAllMedia = {
   media: mockMediaList,
@@ -43,8 +58,8 @@ const mockUseAllMedia = {
   total: mockMediaList.length,
   page: 1,
   limit: 50,
-  loadMore: vi.fn().mockResolvedValue(undefined),
-  refresh: vi.fn().mockResolvedValue(undefined),
+  loadMore: mockLoadMore as unknown as () => Promise<void>,
+  refresh: mockRefreshMedia as unknown as () => Promise<void>,
 };
 
 const mockUseLibraries = {
@@ -54,18 +69,22 @@ const mockUseLibraries = {
   total: mockLibraries.length,
   page: 1,
   limit: 20,
-  fetchLibraries: vi.fn().mockResolvedValue(undefined),
-  createLibrary: vi.fn().mockResolvedValue({} as any),
-  updateLibrary: vi.fn().mockResolvedValue({} as any),
-  deleteLibrary: vi.fn().mockResolvedValue(undefined),
-  refresh: vi.fn().mockResolvedValue(undefined),
+  fetchLibraries: mockFetchLibraries as unknown as () => Promise<void>,
+  createLibrary: mockCreateLibrary as unknown as () => Promise<any>,
+  updateLibrary: mockUpdateLibrary as unknown as () => Promise<any>,
+  deleteLibrary: mockDeleteLibrary as unknown as () => Promise<void>,
+  refresh: mockRefreshLibraries as unknown as () => Promise<void>,
 };
 
+// Import hooks module for mocking
+import * as useAllMediaModule from '../hooks/useAllMedia';
+import * as useLibrariesModule from '../hooks/useLibraries';
+
 describe('AllMediaPage - Integration Tests', () => {
-  beforeEach(async () => {
+  beforeEach(() => {
     // Setup hooks
-    vi.mocked(await import('../hooks/useAllMedia')).useAllMedia = vi.fn(() => mockUseAllMedia);
-    vi.mocked(await import('../hooks/useLibraries')).useLibraries = vi.fn(() => mockUseLibraries);
+    vi.spyOn(useAllMediaModule, 'useAllMedia').mockReturnValue(mockUseAllMedia as any);
+    vi.spyOn(useLibrariesModule, 'useLibraries').mockReturnValue(mockUseLibraries as any);
 
     // Reset API mocks
     vi.clearAllMocks();
@@ -77,32 +96,32 @@ describe('AllMediaPage - Integration Tests', () => {
 
   describe('bulk selection workflow', () => {
     it('allows selecting multiple items and shows toolbar', () => {
-      render(<AllMediaPage />);
+      const { container } = render(<AllMediaPage />);
 
       // Initially no toolbar
       expect(screen.queryByText(/selected/i)).not.toBeInTheDocument();
 
-      // Select first item
-      const checkboxes = screen.getAllByRole('checkbox');
-      fireEvent.click(checkboxes[0]);
+      // Select first item - click checkbox container, not input
+      const checkboxContainers = getMediaCheckboxContainers(container);
+      fireEvent.click(checkboxContainers[0]);
 
       // Toolbar should appear
       expect(screen.getByText('1 selected')).toBeInTheDocument();
 
       // Select second item
-      fireEvent.click(checkboxes[1]);
+      fireEvent.click(checkboxContainers[1]);
 
       // Count should update
       expect(screen.getByText('2 selected')).toBeInTheDocument();
     });
 
     it('clears selection when close button is clicked', () => {
-      render(<AllMediaPage />);
+      const { container } = render(<AllMediaPage />);
 
-      // Select items
-      const checkboxes = screen.getAllByRole('checkbox');
-      fireEvent.click(checkboxes[0]);
-      fireEvent.click(checkboxes[1]);
+      // Select items - click checkbox container, not input
+      const checkboxContainers = getMediaCheckboxContainers(container);
+      fireEvent.click(checkboxContainers[0]);
+      fireEvent.click(checkboxContainers[1]);
 
       expect(screen.getByText('2 selected')).toBeInTheDocument();
 
@@ -115,24 +134,25 @@ describe('AllMediaPage - Integration Tests', () => {
     });
 
     it('maintains selection when items are toggled on and off', () => {
-      render(<AllMediaPage />);
+      const { container } = render(<AllMediaPage />);
 
-      const checkboxes = screen.getAllByRole('checkbox');
+      // Click checkbox containers, not inputs
+      const checkboxContainers = getMediaCheckboxContainers(container);
 
       // Select 3 items
-      fireEvent.click(checkboxes[0]);
-      fireEvent.click(checkboxes[1]);
-      fireEvent.click(checkboxes[2]);
+      fireEvent.click(checkboxContainers[0]);
+      fireEvent.click(checkboxContainers[1]);
+      fireEvent.click(checkboxContainers[2]);
 
       expect(screen.getByText('3 selected')).toBeInTheDocument();
 
       // Deselect middle item
-      fireEvent.click(checkboxes[1]);
+      fireEvent.click(checkboxContainers[1]);
 
       expect(screen.getByText('2 selected')).toBeInTheDocument();
 
       // Reselect it
-      fireEvent.click(checkboxes[1]);
+      fireEvent.click(checkboxContainers[1]);
 
       expect(screen.getByText('3 selected')).toBeInTheDocument();
     });
@@ -140,15 +160,15 @@ describe('AllMediaPage - Integration Tests', () => {
 
   describe('add to library workflow', () => {
     it('opens add to library dialog when button is clicked', async () => {
-      render(<AllMediaPage />);
+      const { container } = render(<AllMediaPage />);
 
-      // Select items
-      const checkboxes = screen.getAllByRole('checkbox');
-      fireEvent.click(checkboxes[0]);
-      fireEvent.click(checkboxes[1]);
+      // Select items - click checkbox container, not input
+      const checkboxContainers = getMediaCheckboxContainers(container);
+      fireEvent.click(checkboxContainers[0]);
+      fireEvent.click(checkboxContainers[1]);
 
-      // Click Add to Library button
-      const addButton = screen.getByText('Add to Library');
+      // Click Add to Library button in toolbar
+      const addButton = screen.getByRole('button', { name: /Add to Library/i });
       fireEvent.click(addButton);
 
       // Dialog should open
@@ -161,15 +181,15 @@ describe('AllMediaPage - Integration Tests', () => {
       // Mock successful API call
       vi.mocked(libraryApi.addAssets).mockResolvedValue([]);
 
-      render(<AllMediaPage />);
+      const { container } = render(<AllMediaPage />);
 
-      // Select items
-      const checkboxes = screen.getAllByRole('checkbox');
-      fireEvent.click(checkboxes[0]);
-      fireEvent.click(checkboxes[1]);
+      // Select items - click checkbox container, not input
+      const checkboxContainers = getMediaCheckboxContainers(container);
+      fireEvent.click(checkboxContainers[0]);
+      fireEvent.click(checkboxContainers[1]);
 
       // Open dialog
-      const addButton = screen.getByText('Add to Library');
+      const addButton = screen.getByRole('button', { name: /Add to Library/i });
       fireEvent.click(addButton);
 
       await waitFor(() => {
@@ -184,7 +204,8 @@ describe('AllMediaPage - Integration Tests', () => {
       fireEvent.click(libraryOption);
 
       // Click Add button in dialog
-      const dialogAddButton = screen.getAllByText('Add to Library').find((el) => el.tagName === 'BUTTON');
+      const dialogAddButtons = screen.getAllByRole('button', { name: /Add to Library/i });
+      const dialogAddButton = dialogAddButtons[dialogAddButtons.length - 1];
       fireEvent.click(dialogAddButton!);
 
       // Verify API was called
@@ -205,14 +226,14 @@ describe('AllMediaPage - Integration Tests', () => {
       // Mock failed API call
       vi.mocked(libraryApi.addAssets).mockRejectedValue(new Error('Network error'));
 
-      render(<AllMediaPage />);
+      const { container } = render(<AllMediaPage />);
 
-      // Select items
-      const checkboxes = screen.getAllByRole('checkbox');
-      fireEvent.click(checkboxes[0]);
+      // Select items - click checkbox container, not input
+      const checkboxContainers = getMediaCheckboxContainers(container);
+      fireEvent.click(checkboxContainers[0]);
 
       // Open dialog and select library
-      const addButton = screen.getByText('Add to Library');
+      const addButton = screen.getByRole('button', { name: /Add to Library/i });
       fireEvent.click(addButton);
 
       await waitFor(() => {
@@ -222,34 +243,35 @@ describe('AllMediaPage - Integration Tests', () => {
         const libraryOption = screen.getByText('Family Photos');
         fireEvent.click(libraryOption);
 
-        const dialogAddButton = screen.getAllByText('Add to Library').find((el) => el.tagName === 'BUTTON');
+        const dialogAddButtons = screen.getAllByRole('button', { name: /Add to Library/i });
+        const dialogAddButton = dialogAddButtons[dialogAddButtons.length - 1];
         fireEvent.click(dialogAddButton!);
       });
 
-      // Error message should appear
+      // Error message should appear (the actual error message from the Error object)
       await waitFor(() => {
-        expect(screen.getByText(/Failed to add to library/i)).toBeInTheDocument();
+        expect(screen.getByText(/Network error/i)).toBeInTheDocument();
       });
     });
   });
 
   describe('edit metadata workflow', () => {
     it('opens metadata dialog when button is clicked', async () => {
-      render(<AllMediaPage />);
+      const { container } = render(<AllMediaPage />);
 
-      // Select items
-      const checkboxes = screen.getAllByRole('checkbox');
-      fireEvent.click(checkboxes[0]);
-      fireEvent.click(checkboxes[1]);
-      fireEvent.click(checkboxes[2]);
+      // Select items - click checkbox container, not input
+      const checkboxContainers = getMediaCheckboxContainers(container);
+      fireEvent.click(checkboxContainers[0]);
+      fireEvent.click(checkboxContainers[1]);
+      fireEvent.click(checkboxContainers[2]);
 
       // Click Edit Metadata button
-      const editButton = screen.getByText('Edit Metadata');
+      const editButton = screen.getByRole('button', { name: /Edit Metadata/i });
       fireEvent.click(editButton);
 
-      // Dialog should open
+      // Dialog should open - check for dialog role and the "selected items" text
       await waitFor(() => {
-        expect(screen.getByText(/Edit Metadata/i)).toBeInTheDocument();
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
         expect(screen.getByText(/3 selected items/i)).toBeInTheDocument();
       });
     });
@@ -261,29 +283,31 @@ describe('AllMediaPage - Integration Tests', () => {
         failed: [],
       });
 
-      render(<AllMediaPage />);
+      const { container } = render(<AllMediaPage />);
 
-      // Select items
-      const checkboxes = screen.getAllByRole('checkbox');
-      fireEvent.click(checkboxes[0]);
-      fireEvent.click(checkboxes[1]);
+      // Select items - click checkbox container, not input
+      const checkboxContainers = getMediaCheckboxContainers(container);
+      fireEvent.click(checkboxContainers[0]);
+      fireEvent.click(checkboxContainers[1]);
 
       // Open dialog
-      const editButton = screen.getByText('Edit Metadata');
+      const editButton = screen.getByRole('button', { name: /Edit Metadata/i });
       fireEvent.click(editButton);
 
       await waitFor(() => {
-        expect(screen.getByText(/Edit Metadata/i)).toBeInTheDocument();
+        // Check dialog is open using role
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
       });
 
-      // Enable country field and set value
+      // Enable country field and set value - these are dialog checkboxes, not media card checkboxes
       const countryCheckbox = screen.getAllByRole('checkbox').find((cb) => {
         const label = cb.closest('div')?.textContent;
         return label?.includes('Country');
       });
       fireEvent.click(countryCheckbox!);
 
-      const countryInput = screen.getByLabelText(/Country/i);
+      // Get the text input for Country (not the checkbox)
+      const countryInput = screen.getByRole('textbox', { name: /Country/i });
       fireEvent.change(countryInput, { target: { value: 'USA' } });
 
       // Click Apply
@@ -313,25 +337,26 @@ describe('AllMediaPage - Integration Tests', () => {
         failed: [{ assetId: 'asset-3', error: 'Permission denied' }],
       });
 
-      render(<AllMediaPage />);
+      const { container } = render(<AllMediaPage />);
 
-      // Select 3 items
-      const checkboxes = screen.getAllByRole('checkbox');
-      fireEvent.click(checkboxes[0]);
-      fireEvent.click(checkboxes[1]);
-      fireEvent.click(checkboxes[2]);
+      // Select 3 items - click checkbox container, not input
+      const checkboxContainers = getMediaCheckboxContainers(container);
+      fireEvent.click(checkboxContainers[0]);
+      fireEvent.click(checkboxContainers[1]);
+      fireEvent.click(checkboxContainers[2]);
 
       // Open dialog, enable field, set value, apply
-      const editButton = screen.getByText('Edit Metadata');
+      const editButton = screen.getByRole('button', { name: /Edit Metadata/i });
       fireEvent.click(editButton);
 
       await waitFor(async () => {
+        // These are dialog checkboxes, not media card checkboxes
         const countryCheckbox = screen.getAllByRole('checkbox').find((cb) => {
           return cb.closest('div')?.textContent?.includes('Country');
         });
         fireEvent.click(countryCheckbox!);
 
-        const countryInput = screen.getByLabelText(/Country/i);
+        const countryInput = screen.getByRole('textbox', { name: /Country/i });
         fireEvent.change(countryInput, { target: { value: 'USA' } });
 
         const applyButton = screen.getByText(/Apply to 3 Items/i);
@@ -347,12 +372,12 @@ describe('AllMediaPage - Integration Tests', () => {
 
   describe('delete workflow', () => {
     it('opens delete confirmation dialog', async () => {
-      render(<AllMediaPage />);
+      const { container } = render(<AllMediaPage />);
 
-      // Select items
-      const checkboxes = screen.getAllByRole('checkbox');
-      fireEvent.click(checkboxes[0]);
-      fireEvent.click(checkboxes[1]);
+      // Select items - click checkbox container, not input
+      const checkboxContainers = getMediaCheckboxContainers(container);
+      fireEvent.click(checkboxContainers[0]);
+      fireEvent.click(checkboxContainers[1]);
 
       // Click Delete button
       const deleteButton = screen.getByText('Delete');
@@ -372,13 +397,13 @@ describe('AllMediaPage - Integration Tests', () => {
         failed: [],
       });
 
-      render(<AllMediaPage />);
+      const { container } = render(<AllMediaPage />);
 
-      // Select items
-      const checkboxes = screen.getAllByRole('checkbox');
-      fireEvent.click(checkboxes[0]);
-      fireEvent.click(checkboxes[1]);
-      fireEvent.click(checkboxes[2]);
+      // Select items - click checkbox container, not input
+      const checkboxContainers = getMediaCheckboxContainers(container);
+      fireEvent.click(checkboxContainers[0]);
+      fireEvent.click(checkboxContainers[1]);
+      fireEvent.click(checkboxContainers[2]);
 
       // Open delete dialog
       const deleteButton = screen.getByText('Delete');
@@ -409,11 +434,11 @@ describe('AllMediaPage - Integration Tests', () => {
     });
 
     it('cancels deletion when Cancel is clicked', async () => {
-      render(<AllMediaPage />);
+      const { container } = render(<AllMediaPage />);
 
-      // Select items
-      const checkboxes = screen.getAllByRole('checkbox');
-      fireEvent.click(checkboxes[0]);
+      // Select items - click checkbox container, not input
+      const checkboxContainers = getMediaCheckboxContainers(container);
+      fireEvent.click(checkboxContainers[0]);
 
       // Open delete dialog
       const deleteButton = screen.getByText('Delete');
@@ -443,21 +468,23 @@ describe('AllMediaPage - Integration Tests', () => {
     it('displays error message when bulk operation fails', async () => {
       vi.mocked(mediaApi.bulkUpdateMetadata).mockRejectedValue(new Error('Server error'));
 
-      render(<AllMediaPage />);
+      const { container } = render(<AllMediaPage />);
 
-      const checkboxes = screen.getAllByRole('checkbox');
-      fireEvent.click(checkboxes[0]);
+      // Select items - click checkbox container, not input
+      const checkboxContainers = getMediaCheckboxContainers(container);
+      fireEvent.click(checkboxContainers[0]);
 
-      const editButton = screen.getByText('Edit Metadata');
+      const editButton = screen.getByRole('button', { name: /Edit Metadata/i });
       fireEvent.click(editButton);
 
       await waitFor(async () => {
+        // These are dialog checkboxes, not media card checkboxes
         const countryCheckbox = screen.getAllByRole('checkbox').find((cb) => {
           return cb.closest('div')?.textContent?.includes('Country');
         });
         fireEvent.click(countryCheckbox!);
 
-        const countryInput = screen.getByLabelText(/Country/i);
+        const countryInput = screen.getByRole('textbox', { name: /Country/i });
         fireEvent.change(countryInput, { target: { value: 'USA' } });
 
         const applyButton = screen.getByText(/Apply to 1 Item/i);
@@ -465,19 +492,21 @@ describe('AllMediaPage - Integration Tests', () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByText(/Failed to update metadata/i)).toBeInTheDocument();
+        // The actual error message from the Error object
+        expect(screen.getByText(/Server error/i)).toBeInTheDocument();
       });
     });
 
     it('refreshes media after successful operations', async () => {
       vi.mocked(libraryApi.addAssets).mockResolvedValue([]);
 
-      render(<AllMediaPage />);
+      const { container } = render(<AllMediaPage />);
 
-      const checkboxes = screen.getAllByRole('checkbox');
-      fireEvent.click(checkboxes[0]);
+      // Select items - click checkbox container, not input
+      const checkboxContainers = getMediaCheckboxContainers(container);
+      fireEvent.click(checkboxContainers[0]);
 
-      const addButton = screen.getByText('Add to Library');
+      const addButton = screen.getByRole('button', { name: /Add to Library/i });
       fireEvent.click(addButton);
 
       await waitFor(() => {
@@ -487,55 +516,60 @@ describe('AllMediaPage - Integration Tests', () => {
         const libraryOption = screen.getByText('Family Photos');
         fireEvent.click(libraryOption);
 
-        const dialogAddButton = screen.getAllByText('Add to Library').find((el) => el.tagName === 'BUTTON');
-        fireEvent.click(dialogAddButton!);
+        // After dialog opens, there are two "Add to Library" buttons - use getAllByRole
+        const dialogAddButtons = screen.getAllByRole('button', { name: /Add to Library/i });
+        fireEvent.click(dialogAddButtons[dialogAddButtons.length - 1]); // Last one is the dialog button
       });
 
       // Refresh should be called
       await waitFor(() => {
-        expect(mockUseAllMedia.refresh).toHaveBeenCalled();
+        expect(mockRefreshMedia).toHaveBeenCalled();
       });
     });
   });
 
   describe('edge cases', () => {
-    it('handles empty media list', async () => {
-      vi.mocked(await import('../hooks/useAllMedia')).useAllMedia = vi.fn(() => ({
+    it('handles empty media list', () => {
+      vi.spyOn(useAllMediaModule, 'useAllMedia').mockReturnValue({
         ...mockUseAllMedia,
         media: [],
         total: 0,
-      }));
+      } as any);
 
       render(<AllMediaPage />);
 
-      expect(screen.getByText(/No media found/i)).toBeInTheDocument();
+      // EmptyGallery component shows this message
+      expect(screen.getByText(/No photos or videos yet/i)).toBeInTheDocument();
       expect(screen.queryByText(/selected/i)).not.toBeInTheDocument();
     });
 
-    it('handles loading state', async () => {
-      vi.mocked(await import('../hooks/useAllMedia')).useAllMedia = vi.fn(() => ({
+    it('handles loading state', () => {
+      vi.spyOn(useAllMediaModule, 'useAllMedia').mockReturnValue({
         ...mockUseAllMedia,
         isLoading: true,
         media: [],
-      }));
+      } as any);
 
-      render(<AllMediaPage />);
+      const { container } = render(<AllMediaPage />);
 
-      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+      // Loading state shows skeletons (GallerySkeleton component)
+      const skeletons = container.querySelectorAll('.MuiSkeleton-root');
+      expect(skeletons.length).toBeGreaterThan(0);
     });
 
     it('handles no libraries available', async () => {
-      vi.mocked(await import('../hooks/useLibraries')).useLibraries = vi.fn(() => ({
+      vi.spyOn(useLibrariesModule, 'useLibraries').mockReturnValue({
         ...mockUseLibraries,
         libraries: [],
-      }));
+      } as any);
 
-      render(<AllMediaPage />);
+      const { container } = render(<AllMediaPage />);
 
-      const checkboxes = screen.getAllByRole('checkbox');
-      fireEvent.click(checkboxes[0]);
+      // Select items - click checkbox container, not input
+      const checkboxContainers = getMediaCheckboxContainers(container);
+      fireEvent.click(checkboxContainers[0]);
 
-      const addButton = screen.getByText('Add to Library');
+      const addButton = screen.getByRole('button', { name: /Add to Library/i });
       fireEvent.click(addButton);
 
       await waitFor(() => {

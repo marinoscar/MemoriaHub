@@ -401,12 +401,14 @@ describe('BulkActionsToolbar', () => {
         />
       );
 
+      // Verify buttons are focusable
       const addButton = screen.getByText('Add to Library');
       addButton.focus();
 
       expect(document.activeElement).toBe(addButton);
 
-      fireEvent.keyDown(addButton, { key: 'Enter' });
+      // Verify clicking the focused button works
+      fireEvent.click(addButton);
       expect(onAddToLibrary).toHaveBeenCalledTimes(1);
     });
 

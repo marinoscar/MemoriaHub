@@ -53,17 +53,17 @@ describe('SideNav', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockPathname = '/';
+    mockPathname = '/media';
     mockUseMediaQuery.mockReturnValue(false); // Desktop by default
   });
 
   describe('navigation items', () => {
-    it('renders Home nav item', () => {
+    it('renders All Media nav item', () => {
       render(<SideNav {...defaultProps} />);
 
       // Both drawers render the items, use getAllBy
-      const homeItems = screen.getAllByText('Home');
-      expect(homeItems.length).toBeGreaterThan(0);
+      const allMediaItems = screen.getAllByText('All Media');
+      expect(allMediaItems.length).toBeGreaterThan(0);
     });
 
     it('renders Libraries nav item (enabled)', () => {
@@ -103,16 +103,16 @@ describe('SideNav', () => {
   });
 
   describe('active route highlighting', () => {
-    it('highlights Home when on / route', () => {
-      mockPathname = '/';
+    it('highlights All Media when on /media route', () => {
+      mockPathname = '/media';
 
       render(<SideNav {...defaultProps} />);
 
       // Find buttons with selected class
       const allButtons = screen.getAllByRole('button');
-      const homeButtons = allButtons.filter(btn => btn.textContent?.includes('Home'));
-      const selectedHome = homeButtons.find(btn => btn.classList.contains('Mui-selected'));
-      expect(selectedHome).toBeDefined();
+      const allMediaButtons = allButtons.filter(btn => btn.textContent?.includes('All Media'));
+      const selectedAllMedia = allMediaButtons.find(btn => btn.classList.contains('Mui-selected'));
+      expect(selectedAllMedia).toBeDefined();
     });
 
     it('highlights Settings when on /settings route', () => {
@@ -126,15 +126,15 @@ describe('SideNav', () => {
       expect(selectedSettings).toBeDefined();
     });
 
-    it('does not highlight Home when on /settings', () => {
+    it('does not highlight All Media when on /settings', () => {
       mockPathname = '/settings';
 
       render(<SideNav {...defaultProps} />);
 
       const allButtons = screen.getAllByRole('button');
-      const homeButtons = allButtons.filter(btn => btn.textContent?.includes('Home'));
-      const selectedHome = homeButtons.filter(btn => btn.classList.contains('Mui-selected'));
-      expect(selectedHome.length).toBe(0);
+      const allMediaButtons = allButtons.filter(btn => btn.textContent?.includes('All Media'));
+      const selectedAllMedia = allMediaButtons.filter(btn => btn.classList.contains('Mui-selected'));
+      expect(selectedAllMedia.length).toBe(0);
     });
 
     it('highlights item for nested routes', () => {
@@ -150,21 +150,21 @@ describe('SideNav', () => {
   });
 
   describe('navigation behavior', () => {
-    it('navigates to / on Home click', () => {
+    it('navigates to /media on All Media click', () => {
       mockPathname = '/settings';
 
       render(<SideNav {...defaultProps} />);
 
-      // Get first Home button (from permanent drawer on desktop)
-      const homeItems = screen.getAllByText('Home');
-      const homeButton = homeItems[0].closest('div[role="button"]') || homeItems[0].closest('button');
-      fireEvent.click(homeButton!);
+      // Get first All Media button (from permanent drawer on desktop)
+      const allMediaItems = screen.getAllByText('All Media');
+      const allMediaButton = allMediaItems[0].closest('div[role="button"]') || allMediaItems[0].closest('button');
+      fireEvent.click(allMediaButton!);
 
-      expect(mockNavigate).toHaveBeenCalledWith('/');
+      expect(mockNavigate).toHaveBeenCalledWith('/media');
     });
 
     it('navigates to /settings on Settings click', () => {
-      mockPathname = '/';
+      mockPathname = '/media';
 
       render(<SideNav {...defaultProps} />);
 
@@ -233,8 +233,8 @@ describe('SideNav', () => {
     it('renders drawer content on mobile', () => {
       render(<SideNav {...defaultProps} mobileOpen={true} />);
 
-      const homeItems = screen.getAllByText('Home');
-      expect(homeItems.length).toBeGreaterThan(0);
+      const allMediaItems = screen.getAllByText('All Media');
+      expect(allMediaItems.length).toBeGreaterThan(0);
     });
 
     it('calls onClose when navigation occurs on mobile', () => {
@@ -242,9 +242,9 @@ describe('SideNav', () => {
 
       render(<SideNav {...defaultProps} mobileOpen={true} onClose={onClose} />);
 
-      const homeItems = screen.getAllByText('Home');
-      const homeButton = homeItems[0].closest('div[role="button"]') || homeItems[0].closest('button');
-      fireEvent.click(homeButton!);
+      const allMediaItems = screen.getAllByText('All Media');
+      const allMediaButton = allMediaItems[0].closest('div[role="button"]') || allMediaItems[0].closest('button');
+      fireEvent.click(allMediaButton!);
 
       expect(onClose).toHaveBeenCalled();
     });
@@ -258,8 +258,8 @@ describe('SideNav', () => {
     it('renders drawer content on desktop', () => {
       render(<SideNav {...defaultProps} />);
 
-      const homeItems = screen.getAllByText('Home');
-      expect(homeItems.length).toBeGreaterThan(0);
+      const allMediaItems = screen.getAllByText('All Media');
+      expect(allMediaItems.length).toBeGreaterThan(0);
     });
 
     it('does not call onClose on navigation (desktop)', () => {
@@ -267,22 +267,22 @@ describe('SideNav', () => {
 
       render(<SideNav {...defaultProps} onClose={onClose} />);
 
-      const homeItems = screen.getAllByText('Home');
-      const homeButton = homeItems[0].closest('div[role="button"]') || homeItems[0].closest('button');
-      fireEvent.click(homeButton!);
+      const allMediaItems = screen.getAllByText('All Media');
+      const allMediaButton = allMediaItems[0].closest('div[role="button"]') || allMediaItems[0].closest('button');
+      fireEvent.click(allMediaButton!);
 
       expect(onClose).not.toHaveBeenCalled();
     });
   });
 
   describe('icons', () => {
-    it('renders icon for Home nav item', () => {
+    it('renders icon for All Media nav item', () => {
       render(<SideNav {...defaultProps} />);
 
       // MUI icons are rendered as SVGs within list items
-      const homeItems = screen.getAllByText('Home');
-      const homeListItem = homeItems[0].closest('li');
-      const svg = homeListItem?.querySelector('svg');
+      const allMediaItems = screen.getAllByText('All Media');
+      const allMediaListItem = allMediaItems[0].closest('li');
+      const svg = allMediaListItem?.querySelector('svg');
       expect(svg).toBeInTheDocument();
     });
 

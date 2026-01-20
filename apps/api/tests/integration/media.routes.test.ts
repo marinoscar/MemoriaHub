@@ -112,6 +112,8 @@ vi.mock('../../src/api/validators/media.validator.js', () => ({
   validateListMediaQuery: (_req: unknown, _res: unknown, next: () => void) => next(),
   validateShareMedia: (_req: unknown, _res: unknown, next: () => void) => next(),
   validateRevokeShare: (_req: unknown, _res: unknown, next: () => void) => next(),
+  validateBulkUpdateMetadata: (_req: unknown, _res: unknown, next: () => void) => next(),
+  validateBulkDelete: (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
 
 // Mock upload service
@@ -121,6 +123,8 @@ const mockCompleteUpload = vi.fn();
 const mockListAssets = vi.fn();
 const mockGetAsset = vi.fn();
 const mockDeleteAsset = vi.fn();
+const mockBulkUpdateMetadata = vi.fn();
+const mockBulkDeleteAssets = vi.fn();
 
 vi.mock('../../src/services/upload/upload.service.js', () => ({
   uploadService: {
@@ -132,6 +136,8 @@ vi.mock('../../src/services/upload/upload.service.js', () => ({
     listAllAccessibleAssets: (...args: unknown[]) => mockListAssets(...args),
     getAsset: (...args: unknown[]) => mockGetAsset(...args),
     deleteAsset: (...args: unknown[]) => mockDeleteAsset(...args),
+    bulkUpdateMetadata: (...args: unknown[]) => mockBulkUpdateMetadata(...args),
+    bulkDeleteAssets: (...args: unknown[]) => mockBulkDeleteAssets(...args),
   },
 }));
 

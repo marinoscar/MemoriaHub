@@ -60,7 +60,7 @@ describe('SelectableMediaGrid', () => {
       const onToggleSelection = vi.fn();
       const selectedIds = new Set<string>();
 
-      render(
+      const { container } = render(
         <SelectableMediaGrid
           media={[]}
           isLoading={true}
@@ -71,7 +71,9 @@ describe('SelectableMediaGrid', () => {
         />
       );
 
-      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+      // GallerySkeleton renders MUI Skeleton components
+      const skeletons = container.querySelectorAll('.MuiSkeleton-root');
+      expect(skeletons.length).toBeGreaterThan(0);
     });
 
     it('shows empty state when no media', () => {
@@ -90,7 +92,7 @@ describe('SelectableMediaGrid', () => {
         />
       );
 
-      expect(screen.getByText(/No media found/i)).toBeInTheDocument();
+      expect(screen.getByText(/No photos or videos yet/i)).toBeInTheDocument();
     });
 
     it('shows upload button in empty state', () => {
@@ -110,7 +112,8 @@ describe('SelectableMediaGrid', () => {
         />
       );
 
-      const uploadButton = screen.getByText(/Upload/i);
+      // Find the button specifically (not the paragraph text)
+      const uploadButton = screen.getByRole('button', { name: /Upload Photos/i });
       expect(uploadButton).toBeInTheDocument();
 
       fireEvent.click(uploadButton);
@@ -185,8 +188,9 @@ describe('SelectableMediaGrid', () => {
         />
       );
 
-      const firstCheckbox = container.querySelector('input[type="checkbox"]') as HTMLElement;
-      fireEvent.click(firstCheckbox);
+      // Click the checkbox container (which handles toggle), not the input directly
+      const firstCheckboxContainer = container.querySelector('.checkbox-container') as HTMLElement;
+      fireEvent.click(firstCheckboxContainer);
 
       expect(onToggleSelection).toHaveBeenCalledTimes(1);
       expect(onToggleSelection).toHaveBeenCalledWith('asset-1');
@@ -208,10 +212,11 @@ describe('SelectableMediaGrid', () => {
         />
       );
 
-      const checkboxes = container.querySelectorAll('input[type="checkbox"]');
+      // Click the checkbox containers (which handle toggle), not the inputs directly
+      const checkboxContainers = container.querySelectorAll('.checkbox-container');
 
-      fireEvent.click(checkboxes[0] as HTMLElement); // asset-1
-      fireEvent.click(checkboxes[2] as HTMLElement); // asset-3
+      fireEvent.click(checkboxContainers[0] as HTMLElement); // asset-1
+      fireEvent.click(checkboxContainers[2] as HTMLElement); // asset-3
 
       expect(onToggleSelection).toHaveBeenCalledTimes(2);
       expect(onToggleSelection).toHaveBeenNthCalledWith(1, 'asset-1');
@@ -259,7 +264,7 @@ describe('SelectableMediaGrid', () => {
         />
       );
 
-      expect(screen.getByText(/No media found/i)).toBeInTheDocument();
+      expect(screen.getByText(/No photos or videos yet/i)).toBeInTheDocument();
     });
 
     it('handles single media item', () => {
@@ -375,12 +380,12 @@ describe('SelectableMediaGrid', () => {
   });
 
   describe('loading and error states', () => {
-    it('shows loading spinner when loading', () => {
+    it('shows loading skeleton when loading with empty media', () => {
       const onMediaClick = vi.fn();
       const onToggleSelection = vi.fn();
       const selectedIds = new Set<string>();
 
-      render(
+      const { container } = render(
         <SelectableMediaGrid
           media={[]}
           isLoading={true}
@@ -391,10 +396,12 @@ describe('SelectableMediaGrid', () => {
         />
       );
 
-      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+      // GallerySkeleton renders MUI Skeleton components (not progressbar)
+      const skeletons = container.querySelectorAll('.MuiSkeleton-root');
+      expect(skeletons.length).toBeGreaterThan(0);
     });
 
-    it('does not show media during loading', () => {
+    it('shows media when loading with existing media (for infinite scroll)', () => {
       const onMediaClick = vi.fn();
       const onToggleSelection = vi.fn();
       const selectedIds = new Set<string>();
@@ -410,7 +417,8 @@ describe('SelectableMediaGrid', () => {
         />
       );
 
-      expect(screen.queryByAltText('image1.jpg')).not.toBeInTheDocument();
+      // When isLoading=true but media exists, shows media (for infinite scroll UX)
+      expect(screen.getByAltText('image1.jpg')).toBeInTheDocument();
     });
 
     it('transitions from loading to loaded', () => {
@@ -429,7 +437,8 @@ describe('SelectableMediaGrid', () => {
         />
       );
 
-      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+      // Loading state with empty media: no images shown
+      expect(screen.queryByAltText('image1.jpg')).not.toBeInTheDocument();
 
       rerender(
         <SelectableMediaGrid
@@ -442,7 +451,7 @@ describe('SelectableMediaGrid', () => {
         />
       );
 
-      expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      // After loading: images present (each card may have its own loading skeleton for images)
       expect(screen.getByAltText('image1.jpg')).toBeInTheDocument();
     });
   });

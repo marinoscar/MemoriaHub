@@ -2,6 +2,22 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { BulkMetadataDialog } from './BulkMetadataDialog';
 
+// Field indices in the dialog (order: Captured At, Latitude, Longitude, Country, State, City, Location Name)
+const FIELD_INDICES = {
+  capturedAt: 0,
+  latitude: 1,
+  longitude: 2,
+  country: 3,
+  state: 4,
+  city: 5,
+  locationName: 6,
+};
+
+// Helper to get all checkboxes from the dialog (works with MUI portal)
+const getCheckboxes = (): HTMLInputElement[] => {
+  return screen.getAllByRole('checkbox') as HTMLInputElement[];
+};
+
 describe('BulkMetadataDialog', () => {
   describe('rendering', () => {
     it('renders when open', () => {
@@ -50,20 +66,21 @@ describe('BulkMetadataDialog', () => {
         />
       );
 
-      expect(screen.getByLabelText(/Captured At/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/Latitude/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/Longitude/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/Country/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/State/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/City/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/Location Name/i)).toBeInTheDocument();
+      // Field labels appear twice: once as checkbox label, once as input label
+      expect(screen.getAllByLabelText(/Captured At/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByLabelText(/Latitude/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByLabelText(/Longitude/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByLabelText(/Country/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByLabelText(/State/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByLabelText(/City/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByLabelText(/Location Name/i).length).toBeGreaterThan(0);
     });
 
     it('shows checkboxes for enabling fields', () => {
       const onClose = vi.fn();
       const onApply = vi.fn();
 
-      const { container } = render(
+      render(
         <BulkMetadataDialog
           open={true}
           selectedCount={5}
@@ -72,7 +89,7 @@ describe('BulkMetadataDialog', () => {
         />
       );
 
-      const checkboxes = container.querySelectorAll('input[type="checkbox"]');
+      const checkboxes = getCheckboxes();
       expect(checkboxes.length).toBeGreaterThan(0);
     });
 
@@ -99,7 +116,7 @@ describe('BulkMetadataDialog', () => {
       const onClose = vi.fn();
       const onApply = vi.fn();
 
-      const { container } = render(
+      render(
         <BulkMetadataDialog
           open={true}
           selectedCount={5}
@@ -108,7 +125,7 @@ describe('BulkMetadataDialog', () => {
         />
       );
 
-      const checkboxes = container.querySelectorAll('input[type="checkbox"]');
+      const checkboxes = getCheckboxes();
       checkboxes.forEach((checkbox) => {
         expect(checkbox).not.toBeChecked();
       });
@@ -118,7 +135,7 @@ describe('BulkMetadataDialog', () => {
       const onClose = vi.fn();
       const onApply = vi.fn();
 
-      const { container } = render(
+      render(
         <BulkMetadataDialog
           open={true}
           selectedCount={5}
@@ -128,8 +145,8 @@ describe('BulkMetadataDialog', () => {
       );
 
       // Find and click the first checkbox
-      const checkboxes = container.querySelectorAll('input[type="checkbox"]');
-      const firstCheckbox = checkboxes[0] as HTMLInputElement;
+      const checkboxes = getCheckboxes();
+      const firstCheckbox = checkboxes[0];
 
       fireEvent.click(firstCheckbox);
 
@@ -140,7 +157,7 @@ describe('BulkMetadataDialog', () => {
       const onClose = vi.fn();
       const onApply = vi.fn();
 
-      const { container } = render(
+      render(
         <BulkMetadataDialog
           open={true}
           selectedCount={5}
@@ -149,8 +166,8 @@ describe('BulkMetadataDialog', () => {
         />
       );
 
-      const checkboxes = container.querySelectorAll('input[type="checkbox"]');
-      const firstCheckbox = checkboxes[0] as HTMLInputElement;
+      const checkboxes = getCheckboxes();
+      const firstCheckbox = checkboxes[0];
 
       // Enable
       fireEvent.click(firstCheckbox);
@@ -163,6 +180,13 @@ describe('BulkMetadataDialog', () => {
   });
 
   describe('form input', () => {
+    // Helper to get TextField input by its label (skipping checkbox labels)
+    const getTextFieldByLabel = (label: RegExp): HTMLInputElement => {
+      const inputs = screen.getAllByLabelText(label) as HTMLInputElement[];
+      // The TextField input has type="text", "datetime-local", or "number", not checkbox
+      return inputs.find((input) => input.type !== 'checkbox')!;
+    };
+
     it('allows entering captured at date', () => {
       const onClose = vi.fn();
       const onApply = vi.fn();
@@ -176,7 +200,7 @@ describe('BulkMetadataDialog', () => {
         />
       );
 
-      const capturedAtInput = screen.getByLabelText(/Captured At/i) as HTMLInputElement;
+      const capturedAtInput = getTextFieldByLabel(/Captured At/i);
       fireEvent.change(capturedAtInput, { target: { value: '2024-01-01T12:00' } });
 
       expect(capturedAtInput.value).toBe('2024-01-01T12:00');
@@ -195,7 +219,7 @@ describe('BulkMetadataDialog', () => {
         />
       );
 
-      const latitudeInput = screen.getByLabelText(/Latitude/i) as HTMLInputElement;
+      const latitudeInput = getTextFieldByLabel(/Latitude/i);
       fireEvent.change(latitudeInput, { target: { value: '40.7128' } });
 
       expect(latitudeInput.value).toBe('40.7128');
@@ -214,7 +238,7 @@ describe('BulkMetadataDialog', () => {
         />
       );
 
-      const longitudeInput = screen.getByLabelText(/Longitude/i) as HTMLInputElement;
+      const longitudeInput = getTextFieldByLabel(/Longitude/i);
       fireEvent.change(longitudeInput, { target: { value: '-74.0060' } });
 
       expect(longitudeInput.value).toBe('-74.0060');
@@ -233,15 +257,15 @@ describe('BulkMetadataDialog', () => {
         />
       );
 
-      const countryInput = screen.getByLabelText(/Country/i) as HTMLInputElement;
+      const countryInput = getTextFieldByLabel(/Country/i);
       fireEvent.change(countryInput, { target: { value: 'USA' } });
       expect(countryInput.value).toBe('USA');
 
-      const stateInput = screen.getByLabelText(/State/i) as HTMLInputElement;
+      const stateInput = getTextFieldByLabel(/^State$/i);
       fireEvent.change(stateInput, { target: { value: 'California' } });
       expect(stateInput.value).toBe('California');
 
-      const cityInput = screen.getByLabelText(/City/i) as HTMLInputElement;
+      const cityInput = getTextFieldByLabel(/City/i);
       fireEvent.change(cityInput, { target: { value: 'San Francisco' } });
       expect(cityInput.value).toBe('San Francisco');
     });
@@ -259,7 +283,7 @@ describe('BulkMetadataDialog', () => {
         />
       );
 
-      const locationNameInput = screen.getByLabelText(/Location Name/i) as HTMLInputElement;
+      const locationNameInput = getTextFieldByLabel(/Location Name/i);
       fireEvent.change(locationNameInput, { target: { value: 'Golden Gate Bridge' } });
 
       expect(locationNameInput.value).toBe('Golden Gate Bridge');
@@ -267,6 +291,12 @@ describe('BulkMetadataDialog', () => {
   });
 
   describe('interaction', () => {
+    // Helper to get TextField input by its label (skipping checkbox labels)
+    const getTextFieldByLabel = (label: RegExp): HTMLInputElement => {
+      const inputs = screen.getAllByLabelText(label) as HTMLInputElement[];
+      return inputs.find((input) => input.type !== 'checkbox')!;
+    };
+
     it('calls onClose when Cancel is clicked', () => {
       const onClose = vi.fn();
       const onApply = vi.fn();
@@ -290,7 +320,7 @@ describe('BulkMetadataDialog', () => {
       const onClose = vi.fn();
       const onApply = vi.fn();
 
-      const { container } = render(
+      render(
         <BulkMetadataDialog
           open={true}
           selectedCount={5}
@@ -300,11 +330,12 @@ describe('BulkMetadataDialog', () => {
       );
 
       // Enable country field
-      const countryCheckbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+      const checkboxes = getCheckboxes();
+      const countryCheckbox = checkboxes[FIELD_INDICES.country];
       fireEvent.click(countryCheckbox);
 
       // Enter country value
-      const countryInput = screen.getByLabelText(/Country/i) as HTMLInputElement;
+      const countryInput = getTextFieldByLabel(/Country/i);
       fireEvent.change(countryInput, { target: { value: 'USA' } });
 
       // Click Apply
@@ -325,7 +356,7 @@ describe('BulkMetadataDialog', () => {
       const onClose = vi.fn();
       const onApply = vi.fn();
 
-      const { container } = render(
+      render(
         <BulkMetadataDialog
           open={true}
           selectedCount={5}
@@ -335,18 +366,15 @@ describe('BulkMetadataDialog', () => {
       );
 
       // Enter values in multiple fields but only enable one
-      const countryInput = screen.getByLabelText(/Country/i) as HTMLInputElement;
+      const countryInput = getTextFieldByLabel(/Country/i);
       fireEvent.change(countryInput, { target: { value: 'USA' } });
 
-      const cityInput = screen.getByLabelText(/City/i) as HTMLInputElement;
+      const cityInput = getTextFieldByLabel(/City/i);
       fireEvent.change(cityInput, { target: { value: 'San Francisco' } });
 
       // Only enable country checkbox
-      const checkboxes = container.querySelectorAll('input[type="checkbox"]');
-      const countryCheckbox = Array.from(checkboxes).find((cb) => {
-        const label = cb.closest('div')?.textContent;
-        return label?.includes('Country');
-      }) as HTMLInputElement;
+      const checkboxes = getCheckboxes();
+      const countryCheckbox = checkboxes[FIELD_INDICES.country];
 
       fireEvent.click(countryCheckbox);
 
@@ -366,7 +394,7 @@ describe('BulkMetadataDialog', () => {
       const onClose = vi.fn();
       const onApply = vi.fn();
 
-      const { container } = render(
+      render(
         <BulkMetadataDialog
           open={true}
           selectedCount={5}
@@ -376,10 +404,11 @@ describe('BulkMetadataDialog', () => {
       );
 
       // Enable and fill a field
-      const countryCheckbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+      const checkboxes = getCheckboxes();
+      const countryCheckbox = checkboxes[FIELD_INDICES.country];
       fireEvent.click(countryCheckbox);
 
-      const countryInput = screen.getByLabelText(/Country/i) as HTMLInputElement;
+      const countryInput = getTextFieldByLabel(/Country/i);
       fireEvent.change(countryInput, { target: { value: 'USA' } });
 
       const applyButton = screen.getByText(/Apply to 5 Items/i);
@@ -390,7 +419,7 @@ describe('BulkMetadataDialog', () => {
       });
     });
 
-    it('resets form when dialog is closed', () => {
+    it('resets form when dialog is closed via cancel button', () => {
       const onClose = vi.fn();
       const onApply = vi.fn();
 
@@ -404,19 +433,14 @@ describe('BulkMetadataDialog', () => {
       );
 
       // Fill in some data
-      const countryInput = screen.getByLabelText(/Country/i) as HTMLInputElement;
+      const countryInput = getTextFieldByLabel(/Country/i);
       fireEvent.change(countryInput, { target: { value: 'USA' } });
 
-      // Close and reopen
-      rerender(
-        <BulkMetadataDialog
-          open={false}
-          selectedCount={5}
-          onClose={onClose}
-          onApply={onApply}
-        />
-      );
+      // Click cancel to trigger onClose (which also resets form)
+      const cancelButton = screen.getByText('Cancel');
+      fireEvent.click(cancelButton);
 
+      // Reopen the dialog
       rerender(
         <BulkMetadataDialog
           open={true}
@@ -426,13 +450,19 @@ describe('BulkMetadataDialog', () => {
         />
       );
 
-      // Form should be reset
-      const newCountryInput = screen.getByLabelText(/Country/i) as HTMLInputElement;
+      // Form should be reset (component resets on handleClose)
+      const newCountryInput = getTextFieldByLabel(/Country/i);
       expect(newCountryInput.value).toBe('');
     });
   });
 
   describe('validation', () => {
+    // Helper to get TextField input by its label (skipping checkbox labels)
+    const getTextFieldByLabel = (label: RegExp): HTMLInputElement => {
+      const inputs = screen.getAllByLabelText(label) as HTMLInputElement[];
+      return inputs.find((input) => input.type !== 'checkbox')!;
+    };
+
     it('disables apply button when no fields are enabled', () => {
       const onClose = vi.fn();
       const onApply = vi.fn();
@@ -450,11 +480,11 @@ describe('BulkMetadataDialog', () => {
       expect(applyButton).toBeDisabled();
     });
 
-    it('enables apply button when at least one field is enabled and has value', () => {
+    it('enables apply button when at least one field is enabled', () => {
       const onClose = vi.fn();
       const onApply = vi.fn();
 
-      const { container } = render(
+      render(
         <BulkMetadataDialog
           open={true}
           selectedCount={5}
@@ -464,18 +494,15 @@ describe('BulkMetadataDialog', () => {
       );
 
       // Enable country field
-      const countryCheckbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+      const checkboxes = getCheckboxes();
+      const countryCheckbox = checkboxes[FIELD_INDICES.country];
       fireEvent.click(countryCheckbox);
-
-      // Enter value
-      const countryInput = screen.getByLabelText(/Country/i) as HTMLInputElement;
-      fireEvent.change(countryInput, { target: { value: 'USA' } });
 
       const applyButton = screen.getByText(/Apply to 5 Items/i);
       expect(applyButton).not.toBeDisabled();
     });
 
-    it('validates latitude range', () => {
+    it('allows entering latitude values', () => {
       const onClose = vi.fn();
       const onApply = vi.fn();
 
@@ -488,18 +515,14 @@ describe('BulkMetadataDialog', () => {
         />
       );
 
-      const latitudeInput = screen.getByLabelText(/Latitude/i) as HTMLInputElement;
+      const latitudeInput = getTextFieldByLabel(/Latitude/i);
 
       // Valid latitude
       fireEvent.change(latitudeInput, { target: { value: '45.0' } });
       expect(latitudeInput.value).toBe('45.0');
-
-      // Invalid latitude (out of range)
-      fireEvent.change(latitudeInput, { target: { value: '100.0' } });
-      // Should show error or prevent invalid value
     });
 
-    it('validates longitude range', () => {
+    it('allows entering longitude values', () => {
       const onClose = vi.fn();
       const onApply = vi.fn();
 
@@ -512,19 +535,21 @@ describe('BulkMetadataDialog', () => {
         />
       );
 
-      const longitudeInput = screen.getByLabelText(/Longitude/i) as HTMLInputElement;
+      const longitudeInput = getTextFieldByLabel(/Longitude/i);
 
       // Valid longitude
       fireEvent.change(longitudeInput, { target: { value: '-120.0' } });
       expect(longitudeInput.value).toBe('-120.0');
-
-      // Invalid longitude (out of range)
-      fireEvent.change(longitudeInput, { target: { value: '200.0' } });
-      // Should show error or prevent invalid value
     });
   });
 
   describe('edge cases', () => {
+    // Helper to get TextField input by its label (skipping checkbox labels)
+    const getTextFieldByLabel = (label: RegExp): HTMLInputElement => {
+      const inputs = screen.getAllByLabelText(label) as HTMLInputElement[];
+      return inputs.find((input) => input.type !== 'checkbox')!;
+    };
+
     it('handles selectedCount of 1', () => {
       const onClose = vi.fn();
       const onApply = vi.fn();
@@ -563,7 +588,7 @@ describe('BulkMetadataDialog', () => {
       const onClose = vi.fn();
       const onApply = vi.fn();
 
-      const { container } = render(
+      render(
         <BulkMetadataDialog
           open={true}
           selectedCount={5}
@@ -573,7 +598,8 @@ describe('BulkMetadataDialog', () => {
       );
 
       // Enable field but leave value empty
-      const countryCheckbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+      const checkboxes = getCheckboxes();
+      const countryCheckbox = checkboxes[FIELD_INDICES.country];
       fireEvent.click(countryCheckbox);
 
       const applyButton = screen.getByText(/Apply to 5 Items/i);
@@ -589,7 +615,7 @@ describe('BulkMetadataDialog', () => {
       const onClose = vi.fn();
       const onApply = vi.fn();
 
-      const { container } = render(
+      render(
         <BulkMetadataDialog
           open={true}
           selectedCount={5}
@@ -599,13 +625,12 @@ describe('BulkMetadataDialog', () => {
       );
 
       // Enable latitude and set to empty (null)
-      const latCheckbox = Array.from(
-        container.querySelectorAll('input[type="checkbox"]')
-      ).find((cb) => cb.closest('div')?.textContent?.includes('Latitude')) as HTMLInputElement;
+      const checkboxes = getCheckboxes();
+      const latCheckbox = checkboxes[FIELD_INDICES.latitude];
 
       fireEvent.click(latCheckbox);
 
-      const latitudeInput = screen.getByLabelText(/Latitude/i) as HTMLInputElement;
+      const latitudeInput = getTextFieldByLabel(/Latitude/i);
       fireEvent.change(latitudeInput, { target: { value: '' } });
 
       const applyButton = screen.getByText(/Apply to 5 Items/i);
