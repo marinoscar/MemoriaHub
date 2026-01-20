@@ -140,7 +140,7 @@ export function LibraryGalleryPage() {
 
   const handleAddToLibrary = async (targetLibraryId: string) => {
     try {
-      const assetIds = Array.from(selectedIds);
+      const assetIds: string[] = Array.from(selectedIds);
       await libraryApi.addAssets(targetLibraryId, assetIds);
       setSnackbar({
         open: true,
@@ -159,7 +159,7 @@ export function LibraryGalleryPage() {
 
   const handleEditMetadata = async (metadata: BulkMetadataUpdate) => {
     try {
-      const assetIds = Array.from(selectedIds);
+      const assetIds: string[] = Array.from(selectedIds);
       const updates = assetIds.map((assetId) => ({ assetId, ...metadata }));
       const result = await mediaApi.bulkUpdateMetadata({ updates });
 
@@ -193,7 +193,7 @@ export function LibraryGalleryPage() {
 
   const handleDelete = async () => {
     try {
-      const assetIds = Array.from(selectedIds);
+      const assetIds: string[] = Array.from(selectedIds);
       const result = await mediaApi.bulkDelete({ assetIds });
 
       const successCount = result.deleted.length;
