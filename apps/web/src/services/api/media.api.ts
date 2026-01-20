@@ -9,6 +9,10 @@ import type {
   MediaAssetDTO,
   PresignedUploadResponse,
   InitiateUploadInput,
+  BulkUpdateMetadataInput,
+  BulkUpdateMetadataResult,
+  BulkDeleteInput,
+  BulkDeleteResult,
 } from '@memoriahub/shared';
 import axios from 'axios';
 import { apiClient } from './client';
@@ -171,5 +175,33 @@ export const mediaApi = {
    */
   async deleteMedia(id: string): Promise<void> {
     await apiClient.delete(`/media/${id}`);
+  },
+
+  // ===========================================================================
+  // Bulk Operations
+  // ===========================================================================
+
+  /**
+   * Bulk update metadata for multiple assets
+   */
+  async bulkUpdateMetadata(
+    input: BulkUpdateMetadataInput
+  ): Promise<BulkUpdateMetadataResult> {
+    const response = await apiClient.patch<ApiResponse<BulkUpdateMetadataResult>>(
+      '/media/bulk',
+      input
+    );
+    return response.data.data;
+  },
+
+  /**
+   * Bulk delete multiple assets
+   */
+  async bulkDelete(input: BulkDeleteInput): Promise<BulkDeleteResult> {
+    const response = await apiClient.delete<ApiResponse<BulkDeleteResult>>(
+      '/media/bulk',
+      { data: input }
+    );
+    return response.data.data;
   },
 };
