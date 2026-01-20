@@ -95,6 +95,7 @@ memoriahub/
     ├── SETUP.md          # First-time setup
     ├── DATABASE.md       # DB configuration
     ├── USER_GUIDE.md     # End-user docs
+    ├── LIBRARIES_AND_SHARING.md  # Libraries & sharing guide
     ├── ADMIN_GUIDE.md    # Admin docs
     ├── TROUBLESHOOTING.md
     └── diagrams/         # Mermaid diagrams
@@ -567,6 +568,7 @@ WORKER_CONCURRENCY=4
 - [docs/DATABASE.md](docs/DATABASE.md) - Database configuration, migrations, and governance
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - Common issues and solutions
 - [docs/USER_GUIDE.md](docs/USER_GUIDE.md) - End-user documentation
+- [docs/LIBRARIES_AND_SHARING.md](docs/LIBRARIES_AND_SHARING.md) - Libraries, media ownership, and sharing guide
 - [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md) - Administrator documentation
 
 ## Troubleshooting

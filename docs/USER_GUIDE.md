@@ -10,7 +10,14 @@ Welcome to MemoriaHub, your privacy-first family photo platform. This guide will
   - [User Preferences](#user-preferences)
   - [System Settings (Admin)](#system-settings-admin)
 - [Features](#features)
+  - [Libraries](#libraries)
+  - [Photo Gallery](#photo-gallery)
+  - [Photo Upload](#photo-upload)
+  - [Sharing](#sharing)
 - [FAQ](#faq)
+
+**Related Guides**:
+- [Libraries and Sharing Guide](LIBRARIES_AND_SHARING.md) - Detailed guide on organizing and sharing media
 
 ---
 
@@ -172,12 +179,26 @@ Enable or disable application features:
 
 ### Libraries
 
-Create and manage photo libraries to organize your memories:
+Libraries are collections that help you organize your photos and videos. For a comprehensive guide, see [Libraries and Sharing Guide](LIBRARIES_AND_SHARING.md).
 
+**Key Concepts**:
+- **You own your media**: Photos belong to you, not to libraries
+- **Flexible organization**: The same photo can appear in multiple libraries
+- **Sharing control**: Share through library membership or directly with users
+
+**Quick Start**:
 1. **Navigate to Libraries** from the side menu
 2. **Create a new library** by clicking the "Create Library" button
 3. **Set visibility**: Private (only you), Shared (invited members), or Public (anyone with link)
 4. **Add a description** to help you remember what the library contains
+
+**Library Visibility**:
+
+| Level | Who Can Access |
+|-------|----------------|
+| **Private** | Only you |
+| **Shared** | You + invited members |
+| **Public** | Anyone with the link |
 
 ### Photo Gallery
 
@@ -209,22 +230,54 @@ View photos and videos in detail:
 
 ### Photo Upload
 
-Upload photos and videos to your libraries:
+Upload photos and videos to MemoriaHub:
 
-1. **Open a library** and click the "Upload" button
+1. **Click the "Upload" button** from the toolbar or within a library
 2. **Drag and drop** files or click to browse
-3. **Supported formats**: JPEG, PNG, GIF, WebP, HEIC, MP4, MOV, AVI, WebM
-4. **Maximum file size**: 100MB per file
-5. **Track progress** as files upload
+3. **Optionally select a library** to add the media to
+4. **Supported formats**: JPEG, PNG, GIF, WebP, HEIC, MP4, MOV, AVI, WebM
+5. **Maximum file size**: 100MB per file
+6. **Track progress** as files upload
+
+**Understanding Uploads**:
+- Uploaded media is **owned by you** regardless of which library it's in
+- If you don't select a library, media appears in your "All Media" view
+- You can add media to libraries later
 
 ### Sharing
 
-*(Coming Soon)*
+Share your memories with family and friends. For detailed information, see [Libraries and Sharing Guide](LIBRARIES_AND_SHARING.md).
 
-- Share albums with family members
-- Create public links for viewing
-- Set expiration dates on shared links
-- Control download permissions
+**Two Ways to Share**:
+
+| Method | Best For |
+|--------|----------|
+| **Direct Share** | Sharing individual photos with specific people |
+| **Library Share** | Sharing entire collections with groups |
+
+**Direct Sharing**:
+1. Open a photo or video you own
+2. Click the **Share** button
+3. Search for users by email
+4. Click **Share** to grant access
+
+**Library Sharing**:
+1. Create or open a shared library
+2. Click **Manage Members**
+3. Invite users by email
+4. Assign roles (Viewer, Contributor, Admin)
+
+**Member Roles**:
+
+| Role | Can View | Can Add Media | Can Manage |
+|------|----------|---------------|------------|
+| Viewer | Yes | No | No |
+| Contributor | Yes | Yes | No |
+| Admin | Yes | Yes | Yes |
+
+**Revoking Access**:
+- For direct shares: Open the photo, click Share, and revoke access
+- For library access: Remove the member from the library
 
 ### Search
 
