@@ -12,7 +12,6 @@ import {
   useMediaQuery,
 } from '@mui/material';
 import {
-  Home as HomeIcon,
   PhotoLibrary as LibraryIcon,
   Collections as AllMediaIcon,
   Search as SearchIcon,

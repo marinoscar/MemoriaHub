@@ -12,7 +12,7 @@ import type {
 import { query } from '../client.js';
 import { logger } from '../../logging/logger.js';
 import { getTraceId } from '../../logging/request-context.js';
-import { s3Service } from '../../storage/s3.service.js';
+import { getDefaultStorageProvider } from '../../storage/storage.factory.js';
 
 /**
  * Database row type for media assets
@@ -1081,14 +1081,15 @@ export class MediaAssetRepository {
 
         // Storage cleanup (best-effort, don't fail if S3 delete fails)
         try {
-          await s3Service.deleteObject(asset.storageBucket, asset.storageKey);
+          const storage = getDefaultStorageProvider();
+          await storage.deleteObject(asset.storageBucket, asset.storageKey);
 
           // Also delete derivatives if they exist
           if (asset.thumbnailKey) {
-            await s3Service.deleteObject(asset.storageBucket, asset.thumbnailKey);
+            await storage.deleteObject(asset.storageBucket, asset.thumbnailKey);
           }
           if (asset.previewKey) {
-            await s3Service.deleteObject(asset.storageBucket, asset.previewKey);
+            await storage.deleteObject(asset.storageBucket, asset.previewKey);
           }
         } catch (s3Error) {
           logger.warn({

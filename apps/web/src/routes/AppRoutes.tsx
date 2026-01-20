@@ -4,7 +4,6 @@ import { AppLayout } from '../components/layout';
 import {
   AdminSettingsPage,
   LoginPage,
-  HomePage,
   ProfilePage,
   SettingsPage,
   NotFoundPage,
