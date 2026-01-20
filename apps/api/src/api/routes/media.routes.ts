@@ -34,6 +34,8 @@ import {
   validateCompleteUpload,
   validateListMediaQuery,
   validateShareMedia,
+  validateBulkUpdateMetadata,
+  validateBulkDelete,
 } from '../validators/media.validator.js';
 import { asyncHandler } from '../utils/async-handler.js';
 import { storageConfig } from '../../config/storage.config.js';
@@ -102,6 +104,25 @@ export function createMediaRoutes(): Router {
     '/library/:libraryId',
     validateListMediaQuery,
     asyncHandler((req, res, next) => mediaController.listMediaInLibrary(req, res, next))
+  );
+
+  // ===========================================================================
+  // Bulk Operations
+  // IMPORTANT: These routes must come BEFORE /:id to avoid "bulk" being treated as an ID
+  // ===========================================================================
+
+  // Bulk update metadata
+  router.patch(
+    '/bulk',
+    validateBulkUpdateMetadata,
+    asyncHandler((req, res, next) => mediaController.bulkUpdateMetadata(req, res, next))
+  );
+
+  // Bulk delete
+  router.delete(
+    '/bulk',
+    validateBulkDelete,
+    asyncHandler((req, res, next) => mediaController.bulkDelete(req, res, next))
   );
 
   // Get single media asset

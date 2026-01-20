@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { ProtectedRoute, OAuthCallback, AdminRoute } from '../components/auth';
 import { AppLayout } from '../components/layout';
 import {
@@ -11,6 +11,7 @@ import {
   LibrariesPage,
   LibraryGalleryPage,
 } from '../pages';
+import { AllMediaPage } from '../pages/AllMediaPage';
 
 /**
  * Application routes configuration
@@ -39,7 +40,12 @@ export function AppRoutes() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<HomePage />} />
+        {/* Redirect home to All Media */}
+        <Route index element={<Navigate to="/media" replace />} />
+
+        {/* All Media page (landing page) */}
+        <Route path="media" element={<AllMediaPage />} />
+
         <Route path="profile" element={<ProfilePage />} />
         <Route path="settings" element={<SettingsPage />} />
 
