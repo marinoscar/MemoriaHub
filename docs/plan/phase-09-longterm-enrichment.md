@@ -24,6 +24,8 @@ Extend MemoriaHub with the intelligence and platform integrations described in t
 
 All items in this phase map to the "Long-Term Vision" section: _"Over time, MemoriaHub can become a complete personal memory platform."_
 
+**Note:** Basic reverse geocoding (country / state-region / city) was moved to Phase 02 because location-based search is a first-class user capability, not a long-term enhancement. What remains in Phase 09 is (a) fine-grained POI/landmark naming beyond the default offline geocoder, and (b) trip/event grouping — auto-clustering a date range and place into a named trip. These are distinct from, and complementary to, the location filtering that Phase 01/02 deliver.
+
 ---
 
 ## 3. What We Reuse
@@ -32,10 +34,12 @@ Every item in this phase reuses one or more of these established extension point
 
 | Extension Point | Reused By |
 |-----------------|-----------|
-| `ObjectProcessor` interface (`apps/api/src/storage/processing/object-processor.interface.ts`) | Face recognition, object detection, video thumbnail, location enrichment, duplicate detection |
+| `ObjectProcessor` interface (`apps/api/src/storage/processing/object-processor.interface.ts`) | Face recognition, object detection, video thumbnail, landmark refinement, duplicate detection |
+| `GeoLocationProvider` interface (Phase 02, `apps/api/src/media/geo/`) | Landmark/POI refinement processor — swaps in a finer provider or re-geocodes with POI resolution |
 | `StorageProvider` interface (`apps/api/src/storage/providers/storage-provider.interface.ts`) | Azure provider, additional cloud providers |
 | Phase 05 CLI resumable upload + manifest | Google Photos Takeout import, OneDrive/Dropbox import |
 | Phase 02 `contentHash` on `MediaItem` | Duplicate detection grouping |
+| Phase 02 `geoCountry` / `geoAdmin1` / `geoLocality` on `MediaItem` | Trip/event grouping — location is already populated; this phase clusters by date + place into named trips |
 | Phase 01 `MediaItem.metadata` JSONB | All processors write their results here |
 
 ---
@@ -141,22 +145,31 @@ Each import path is a new CLI subcommand (`memoriaHub import-google`, etc.) or a
 
 ---
 
-### 4.7 Location Enrichment
+### 4.7 Landmark/POI Refinement
 
-**New `ObjectProcessor`:** `LocationEnrichmentProcessor`
-- Reverse-geocodes `takenLat` / `takenLng` (from Phase 02 EXIF) using a self-hosted Nominatim instance or a configured third-party geocoding API
-- Writes `MediaItem.metadata.location`: `{ city, country, region, displayName }`
+**Context:** Basic reverse geocoding (country → state/region → city) already lands in Phase 02 via `ReverseGeocodeProcessor` and `OfflineGeoLocationProvider`. This sub-project addresses the one gap in offline geocoding: fine-grained point-of-interest and landmark naming (e.g., resolving "37.865°N, 119.538°W" to "Yosemite National Park" rather than just "Mariposa County, California").
 
-**API enhancement:** `GET /api/media?country=Costa Rica` filter against enriched location
+**New `ObjectProcessor`:** `LandmarkRefinementProcessor`
+- Runs only for items where `geoPlaceName` is null and `takenLat`/`takenLng` are present (i.e., items that were geocoded offline but did not receive a landmark name)
+- Calls `GeoLocationProvider.reverseGeocode()` with a more capable provider (external Nominatim, Mapbox, or Google Places) that returns POI/landmark data
+- Updates `MediaItem.geoPlaceName`, `geoSource`, and `geocodedAt` only if a landmark name is resolved; leaves other geo columns unchanged
+
+**IMPORTANT:** This processor contacts an external service and sends GPS coordinates over the network. It must only be enabled when the operator has explicitly opted in via `GEO_PROVIDER=nominatim` (or equivalent). Privacy tradeoff must be documented in the configuration guide.
+
+**API:** no new endpoint required — `geoPlaceName` is already a first-class column and is included in the existing `?place=` and `?location=` filter params from Phase 01.
 
 ---
 
-### 4.8 Timeline and Event Grouping
+### 4.8 Trip and Event Grouping
 
-**New service:** `EventGroupingService`
-- Cron task: clusters `MediaItem` records by `capturedAt` proximity (gap > 48 hours = new event) and `takenLat`/`takenLng` proximity
-- Creates `Album` records automatically (labeled by date range + location if available)
-- Albums created by the service are flagged as `auto_generated`; users can rename, merge, or delete them
+**Context:** Location-based search ("all photos from Costa Rica") is available from Phase 01/02. This sub-project adds a higher-level concept: automatically recognising that a cluster of photos taken in the same place over a multi-day window represents a named trip or event (e.g., "Trip to Costa Rica, March 2025"), and surfacing it as a browseable unit.
+
+**New service:** `TripGroupingService`
+- Cron task: clusters `MediaItem` records by `capturedAt` proximity (gap > 48 hours = new event boundary) and `geoAdmin1` / `geoLocality` proximity
+- Creates `Album` records automatically labeled by date range + location (e.g., "La Fortuna · March 14–18 2025")
+- Albums created by the service carry a flag `autoGenerated = true`; users can rename, merge, or delete them; auto-generated albums are not re-created if deleted
+
+**Distinction from location filtering:** `?location=Costa Rica` returns individual items. A trip album groups those items into a named, browseable collection with a date-range label. These are complementary, not overlapping.
 
 ---
 
@@ -191,8 +204,8 @@ Because each sub-project in this phase is a standalone workstream, implementatio
 | Platform imports | One sub-project per platform; each extends Phase 05 CLI | `backend-dev`, `testing-dev` |
 | Azure provider | Add `AzureStorageProvider`; update provider module wiring | `backend-dev`, `testing-dev` |
 | Video thumbnails | Add `VideoThumbnailProcessor` | `backend-dev`, `testing-dev` |
-| Location enrichment | Add `LocationEnrichmentProcessor`; configure geocoding service | `backend-dev`, `testing-dev` |
-| Event grouping | Add `EventGroupingService` cron task | `backend-dev`, `frontend-dev`, `testing-dev` |
+| Landmark/POI refinement | Add `LandmarkRefinementProcessor` (opt-in, external provider only); document privacy tradeoff in configuration guide | `backend-dev`, `testing-dev` |
+| Trip grouping | Add `TripGroupingService` cron task; add `autoGenerated` flag to `Album` model; build trip browsing UI | `database-dev`, `backend-dev`, `frontend-dev`, `testing-dev` |
 
 ---
 
