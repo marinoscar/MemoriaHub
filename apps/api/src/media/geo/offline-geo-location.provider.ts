@@ -61,13 +61,28 @@ export class OfflineGeoLocationProvider implements GeoLocationProvider, OnModule
   private async ensureInitialized(): Promise<void> {
     if (this.initialized) return;
 
-    return new Promise<void>((resolve, reject) => {
+    return new Promise<void>((resolve, _reject) => {
       this.logger.log('Initializing local-reverse-geocoder (GeoNames dataset)…');
-      geocoder.init({}, () => {
-        this.initialized = true;
-        this.logger.log('local-reverse-geocoder initialized');
-        resolve();
-      });
+      geocoder.init(
+        {
+          load: {
+            admin1: true,         // state/province/region names — required for "pics in California"
+            admin2: true,         // county/canton names — modest size, useful for locality
+            admin3And4: false,    // municipality sub-divisions — not needed, saves ~allCountries download
+            alternateNames: false, // DISABLED: this is the memory hog; the alternateNames.zip is
+                                   // hundreds of MB and parsing it into an in-process object exhausts
+                                   // the Node heap (root cause of OOM crash on startup).
+          },
+          citiesFileOverride: 'cities15000', // ~26k cities; far smaller than default cities1000
+                                              // while still covering all family-photo localities
+          dumpDirectory: process.env.GEONAMES_CACHE_DIR ?? '/tmp/geonames-cache', // volume-mountable cache
+        },
+        () => {
+          this.initialized = true;
+          this.logger.log('local-reverse-geocoder initialized');
+          resolve();
+        },
+      );
     });
   }
 
