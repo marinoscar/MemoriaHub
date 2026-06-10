@@ -59,6 +59,54 @@ export const mockPermissions = {
     name: 'allowlist:write',
     description: 'Modify allowlist',
   },
+  // Storage permissions
+  storageRead: {
+    id: randomUUID(),
+    name: 'storage:read',
+    description: 'Read own storage objects',
+  },
+  storageWrite: {
+    id: randomUUID(),
+    name: 'storage:write',
+    description: 'Write own storage objects',
+  },
+  storageDeleteAny: {
+    id: randomUUID(),
+    name: 'storage:delete_any',
+    description: 'Delete any storage object',
+  },
+  // Media permissions (own)
+  mediaRead: {
+    id: randomUUID(),
+    name: 'media:read',
+    description: 'Read own media items',
+  },
+  mediaWrite: {
+    id: randomUUID(),
+    name: 'media:write',
+    description: 'Write own media items',
+  },
+  mediaDelete: {
+    id: randomUUID(),
+    name: 'media:delete',
+    description: 'Delete own media items',
+  },
+  // Media permissions (any — admin)
+  mediaReadAny: {
+    id: randomUUID(),
+    name: 'media:read_any',
+    description: 'Read any media item',
+  },
+  mediaWriteAny: {
+    id: randomUUID(),
+    name: 'media:write_any',
+    description: 'Write any media item',
+  },
+  mediaDeleteAny: {
+    id: randomUUID(),
+    name: 'media:delete_any',
+    description: 'Delete any media item',
+  },
 };
 
 export const mockRoles = {
@@ -350,14 +398,30 @@ export const rolePermissionsMap = {
     mockPermissions.rbacManage,
     mockPermissions.allowlistRead,
     mockPermissions.allowlistWrite,
+    mockPermissions.storageRead,
+    mockPermissions.storageWrite,
+    mockPermissions.storageDeleteAny,
+    mockPermissions.mediaRead,
+    mockPermissions.mediaWrite,
+    mockPermissions.mediaDelete,
+    mockPermissions.mediaReadAny,
+    mockPermissions.mediaWriteAny,
+    mockPermissions.mediaDeleteAny,
   ],
   contributor: [
     mockPermissions.userSettingsRead,
     mockPermissions.userSettingsWrite,
+    mockPermissions.storageRead,
+    mockPermissions.storageWrite,
+    mockPermissions.mediaRead,
+    mockPermissions.mediaWrite,
+    mockPermissions.mediaDelete,
   ],
   viewer: [
     mockPermissions.userSettingsRead,
     mockPermissions.userSettingsWrite,
+    mockPermissions.storageRead,
+    mockPermissions.mediaRead,
   ],
 };
 
