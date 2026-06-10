@@ -5,7 +5,7 @@
 # -----------------------------------------------------------------------------
 # Base stage
 # -----------------------------------------------------------------------------
-FROM node:20-alpine AS base
+FROM node:26-alpine AS base
 WORKDIR /app
 # Install OpenSSL for Prisma compatibility and ffmpeg for video processing
 RUN apk add --no-cache openssl openssl-dev ffmpeg
