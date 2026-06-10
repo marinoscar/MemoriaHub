@@ -37,6 +37,9 @@ model User {
   deviceCodes               DeviceCode[]     @relation("UserDeviceCodes")
   storageObjects            StorageObject[]  @relation("UserStorageObjects")
   personalAccessTokens      PersonalAccessToken[] @relation("UserPersonalAccessTokens")
+  mediaItems                MediaItem[]
+  albums                    Album[]
+  tags                      Tag[]
 
   @@map("users")
 }
@@ -294,6 +297,7 @@ model StorageObject {
   // Relations
   uploadedBy User?                @relation("UserStorageObjects", fields: [uploadedById], references: [id], onDelete: SetNull)
   chunks     StorageObjectChunk[]
+  mediaItem  MediaItem?
 
   @@index([uploadedById])
   @@index([status])
@@ -315,4 +319,154 @@ model StorageObjectChunk {
   @@unique([objectId, partNumber])
   @@index([objectId])
   @@map("storage_object_chunks")
+}
+
+// =============================================================================
+// Media Domain
+// =============================================================================
+
+enum MediaType {
+  photo
+  video
+}
+
+enum MediaSource {
+  web
+  cli
+  android
+  import
+  sync
+}
+
+enum MediaClassification {
+  memory
+  low_value
+  unreviewed
+}
+
+model MediaItem {
+  // --- Identity and storage ---
+  id              String        @id @default(uuid()) @db.Uuid
+  storageObjectId String        @unique @map("storage_object_id") @db.Uuid
+  storageObject   StorageObject @relation(fields: [storageObjectId], references: [id])
+  ownerId         String        @map("owner_id") @db.Uuid
+  owner           User          @relation(fields: [ownerId], references: [id])
+
+  // --- Audit timestamps ---
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // --- Core typed fields ---
+  type             MediaType
+  capturedAt       DateTime?           @map("captured_at") @db.Timestamptz
+  capturedAtOffset Int?                @map("captured_at_offset") // UTC offset in minutes at capture time
+  importedAt       DateTime            @default(now()) @map("imported_at") @db.Timestamptz
+  source           MediaSource
+  contentHash      String?             @map("content_hash")
+  classification   MediaClassification @default(unreviewed)
+  width            Int?
+  height           Int?
+  durationMs       Int?                @map("duration_ms")
+  orientation      Int?                // EXIF orientation tag (1–8), display-critical
+  cameraMake       String?             @map("camera_make")
+  cameraModel      String?             @map("camera_model")
+  originalFilename String              @map("original_filename")
+  metadata         Json?
+
+  // --- User-added metadata ---
+  title       String?
+  caption     String?
+  description String?
+  favorite    Boolean @default(false)
+
+  // --- Lifecycle / soft-delete ---
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz // soft-delete / trash; null = active
+
+  // --- Import / sync provenance ---
+  originalCreatedAt DateTime? @map("original_created_at") @db.Timestamptz // file creation date, distinct from capturedAt
+  sourcePath        String?   @map("source_path") // original folder/path on the source device
+  sourceDeviceId    String?   @map("source_device_id")
+  sourceDeviceName  String?   @map("source_device_name")
+
+  // --- Location / reverse-geocoding (first-class) ---
+  takenLat      Float?   @map("taken_lat")
+  takenLng      Float?   @map("taken_lng")
+  takenAltitude Float?   @map("taken_altitude")
+  geoCountry    String?  @map("geo_country") // "Costa Rica", "United States"
+  geoCountryCode String? @map("geo_country_code") // ISO 3166-1 alpha-2: "CR", "US"
+  geoAdmin1     String?  @map("geo_admin1") // state / province / region
+  geoAdmin2     String?  @map("geo_admin2") // county / canton (optional tier)
+  geoLocality   String?  @map("geo_locality") // city / town
+  geoPlaceName  String?  @map("geo_place_name") // POI / landmark / display label
+  geoSource     String?  @map("geo_source") // provider that produced it
+  geocodedAt    DateTime? @map("geocoded_at") @db.Timestamptz // when reverse geocoding ran; null = not yet geocoded
+
+  // --- Relations ---
+  albumItems AlbumItem[]
+  mediaTags  MediaTag[]
+
+  @@index([ownerId])
+  @@index([capturedAt])
+  @@index([contentHash])
+  @@index([classification])
+  @@index([type])
+  @@index([deletedAt])
+  @@index([favorite])
+  @@index([geoCountryCode])
+  @@index([geoAdmin1])
+  @@index([geoLocality])
+  @@map("media_items")
+}
+
+model Album {
+  id          String    @id @default(uuid()) @db.Uuid
+  ownerId     String    @map("owner_id") @db.Uuid
+  owner       User      @relation(fields: [ownerId], references: [id])
+  name        String
+  description String?
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  items       AlbumItem[]
+
+  @@index([ownerId])
+  @@map("albums")
+}
+
+model AlbumItem {
+  id          String    @id @default(uuid()) @db.Uuid
+  albumId     String    @map("album_id") @db.Uuid
+  album       Album     @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  mediaItemId String    @map("media_item_id") @db.Uuid
+  mediaItem   MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  addedAt     DateTime  @default(now()) @map("added_at") @db.Timestamptz
+
+  @@unique([albumId, mediaItemId])
+  @@index([albumId])
+  @@map("album_items")
+}
+
+model Tag {
+  id        String     @id @default(uuid()) @db.Uuid
+  ownerId   String     @map("owner_id") @db.Uuid
+  owner     User       @relation(fields: [ownerId], references: [id])
+  name      String
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  mediaTags MediaTag[]
+
+  @@unique([ownerId, name])
+  @@index([ownerId])
+  @@map("tags")
+}
+
+model MediaTag {
+  id          String    @id @default(uuid()) @db.Uuid
+  tagId       String    @map("tag_id") @db.Uuid
+  tag         Tag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  mediaItemId String    @map("media_item_id") @db.Uuid
+  mediaItem   MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  addedAt     DateTime  @default(now()) @map("added_at") @db.Timestamptz
+
+  @@unique([tagId, mediaItemId])
+  @@index([mediaItemId])
+  @@map("media_tags")
 }
