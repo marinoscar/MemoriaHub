@@ -1,0 +1,39 @@
+##
+## Uptrace 1.7.x configuration
+##
+
+# ClickHouse for traces and metrics storage
+ch:
+  addr: clickhouse:9000
+  user: default
+  database: uptrace
+
+# PostgreSQL for metadata (uses UPTRACE_PG* environment variables)
+pg:
+  addr: uptrace-pg:5432
+  user: uptrace
+  password: uptrace
+  database: uptrace
+
+projects:
+  - id: 1
+    name: Enterprise App
+    token: project1_secret_token
+    pinned_attrs:
+      - service.name
+      - host.name
+
+listen:
+  grpc:
+    addr: ":14317"
+  http:
+    addr: ":14318"
+
+# Disable authentication for local development
+auth:
+  users:
+    - email: admin@localhost
+      password: admin
+      notify_by_email: false
+
+secret_key: "change-me-in-production-1234567890abcdef"

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(if [ -d \"c:\\\\git\\\\EnterpriseAppBase\\\\apps\\\\web\\\\src\\\\hooks\" ])",
+      "Bash(then ls \"c:\\\\git\\\\EnterpriseAppBase\\\\apps\\\\web\\\\src\\\\hooks\")",
+      "Bash(else echo \"Directory does not exist\")",
+      "Bash(fi)",
+      "Bash(docker compose:*)"
+    ]
+  }
+}

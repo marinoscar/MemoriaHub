@@ -1,0 +1,18 @@
+{
+  "name": "enterprise-app",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "api": "npm -w apps/api",
+    "web": "npm -w apps/web",
+    "api:dev": "npm -w apps/api run start:dev",
+    "web:dev": "npm -w apps/web run dev",
+    "api:test": "npm -w apps/api test",
+    "web:test": "npm -w apps/web test",
+    "postinstall": "node scripts/patch-react-transition-group.js"
+  },
+  "overrides": {
+    "@nestjs/common": "^11.1.12",
+    "@nestjs/core": "^11.1.12"
+  }
+}

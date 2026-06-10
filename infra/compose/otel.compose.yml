@@ -1,0 +1,110 @@
+# =============================================================================
+# Docker Compose - Observability Stack (OpenTelemetry + Uptrace)
+# =============================================================================
+# Usage:
+#   docker compose -f base.compose.yml -f dev.compose.yml -f otel.compose.yml up
+#
+# Services:
+#   - OpenTelemetry Collector: Receives and exports telemetry data
+#   - Uptrace: Unified traces, metrics, and logs visualization
+#   - ClickHouse: Storage backend for Uptrace (traces/metrics)
+#   - PostgreSQL: Storage backend for Uptrace (metadata)
+#
+# Access Uptrace UI at: http://localhost:14318
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # API - Enable OTEL
+  # ---------------------------------------------------------------------------
+  api:
+    environment:
+      - OTEL_ENABLED=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+    depends_on:
+      - otel-collector
+
+  # ---------------------------------------------------------------------------
+  # OpenTelemetry Collector
+  # ---------------------------------------------------------------------------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ../otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4327:4317"   # OTLP gRPC receiver (remapped to avoid conflict)
+      - "4328:4318"   # OTLP HTTP receiver (remapped to avoid conflict)
+    depends_on:
+      - uptrace
+    networks:
+      - app-network
+
+  # ---------------------------------------------------------------------------
+  # Uptrace - Observability Platform
+  # ---------------------------------------------------------------------------
+  uptrace:
+    image: uptrace/uptrace:1.7.2
+    volumes:
+      - ../otel/uptrace.yml:/etc/uptrace/uptrace.yml:ro
+      - uptrace-data:/var/lib/uptrace
+    ports:
+      - "14317:14317"  # OTLP gRPC
+      - "14318:14318"  # Uptrace UI
+    environment:
+      - UPTRACE_PGHOST=uptrace-pg
+      - UPTRACE_PGUSER=uptrace
+      - UPTRACE_PGPASSWORD=uptrace
+      - UPTRACE_PGDATABASE=uptrace
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      uptrace-pg:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  # ---------------------------------------------------------------------------
+  # ClickHouse - Storage Backend for Uptrace (traces/metrics)
+  # ---------------------------------------------------------------------------
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    environment:
+      - CLICKHOUSE_DB=uptrace
+      - ALLOW_EMPTY_PASSWORD=yes
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL - Storage Backend for Uptrace (metadata)
+  # ---------------------------------------------------------------------------
+  uptrace-pg:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=uptrace
+      - POSTGRES_PASSWORD=uptrace
+      - POSTGRES_DB=uptrace
+    volumes:
+      - uptrace-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U uptrace"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  uptrace-data:
+  clickhouse-data:
+  uptrace-pg-data:
