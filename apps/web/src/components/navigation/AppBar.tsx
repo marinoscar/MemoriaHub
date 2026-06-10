@@ -14,6 +14,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useThemeContext } from '../../contexts/ThemeContext';
 import { UserMenu } from './UserMenu';
+import { APP_NAME } from '../../constants/app';
 
 interface AppBarProps {
   onMenuClick?: () => void;
@@ -55,7 +56,7 @@ export function AppBar({ onMenuClick }: AppBarProps) {
           }}
           onClick={() => navigate('/')}
         >
-          Enterprise App
+          {APP_NAME}
         </Typography>
 
         {/* Spacer */}
