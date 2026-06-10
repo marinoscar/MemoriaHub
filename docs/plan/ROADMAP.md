@@ -5,6 +5,8 @@
 
 MemoriaHub is a personal media ownership platform that gives families full control over their photos and videos — independent of any single cloud provider. The product vision (see [`../../VISION.MD`](../../VISION.MD)) defines fourteen MVP capabilities spanning upload, metadata extraction, web browsing, CLI import, Android sync, multi-provider storage, replication, export, and long-term enrichment. This roadmap translates that vision into nine sequenced phases built on top of the already-implemented resumable-upload and event-driven processing backbone, so that every phase adds media-domain value rather than rebuilding infrastructure.
 
+**Phase 01 (Media Domain Foundation) is implemented and deployed at https://memoriahub.dev.marin.cr.**
+
 **Backbone already in place (satisfies vision item #3 — AWS storage):**
 The `S3StorageProvider`, resumable multipart upload flow (`StorageObject` / `StorageObjectChunk`), JSONB `metadata` field, `ObjectProcessor` plugin interface, and `OBJECT_UPLOADED_EVENT` pipeline all exist today. Every enrichment processor described in phases 02 through 09 is a new implementation of that existing interface — no pipeline changes are needed.
 
