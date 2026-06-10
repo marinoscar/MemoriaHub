@@ -3,7 +3,7 @@
 **Roadmap:** [ROADMAP.md](ROADMAP.md)
 **Previous Phase:** — (first phase; builds on existing storage backbone)
 **Next Phase:** [Phase 02 — Metadata Extraction](phase-02-metadata-extraction.md)
-**Status:** Not Started
+**Status:** Done
 
 ---
 
