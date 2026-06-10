@@ -20,7 +20,9 @@ services:
   nginx:
     image: nginx:alpine
     ports:
-      - "3535:80"
+      # 8327 is the memoriahub slot in the dev.marin.cr host-nginx map.
+      # See docs/ssl-nginx-setup.md for the full port table.
+      - "8327:80"
     volumes:
       - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
@@ -36,9 +38,15 @@ services:
     build:
       context: ../../apps/api
       dockerfile: Dockerfile
+    # Load every variable from .env (APP_URL, COOKIE_SECRET, STORAGE_*, DEVICE_*,
+    # etc.) so newly added env vars don't have to be enumerated below. The explicit
+    # `environment` entries still take precedence over values from the env_file.
+    env_file:
+      - .env
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - PORT=${PORT:-3000}
+      - APP_URL=${APP_URL}
       # Database connection (individual variables)
       - POSTGRES_HOST=${POSTGRES_HOST:-db}
       - POSTGRES_PORT=${POSTGRES_PORT:-5432}
@@ -64,10 +72,13 @@ services:
       # Observability
       - OTEL_ENABLED=${OTEL_ENABLED:-false}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT}
-      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-enterprise-app-api}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-memoriahub-api}
       - LOG_LEVEL=${LOG_LEVEL:-info}
     networks:
       - app-network
+      # Shared network where the central postgres container (hostname `postgres`)
+      # lives. Required because POSTGRES_HOST=postgres resolves on devnet.
+      - devnet
 
   # ---------------------------------------------------------------------------
   # Web - React Frontend
@@ -85,4 +96,9 @@ services:
 networks:
   app-network:
     driver: bridge
+  # Shared external network created once on the host (`docker network create devnet`);
+  # the central postgres container is reachable here as hostname `postgres`.
+  devnet:
+    external: true
+    name: devnet
 
