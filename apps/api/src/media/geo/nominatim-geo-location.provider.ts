@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { GeoLocationProvider, GeoLocationResult } from './geo-location-provider.interface';
 
 /**
@@ -20,8 +21,11 @@ export class NominatimGeoLocationProvider implements GeoLocationProvider {
 
   private readonly baseUrl: string;
 
-  constructor(baseUrl = 'https://nominatim.openstreetmap.org') {
-    this.baseUrl = baseUrl;
+  constructor(private readonly config: ConfigService) {
+    this.baseUrl = this.config.get<string>(
+      'NOMINATIM_BASE_URL',
+      'https://nominatim.openstreetmap.org',
+    );
   }
 
   async reverseGeocode(lat: number, lng: number): Promise<GeoLocationResult | null> {
