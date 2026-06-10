@@ -1,11 +1,19 @@
-# Enterprise Application Foundation
+# MemoriaHub
 
-[![CI](https://github.com/marinoscar/EnterpriseAppBase/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/marinoscar/EnterpriseAppBase/actions/workflows/ci.yml)
+[![CI](https://github.com/marinoscar/MemoriaHub/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/marinoscar/MemoriaHub/actions/workflows/ci.yml)
 
-A production-grade full-stack application foundation built with React, NestJS, and PostgreSQL. Features OAuth authentication, role-based access control, and comprehensive observability.
+MemoriaHub is a personal media-ownership platform that gives families full control over their photos and videos, independent of any single cloud provider. Store, organize, enrich, import, sync, replicate, and export your family memories while keeping data portable and in your hands. The guiding principle: **your family memories should belong to you, not to a platform.**
 
 ## Features
 
+### Media and Storage
+- **Media Domain**: Photos and videos as first-class `MediaItem` records with typed columns for capture date, camera make/model, GPS coordinates, reverse-geocoded country/region/city, tags, albums, favorites, classification, and soft-delete
+- **Pluggable Storage**: AWS S3 today; local and Azure planned — storage providers are interchangeable by design
+- **Resumable Uploads**: Multipart upload with pre-signed URLs and event-driven post-upload processing pipeline
+- **Personal Access Tokens**: Long-lived tokens for CLI tools, scripts, and automation workflows
+- **Metadata-First**: All media metadata stored in typed columns and queryable; exportable in JSON and CSV (roadmap Phase 04)
+
+### Foundation
 - **Authentication**: Google OAuth 2.0 with JWT access tokens and refresh token rotation
 - **Device Authorization**: RFC 8628 Device Authorization Flow for CLI tools, mobile apps, and IoT devices
 - **Authorization**: Role-Based Access Control (RBAC) with three roles (Admin, Contributor, Viewer)
@@ -14,7 +22,10 @@ A production-grade full-stack application foundation built with React, NestJS, a
 - **Settings Framework**: System-wide and per-user settings with type-safe schemas
 - **Observability**: OpenTelemetry instrumentation with traces, metrics, and structured logging
 - **API Documentation**: Swagger/OpenAPI documentation at `/api/docs`
-- **Same-Origin Architecture**: Frontend and API served from same host via Nginx reverse proxy
+- **Same-Origin Architecture**: Frontend and API served from the same host via Nginx reverse proxy
+
+### Planned Capabilities
+The roadmap covers metadata extraction and reverse geocoding (Phase 02), web media library (Phase 03), metadata export (Phase 04), CLI importer (Phase 05), storage replication and local storage (Phase 06), memory prioritization (Phase 07), Android sync (Phase 08), and long-term enrichment such as face recognition, object detection, and duplicate detection (Phase 09). See [docs/plan/ROADMAP.md](docs/plan/ROADMAP.md) for details.
 
 ## Technology Stack
 
@@ -35,7 +46,7 @@ A production-grade full-stack application foundation built with React, NestJS, a
 ### Infrastructure
 - **Containerization**: Docker + Docker Compose
 - **Reverse Proxy**: Nginx
-- **Database**: PostgreSQL 16
+- **Database**: PostgreSQL
 
 ## Prerequisites
 
@@ -49,7 +60,7 @@ A production-grade full-stack application foundation built with React, NestJS, a
 
 ```bash
 git clone <repository-url>
-cd EnterpriseAppBase
+cd MemoriaHub
 
 # Set up environment variables
 cd infra/compose
@@ -89,7 +100,7 @@ exit
 
 **Why seeding is required:**
 - Creates RBAC roles (admin, contributor, viewer)
-- Creates permissions (users:read, users:write, etc.)
+- Creates permissions (users:read, users:write, media:read, media:write, etc.)
 - Without seeds, first login will fail with "Default role not found"
 
 ### 5. Access Application
@@ -152,14 +163,14 @@ Note: E2E tests use a test authentication bypass (`/testing/login`) that is only
 ```bash
 cd apps/api
 
-# Create a new migration
-npx prisma migrate dev --name migration_name
+# Create a new migration (uses npm script to construct DATABASE_URL from env vars)
+npm run prisma:migrate:dev -- --name migration_name
 
-# Apply migrations
-npx prisma migrate deploy
+# Apply migrations (production)
+npm run prisma:migrate
 
-# Generate Prisma Client
-npx prisma generate
+# Generate Prisma Client after schema changes
+npm run prisma:generate
 ```
 
 ### Hot Reload
@@ -171,14 +182,19 @@ Development mode (`dev.compose.yml`) includes hot reload for both frontend and b
 ## Project Structure
 
 ```
-EnterpriseAppBase/
+MemoriaHub/
 ├── apps/
 │   ├── api/                    # Backend API (NestJS + Fastify)
 │   │   ├── src/
 │   │   │   ├── auth/          # Authentication & authorization
+│   │   │   ├── media/         # Media domain (MediaItem, Album, Tag)
+│   │   │   ├── storage/       # Storage providers, objects, processing pipeline
 │   │   │   ├── users/         # User management
+│   │   │   ├── allowlist/     # Email allowlist
+│   │   │   ├── pat/           # Personal access tokens
 │   │   │   ├── settings/      # Settings endpoints
-│   │   │   └── prisma/        # Database service
+│   │   │   ├── device-auth/   # RFC 8628 device authorization
+│   │   │   └── health/        # Liveness and readiness probes
 │   │   ├── prisma/
 │   │   │   ├── schema.prisma  # Database schema
 │   │   │   ├── seed.ts        # Database seeds
@@ -189,13 +205,20 @@ EnterpriseAppBase/
 │       │   ├── components/    # Reusable components
 │       │   ├── contexts/      # React contexts (Auth, Theme)
 │       │   ├── pages/         # Page components
+│       │   ├── hooks/         # Custom React hooks
 │       │   └── services/      # API client
 │       └── src/__tests__/     # Component tests
-├── docs/                       # Documentation
+├── docs/
+│   ├── plan/                  # Implementation roadmap and phase specs
+│   │   ├── ROADMAP.md         # Phase-by-phase implementation plan
+│   │   └── phase-01-media-domain.md  # (and other phase docs)
+│   ├── ARCHITECTURE.md        # System architecture
+│   ├── API.md                 # Complete API reference
 │   ├── DEVELOPMENT.md         # Development guide (start here!)
 │   ├── SECURITY-ARCHITECTURE.md  # Security design
 │   ├── TESTING.md             # Testing guide
-│   └── specs/                 # Feature specifications
+│   ├── DEVICE-AUTH.md         # Device Authorization Flow guide
+│   └── ssl-nginx-setup.md     # VPS/HTTPS deployment with Nginx
 ├── infra/
 │   ├── compose/               # Docker Compose configs
 │   │   ├── base.compose.yml   # Core services
@@ -204,18 +227,22 @@ EnterpriseAppBase/
 │   │   └── otel.compose.yml   # Observability stack
 │   ├── nginx/                 # Nginx config
 │   └── otel/                  # OpenTelemetry config
+├── tests/e2e/                 # Playwright E2E tests
+├── VISION.MD                  # Product vision and MVP definition
 └── CLAUDE.md                  # AI assistant guidance
 ```
 
 ## Documentation
 
-- **[DEVELOPMENT.md](docs/DEVELOPMENT.md)** - Development setup, common patterns, and troubleshooting
-- **[SECURITY-ARCHITECTURE.md](docs/SECURITY-ARCHITECTURE.md)** - Security design and implementation
-- **[TESTING.md](docs/TESTING.md)** - Testing strategy and best practices
-- **[DEVICE-AUTH.md](docs/DEVICE-AUTH.md)** - Device Authorization Flow guide and integration examples
-- **[API.md](docs/API.md)** - Complete API reference
-- **[System Specification](docs/System_Specification_Document.md)** - Complete project specification
-- **[Feature Specs](docs/specs/)** - Individual feature specifications
+- **[VISION.MD](VISION.MD)** - Product vision, MVP definition, and guiding principles
+- **[docs/plan/ROADMAP.md](docs/plan/ROADMAP.md)** - Phase-by-phase implementation plan
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - System architecture and design decisions
+- **[docs/API.md](docs/API.md)** - Complete API reference
+- **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** - Development setup, common patterns, and troubleshooting
+- **[docs/SECURITY-ARCHITECTURE.md](docs/SECURITY-ARCHITECTURE.md)** - Security design and implementation
+- **[docs/TESTING.md](docs/TESTING.md)** - Testing strategy and best practices
+- **[docs/DEVICE-AUTH.md](docs/DEVICE-AUTH.md)** - Device Authorization Flow guide and integration examples
+- **[docs/ssl-nginx-setup.md](docs/ssl-nginx-setup.md)** - VPS deployment with HTTPS and Nginx
 
 ## API Documentation
 
@@ -236,9 +263,32 @@ Interactive API documentation is available at `/api/docs` when running the appli
 - `GET /api/auth/device/sessions` - List authorized devices
 - `DELETE /api/auth/device/sessions/:id` - Revoke device access
 
+**Media (Phase 01 — implemented):**
+- `POST /api/media` - Register an uploaded file as a MediaItem
+- `GET /api/media` - List media (paginated; filter by type, date, classification, album, tag, location)
+- `GET /api/media/:id` - Get a single MediaItem
+- `PATCH /api/media/:id` - Update mutable fields (title, caption, favorite, classification, etc.)
+- `DELETE /api/media/:id` - Soft-delete MediaItem (moves to trash; blob preserved)
+- `GET /api/media/tags` - List caller's tags
+- `POST /api/media/:id/tags` - Attach tags to a MediaItem
+- `POST /api/media/albums` - Create album
+- `GET /api/media/albums` - List albums
+- `POST /api/media/albums/:id/items` - Add items to album
+
+**Storage:**
+- `POST /api/storage/objects/upload/init` - Initialize resumable multipart upload
+- `POST /api/storage/objects/:id/upload/complete` - Complete multipart upload
+- `POST /api/storage/objects` - Simple file upload
+- `GET /api/storage/objects/:id/download` - Get signed download URL
+- `DELETE /api/storage/objects/:id` - Delete object
+
+**Personal Access Tokens:**
+- `POST /api/pat` - Create token
+- `GET /api/pat` - List tokens
+- `DELETE /api/pat/:id` - Revoke token
+
 **Users (Admin only):**
 - `GET /api/users` - List users
-- `GET /api/users/:id` - Get user by ID
 - `PATCH /api/users/:id` - Update user
 
 **Allowlist (Admin only):**
@@ -266,8 +316,12 @@ NODE_ENV=development
 PORT=3000
 APP_URL=http://localhost:3535
 
-# Database
-DATABASE_URL=postgresql://postgres:postgres@db:5432/appdb
+# Database (DATABASE_URL is constructed automatically from these)
+POSTGRES_HOST=db
+POSTGRES_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_DB=appdb
 
 # JWT
 JWT_SECRET=your-secret-min-32-chars
@@ -282,6 +336,12 @@ GOOGLE_CALLBACK_URL=http://localhost:3535/api/auth/google/callback
 # Admin Bootstrap
 INITIAL_ADMIN_EMAIL=admin@example.com
 
+# Storage (AWS S3)
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key
+S3_BUCKET=your-bucket-name
+
 # Observability
 OTEL_ENABLED=true
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
@@ -294,10 +354,10 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 This application uses **Fastify** as the HTTP adapter, not Express. Key differences:
 
 **Response methods:**
-- ✅ Fastify: `res.code(200).send(data)`
-- ❌ Express: `res.status(200).json(data)`
+- Fastify: `res.code(200).send(data)`
+- Express (do not use): `res.status(200).json(data)`
 
-**Best practice:** Let NestJS handle responses automatically (don't use `@Res()` decorator).
+**Best practice:** Let NestJS handle responses automatically (do not use the `@Res()` decorator).
 
 See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for detailed guidance.
 
@@ -312,6 +372,17 @@ npx tsx prisma/seed.ts
 ```
 
 This creates roles, permissions, and default settings. Without seeding, OAuth login will fail.
+
+### Database Migrations Use npm Scripts
+
+Use the project npm scripts rather than raw `npx prisma` commands — the scripts automatically construct `DATABASE_URL` from the individual `POSTGRES_*` environment variables:
+
+```bash
+cd apps/api
+npm run prisma:migrate:dev -- --name <name>   # development
+npm run prisma:migrate                         # production
+npm run prisma:generate                        # after schema changes
+```
 
 ### OAuth with Fastify
 
@@ -338,17 +409,17 @@ If you're not the first admin, ask an existing admin to add your email to the al
 ### Database connection error
 **Solution:**
 1. Ensure containers are running: `docker compose ps`
-2. Check `DATABASE_URL` in `.env`
+2. Check the `POSTGRES_*` variables in `.env`
 3. Restart: `docker compose restart db`
 
 ### Port already in use
-**Solution:** Change `PORT` in `.env` or stop conflicting service
+**Solution:** Change `PORT` in `.env` or stop the conflicting service
 
 For more troubleshooting, see [DEVELOPMENT.md](docs/DEVELOPMENT.md#debugging-tips).
 
 ## Production Deployment
 
-For production deployment:
+For local `docker compose`-based production:
 
 1. Use `prod.compose.yml` overrides
 2. Set `NODE_ENV=production`
@@ -359,16 +430,9 @@ For production deployment:
 7. Set up database backups
 8. Configure monitoring and alerting
 
-See [SECURITY-ARCHITECTURE.md](docs/SECURITY-ARCHITECTURE.md) for production security checklist.
+For VPS deployment with HTTPS and Nginx (the setup used at https://memoriahub.dev.marin.cr), see [docs/ssl-nginx-setup.md](docs/ssl-nginx-setup.md).
 
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Write tests for new features
-4. Ensure all tests pass
-5. Update documentation
-6. Submit pull request
+See [SECURITY-ARCHITECTURE.md](docs/SECURITY-ARCHITECTURE.md) for the production security checklist.
 
 ## Architecture Decisions
 
@@ -376,7 +440,9 @@ See [SECURITY-ARCHITECTURE.md](docs/SECURITY-ARCHITECTURE.md) for production sec
 - **Prisma**: Type-safe ORM with excellent migration tooling
 - **Same-origin hosting**: Simplifies security, no CORS complexity
 - **JWT + Refresh tokens**: Short-lived access tokens with secure refresh rotation
-- **RBAC**: Flexible permission system for future feature expansion
+- **RBAC**: Flexible permission system supporting media:read/write/delete and _any admin variants
+- **Pluggable storage providers**: `StorageProvider` interface abstracts AWS S3 today, local/Azure in future phases
+- **Event-driven processing**: `OBJECT_UPLOADED_EVENT` pipeline decouples upload from enrichment processors
 - **OpenTelemetry**: Vendor-neutral observability
 - **Docker Compose**: Reproducible local development environment
 
@@ -390,8 +456,3 @@ For issues, questions, or contributions:
 - Review [DEVELOPMENT.md](docs/DEVELOPMENT.md) for common issues
 - Check [documentation](docs/) for detailed guides
 - Submit issues via GitHub Issues
-- Contact the team
-
----
-
-**Happy coding!** 🚀
