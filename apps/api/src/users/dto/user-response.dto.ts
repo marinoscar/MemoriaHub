@@ -1,5 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { isoDateTime } from '../../common/schemas/iso-date';
 
 export const userResponseSchema = z.object({
   id: z.string().uuid(),
@@ -10,8 +11,8 @@ export const userResponseSchema = z.object({
   providerProfileImageUrl: z.string().url().nullable(),
   isActive: z.boolean(),
   roles: z.array(z.string()),
-  createdAt: z.date(),
-  updatedAt: z.date(),
+  createdAt: isoDateTime,
+  updatedAt: isoDateTime,
 });
 
 export class UserResponseDto extends createZodDto(userResponseSchema) {}

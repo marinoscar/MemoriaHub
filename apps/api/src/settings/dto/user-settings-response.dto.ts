@@ -1,5 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { isoDateTime } from '../../common/schemas/iso-date';
 
 export const userSettingsResponseSchema = z.object({
   theme: z.enum(['light', 'dark', 'system']),
@@ -8,7 +9,7 @@ export const userSettingsResponseSchema = z.object({
     useProviderImage: z.boolean(),
     customImageUrl: z.string().url().nullable().optional(),
   }),
-  updatedAt: z.date(),
+  updatedAt: isoDateTime,
   version: z.number(),
 });
 

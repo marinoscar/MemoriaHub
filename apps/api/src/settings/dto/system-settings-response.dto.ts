@@ -1,5 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { isoDateTime } from '../../common/schemas/iso-date';
 
 export const systemSettingsResponseSchema = z.object({
   ui: z.object({
@@ -10,7 +11,7 @@ export const systemSettingsResponseSchema = z.object({
     refreshTtlDays: z.number(),
   }),
   features: z.record(z.string(), z.boolean()),
-  updatedAt: z.date(),
+  updatedAt: isoDateTime,
   updatedBy: z
     .object({
       id: z.string().uuid(),

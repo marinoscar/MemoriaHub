@@ -1,13 +1,14 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { isoDateTimeInput } from '../../common/schemas/iso-date';
 
 export const mediaQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   // Type / date filters
   type: z.enum(['photo', 'video']).optional(),
-  capturedAtFrom: z.coerce.date().optional(),
-  capturedAtTo: z.coerce.date().optional(),
+  capturedAtFrom: isoDateTimeInput.optional(),
+  capturedAtTo: isoDateTimeInput.optional(),
   classification: z.enum(['memory', 'low_value', 'unreviewed']).optional(),
   albumId: z.string().uuid().optional(),
   favorite: z

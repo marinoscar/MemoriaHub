@@ -1,12 +1,13 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { isoDateTimeInput } from '../../common/schemas/iso-date';
 
 export const createMediaSchema = z.object({
   storageObjectId: z.string().uuid('storageObjectId must be a valid UUID'),
   type: z.enum(['photo', 'video']),
   source: z.enum(['web', 'cli', 'android', 'import', 'sync']),
   originalFilename: z.string().min(1).max(1024),
-  capturedAt: z.coerce.date().optional(),
+  capturedAt: isoDateTimeInput.optional(),
   capturedAtOffset: z.number().int().optional(),
   classification: z.enum(['memory', 'low_value', 'unreviewed']).optional(),
   title: z.string().max(512).optional(),
@@ -15,7 +16,7 @@ export const createMediaSchema = z.object({
   favorite: z.boolean().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
   // Provenance
-  originalCreatedAt: z.coerce.date().optional(),
+  originalCreatedAt: isoDateTimeInput.optional(),
   sourcePath: z.string().max(2048).optional(),
   sourceDeviceId: z.string().max(256).optional(),
   sourceDeviceName: z.string().max(256).optional(),

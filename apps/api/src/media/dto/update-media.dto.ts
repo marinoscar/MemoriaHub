@@ -1,8 +1,9 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { isoDateTimeInput } from '../../common/schemas/iso-date';
 
 export const updateMediaSchema = z.object({
-  capturedAt: z.coerce.date().nullable().optional(),
+  capturedAt: isoDateTimeInput.nullable().optional(),
   capturedAtOffset: z.number().int().nullable().optional(),
   classification: z.enum(['memory', 'low_value', 'unreviewed']).optional(),
   metadata: z.record(z.string(), z.unknown()).nullable().optional(),
