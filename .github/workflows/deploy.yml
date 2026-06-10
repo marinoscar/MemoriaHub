@@ -78,7 +78,7 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
 
       - name: Build and push API image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./apps/api
           file: apps/api/Dockerfile
@@ -91,7 +91,7 @@ jobs:
             VERSION=${{ steps.version.outputs.version }}
 
       - name: Build and push Web image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./apps/web
           file: apps/web/Dockerfile
