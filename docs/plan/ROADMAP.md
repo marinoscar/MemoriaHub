@@ -15,7 +15,7 @@ The `S3StorageProvider`, resumable multipart upload flow (`StorageObject` / `Sto
 | Phase | Title | Primary Surfaces | Key Vision Items | Depends On |
 |-------|-------|-----------------|-----------------|------------|
 | [01](phase-01-media-domain.md) | Media Domain Foundation | API, DB | #1, #2, #6, #9 | — (backbone) |
-| [02](phase-02-metadata-extraction.md) | Metadata Extraction (Enrichment v1) | API, DB | #2, #11 | 01 |
+| [02](phase-02-metadata-extraction.md) | Metadata Extraction + Reverse Geocoding (Enrichment v1) | API, DB | #2, #11 | 01 |
 | [03](phase-03-web-library.md) | Web Media Library | Web, API | #1, #6, #10 | 02 |
 | [04](phase-04-metadata-export.md) | Metadata Export | API, Web | #10 | 02 |
 | [05](phase-05-cli-importer.md) | CLI Importer | CLI, API | #8, #12 | 02 |
@@ -64,7 +64,7 @@ The following principles are restated directly from [`../../VISION.MD`](../../VI
 | **Ownership First** | No phase introduces lock-in; media and metadata remain exportable at every stage |
 | **Family Memories First** | Phase 07 (prioritization) is mandatory MVP, not a future nicety |
 | **Provider Independence** | Phase 06 adds local storage and replication so AWS is never the only option |
-| **Open Metadata** | Phase 02 extracts into typed columns + JSONB; Phase 04 exports in JSON and CSV |
+| **Open Metadata** | Phase 02 extracts into typed columns + JSONB (including location reverse-geocoding for country/region/city); Phase 04 exports in JSON and CSV |
 | **Extensible Enrichment** | Every processor is a new `ObjectProcessor` — the orchestrator never changes |
 | **Simple Export and Exit** | Phase 04 export is a first-class deliverable, not an afterthought |
 
@@ -91,7 +91,7 @@ The following principles are restated directly from [`../../VISION.MD`](../../VI
 | Vision Item | Description (abbreviated) | Phase(s) |
 |-------------|--------------------------|---------|
 | #1 | Upload and store photos and videos | 01, 03 |
-| #2 | Extract and store key media metadata | 01, 02 |
+| #2 | Extract and store key media metadata (incl. location reverse-geocoding for country/region/city search) | 01, 02 |
 | #3 | AWS storage as first cloud option | Already done (backbone) |
 | #4 | Future Azure and other provider support | 06 |
 | #5 | Sync with local hard drives or network storage | 06 |
