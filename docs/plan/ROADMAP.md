@@ -77,7 +77,7 @@ The following principles are restated directly from [`../../VISION.MD`](../../VI
 | Phase | Title | Status |
 |-------|-------|--------|
 | 01 | Media Domain Foundation | Done |
-| 02 | Metadata Extraction | Not Started |
+| 02 | Metadata Extraction | Done |
 | 03 | Web Media Library | Not Started |
 | 04 | Metadata Export | Not Started |
 | 05 | CLI Importer | Not Started |

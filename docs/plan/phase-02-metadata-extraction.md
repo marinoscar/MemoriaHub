@@ -3,7 +3,7 @@
 **Roadmap:** [ROADMAP.md](ROADMAP.md)
 **Previous Phase:** [Phase 01 — Media Domain Foundation](phase-01-media-domain.md)
 **Next Phase:** [Phase 03 — Web Media Library](phase-03-web-library.md) · [Phase 04 — Metadata Export](phase-04-metadata-export.md) · [Phase 05 — CLI Importer](phase-05-cli-importer.md)
-**Status:** Not Started
+**Status:** Done
 
 ---
 
@@ -140,7 +140,7 @@ No new endpoints are introduced in this phase. Processor results are visible thr
 | 5 | Implement `ImageDimensionsProcessor` (priority 25): use `sharp(buffer).metadata()` to get width/height; write to `metadata.dimensions`; `canProcess` returns true for `image/*` | `backend-dev` |
 | 6 | Implement `VideoProbeProcessor` (priority 20): use `fluent-ffmpeg.ffprobe()` to get duration, video stream width/height, codec; write to `metadata.videoProbe`; `canProcess` returns true for `video/*` | `backend-dev` |
 | 7 | Implement `ReverseGeocodeProcessor` (priority 30, after `ExifProcessor`): read `takenLat`/`takenLng` from `StorageObject.metadata.exif`; call `GeoLocationProvider.reverseGeocode()`; write results to `metadata.geocode` including `source` and `geocodedAt`; no-op if GPS absent; `canProcess` returns true for `image/*` | `backend-dev` |
-| 8 | Implement `MediaMetadataSyncService.sync(storageObjectId)` that reads `StorageObject.metadata` and upserts all typed columns on the linked `MediaItem`, including `geoCountry`, `geoCountryCode`, `geoAdmin1`, `geoAdmin2`, `geoLocality`, `geoPlaceName`, `geoSource`, `geocodedAt`, `orientation`, and `capturedAtOffset`; call this from `ObjectProcessingService` after all processors have run | `backend-dev` |
+| 8 | Implement `MediaMetadataSyncService.sync(storageObjectId)` that reads `StorageObject.metadata` and upserts all typed columns on the linked `MediaItem`, including `geoCountry`, `geoCountryCode`, `geoAdmin1`, `geoAdmin2`, `geoLocality`, `geoPlaceName`, `geoSource`, `geocodedAt`, `orientation`, and `capturedAtOffset`; call this from `ObjectProcessingService` after all processors have run. **Note (as built):** the sync is triggered via an `OBJECT_PROCESSED_EVENT` listener inside `MediaMetadataSyncService` rather than a direct call from the orchestrator, to avoid a circular dependency. | `backend-dev` |
 | 9 | Register all five processors as providers in `storage.module.ts` (follow the pattern used for `ExampleMetadataProcessor`) | `backend-dev` |
 | 10 | Write unit tests for each processor; mock the `getStream` callback to return a fixture byte buffer; mock `GeoLocationProvider` in `ReverseGeocodeProcessor` tests | `testing-dev` |
 | 11 | Write integration test: upload a test image with GPS EXIF → verify `MediaItem.capturedAt`, `width`, `height`, `contentHash`, `geoCountry`, `geoAdmin1`, `geoLocality` are populated after event processing; upload a test video → verify `durationMs` populated; upload a GPS-free image → verify `geocodedAt` remains null | `testing-dev` |
