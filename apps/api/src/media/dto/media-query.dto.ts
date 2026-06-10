@@ -1,0 +1,30 @@
+import { createZodDto } from 'nestjs-zod';
+import { z } from 'zod';
+
+export const mediaQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  // Type / date filters
+  type: z.enum(['photo', 'video']).optional(),
+  capturedAtFrom: z.coerce.date().optional(),
+  capturedAtTo: z.coerce.date().optional(),
+  classification: z.enum(['memory', 'low_value', 'unreviewed']).optional(),
+  albumId: z.string().uuid().optional(),
+  favorite: z
+    .string()
+    .optional()
+    .transform((v) => (v === 'true' ? true : v === 'false' ? false : undefined)),
+  tag: z.string().optional(),
+  // Geo filters (individual)
+  country: z.string().optional(),
+  region: z.string().optional(),
+  locality: z.string().optional(),
+  place: z.string().optional(),
+  // Combined free-text geo search
+  location: z.string().optional(),
+  // Sort
+  sortBy: z.enum(['capturedAt', 'importedAt', 'createdAt']).default('capturedAt'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
+});
+
+export class MediaQueryDto extends createZodDto(mediaQuerySchema) {}
