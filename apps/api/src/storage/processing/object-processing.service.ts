@@ -1,9 +1,11 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { STORAGE_PROVIDER, StorageProvider } from '../providers';
 import { OBJECT_UPLOADED_EVENT, ObjectUploadedEvent } from './events/object-uploaded.event';
+import { OBJECT_PROCESSED_EVENT, ObjectProcessedEvent } from './events/object-processed.event';
 import { OBJECT_PROCESSOR, ObjectProcessor } from './object-processor.interface';
 
 @Injectable()
@@ -15,6 +17,7 @@ export class ObjectProcessingService {
     private readonly prisma: PrismaService,
     @Inject(STORAGE_PROVIDER)
     private readonly storageProvider: StorageProvider,
+    private readonly eventEmitter: EventEmitter2,
     @Optional()
     @Inject(OBJECT_PROCESSOR)
     processors?: ObjectProcessor | ObjectProcessor[],
@@ -48,6 +51,7 @@ export class ObjectProcessingService {
     if (applicableProcessors.length === 0) {
       this.logger.debug(`No processors applicable for object ${object.id}`);
       await this.markReady(object.id, {});
+      this.eventEmitter.emit(OBJECT_PROCESSED_EVENT, new ObjectProcessedEvent(object.id));
       return;
     }
 
@@ -93,6 +97,10 @@ export class ObjectProcessingService {
     } else {
       await this.markReady(object.id, allMetadata);
     }
+
+    // Emit processed event so downstream listeners (e.g. MediaMetadataSyncService)
+    // can react without creating a circular dependency.
+    this.eventEmitter.emit(OBJECT_PROCESSED_EVENT, new ObjectProcessedEvent(object.id));
   }
 
   private async markReady(
