@@ -45,6 +45,14 @@ const PERMISSIONS = [
   { name: 'storage:read', description: 'Read object metadata, get download URLs' },
   { name: 'storage:write', description: 'Upload, update metadata' },
   { name: 'storage:delete_any', description: 'Admin: delete any object' },
+
+  // Media management
+  { name: 'media:read', description: 'Read own media items' },
+  { name: 'media:write', description: 'Create and update own media items' },
+  { name: 'media:delete', description: 'Soft-delete own media items' },
+  { name: 'media:read_any', description: 'Admin: read any user media items' },
+  { name: 'media:write_any', description: 'Admin: update any user media items' },
+  { name: 'media:delete_any', description: 'Admin: delete any user media items' },
 ] as const;
 
 // Role to permissions mapping
@@ -62,17 +70,26 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'storage:read',
     'storage:write',
     'storage:delete_any',
+    'media:read_any',
+    'media:write_any',
+    'media:delete_any',
   ],
   contributor: [
     'user_settings:read',
     'user_settings:write',
     'storage:read',
     'storage:write',
+    'media:read',
+    'media:write',
+    'media:delete',
   ],
   viewer: [
     'user_settings:read',
     'user_settings:write',
     'storage:read',
+    'media:read',
+    'media:write',
+    'media:delete',
   ],
 };
 
