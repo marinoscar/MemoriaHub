@@ -241,6 +241,20 @@ check_tool npm
 check_tool git
 check_tool curl
 
+# Informational note about native dependencies.
+# better-sqlite3 ships prebuilt binaries for Node 18/20/22 on linux-x64,
+# linux-arm64, and macOS (x64 + arm64).  Most users will NOT need a C compiler.
+# If a prebuild is unavailable for your platform/Node version, the install will
+# fall back to compiling from source — in that case build-essential + python3
+# (Linux) or Xcode Command Line Tools (macOS) are required.
+if ! command -v cc &>/dev/null && ! command -v gcc &>/dev/null && ! command -v clang &>/dev/null; then
+  info "No C compiler found — this is fine if a prebuilt SQLite binary is available for your platform."
+  dim "  If the sqlite probe below fails, install build tools and re-run:"
+  dim "    Debian/Ubuntu : sudo apt install build-essential python3"
+  dim "    macOS         : xcode-select --install"
+  dim "  Or force source build: npm_config_build_from_source=true bash install.sh"
+fi
+
 # ---------------------------------------------------------------------------
 # Step 2: Get source (clone or use local)
 # ---------------------------------------------------------------------------
@@ -340,11 +354,12 @@ ok "Copied dist + package.json to $APP_DIR"
 
 info "Installing runtime dependencies (omitting devDeps) …"
 # This runs OUTSIDE the monorepo, so npm installs only the CLI's own
-# runtime deps (commander, picocolors, cli-table3, ora, boxen, cli-progress).
-# Sharp, Prisma, and all api/web deps are NOT present.
+# runtime deps (better-sqlite3, ink, react, commander, chalk, cli-table3, etc.).
+# --legacy-peer-deps is required because react-reconciler@0.29.2 declares a
+# peer on react@^18 while the CLI uses react@19; ink handles this at runtime.
 (
   cd "$APP_DIR"
-  npm install --omit=dev --no-audit --no-fund 2>&1 \
+  npm install --omit=dev --legacy-peer-deps --no-audit --no-fund 2>&1 \
     | grep -v "^$" \
     | grep -v "^npm warn" \
     | while IFS= read -r line; do dim "$line"; done
@@ -353,6 +368,23 @@ info "Installing runtime dependencies (omitting devDeps) …"
   exit 1
 }
 ok "Runtime dependencies installed"
+
+# ---------------------------------------------------------------------------
+# Step 4b: Verify native SQLite module
+# ---------------------------------------------------------------------------
+info "Verifying native SQLite module …"
+if ! node -e "require('$APP_DIR/node_modules/better-sqlite3')" 2>/dev/null; then
+  err "better-sqlite3 native module did not load correctly."
+  warn "The prebuilt SQLite binary is unavailable for this platform/Node version."
+  warn "Remediation options:"
+  dim "  1. Install build tools and re-run the installer:"
+  dim "       Debian/Ubuntu : sudo apt install build-essential python3"
+  dim "       macOS         : xcode-select --install"
+  dim "  2. Force a source build:"
+  dim "       npm_config_build_from_source=true bash install.sh"
+  exit 1
+fi
+ok "$(_c $GREEN "SQLite native module OK")"
 
 # ---------------------------------------------------------------------------
 # Step 5: Write bin shim
@@ -391,8 +423,15 @@ step "Verifying installation"
 INSTALLED_VERSION="$("$BIN_SHIM" --version 2>/dev/null || echo "unknown")"
 ok "Installed version: $INSTALLED_VERSION"
 
+INSTALL_SIZE="unknown"
+if command -v du &>/dev/null; then
+  INSTALL_SIZE="$(du -sh "$APP_DIR" 2>/dev/null | cut -f1)"
+fi
+ok "Install size: $INSTALL_SIZE"
+
 print_box "Installation Complete" \
   "CLI version : $INSTALLED_VERSION" \
+  "Install size: $INSTALL_SIZE" \
   "Location    : $APP_DIR" \
   "Shim        : $BIN_SHIM" \
   "" \
