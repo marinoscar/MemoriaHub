@@ -31,7 +31,7 @@ Docker Compose (app-network + devnet)
 
 - **No database container**: MemoriaHub uses the shared external PostgreSQL container (hostname `postgres`) reachable on the `devnet` Docker network — the same pattern as Knecta and Knotes. The API container is attached to both `app-network` and `devnet`.
 - **Large uploads**: the internal Nginx sets `client_max_body_size 10g` so the simple-upload endpoint (`POST /api/storage/objects`) accepts large media. Resumable multipart uploads use pre-signed URLs that go **directly to S3** and bypass Nginx entirely.
-- **S3 storage**: media is stored in the dedicated `marin-memoriahub` S3 bucket (AWS credentials shared from the knecta stack).
+- **S3 storage**: media is stored in the dedicated `marin-memoriahub` S3 bucket (AWS credentials shared from the knecta stack). See [`infra/aws/README.md`](../infra/aws/README.md) for bucket provisioning and CORS setup.
 
 ## Port Assignment
 
