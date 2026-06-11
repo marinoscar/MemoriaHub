@@ -1,17 +1,18 @@
 /** @type {import('jest').Config} */
 export default {
-  extensionsToTreatAsEsm: ['.ts'],
-  moduleFileExtensions: ['js', 'json', 'ts'],
+  extensionsToTreatAsEsm: ['.ts', '.tsx'],
+  moduleFileExtensions: ['js', 'jsx', 'json', 'ts', 'tsx'],
   rootDir: '.',
-  testRegex: '.*\\.spec\\.ts$',
+  testRegex: '.*\\.spec\\.(ts|tsx)$',
   transform: {
-    '^.+\\.ts$': ['ts-jest', { useESM: true, tsconfig: '<rootDir>/tsconfig.test.json' }],
+    '^.+\\.tsx?$': ['ts-jest', { useESM: true, tsconfig: '<rootDir>/tsconfig.test.json' }],
   },
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
   collectCoverageFrom: [
     'src/**/*.ts',
+    'src/**/*.tsx',
     '!src/index.ts',
   ],
   coverageDirectory: './coverage',

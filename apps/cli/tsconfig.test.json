@@ -5,7 +5,8 @@
     "moduleResolution": "NodeNext",
     "rootDir": ".",
     "isolatedModules": true,
-    "types": ["node", "jest"]
+    "types": ["node", "jest"],
+    "jsx": "react-jsx"
   },
   "include": ["src", "test"]
 }

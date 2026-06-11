@@ -1,7 +1,9 @@
 {
   "name": "enterprise-app",
   "private": true,
-  "workspaces": ["apps/*"],
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
     "api": "npm -w apps/api",
     "web": "npm -w apps/web",
@@ -14,5 +16,8 @@
   "overrides": {
     "@nestjs/common": "^11.1.12",
     "@nestjs/core": "^11.1.12"
+  },
+  "dependencies": {
+    "ink": "^6.8.0"
   }
 }
