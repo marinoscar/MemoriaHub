@@ -7,6 +7,7 @@ import {
   Param,
   Body,
   Query,
+  Res,
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
@@ -19,6 +20,7 @@ import {
   ApiQuery,
   ApiBearerAuth,
 } from '@nestjs/swagger';
+import { FastifyReply } from 'fastify';
 
 import { MediaService } from './media.service';
 import { Auth } from '../auth/decorators/auth.decorator';
@@ -33,6 +35,7 @@ import { CreateAlbumDto } from './dto/create-album.dto';
 import { UpdateAlbumDto } from './dto/update-album.dto';
 import { AlbumQueryDto } from './dto/album-query.dto';
 import { AddAlbumItemsDto } from './dto/add-album-items.dto';
+import { ExportQueryDto } from './dto/export-query.dto';
 
 @ApiTags('Media')
 @ApiBearerAuth('JWT-auth')
@@ -71,6 +74,38 @@ export class MediaController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.mediaService.listAlbums(query, user.id, user.permissions);
+  }
+
+  /**
+   * GET /api/media/export
+   *
+   * Streams a metadata export for the caller's media items.
+   * Declared before @Get(':id') to prevent route shadowing.
+   */
+  @Get('export')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({
+    summary: 'Stream metadata export for the caller\'s media items',
+    description:
+      'Returns a streaming download of MediaItem metadata in JSON (NDJSON) or CSV format. ' +
+      'Admins with media:read_any can supply ?ownerId=<userId> to export another user\'s records. ' +
+      'The response is chunked — no size limit for the caller\'s own data.',
+  })
+  @ApiQuery({ name: 'format', required: false, enum: ['json', 'csv'], description: 'Export format (default: json)' })
+  @ApiQuery({ name: 'ownerId', required: false, type: String, format: 'uuid', description: 'Admin only: export a specific user\'s media' })
+  @ApiQuery({ name: 'type', required: false, enum: ['photo', 'video'], description: 'Filter by media type' })
+  @ApiQuery({ name: 'from', required: false, type: String, description: 'ISO 8601 datetime — filter capturedAt >= from' })
+  @ApiQuery({ name: 'to', required: false, type: String, description: 'ISO 8601 datetime — filter capturedAt <= to' })
+  @ApiResponse({ status: 200, description: 'Streaming export — Content-Type is application/json or text/csv' })
+  @ApiResponse({ status: 403, description: 'Non-admin caller supplied ownerId for another user' })
+  async exportMedia(
+    @Query() dto: ExportQueryDto,
+    @CurrentUser() user: RequestUser,
+    @Res() res: FastifyReply,
+  ): Promise<void> {
+    // Delegate to service; all validation and header-writing happen there.
+    // Errors thrown before streaming begins propagate through Nest's exception filter.
+    await this.mediaService.streamExport(dto, user.id, user.permissions, res);
   }
 
   /**

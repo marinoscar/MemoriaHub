@@ -7,6 +7,8 @@ import {
   Inject,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { FastifyReply } from 'fastify';
+import { stringify as csvStringify } from 'csv-stringify';
 import { PrismaService } from '../prisma/prisma.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import {
@@ -21,6 +23,7 @@ import { CreateAlbumDto } from './dto/create-album.dto';
 import { UpdateAlbumDto } from './dto/update-album.dto';
 import { AlbumQueryDto } from './dto/album-query.dto';
 import { AddAlbumItemsDto } from './dto/add-album-items.dto';
+import { ExportQueryDto } from './dto/export-query.dto';
 
 @Injectable()
 export class MediaService {
@@ -672,6 +675,276 @@ export class MediaService {
 
     this.logger.log(
       `Removed MediaItem ${itemId} from album ${albumId} by user ${userId}`,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Metadata export (streaming, cursor-based)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Stream all MediaItem metadata for the target owner in JSON (NDJSON) or CSV format.
+   *
+   * Ownership resolution:
+   *   - If dto.ownerId is provided and differs from userId → requires MEDIA_READ_ANY.
+   *   - If dto.ownerId is omitted → target = userId (own records only).
+   *   - If caller holds MEDIA_READ_ANY and sets ownerId → use ownerId as target.
+   *
+   * The 403 check is performed BEFORE any response bytes are written so the
+   * Nest exception filter can still produce a proper error response.
+   *
+   * BigInt safety: storageObject.size is a PostgreSQL bigint (Prisma maps it
+   * to JS BigInt). We convert it to Number via Number(size) before any
+   * JSON.stringify call so we never hit the "BigInt cannot be serialised"
+   * TypeError.
+   */
+  async streamExport(
+    dto: ExportQueryDto,
+    userId: string,
+    userPermissions: string[],
+    res: FastifyReply,
+  ): Promise<void> {
+    // ------------------------------------------------------------------
+    // 1. Permission + owner resolution (MUST happen before first write)
+    // ------------------------------------------------------------------
+    const canReadAny = userPermissions.includes(PERMISSIONS.MEDIA_READ_ANY);
+    let targetOwnerId: string;
+
+    if (dto.ownerId && dto.ownerId !== userId) {
+      if (!canReadAny) {
+        throw new ForbiddenException(
+          'You do not have permission to export other users\' media',
+        );
+      }
+      targetOwnerId = dto.ownerId;
+    } else {
+      targetOwnerId = userId;
+    }
+
+    // ------------------------------------------------------------------
+    // 2. Build Prisma where clause
+    // ------------------------------------------------------------------
+    const { type, from, to } = dto;
+
+    const where: Prisma.MediaItemWhereInput = {
+      ownerId: targetOwnerId,
+      deletedAt: null,
+      ...(type && { type }),
+      ...((from ?? to)
+        ? {
+            capturedAt: {
+              ...(from && { gte: from }),
+              ...(to && { lte: to }),
+            },
+          }
+        : {}),
+    };
+
+    // ------------------------------------------------------------------
+    // 3. Set streaming response headers (before first write)
+    // ------------------------------------------------------------------
+    const dateStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const isJson = dto.format === 'json';
+    const ext = isJson ? 'json' : 'csv';
+    const contentType = isJson
+      ? 'application/json'
+      : 'text/csv; charset=utf-8';
+
+    res.raw.writeHead(200, {
+      'Content-Type': contentType,
+      'Content-Disposition': `attachment; filename="memoriahub-export-${dateStr}.${ext}"`,
+      'Transfer-Encoding': 'chunked',
+    });
+
+    // ------------------------------------------------------------------
+    // 4. Stream records using cursor-based pagination (no full-load)
+    // ------------------------------------------------------------------
+    const BATCH_SIZE = 100;
+
+    /** Build the export-record object from a raw Prisma row. */
+    const toRecord = (item: {
+      id: string;
+      originalFilename: string;
+      type: string;
+      capturedAt: Date | null;
+      importedAt: Date;
+      source: string;
+      classification: string;
+      width: number | null;
+      height: number | null;
+      durationMs: number | null;
+      takenLat: number | null;
+      takenLng: number | null;
+      cameraMake: string | null;
+      cameraModel: string | null;
+      contentHash: string | null;
+      metadata: Prisma.JsonValue | null;
+      storageObject: {
+        storageProvider: string;
+        storageKey: string;
+        size: bigint;
+      } | null;
+    }) => ({
+      id: item.id,
+      originalFilename: item.originalFilename,
+      type: item.type,
+      capturedAt: item.capturedAt?.toISOString() ?? null,
+      importedAt: item.importedAt.toISOString(),
+      source: item.source,
+      classification: item.classification,
+      width: item.width,
+      height: item.height,
+      durationMs: item.durationMs,
+      takenLat: item.takenLat,
+      takenLng: item.takenLng,
+      cameraMake: item.cameraMake,
+      cameraModel: item.cameraModel,
+      contentHash: item.contentHash,
+      metadata: item.metadata ?? {},
+      storage: item.storageObject
+        ? {
+            provider: item.storageObject.storageProvider,
+            key: item.storageObject.storageKey,
+            // Convert BigInt → Number before serialisation
+            size: Number(item.storageObject.size),
+          }
+        : null,
+    });
+
+    if (isJson) {
+      // ----------------------------------------------------------------
+      // JSON path: newline-delimited JSON (NDJSON), one object per line
+      // ----------------------------------------------------------------
+      let cursor: string | undefined;
+      let done = false;
+
+      while (!done) {
+        const batch = await this.prisma.mediaItem.findMany({
+          where,
+          include: {
+            storageObject: {
+              select: {
+                storageProvider: true,
+                storageKey: true,
+                size: true,
+              },
+            },
+          },
+          orderBy: { id: 'asc' },
+          take: BATCH_SIZE,
+          ...(cursor
+            ? { cursor: { id: cursor }, skip: 1 }
+            : {}),
+        });
+
+        for (const item of batch) {
+          const record = toRecord(item);
+          res.raw.write(JSON.stringify(record) + '\n');
+        }
+
+        if (batch.length < BATCH_SIZE) {
+          done = true;
+        } else {
+          cursor = batch[batch.length - 1].id;
+        }
+      }
+
+      res.raw.end();
+    } else {
+      // ----------------------------------------------------------------
+      // CSV path: RFC 4180 via csv-stringify streaming API
+      // ----------------------------------------------------------------
+      const CSV_COLUMNS = [
+        'id',
+        'originalFilename',
+        'type',
+        'capturedAt',
+        'importedAt',
+        'source',
+        'classification',
+        'width',
+        'height',
+        'durationMs',
+        'takenLat',
+        'takenLng',
+        'cameraMake',
+        'cameraModel',
+        'contentHash',
+        'storage_provider',
+        'storage_key',
+        'storage_size',
+        'metadata',
+      ] as const;
+
+      const stringifier = csvStringify({
+        header: true,
+        columns: CSV_COLUMNS as unknown as string[],
+      });
+
+      // Pipe the stringifier output into the raw Node response stream.
+      stringifier.pipe(res.raw);
+
+      let cursor: string | undefined;
+      let done = false;
+
+      while (!done) {
+        const batch = await this.prisma.mediaItem.findMany({
+          where,
+          include: {
+            storageObject: {
+              select: {
+                storageProvider: true,
+                storageKey: true,
+                size: true,
+              },
+            },
+          },
+          orderBy: { id: 'asc' },
+          take: BATCH_SIZE,
+          ...(cursor
+            ? { cursor: { id: cursor }, skip: 1 }
+            : {}),
+        });
+
+        for (const item of batch) {
+          const record = toRecord(item);
+          // Flatten nested storage.* and serialize metadata as JSON string
+          stringifier.write({
+            id: record.id,
+            originalFilename: record.originalFilename,
+            type: record.type,
+            capturedAt: record.capturedAt,
+            importedAt: record.importedAt,
+            source: record.source,
+            classification: record.classification,
+            width: record.width,
+            height: record.height,
+            durationMs: record.durationMs,
+            takenLat: record.takenLat,
+            takenLng: record.takenLng,
+            cameraMake: record.cameraMake,
+            cameraModel: record.cameraModel,
+            contentHash: record.contentHash,
+            storage_provider: record.storage?.provider ?? null,
+            storage_key: record.storage?.key ?? null,
+            storage_size: record.storage?.size ?? null,
+            metadata: JSON.stringify(record.metadata ?? {}),
+          });
+        }
+
+        if (batch.length < BATCH_SIZE) {
+          done = true;
+        } else {
+          cursor = batch[batch.length - 1].id;
+        }
+      }
+
+      // Signal end; 'finish' on the underlying stream closes res.raw
+      stringifier.end();
+    }
+
+    this.logger.log(
+      `Media export (${dto.format}) streamed for owner ${targetOwnerId} by user ${userId}`,
     );
   }
 
