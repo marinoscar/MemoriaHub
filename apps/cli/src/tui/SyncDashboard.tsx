@@ -47,6 +47,13 @@ export interface SyncDashboardProps {
   all?: boolean;
   folderIds?: number[];
   onHome: () => void;
+  /**
+   * Optional pre-built engine instance for tests.
+   * When provided, the dashboard subscribes to this engine's events
+   * instead of constructing its own.  The caller is responsible for
+   * calling engine.run() externally.
+   */
+  _engineForTesting?: SyncEngine;
 }
 
 interface DashboardState {
@@ -78,6 +85,7 @@ export function SyncDashboard({
   all,
   folderIds,
   onHome,
+  _engineForTesting,
 }: SyncDashboardProps): React.ReactElement {
   const [state, setState] = useState<DashboardState>({
     counts: EMPTY_COUNTS,
@@ -111,13 +119,18 @@ export function SyncDashboard({
   });
 
   useEffect(() => {
-    const api  = new ApiClient({ serverUrl: config.serverUrl, pat: config.pat });
-    const folders = new FolderRepo(db);
-    const files   = new FileRepo(db);
-    const runs    = new RunRepo(db);
-    const settings = new SettingsRepo(db);
-
-    const engine = new SyncEngine({ api, folders, files, runs, settings });
+    // Use an injected engine when testing; otherwise construct one from props.
+    let engine: SyncEngine;
+    if (_engineForTesting) {
+      engine = _engineForTesting;
+    } else {
+      const api  = new ApiClient({ serverUrl: config.serverUrl, pat: config.pat });
+      const folders = new FolderRepo(db);
+      const files   = new FileRepo(db);
+      const runs    = new RunRepo(db);
+      const settings = new SettingsRepo(db);
+      engine = new SyncEngine({ api, folders, files, runs, settings });
+    }
 
     // run:start
     engine.on(EV.RUN_START, (payload) => {
@@ -239,14 +252,17 @@ export function SyncDashboard({
       setState((prev) => ({ ...prev, errorMsg: payload.message, isDone: true }));
     });
 
-    // Kick off the run (fire-and-forget; errors are surfaced via events)
-    engine.run({
-      trigger: 'menu',
-      all: all ?? false,
-      folderIds: folderIds ?? [],
-    }).catch(() => {
-      // Fatal errors emitted via EV.ERROR already
-    });
+    // Kick off the run only when not using an injected test engine.
+    // (Test engines have their run() called externally.)
+    if (!_engineForTesting) {
+      engine.run({
+        trigger: 'menu',
+        all: all ?? false,
+        folderIds: folderIds ?? [],
+      }).catch(() => {
+        // Fatal errors emitted via EV.ERROR already
+      });
+    }
 
     return () => {
       if (throttleTimer.current) clearTimeout(throttleTimer.current);
