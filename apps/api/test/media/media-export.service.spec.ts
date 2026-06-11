@@ -23,6 +23,7 @@ import { ForbiddenException } from '@nestjs/common';
 import { MediaService } from '../../src/media/media.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { STORAGE_PROVIDER } from '../../src/storage/providers/storage-provider.interface';
+import { MediaMetadataSyncService } from '../../src/media/sync/media-metadata-sync.service';
 import {
   createMockPrismaService,
   MockPrismaService,
@@ -172,6 +173,9 @@ describe('MediaService.streamExport', () => {
         MediaService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
+        // MediaService constructor index [2]: syncFromStorageObject is not
+        // exercised by export tests — a no-op mock satisfies the dependency.
+        { provide: MediaMetadataSyncService, useValue: { syncFromStorageObject: jest.fn() } },
       ],
     }).compile();
 
