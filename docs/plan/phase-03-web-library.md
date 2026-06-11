@@ -3,7 +3,7 @@
 **Roadmap:** [ROADMAP.md](ROADMAP.md)
 **Previous Phase:** [Phase 02 — Metadata Extraction](phase-02-metadata-extraction.md)
 **Next Phase:** [Phase 07 — Memory Prioritization](phase-07-memory-prioritization.md)
-**Status:** Not Started
+**Status:** Done
 
 ---
 
@@ -76,6 +76,12 @@ No new Prisma models. The `ThumbnailProcessor` writes to `MediaItem.metadata` (J
 ## 6. API Endpoints
 
 No new API endpoints beyond Phase 01 and Phase 02. The thumbnail signed URL is returned as part of `GET /api/media/:id` via `MediaItem.metadata.thumbnailUrl`.
+
+**Note (as built):**
+
+- **Thumbnail and download URL handling.** The stable references `thumbnailObjectId` and `thumbnailStorageKey` are persisted in `MediaItem.metadata`; `thumbnailUrl` (thumbnail) and `downloadUrl` (full resolution, returned on `GET /api/media/:id`) are signed fresh on each read inside `MediaService` rather than stored. This avoids serving expired signed URLs that were written at processor time.
+
+- **Scoped limitations.** The list endpoint (`GET /api/media`) filters by a single `?tag=` value; when multiple tag chips are active the UI sends only the first. The `MediaUploadDialog` handles files within the first presigned-URL batch (up to 10 parts, roughly 100 MB); files exceeding that limit surface a clear error rather than silently failing. Both limitations are candidates for a follow-up.
 
 ---
 
