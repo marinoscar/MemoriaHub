@@ -186,6 +186,34 @@ export class MediaMetadataSyncService {
         }
       }
 
+      // --- thumbnail ---
+      // When the ThumbnailProcessor ran successfully, merge the stable object
+      // reference into MediaItem.metadata so the read path can sign a fresh URL
+      // at query time without a second DB lookup.
+      //
+      // We do a read-modify-write on the JSONB column to preserve any existing
+      // metadata keys (e.g. keys set by the caller at MediaItem creation time).
+      const thumbMeta = processing['thumbnail'];
+      if (
+        typeof thumbMeta?.['thumbnailObjectId'] === 'string' &&
+        typeof thumbMeta?.['thumbnailStorageKey'] === 'string'
+      ) {
+        // Load current MediaItem.metadata to merge into it
+        const currentItem = await this.prisma.mediaItem.findUnique({
+          where: { id: mediaItem.id },
+          select: { metadata: true },
+        });
+
+        const existingMeta =
+          (currentItem?.metadata as Record<string, unknown> | null) ?? {};
+
+        update.metadata = {
+          ...existingMeta,
+          thumbnailObjectId: thumbMeta['thumbnailObjectId'],
+          thumbnailStorageKey: thumbMeta['thumbnailStorageKey'],
+        } as Prisma.InputJsonValue;
+      }
+
       // Only run the DB update if there is anything to update
       if (Object.keys(update).length === 0) {
         this.logger.debug(`No typed fields to sync for MediaItem ${mediaItem.id}`);
