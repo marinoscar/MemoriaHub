@@ -3,7 +3,15 @@
 **Roadmap:** [ROADMAP.md](ROADMAP.md)
 **Previous Phase:** [Phase 02 — Metadata Extraction](phase-02-metadata-extraction.md)
 **Next Phase:** [Phase 09 — Long-Term Enrichment](phase-09-longterm-enrichment.md)
-**Status:** Not Started
+**Status:** Done
+
+**Note (as built):**
+
+- The binary and config directory use lowercase: command `memoriahub`, config at `~/.memoriahub/config.json`, manifests under `~/.memoriahub/manifests/`. The spec used the mixed-case form `~/.memoriaHub`.
+- Two server-side endpoints were added to support the CLI:
+  - `GET /api/media?contentHash=<sha256>` — dedup filter; returns the existing `MediaItem` if a file with that hash is already stored, so the upload is skipped.
+  - `POST /api/storage/objects/:id/upload/part-urls` — mints presigned S3 URLs for arbitrary part numbers. This enables uploads larger than 10 parts (>100 MB at the default 10 MB chunk size) and lifted the web client's earlier >100 MB upload cap as a side effect.
+- Distribution is source-based: build with `npm run build` inside `apps/cli` (or `npm run build -w apps/cli` from the repo root), then invoke via `node apps/cli/dist/index.js` or `npm link`. The `dist/` directory is gitignored.
 
 ---
 
