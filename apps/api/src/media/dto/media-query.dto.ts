@@ -23,6 +23,8 @@ export const mediaQuerySchema = z.object({
   place: z.string().optional(),
   // Combined free-text geo search
   location: z.string().optional(),
+  // Dedup filter (used by CLI importer)
+  contentHash: z.string().optional(),
   // Sort
   sortBy: z.enum(['capturedAt', 'importedAt', 'createdAt']).default('capturedAt'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),

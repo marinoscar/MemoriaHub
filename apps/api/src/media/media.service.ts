@@ -118,6 +118,7 @@ export class MediaService {
       locality,
       place,
       location,
+      contentHash,
       sortBy,
       sortOrder,
     } = query;
@@ -134,6 +135,7 @@ export class MediaService {
       ...(type && { type }),
       ...(classification && { classification }),
       ...(favorite !== undefined && { favorite }),
+      ...(contentHash && { contentHash }),
       // Date range
       ...(capturedAtFrom || capturedAtTo
         ? {
