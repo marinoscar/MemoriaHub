@@ -124,8 +124,12 @@ describe('ThumbnailProcessor', () => {
       expect(processor.canProcess(makeObject({ mimeType: 'image/webp' }))).toBe(true);
     });
 
-    it('should return false for video/mp4', () => {
-      expect(processor.canProcess(makeObject({ mimeType: 'video/mp4' }))).toBe(false);
+    it('should return true for video/mp4', () => {
+      expect(processor.canProcess(makeObject({ mimeType: 'video/mp4' }))).toBe(true);
+    });
+
+    it('should return true for video/quicktime', () => {
+      expect(processor.canProcess(makeObject({ mimeType: 'video/quicktime' }))).toBe(true);
     });
 
     it('should return false for application/pdf', () => {
