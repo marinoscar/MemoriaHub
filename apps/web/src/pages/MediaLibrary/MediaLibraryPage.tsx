@@ -31,6 +31,7 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Paper,
+  Menu,
 } from '@mui/material';
 import {
   Star as StarIcon,
@@ -44,7 +45,8 @@ import {
 import { useTheme } from '@mui/material/styles';
 import { useMedia } from '../../hooks/useMedia';
 import { useAlbums } from '../../hooks/useAlbums';
-import { listTags } from '../../services/media';
+import { listTags, exportMedia } from '../../services/media';
+import type { ExportFilters } from '../../services/media';
 import { MediaDetailDrawer } from '../../components/media/MediaDetailDrawer';
 import { MediaUploadDialog } from '../../components/media/MediaUploadDialog';
 import type { MediaItem, MediaQueryParams, TagItem, MediaType, MediaClassification } from '../../types/media';
@@ -268,6 +270,12 @@ export default function MediaLibraryPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
 
+  // Export menu
+  const [exportAnchorEl, setExportAnchorEl] = useState<null | HTMLElement>(null);
+  const exportMenuOpen = Boolean(exportAnchorEl);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
   const geoFacets = useMemo(() => deriveGeoFacets(items), [items]);
 
   const buildParams = useCallback((): MediaQueryParams => {
@@ -404,6 +412,31 @@ export default function MediaLibraryPage() {
     setPage(1);
   }, []);
 
+  const handleExport = useCallback(
+    async (format: 'json' | 'csv') => {
+      setExportAnchorEl(null);
+      setExportError(null);
+      setExportLoading(true);
+
+      // Only forward the filters the export endpoint supports (type + date range)
+      const filters: ExportFilters = {};
+      if (filterType) filters.type = filterType;
+      if (filterDateFrom) filters.from = new Date(filterDateFrom).toISOString();
+      if (filterDateTo) filters.to = new Date(filterDateTo).toISOString();
+
+      try {
+        await exportMedia(format, filters);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'Export failed. Please try again.';
+        setExportError(message);
+      } finally {
+        setExportLoading(false);
+      }
+    },
+    [filterType, filterDateFrom, filterDateTo],
+  );
+
   const grouped = useMemo(() => groupByYearMonth(items), [items]);
 
   const availableRegions = filterCountry
@@ -435,19 +468,37 @@ export default function MediaLibraryPage() {
         </Typography>
 
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-          {/* Export button — disabled until Phase 04 */}
-          <Tooltip title="Export available in next release">
+          {/* Export button — opens JSON / CSV format menu */}
+          <Tooltip title="Export metadata">
             <span>
               <Button
                 variant="outlined"
-                startIcon={<ExportIcon />}
-                disabled
-                aria-disabled="true"
+                startIcon={exportLoading ? <CircularProgress size={16} /> : <ExportIcon />}
+                disabled={exportLoading}
+                aria-label="Export media metadata"
+                aria-haspopup="menu"
+                aria-expanded={exportMenuOpen ? 'true' : undefined}
+                aria-controls={exportMenuOpen ? 'export-format-menu' : undefined}
+                onClick={(e) => setExportAnchorEl(e.currentTarget)}
               >
                 Export
               </Button>
             </span>
           </Tooltip>
+          <Menu
+            id="export-format-menu"
+            anchorEl={exportAnchorEl}
+            open={exportMenuOpen}
+            onClose={() => setExportAnchorEl(null)}
+            slotProps={{ list: { 'aria-labelledby': 'export-button' } }}
+          >
+            <MenuItem onClick={() => void handleExport('json')}>
+              Export as JSON
+            </MenuItem>
+            <MenuItem onClick={() => void handleExport('csv')}>
+              Export as CSV
+            </MenuItem>
+          </Menu>
 
           <Button
             variant={showFilters ? 'contained' : 'outlined'}
@@ -722,6 +773,17 @@ export default function MediaLibraryPage() {
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
+        </Alert>
+      )}
+
+      {/* Export error */}
+      {exportError && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          onClose={() => setExportError(null)}
+        >
+          {exportError}
         </Alert>
       )}
 
