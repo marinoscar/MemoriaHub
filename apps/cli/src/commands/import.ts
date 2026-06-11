@@ -1,81 +1,73 @@
-import * as path from 'path';
+/**
+ * commands/import.ts — `memoriahub import` back-compat alias.
+ *
+ * Registers the given folder (auto-adds if absent) then runs a one-shot
+ * sync of just that folder via the SyncEngine.  Functionally identical
+ * to `memoriahub sync <folder>` but kept for script / muscle-memory compat.
+ */
+
+import * as path from 'node:path';
 import { Command } from 'commander';
 import { requireConfig } from '../config.js';
 import { ApiClient } from '../api.js';
-import { enumerateFiles } from '../files.js';
-import { loadManifest, saveManifest } from '../manifest.js';
-import { processFiles } from '../process-files.js';
-import { ui, printImportSummaryBox } from '../ui.js';
+import { getDb } from '../db/database.js';
+import { FolderRepo } from '../repo/folders.js';
+import { FileRepo } from '../repo/files.js';
+import { RunRepo } from '../repo/runs.js';
+import { SettingsRepo } from '../repo/settings.js';
+import { SyncEngine } from '../sync/sync-engine.js';
+import { renderSyncHeadless } from '../render/headless-sync.js';
+import { ui } from '../ui.js';
 
 export function importCommand(): Command {
   const cmd = new Command('import');
   cmd
-    .description('One-shot import of all supported files in a folder')
+    .description('One-shot import: register a folder and sync it immediately (alias for sync <folder>)')
     .argument('<folder>', 'Path to the folder to import')
     .option('-r, --recursive', 'Descend into sub-directories', false)
-    .option(
-      '--dry-run',
-      'Show what would be uploaded without actually uploading',
-      false,
-    );
+    .option('--dry-run', 'Show what would be uploaded without actually uploading', false);
 
   cmd.action(async (folder: string, options: { recursive: boolean; dryRun: boolean }) => {
     const cfg = requireConfig();
-    const api = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
+    const api  = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
+    const db   = getDb();
+    const folderRepo   = new FolderRepo(db);
+    const fileRepo     = new FileRepo(db);
+    const runRepo      = new RunRepo(db);
+    const settingsRepo = new SettingsRepo(db);
 
-    const absFolder = path.resolve(folder);
+    const absPath = path.resolve(folder);
 
-    ui.step(`Scanning folder: ${absFolder}`);
-    if (options.dryRun) ui.warn('Dry-run mode — no files will be uploaded');
-
-    const { supported, skipped } = enumerateFiles(absFolder, options.recursive);
-
-    if (skipped.length > 0) {
-      ui.warn(`Skipping ${skipped.length} unsupported file(s)`);
-      for (const f of skipped) {
-        ui.dim(f);
-      }
+    // Register the folder if not already known
+    let f = folderRepo.getByPath(absPath);
+    if (!f) {
+      f = folderRepo.add({ path: absPath, recursive: options.recursive, enabled: true });
+      ui.info(`Registered folder: ${absPath} (id=${f.id})`);
+    } else if (options.recursive && !f.recursive) {
+      // Update recursive flag if caller explicitly passed -r
+      f = folderRepo.setRecursive(f.id, true) ?? f;
     }
 
-    if (supported.length === 0) {
-      ui.info('No supported files found in the specified folder.');
-      return;
-    }
-
-    ui.info(
-      `Found ${supported.length} supported file(s)` +
-        (options.recursive ? ' (recursive)' : ''),
-    );
-    ui.blank();
-
-    const manifest = loadManifest(absFolder);
-    manifest.folderPath = absFolder;
-
-    const result = await processFiles({
-      filePaths: supported,
+    const engine = new SyncEngine({
       api,
-      manifest,
-      dryRun: options.dryRun,
+      folders: folderRepo,
+      files:   fileRepo,
+      runs:    runRepo,
+      settings: settingsRepo,
     });
 
-    if (!options.dryRun) {
-      manifest.lastSyncAt = new Date().toISOString();
-      saveManifest(absFolder, manifest);
-    }
+    renderSyncHeadless(engine);
 
-    printImportSummaryBox({
-      uploaded: result.uploaded,
-      skipped: result.skipped,
-      failed: result.failed,
-      dryRun: options.dryRun,
-      dryRunWouldUpload: result.dryRunWouldUpload.length,
-      dryRunDedups: result.dryRunDedups.length,
-    });
-
-    if (result.failed > 0) {
-      ui.warn(
-        `${result.failed} file(s) failed. Run \`memoriahub sync <folder>\` to retry.`,
-      );
+    try {
+      await engine.run({
+        folderIds: [f.id],
+        dryRun:    options.dryRun,
+        trigger:   'cli',
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      ui.error(msg);
+      process.exit(1);
     }
   });
 

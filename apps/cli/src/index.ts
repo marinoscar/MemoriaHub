@@ -6,6 +6,8 @@ import { importCommand } from './commands/import.js';
 import { syncCommand } from './commands/sync.js';
 import { statusCommand } from './commands/status.js';
 import { foldersCommand } from './commands/folders.js';
+import { retryCommand } from './commands/retry.js';
+import { settingsCommand } from './commands/settings.js';
 import { printBanner } from './ui.js';
 
 // ESM-safe package.json read: createRequire allows require() in ESM modules.
@@ -37,8 +39,12 @@ program.addCommand(importCommand());
 program.addCommand(syncCommand());
 program.addCommand(statusCommand());
 program.addCommand(foldersCommand());
+program.addCommand(retryCommand());
+program.addCommand(settingsCommand());
 
-// If invoked with no arguments, show help (which triggers the banner).
+// TODO(ink-step): bare invocation + menu command
+// When no subcommand is given in a TTY, launch the interactive Ink menu.
+// For now, fall through to help display.
 if (process.argv.length === 2) {
   program.help();
 }
