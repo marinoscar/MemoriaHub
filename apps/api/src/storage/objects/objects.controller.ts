@@ -53,6 +53,11 @@ import {
 import {
   DownloadUrlResponseDto,
 } from './dto/download-url-response.dto';
+import {
+  GetPartUrlsDto,
+  GetPartUrlsResponseDto,
+  getPartUrlsSchema,
+} from './dto/get-part-urls.dto';
 
 @ApiTags('Storage')
 @Controller('storage/objects')
@@ -249,6 +254,36 @@ export class ObjectsController {
     @CurrentUser('id') userId: string,
   ): Promise<{ data: UploadStatusResponseDto }> {
     const result = await this.objectsService.getUploadStatus(objectId, userId);
+    return { data: result };
+  }
+
+  /**
+   * Mint presigned upload URLs for arbitrary part numbers.
+   * Clients that need more than the initial 10 URLs (files >100 MB at 10 MB
+   * part size) call this endpoint with a list of part numbers to get fresh
+   * presigned PUT URLs. At most 100 part numbers per call.
+   */
+  @Post(':id/upload/part-urls')
+  @ApiOperation({
+    summary: 'Get presigned upload URLs for parts',
+    description:
+      'Mint fresh presigned PUT URLs for the given part numbers of an in-progress multipart upload. Supports up to 100 part numbers per request.',
+  })
+  @ApiParam({ name: 'id', type: String, format: 'uuid', description: 'StorageObject ID' })
+  @ApiResponse({
+    status: 201,
+    description: 'Presigned URLs generated',
+    type: Object,
+  })
+  @ApiResponse({ status: 400, description: 'No active multipart upload or invalid input' })
+  @ApiResponse({ status: 403, description: 'Access denied - you do not own this upload' })
+  @ApiResponse({ status: 404, description: 'Upload not found' })
+  async getPartUrls(
+    @Param('id', ParseUUIDPipe) objectId: string,
+    @Body(new ZodValidationPipe(getPartUrlsSchema)) dto: GetPartUrlsDto,
+    @CurrentUser('id') userId: string,
+  ): Promise<{ data: GetPartUrlsResponseDto }> {
+    const result = await this.objectsService.getPartUrls(objectId, dto, userId);
     return { data: result };
   }
 

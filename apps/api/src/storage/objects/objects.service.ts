@@ -38,6 +38,10 @@ import {
   DownloadUrlResponseDto,
 } from './dto/download-url-response.dto';
 import {
+  GetPartUrlsDto,
+  GetPartUrlsResponseDto,
+} from './dto/get-part-urls.dto';
+import {
   OBJECT_UPLOADED_EVENT,
   ObjectUploadedEvent,
 } from '../processing/events/object-uploaded.event';
@@ -187,6 +191,57 @@ export class ObjectsService {
       uploadedBytes: uploadedBytes.toString(),
       totalBytes: storageObject.size.toString(),
     };
+  }
+
+  /**
+   * Mint presigned upload URLs for arbitrary part numbers.
+   *
+   * This resolves the >10-part limit imposed by initUpload (which only returns
+   * the first ≤10 URLs). The CLI uses this for files requiring more than 10
+   * parts (>100 MB at the default 10 MB part size), enabling 500 MB+ uploads
+   * without a server-side size cap.
+   *
+   * The web client can use the same endpoint in the future to lift its own
+   * informal 100 MB limit.
+   */
+  async getPartUrls(
+    objectId: string,
+    dto: GetPartUrlsDto,
+    userId: string,
+  ): Promise<GetPartUrlsResponseDto> {
+    const storageObject = await this.prisma.storageObject.findUnique({
+      where: { id: objectId },
+    });
+
+    if (!storageObject) {
+      throw new NotFoundException('Upload not found');
+    }
+
+    // Ownership check mirrors getUploadStatus
+    if (storageObject.uploadedById !== userId) {
+      throw new ForbiddenException('You do not own this upload');
+    }
+
+    if (!storageObject.s3UploadId) {
+      throw new BadRequestException('No active multipart upload for this object');
+    }
+
+    const presignedUrls = await Promise.all(
+      dto.partNumbers.map(async (partNumber) => ({
+        partNumber,
+        url: await this.storageProvider.getSignedUploadUrl(
+          storageObject.storageKey,
+          storageObject.s3UploadId!,
+          partNumber,
+        ),
+      })),
+    );
+
+    this.logger.log(
+      `Minted ${presignedUrls.length} part URL(s) for object ${objectId}`,
+    );
+
+    return { presignedUrls };
   }
 
   /**
