@@ -449,13 +449,14 @@ describe('MediaLibraryPage', () => {
       expect(screen.getByText(/processing…/i)).toBeInTheDocument();
     });
 
-    it('should not show "Processing…" for video items without a thumbnail', () => {
+    it('should show a "Processing…" label for video items without a thumbnail', () => {
+      // Videos awaiting their poster thumbnail also show the processing state
       const items = [
         makeMediaItem('vid', { type: 'video', thumbnailUrl: null }),
       ];
       mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
       render(<MediaLibraryPage />);
-      expect(screen.queryByText(/processing…/i)).not.toBeInTheDocument();
+      expect(screen.getByText(/processing…/i)).toBeInTheDocument();
     });
 
     it('should not show "Processing…" when the photo has a thumbnail', () => {
@@ -465,6 +466,61 @@ describe('MediaLibraryPage', () => {
       mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
       render(<MediaLibraryPage />);
       expect(screen.queryByText(/processing…/i)).not.toBeInTheDocument();
+    });
+
+    it('should not show "Processing…" when the video has a thumbnail (poster ready)', () => {
+      const items = [
+        makeMediaItem('vid-ready', { type: 'video', thumbnailUrl: 'http://cdn/poster.jpg' }),
+      ];
+      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
+      render(<MediaLibraryPage />);
+      expect(screen.queryByText(/processing…/i)).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Play indicator — video tiles with a thumbnail show a play overlay
+  // -------------------------------------------------------------------------
+
+  describe('play indicator', () => {
+    it('should show the play indicator overlay for video tiles with a thumbnail', () => {
+      const items = [
+        makeMediaItem('vid-thumb', {
+          type: 'video',
+          thumbnailUrl: 'http://cdn/poster.jpg',
+          title: 'My Video',
+        }),
+      ];
+      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
+      render(<MediaLibraryPage />);
+      // The image renders
+      expect(screen.getByAltText('My Video')).toBeInTheDocument();
+      // The play indicator is present
+      expect(screen.getByTestId('play-indicator')).toBeInTheDocument();
+    });
+
+    it('should NOT show the play indicator for photo tiles with a thumbnail', () => {
+      const items = [
+        makeMediaItem('photo-thumb', {
+          type: 'photo',
+          thumbnailUrl: 'http://cdn/photo.jpg',
+          title: 'My Photo',
+        }),
+      ];
+      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
+      render(<MediaLibraryPage />);
+      expect(screen.getByAltText('My Photo')).toBeInTheDocument();
+      expect(screen.queryByTestId('play-indicator')).not.toBeInTheDocument();
+    });
+
+    it('should NOT show the play indicator for video tiles in the processing state', () => {
+      // No thumbnail yet — the tile shows "Processing…", not the poster + play button
+      const items = [
+        makeMediaItem('vid-pending', { type: 'video', thumbnailUrl: null }),
+      ];
+      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
+      render(<MediaLibraryPage />);
+      expect(screen.queryByTestId('play-indicator')).not.toBeInTheDocument();
     });
   });
 

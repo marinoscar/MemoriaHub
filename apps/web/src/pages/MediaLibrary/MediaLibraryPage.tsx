@@ -43,6 +43,7 @@ import {
   Search as SearchIcon,
   FileDownload as ExportIcon,
   PhotoLibrary as PhotoLibraryIcon,
+  PlayCircleOutlined as PlayCircleOutlinedIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { useMedia } from '../../hooks/useMedia';
@@ -62,9 +63,17 @@ const ENRICHMENT_POLL_INTERVAL_MS = 3_000;
 /** Maximum number of poll attempts before giving up (~30 s). */
 const ENRICHMENT_POLL_MAX_ATTEMPTS = 10;
 
-/** Returns true when all photo items in the list already have a thumbnailUrl. */
-function allPhotosEnriched(items: MediaItem[]): boolean {
-  return items.every((item) => item.type !== 'photo' || item.thumbnailUrl !== null);
+/**
+ * Returns true when every photo AND video item in the list already has a
+ * thumbnailUrl (i.e. enrichment is complete for all media types that produce
+ * thumbnails).
+ */
+function allItemsEnriched(items: MediaItem[]): boolean {
+  return items.every(
+    (item) =>
+      (item.type !== 'photo' && item.type !== 'video') ||
+      item.thumbnailUrl !== null,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -164,20 +173,48 @@ function MediaTile({ item, onSelect, onToggleFavorite }: MediaTileProps) {
       }}
     >
       {thumbUrl && !imgError ? (
-        <Box
-          component="img"
-          src={thumbUrl}
-          alt={item.title ?? item.originalFilename}
-          onError={() => setImgError(true)}
-          sx={{
-            width: '100%',
-            height: '100%',
-            objectFit: 'cover',
-            display: 'block',
-          }}
-        />
-      ) : item.type === 'photo' && !imgError ? (
-        /* Photo awaiting thumbnail enrichment — show a subtle processing state */
+        /* Thumbnail present — show the image, plus a play indicator for videos */
+        <Box sx={{ position: 'relative', width: '100%', height: '100%' }}>
+          <Box
+            component="img"
+            src={thumbUrl}
+            alt={item.title ?? item.originalFilename}
+            onError={() => setImgError(true)}
+            sx={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              display: 'block',
+            }}
+          />
+          {item.type === 'video' && (
+            <Box
+              aria-label="video"
+              data-testid="play-indicator"
+              sx={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                pointerEvents: 'none',
+              }}
+            >
+              <PlayCircleOutlinedIcon
+                sx={{
+                  fontSize: 48,
+                  color: 'rgba(255,255,255,0.85)',
+                  filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.5))',
+                }}
+              />
+            </Box>
+          )}
+        </Box>
+      ) : (item.type === 'photo' || item.type === 'video') && !imgError ? (
+        /* Photo or video awaiting thumbnail enrichment — show a subtle processing state */
         <Box
           sx={{
             width: '100%',
@@ -219,7 +256,7 @@ function MediaTile({ item, onSelect, onToggleFavorite }: MediaTileProps) {
           </Typography>
         </Box>
       ) : (
-        /* Broken image or video without thumbnail */
+        /* Broken image — generic fallback icon */
         <Box
           sx={{
             width: '100%',
@@ -480,7 +517,7 @@ export default function MediaLibraryPage() {
 
       void fetchMedia(buildParams()).then((loadedItems) => {
         const done =
-          allPhotosEnriched(loadedItems) ||
+          allItemsEnriched(loadedItems) ||
           enrichmentPollAttemptsRef.current >= ENRICHMENT_POLL_MAX_ATTEMPTS;
 
         if (done && enrichmentPollRef.current !== null) {
