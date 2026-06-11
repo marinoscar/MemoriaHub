@@ -1,15 +1,11 @@
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { ui } from './ui.js';
+import { configDir } from './paths.js';
 
 export interface CliConfig {
   serverUrl: string;
   pat: string;
-}
-
-function configDir(): string {
-  return path.join(os.homedir(), '.memoriahub');
 }
 
 function configPath(): string {
@@ -37,6 +33,7 @@ export function saveConfig(config: CliConfig): void {
 }
 
 export function manifestsDir(): string {
+  // Re-exported for backwards-compatibility; actual impl lives in paths.ts.
   const dir = path.join(configDir(), 'manifests');
   fs.mkdirSync(dir, { recursive: true });
   return dir;
