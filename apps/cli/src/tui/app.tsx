@@ -1,0 +1,256 @@
+/**
+ * tui/app.tsx — Root TUI application: screen state machine + launch entry point.
+ *
+ * Screens: home | login | folders | pickFolders | dashboard | help
+ *
+ * launchTui() checks for a real TTY; if non-TTY it prints a message and
+ * returns immediately without hanging.  Otherwise it renders <App/> and
+ * awaits Ink's waitUntilExit().
+ */
+
+import React, { useState, useEffect } from 'react';
+import { Box, Text, render, useApp, useInput } from 'ink';
+
+import { loadConfig, type CliConfig } from '../config.js';
+import { openDb } from '../db/database.js';
+import { ApiClient } from '../api.js';
+import type BetterSqlite3 from 'better-sqlite3';
+
+import { HomeMenu, type MenuAction } from './HomeMenu.js';
+import { LoginScreen } from './LoginScreen.js';
+import { FolderManager } from './FolderManager.js';
+import { PickFolders } from './PickFolders.js';
+import { SyncDashboard } from './SyncDashboard.js';
+import { BOX_BORDER } from './theme.js';
+
+// ---------------------------------------------------------------------------
+// Screen types
+// ---------------------------------------------------------------------------
+
+type Screen =
+  | { kind: 'home' }
+  | { kind: 'login' }
+  | { kind: 'folders' }
+  | { kind: 'pickFolders' }
+  | { kind: 'dashboard'; all?: boolean; folderIds?: number[] }
+  | { kind: 'help' };
+
+// ---------------------------------------------------------------------------
+// Small helper: Esc/q key handler (used on help screen)
+// ---------------------------------------------------------------------------
+
+function KeyHandler({ onBack }: { onBack: () => void }): null {
+  useInput((input, key) => {
+    if (key.escape || input === 'q') onBack();
+  });
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// App component
+// ---------------------------------------------------------------------------
+
+interface AppState {
+  config: CliConfig | null;
+  identity: string | null;
+  db: BetterSqlite3.Database | null;
+}
+
+function App(): React.ReactElement {
+  const { exit } = useApp();
+
+  const [screen, setScreen] = useState<Screen>({ kind: 'home' });
+  const [appState, setAppState] = useState<AppState>({
+    config: null,
+    identity: null,
+    db: null,
+  });
+
+  // Load config + db + identity on mount
+  useEffect(() => {
+    const cfg = loadConfig();
+    const db  = openDb();
+
+    let cancelled = false;
+
+    async function loadIdentity(): Promise<void> {
+      if (!cfg) {
+        if (!cancelled) setAppState({ config: null, identity: null, db });
+        return;
+      }
+
+      try {
+        const api = new ApiClient(cfg);
+        const me = await api.get<{ email?: string }>('/api/auth/me');
+        if (!cancelled) {
+          setAppState({ config: cfg, identity: me.email ?? null, db });
+        }
+      } catch {
+        // Not logged in / server unreachable
+        if (!cancelled) setAppState({ config: cfg, identity: null, db });
+      }
+    }
+
+    void loadIdentity();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ---- Home menu ----
+  function handleMenuSelect(action: MenuAction): void {
+    switch (action) {
+      case 'login':
+        setScreen({ kind: 'login' });
+        break;
+      case 'folders':
+        setScreen({ kind: 'folders' });
+        break;
+      case 'sync-all':
+        setScreen({ kind: 'dashboard', all: true });
+        break;
+      case 'sync-select':
+        setScreen({ kind: 'pickFolders' });
+        break;
+      case 'retry':
+        // Retry: run dashboard in all mode; engine handles retryFailedOnly logic
+        setScreen({ kind: 'dashboard', all: true });
+        break;
+      case 'status':
+        setScreen({ kind: 'help' });
+        break;
+      case 'settings':
+        setScreen({ kind: 'help' });
+        break;
+      case 'help':
+        setScreen({ kind: 'help' });
+        break;
+      case 'quit':
+        exit();
+        break;
+    }
+  }
+
+  // ---- If db not ready yet, show loading ----
+  if (!appState.db) {
+    return (
+      <Box paddingX={1}>
+        <Text dimColor>Loading…</Text>
+      </Box>
+    );
+  }
+
+  const db = appState.db;
+
+  // ---- Screen routing ----
+  switch (screen.kind) {
+    case 'home':
+      return (
+        <HomeMenu
+          config={appState.config}
+          identity={appState.identity}
+          onSelect={handleMenuSelect}
+        />
+      );
+
+    case 'login':
+      return (
+        <LoginScreen
+          initialConfig={appState.config}
+          onDone={(cfg) => {
+            setAppState((prev) => ({ ...prev, config: cfg }));
+            // Re-fetch identity after successful login
+            const api = new ApiClient(cfg);
+            api.get<{ email?: string }>('/api/auth/me')
+              .then((me) => {
+                setAppState((prev) => ({ ...prev, identity: me.email ?? null }));
+              })
+              .catch(() => {})
+              .finally(() => setScreen({ kind: 'home' }));
+          }}
+          onBack={() => setScreen({ kind: 'home' })}
+        />
+      );
+
+    case 'folders':
+      return (
+        <FolderManager
+          db={db}
+          onBack={() => setScreen({ kind: 'home' })}
+        />
+      );
+
+    case 'pickFolders':
+      return (
+        <PickFolders
+          db={db}
+          onConfirm={(folderIds) => setScreen({ kind: 'dashboard', folderIds })}
+          onBack={() => setScreen({ kind: 'home' })}
+        />
+      );
+
+    case 'dashboard':
+      if (!appState.config) {
+        return (
+          <Box paddingX={1} flexDirection="column" gap={1}>
+            <Text color="yellow">Not logged in. Please login first.</Text>
+            <Text dimColor>Press q to go back.</Text>
+            <KeyHandler onBack={() => setScreen({ kind: 'home' })} />
+          </Box>
+        );
+      }
+      return (
+        <SyncDashboard
+          config={appState.config}
+          db={db}
+          all={screen.all}
+          folderIds={screen.folderIds}
+          onHome={() => setScreen({ kind: 'home' })}
+        />
+      );
+
+    case 'help':
+      return (
+        <Box
+          borderStyle={BOX_BORDER}
+          borderColor="cyan"
+          flexDirection="column"
+          paddingX={3}
+          paddingY={2}
+        >
+          <Text bold color="cyan">MemoriaHub CLI — Help</Text>
+          <Text> </Text>
+          <Text>Use the interactive menu to manage folders and run syncs.</Text>
+          <Text> </Text>
+          <Text dimColor>Headless commands (bypass TUI):</Text>
+          <Text>  memoriahub login      Configure server + PAT</Text>
+          <Text>  memoriahub folders    Manage watched folders</Text>
+          <Text>  memoriahub sync       Run a sync</Text>
+          <Text>  memoriahub status     Show sync status</Text>
+          <Text>  memoriahub retry      Retry failed files</Text>
+          <Text>  memoriahub settings   Manage settings</Text>
+          <Text> </Text>
+          <Text dimColor>[Esc/q] back to home</Text>
+          <KeyHandler onBack={() => setScreen({ kind: 'home' })} />
+        </Box>
+      );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// launchTui — public entry point
+// ---------------------------------------------------------------------------
+
+export async function launchTui(_opts?: Record<string, unknown>): Promise<void> {
+  if (!process.stdout.isTTY) {
+    process.stdout.write(
+      'The interactive UI needs a real terminal. ' +
+      'Use `memoriahub sync --all` or `memoriahub --help`.\n',
+    );
+    return;
+  }
+
+  const { waitUntilExit } = render(<App />);
+  await waitUntilExit();
+}

@@ -42,11 +42,25 @@ program.addCommand(foldersCommand());
 program.addCommand(retryCommand());
 program.addCommand(settingsCommand());
 
-// TODO(ink-step): bare invocation + menu command
-// When no subcommand is given in a TTY, launch the interactive Ink menu.
-// For now, fall through to help display.
+// Bare invocation: if TTY launch TUI, else show help
 if (process.argv.length === 2) {
-  program.help();
+  if (process.stdout.isTTY) {
+    // Dynamic import keeps Ink/React out of headless code paths
+    const { launchTui } = await import('./tui/app.js');
+    await launchTui();
+    process.exit(0);
+  } else {
+    program.help();
+  }
 }
+
+// `menu` command — explicit entry to the interactive TUI
+program
+  .command('menu')
+  .description('Launch the interactive terminal UI (requires a TTY)')
+  .action(async () => {
+    const { launchTui } = await import('./tui/app.js');
+    await launchTui();
+  });
 
 program.parse(process.argv);
