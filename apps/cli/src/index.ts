@@ -5,6 +5,7 @@ import { loginCommand } from './commands/login.js';
 import { importCommand } from './commands/import.js';
 import { syncCommand } from './commands/sync.js';
 import { statusCommand } from './commands/status.js';
+import { foldersCommand } from './commands/folders.js';
 import { printBanner } from './ui.js';
 
 // ESM-safe package.json read: createRequire allows require() in ESM modules.
@@ -35,6 +36,7 @@ program.addCommand(loginCommand());
 program.addCommand(importCommand());
 program.addCommand(syncCommand());
 program.addCommand(statusCommand());
+program.addCommand(foldersCommand());
 
 // If invoked with no arguments, show help (which triggers the banner).
 if (process.argv.length === 2) {
