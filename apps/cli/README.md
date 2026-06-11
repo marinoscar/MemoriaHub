@@ -175,12 +175,42 @@ Before syncing, authenticate with your server:
 memoriahub login
 ```
 
-The command prompts interactively for:
+### Default: device authorization flow (browser approval)
 
-- **Server URL** — the base URL of your MemoriaHub instance (e.g. `https://memoriahub.example.com`)
-- **Personal Access Token (PAT)** — create one in the web app under **Settings > Personal Access Tokens**
+Running `memoriahub login` without flags initiates the RFC 8628 device authorization flow:
 
-The CLI validates the token by calling `GET /api/auth/me`. On success, credentials are written to `~/.memoriahub/config.json` with mode `0600`. Credentials are never accepted as positional arguments.
+1. The CLI prompts for the server URL (skip the prompt with `--server <url>`).
+2. It requests a device code from the server and prints a verification URL and a short user code, for example:
+
+   ```
+   Open in your browser: https://memoriahub.example.com/device
+   Then enter the code:  ABCD-1234
+
+   (Or open the direct link: https://memoriahub.example.com/device?code=ABCD-1234)
+   ```
+
+3. The CLI makes a best-effort attempt to open the URL in your default browser automatically.
+4. Sign in with Google and approve the device on the activation page.
+5. Once you approve, the CLI receives a **90-day Personal Access Token** and stores it at `~/.memoriahub/config.json` (mode `0600`).
+
+The token is a standard Personal Access Token — it is revocable at any time from the web app under **Settings > Personal Access Tokens**. Re-running `memoriahub login` issues a fresh token.
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `--server <url>` | Supply the server URL directly and skip the interactive prompt |
+| `--token <pat>` | Headless / CI fallback: provide an existing PAT created in the web app (no browser required) |
+
+**Headless / CI usage** (`--token`):
+
+```bash
+memoriahub login --server https://memoriahub.example.com --token mhpat_xxxxxx
+```
+
+Create the PAT manually in the web app under **Settings > Personal Access Tokens**, then pass it here. The CLI validates the token against the server and saves it — no browser is opened.
+
+The CLI validates any token (device-issued or manually supplied) by calling `GET /api/auth/me`. On success, credentials are written to `~/.memoriahub/config.json` with mode `0600`. Credentials are never accepted as positional arguments.
 
 ---
 
@@ -199,7 +229,7 @@ The CLI validates the token by calling `GET /api/auth/me`. On success, credentia
 
 | Command | Flags | Description | Menu equivalent |
 |---------|-------|-------------|-----------------|
-| `login` | (none) | Authenticate interactively with server URL + PAT | Login / Change server |
+| `login` | `--server <url>` / `--token <pat>` | Authenticate via browser device-auth flow (default) or with an existing PAT (`--token`, CI/headless) | Login / Change server |
 | `folders add <path>` | `-r, --recursive` / `--disabled` | Register a folder in the managed registry | Manage folders → [a] add |
 | `folders list` | `--json` | List all registered folders | Manage folders |
 | `folders remove <id\|path>` | (none) | Remove a folder and cascade-delete its file records | Manage folders → [d] remove |
@@ -219,7 +249,14 @@ The CLI validates the token by calling `GET /api/auth/me`. On success, credentia
 ### `memoriahub login`
 
 ```bash
+# Default: device authorization flow — opens browser, issues a 90-day token
 memoriahub login
+
+# Skip the server URL prompt
+memoriahub login --server https://memoriahub.example.com
+
+# CI/headless: use an existing PAT created in the web app (no browser)
+memoriahub login --server https://memoriahub.example.com --token mhpat_xxxxxx
 ```
 
 ### `memoriahub folders`
