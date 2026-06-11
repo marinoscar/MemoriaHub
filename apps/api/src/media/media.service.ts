@@ -24,6 +24,7 @@ import { UpdateAlbumDto } from './dto/update-album.dto';
 import { AlbumQueryDto } from './dto/album-query.dto';
 import { AddAlbumItemsDto } from './dto/add-album-items.dto';
 import { ExportQueryDto } from './dto/export-query.dto';
+import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 
 @Injectable()
 export class MediaService {
@@ -33,6 +34,7 @@ export class MediaService {
     private readonly prisma: PrismaService,
     @Inject(STORAGE_PROVIDER)
     private readonly storageProvider: StorageProvider,
+    private readonly mediaMetadataSyncService: MediaMetadataSyncService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -95,6 +97,24 @@ export class MediaService {
     });
 
     this.logger.log(`MediaItem created: ${mediaItem.id} by user ${userId}`);
+
+    // Best-effort: if processing already finished before this createMedia call
+    // (i.e. OBJECT_PROCESSED_EVENT fired and no-op'd because no MediaItem
+    // existed yet), apply the processor metadata now so the item is immediately
+    // enriched rather than staying permanently un-enriched.
+    // If processing has not run yet the call is a no-op (_processing absent).
+    // If processing runs again after this, the event handler reapplies the same
+    // values — idempotent by design (present-only overwrites).
+    try {
+      await this.mediaMetadataSyncService.syncFromStorageObject(mediaItem.storageObjectId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Post-create metadata sync failed for MediaItem ${mediaItem.id} ` +
+          `(StorageObject ${mediaItem.storageObjectId}): ${msg}`,
+      );
+      // Never fail createMedia because of a sync issue
+    }
 
     return mediaItem;
   }
