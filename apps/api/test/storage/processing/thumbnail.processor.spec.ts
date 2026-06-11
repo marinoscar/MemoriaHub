@@ -11,6 +11,21 @@
  * Recursion guard:
  *   canProcess must return false for any storageKey that starts with
  *   'thumbnails/', and false for non-image MIME types.
+ *
+ * Video path mock strategy:
+ *   The video path calls:
+ *     - fs.writeFile / fs.readFile / fs.unlink  (temp file management)
+ *     - new ffmpeg.FfmpegCommand(input)  (frame extraction)
+ *   Both are module-level mocks (jest.mock hoisting) so the processor module
+ *   gets the mock version before it is imported.
+ *
+ *   FfmpegCommand is mocked as a constructor that returns a chainable stub.
+ *   Each chain method (.seekInput, .frames, .output) returns `this`.
+ *   .on('end', cb) / .on('error', cb) stores the handlers; .run() invokes them.
+ *   mockFfmpegInvokeEnd() / mockFfmpegInvokeError() control which callback fires.
+ *
+ *   fs.promises is mocked so writeFile and unlink are no-ops and readFile
+ *   returns a real JPEG buffer obtained from getPlainJpegBuffer().
  */
 
 import { ThumbnailProcessor } from '../../../src/storage/processing/processors/thumbnail.processor';
@@ -19,6 +34,97 @@ import { PrismaService } from '../../../src/prisma/prisma.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getPlainJpegBuffer, makeGetStream } from '../../fixtures/media/image-fixtures';
 import { Readable } from 'stream';
+
+// ---------------------------------------------------------------------------
+// fluent-ffmpeg module-level mock
+// ---------------------------------------------------------------------------
+//
+// The processor calls `new ffmpeg.FfmpegCommand(input)` and chains:
+//   .seekInput(n).frames(1).output(path).on('end'|'error', cb).run()
+//
+// Because jest.mock() is hoisted to the top of the file, we cannot reference
+// variables declared in module scope inside the factory.  Instead, the factory
+// uses a module-scoped state object (ffmpegMockState) that IS accessible from
+// inside the class because it is evaluated at call-time, not at hoist-time.
+// The object is populated immediately, before any test code runs.
+//
+// mockFfmpegInvokeEnd()  — next .run() fires 'end' (default).
+// mockFfmpegInvokeError() — next .run() fires 'error'; auto-resets to 'success'
+//                           afterwards so the fallback call succeeds.
+
+const ffmpegMockState = {
+  mode: 'success' as 'success' | 'error',
+  endCb: null as (() => void) | null,
+  errorCb: null as ((err: Error) => void) | null,
+  runCallCount: 0,
+};
+
+function mockFfmpegInvokeEnd() {
+  ffmpegMockState.mode = 'success';
+}
+
+function mockFfmpegInvokeError() {
+  ffmpegMockState.mode = 'error';
+}
+
+function resetFfmpegMock() {
+  ffmpegMockState.mode = 'success';
+  ffmpegMockState.endCb = null;
+  ffmpegMockState.errorCb = null;
+  ffmpegMockState.runCallCount = 0;
+}
+
+jest.mock('fluent-ffmpeg', () => {
+  // ffmpegMockState is in the enclosing module scope and is safely accessible
+  // here because this factory is called at import time (after module scope
+  // initialisation), not when jest.mock() is hoisted.
+  class FfmpegCommandStub {
+    seekInput(_n: number) { return this; }
+    frames(_n: number) { return this; }
+    output(_path: string) { return this; }
+    on(event: string, cb: (...args: any[]) => void) {
+      if (event === 'end') ffmpegMockState.endCb = cb as () => void;
+      if (event === 'error') ffmpegMockState.errorCb = cb as (err: Error) => void;
+      return this;
+    }
+    run() {
+      ffmpegMockState.runCallCount++;
+      // Use setImmediate so the Promise machinery in extractFrame registers
+      // both handlers before we invoke one.
+      setImmediate(() => {
+        if (ffmpegMockState.mode === 'error' && ffmpegMockState.errorCb) {
+          ffmpegMockState.mode = 'success'; // auto-reset so fallback call succeeds
+          ffmpegMockState.errorCb(new Error('ffmpeg: clip too short'));
+        } else if (ffmpegMockState.endCb) {
+          ffmpegMockState.endCb();
+        }
+      });
+    }
+  }
+  return { FfmpegCommand: FfmpegCommandStub };
+});
+
+// ---------------------------------------------------------------------------
+// fs mock (promises API used by the processor)
+// ---------------------------------------------------------------------------
+//
+// The processor calls fs.writeFile, fs.readFile, and fs.unlink.
+// writeFile and unlink are stubs; readFile returns a real JPEG buffer.
+
+let mockFsReadFileBuffer: Buffer = Buffer.alloc(0);
+
+jest.mock('fs', () => {
+  const originalFs = jest.requireActual<typeof import('fs')>('fs');
+  return {
+    ...originalFs,
+    promises: {
+      ...originalFs.promises,
+      writeFile: jest.fn().mockResolvedValue(undefined),
+      readFile: jest.fn().mockImplementation(() => Promise.resolve(mockFsReadFileBuffer)),
+      unlink: jest.fn().mockResolvedValue(undefined),
+    },
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Factories
@@ -295,6 +401,128 @@ describe('ThumbnailProcessor', () => {
       await expect(
         processor.process(makeObject(), makeGetStream(buf)),
       ).resolves.toBeDefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Video path — poster-frame extraction
+  // -------------------------------------------------------------------------
+
+  describe('process — video path (poster-frame thumbnail)', () => {
+    let jpegBuf: Buffer;
+
+    beforeAll(async () => {
+      jpegBuf = await getPlainJpegBuffer();
+    });
+
+    beforeEach(() => {
+      resetFfmpegMock();
+      mockFfmpegInvokeEnd(); // default: 1s-seek succeeds
+      mockFsReadFileBuffer = jpegBuf; // readFile returns a real JPEG
+    });
+
+    it('should return success:true for a video/mp4 object', async () => {
+      const result = await processor.process(
+        makeObject({ mimeType: 'video/mp4' }),
+        makeGetStream(jpegBuf),
+      );
+      expect(result.success).toBe(true);
+      expect(result.error).toBeUndefined();
+    });
+
+    it('should return thumbnailObjectId in metadata', async () => {
+      const result = await processor.process(
+        makeObject({ mimeType: 'video/mp4' }),
+        makeGetStream(jpegBuf),
+      );
+      expect(result.metadata?.thumbnailObjectId).toBe(THUMB_ID);
+    });
+
+    it('should return thumbnailStorageKey = thumbnails/<id>.jpg in metadata', async () => {
+      const result = await processor.process(
+        makeObject({ mimeType: 'video/mp4' }),
+        makeGetStream(jpegBuf),
+      );
+      expect(result.metadata?.thumbnailStorageKey).toBe(`thumbnails/${OBJECT_ID}.jpg`);
+    });
+
+    it('should call storageProvider.upload with thumbnails/<id>.jpg key', async () => {
+      await processor.process(
+        makeObject({ mimeType: 'video/mp4' }),
+        makeGetStream(jpegBuf),
+      );
+      const [uploadedKey, , options] = mockUpload.mock.calls[0];
+      expect(uploadedKey).toBe(`thumbnails/${OBJECT_ID}.jpg`);
+      expect(options).toMatchObject({ mimeType: 'image/jpeg' });
+    });
+
+    it('should call storageProvider.upload with a Readable stream', async () => {
+      await processor.process(
+        makeObject({ mimeType: 'video/mp4' }),
+        makeGetStream(jpegBuf),
+      );
+      const [, stream] = mockUpload.mock.calls[0];
+      expect(stream).toBeInstanceOf(Readable);
+    });
+
+    it('should create a StorageObject with status "ready"', async () => {
+      await processor.process(
+        makeObject({ mimeType: 'video/mp4' }),
+        makeGetStream(jpegBuf),
+      );
+      const createArg = mockStorageObjectCreate.mock.calls[0][0];
+      expect(createArg.data.status).toBe('ready');
+    });
+
+    it('should create a StorageObject with mimeType "image/jpeg"', async () => {
+      await processor.process(
+        makeObject({ mimeType: 'video/mp4' }),
+        makeGetStream(jpegBuf),
+      );
+      const createArg = mockStorageObjectCreate.mock.calls[0][0];
+      expect(createArg.data.mimeType).toBe('image/jpeg');
+    });
+
+    it('should succeed when 1s-seek fails but 0s-seek (fallback) succeeds', async () => {
+      // First extractFrame call (seekInput 1) fires 'error'; second (seekInput 0) fires 'end'.
+      mockFfmpegInvokeError(); // mode='error' for the first run() call; stub auto-resets to 'success'
+
+      const result = await processor.process(
+        makeObject({ mimeType: 'video/mp4' }),
+        makeGetStream(jpegBuf),
+      );
+      expect(result.success).toBe(true);
+      expect(result.metadata?.thumbnailObjectId).toBe(THUMB_ID);
+    });
+
+    it('should return success:false without throwing when both frame extractions fail', async () => {
+      // Both extractFrame calls will fail: set error mode permanently for this test.
+      // We reset to error after each run() by patching the stub behaviour inline.
+      const { promises: fsMock } = require('fs');
+      // Make readFile throw to simulate both extractions failing (ffmpeg writes nothing)
+      fsMock.readFile.mockRejectedValueOnce(new Error('no frame written'));
+      mockFfmpegInvokeError(); // first call errors; second call goes into success but readFile fails
+
+      const result = await processor.process(
+        makeObject({ mimeType: 'video/mp4' }),
+        makeGetStream(jpegBuf),
+      );
+      expect(result.success).toBe(false);
+      expect(typeof result.error).toBe('string');
+    });
+
+    it('should clean up temp files even when ffmpeg fails', async () => {
+      const { promises: fsMock } = require('fs');
+      fsMock.readFile.mockRejectedValueOnce(new Error('frame read error'));
+      mockFfmpegInvokeError();
+
+      await processor.process(
+        makeObject({ mimeType: 'video/mp4' }),
+        makeGetStream(jpegBuf),
+      );
+
+      // unlink is called in the finally block — must not throw regardless
+      expect(fsMock.unlink).toHaveBeenCalled();
     });
   });
 });

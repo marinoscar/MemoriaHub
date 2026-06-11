@@ -236,4 +236,106 @@ describe('VideoProbeProcessor', () => {
       expect(result.metadata?.codec).toBe('vp9');
     });
   });
+
+  // -------------------------------------------------------------------------
+  // capturedAt — creation_time tag extraction
+  // -------------------------------------------------------------------------
+
+  describe('process — capturedAt from creation_time', () => {
+    const CREATION_TIME = '2026-06-11T18:13:42.000000Z';
+    const EXPECTED_ISO = new Date(CREATION_TIME).toISOString();
+
+    it('should extract capturedAt from format.tags.creation_time', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        format: {
+          duration: 12.4,
+          filename: '/tmp/fake',
+          nb_streams: 2,
+          format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+          size: '102400',
+          bit_rate: '0',
+          tags: { creation_time: CREATION_TIME },
+        } as any,
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.success).toBe(true);
+      expect(result.metadata?.capturedAt).toBe(EXPECTED_ISO);
+      // Other fields still present
+      expect(result.metadata?.durationMs).toBe(12400);
+      expect(result.metadata?.width).toBe(1920);
+      expect(result.metadata?.height).toBe(1080);
+      expect(result.metadata?.codec).toBe('h264');
+    });
+
+    it('should fall back to video stream tags.creation_time when format tags are absent', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        streams: [
+          {
+            codec_type: 'video',
+            codec_name: 'h264',
+            width: 1920,
+            height: 1080,
+            index: 0,
+            tags: { creation_time: CREATION_TIME },
+          } as any,
+        ],
+        // format has no tags
+        format: {
+          duration: 5.0,
+          filename: '/tmp/fake',
+          nb_streams: 1,
+          format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+          size: '51200',
+          bit_rate: '0',
+        } as any,
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.success).toBe(true);
+      expect(result.metadata?.capturedAt).toBe(EXPECTED_ISO);
+    });
+
+    it('should omit capturedAt when no creation_time tag exists anywhere', async () => {
+      // Default synthetic data has no creation_time tag
+      setupFfprobeSuccess(makeSyntheticProbeData());
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.success).toBe(true);
+      expect(result.metadata).not.toHaveProperty('capturedAt');
+    });
+
+    it('should omit capturedAt when creation_time is an invalid date string', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        format: {
+          duration: 12.4,
+          filename: '/tmp/fake',
+          nb_streams: 2,
+          format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+          size: '102400',
+          bit_rate: '0',
+          tags: { creation_time: 'not-a-valid-date' },
+        } as any,
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.success).toBe(true);
+      expect(result.metadata).not.toHaveProperty('capturedAt');
+      // Other fields are still extracted
+      expect(result.metadata?.durationMs).toBe(12400);
+    });
+
+    it('should not throw when creation_time is an invalid date string', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        format: {
+          duration: 3.0,
+          tags: { creation_time: '!!garbage!!' },
+        } as any,
+      }));
+
+      await expect(
+        processor.process(makeObject(), makeGetStream()),
+      ).resolves.toMatchObject({ success: true });
+    });
+  });
 });

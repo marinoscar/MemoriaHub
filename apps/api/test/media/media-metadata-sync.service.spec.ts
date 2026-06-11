@@ -541,6 +541,94 @@ describe('MediaMetadataSyncService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // video-probe.capturedAt → MediaItem.capturedAt
+  // -------------------------------------------------------------------------
+
+  describe('handleObjectProcessed — video-probe capturedAt', () => {
+    const VIDEO_CAPTURED_AT = '2026-06-11T18:13:42.000Z';
+
+    it('should set capturedAt from video-probe when exif block is absent', async () => {
+      prisma.storageObject.findUnique.mockResolvedValue({
+        id: STORAGE_OBJ_ID,
+        metadata: {
+          _processing: {
+            'video-probe': {
+              durationMs: 12400,
+              width: 1920,
+              height: 1080,
+              capturedAt: VIDEO_CAPTURED_AT,
+            },
+          },
+        },
+      });
+      prisma.mediaItem.findUnique.mockResolvedValue(mockMediaItem);
+      prisma.mediaItem.update.mockResolvedValue({});
+
+      await service.handleObjectProcessed(new ObjectProcessedEvent(STORAGE_OBJ_ID));
+
+      const data = prisma.mediaItem.update.mock.calls[0][0].data;
+      expect(data.capturedAt).toEqual(new Date(VIDEO_CAPTURED_AT));
+    });
+
+    it('should prefer exif.capturedAt over video-probe.capturedAt when both are present', async () => {
+      const EXIF_CAPTURED_AT = '2025-01-15T09:00:00.000Z';
+      prisma.storageObject.findUnique.mockResolvedValue({
+        id: STORAGE_OBJ_ID,
+        metadata: {
+          _processing: {
+            exif: {
+              capturedAt: EXIF_CAPTURED_AT,
+            },
+            'video-probe': {
+              durationMs: 12400,
+              width: 1920,
+              height: 1080,
+              capturedAt: VIDEO_CAPTURED_AT,
+            },
+          },
+        },
+      });
+      prisma.mediaItem.findUnique.mockResolvedValue(mockMediaItem);
+      prisma.mediaItem.update.mockResolvedValue({});
+
+      await service.handleObjectProcessed(new ObjectProcessedEvent(STORAGE_OBJ_ID));
+
+      const data = prisma.mediaItem.update.mock.calls[0][0].data;
+      // exif wins
+      expect(data.capturedAt).toEqual(new Date(EXIF_CAPTURED_AT));
+      // must NOT be the video-probe value
+      expect(data.capturedAt).not.toEqual(new Date(VIDEO_CAPTURED_AT));
+    });
+
+    it('should not set capturedAt when video-probe block has no capturedAt field', async () => {
+      prisma.storageObject.findUnique.mockResolvedValue({
+        id: STORAGE_OBJ_ID,
+        metadata: {
+          _processing: {
+            'video-probe': {
+              durationMs: 5000,
+              width: 1280,
+              height: 720,
+              // capturedAt deliberately absent
+            },
+          },
+        },
+      });
+      prisma.mediaItem.findUnique.mockResolvedValue(mockMediaItem);
+      prisma.mediaItem.update.mockResolvedValue({});
+
+      await service.handleObjectProcessed(new ObjectProcessedEvent(STORAGE_OBJ_ID));
+
+      const data = prisma.mediaItem.update.mock.calls[0][0].data;
+      expect(data.capturedAt).toBeUndefined();
+      // width/height/durationMs still mapped
+      expect(data.durationMs).toBe(5000);
+      expect(data.width).toBe(1280);
+      expect(data.height).toBe(720);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Event constant
   // -------------------------------------------------------------------------
 
