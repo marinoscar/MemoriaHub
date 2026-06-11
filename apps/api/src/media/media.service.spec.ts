@@ -10,6 +10,8 @@ import {
   createMockPrismaService,
   MockPrismaService,
 } from '../../test/mocks/prisma.mock';
+import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
+import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { randomUUID } from 'crypto';
 
@@ -142,14 +144,24 @@ const noPerms: string[] = [];
 describe('MediaService', () => {
   let service: MediaService;
   let mockPrisma: MockPrismaService;
+  let mockStorageProvider: { getSignedDownloadUrl: jest.Mock };
+  let mockSyncService: jest.Mocked<Pick<MediaMetadataSyncService, 'syncFromStorageObject'>>;
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
+    mockStorageProvider = {
+      getSignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/signed'),
+    };
+    mockSyncService = {
+      syncFromStorageObject: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MediaService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
+        { provide: MediaMetadataSyncService, useValue: mockSyncService },
       ],
     }).compile();
 
@@ -252,6 +264,51 @@ describe('MediaService', () => {
           'user-1',
         ),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should call syncFromStorageObject with the created item storageObjectId (best-effort enrichment)', async () => {
+      const storageObject = makeStorageObject({ uploadedById: 'user-1' });
+      const createdItem = makeMediaItem({ storageObjectId: storageObject.id });
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue(storageObject as any);
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
+      mockPrisma.mediaItem.create.mockResolvedValue(createdItem as any);
+
+      await service.createMedia(
+        {
+          storageObjectId: storageObject.id,
+          type: 'photo',
+          source: 'web',
+          originalFilename: 'photo.jpg',
+        },
+        'user-1',
+      );
+
+      expect(mockSyncService.syncFromStorageObject).toHaveBeenCalledTimes(1);
+      expect(mockSyncService.syncFromStorageObject).toHaveBeenCalledWith(createdItem.storageObjectId);
+    });
+
+    it('should still resolve with the created MediaItem when syncFromStorageObject rejects (error swallowed)', async () => {
+      const storageObject = makeStorageObject({ uploadedById: 'user-1' });
+      const createdItem = makeMediaItem({ storageObjectId: storageObject.id });
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue(storageObject as any);
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
+      mockPrisma.mediaItem.create.mockResolvedValue(createdItem as any);
+      mockSyncService.syncFromStorageObject.mockRejectedValue(new Error('sync failure'));
+
+      const result = await service.createMedia(
+        {
+          storageObjectId: storageObject.id,
+          type: 'photo',
+          source: 'web',
+          originalFilename: 'photo.jpg',
+        },
+        'user-1',
+      );
+
+      // createMedia must resolve despite sync failure
+      expect(result).toEqual(createdItem);
     });
   });
 
@@ -462,10 +519,13 @@ describe('MediaService', () => {
     it('should return a MediaItem for the owner', async () => {
       const item = makeMediaItem({ ownerId: 'user-1' });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+      mockPrisma.storageObject.findUnique.mockResolvedValue(
+        makeStorageObject({ id: item.storageObjectId, uploadedById: 'user-1' }) as any,
+      );
 
       const result = await service.getMedia(item.id, 'user-1', ownPerms);
 
-      expect(result).toEqual(item);
+      expect(result).toMatchObject({ id: item.id, ownerId: 'user-1' });
     });
 
     it('should throw NotFoundException if item does not exist', async () => {
@@ -497,10 +557,13 @@ describe('MediaService', () => {
     it('should allow Admin with media:read_any to access another user\'s item', async () => {
       const item = makeMediaItem({ ownerId: 'other-user' });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+      mockPrisma.storageObject.findUnique.mockResolvedValue(
+        makeStorageObject({ id: item.storageObjectId, uploadedById: 'other-user' }) as any,
+      );
 
       const result = await service.getMedia(item.id, 'user-1', anyPerms);
 
-      expect(result).toEqual(item);
+      expect(result).toMatchObject({ id: item.id, ownerId: 'other-user' });
     });
   });
 
