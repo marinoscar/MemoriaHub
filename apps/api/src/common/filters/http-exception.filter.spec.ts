@@ -353,4 +353,230 @@ describe('HttpExceptionFilter', () => {
       );
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // RFC 8628 / OAuth 2.0 error field propagation
+  // New behaviour: error + error_description are forwarded verbatim when present
+  // ---------------------------------------------------------------------------
+
+  describe('RFC 8628 / OAuth error field propagation', () => {
+    it('should include error and error_description when present in HttpException payload', () => {
+      const exception = new HttpException(
+        {
+          error: 'authorization_pending',
+          error_description: 'User has not yet authorized this device',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+
+      filter.catch(exception, mockHost);
+
+      expect(mockResponse.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: 'authorization_pending',
+          error_description: 'User has not yet authorized this device',
+        }),
+      );
+    });
+
+    it('should propagate slow_down RFC error code', () => {
+      const exception = new HttpException(
+        {
+          error: 'slow_down',
+          error_description: 'Polling too frequently. Please slow down.',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+
+      filter.catch(exception, mockHost);
+
+      const sent = mockResponse.send.mock.calls[0][0];
+      expect(sent.error).toBe('slow_down');
+      expect(sent.error_description).toBe('Polling too frequently. Please slow down.');
+    });
+
+    it('should propagate expired_token RFC error code', () => {
+      const exception = new HttpException(
+        {
+          error: 'expired_token',
+          error_description: 'The device code has expired',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+
+      filter.catch(exception, mockHost);
+
+      const sent = mockResponse.send.mock.calls[0][0];
+      expect(sent.error).toBe('expired_token');
+      expect(sent.error_description).toBe('The device code has expired');
+    });
+
+    it('should propagate access_denied RFC error code', () => {
+      const exception = new HttpException(
+        {
+          error: 'access_denied',
+          error_description: 'User denied the authorization request',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+
+      filter.catch(exception, mockHost);
+
+      const sent = mockResponse.send.mock.calls[0][0];
+      expect(sent.error).toBe('access_denied');
+    });
+
+    it('should propagate invalid_grant RFC error code on 401', () => {
+      const exception = new HttpException(
+        {
+          error: 'invalid_grant',
+          error_description: 'Invalid device code',
+        },
+        HttpStatus.UNAUTHORIZED,
+      );
+
+      filter.catch(exception, mockHost);
+
+      expect(mockResponse.code).toHaveBeenCalledWith(401);
+      const sent = mockResponse.send.mock.calls[0][0];
+      expect(sent.error).toBe('invalid_grant');
+      expect(sent.error_description).toBe('Invalid device code');
+    });
+
+    it('should include both error fields alongside standard statusCode, code, and message', () => {
+      const exception = new HttpException(
+        {
+          message: 'User has not yet authorized this device',
+          error: 'authorization_pending',
+          error_description: 'User has not yet authorized this device',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+
+      filter.catch(exception, mockHost);
+
+      const sent = mockResponse.send.mock.calls[0][0];
+      expect(sent).toMatchObject({
+        statusCode: 400,
+        code: 'BAD_REQUEST',
+        message: 'User has not yet authorized this device',
+        error: 'authorization_pending',
+        error_description: 'User has not yet authorized this device',
+        timestamp: expect.any(String),
+        path: '/api/test',
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Regression guard: ordinary exceptions must NOT gain stray error fields
+  // ---------------------------------------------------------------------------
+
+  describe('regression guard — ordinary exceptions keep unchanged shape', () => {
+    it('should NOT include error or error_description for a plain string HttpException', () => {
+      const exception = new HttpException('Simple error', HttpStatus.BAD_REQUEST);
+
+      filter.catch(exception, mockHost);
+
+      const sent = mockResponse.send.mock.calls[0][0];
+      expect(sent).not.toHaveProperty('error');
+      expect(sent).not.toHaveProperty('error_description');
+    });
+
+    it('should NOT include error or error_description for an object HttpException without those fields', () => {
+      const exception = new HttpException(
+        { message: 'Validation failed', details: [{ field: 'email' }] },
+        HttpStatus.BAD_REQUEST,
+      );
+
+      filter.catch(exception, mockHost);
+
+      const sent = mockResponse.send.mock.calls[0][0];
+      expect(sent).not.toHaveProperty('error');
+      expect(sent).not.toHaveProperty('error_description');
+      // Original fields still present
+      expect(sent.statusCode).toBe(400);
+      expect(sent.message).toBe('Validation failed');
+    });
+
+    it('should NOT include error or error_description for a generic Error', () => {
+      const error = new Error('Unexpected crash');
+
+      filter.catch(error, mockHost);
+
+      const sent = mockResponse.send.mock.calls[0][0];
+      expect(sent).not.toHaveProperty('error');
+      expect(sent).not.toHaveProperty('error_description');
+      expect(sent.statusCode).toBe(500);
+      expect(sent.message).toBe('Unexpected crash');
+    });
+
+    it('should NOT include error or error_description for an unknown object exception', () => {
+      filter.catch({ some: 'unknown' }, mockHost);
+
+      const sent = mockResponse.send.mock.calls[0][0];
+      expect(sent).not.toHaveProperty('error');
+      expect(sent).not.toHaveProperty('error_description');
+      expect(sent.statusCode).toBe(500);
+    });
+
+    it('should NOT add error field when the HttpException payload has a numeric error property', () => {
+      // Ensures we don't forward non-string values that happen to be named "error"
+      const exception = new HttpException(
+        { message: 'Type mismatch', error: 42 as any },
+        HttpStatus.BAD_REQUEST,
+      );
+
+      filter.catch(exception, mockHost);
+
+      const sent = mockResponse.send.mock.calls[0][0];
+      // A numeric 'error' must NOT be forwarded (the filter guards typeof === 'string')
+      expect(sent).not.toHaveProperty('error');
+    });
+
+    it('should NOT add error_description field when it is not a string', () => {
+      const exception = new HttpException(
+        { message: 'Error', error: 'some_code', error_description: { nested: true } as any },
+        HttpStatus.BAD_REQUEST,
+      );
+
+      filter.catch(exception, mockHost);
+
+      const sent = mockResponse.send.mock.calls[0][0];
+      // error is a string so it IS forwarded
+      expect(sent.error).toBe('some_code');
+      // error_description is not a string so it must NOT be forwarded
+      expect(sent).not.toHaveProperty('error_description');
+    });
+
+    it('should preserve 401 Unauthorized shape without stray fields', () => {
+      const exception = new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+
+      filter.catch(exception, mockHost);
+
+      const sent = mockResponse.send.mock.calls[0][0];
+      expect(sent).toMatchObject({
+        statusCode: 401,
+        code: 'UNAUTHORIZED',
+        message: 'Unauthorized',
+      });
+      expect(sent).not.toHaveProperty('error');
+      expect(sent).not.toHaveProperty('error_description');
+    });
+
+    it('should preserve 403 Forbidden shape without stray fields', () => {
+      const exception = new HttpException('Forbidden', HttpStatus.FORBIDDEN);
+
+      filter.catch(exception, mockHost);
+
+      const sent = mockResponse.send.mock.calls[0][0];
+      expect(sent).toMatchObject({
+        statusCode: 403,
+        code: 'FORBIDDEN',
+        message: 'Forbidden',
+      });
+      expect(sent).not.toHaveProperty('error');
+      expect(sent).not.toHaveProperty('error_description');
+    });
+  });
 });

@@ -8,6 +8,7 @@ import {
 import { DeviceAuthService } from '../device-auth.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../../auth/auth.service';
+import { PatService } from '../../pat/pat.service';
 import {
   createMockPrismaService,
   MockPrismaService,
@@ -19,6 +20,7 @@ describe('DeviceAuthService', () => {
   let mockPrisma: MockPrismaService;
   let mockAuthService: jest.Mocked<AuthService>;
   let mockConfigService: jest.Mocked<ConfigService>;
+  let mockPatService: jest.Mocked<PatService>;
 
   const mockUser = {
     id: 'user-1',
@@ -36,8 +38,18 @@ describe('DeviceAuthService', () => {
     ],
   };
 
+  // Default config answers; individual tests can override mockConfigService.get
+  const defaultConfig: Record<string, any> = {
+    'deviceAuth.expiryMinutes': 15,
+    'deviceAuth.pollInterval': 5,
+    'deviceAuth.patTtlDays': 90,
+    'deviceAuth.tokenExpiryDays': 7,
+    appUrl: 'http://localhost:3535',
+  };
+
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
+
     mockAuthService = {
       generateFullTokens: jest.fn().mockResolvedValue({
         accessToken: 'mock-access-token',
@@ -45,14 +57,21 @@ describe('DeviceAuthService', () => {
         expiresIn: 900,
       }),
     } as any;
+
+    mockPatService = {
+      createToken: jest.fn().mockResolvedValue({
+        token: 'pat_abc123mock',
+        id: 'pat-id-1',
+        name: 'MemoriaHub CLI',
+        tokenPrefix: 'pat_abc1',
+        expiresAt: new Date(Date.now() + 90 * 86400 * 1000).toISOString(),
+        createdAt: new Date().toISOString(),
+      }),
+    } as any;
+
     mockConfigService = {
       get: jest.fn((key: string, defaultValue?: any) => {
-        const config: Record<string, any> = {
-          'deviceAuth.expiryMinutes': 15,
-          'deviceAuth.pollInterval': 5,
-          appUrl: 'http://localhost:3535',
-        };
-        return config[key] ?? defaultValue;
+        return defaultConfig[key] ?? defaultValue;
       }),
     } as any;
 
@@ -62,6 +81,7 @@ describe('DeviceAuthService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AuthService, useValue: mockAuthService },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: PatService, useValue: mockPatService },
       ],
     }).compile();
 
@@ -71,6 +91,10 @@ describe('DeviceAuthService', () => {
   afterEach(() => {
     jest.clearAllMocks();
   });
+
+  // ---------------------------------------------------------------------------
+  // generateDeviceCode
+  // ---------------------------------------------------------------------------
 
   describe('generateDeviceCode', () => {
     it('should generate valid device code and user code', async () => {
@@ -159,10 +183,391 @@ describe('DeviceAuthService', () => {
     });
   });
 
-  describe('pollForToken', () => {
-    // Use unique device codes for each test to avoid rate limiting issues
+  // ---------------------------------------------------------------------------
+  // pollForToken — PAT branch (new 90-day flow)
+  // ---------------------------------------------------------------------------
+
+  describe('pollForToken — PAT branch', () => {
+    // Each test gets a unique device code to avoid in-process rate-limit collision
     let testCounter = 0;
-    const getUniqueDeviceCode = () => `device-code-${++testCounter}-${Date.now()}`;
+    const getUniqueDeviceCode = () => `pat-flow-test-${++testCounter}-${Date.now()}`;
+
+    it('should call patService.createToken with durationUnit:days and default patTtlDays=90', async () => {
+      const deviceCode = getUniqueDeviceCode();
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValue({
+        id: 'dc-pat-1',
+        status: DeviceCodeStatus.approved,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        userId: 'user-1',
+        user: mockUser,
+        clientInfo: { tokenType: 'pat', name: 'MemoriaHub CLI' },
+      } as any);
+      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
+
+      const result = await service.pollForToken(deviceCode);
+
+      expect(mockPatService.createToken).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({
+          durationUnit: 'days',
+          durationValue: 90,
+        }),
+      );
+      expect(result.accessToken).toBe('pat_abc123mock');
+      expect(result.refreshToken).toBe('');
+      expect(result.tokenType).toBe('Bearer');
+      expect(result.expiresIn).toBe(90 * 86400);
+    });
+
+    it('should use non-default patTtlDays from ConfigService when configured', async () => {
+      const deviceCode = getUniqueDeviceCode();
+
+      // Override config to return 30 days instead of 90
+      mockConfigService.get.mockImplementation((key: string, defaultValue?: any) => {
+        if (key === 'deviceAuth.patTtlDays') return 30;
+        return defaultConfig[key] ?? defaultValue;
+      });
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValue({
+        id: 'dc-pat-2',
+        status: DeviceCodeStatus.approved,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        userId: 'user-1',
+        user: mockUser,
+        clientInfo: { tokenType: 'pat', name: 'CLI Custom TTL' },
+      } as any);
+      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
+
+      const result = await service.pollForToken(deviceCode);
+
+      expect(mockPatService.createToken).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({
+          durationUnit: 'days',
+          durationValue: 30,
+        }),
+      );
+      expect(result.expiresIn).toBe(30 * 86400);
+    });
+
+    it('should use the PAT token string as the returned accessToken', async () => {
+      const deviceCode = getUniqueDeviceCode();
+
+      mockPatService.createToken.mockResolvedValue({
+        token: 'pat_specifictoken999',
+        id: 'pat-id-x',
+        name: 'MemoriaHub CLI',
+        tokenPrefix: 'pat_spec',
+        expiresAt: new Date(Date.now() + 90 * 86400 * 1000).toISOString(),
+        createdAt: new Date().toISOString(),
+      } as any);
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValue({
+        id: 'dc-pat-3',
+        status: DeviceCodeStatus.approved,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        userId: 'user-1',
+        user: mockUser,
+        clientInfo: { tokenType: 'pat' },
+      } as any);
+      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
+
+      const result = await service.pollForToken(deviceCode);
+
+      expect(result.accessToken).toBe('pat_specifictoken999');
+    });
+
+    it('should NOT call authService.generateFullTokens when tokenType is pat', async () => {
+      const deviceCode = getUniqueDeviceCode();
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValue({
+        id: 'dc-pat-4',
+        status: DeviceCodeStatus.approved,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        userId: 'user-1',
+        user: mockUser,
+        clientInfo: { tokenType: 'pat', name: 'MemoriaHub CLI' },
+      } as any);
+      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
+
+      await service.pollForToken(deviceCode);
+
+      expect(mockAuthService.generateFullTokens).not.toHaveBeenCalled();
+    });
+
+    it('should mark device code as expired (used) after PAT issuance', async () => {
+      const deviceCode = getUniqueDeviceCode();
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValue({
+        id: 'dc-pat-5',
+        status: DeviceCodeStatus.approved,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        userId: 'user-1',
+        user: mockUser,
+        clientInfo: { tokenType: 'pat' },
+      } as any);
+      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
+
+      await service.pollForToken(deviceCode);
+
+      expect(mockPrisma.deviceCode.update).toHaveBeenCalledWith({
+        where: { id: 'dc-pat-5' },
+        data: { status: DeviceCodeStatus.expired },
+      });
+    });
+
+    it('should use clientInfo.name as the PAT name when provided', async () => {
+      const deviceCode = getUniqueDeviceCode();
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValue({
+        id: 'dc-pat-6',
+        status: DeviceCodeStatus.approved,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        userId: 'user-1',
+        user: mockUser,
+        clientInfo: { tokenType: 'pat', name: '  My Named CLI  ' },
+      } as any);
+      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
+
+      await service.pollForToken(deviceCode);
+
+      expect(mockPatService.createToken).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({ name: 'My Named CLI' }),
+      );
+    });
+
+    it('should fall back to "MemoriaHub CLI" when clientInfo.name is absent', async () => {
+      const deviceCode = getUniqueDeviceCode();
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValue({
+        id: 'dc-pat-7',
+        status: DeviceCodeStatus.approved,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        userId: 'user-1',
+        user: mockUser,
+        clientInfo: { tokenType: 'pat' },
+      } as any);
+      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
+
+      await service.pollForToken(deviceCode);
+
+      expect(mockPatService.createToken).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({ name: 'MemoriaHub CLI' }),
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // pollForToken — JWT branch (existing flow; must be unchanged)
+  // ---------------------------------------------------------------------------
+
+  describe('pollForToken — JWT branch', () => {
+    let testCounter = 0;
+    const getUniqueDeviceCode = () => `jwt-flow-test-${++testCounter}-${Date.now()}`;
+
+    it('should call authService.generateFullTokens when clientInfo is null', async () => {
+      const deviceCode = getUniqueDeviceCode();
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValue({
+        id: 'dc-jwt-1',
+        status: DeviceCodeStatus.approved,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        userId: 'user-1',
+        user: mockUser,
+        clientInfo: null,
+      } as any);
+      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
+
+      const result = await service.pollForToken(deviceCode);
+
+      expect(mockAuthService.generateFullTokens).toHaveBeenCalledWith(
+        mockUser,
+        expect.objectContaining({
+          accessTtlMinutes: expect.any(Number),
+          refreshTtlDays: expect.any(Number),
+        }),
+      );
+      expect(mockPatService.createToken).not.toHaveBeenCalled();
+      expect(result.accessToken).toBe('mock-access-token');
+      expect(result.refreshToken).toBe('mock-refresh-token');
+    });
+
+    it('should call authService.generateFullTokens when tokenType is not "pat"', async () => {
+      const deviceCode = getUniqueDeviceCode();
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValue({
+        id: 'dc-jwt-2',
+        status: DeviceCodeStatus.approved,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        userId: 'user-1',
+        user: mockUser,
+        clientInfo: { tokenType: 'jwt' },
+      } as any);
+      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
+
+      const result = await service.pollForToken(deviceCode);
+
+      expect(mockAuthService.generateFullTokens).toHaveBeenCalled();
+      expect(mockPatService.createToken).not.toHaveBeenCalled();
+      expect(result.accessToken).toBe('mock-access-token');
+    });
+
+    it('should call authService.generateFullTokens when clientInfo has no tokenType field', async () => {
+      const deviceCode = getUniqueDeviceCode();
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValue({
+        id: 'dc-jwt-3',
+        status: DeviceCodeStatus.approved,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        userId: 'user-1',
+        user: mockUser,
+        clientInfo: { hostname: 'my-machine', platform: 'linux' },
+      } as any);
+      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
+
+      await service.pollForToken(deviceCode);
+
+      expect(mockAuthService.generateFullTokens).toHaveBeenCalled();
+      expect(mockPatService.createToken).not.toHaveBeenCalled();
+    });
+
+    it('should mark device code as expired after JWT issuance', async () => {
+      const deviceCode = getUniqueDeviceCode();
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValue({
+        id: 'dc-jwt-4',
+        status: DeviceCodeStatus.approved,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        userId: 'user-1',
+        user: mockUser,
+        clientInfo: null,
+      } as any);
+      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
+
+      await service.pollForToken(deviceCode);
+
+      expect(mockPrisma.deviceCode.update).toHaveBeenCalledWith({
+        where: { id: 'dc-jwt-4' },
+        data: { status: DeviceCodeStatus.expired },
+      });
+    });
+
+    it('should return tokens object with correct shape on JWT path', async () => {
+      const deviceCode = getUniqueDeviceCode();
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValue({
+        id: 'dc-jwt-5',
+        status: DeviceCodeStatus.approved,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        userId: 'user-1',
+        user: mockUser,
+        clientInfo: null,
+      } as any);
+      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
+
+      const result = await service.pollForToken(deviceCode);
+
+      expect(result).toEqual({
+        accessToken: 'mock-access-token',
+        refreshToken: 'mock-refresh-token',
+        tokenType: 'Bearer',
+        expiresIn: 900,
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // pollForToken — clientInfo type-guard (edge cases that must not crash)
+  // ---------------------------------------------------------------------------
+
+  describe('pollForToken — clientInfo type-guard edge cases', () => {
+    let testCounter = 0;
+    const getUniqueDeviceCode = () => `typeguard-test-${++testCounter}-${Date.now()}`;
+
+    it('should treat array clientInfo as non-pat and use JWT path', async () => {
+      const deviceCode = getUniqueDeviceCode();
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValue({
+        id: 'dc-arr-1',
+        status: DeviceCodeStatus.approved,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        userId: 'user-1',
+        user: mockUser,
+        // Arrays are valid Prisma Json but must NOT be treated as clientInfo object
+        clientInfo: ['tokenType', 'pat'] as any,
+      } as any);
+      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
+
+      await expect(service.pollForToken(deviceCode)).resolves.toBeDefined();
+      expect(mockAuthService.generateFullTokens).toHaveBeenCalled();
+      expect(mockPatService.createToken).not.toHaveBeenCalled();
+    });
+
+    it('should treat primitive string clientInfo as non-pat and use JWT path', async () => {
+      const deviceCode = getUniqueDeviceCode();
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValue({
+        id: 'dc-prim-1',
+        status: DeviceCodeStatus.approved,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        userId: 'user-1',
+        user: mockUser,
+        clientInfo: 'pat' as any,
+      } as any);
+      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
+
+      await expect(service.pollForToken(deviceCode)).resolves.toBeDefined();
+      expect(mockAuthService.generateFullTokens).toHaveBeenCalled();
+      expect(mockPatService.createToken).not.toHaveBeenCalled();
+    });
+
+    it('should treat numeric clientInfo as non-pat and use JWT path', async () => {
+      const deviceCode = getUniqueDeviceCode();
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValue({
+        id: 'dc-num-1',
+        status: DeviceCodeStatus.approved,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        userId: 'user-1',
+        user: mockUser,
+        clientInfo: 42 as any,
+      } as any);
+      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
+
+      await expect(service.pollForToken(deviceCode)).resolves.toBeDefined();
+      expect(mockAuthService.generateFullTokens).toHaveBeenCalled();
+      expect(mockPatService.createToken).not.toHaveBeenCalled();
+    });
+
+    it('should treat empty object clientInfo as non-pat and use JWT path', async () => {
+      const deviceCode = getUniqueDeviceCode();
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValue({
+        id: 'dc-empty-1',
+        status: DeviceCodeStatus.approved,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        userId: 'user-1',
+        user: mockUser,
+        clientInfo: {},
+      } as any);
+      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
+
+      await expect(service.pollForToken(deviceCode)).resolves.toBeDefined();
+      expect(mockAuthService.generateFullTokens).toHaveBeenCalled();
+      expect(mockPatService.createToken).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // pollForToken — existing error-path tests (preserved from original spec)
+  // ---------------------------------------------------------------------------
+
+  describe('pollForToken — error paths', () => {
+    let testCounter = 0;
+    const getUniqueDeviceCode = () => `error-path-test-${++testCounter}-${Date.now()}`;
 
     it('should throw authorization_pending when status is pending', async () => {
       const deviceCode = getUniqueDeviceCode();
@@ -226,41 +631,6 @@ describe('DeviceAuthService', () => {
       });
     });
 
-    it('should return tokens when status is approved', async () => {
-      const deviceCode = getUniqueDeviceCode();
-      mockPrisma.deviceCode.findUnique.mockResolvedValue({
-        id: 'device-code-1',
-        status: DeviceCodeStatus.approved,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-        userId: 'user-1',
-        user: mockUser,
-      } as any);
-      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
-
-      const result = await service.pollForToken(deviceCode);
-
-      expect(result).toEqual({
-        accessToken: 'mock-access-token',
-        refreshToken: 'mock-refresh-token',
-        tokenType: 'Bearer',
-        expiresIn: 900,
-      });
-
-      expect(mockAuthService.generateFullTokens).toHaveBeenCalledWith(
-        mockUser,
-        expect.objectContaining({
-          accessTtlMinutes: expect.any(Number),
-          refreshTtlDays: expect.any(Number),
-        }),
-      );
-
-      // Should mark as expired to prevent reuse
-      expect(mockPrisma.deviceCode.update).toHaveBeenCalledWith({
-        where: { id: 'device-code-1' },
-        data: { status: DeviceCodeStatus.expired },
-      });
-    });
-
     it('should throw invalid_grant when device code not found', async () => {
       const deviceCode = getUniqueDeviceCode();
       mockPrisma.deviceCode.findUnique.mockResolvedValue(null);
@@ -282,6 +652,7 @@ describe('DeviceAuthService', () => {
         expiresAt: new Date(Date.now() + 10 * 60 * 1000),
         userId: 'user-1',
         user: null, // User was deleted
+        clientInfo: null,
       } as any);
 
       try {
@@ -294,7 +665,6 @@ describe('DeviceAuthService', () => {
     });
 
     it('should enforce rate limiting with slow_down error', async () => {
-      // This test uses a fixed device code to test rate limiting
       const rateLimitDeviceCode = `rate-limit-test-${Date.now()}`;
 
       mockPrisma.deviceCode.findUnique.mockResolvedValue({
@@ -320,6 +690,10 @@ describe('DeviceAuthService', () => {
       }
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // getActivationInfo
+  // ---------------------------------------------------------------------------
 
   describe('getActivationInfo', () => {
     it('should return verification URI when no code provided', async () => {
@@ -413,6 +787,10 @@ describe('DeviceAuthService', () => {
       );
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // authorizeDevice
+  // ---------------------------------------------------------------------------
 
   describe('authorizeDevice', () => {
     const userId = 'user-1';
@@ -528,6 +906,10 @@ describe('DeviceAuthService', () => {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // getUserDeviceSessions
+  // ---------------------------------------------------------------------------
+
   describe('getUserDeviceSessions', () => {
     it('should return paginated device sessions', async () => {
       const mockSessions = [
@@ -622,6 +1004,10 @@ describe('DeviceAuthService', () => {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // revokeDeviceSession
+  // ---------------------------------------------------------------------------
+
   describe('revokeDeviceSession', () => {
     it('should revoke device session successfully', async () => {
       mockPrisma.deviceCode.findUnique.mockResolvedValue({
@@ -673,6 +1059,10 @@ describe('DeviceAuthService', () => {
       expect(mockPrisma.deviceCode.update).not.toHaveBeenCalled();
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // cleanupExpiredCodes
+  // ---------------------------------------------------------------------------
 
   describe('cleanupExpiredCodes', () => {
     it('should delete expired codes', async () => {
