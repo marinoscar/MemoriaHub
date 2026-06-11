@@ -4,10 +4,15 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  Inject,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
+import {
+  STORAGE_PROVIDER,
+  StorageProvider,
+} from '../storage/providers/storage-provider.interface';
 import { CreateMediaDto } from './dto/create-media.dto';
 import { UpdateMediaDto } from './dto/update-media.dto';
 import { MediaQueryDto } from './dto/media-query.dto';
@@ -21,7 +26,11 @@ import { AddAlbumItemsDto } from './dto/add-album-items.dto';
 export class MediaService {
   private readonly logger = new Logger(MediaService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(STORAGE_PROVIDER)
+    private readonly storageProvider: StorageProvider,
+  ) {}
 
   // ---------------------------------------------------------------------------
   // MediaItem CRUD
@@ -220,8 +229,17 @@ export class MediaService {
       this.prisma.mediaItem.count({ where }),
     ]);
 
+    // Sign thumbnail URLs for all items in parallel (no extra DB query —
+    // thumbnailStorageKey is already embedded in item.metadata).
+    const itemsWithUrls = await Promise.all(
+      items.map(async (item) => ({
+        ...item,
+        thumbnailUrl: await this.signThumb(item.metadata),
+      })),
+    );
+
     return {
-      items,
+      items: itemsWithUrls,
       meta: {
         page,
         pageSize,
@@ -233,6 +251,14 @@ export class MediaService {
 
   /**
    * Get one MediaItem. Ownership or media:read_any required.
+   *
+   * Returns the item with two additional signed-URL fields:
+   *   thumbnailUrl  — fresh signed URL for the thumbnail (null if no thumbnail)
+   *   downloadUrl   — fresh signed URL for the original full-res blob (null if
+   *                   the linked StorageObject row is missing)
+   *
+   * BigInt safety: we only select `storageKey` from StorageObject, so the
+   * BigInt `size` field never appears in the returned object.
    */
   async getMedia(id: string, userId: string, userPermissions: string[]) {
     const item = await this.prisma.mediaItem.findUnique({ where: { id } });
@@ -246,7 +272,25 @@ export class MediaService {
       throw new ForbiddenException('You do not have access to this media item');
     }
 
-    return item;
+    // Fetch only the storageKey of the linked StorageObject to avoid spreading
+    // a BigInt `size` field into the response.
+    const storageObj = await this.prisma.storageObject.findUnique({
+      where: { id: item.storageObjectId },
+      select: { storageKey: true },
+    });
+
+    const [thumbnailUrl, downloadUrl] = await Promise.all([
+      this.signThumb(item.metadata),
+      storageObj
+        ? this.storageProvider.getSignedDownloadUrl(storageObj.storageKey)
+        : Promise.resolve(null),
+    ]);
+
+    return {
+      ...item,
+      thumbnailUrl,
+      downloadUrl,
+    };
   }
 
   /**
@@ -657,6 +701,37 @@ export class MediaService {
     }
 
     return item;
+  }
+
+  // ---------------------------------------------------------------------------
+  // URL signing helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Sign a fresh download URL for a thumbnail, or return null if the item has
+   * no thumbnail yet (processor has not run / image not yet uploaded).
+   *
+   * Reads `thumbnailStorageKey` from the JSONB metadata field.  This is a
+   * stable key (never signed), so it is safe to store in the DB.
+   */
+  private async signThumb(
+    metadata: Prisma.JsonValue | null,
+  ): Promise<string | null> {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      return null;
+    }
+    const meta = metadata as Record<string, unknown>;
+    const key = meta['thumbnailStorageKey'];
+    if (typeof key !== 'string' || !key) {
+      return null;
+    }
+    try {
+      return await this.storageProvider.getSignedDownloadUrl(key);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to sign thumbnail URL for key ${key}: ${msg}`);
+      return null;
+    }
   }
 
   /**
