@@ -1,11 +1,11 @@
 import * as path from 'path';
 import { Command } from 'commander';
-import { requireConfig } from '../config';
-import { ApiClient } from '../api';
-import { enumerateFiles } from '../files';
-import { loadManifest, saveManifest } from '../manifest';
-import { processFiles } from '../process-files';
-import { ui, printImportSummaryBox } from '../ui';
+import { requireConfig } from '../config.js';
+import { ApiClient } from '../api.js';
+import { enumerateFiles } from '../files.js';
+import { loadManifest, saveManifest } from '../manifest.js';
+import { processFiles } from '../process-files.js';
+import { ui, printImportSummaryBox } from '../ui.js';
 
 export function importCommand(): Command {
   const cmd = new Command('import');

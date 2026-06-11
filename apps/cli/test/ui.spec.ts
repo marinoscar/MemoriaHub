@@ -7,11 +7,12 @@
  * change without breaking tests).
  */
 
-// Set NO_COLOR before ui.ts is imported so picocolors disables color output.
+// Set NO_COLOR before ui.ts is imported so chalk disables color output.
 // This also exercises the non-TTY/no-color code paths.
 process.env['NO_COLOR'] = '1';
 
-import { ui } from '../src/ui';
+import { jest } from '@jest/globals';
+import { ui } from '../src/ui.js';
 
 describe('ui helpers — smoke under NO_COLOR', () => {
   let stdoutChunks: string[];

@@ -1,11 +1,11 @@
 import * as path from 'path';
 import * as cliProgress from 'cli-progress';
-import pc from 'picocolors';
-import { ApiClient, ApiError } from './api';
-import { sha256File } from './hash';
-import { uploadFile } from './upload';
-import { Manifest, ManifestEntry } from './manifest';
-import { ui, isTTY, printImportSummaryBox } from './ui';
+import chalk from 'chalk';
+import { ApiClient, ApiError } from './api.js';
+import { sha256File } from './hash.js';
+import { uploadFile } from './upload.js';
+import { Manifest, ManifestEntry } from './manifest.js';
+import { ui, isTTY, printImportSummaryBox } from './ui.js';
 
 export interface ProcessResult {
   uploaded: number;
@@ -50,7 +50,7 @@ export async function processFiles(opts: ProcessOptions): Promise<ProcessResult>
   // Style the progress bar; on non-TTY, cli-progress still works but uses
   // plain ASCII characters (no cursor hide needed).
   const barFormat = isTTY
-    ? `  {filename} ${pc.dim('|{bar}|')} {value}/{total}  {percentage}%`
+    ? `  {filename} ${chalk.dim('|{bar}|')} {value}/{total}  {percentage}%`
     : '  {filename} [{bar}] {value}/{total}  {percentage}%';
 
   const bar = new cliProgress.SingleBar(

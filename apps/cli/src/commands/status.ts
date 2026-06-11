@@ -1,6 +1,6 @@
 import { Command } from 'commander';
-import { loadAllManifests } from '../manifest';
-import { ui, printFolderStatusTable, FolderStatusRow } from '../ui';
+import { loadAllManifests } from '../manifest.js';
+import { ui, printFolderStatusTable, FolderStatusRow } from '../ui.js';
 
 export function statusCommand(): Command {
   const cmd = new Command('status');

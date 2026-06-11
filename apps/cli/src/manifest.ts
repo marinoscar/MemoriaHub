@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { manifestsDir } from './config';
+import { manifestsDir } from './config.js';
 
 export type FileStatus = 'uploaded' | 'pending' | 'failed';
 

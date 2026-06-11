@@ -2,7 +2,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { sha256File } from '../src/hash';
+import { sha256File } from '../src/hash.js';
 
 function computeSha256(buf: Buffer): string {
   return crypto.createHash('sha256').update(buf).digest('hex');

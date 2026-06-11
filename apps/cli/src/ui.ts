@@ -5,12 +5,12 @@
  * Business logic stays in the other modules; this file is pure presentation.
  *
  * Color discipline:
- *   - picocolors honors NO_COLOR env automatically.
+ *   - chalk honors NO_COLOR env automatically.
  *   - Spinners and banners are disabled when stdout is not a TTY.
  *   - A global --no-color option sets NO_COLOR=1 before this module is loaded.
  */
 
-import pc from 'picocolors';
+import chalk from 'chalk';
 import ora, { Ora } from 'ora';
 import boxen from 'boxen';
 import Table from 'cli-table3';
@@ -22,8 +22,14 @@ import Table from 'cli-table3';
 /** True when output is a real terminal (not piped/redirected). */
 export const isTTY = Boolean(process.stdout.isTTY);
 
-/** True when colors are enabled (picocolors handles NO_COLOR internally). */
+/** True when colors are enabled (chalk handles NO_COLOR internally). */
 export const isColor = isTTY && !process.env['NO_COLOR'];
+
+// Align chalk's color level with our explicit gating so behavior is identical
+// to the previous picocolors setup: if !isColor, force chalk to plain text.
+if (!isColor) {
+  chalk.level = 0;
+}
 
 // ---------------------------------------------------------------------------
 // Banner
@@ -49,9 +55,9 @@ export function printBanner(version: string): void {
     return;
   }
 
-  const art = BANNER_ART.map((line) => pc.cyan(line)).join('\n');
-  const versionBadge = pc.dim(`v${version}`);
-  const tagline = pc.dim(TAGLINE);
+  const art = BANNER_ART.map((line) => chalk.cyan(line)).join('\n');
+  const versionBadge = chalk.dim(`v${version}`);
+  const tagline = chalk.dim(TAGLINE);
 
   process.stdout.write('\n');
   process.stdout.write(art + '\n');
@@ -75,32 +81,32 @@ const ICONS = {
 export const ui = {
   /** Green check — operation succeeded. */
   success(msg: string): void {
-    process.stdout.write(pc.green(`${ICONS.success} ${msg}`) + '\n');
+    process.stdout.write(chalk.green(`${ICONS.success} ${msg}`) + '\n');
   },
 
   /** Red X — operation failed. */
   error(msg: string): void {
-    process.stderr.write(pc.red(`${ICONS.error} ${msg}`) + '\n');
+    process.stderr.write(chalk.red(`${ICONS.error} ${msg}`) + '\n');
   },
 
   /** Yellow warning — non-fatal issue. */
   warn(msg: string): void {
-    process.stdout.write(pc.yellow(`${ICONS.warn} ${msg}`) + '\n');
+    process.stdout.write(chalk.yellow(`${ICONS.warn} ${msg}`) + '\n');
   },
 
   /** Cyan info — neutral informational message. */
   info(msg: string): void {
-    process.stdout.write(pc.cyan(`${ICONS.info} ${msg}`) + '\n');
+    process.stdout.write(chalk.cyan(`${ICONS.info} ${msg}`) + '\n');
   },
 
   /** Gray dim — secondary/supporting detail. */
   dim(msg: string): void {
-    process.stdout.write(pc.dim(`${ICONS.dim} ${msg}`) + '\n');
+    process.stdout.write(chalk.dim(`${ICONS.dim} ${msg}`) + '\n');
   },
 
   /** Bold arrow — major step/action heading. */
   step(msg: string): void {
-    process.stdout.write(pc.bold(`${ICONS.step} ${msg}`) + '\n');
+    process.stdout.write(chalk.bold(`${ICONS.step} ${msg}`) + '\n');
   },
 
   /** Plain line — unstyled. */
@@ -180,7 +186,7 @@ export function printBox(lines: string[], title?: string): void {
     margin: { top: 1, bottom: 1, left: 0, right: 0 },
     borderStyle: 'round',
     borderColor: 'cyan',
-    title: title ? pc.bold(pc.cyan(title)) : undefined,
+    title: title ? chalk.bold(chalk.cyan(title)) : undefined,
     titleAlignment: 'center',
   });
   process.stdout.write(box + '\n');
@@ -205,9 +211,9 @@ export function printFileSummaryTable(rows: FileSummaryRow[], maxRows = 50): voi
 
   const table = new Table({
     head: [
-      pc.bold('File'),
-      pc.bold('Status'),
-      pc.bold('Detail'),
+      chalk.bold('File'),
+      chalk.bold('Status'),
+      chalk.bold('Detail'),
     ],
     colWidths: [40, 12, 30],
     wordWrap: true,
@@ -231,10 +237,10 @@ export function printFileSummaryTable(rows: FileSummaryRow[], maxRows = 50): voi
 
 function formatStatus(status: FileSummaryRow['status']): string {
   switch (status) {
-    case 'uploaded': return pc.green('uploaded');
-    case 'skipped':  return pc.dim('skipped');
-    case 'failed':   return pc.red('failed');
-    case 'dry-run':  return pc.yellow('dry-run');
+    case 'uploaded': return chalk.green('uploaded');
+    case 'skipped':  return chalk.dim('skipped');
+    case 'failed':   return chalk.red('failed');
+    case 'dry-run':  return chalk.yellow('dry-run');
   }
 }
 
@@ -257,12 +263,12 @@ export function printFolderStatusTable(rows: FolderStatusRow[]): void {
 
   const table = new Table({
     head: [
-      pc.bold('Folder'),
-      pc.bold('Last Sync'),
-      pc.bold('Total'),
-      pc.bold('Uploaded'),
-      pc.bold('Pending'),
-      pc.bold('Failed'),
+      chalk.bold('Folder'),
+      chalk.bold('Last Sync'),
+      chalk.bold('Total'),
+      chalk.bold('Uploaded'),
+      chalk.bold('Pending'),
+      chalk.bold('Failed'),
     ],
     colWidths: [35, 22, 7, 10, 9, 8],
     wordWrap: true,
@@ -274,9 +280,9 @@ export function printFolderStatusTable(rows: FolderStatusRow[]): void {
       truncate(row.folder, 33),
       row.lastSync,
       String(row.total),
-      pc.green(String(row.uploaded)),
-      row.pending > 0 ? pc.yellow(String(row.pending)) : String(row.pending),
-      row.failed > 0  ? pc.red(String(row.failed))    : String(row.failed),
+      chalk.green(String(row.uploaded)),
+      row.pending > 0 ? chalk.yellow(String(row.pending)) : String(row.pending),
+      row.failed > 0  ? chalk.red(String(row.failed))    : String(row.failed),
     ]);
   }
 
@@ -302,23 +308,23 @@ export function printImportSummaryBox(totals: ImportTotals): void {
 
   if (totals.dryRun) {
     printBox([
-      pc.bold('Dry-run complete — nothing was uploaded'),
+      chalk.bold('Dry-run complete — nothing was uploaded'),
       '',
-      `  Would upload : ${pc.green(String(totals.dryRunWouldUpload))} file(s)`,
-      `  Dedup match  : ${pc.dim(String(totals.dryRunDedups))} file(s) (already on server)`,
+      `  Would upload : ${chalk.green(String(totals.dryRunWouldUpload))} file(s)`,
+      `  Dedup match  : ${chalk.dim(String(totals.dryRunDedups))} file(s) (already on server)`,
     ], 'Dry-Run Summary');
     return;
   }
 
   const failedLine =
     totals.failed > 0
-      ? `  ${pc.red('Failed')}   : ${pc.red(String(totals.failed))}`
+      ? `  ${chalk.red('Failed')}   : ${chalk.red(String(totals.failed))}`
       : `  Failed   : 0`;
 
   printBox([
     `  Total     : ${total}`,
-    `  ${pc.green('Uploaded')} : ${pc.green(String(totals.uploaded))}`,
-    `  ${pc.dim('Skipped')}  : ${pc.dim(String(totals.skipped))} (already on server)`,
+    `  ${chalk.green('Uploaded')} : ${chalk.green(String(totals.uploaded))}`,
+    `  ${chalk.dim('Skipped')}  : ${chalk.dim(String(totals.skipped))} (already on server)`,
     failedLine,
   ], 'Import Summary');
 }

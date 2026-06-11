@@ -1,12 +1,12 @@
 import * as path from 'path';
 import { Command } from 'commander';
-import { requireConfig } from '../config';
-import { ApiClient } from '../api';
-import { enumerateFiles } from '../files';
-import { loadManifest, saveManifest } from '../manifest';
-import { processFiles } from '../process-files';
-import { sha256File } from '../hash';
-import { ui, createSpinner, printImportSummaryBox } from '../ui';
+import { requireConfig } from '../config.js';
+import { ApiClient } from '../api.js';
+import { enumerateFiles } from '../files.js';
+import { loadManifest, saveManifest } from '../manifest.js';
+import { processFiles } from '../process-files.js';
+import { sha256File } from '../hash.js';
+import { ui, createSpinner, printImportSummaryBox } from '../ui.js';
 
 export function syncCommand(): Command {
   const cmd = new Command('sync');

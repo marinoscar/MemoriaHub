@@ -1,10 +1,10 @@
 import { Command } from 'commander';
 import * as readline from 'readline/promises';
 import { stdin as input, stdout as output } from 'process';
-import pc from 'picocolors';
-import { saveConfig } from '../config';
-import { ApiClient, ApiError } from '../api';
-import { ui, createSpinner, printBox } from '../ui';
+import chalk from 'chalk';
+import { saveConfig } from '../config.js';
+import { ApiClient, ApiError } from '../api.js';
+import { ui, createSpinner, printBox } from '../ui.js';
 
 export function loginCommand(): Command {
   const cmd = new Command('login');
@@ -18,14 +18,14 @@ export function loginCommand(): Command {
       ui.step('Login to MemoriaHub');
       ui.blank();
 
-      const serverUrl = await rl.question(pc.cyan('  Server URL (e.g. https://example.com): '));
+      const serverUrl = await rl.question(chalk.cyan('  Server URL (e.g. https://example.com): '));
       if (!serverUrl.trim()) {
         ui.error('Server URL cannot be empty.');
         process.exit(1);
       }
 
       // Do not accept PAT as positional arg — always prompt interactively
-      const pat = await rl.question(pc.cyan('  Personal Access Token: '));
+      const pat = await rl.question(chalk.cyan('  Personal Access Token: '));
       if (!pat.trim()) {
         ui.error('PAT cannot be empty.');
         process.exit(1);
@@ -60,12 +60,12 @@ export function loginCommand(): Command {
 
       printBox(
         [
-          pc.bold(`Logged in as ${pc.cyan(userEmail)}`),
+          chalk.bold(`Logged in as ${chalk.cyan(userEmail)}`),
           '',
           `  Server : ${serverUrl.trim()}`,
-          `  Config : ${pc.dim('~/.memoriahub/config.json')}`,
+          `  Config : ${chalk.dim('~/.memoriahub/config.json')}`,
           '',
-          pc.dim('Run `memoriahub import <folder>` to start uploading.'),
+          chalk.dim('Run `memoriahub import <folder>` to start uploading.'),
         ],
         'Login Successful',
       );

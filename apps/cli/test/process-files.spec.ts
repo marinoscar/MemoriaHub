@@ -11,12 +11,13 @@
  * We also mock cli-progress to suppress terminal output in tests.
  */
 
+import { jest } from '@jest/globals';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { processFiles, ProcessOptions, ProcessResult } from '../src/process-files';
-import { ApiClient } from '../src/api';
-import { Manifest } from '../src/manifest';
+import { processFiles, ProcessOptions, ProcessResult } from '../src/process-files.js';
+import { ApiClient } from '../src/api.js';
+import { Manifest } from '../src/manifest.js';
 
 // ---- Silence cli-progress in tests ----
 jest.mock('cli-progress', () => {

@@ -12,7 +12,8 @@
  *
  * Mocking strategy:
  *   - global.fetch is replaced with jest.spyOn so all HTTP calls are intercepted.
- *   - os.homedir() is overridden via jest.mock('os') so no ~/.memoriahub is touched.
+ *   - os.homedir() is overridden via jest.unstable_mockModule (ESM-safe) so no
+ *     ~/.memoriahub is touched.
  *   - cli-progress is module-mocked to suppress terminal output.
  *
  * The sync command action is tightly coupled to Commander + requireConfig().
@@ -20,23 +21,21 @@
  * to keep the test hermetic and fast.
  */
 
+import { jest } from '@jest/globals';
 import * as fs from 'fs';
-import * as os from 'os';
+import * as actualOs from 'os';
 import * as path from 'path';
 
 // ---- os.homedir isolation ----
-// jest.spyOn cannot redefine os.homedir inside Jest's module registry.
-// Instead we mock the whole 'os' module and control homedir per-test.
-const actualOs = jest.requireActual<typeof os>('os');
+// Under ESM with --experimental-vm-modules, jest.mock() does not intercept
+// static imports of built-in modules. We use jest.unstable_mockModule instead.
+
 let _fakeHome = '';
 
-jest.mock('os', () => {
-  const real = jest.requireActual<typeof os>('os');
-  return {
-    ...real,
-    homedir: jest.fn(() => _fakeHome || real.homedir()),
-  };
-});
+jest.unstable_mockModule('os', () => ({
+  ...actualOs,
+  homedir: jest.fn(() => _fakeHome || actualOs.homedir()),
+}));
 
 // ---- Suppress cli-progress terminal output ----
 jest.mock('cli-progress', () => ({
@@ -48,12 +47,12 @@ jest.mock('cli-progress', () => ({
   Presets: { shades_classic: {} },
 }));
 
-// Imports must come AFTER jest.mock calls
-import { enumerateFiles } from '../src/files';
-import { loadManifest, saveManifest } from '../src/manifest';
-import { processFiles } from '../src/process-files';
-import { ApiClient } from '../src/api';
-import { sha256File } from '../src/hash';
+// Dynamic imports AFTER jest.unstable_mockModule so the mock is applied
+const { enumerateFiles } = await import('../src/files.js');
+const { loadManifest, saveManifest } = await import('../src/manifest.js');
+const { processFiles } = await import('../src/process-files.js');
+const { ApiClient } = await import('../src/api.js');
+const { sha256File } = await import('../src/hash.js');
 
 // ---- Server mock factory ----
 
@@ -151,7 +150,7 @@ function buildFetchMock(
 // Mirrors the sync command action without Commander / requireConfig().
 async function runSync(
   folderPath: string,
-  api: ApiClient,
+  api: InstanceType<typeof ApiClient>,
 ): Promise<{ skippedByManifest: number; processedCount: number }> {
   const absFolder = path.resolve(folderPath);
   const { supported } = enumerateFiles(absFolder, false);
@@ -205,7 +204,6 @@ describe('sync dedup integration — second sync skips unchanged files', () => {
   beforeEach(() => {
     tmpHome = fs.mkdtempSync(path.join(actualOs.tmpdir(), 'mh-sync-home-'));
     _fakeHome = tmpHome;
-    (os.homedir as jest.Mock).mockImplementation(() => tmpHome);
 
     tmpPhotos = fs.mkdtempSync(path.join(actualOs.tmpdir(), 'mh-sync-photos-'));
     fs.writeFileSync(path.join(tmpPhotos, 'photo1.jpg'), Buffer.from('fake-jpeg-content-1'));
@@ -214,7 +212,6 @@ describe('sync dedup integration — second sync skips unchanged files', () => {
 
   afterEach(() => {
     _fakeHome = '';
-    (os.homedir as jest.Mock).mockImplementation(() => actualOs.homedir());
     if (fetchSpy) fetchSpy.mockRestore();
     fs.rmSync(tmpHome, { recursive: true, force: true });
     fs.rmSync(tmpPhotos, { recursive: true, force: true });
@@ -304,9 +301,6 @@ describe('sync dedup integration — second sync skips unchanged files', () => {
   it('retries failed files on second sync without re-uploading successful ones', async () => {
     const api = new ApiClient({ serverUrl: 'http://fake.local', pat: 'test-pat' });
     const callLog: CallRecord[] = [];
-
-    const file1 = path.join(tmpPhotos, 'photo1.jpg');
-    const file2 = path.join(tmpPhotos, 'photo2.jpg');
 
     // On first run, let the register call fail for photo1 (first POST /api/media)
     let registerCallCount = 0;

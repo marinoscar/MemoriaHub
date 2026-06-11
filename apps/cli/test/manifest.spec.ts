@@ -1,30 +1,29 @@
+import { jest } from '@jest/globals';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
-import * as os from 'os';
+import * as actualOs from 'os';
 import * as path from 'path';
-import { loadManifest, saveManifest, Manifest } from '../src/manifest';
 
 /**
  * manifest.ts calls manifestsDir() from config.ts, which in turn calls
  * os.homedir(). We redirect that to a temp directory per-test so tests never
  * touch the real ~/.memoriahub.
  *
- * jest.spyOn cannot redefine os.homedir inside the Jest module registry, so we
- * use jest.mock('os') with jest.requireActual and override homedir manually
- * per-test by reassigning the mock implementation.
+ * Under ESM with --experimental-vm-modules, jest.mock() does not intercept
+ * static imports of built-in modules. We use jest.unstable_mockModule +
+ * dynamic import to replace os.homedir before the modules under test load.
  */
 
-// We need to mock at module level before imports are resolved.
-// We grab the actual 'os' module and override just homedir.
-const actualOs = jest.requireActual<typeof os>('os');
 let _fakeHome = '';
 
-jest.mock('os', () => {
-  const real = jest.requireActual<typeof os>('os');
-  return {
-    ...real,
-    homedir: jest.fn(() => _fakeHome || real.homedir()),
-  };
-});
+jest.unstable_mockModule('os', () => ({
+  ...actualOs,
+  homedir: jest.fn(() => _fakeHome || actualOs.homedir()),
+}));
+
+// Dynamic imports AFTER jest.unstable_mockModule so the mock is applied
+const { loadManifest, saveManifest } = await import('../src/manifest.js');
+type Manifest = import('../src/manifest.js').Manifest;
 
 describe('manifest read/write', () => {
   let tmpHome: string;
@@ -32,13 +31,10 @@ describe('manifest read/write', () => {
   beforeEach(() => {
     tmpHome = fs.mkdtempSync(path.join(actualOs.tmpdir(), 'mh-manifest-test-'));
     _fakeHome = tmpHome;
-    // Also update the mock implementation in case it cached the closure
-    (os.homedir as jest.Mock).mockImplementation(() => tmpHome);
   });
 
   afterEach(() => {
     _fakeHome = '';
-    (os.homedir as jest.Mock).mockImplementation(() => actualOs.homedir());
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 
@@ -116,7 +112,6 @@ describe('manifest read/write', () => {
       saveManifest(folderPath, manifest);
 
       // Derive expected manifest path so we can check the filesystem
-      const crypto = require('crypto') as typeof import('crypto');
       const hash = crypto
         .createHash('sha256')
         .update(path.resolve(folderPath))
@@ -155,7 +150,6 @@ describe('manifest read/write', () => {
     it('returns an empty default manifest when JSON is malformed', () => {
       // Write a corrupt manifest file directly
       const folderPath = '/corrupt';
-      const crypto = require('crypto') as typeof import('crypto');
       const hash = crypto
         .createHash('sha256')
         .update(path.resolve(folderPath))

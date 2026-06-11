@@ -1,15 +1,18 @@
 #!/usr/bin/env node
+import { createRequire } from 'node:module';
 import { Command } from 'commander';
-import { loginCommand } from './commands/login';
-import { importCommand } from './commands/import';
-import { syncCommand } from './commands/sync';
-import { statusCommand } from './commands/status';
-import { printBanner } from './ui';
+import { loginCommand } from './commands/login.js';
+import { importCommand } from './commands/import.js';
+import { syncCommand } from './commands/sync.js';
+import { statusCommand } from './commands/status.js';
+import { printBanner } from './ui.js';
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+// ESM-safe package.json read: createRequire allows require() in ESM modules.
+// dist/index.js → ../package.json resolves to apps/cli/package.json at runtime.
+const require = createRequire(import.meta.url);
 const pkg = require('../package.json') as { version: string };
 
-// Honor --no-color before any other processing so picocolors picks it up.
+// Honor --no-color before any other processing so chalk picks it up.
 if (process.argv.includes('--no-color')) {
   process.env['NO_COLOR'] = '1';
 }

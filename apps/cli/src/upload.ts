@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import { ApiClient } from './api';
+import { ApiClient } from './api.js';
 
 export interface UploadResult {
   objectId: string;
