@@ -8,26 +8,23 @@ The CLI persists all sync state in a local SQLite database (`~/.memoriahub/memor
 
 ## Install via curl
 
-> **Repository visibility note**
-> The raw-content URL below requires the repository to be **public**. While the repository is private, use one of the two alternative methods shown below instead.
-
-**Public repo (or once the repo is made public):**
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/marinoscar/MemoriaHub/main/install.sh | bash
 ```
 
-**Private repo — install from a local clone:**
+The installer auto-detects whether a previous installation exists and updates it in place — re-running the same command is safe and idempotent.
+
+### Install from a local clone (offline or for contributors)
+
+If you have already cloned the repository, or prefer to install without curl, point the installer at your local copy:
 
 ```bash
-# 1. Clone the repository using your credentials
+# 1. Clone the repository
 git clone https://github.com/marinoscar/MemoriaHub.git ~/MemoriaHub
 
 # 2. Run the installer pointing at the local clone
 MEMORIAHUB_SRC=~/MemoriaHub bash ~/MemoriaHub/install.sh
 ```
-
-The installer auto-detects whether a previous installation exists and updates it in place — re-running the same command is safe and idempotent.
 
 ### Install size and native dependencies
 
@@ -56,7 +53,7 @@ xcode-select --install
 Re-run the same install command at any time to update to the latest version. The installer removes the old `~/.memoriahub/app` directory, rebuilds from source, and redeploys the standalone app. Your sync database and configuration are preserved.
 
 ```bash
-# Public repo
+# curl (recommended)
 curl -fsSL https://raw.githubusercontent.com/marinoscar/MemoriaHub/main/install.sh | bash
 
 # Local clone
@@ -108,7 +105,7 @@ Removes `~/.memoriahub/app` and the `~/.local/bin/memoriahub` shim. Configuratio
 | `MEMORIAHUB_REF` | `main` | Branch, tag, or commit to install |
 | `MEMORIAHUB_HOME` | `~/.memoriahub` | Root directory for app install and config |
 | `MEMORIAHUB_BIN_DIR` | `~/.local/bin` | Directory where the `memoriahub` shim is placed |
-| `GITHUB_TOKEN` | _(unset)_ | GitHub PAT injected into the clone URL for private repos |
+| `GITHUB_TOKEN` | _(unset)_ | GitHub token injected into the clone URL (for private forks or to avoid rate limits) |
 | `MEMORIAHUB_SRC` | _(unset)_ | Local source directory; skips git clone entirely |
 
 ### PATH note
