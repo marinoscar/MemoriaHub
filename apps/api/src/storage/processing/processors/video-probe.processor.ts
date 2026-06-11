@@ -24,7 +24,13 @@ import { streamToBuffer } from './stream-utils';
  *
  * Requires ffmpeg/ffprobe to be installed in the container (see Dockerfile).
  *
- * Writes: { durationMs: number, width: number, height: number, codec: string }
+ * Writes: { durationMs: number, width: number, height: number, codec: string,
+ *           capturedAt?: string }
+ *
+ * capturedAt is an ISO-8601 string derived from the video's creation_time tag
+ * (format.tags.creation_time, or the video-stream's tags.creation_time).  Only
+ * written when the tag is present and parseable as a valid date; invalid or
+ * missing values are silently omitted.
  */
 @Injectable()
 export class VideoProbeProcessor implements ObjectProcessor {
@@ -62,14 +68,30 @@ export class VideoProbeProcessor implements ObjectProcessor {
       const height = videoStream?.height;
       const codec = videoStream?.codec_name;
 
+      // --- creation_time → capturedAt ---
+      // Prefer format-level tag; fall back to the video stream's tag.
+      const rawCreationTime: unknown =
+        probeData.format?.tags?.['creation_time'] ??
+        videoStream?.tags?.['creation_time'];
+
+      let capturedAt: string | undefined;
+      if (typeof rawCreationTime === 'string' && rawCreationTime.length > 0) {
+        const d = new Date(rawCreationTime);
+        if (!isNaN(d.getTime())) {
+          capturedAt = d.toISOString();
+        }
+      }
+
       const metadata: Record<string, unknown> = {};
       if (durationMs !== undefined) metadata['durationMs'] = durationMs;
       if (typeof width === 'number') metadata['width'] = width;
       if (typeof height === 'number') metadata['height'] = height;
       if (typeof codec === 'string') metadata['codec'] = codec;
+      if (capturedAt !== undefined) metadata['capturedAt'] = capturedAt;
 
       this.logger.debug(
-        `video-probe for object ${object.id}: ${durationMs}ms ${width}x${height} ${codec}`,
+        `video-probe for object ${object.id}: ${durationMs}ms ${width}x${height} ${codec}` +
+          (capturedAt ? ` capturedAt=${capturedAt}` : ''),
       );
 
       return { success: true, metadata };

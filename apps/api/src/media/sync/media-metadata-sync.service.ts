@@ -39,6 +39,7 @@ import {
  *   _processing['video-probe'].width            → width  (videos)
  *   _processing['video-probe'].height           → height (videos)
  *   _processing['video-probe'].durationMs       → durationMs
+ *   _processing['video-probe'].capturedAt       → capturedAt (videos, only when exif absent)
  *   _processing['geocode'].country              → geoCountry
  *   _processing['geocode'].countryCode          → geoCountryCode
  *   _processing['geocode'].admin1               → geoAdmin1
@@ -166,6 +167,12 @@ export class MediaMetadataSyncService {
       }
       if (typeof videoProbeMeta['durationMs'] === 'number') {
         update.durationMs = videoProbeMeta['durationMs'];
+      }
+      // capturedAt from video creation_time — only when exif didn't already set it
+      // (exif block is processed above; if exif.capturedAt was present it is
+      // already set in update.capturedAt and we do NOT override it here)
+      if (update.capturedAt === undefined && typeof videoProbeMeta['capturedAt'] === 'string') {
+        update.capturedAt = new Date(videoProbeMeta['capturedAt']);
       }
     }
 
