@@ -118,7 +118,7 @@ async function uploadFileWithRetry(
       throw lastErr ?? new Error(`Failed to upload part ${partNumber}`);
     }
 
-    parts.push({ partNumber, etag });
+    parts.push({ partNumber, eTag: etag });
     onProgress(Math.round((partNumber / totalParts) * 90)); // 0–90% for parts
   }
 

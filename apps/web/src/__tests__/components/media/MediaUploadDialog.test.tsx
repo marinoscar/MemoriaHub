@@ -275,7 +275,7 @@ describe('MediaUploadDialog', () => {
       expect(mockCompleteUpload).toHaveBeenCalledWith(
         OBJECT_ID,
         expect.arrayContaining([
-          expect.objectContaining({ partNumber: 1, etag: '"etag-001"' }),
+          expect.objectContaining({ partNumber: 1, eTag: '"etag-001"' }),
         ]),
       );
     });

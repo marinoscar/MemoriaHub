@@ -156,7 +156,7 @@ export interface InitUploadResponse {
 
 export interface UploadPart {
   partNumber: number;
-  etag: string;
+  eTag: string;
 }
 
 export interface CompleteUploadDto {
