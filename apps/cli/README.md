@@ -30,7 +30,7 @@ MEMORIAHUB_SRC=~/MemoriaHub bash ~/MemoriaHub/install.sh
 
 The installed footprint is approximately **~38 MB**, which includes the Ink/React TUI runtime and the native `better-sqlite3` binary.
 
-`better-sqlite3` ships prebuilt binaries for Node 18, 20, and 22 on `linux-x64`, `linux-arm64`, and `macOS` (x64 and arm64). Most users will not need a C compiler. The installer probes the native module after installation and prints a clear remediation message if the prebuilt binary is unavailable for your platform or Node version. To force a source build:
+`better-sqlite3` ships prebuilt binaries for Node 20, 22, 23, 24, 25, 26 on `linux-x64`, `linux-arm64`, and `macOS` (x64 and arm64). Most users will not need a C compiler. The installer probes the native module after installation and prints a clear remediation message if the prebuilt binary is unavailable for your platform or Node version. To force a source build:
 
 ```bash
 npm_config_build_from_source=true bash install.sh
@@ -80,8 +80,8 @@ Removes `~/.memoriahub/app` and the `~/.local/bin/memoriahub` shim. Configuratio
 
 | Dependency | Minimum version | Notes |
 |------------|-----------------|-------|
-| Node.js    | 18              | Enforced by installer |
-| npm        | bundled with Node | Any version that ships with Node 18+ |
+| Node.js    | 20              | Enforced by installer |
+| npm        | bundled with Node | Any version that ships with Node 20+ |
 | git        | any             | Used for shallow clone |
 | curl       | any             | Used by the curl-pipe flow |
 
