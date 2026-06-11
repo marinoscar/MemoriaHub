@@ -4,8 +4,9 @@ import { requireConfig } from '../config';
 import { ApiClient } from '../api';
 import { enumerateFiles } from '../files';
 import { loadManifest, saveManifest } from '../manifest';
-import { processFiles, printSummary } from '../process-files';
+import { processFiles } from '../process-files';
 import { sha256File } from '../hash';
+import { ui, createSpinner, printImportSummaryBox } from '../ui';
 
 export function syncCommand(): Command {
   const cmd = new Command('sync');
@@ -26,14 +27,18 @@ export function syncCommand(): Command {
     const api = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
 
     const absFolder = path.resolve(folder);
+
+    ui.step(`Syncing folder: ${absFolder}`);
+    if (options.dryRun) ui.warn('Dry-run mode — no files will be uploaded');
+
     const { supported, skipped } = enumerateFiles(absFolder, options.recursive);
 
     if (skipped.length > 0) {
-      console.log(`\nSkipping ${skipped.length} unsupported file(s).`);
+      ui.warn(`Skipping ${skipped.length} unsupported file(s)`);
     }
 
     if (supported.length === 0) {
-      console.log('No supported files found in the specified folder.');
+      ui.info('No supported files found in the specified folder.');
       return;
     }
 
@@ -46,6 +51,12 @@ export function syncCommand(): Command {
     //   - AND the current sha256 matches the manifest entry (file unchanged)
     const toProcess: Array<{ filePath: string; mimeType: string }> = [];
     let alreadySynced = 0;
+
+    // Spin while computing local hashes
+    const hashSpinner = createSpinner(
+      `Checking ${supported.length} file(s) against local manifest…`,
+    );
+    hashSpinner.start();
 
     for (const { filePath, mimeType } of supported) {
       const entry = manifest.files[filePath];
@@ -68,14 +79,12 @@ export function syncCommand(): Command {
       toProcess.push({ filePath, mimeType });
     }
 
-    if (alreadySynced > 0) {
-      console.log(
-        `\nSkipping ${alreadySynced} already-synced file(s) (manifest + sha256 match).`,
-      );
-    }
+    hashSpinner.succeed(
+      `Manifest check complete — ${alreadySynced} already-synced, ${toProcess.length} to process`,
+    );
 
     if (toProcess.length === 0) {
-      console.log('Nothing to sync. All files are up to date.');
+      ui.success('Nothing to sync. All files are up to date.');
       if (!options.dryRun) {
         manifest.lastSyncAt = new Date().toISOString();
         saveManifest(absFolder, manifest);
@@ -83,10 +92,11 @@ export function syncCommand(): Command {
       return;
     }
 
-    console.log(
-      `\nProcessing ${toProcess.length} file(s)` +
+    ui.info(
+      `Processing ${toProcess.length} file(s)` +
         (options.dryRun ? ' [dry-run]' : ''),
     );
+    ui.blank();
 
     const result = await processFiles({
       filePaths: toProcess,
@@ -103,7 +113,18 @@ export function syncCommand(): Command {
       saveManifest(absFolder, manifest);
     }
 
-    printSummary(result, options.dryRun);
+    printImportSummaryBox({
+      uploaded: result.uploaded,
+      skipped: result.skipped,
+      failed: result.failed,
+      dryRun: options.dryRun,
+      dryRunWouldUpload: result.dryRunWouldUpload.length,
+      dryRunDedups: result.dryRunDedups.length,
+    });
+
+    if (result.failed > 0) {
+      ui.warn(`${result.failed} file(s) failed. Re-run \`memoriahub sync <folder>\` to retry.`);
+    }
   });
 
   return cmd;

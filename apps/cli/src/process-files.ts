@@ -1,9 +1,11 @@
 import * as path from 'path';
 import * as cliProgress from 'cli-progress';
+import pc from 'picocolors';
 import { ApiClient, ApiError } from './api';
 import { sha256File } from './hash';
 import { uploadFile } from './upload';
 import { Manifest, ManifestEntry } from './manifest';
+import { ui, isTTY, printImportSummaryBox } from './ui';
 
 export interface ProcessResult {
   uploaded: number;
@@ -45,13 +47,21 @@ export async function processFiles(opts: ProcessOptions): Promise<ProcessResult>
     dryRunDedups: [],
   };
 
+  // Style the progress bar; on non-TTY, cli-progress still works but uses
+  // plain ASCII characters (no cursor hide needed).
+  const barFormat = isTTY
+    ? `  {filename} ${pc.dim('|{bar}|')} {value}/{total}  {percentage}%`
+    : '  {filename} [{bar}] {value}/{total}  {percentage}%';
+
   const bar = new cliProgress.SingleBar(
     {
-      format: 'Progress |{bar}| {value}/{total} files  {filename}',
+      format: barFormat,
+      barCompleteChar: '█',
+      barIncompleteChar: '░',
       clearOnComplete: false,
-      hideCursor: true,
+      hideCursor: isTTY,
+      barsize: 25,
     },
-    cliProgress.Presets.shades_classic,
   );
 
   bar.start(filePaths.length, 0, { filename: '' });
@@ -59,7 +69,9 @@ export async function processFiles(opts: ProcessOptions): Promise<ProcessResult>
   for (let i = 0; i < filePaths.length; i++) {
     const { filePath, mimeType } = filePaths[i];
     const basename = path.basename(filePath);
-    bar.update(i, { filename: basename });
+    // Truncate long filenames so the bar stays on one line
+    const label = basename.length > 28 ? basename.slice(0, 27) + '…' : basename.padEnd(28);
+    bar.update(i, { filename: label });
 
     try {
       // Compute SHA-256
@@ -84,12 +96,14 @@ export async function processFiles(opts: ProcessOptions): Promise<ProcessResult>
           };
         }
         result.skipped++;
+        bar.update(i + 1, { filename: label });
         continue;
       }
 
       if (dryRun) {
         result.dryRunWouldUpload.push(filePath);
         result.uploaded++;
+        bar.update(i + 1, { filename: label });
         continue;
       }
 
@@ -103,7 +117,9 @@ export async function processFiles(opts: ProcessOptions): Promise<ProcessResult>
         objectId = uploadResult.objectId;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`\nFailed to upload ${basename}: ${msg}`);
+        bar.stop();
+        ui.error(`Failed to upload ${basename}: ${msg}`);
+        bar.start(filePaths.length, i + 1, { filename: label });
         manifest.files[filePath] = {
           sha256,
           mediaItemId: null,
@@ -131,7 +147,9 @@ export async function processFiles(opts: ProcessOptions): Promise<ProcessResult>
             : err instanceof Error
               ? err.message
               : String(err);
-        console.error(`\nFailed to register media for ${basename}: ${msg}`);
+        bar.stop();
+        ui.error(`Failed to register media for ${basename}: ${msg}`);
+        bar.start(filePaths.length, i + 1, { filename: label });
         manifest.files[filePath] = {
           sha256,
           mediaItemId: null,
@@ -149,9 +167,12 @@ export async function processFiles(opts: ProcessOptions): Promise<ProcessResult>
         status: 'uploaded',
       };
       result.uploaded++;
+      bar.update(i + 1, { filename: label });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`\nUnexpected error processing ${basename}: ${msg}`);
+      bar.stop();
+      ui.error(`Unexpected error processing ${basename}: ${msg}`);
+      bar.start(filePaths.length, i + 1, { filename: label });
       // Mark as pending so it can be retried on next sync
       manifest.files[filePath] = {
         sha256: '',
@@ -163,39 +184,26 @@ export async function processFiles(opts: ProcessOptions): Promise<ProcessResult>
     }
   }
 
-  bar.update(filePaths.length, { filename: 'done' });
+  bar.update(filePaths.length, { filename: 'done'.padEnd(28) });
   bar.stop();
 
   return result;
 }
 
+/**
+ * printSummary is kept for backward compatibility (tests may call it directly).
+ * New callers should prefer printImportSummaryBox from ui.ts.
+ */
 export function printSummary(
   result: ProcessResult,
   dryRun: boolean,
 ): void {
-  if (dryRun) {
-    console.log('\n--- Dry-run summary ---');
-    console.log(`Would upload : ${result.dryRunWouldUpload.length} file(s)`);
-    console.log(`Dedup match  : ${result.dryRunDedups.length} file(s) (already on server)`);
-    if (result.dryRunWouldUpload.length > 0) {
-      console.log('\nFiles that would be uploaded:');
-      for (const f of result.dryRunWouldUpload) {
-        console.log(`  + ${f}`);
-      }
-    }
-    if (result.dryRunDedups.length > 0) {
-      console.log('\nFiles already on server (dedup):');
-      for (const f of result.dryRunDedups) {
-        console.log(`  = ${f}`);
-      }
-    }
-    return;
-  }
-
-  const total = result.uploaded + result.skipped + result.failed;
-  console.log('\n--- Summary ---');
-  console.log(`Total files  : ${total}`);
-  console.log(`Uploaded     : ${result.uploaded}`);
-  console.log(`Skipped      : ${result.skipped} (already on server)`);
-  console.log(`Failed       : ${result.failed}`);
+  printImportSummaryBox({
+    uploaded: result.uploaded,
+    skipped: result.skipped,
+    failed: result.failed,
+    dryRun,
+    dryRunWouldUpload: result.dryRunWouldUpload.length,
+    dryRunDedups: result.dryRunDedups.length,
+  });
 }

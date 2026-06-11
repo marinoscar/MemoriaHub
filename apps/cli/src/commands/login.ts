@@ -1,8 +1,10 @@
 import { Command } from 'commander';
 import * as readline from 'readline/promises';
 import { stdin as input, stdout as output } from 'process';
+import pc from 'picocolors';
 import { saveConfig } from '../config';
 import { ApiClient, ApiError } from '../api';
+import { ui, createSpinner, printBox } from '../ui';
 
 export function loginCommand(): Command {
   const cmd = new Command('login');
@@ -13,18 +15,25 @@ export function loginCommand(): Command {
   cmd.action(async () => {
     const rl = readline.createInterface({ input, output });
     try {
-      const serverUrl = await rl.question('Server URL (e.g. https://example.com): ');
+      ui.step('Login to MemoriaHub');
+      ui.blank();
+
+      const serverUrl = await rl.question(pc.cyan('  Server URL (e.g. https://example.com): '));
       if (!serverUrl.trim()) {
-        console.error('Server URL cannot be empty.');
+        ui.error('Server URL cannot be empty.');
         process.exit(1);
       }
 
       // Do not accept PAT as positional arg — always prompt interactively
-      const pat = await rl.question('Personal Access Token: ');
+      const pat = await rl.question(pc.cyan('  Personal Access Token: '));
       if (!pat.trim()) {
-        console.error('PAT cannot be empty.');
+        ui.error('PAT cannot be empty.');
         process.exit(1);
       }
+
+      ui.blank();
+      const spinner = createSpinner('Validating token with server…');
+      spinner.start();
 
       const api = new ApiClient({ serverUrl: serverUrl.trim(), pat: pat.trim() });
 
@@ -34,19 +43,32 @@ export function loginCommand(): Command {
         userEmail = me.email;
       } catch (err) {
         if (err instanceof ApiError) {
-          console.error(
+          spinner.fail(
             `Authentication failed (HTTP ${err.status}): ${err.serverMessage}`,
           );
         } else {
-          console.error(
+          spinner.fail(
             `Could not reach server: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
         process.exit(1);
       }
 
+      spinner.succeed('Token validated');
+
       saveConfig({ serverUrl: serverUrl.trim(), pat: pat.trim() });
-      console.log(`\nLogged in as ${userEmail}. Config saved to ~/.memoriahub/config.json`);
+
+      printBox(
+        [
+          pc.bold(`Logged in as ${pc.cyan(userEmail)}`),
+          '',
+          `  Server : ${serverUrl.trim()}`,
+          `  Config : ${pc.dim('~/.memoriahub/config.json')}`,
+          '',
+          pc.dim('Run `memoriahub import <folder>` to start uploading.'),
+        ],
+        'Login Successful',
+      );
     } finally {
       rl.close();
     }

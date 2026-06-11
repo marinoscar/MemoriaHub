@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { loadAllManifests } from '../manifest';
+import { ui, printFolderStatusTable, FolderStatusRow } from '../ui';
 
 export function statusCommand(): Command {
   const cmd = new Command('status');
@@ -9,31 +10,29 @@ export function statusCommand(): Command {
     const manifests = loadAllManifests();
 
     if (manifests.length === 0) {
-      console.log(
+      ui.info(
         'No sync history found. Run `memoriahub import <folder>` or `memoriahub sync <folder>` first.',
       );
       return;
     }
 
-    console.log('');
-    for (const m of manifests) {
+    const rows: FolderStatusRow[] = manifests.map((m) => {
       const entries = Object.values(m.files);
       const uploaded = entries.filter((e) => e.status === 'uploaded').length;
-      const failed = entries.filter((e) => e.status === 'failed').length;
-      const pending = entries.filter((e) => e.status === 'pending').length;
-      const total = entries.length;
-
+      const failed   = entries.filter((e) => e.status === 'failed').length;
+      const pending  = entries.filter((e) => e.status === 'pending').length;
+      const total    = entries.length;
       const lastSync = m.lastSyncAt
         ? new Date(m.lastSyncAt).toLocaleString()
         : 'never';
 
-      console.log(`Folder    : ${m.folderPath}`);
-      console.log(`Last sync : ${lastSync}`);
-      console.log(
-        `Files     : ${total} total  |  ${uploaded} uploaded  |  ${pending} pending  |  ${failed} failed`,
-      );
-      console.log('');
-    }
+      return { folder: m.folderPath, lastSync, uploaded, pending, failed, total };
+    });
+
+    ui.blank();
+    ui.step('Sync Status');
+    ui.blank();
+    printFolderStatusTable(rows);
   });
 
   return cmd;

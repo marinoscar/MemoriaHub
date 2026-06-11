@@ -44,9 +44,10 @@ export function manifestsDir(): string {
 export function requireConfig(): CliConfig {
   const cfg = loadConfig();
   if (!cfg) {
-    console.error(
-      'Not logged in. Run `memoriahub login` to configure your server URL and PAT.',
-    );
+    // Lazy import to avoid circular deps (config is loaded before ui in some paths)
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { ui } = require('./ui') as typeof import('./ui');
+    ui.error('Not logged in. Run `memoriahub login` to configure your server URL and PAT.');
     process.exit(1);
   }
   return cfg;
