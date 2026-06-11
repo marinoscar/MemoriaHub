@@ -102,6 +102,27 @@ function makeStorageObjectHashOnly() {
   };
 }
 
+const THUMB_OBJ_ID = 'thumb-obj-uuid-001';
+const THUMB_STORAGE_KEY = `thumbnails/${STORAGE_OBJ_ID}.jpg`;
+
+/** Builds a StorageObject that includes a thumbnail block in _processing */
+function makeStorageObjectWithThumbnail() {
+  return {
+    id: STORAGE_OBJ_ID,
+    metadata: {
+      _processing: {
+        'content-hash': {
+          sha256: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        },
+        thumbnail: {
+          thumbnailObjectId: THUMB_OBJ_ID,
+          thumbnailStorageKey: THUMB_STORAGE_KEY,
+        },
+      },
+    },
+  };
+}
+
 const mockMediaItem = { id: MEDIA_ITEM_ID };
 
 // ---------------------------------------------------------------------------
@@ -440,6 +461,82 @@ describe('MediaMetadataSyncService', () => {
       await expect(
         service.handleObjectProcessed(new ObjectProcessedEvent(STORAGE_OBJ_ID)),
       ).resolves.toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Thumbnail block → MediaItem.metadata merge
+  // -------------------------------------------------------------------------
+
+  describe('handleObjectProcessed — thumbnail block', () => {
+    beforeEach(() => {
+      // findUnique is called twice when thumbnail block is present:
+      //   1. to load the StorageObject
+      //   2. to read the current MediaItem.metadata before merging
+      prisma.storageObject.findUnique.mockResolvedValue(makeStorageObjectWithThumbnail());
+      prisma.mediaItem.findUnique
+        .mockResolvedValueOnce(mockMediaItem)         // first call: linked media check
+        .mockResolvedValueOnce({ id: MEDIA_ITEM_ID, metadata: null }); // second call: read current metadata
+      prisma.mediaItem.update.mockResolvedValue({});
+    });
+
+    it('should call mediaItem.update once when thumbnail block is present', async () => {
+      await service.handleObjectProcessed(new ObjectProcessedEvent(STORAGE_OBJ_ID));
+      expect(prisma.mediaItem.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('should merge thumbnailObjectId into MediaItem.metadata', async () => {
+      await service.handleObjectProcessed(new ObjectProcessedEvent(STORAGE_OBJ_ID));
+      const data = prisma.mediaItem.update.mock.calls[0][0].data;
+      expect(data.metadata).toMatchObject({ thumbnailObjectId: THUMB_OBJ_ID });
+    });
+
+    it('should merge thumbnailStorageKey into MediaItem.metadata', async () => {
+      await service.handleObjectProcessed(new ObjectProcessedEvent(STORAGE_OBJ_ID));
+      const data = prisma.mediaItem.update.mock.calls[0][0].data;
+      expect(data.metadata).toMatchObject({ thumbnailStorageKey: THUMB_STORAGE_KEY });
+    });
+
+    it('should preserve existing MediaItem.metadata keys during merge', async () => {
+      // Override the second findUnique call so the current metadata has an existing key
+      prisma.mediaItem.findUnique
+        .mockReset()
+        .mockResolvedValueOnce(mockMediaItem)
+        .mockResolvedValueOnce({ id: MEDIA_ITEM_ID, metadata: { customKey: 'preserved' } });
+
+      await service.handleObjectProcessed(new ObjectProcessedEvent(STORAGE_OBJ_ID));
+      const data = prisma.mediaItem.update.mock.calls[0][0].data;
+      expect(data.metadata).toMatchObject({
+        customKey: 'preserved',
+        thumbnailObjectId: THUMB_OBJ_ID,
+        thumbnailStorageKey: THUMB_STORAGE_KEY,
+      });
+    });
+
+    it('should not set metadata when thumbnail block is absent', async () => {
+      // Use a StorageObject with only the content-hash block
+      prisma.storageObject.findUnique.mockReset().mockResolvedValue(makeStorageObjectHashOnly());
+      prisma.mediaItem.findUnique.mockReset().mockResolvedValue(mockMediaItem);
+      prisma.mediaItem.update.mockResolvedValue({});
+
+      await service.handleObjectProcessed(new ObjectProcessedEvent(STORAGE_OBJ_ID));
+      const data = prisma.mediaItem.update.mock.calls[0][0].data;
+      expect(data.metadata).toBeUndefined();
+    });
+
+    it('should not set metadata when thumbnail block has partial fields (missing thumbnailObjectId)', async () => {
+      prisma.storageObject.findUnique.mockReset().mockResolvedValue({
+        id: STORAGE_OBJ_ID,
+        metadata: {
+          _processing: {
+            thumbnail: { thumbnailStorageKey: THUMB_STORAGE_KEY }, // missing thumbnailObjectId
+          },
+        },
+      });
+      prisma.mediaItem.findUnique.mockReset().mockResolvedValue(mockMediaItem);
+      // If no other typed fields update, no DB write is expected
+      await service.handleObjectProcessed(new ObjectProcessedEvent(STORAGE_OBJ_ID));
+      expect(prisma.mediaItem.update).not.toHaveBeenCalled();
     });
   });
 
