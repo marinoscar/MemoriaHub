@@ -38,7 +38,8 @@ interface UseMediaResult {
   error: string | null;
   filters: MediaFilters;
   setFilters: (filters: MediaFilters) => void;
-  fetchMedia: (params?: MediaQueryParams) => Promise<void>;
+  /** Fetches media and returns the loaded items for callers that need them synchronously. */
+  fetchMedia: (params?: MediaQueryParams) => Promise<MediaItem[]>;
   patchMedia: (id: string, dto: PatchMediaDto) => Promise<void>;
   removeMedia: (id: string) => Promise<void>;
   updateItemLocally: (id: string, patch: Partial<MediaItem>) => void;
@@ -59,17 +60,19 @@ export function useMedia(): UseMediaResult {
     setFiltersState(newFilters);
   }, []);
 
-  const fetchMedia = useCallback(async (params?: MediaQueryParams) => {
+  const fetchMedia = useCallback(async (params?: MediaQueryParams): Promise<MediaItem[]> => {
     setIsLoading(true);
     setError(null);
     try {
       const response = await listMediaApi(params);
       setItems(response.items);
       setMeta(response.meta);
+      return response.items;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to fetch media';
       setError(message);
       setItems([]);
+      return [];
     } finally {
       setIsLoading(false);
     }

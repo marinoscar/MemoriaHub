@@ -1,6 +1,7 @@
 import {
   useState,
   useEffect,
+  useRef,
   useCallback,
   useMemo,
 } from 'react';
@@ -23,6 +24,7 @@ import {
   FormControl,
   InputLabel,
   CircularProgress,
+  Skeleton,
   Alert,
   Button,
   Collapse,
@@ -50,6 +52,20 @@ import type { ExportFilters } from '../../services/media';
 import { MediaDetailDrawer } from '../../components/media/MediaDetailDrawer';
 import { MediaUploadDialog } from '../../components/media/MediaUploadDialog';
 import type { MediaItem, MediaQueryParams, TagItem, MediaType, MediaClassification } from '../../types/media';
+
+// ---------------------------------------------------------------------------
+// Post-upload enrichment polling constants
+// ---------------------------------------------------------------------------
+
+/** How often (ms) to re-fetch after an upload while waiting for enrichment. */
+const ENRICHMENT_POLL_INTERVAL_MS = 3_000;
+/** Maximum number of poll attempts before giving up (~30 s). */
+const ENRICHMENT_POLL_MAX_ATTEMPTS = 10;
+
+/** Returns true when all photo items in the list already have a thumbnailUrl. */
+function allPhotosEnriched(items: MediaItem[]): boolean {
+  return items.every((item) => item.type !== 'photo' || item.thumbnailUrl !== null);
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -160,7 +176,50 @@ function MediaTile({ item, onSelect, onToggleFavorite }: MediaTileProps) {
             display: 'block',
           }}
         />
+      ) : item.type === 'photo' && !imgError ? (
+        /* Photo awaiting thumbnail enrichment — show a subtle processing state */
+        <Box
+          sx={{
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 1,
+            position: 'relative',
+            overflow: 'hidden',
+          }}
+        >
+          <Skeleton
+            variant="rectangular"
+            sx={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+            }}
+            aria-hidden="true"
+          />
+          <CircularProgress
+            size={28}
+            aria-label="Processing thumbnail"
+            sx={{ position: 'relative', zIndex: 1 }}
+          />
+          <Typography
+            variant="caption"
+            sx={{
+              position: 'relative',
+              zIndex: 1,
+              color: 'text.secondary',
+            }}
+          >
+            Processing…
+          </Typography>
+        </Box>
       ) : (
+        /* Broken image or video without thumbnail */
         <Box
           sx={{
             width: '100%',
@@ -242,6 +301,11 @@ export default function MediaLibraryPage() {
     updateItemLocally,
   } = useMedia();
 
+  /** Holds the setInterval id for the post-upload enrichment poll. */
+  const enrichmentPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Tracks how many poll attempts have fired for the current upload batch. */
+  const enrichmentPollAttemptsRef = useRef(0);
+
   const { albums, fetchAlbums } = useAlbums();
 
   const [tags, setTags] = useState<TagItem[]>([]);
@@ -314,8 +378,13 @@ export default function MediaLibraryPage() {
     locationSearch,
   ]);
 
-  // Load data on mount and when filters change
+  // Load data on mount and when filters change.
+  // Also stop any running enrichment poll so it doesn't fight a user-initiated refetch.
   useEffect(() => {
+    if (enrichmentPollRef.current !== null) {
+      clearInterval(enrichmentPollRef.current);
+      enrichmentPollRef.current = null;
+    }
     void fetchMedia(buildParams());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -341,6 +410,16 @@ export default function MediaLibraryPage() {
       .then(setTags)
       .catch(() => setTags([]));
   }, [fetchAlbums]);
+
+  // Clear any running enrichment poll on unmount so it never leaks.
+  useEffect(() => {
+    return () => {
+      if (enrichmentPollRef.current !== null) {
+        clearInterval(enrichmentPollRef.current);
+        enrichmentPollRef.current = null;
+      }
+    };
+  }, []);
 
   const handleToggleTag = useCallback((tagName: string) => {
     setSelectedTags((prev) =>
@@ -383,7 +462,33 @@ export default function MediaLibraryPage() {
   const handleUploadSuccess = useCallback(() => {
     setUploadOpen(false);
     setPage(1);
+
+    // Cancel any previous enrichment poll before starting a new one.
+    if (enrichmentPollRef.current !== null) {
+      clearInterval(enrichmentPollRef.current);
+      enrichmentPollRef.current = null;
+    }
+    enrichmentPollAttemptsRef.current = 0;
+
+    // Immediate refetch so the new item appears right away.
     void fetchMedia(buildParams());
+
+    // Bounded background poll: re-fetches every ENRICHMENT_POLL_INTERVAL_MS until
+    // all photos have thumbnails or ENRICHMENT_POLL_MAX_ATTEMPTS is reached.
+    enrichmentPollRef.current = setInterval(() => {
+      enrichmentPollAttemptsRef.current += 1;
+
+      void fetchMedia(buildParams()).then((loadedItems) => {
+        const done =
+          allPhotosEnriched(loadedItems) ||
+          enrichmentPollAttemptsRef.current >= ENRICHMENT_POLL_MAX_ATTEMPTS;
+
+        if (done && enrichmentPollRef.current !== null) {
+          clearInterval(enrichmentPollRef.current);
+          enrichmentPollRef.current = null;
+        }
+      });
+    }, ENRICHMENT_POLL_INTERVAL_MS);
   }, [fetchMedia, buildParams]);
 
   const handleCountrySelect = useCallback((country: string) => {
