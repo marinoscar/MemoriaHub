@@ -15,11 +15,12 @@
  * Video path mock strategy:
  *   The video path calls:
  *     - fs.writeFile / fs.readFile / fs.unlink  (temp file management)
- *     - new ffmpeg.FfmpegCommand(input)  (frame extraction)
+ *     - ffmpeg(input)  (factory call — the default export is callable, not a class)
  *   Both are module-level mocks (jest.mock hoisting) so the processor module
  *   gets the mock version before it is imported.
  *
- *   FfmpegCommand is mocked as a constructor that returns a chainable stub.
+ *   The fluent-ffmpeg mock's default export is itself a function (the factory).
+ *   Calling ffmpeg(input) returns a chainable stub.
  *   Each chain method (.seekInput, .frames, .output) returns `this`.
  *   .on('end', cb) / .on('error', cb) stores the handlers; .run() invokes them.
  *   mockFfmpegInvokeEnd() / mockFfmpegInvokeError() control which callback fires.
@@ -78,15 +79,23 @@ jest.mock('fluent-ffmpeg', () => {
   // ffmpegMockState is in the enclosing module scope and is safely accessible
   // here because this factory is called at import time (after module scope
   // initialisation), not when jest.mock() is hoisted.
-  class FfmpegCommandStub {
-    seekInput(_n: number) { return this; }
-    frames(_n: number) { return this; }
-    output(_path: string) { return this; }
+  //
+  // The processor uses `import ffmpeg from 'fluent-ffmpeg'` (default import with
+  // esModuleInterop) and then calls `ffmpeg(input)` — the default export is a
+  // callable factory, not a class.  The mock therefore returns a module whose
+  // `default` property IS the factory function, mirroring the real API shape.
+  // Jest's esModuleInterop handling means `require('fluent-ffmpeg')` returns the
+  // object below, and the default-import expression resolves to `.default`.
+
+  const stub = {
+    seekInput(_n: number) { return stub; },
+    frames(_n: number) { return stub; },
+    output(_path: string) { return stub; },
     on(event: string, cb: (...args: any[]) => void) {
       if (event === 'end') ffmpegMockState.endCb = cb as () => void;
       if (event === 'error') ffmpegMockState.errorCb = cb as (err: Error) => void;
-      return this;
-    }
+      return stub;
+    },
     run() {
       ffmpegMockState.runCallCount++;
       // Use setImmediate so the Promise machinery in extractFrame registers
@@ -99,9 +108,19 @@ jest.mock('fluent-ffmpeg', () => {
           ffmpegMockState.endCb();
         }
       });
-    }
+    },
+  };
+
+  // The factory function is the default export: calling ffmpeg(input) returns
+  // the chainable stub.
+  function ffmpegFactory(_input: string) {
+    return stub;
   }
-  return { FfmpegCommand: FfmpegCommandStub };
+
+  // Attach __esModule so Jest's interop layer resolves the default import
+  // correctly, matching the behaviour of the real fluent-ffmpeg package whose
+  // typings use `export =` (CJS-compatible).
+  return Object.assign(ffmpegFactory, { __esModule: true, default: ffmpegFactory });
 });
 
 // ---------------------------------------------------------------------------

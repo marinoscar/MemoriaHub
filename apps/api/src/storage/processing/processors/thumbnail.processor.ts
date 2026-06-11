@@ -5,7 +5,7 @@ import { tmpdir } from 'os';
 import { join, extname } from 'path';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
-import * as ffmpeg from 'fluent-ffmpeg';
+import ffmpeg from 'fluent-ffmpeg';
 import { ObjectProcessor, ObjectProcessorResult } from '../object-processor.interface';
 import { STORAGE_PROVIDER, StorageProvider } from '../../providers/storage-provider.interface';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -175,13 +175,14 @@ export class ThumbnailProcessor implements ObjectProcessor {
    * Extract a single frame from the video at `seekSecs` seconds into `tmpOut`.
    * Wraps the fluent-ffmpeg event-driven API in a Promise.
    *
-   * Uses `new ffmpeg.FfmpegCommand(input)` to satisfy TypeScript's type checker
-   * when the module is imported as a namespace (`import * as ffmpeg`).  The
-   * runtime behaviour is identical to calling `ffmpeg(input)` directly.
+   * `ffmpeg(input)` is the factory call — fluent-ffmpeg's default export is a
+   * callable function, not a class constructor.  `ffmpeg.FfmpegCommand` does not
+   * exist at runtime; calling `new ffmpeg.FfmpegCommand(...)` throws
+   * "ffmpeg.FfmpegCommand is not a constructor".
    */
   private extractFrame(tmpIn: string, tmpOut: string, seekSecs: number): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      new ffmpeg.FfmpegCommand(tmpIn)
+      ffmpeg(tmpIn)
         .seekInput(seekSecs)
         .frames(1)
         .output(tmpOut)
