@@ -211,7 +211,7 @@ check_tool() {
   if ! command -v "$name" &>/dev/null; then
     err "$name is required but not found."
     case "$name" in
-      node) warn "Install Node.js >= 18 from https://nodejs.org or via nvm: https://github.com/nvm-sh/nvm" ;;
+      node) warn "Install Node.js >= 20 from https://nodejs.org or via nvm: https://github.com/nvm-sh/nvm" ;;
       npm)  warn "npm ships with Node.js; reinstall from https://nodejs.org" ;;
       git)  warn "Install git from https://git-scm.com" ;;
       curl) warn "Install curl via your package manager (e.g. apt install curl)" ;;
@@ -236,17 +236,18 @@ check_tool() {
   ok "$name  $(_c $DIM "$version")"
 }
 
-check_tool node 18
+check_tool node 20
 check_tool npm
 check_tool git
 check_tool curl
 
 # Informational note about native dependencies.
-# better-sqlite3 ships prebuilt binaries for Node 18/20/22 on linux-x64,
-# linux-arm64, and macOS (x64 + arm64).  Most users will NOT need a C compiler.
-# If a prebuild is unavailable for your platform/Node version, the install will
-# fall back to compiling from source — in that case build-essential + python3
-# (Linux) or Xcode Command Line Tools (macOS) are required.
+# better-sqlite3 v12 ships prebuilt binaries for Node 20, 22, 23, 24, 25, 26
+# on linux-x64, linux-arm64, and macOS (x64 + arm64).  Most users will NOT
+# need a C compiler.  If a prebuild is unavailable for your platform/Node
+# version, the install will fall back to compiling from source — in that case
+# build-essential + python3 (Linux) or Xcode Command Line Tools (macOS) are
+# required.
 if ! command -v cc &>/dev/null && ! command -v gcc &>/dev/null && ! command -v clang &>/dev/null; then
   info "No C compiler found — this is fine if a prebuilt SQLite binary is available for your platform."
   dim "  If the sqlite probe below fails, install build tools and re-run:"
@@ -317,6 +318,9 @@ info "Installing CLI workspace dependencies …"
     | while IFS= read -r line; do dim "$line"; done
 ) || {
   err "npm install failed"
+  warn "If the error mentions node-gyp or node-pre-gyp, install build tools and re-run:"
+  dim "    Debian/Ubuntu : sudo apt install build-essential python3"
+  dim "    macOS         : xcode-select --install"
   exit 1
 }
 ok "Dependencies installed"
