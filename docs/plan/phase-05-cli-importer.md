@@ -142,3 +142,102 @@ The CLI consumes existing endpoints. No new server-side endpoints are required.
 - Import from Apple Photos library format (Phase 09)
 - Remote network folder mounting (users mount the drive themselves; CLI sees it as a local path)
 - Windows installer / macOS app bundle (deferred; npm install is the primary distribution)
+
+---
+
+## Phase 05.1 — Folder-managed SQLite sync + interactive TUI (as built)
+
+**Status:** Done
+
+This section documents the major upgrade to the CLI delivered after the initial Phase 05 implementation. It replaces the per-folder JSON manifest system with a durable SQLite database, adds a managed folder registry, multi-folder sync, retry/issue tracking, and a Claude-Code-style interactive terminal UI.
+
+### SQLite persistence
+
+All sync state is stored in `~/.memoriahub/memoriahub.db` (a `better-sqlite3` database). The schema consists of four tables:
+
+| Table | Purpose |
+|-------|---------|
+| `folders` | Folder registry: path, recursive flag, enabled flag, last_sync_at |
+| `files` | Per-file state: status, sha256, attempt_count, last_error, media_item_id, size_bytes |
+| `sync_runs` | Run history: trigger, folder IDs, total/uploaded/skipped/failed counts, duration, dry_run flag |
+| `settings` | Key-value store for CLI settings (concurrency, attempts_cap) |
+
+File status values: `queued`, `uploading`, `uploaded`, `skipped`, `failed`.
+
+The database is created and migrated automatically on first run. All operations use synchronous `better-sqlite3` calls so there is no async database layer.
+
+### Folder registry
+
+Folders are registered once with `memoriahub folders add <path>` (or auto-registered when a path is passed directly to `sync`). Each folder has:
+- A numeric ID used to reference it in commands
+- A `recursive` flag controlling whether subdirectories are scanned
+- An `enabled` flag; disabled folders are excluded from `sync --all` runs
+- A `last_sync_at` timestamp updated after each successful run
+
+Subcommands: `folders add`, `folders list`, `folders remove`, `folders enable`, `folders disable`. All accept an `<id|path>` argument.
+
+### Sync engine: all and selected
+
+`memoriahub sync` accepts:
+- `--all` — sync all registered enabled folders
+- One or more folder paths — sync specific folders (auto-registering any not yet known)
+- `--dry-run` — enumerate and hash files, perform dedup checks, but do not upload or persist `uploaded` status
+- `--concurrency <n>` — override the concurrent worker count for this run
+- `-r, --recursive` — set the recursive flag on auto-registered folders
+
+The engine emits typed events (`run:start`, `run:progress`, `file:start`, `file:progress`, `file:done`, `file:skipped`, `file:failed`, `run:done`, `error`) consumed by either the headless renderer (direct command mode) or the Ink TUI renderer (interactive mode).
+
+### Deduplication
+
+Two layers prevent redundant uploads:
+1. **Unchanged-skip** — if a file is already `uploaded` and its size on disk matches the recorded size, it is skipped with no network call.
+2. **Server content-hash dedup** — for all other files, SHA-256 is computed locally and checked against `GET /api/media?contentHash=<sha256>`. A match skips the upload.
+
+### Retry and attempts cap
+
+Each file row records `attempt_count` and `last_error`. Failed files with `attempt_count < attempts_cap` are automatically re-queued on the next sync run. Files that reach `attempts_cap` are blocked until `retry --force` is used, which resets their count.
+
+`memoriahub retry` options:
+- `--all` — retry failed files across all folders
+- `--folder <id|path>` — limit to a specific folder
+- `--force` — also reset and retry blocked files
+
+### Crash recovery
+
+On startup, files stuck in the `uploading` state from a previous crashed run are reset to `queued`. This means any interrupted uploads are retried automatically on the next invocation.
+
+### Interactive Ink TUI
+
+Running `memoriahub` with no arguments in a TTY, or `memoriahub menu`, launches a full-screen Ink (React-for-terminal) application. Ink/React components are loaded lazily via dynamic `import()` so the TUI runtime is never loaded in headless code paths.
+
+**Home menu** presents a navigable list (arrow keys + Enter):
+- Login / Change server
+- Manage folders
+- Sync all folders
+- Sync selected folders
+- Status
+- Retry failed files
+- Settings
+- Help / Quit
+
+When not logged in, only Login, Help, and Quit are shown.
+
+**Sync dashboard** renders while a sync run is in progress:
+- `StatusLine` — server host, folder count, elapsed time
+- `ContextMeter` — a 56-character block-grid progress bar (Claude-Code `/context` style) using the largest-remainder cell allocation method across five categories (uploaded, uploading, queued, skipped, failed); re-renders throttled to ~10 fps
+- `Legend` — counts per category with color coding
+- `ActiveUploads` — per-file mini progress bars (up to 5 visible) showing filename and percentage
+- `EventLog` — rolling log of completed, skipped, and failed files
+- On `run:done`, transitions to a `Summary` screen with final stats and any failure details
+
+**FolderManager** — interactive table with keyboard controls to add (`a`), toggle enable/disable (`e`), remove (`d`), and navigate folders.
+
+**PickFolders** — checkbox multi-select for "Sync selected folders" with Space to toggle, `a`/`n` for all/none, Enter to confirm.
+
+### Command and menu parity
+
+Every CLI command has a direct menu equivalent. The same `SyncEngine` instance is used in both modes; only the renderer differs (headless vs. Ink).
+
+### Legacy manifest auto-import
+
+On the first run after upgrade, the CLI automatically imports all existing JSON manifests from `~/.memoriahub/manifests/` into the SQLite database. The import is idempotent (guarded by a `schema_imported_manifests` settings flag), atomic (single SQLite transaction), and non-destructive (manifests are preserved as read-only records). Legacy status values are mapped: `uploaded` → `uploaded`, `failed` → `failed`, `pending` → `queued`.

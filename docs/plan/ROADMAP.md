@@ -80,7 +80,7 @@ The following principles are restated directly from [`../../VISION.MD`](../../VI
 | 02 | Metadata Extraction | Done |
 | 03 | Web Media Library | Done |
 | 04 | Metadata Export | Done |
-| 05 | CLI Importer | Done |
+| 05 | CLI Importer | Done — upgraded in 05.1 with SQLite-backed multi-folder sync and interactive Ink TUI |
 | 06 | Storage Providers and Replication | Not Started |
 | 07 | Memory Prioritization | Not Started |
 | 08 | Android Sync | Not Started |
