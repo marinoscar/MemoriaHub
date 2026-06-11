@@ -11,6 +11,10 @@ interface ErrorResponse {
   statusCode: number;
   code: string;
   message: string;
+  /** RFC 8628 / OAuth 2.0 error code, forwarded verbatim when present */
+  error?: string;
+  /** RFC 8628 / OAuth 2.0 human-readable error description */
+  error_description?: string;
   details?: unknown;
   timestamp: string;
   path: string;
@@ -29,6 +33,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
     let code = 'INTERNAL_ERROR';
     let message = 'An unexpected error occurred';
     let details: unknown;
+    let rfcError: string | undefined;
+    let rfcErrorDescription: string | undefined;
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
@@ -41,6 +47,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
         message = (resp.message as string) || message;
         code = (resp.code as string) || this.getCodeFromStatus(status);
         details = resp.details;
+        // Propagate RFC 8628 / OAuth 2.0 error fields verbatim
+        if (typeof resp.error === 'string') {
+          rfcError = resp.error;
+        }
+        if (typeof resp.error_description === 'string') {
+          rfcErrorDescription = resp.error_description;
+        }
       }
 
       code = this.getCodeFromStatus(status);
@@ -60,6 +73,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
       path: request.url,
     };
 
+    if (rfcError !== undefined) {
+      errorResponse.error = rfcError;
+    }
+    if (rfcErrorDescription !== undefined) {
+      errorResponse.error_description = rfcErrorDescription;
+    }
     if (details) {
       errorResponse.details = details;
     }

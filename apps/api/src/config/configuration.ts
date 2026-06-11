@@ -52,6 +52,7 @@ export default () => {
     expiryMinutes: parseInt(process.env.DEVICE_CODE_EXPIRY_MINUTES || '15', 10),
     pollInterval: parseInt(process.env.DEVICE_CODE_POLL_INTERVAL || '5', 10),
     tokenExpiryDays: parseInt(process.env.DEVICE_TOKEN_EXPIRY_DAYS || '7', 10),
+    patTtlDays: parseInt(process.env.DEVICE_PAT_TTL_DAYS || '90', 10),
   },
 
   // Observability

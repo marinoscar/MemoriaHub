@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { randomBytes, createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
+import { PatService } from '../pat/pat.service';
 import { DeviceCodeStatus } from '@prisma/client';
 
 /**
@@ -28,6 +29,7 @@ export class DeviceAuthService {
     private readonly prisma: PrismaService,
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
+    private readonly patService: PatService,
   ) {}
 
   /**
@@ -171,7 +173,54 @@ export class DeviceAuthService {
           });
         }
 
-        // Generate tokens with device-specific expiry
+        // Safely narrow clientInfo: it is Prisma's Json? type (unknown at runtime)
+        const clientInfo =
+          record.clientInfo !== null &&
+          typeof record.clientInfo === 'object' &&
+          !Array.isArray(record.clientInfo)
+            ? (record.clientInfo as Record<string, unknown>)
+            : undefined;
+
+        // When the client requests a PAT (e.g. the CLI), mint a long-lived
+        // Personal Access Token instead of a short-lived JWT pair.
+        if (clientInfo?.tokenType === 'pat') {
+          const patTtlDays = this.configService.get<number>(
+            'deviceAuth.patTtlDays',
+            90,
+          );
+          const patName =
+            typeof clientInfo.name === 'string' && clientInfo.name.trim()
+              ? clientInfo.name.trim()
+              : 'MemoriaHub CLI';
+
+          const pat = await this.patService.createToken(record.user.id, {
+            name: patName,
+            durationValue: patTtlDays,
+            durationUnit: 'days',
+          });
+
+          // Mark as used (status expired prevents reuse)
+          await this.prisma.deviceCode.update({
+            where: { id: record.id },
+            data: { status: DeviceCodeStatus.expired },
+          });
+
+          // Clean up poll timestamp
+          this.pollTimestamps.delete(deviceCodeHash);
+
+          this.logger.log(
+            `Device authorized (PAT) for user: ${record.user.email}, ttl=${patTtlDays}d`,
+          );
+
+          return {
+            accessToken: pat.token,
+            refreshToken: '',
+            tokenType: 'Bearer',
+            expiresIn: patTtlDays * 86400,
+          };
+        }
+
+        // Default path: generate short-lived JWT access + refresh tokens
         const tokenExpiryDays = this.configService.get<number>(
           'deviceAuth.tokenExpiryDays',
           7,
