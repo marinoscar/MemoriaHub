@@ -17,8 +17,8 @@ import { ui } from '../src/ui.js';
 describe('ui helpers — smoke under NO_COLOR', () => {
   let stdoutChunks: string[];
   let stderrChunks: string[];
-  let stdoutWrite: jest.SpyInstance;
-  let stderrWrite: jest.SpyInstance;
+  let stdoutWrite: ReturnType<typeof jest.spyOn>;
+  let stderrWrite: ReturnType<typeof jest.spyOn>;
 
   beforeEach(() => {
     stdoutChunks = [];
