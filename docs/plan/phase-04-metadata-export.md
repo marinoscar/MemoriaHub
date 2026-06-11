@@ -3,7 +3,7 @@
 **Roadmap:** [ROADMAP.md](ROADMAP.md)
 **Previous Phase:** [Phase 02 — Metadata Extraction](phase-02-metadata-extraction.md)
 **Next Phase:** [Phase 07 — Memory Prioritization](phase-07-memory-prioritization.md)
-**Status:** Not Started
+**Status:** Done
 
 ---
 
@@ -55,6 +55,8 @@ The full list of exported fields mirrors the "Open Metadata" principle from VISI
 - Admin with `media:read_any` can export all users' records by specifying `?ownerId=<userId>`
 - `Content-Disposition: attachment` header with a timestamped filename
 - Web "Export" button in `MediaLibraryPage` toolbar sends the request and triggers a browser file download
+
+**Note (as built):** The endpoint streams via Fastify `@Res()` writing directly to `res.raw`. JSON output is newline-delimited. CSV uses `csv-stringify` with 19 columns (all typed `MediaItem` fields plus `storage_provider`, `storage_key`, `storage_size`, and a JSON-encoded `metadata` column). The web Export button opens a JSON/CSV menu and forwards only `type`, `from`, and `to` filters (no `ownerId` from the UI).
 
 ---
 
