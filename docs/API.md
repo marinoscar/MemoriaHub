@@ -213,6 +213,7 @@ The Device Authorization Flow enables input-constrained devices (CLI tools, IoT 
 | `clientInfo.name` | string | No | Application name |
 | `clientInfo.version` | string | No | Application version |
 | `clientInfo.platform` | string | No | Platform identifier |
+| `clientInfo.tokenType` | string | No | Set to `"pat"` to request a long-lived Personal Access Token on approval instead of a short-lived JWT. The CLI uses this to obtain a 90-day PAT (lifetime controlled by `DEVICE_PAT_TTL_DAYS`, default 90). The PAT is visible and revocable from the web app's Personal Access Tokens screen. |
 
 **Response:**
 ```json

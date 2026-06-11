@@ -125,17 +125,16 @@ flowchart TD
 
 ### Access Tokens vs Refresh Tokens
 
-| Aspect | Access Token | Refresh Token |
-|--------|--------------|---------------|
-| **Type** | JWT (signed JSON) | Random 32-byte hex string |
-| **Storage (Client)** | Memory only (never localStorage) | HttpOnly cookie |
-| **Storage (Server)** | None (stateless) | SHA256 hash in `refresh_tokens` table |
-| **Lifetime** | 15 minutes (default) | 14 days (default) |
-| **Purpose** | Authorize API requests | Obtain new access tokens |
-| **Exposed to JS** | Yes (needed for Authorization header) | No (HttpOnly prevents access) |
-| **Revocable** | No (stateless, valid until expiry) | Yes (database record can be revoked) |
-| **Rotation** | New token on each refresh | New token on each refresh (old one revoked) |
-| **Attack Surface** | XSS (if stored in localStorage) | CSRF (mitigated by SameSite) |
+| Aspect | Access Token | Refresh Token | Device PAT |
+|--------|--------------|---------------|------------|
+| **Type** | JWT (signed JSON) | Random 32-byte hex string | Random token stored as SHA256 hash |
+| **Storage (Client)** | Memory only (never localStorage) | HttpOnly cookie | `~/.memoriahub/config.json` (mode 0600) |
+| **Storage (Server)** | None (stateless) | SHA256 hash in `refresh_tokens` table | SHA256 hash in `personal_access_tokens` table |
+| **Lifetime** | 15 minutes (default) | 14 days (default) | 90 days (default, `DEVICE_PAT_TTL_DAYS`) |
+| **Purpose** | Authorize API requests | Obtain new access tokens | Long-lived CLI / automation token |
+| **Exposed to JS** | Yes (needed for Authorization header) | No (HttpOnly prevents access) | No (CLI process only) |
+| **Revocable** | No (stateless, valid until expiry) | Yes (database record can be revoked) | Yes (web app Personal Access Tokens screen) |
+| **Issued via** | OAuth or token refresh | OAuth or token refresh | Device authorization flow (`clientInfo.tokenType: 'pat'`) |
 
 **Why This Design:**
 - **Short-lived access tokens** minimize damage from token theft (15 min window)
@@ -1315,6 +1314,12 @@ JWT_REFRESH_TTL_DAYS=14            # Refresh token lifetime (default: 14 days)
 
 # Cookie Configuration
 COOKIE_SECRET=your-cookie-secret-key-min-32-characters-long
+
+# Device Authorization Flow (RFC 8628)
+DEVICE_CODE_EXPIRY_MINUTES=15      # How long the user code is valid (default: 15)
+DEVICE_CODE_POLL_INTERVAL=5        # Minimum polling interval in seconds (default: 5)
+DEVICE_TOKEN_EXPIRY_DAYS=7         # Lifetime of JWT tokens issued via device flow (default: 7)
+DEVICE_PAT_TTL_DAYS=90             # Lifetime of PATs issued via device flow for CLI clients (default: 90)
 ```
 
 **OAuth Providers:**
