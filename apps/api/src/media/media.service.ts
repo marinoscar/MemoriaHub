@@ -24,7 +24,18 @@ import { UpdateAlbumDto } from './dto/update-album.dto';
 import { AlbumQueryDto } from './dto/album-query.dto';
 import { AddAlbumItemsDto } from './dto/add-album-items.dto';
 import { ExportQueryDto } from './dto/export-query.dto';
+import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
+
+/** Shape of each element returned by listLocations. */
+export interface MediaLocation {
+  id: string;
+  takenLat: number;
+  takenLng: number;
+  capturedAt: Date | null;
+  geoLocality: string | null;
+  thumbnailUrl: string | null;
+}
 
 @Injectable()
 export class MediaService {
@@ -380,6 +391,135 @@ export class MediaService {
         totalPages: Math.ceil(totalItems / pageSize),
       },
     };
+  }
+
+  /**
+   * Return ALL geotagged (takenLat + takenLng non-null) non-deleted media items
+   * for the caller — no pagination. Used by the map view.
+   *
+   * Applies the same ownership guard and geo/date/type filters as listMedia
+   * but returns only the fields needed to render map pins:
+   *   id, takenLat, takenLng, capturedAt, geoLocality, thumbnailUrl.
+   *
+   * thumbnailUrl is signed in parallel (same signThumb helper as listMedia).
+   */
+  async listLocations(
+    query: MediaLocationsQueryDto,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<MediaLocation[]> {
+    const {
+      type,
+      capturedAtFrom,
+      capturedAtTo,
+      country,
+      region,
+      locality,
+      place,
+      location,
+    } = query;
+
+    const canReadAny = userPermissions.includes(PERMISSIONS.MEDIA_READ_ANY);
+
+    const where: Prisma.MediaItemWhereInput = {
+      // Ownership guard: only own items unless caller holds media:read_any
+      ...(canReadAny ? {} : { ownerId: userId }),
+      // Must have coordinates
+      takenLat: { not: null },
+      takenLng: { not: null },
+      // Exclude soft-deleted items
+      deletedAt: null,
+      // Optional type filter
+      ...(type && { type }),
+      // Date range
+      ...(capturedAtFrom || capturedAtTo
+        ? {
+            capturedAt: {
+              ...(capturedAtFrom && { gte: capturedAtFrom }),
+              ...(capturedAtTo && { lte: capturedAtTo }),
+            },
+          }
+        : {}),
+      // Individual geo filters
+      ...(country
+        ? {
+            OR: [
+              {
+                geoCountry: { contains: country, mode: 'insensitive' as const },
+              },
+              {
+                geoCountryCode: { equals: country, mode: 'insensitive' as const },
+              },
+            ],
+          }
+        : {}),
+      ...(region
+        ? { geoAdmin1: { contains: region, mode: 'insensitive' as const } }
+        : {}),
+      ...(locality
+        ? { geoLocality: { contains: locality, mode: 'insensitive' as const } }
+        : {}),
+      ...(place
+        ? { geoPlaceName: { contains: place, mode: 'insensitive' as const } }
+        : {}),
+      // Combined free-text location search across all geo tiers
+      ...(location
+        ? {
+            OR: [
+              {
+                geoCountry: { contains: location, mode: 'insensitive' as const },
+              },
+              {
+                geoCountryCode: {
+                  contains: location,
+                  mode: 'insensitive' as const,
+                },
+              },
+              {
+                geoAdmin1: { contains: location, mode: 'insensitive' as const },
+              },
+              {
+                geoLocality: {
+                  contains: location,
+                  mode: 'insensitive' as const,
+                },
+              },
+              {
+                geoPlaceName: {
+                  contains: location,
+                  mode: 'insensitive' as const,
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+
+    const rows = await this.prisma.mediaItem.findMany({
+      where,
+      select: {
+        id: true,
+        takenLat: true,
+        takenLng: true,
+        capturedAt: true,
+        geoLocality: true,
+        metadata: true,
+      },
+      orderBy: { capturedAt: 'desc' },
+    });
+
+    // Sign all thumbnails in parallel; metadata is used only as signThumb input
+    // and is NOT included in the returned objects.
+    return Promise.all(
+      rows.map(async (row) => ({
+        id: row.id,
+        takenLat: row.takenLat as number,
+        takenLng: row.takenLng as number,
+        capturedAt: row.capturedAt,
+        geoLocality: row.geoLocality,
+        thumbnailUrl: await this.signThumb(row.metadata),
+      })),
+    );
   }
 
   /**

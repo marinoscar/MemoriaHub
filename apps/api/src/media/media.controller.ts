@@ -36,6 +36,7 @@ import { UpdateAlbumDto } from './dto/update-album.dto';
 import { AlbumQueryDto } from './dto/album-query.dto';
 import { AddAlbumItemsDto } from './dto/add-album-items.dto';
 import { ExportQueryDto } from './dto/export-query.dto';
+import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
 
 @ApiTags('Media')
 @ApiBearerAuth('JWT-auth')
@@ -106,6 +107,38 @@ export class MediaController {
     // Delegate to service; all validation and header-writing happen there.
     // Errors thrown before streaming begins propagate through Nest's exception filter.
     await this.mediaService.streamExport(dto, user.id, user.permissions, res);
+  }
+
+  /**
+   * GET /api/media/locations
+   *
+   * Returns ALL geotagged (takenLat + takenLng) non-deleted media items for the
+   * caller as a flat array — no pagination. Intended for the map view.
+   * Declared in the static-routes block so it is never shadowed by @Get(':id').
+   */
+  @Get('locations')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({
+    summary: "List all caller's geotagged media for map view (no pagination)",
+    description:
+      'Returns every non-deleted media item that has GPS coordinates (takenLat + takenLng). ' +
+      'Admins with media:read_any see all users\' items. ' +
+      'Optional filters narrow the result by type, date range, and/or geographic metadata.',
+  })
+  @ApiQuery({ name: 'type', required: false, enum: ['photo', 'video'], description: 'Filter by media type' })
+  @ApiQuery({ name: 'capturedAtFrom', required: false, type: String, description: 'ISO 8601 datetime — filter capturedAt >= from' })
+  @ApiQuery({ name: 'capturedAtTo', required: false, type: String, description: 'ISO 8601 datetime — filter capturedAt <= to' })
+  @ApiQuery({ name: 'country', required: false, type: String, description: 'Matches geoCountry (contains) or geoCountryCode (exact), case-insensitive' })
+  @ApiQuery({ name: 'region', required: false, type: String, description: 'Matches geoAdmin1 (contains), case-insensitive' })
+  @ApiQuery({ name: 'locality', required: false, type: String, description: 'Matches geoLocality (contains), case-insensitive' })
+  @ApiQuery({ name: 'place', required: false, type: String, description: 'Substring match on geoPlaceName, case-insensitive' })
+  @ApiQuery({ name: 'location', required: false, type: String, description: 'Free-text search across all geo tiers' })
+  @ApiResponse({ status: 200, description: 'Array of geotagged media location objects' })
+  async listLocations(
+    @Query() query: MediaLocationsQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.listLocations(query, user.id, user.permissions);
   }
 
   /**
