@@ -19,48 +19,13 @@
 import { Command } from 'commander';
 import * as readline from 'readline/promises';
 import { stdin as input, stdout as output } from 'process';
-import { execFile } from 'child_process';
 import * as os from 'os';
 import chalk from 'chalk';
 import { saveConfig } from '../config.js';
 import { ApiClient, ApiError } from '../api.js';
 import { ui, createSpinner, printBox } from '../ui.js';
 import { requestDeviceCode, pollForDeviceToken } from '../device-auth.js';
-
-// ---------------------------------------------------------------------------
-// Browser opener — platform-specific, no npm dependency
-// ---------------------------------------------------------------------------
-
-/**
- * Best-effort open a URL in the default browser.
- * Silently swallows all errors — the URL is always printed in the UI.
- */
-function openBrowser(url: string): void {
-  const platform = os.platform();
-  let cmd: string;
-  let args: string[];
-
-  if (platform === 'darwin') {
-    cmd = 'open';
-    args = [url];
-  } else if (platform === 'win32') {
-    // `cmd /c start` handles spaces and special chars correctly
-    cmd = 'cmd';
-    args = ['/c', 'start', '', url];
-  } else {
-    // Linux / other POSIX
-    cmd = 'xdg-open';
-    args = [url];
-  }
-
-  try {
-    execFile(cmd, args, { timeout: 5000 }, () => {
-      // ignore all errors and exit codes
-    });
-  } catch {
-    // ignore synchronous errors (e.g. ENOENT on minimal systems)
-  }
-}
+import { openBrowser } from '../open-browser.js';
 
 // ---------------------------------------------------------------------------
 // Shared helper: validate PAT and save config
