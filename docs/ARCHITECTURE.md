@@ -464,6 +464,107 @@ apps/api/src/storage/
         └── base-processor.interface.ts
 ```
 
+### 5.5 Content-Hash Deduplication
+
+#### Overview
+
+The system performs **byte-exact (tier-1) deduplication** on media items. Two files are considered identical if and only if their SHA-256 content hashes match. Re-encoded or visually similar files are NOT caught by this mechanism; near-duplicate detection via perceptual hashing is a planned tier-2 enhancement (see [Phase 09 — Long-Term Enrichment](plan/phase-09-longterm-enrichment.md)).
+
+The dedup key is the tuple `(owner_id, content_hash)`. Deduplication is scoped to the owner — two users can independently hold files with the same content hash.
+
+#### Database Backstop
+
+A partial unique index on `media_items` enforces the invariant at the database level:
+
+```sql
+CREATE UNIQUE INDEX "media_items_owner_content_hash_active_key"
+  ON "media_items" ("owner_id", "content_hash")
+  WHERE "content_hash" IS NOT NULL AND "deleted_at" IS NULL;
+```
+
+The `WHERE` predicate serves two purposes:
+
+- `content_hash IS NOT NULL` — rows where no hash has been computed yet are never constrained, so the pipeline can still ingest files whose hash is not yet known.
+- `deleted_at IS NULL` — soft-deleted rows are excluded, allowing a user to re-import a file they previously trashed without triggering a constraint violation.
+
+**Note:** This index is hand-authored in a migration and is not represented in `schema.prisma`. Prisma cannot express partial unique indexes, and a plain `@@unique` directive would wrongly constrain `NULL` hash rows.
+
+#### Full Deduplication Flow
+
+```
+Client                         API                             DB
+  │                              │                               │
+  │  1. Compute SHA-256          │                               │
+  │     (streaming, in-memory)   │                               │
+  │                              │                               │
+  │  2. GET /api/media           │                               │
+  │     ?contentHash=<hash>      │                               │
+  │◀─────────────────────────────│  Query media_items            │
+  │                              │◀──────────────────────────────│
+  │  If items.length > 0 →       │                               │
+  │    skip upload entirely      │                               │
+  │    show "Already in library" │                               │
+  │                              │                               │
+  │  3. Upload file bytes        │                               │
+  │     (multipart to S3)        │                               │
+  │                              │                               │
+  │  4. POST /api/media          │                               │
+  │     { storageObjectId,       │                               │
+  │       contentHash, ... }     │                               │
+  │─────────────────────────────▶│                               │
+  │                              │  Fast-path check:             │
+  │                              │  findFirst where hash = ?     │
+  │                              │◀──────────────────────────────│
+  │                              │  If duplicate found:          │
+  │                              │    delete redundant blob      │
+  │                              │    return existing item       │
+  │                              │    HTTP 200, dedup: true      │
+  │                              │  Else:                        │
+  │                              │    INSERT media_item          │
+  │                              │◀──────────────────────────────│
+  │                              │  If P2002 (race):             │
+  │                              │    fetch winner               │
+  │                              │    delete redundant blob      │
+  │                              │    return winner              │
+  │                              │    HTTP 200, dedup: true      │
+  │                              │  Else:                        │
+  │                              │    HTTP 201, dedup: false     │
+  │◀─────────────────────────────│                               │
+```
+
+#### Race Handling
+
+The fast-path pre-check and the DB `INSERT` are not atomic. If two sessions upload the same content concurrently the unique index fires a `P2002` constraint violation on the second write. The service catches that error, fetches the winning row, cleans up the redundant blob, and returns the winner — so callers always receive a valid item regardless of which session "won".
+
+#### Redundant Blob Cleanup
+
+When a dedup hit is detected (either via the pre-check or the P2002 race path) the newly-uploaded `StorageObject` blob is deleted from the storage backend and the `StorageObject` row is removed from the database. Both operations are wrapped independently and log warnings on failure rather than failing the request, so a transient storage error does not block the caller from receiving their item.
+
+#### Hash Source and Trust
+
+| Source | Hash origin | Notes |
+|--------|-------------|-------|
+| Web UI (`MediaUploadDialog`) | Client-side, via `hash-wasm` streaming SHA-256 | `apps/web/src/utils/sha256.ts` |
+| CLI (`SyncEngine`) | Node.js `crypto`, cached by size + `mtime_ms` | `apps/cli/src/sync/sync-engine.ts` |
+| Post-upload processor | Server-side `content-hash` `ObjectProcessor` | Stored in `StorageObject.metadata._processing['content-hash'].sha256` |
+| `MediaMetadataSyncService` | Reads server hash from `_processing`; sets `contentHash` only when `NULL` | Warns on client/server mismatch but keeps the client-supplied value |
+
+The server-computed hash is authoritative for integrity verification. If the client-supplied hash and the server-computed hash disagree (tampered upload or encoding difference), a warning is logged and the client-supplied value is retained.
+
+#### Where Each Piece Lives
+
+| Piece | Location |
+|-------|----------|
+| Partial unique index migration | `apps/api/prisma/migrations/20260612000000_add_media_content_hash_unique/` |
+| `POST /api/media` dedup logic | `apps/api/src/media/media.service.ts` → `createMedia` |
+| Redundant blob cleanup | `apps/api/src/media/media.service.ts` → `cleanupRedundantStorageObject` |
+| Metadata sync / hash backfill | `apps/api/src/media/sync/media-metadata-sync.service.ts` → `syncFromStorageObject` |
+| `contentHash` field definition | `apps/api/src/media/dto/create-media.dto.ts` |
+| `?contentHash=` query param | `apps/api/src/media/dto/media-query.dto.ts` |
+| Web client SHA-256 utility | `apps/web/src/utils/sha256.ts` |
+| Web pre-check + dedup UI | `apps/web/src/components/media/MediaUploadDialog.tsx` |
+| CLI hash cache + dedup flow | `apps/cli/src/sync/sync-engine.ts` |
+
 ---
 
 ## 6. Data Architecture

@@ -1305,6 +1305,210 @@ The storage system provides file upload and management capabilities with support
 
 ---
 
+### Media
+
+Media endpoints register uploaded `StorageObject` blobs as `MediaItem` records in the library and provide list/get/update/delete access to those records. All media endpoints require `media:read` or `media:write` permission. Admins holding `media:read_any` can read all users' items; `media:write_any` and `media:delete_any` extend that to mutations.
+
+#### POST /api/media
+
+**Requires:** `media:write` permission
+
+Register an uploaded `StorageObject` as a `MediaItem`.
+
+**Idempotent deduplication behavior:** When `contentHash` is supplied the server checks whether the caller already owns a non-deleted `MediaItem` with the same hash. If one exists the redundant `StorageObject` blob is deleted best-effort and the **existing** item is returned. A concurrent registration of the same hash (race condition) is caught via the database partial unique index on `(owner_id, content_hash)` — the server fetches the winning row, cleans up the redundant blob, and returns the winner. The `deduplicated` field in the response indicates which path was taken.
+
+| HTTP Status | Meaning |
+|-------------|---------|
+| `201 Created` | Fresh item created (`deduplicated: false`) |
+| `200 OK` | Duplicate detected — existing item returned (`deduplicated: true`) |
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `storageObjectId` | UUID | Yes | ID of an already-uploaded `StorageObject` owned by the caller |
+| `type` | `"photo"` \| `"video"` | Yes | Media type |
+| `source` | `"web"` \| `"cli"` \| `"android"` \| `"import"` \| `"sync"` | Yes | Upload origin |
+| `originalFilename` | string (1–1024 chars) | Yes | Original file name |
+| `contentHash` | string (64 lowercase hex chars) | No | SHA-256 hex digest of the file bytes. When supplied the server deduplicates by `(ownerId, contentHash)`. |
+| `capturedAt` | ISO 8601 datetime | No | When the photo/video was taken |
+| `capturedAtOffset` | integer (minutes) | No | UTC offset of `capturedAt` |
+| `classification` | `"memory"` \| `"low_value"` \| `"unreviewed"` | No | Defaults to `"unreviewed"` |
+| `title` | string (max 512) | No | |
+| `caption` | string (max 2048) | No | |
+| `description` | string (max 8192) | No | |
+| `favorite` | boolean | No | Defaults to `false` |
+| `metadata` | object | No | Arbitrary JSONB metadata |
+| `originalCreatedAt` | ISO 8601 datetime | No | File system creation time |
+| `sourcePath` | string (max 2048) | No | Original path on source device |
+| `sourceDeviceId` | string (max 256) | No | |
+| `sourceDeviceName` | string (max 256) | No | |
+
+**Example request (with dedup hash):**
+
+```json
+{
+  "storageObjectId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "type": "photo",
+  "source": "web",
+  "originalFilename": "IMG_4521.jpg",
+  "contentHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}
+```
+
+**Response (201 — fresh create):**
+
+```json
+{
+  "id": "uuid",
+  "ownerId": "uuid",
+  "storageObjectId": "uuid",
+  "type": "photo",
+  "source": "web",
+  "originalFilename": "IMG_4521.jpg",
+  "contentHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "classification": "unreviewed",
+  "favorite": false,
+  "importedAt": "2026-06-12T10:00:00.000Z",
+  "deduplicated": false
+}
+```
+
+**Response (200 — dedup hit):**
+
+Same shape as above but `deduplicated: true`. The returned item is the **existing** item already in the library; the `storageObjectId` in the response will differ from the one in the request.
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | `storageObjectId` is already linked to another `MediaItem` |
+| 403 | Caller does not own the referenced `StorageObject` |
+| 404 | `StorageObject` not found |
+
+---
+
+#### GET /api/media
+
+**Requires:** `media:read` permission
+
+List the caller's active (non-deleted) media items with pagination and filtering. Admins holding `media:read_any` see all users' items.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | number | 1 | Page number (1-indexed) |
+| `pageSize` | number | 20 | Items per page (max 100) |
+| `type` | `"photo"` \| `"video"` | — | Filter by media type |
+| `capturedAtFrom` | ISO 8601 datetime | — | Lower bound on `capturedAt` |
+| `capturedAtTo` | ISO 8601 datetime | — | Upper bound on `capturedAt` |
+| `classification` | enum | — | `memory`, `low_value`, or `unreviewed` |
+| `albumId` | UUID | — | Return items in this album |
+| `favorite` | boolean | — | Filter by favorite flag |
+| `tag` | string | — | Exact tag name match (case-insensitive) |
+| `country` | string | — | Matches `geoCountry` (contains) or `geoCountryCode` (exact) |
+| `region` | string | — | Substring match on `geoAdmin1` |
+| `locality` | string | — | Substring match on `geoLocality` |
+| `place` | string | — | Substring match on `geoPlaceName` |
+| `location` | string | — | Free-text match across all geo tiers |
+| `contentHash` | string (64 hex chars) | — | Return the item matching this exact SHA-256 hash. Used as a deduplication pre-check: if the response contains at least one item the file is already in the library and the upload can be skipped. |
+| `sortBy` | enum | `capturedAt` | `capturedAt`, `importedAt`, or `createdAt` |
+| `sortOrder` | enum | `desc` | `asc` or `desc` |
+
+**Deduplication pre-check usage:**
+
+Before uploading, clients should query:
+
+```
+GET /api/media?contentHash=<sha256>&pageSize=1
+```
+
+If `items.length > 0` the file already exists in the library and the upload can be skipped entirely. This saves both bandwidth and storage. The web upload dialog and the CLI sync engine both perform this check.
+
+**Response:**
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "ownerId": "uuid",
+      "type": "photo",
+      "originalFilename": "IMG_4521.jpg",
+      "contentHash": "e3b0c44298fc1c149afbf4c8996fb924...",
+      "classification": "unreviewed",
+      "capturedAt": "2024-07-15T14:30:00.000Z",
+      "importedAt": "2026-06-12T10:00:00.000Z",
+      "thumbnailUrl": "https://...",
+      "favorite": false
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 142,
+    "totalPages": 8
+  }
+}
+```
+
+---
+
+#### GET /api/media/:id
+
+**Requires:** `media:read` permission
+
+Get a single `MediaItem` by ID. Returns fresh signed URLs for the thumbnail and the original blob.
+
+**Response:**
+
+```json
+{
+  "id": "uuid",
+  "ownerId": "uuid",
+  "type": "photo",
+  "originalFilename": "IMG_4521.jpg",
+  "contentHash": "e3b0c44298fc1c149afbf4c8996fb924...",
+  "capturedAt": "2024-07-15T14:30:00.000Z",
+  "importedAt": "2026-06-12T10:00:00.000Z",
+  "thumbnailUrl": "https://s3.amazonaws.com/...",
+  "downloadUrl": "https://s3.amazonaws.com/..."
+}
+```
+
+**Error Cases:**
+- 404 Not Found — item does not exist or is soft-deleted
+- 403 Forbidden — caller does not own the item and lacks `media:read_any`
+
+---
+
+#### PATCH /api/media/:id
+
+**Requires:** `media:write` permission
+
+Update mutable fields on a `MediaItem`. Only supplied fields are updated.
+
+**Mutable fields:** `capturedAt`, `capturedAtOffset`, `classification`, `metadata`, `title`, `caption`, `description`, `favorite`.
+
+**Error Cases:**
+- 404 Not Found
+- 403 Forbidden
+
+---
+
+#### DELETE /api/media/:id
+
+**Requires:** `media:delete` permission
+
+Soft-delete a `MediaItem`. Sets `deletedAt`; does not remove the underlying `StorageObject` or blob.
+
+**Response:** HTTP 204 No Content
+
+**Note:** A soft-deleted item is excluded from `GET /api/media` results and from the dedup unique index, so the same content hash can be re-imported after deletion.
+
+---
+
 ### Health
 
 **Public endpoints** - Used for Kubernetes liveness/readiness probes.
