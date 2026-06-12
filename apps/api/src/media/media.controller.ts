@@ -219,6 +219,17 @@ export class MediaController {
 
   /**
    * POST /api/media
+   *
+   * Deduplication behaviour:
+   *   If `contentHash` is supplied in the request body the server checks whether
+   *   the caller already owns an active MediaItem with the same hash.  If so,
+   *   the redundant StorageObject is cleaned up and the EXISTING MediaItem is
+   *   returned with HTTP 200 and `{ deduplicated: true }`.  A fresh create
+   *   returns HTTP 201 with `{ deduplicated: false }`.
+   *
+   *   The same dedup logic fires at the DB level via a partial unique index on
+   *   (owner_id, content_hash) as a server-side backstop, even when the client
+   *   does not supply a hash.
    */
   @Post()
   @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
@@ -226,17 +237,36 @@ export class MediaController {
     summary: 'Register an uploaded StorageObject as a MediaItem',
     description:
       'The referenced StorageObject must be owned by the caller. ' +
-      'Returns the created MediaItem record.',
+      'Returns the created (or existing deduplicated) MediaItem record. ' +
+      'When `contentHash` is provided the server deduplicates by (ownerId, contentHash): ' +
+      'if an active item with that hash already exists the existing item is returned ' +
+      'with HTTP 200 and `deduplicated: true`. A fresh create returns HTTP 201 with ' +
+      '`deduplicated: false`. The redundant StorageObject blob is cleaned up best-effort.',
   })
-  @ApiResponse({ status: 201, description: 'MediaItem created' })
+  @ApiResponse({ status: 201, description: 'MediaItem created (fresh)' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Duplicate detected — existing MediaItem returned (deduplicated: true). ' +
+      'The redundant StorageObject has been cleaned up best-effort.',
+  })
   @ApiResponse({ status: 400, description: 'StorageObject already linked' })
   @ApiResponse({ status: 403, description: 'Caller does not own the StorageObject' })
   @ApiResponse({ status: 404, description: 'StorageObject not found' })
   async createMedia(
     @Body() dto: CreateMediaDto,
     @CurrentUser('id') userId: string,
+    @Res({ passthrough: true }) res: FastifyReply,
   ) {
-    return this.mediaService.createMedia(dto, userId);
+    const result = await this.mediaService.createMedia(dto, userId);
+    // Signal dedup vs. fresh create via HTTP status while keeping the body shape
+    // consistent so downstream consumers can also inspect `deduplicated`.
+    if (result.deduplicated) {
+      res.status(HttpStatus.OK);
+    } else {
+      res.status(HttpStatus.CREATED);
+    }
+    return result;
   }
 
   /**

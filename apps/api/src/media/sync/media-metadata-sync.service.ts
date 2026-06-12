@@ -88,7 +88,7 @@ export class MediaMetadataSyncService {
     // Find the linked MediaItem
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { storageObjectId },
-      select: { id: true },
+      select: { id: true, contentHash: true },
     });
 
     if (!mediaItem) {
@@ -111,9 +111,24 @@ export class MediaMetadataSyncService {
     const update: Prisma.MediaItemUpdateInput = {};
 
     // --- content-hash ---
+    // Only set the hash when the MediaItem's contentHash is currently NULL.
+    // If the client already supplied a hash at registration time (non-null), keep it.
+    // If both are present but differ, log a warning (integrity mismatch) and retain
+    // the existing client-supplied value rather than overwriting it.
     const hashMeta = processing['content-hash'];
     if (typeof hashMeta?.['sha256'] === 'string') {
-      update.contentHash = hashMeta['sha256'];
+      const serverHash = (hashMeta['sha256'] as string).toLowerCase();
+      if (mediaItem.contentHash === null) {
+        update.contentHash = serverHash;
+      } else if (mediaItem.contentHash.toLowerCase() !== serverHash) {
+        this.logger.warn(
+          `Content hash integrity mismatch for MediaItem ${mediaItem.id}: ` +
+            `client-supplied=${mediaItem.contentHash}, server-computed=${serverHash}. ` +
+            `Keeping client-supplied value.`,
+        );
+        // Do NOT set update.contentHash — leave the existing value in place
+      }
+      // else: hashes match, no update needed
     }
 
     // --- exif ---
@@ -239,10 +254,36 @@ export class MediaMetadataSyncService {
       return;
     }
 
-    await this.prisma.mediaItem.update({
-      where: { id: mediaItem.id },
-      data: update,
-    });
+    // Wrap the update so that a P2002 on the content-hash unique index
+    // (e.g. a client that did not supply a hash but whose computed hash
+    // collides with an already-registered item) is caught and logged rather
+    // than crashing the processing pipeline.  We leave the item without a
+    // contentHash in that case — it is a duplicate that can be surfaced via
+    // a separate dedup audit job if needed.
+    try {
+      await this.prisma.mediaItem.update({
+        where: { id: mediaItem.id },
+        data: update,
+      });
+    } catch (err: unknown) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        this.logger.warn(
+          `Content hash collision on backfill for MediaItem ${mediaItem.id} — ` +
+            `the computed hash already belongs to another item. ` +
+            `Retrying update without contentHash to preserve other enrichment fields.`,
+        );
+        // Remove contentHash from the update and retry so enrichment is not lost entirely
+        const { contentHash: _dropped, ...updateWithoutHash } = update;
+        if (Object.keys(updateWithoutHash).length > 0) {
+          await this.prisma.mediaItem.update({
+            where: { id: mediaItem.id },
+            data: updateWithoutHash,
+          });
+        }
+        return;
+      }
+      throw err;
+    }
 
     this.logger.log(
       `Synced ${Object.keys(update).length} metadata field(s) into MediaItem ${mediaItem.id}`,

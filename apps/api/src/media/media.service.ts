@@ -44,6 +44,22 @@ export class MediaService {
   /**
    * Register a StorageObject as a MediaItem.
    * Validates that the referenced StorageObject exists and is owned by the caller.
+   *
+   * Deduplication by content hash:
+   *   If `dto.contentHash` is supplied the service checks whether the caller
+   *   already owns a non-deleted MediaItem with the same hash (fast path).
+   *   If found the redundant StorageObject blob is cleaned up best-effort and
+   *   the existing MediaItem is returned with `deduplicated: true`.
+   *
+   *   If no pre-existing item is found the MediaItem is created with the hash
+   *   already set.  A concurrent registration of the same hash may still win
+   *   the race and cause `prisma.mediaItem.create` to throw a P2002
+   *   (partial unique index violation).  That is caught, the winner is fetched,
+   *   the redundant blob cleaned up, and the winner returned as a dedup hit.
+   *
+   *   The `deduplicated` field is non-persisted — it is added to the returned
+   *   object to signal to callers whether the result is a fresh create or a
+   *   dedup hit (clients may use it to decide HTTP status codes or UI feedback).
    */
   async createMedia(dto: CreateMediaDto, userId: string) {
     // Verify the StorageObject exists and belongs to the caller
@@ -74,27 +90,85 @@ export class MediaService {
       );
     }
 
-    const mediaItem = await this.prisma.mediaItem.create({
-      data: {
-        storageObjectId: dto.storageObjectId,
-        ownerId: userId,
-        type: dto.type,
-        source: dto.source,
-        originalFilename: dto.originalFilename,
-        capturedAt: dto.capturedAt ?? null,
-        capturedAtOffset: dto.capturedAtOffset ?? null,
-        classification: dto.classification ?? 'unreviewed',
-        title: dto.title ?? null,
-        caption: dto.caption ?? null,
-        description: dto.description ?? null,
-        favorite: dto.favorite ?? false,
-        metadata: dto.metadata ? (dto.metadata as Prisma.InputJsonValue) : Prisma.JsonNull,
-        originalCreatedAt: dto.originalCreatedAt ?? null,
-        sourcePath: dto.sourcePath ?? null,
-        sourceDeviceId: dto.sourceDeviceId ?? null,
-        sourceDeviceName: dto.sourceDeviceName ?? null,
-      },
-    });
+    // Normalize the client-supplied hash once
+    const hash = dto.contentHash?.toLowerCase() ?? null;
+
+    // -----------------------------------------------------------------------
+    // Fast-path dedup: if the hash is known, check before hitting the DB
+    // -----------------------------------------------------------------------
+    if (hash) {
+      const duplicate = await this.prisma.mediaItem.findFirst({
+        where: { ownerId: userId, contentHash: hash, deletedAt: null },
+      });
+
+      if (duplicate) {
+        this.logger.log(
+          `Dedup hit (pre-check): MediaItem ${duplicate.id} already owns hash ${hash}; ` +
+            `cleaning up redundant StorageObject ${dto.storageObjectId}`,
+        );
+        await this.cleanupRedundantStorageObject(dto.storageObjectId, storageObject.storageKey);
+        return { ...duplicate, deduplicated: true as const };
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Create path — may race with a concurrent register for the same hash
+    // -----------------------------------------------------------------------
+    let mediaItem: Awaited<ReturnType<typeof this.prisma.mediaItem.create>>;
+
+    try {
+      mediaItem = await this.prisma.mediaItem.create({
+        data: {
+          storageObjectId: dto.storageObjectId,
+          ownerId: userId,
+          type: dto.type,
+          source: dto.source,
+          originalFilename: dto.originalFilename,
+          capturedAt: dto.capturedAt ?? null,
+          capturedAtOffset: dto.capturedAtOffset ?? null,
+          classification: dto.classification ?? 'unreviewed',
+          title: dto.title ?? null,
+          caption: dto.caption ?? null,
+          description: dto.description ?? null,
+          favorite: dto.favorite ?? false,
+          metadata: dto.metadata ? (dto.metadata as Prisma.InputJsonValue) : Prisma.JsonNull,
+          originalCreatedAt: dto.originalCreatedAt ?? null,
+          sourcePath: dto.sourcePath ?? null,
+          sourceDeviceId: dto.sourceDeviceId ?? null,
+          sourceDeviceName: dto.sourceDeviceName ?? null,
+          contentHash: hash,
+        },
+      });
+    } catch (err) {
+      // P2002 = unique constraint violation — the partial index on
+      // (owner_id, content_hash) WHERE content_hash IS NOT NULL AND deleted_at IS NULL
+      // fired because a concurrent request registered the same hash first.
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002' &&
+        hash
+      ) {
+        this.logger.warn(
+          `Dedup hit (P2002 race): concurrent register won for hash ${hash}; ` +
+            `fetching winner and cleaning up redundant StorageObject ${dto.storageObjectId}`,
+        );
+
+        const winner = await this.prisma.mediaItem.findFirst({
+          where: { ownerId: userId, contentHash: hash, deletedAt: null },
+        });
+
+        if (!winner) {
+          // Extremely unlikely: the winner was hard-deleted between our create
+          // and this re-query. Rethrow so the caller gets a 500 and can retry.
+          throw err;
+        }
+
+        await this.cleanupRedundantStorageObject(dto.storageObjectId, storageObject.storageKey);
+        return { ...winner, deduplicated: true as const };
+      }
+
+      throw err;
+    }
 
     this.logger.log(`MediaItem created: ${mediaItem.id} by user ${userId}`);
 
@@ -116,7 +190,41 @@ export class MediaService {
       // Never fail createMedia because of a sync issue
     }
 
-    return mediaItem;
+    return { ...mediaItem, deduplicated: false as const };
+  }
+
+  /**
+   * Best-effort cleanup of a redundant StorageObject and its blob.
+   *
+   * Called when a duplicate is detected (pre-check or P2002 race) so that the
+   * newly-uploaded but ultimately unused blob does not linger in storage.
+   *
+   * Both the blob delete and the DB row delete are wrapped independently: a
+   * failure in either only logs a warning rather than failing the parent request.
+   * The storage key is different from the original (it is the redundant one),
+   * so deleting it is safe.
+   */
+  private async cleanupRedundantStorageObject(
+    storageObjectId: string,
+    storageKey: string,
+  ): Promise<void> {
+    try {
+      await this.storageProvider.delete(storageKey);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Failed to delete redundant blob (key=${storageKey}): ${msg} — continuing`,
+      );
+    }
+
+    try {
+      await this.prisma.storageObject.delete({ where: { id: storageObjectId } });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Failed to delete redundant StorageObject row (id=${storageObjectId}): ${msg} — continuing`,
+      );
+    }
   }
 
   /**

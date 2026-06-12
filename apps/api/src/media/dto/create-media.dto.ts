@@ -20,6 +20,21 @@ export const createMediaSchema = z.object({
   sourcePath: z.string().max(2048).optional(),
   sourceDeviceId: z.string().max(256).optional(),
   sourceDeviceName: z.string().max(256).optional(),
+  /**
+   * Client-provided SHA-256 content hash (64 lowercase hex characters).
+   * When supplied, the server uses it to deduplicate: if an active MediaItem
+   * with the same (ownerId, contentHash) already exists the existing item is
+   * returned without creating a new one. The redundant StorageObject blob is
+   * cleaned up best-effort. If omitted, dedup still occurs via the database
+   * unique-index when the hash is later computed by the content-hash processor.
+   */
+  contentHash: z
+    .string()
+    .regex(
+      /^[a-f0-9]{64}$/i,
+      'contentHash must be a 64-char hex SHA-256',
+    )
+    .optional(),
 });
 
 export class CreateMediaDto extends createZodDto(createMediaSchema) {}
