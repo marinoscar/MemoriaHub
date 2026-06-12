@@ -37,6 +37,8 @@ export interface FileRecord {
   storage_object_id: string | null;
   size_bytes: number | null;
   mime_type: string | null;
+  /** Modification time in milliseconds (Math.round of fs.stat.mtimeMs), or null if not yet recorded. */
+  mtime_ms: number | null;
   first_seen_at: string;  // ISO 8601
   updated_at: string;     // ISO 8601
   uploaded_at: string | null;

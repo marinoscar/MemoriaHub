@@ -47,6 +47,10 @@ CREATE INDEX IF NOT EXISTS idx_files_status ON files(status)`;
 export const CREATE_FILES_IDX_SHA256 = `
 CREATE INDEX IF NOT EXISTS idx_files_sha256 ON files(sha256)`;
 
+/** Migration 2: add mtime_ms column to files for hash-cache invalidation. */
+export const ALTER_FILES_ADD_MTIME_MS = `
+ALTER TABLE files ADD COLUMN mtime_ms INTEGER`;
+
 export const CREATE_SYNC_RUNS = `
 CREATE TABLE IF NOT EXISTS sync_runs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,

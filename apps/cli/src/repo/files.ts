@@ -24,6 +24,7 @@ interface FileRow {
   storage_object_id: string | null;
   size_bytes: number | null;
   mime_type: string | null;
+  mtime_ms: number | null;
   first_seen_at: string;
   updated_at: string;
   uploaded_at: string | null;
@@ -42,6 +43,7 @@ function rowToFile(row: FileRow): FileRecord {
     storage_object_id: row.storage_object_id,
     size_bytes: row.size_bytes,
     mime_type: row.mime_type,
+    mtime_ms: row.mtime_ms ?? null,
     first_seen_at: row.first_seen_at,
     updated_at: row.updated_at,
     uploaded_at: row.uploaded_at,
@@ -59,6 +61,7 @@ export interface FilePatch {
   storage_object_id?: string | null;
   size_bytes?: number | null;
   mime_type?: string | null;
+  mtime_ms?: number | null;
   uploaded_at?: string | null;
   last_error?: string | null;
   attempt_count?: number;
@@ -92,9 +95,9 @@ export class FileRepo {
         .prepare(
           `INSERT INTO files
              (folder_id, file_path, sha256, status, media_item_id,
-              storage_object_id, size_bytes, mime_type, first_seen_at, updated_at,
+              storage_object_id, size_bytes, mime_type, mtime_ms, first_seen_at, updated_at,
               uploaded_at, last_error, attempt_count)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           folderId,
@@ -105,6 +108,7 @@ export class FileRepo {
           fields.storage_object_id ?? null,
           fields.size_bytes ?? null,
           fields.mime_type ?? null,
+          fields.mtime_ms ?? null,
           now,
           now,
           fields.uploaded_at ?? null,
@@ -128,6 +132,7 @@ export class FileRepo {
       apply('storage_object_id', 'storage_object_id');
       apply('size_bytes', 'size_bytes');
       apply('mime_type', 'mime_type');
+      apply('mtime_ms', 'mtime_ms');
       apply('uploaded_at', 'uploaded_at');
       apply('last_error', 'last_error');
       apply('attempt_count', 'attempt_count');
@@ -173,6 +178,7 @@ export class FileRepo {
     apply('storage_object_id', 'storage_object_id');
     apply('size_bytes', 'size_bytes');
     apply('mime_type', 'mime_type');
+    apply('mtime_ms', 'mtime_ms');
     apply('uploaded_at', 'uploaded_at');
     apply('last_error', 'last_error');
     apply('attempt_count', 'attempt_count');

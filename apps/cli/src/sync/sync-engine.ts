@@ -80,6 +80,8 @@ interface MediaListResponse {
 
 interface MediaItem {
   id: string;
+  /** Present when the server performed idempotent dedup on registration. */
+  deduplicated?: boolean;
 }
 
 function mimeToMediaType(mimeType: string): 'photo' | 'video' {
@@ -170,6 +172,8 @@ export class SyncEngine extends TypedEmitter {
     // 3. Build the work set
     // ------------------------------------------------------------------
     const workList: Array<{ fileId: number; filePath: string; mimeType: string; folderId: number }> = [];
+    // Track per-file stat info so the worker can reuse cached hashes.
+    const fileStatCache = new Map<number, { sizeBytes: number; mtimeMs: number }>();
     let unchangedSkippedCount = 0;
 
     if (opts.retryFailedOnly) {
@@ -218,10 +222,13 @@ export class SyncEngine extends TypedEmitter {
         });
 
         for (const { filePath, mimeType } of supported) {
-          // Stat for size
+          // Stat for size and mtime
           let sizeBytes: number | null = null;
+          let mtimeMs: number | null = null;
           try {
-            sizeBytes = fs.statSync(filePath).size;
+            const st = fs.statSync(filePath);
+            sizeBytes = st.size;
+            mtimeMs = Math.round(st.mtimeMs);
           } catch {
             // File might have disappeared; let the worker handle it
           }
@@ -241,6 +248,11 @@ export class SyncEngine extends TypedEmitter {
               reason: 'unchanged',
             });
             continue;
+          }
+
+          // Stash the stat for the worker so it can check the mtime cache
+          if (sizeBytes !== null && mtimeMs !== null) {
+            fileStatCache.set(rec.id, { sizeBytes, mtimeMs });
           }
 
           // Queue it
@@ -321,8 +333,34 @@ export class SyncEngine extends TypedEmitter {
       }
 
       try {
-        // --- Hash ---
-        const sha256 = await this.deps.hashFn(filePath);
+        // --- Hash (with mtime cache) ---
+        // Check if the stored sha256 is still valid: size AND mtime must both match.
+        // fileStatCache holds the stat taken during the work-set build phase (same run).
+        const statForFile = fileStatCache.get(fileId);
+        const currentFileRecord = files.getByFolderAndPath(item.folderId, filePath);
+
+        let sha256: string;
+        if (
+          currentFileRecord?.sha256 &&
+          statForFile !== undefined &&
+          currentFileRecord.size_bytes === statForFile.sizeBytes &&
+          currentFileRecord.mtime_ms === statForFile.mtimeMs
+        ) {
+          // Cache hit: file is byte-for-byte identical to last hash computation
+          sha256 = currentFileRecord.sha256;
+        } else {
+          // Cache miss: compute hash and store mtime alongside it
+          sha256 = await this.deps.hashFn(filePath);
+          // Persist the new hash + mtime so future runs can skip recomputation.
+          // We write this even before upload so retries also benefit.
+          if (statForFile !== undefined) {
+            files.setStatus(fileId, 'uploading', {
+              sha256,
+              size_bytes: statForFile.sizeBytes,
+              mtime_ms: statForFile.mtimeMs,
+            });
+          }
+        }
 
         // --- Dedup check ---
         let dedupMediaId: string | null = null;
@@ -378,7 +416,7 @@ export class SyncEngine extends TypedEmitter {
         );
         const { objectId } = uploadResult;
 
-        // --- Register as MediaItem ---
+        // --- Register as MediaItem (include contentHash for server-side dedup) ---
         const basename = path.basename(filePath);
         const type = mimeToMediaType(mimeType);
         const mediaItem = await api.post<MediaItem>('/api/media', {
@@ -386,7 +424,21 @@ export class SyncEngine extends TypedEmitter {
           type,
           source: 'cli',
           originalFilename: basename,
+          contentHash: sha256,
         });
+
+        // If the server deduplicated (race: another device registered same content first),
+        // treat as skipped rather than uploaded so local DB reflects reality.
+        if (mediaItem.deduplicated) {
+          files.setStatus(fileId, 'skipped', {
+            sha256,
+            media_item_id: mediaItem.id,
+            storage_object_id: objectId,
+          });
+          this.emit(EV.FILE_SKIPPED, { fileId, path: filePath, reason: 'dedup' });
+          this._emitProgress(files, targetFolderIds, total);
+          return;
+        }
 
         // Persist uploaded status
         files.setStatus(fileId, 'uploaded', {

@@ -19,6 +19,7 @@ import {
   CREATE_SYNC_RUNS_IDX_STARTED,
   CREATE_SETTINGS,
   SEED_SETTINGS,
+  ALTER_FILES_ADD_MTIME_MS,
 } from './schema.js';
 
 interface Migration {
@@ -48,6 +49,16 @@ const MIGRATIONS: Migration[] = [
       for (const { key, value } of SEED_SETTINGS) {
         insert.run(key, value);
       }
+    },
+  },
+  {
+    version: 2,
+    up(db: BetterSqlite3.Database): void {
+      // Add mtime_ms column to files table for hash-cache invalidation.
+      // SQLite ALTER TABLE ADD COLUMN is safe to run: the column is nullable,
+      // so existing rows get NULL (meaning "no cached mtime yet"), and the
+      // engine will recompute and store it on the next sync.
+      db.exec(ALTER_FILES_ADD_MTIME_MS);
     },
   },
 ];
