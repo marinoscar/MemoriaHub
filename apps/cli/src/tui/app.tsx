@@ -1,7 +1,7 @@
 /**
  * tui/app.tsx — Root TUI application: screen state machine + launch entry point.
  *
- * Screens: home | login | folders | pickFolders | dashboard | help
+ * Screens: home | login | folders | pickFolders | dashboard | help | status | settings
  *
  * launchTui() checks for a real TTY; if non-TTY it prints a message and
  * returns immediately without hanging.  Otherwise it renders <App/> and
@@ -21,6 +21,8 @@ import { LoginScreen } from './LoginScreen.js';
 import { FolderManager } from './FolderManager.js';
 import { PickFolders } from './PickFolders.js';
 import { SyncDashboard } from './SyncDashboard.js';
+import { StatusScreen } from './StatusScreen.js';
+import { SettingsScreen } from './SettingsScreen.js';
 import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
@@ -33,7 +35,9 @@ type Screen =
   | { kind: 'folders' }
   | { kind: 'pickFolders' }
   | { kind: 'dashboard'; all?: boolean; folderIds?: number[] }
-  | { kind: 'help' };
+  | { kind: 'help' }
+  | { kind: 'status' }
+  | { kind: 'settings' };
 
 // ---------------------------------------------------------------------------
 // Small helper: Esc/q key handler (used on help screen)
@@ -118,10 +122,10 @@ function App(): React.ReactElement {
         setScreen({ kind: 'dashboard', all: true });
         break;
       case 'status':
-        setScreen({ kind: 'help' });
+        setScreen({ kind: 'status' });
         break;
       case 'settings':
-        setScreen({ kind: 'help' });
+        setScreen({ kind: 'settings' });
         break;
       case 'help':
         setScreen({ kind: 'help' });
@@ -207,6 +211,22 @@ function App(): React.ReactElement {
           all={screen.all}
           folderIds={screen.folderIds}
           onHome={() => setScreen({ kind: 'home' })}
+        />
+      );
+
+    case 'status':
+      return (
+        <StatusScreen
+          db={db}
+          onBack={() => setScreen({ kind: 'home' })}
+        />
+      );
+
+    case 'settings':
+      return (
+        <SettingsScreen
+          db={db}
+          onBack={() => setScreen({ kind: 'home' })}
         />
       );
 
