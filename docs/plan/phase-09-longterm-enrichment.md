@@ -109,7 +109,7 @@ model MediaPerson {
 
 **Web review UI:** new `DuplicateReviewPage` showing side-by-side groups; user picks which copy to keep; deletes the rest via `POST /api/media/review`
 
-**Note:** Exact-duplicate detection (same SHA-256 `contentHash`) already works from Phase 02 / Phase 05. This phase adds near-duplicate detection via perceptual hashing.
+**Note:** Exact-duplicate detection (same SHA-256 `contentHash`) already works from Phase 02 / Phase 05. **Tier-1 exact/byte-identical deduplication shipped** on branch `feat/reliable-dedup` (migration `20260612000000_add_media_content_hash_unique`, `POST /api/media` idempotent registration, web pre-check, CLI hash cache + `contentHash` registration, and P2002 race handling). This phase adds **tier-2 near-duplicate detection** via perceptual hashing — visually similar but not byte-identical files.
 
 ---
 

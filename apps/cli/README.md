@@ -373,10 +373,13 @@ For each target folder the engine enumerates all supported files (see [Supported
 
 ### Deduplication and skip logic
 
-Two checks prevent redundant uploads:
+Three checks prevent redundant uploads:
 
 1. **Unchanged-skip (fast path)** — if a file already has status `uploaded` and its size on disk matches the recorded size, the file is skipped without any network call.
-2. **Server content-hash dedup** — for all other queued files, the CLI computes a local SHA-256 and sends `GET /api/media?contentHash=<sha256>`. If the server already holds a media item with that hash (regardless of filename or folder), the upload is skipped and the file is recorded as `skipped`.
+2. **Hash cache** — before computing a SHA-256 for a file, the engine checks whether the locally stored hash is still valid. The cache is keyed on `(size_bytes, mtime_ms)`: if both match the recorded values the stored hash is reused, avoiding a full re-read of unchanged files on subsequent runs. The `mtime_ms` column was added to the `files` table to support this cache.
+3. **Server content-hash dedup (pre-check)** — for all other queued files, the CLI computes a local SHA-256 and sends `GET /api/media?contentHash=<sha256>`. If the server already holds a media item with that hash (regardless of filename or folder), the upload is skipped and the file is recorded as `skipped`.
+
+**Server-side dedup backstop:** After a successful upload the CLI sends `contentHash` as part of the `POST /api/media` registration request. The server enforces a partial unique index on `(owner_id, content_hash)` for active items, so if two CLI sessions upload the same file concurrently only one `MediaItem` is created. The server returns `deduplicated: true` on the response when this happens; the CLI records the file as `skipped` (dedup) rather than `uploaded` so the local database accurately reflects that the file is already represented in the library.
 
 ### Upload and registration
 
