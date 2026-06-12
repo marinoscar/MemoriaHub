@@ -118,12 +118,14 @@ export class MediaMetadataSyncService {
     const hashMeta = processing['content-hash'];
     if (typeof hashMeta?.['sha256'] === 'string') {
       const serverHash = (hashMeta['sha256'] as string).toLowerCase();
-      if (mediaItem.contentHash === null) {
+      // contentHash may be null (never set) or undefined (not selected — treated the same way)
+      const currentHash = mediaItem.contentHash ?? null;
+      if (currentHash === null) {
         update.contentHash = serverHash;
-      } else if (mediaItem.contentHash.toLowerCase() !== serverHash) {
+      } else if (currentHash.toLowerCase() !== serverHash) {
         this.logger.warn(
           `Content hash integrity mismatch for MediaItem ${mediaItem.id}: ` +
-            `client-supplied=${mediaItem.contentHash}, server-computed=${serverHash}. ` +
+            `client-supplied=${currentHash}, server-computed=${serverHash}. ` +
             `Keeping client-supplied value.`,
         );
         // Do NOT set update.contentHash — leave the existing value in place

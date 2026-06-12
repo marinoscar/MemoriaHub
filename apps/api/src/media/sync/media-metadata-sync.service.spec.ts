@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Prisma } from '@prisma/client';
 import { MediaMetadataSyncService } from './media-metadata-sync.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -7,6 +8,16 @@ import {
   MockPrismaService,
 } from '../../../test/mocks/prisma.mock';
 import { randomUUID } from 'crypto';
+
+// ---------------------------------------------------------------------------
+// Helper: build a Prisma P2002 error for unique constraint violations
+// ---------------------------------------------------------------------------
+function makeP2002Error(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(
+    'Unique constraint failed',
+    { code: 'P2002', clientVersion: '0.0.0', meta: { target: ['owner_id', 'content_hash'] } },
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Test factories
@@ -323,6 +334,200 @@ describe('MediaMetadataSyncService', () => {
       await expect(service.syncFromStorageObject(randomUUID())).resolves.toBeUndefined();
 
       expect(mockPrisma.mediaItem.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Content-hash no-clobber: client-supplied hash is preserved
+  // -------------------------------------------------------------------------
+
+  describe('content-hash no-clobber', () => {
+    const CLIENT_HASH = 'c'.repeat(64);
+    const SERVER_HASH = 'a'.repeat(64);
+
+    it('does NOT overwrite contentHash when the MediaItem already has one (matching)', async () => {
+      const storageObjectId = randomUUID();
+      const mediaItemId = randomUUID();
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue(
+        makeStorageObject({
+          id: storageObjectId,
+          metadata: {
+            _processing: {
+              'content-hash': { sha256: CLIENT_HASH },
+            },
+          },
+        }) as any,
+      );
+      // MediaItem already has the same hash set by the client at registration
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem({ id: mediaItemId, contentHash: CLIENT_HASH }) as any,
+      );
+      mockPrisma.mediaItem.update.mockResolvedValue(makeMediaItem({ id: mediaItemId }) as any);
+
+      await service.syncFromStorageObject(storageObjectId);
+
+      // update is still called (for other enrichment fields like exif, geocode)
+      // but contentHash should NOT be set in the update data
+      const updateArgs = (mockPrisma.mediaItem.update as jest.Mock).mock.calls;
+      // If update was called, contentHash must not be in the data
+      if (updateArgs.length > 0) {
+        expect(updateArgs[0][0].data).not.toHaveProperty('contentHash');
+      }
+    });
+
+    it('does NOT overwrite contentHash when client and server hashes differ (logs warn)', async () => {
+      const storageObjectId = randomUUID();
+      const mediaItemId = randomUUID();
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue(
+        makeStorageObject({
+          id: storageObjectId,
+          metadata: {
+            _processing: {
+              'content-hash': { sha256: SERVER_HASH },
+            },
+          },
+        }) as any,
+      );
+      // MediaItem has a client-supplied hash that differs from server-computed
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem({ id: mediaItemId, contentHash: CLIENT_HASH }) as any,
+      );
+      mockPrisma.mediaItem.update.mockResolvedValue(makeMediaItem({ id: mediaItemId }) as any);
+
+      await service.syncFromStorageObject(storageObjectId);
+
+      // contentHash must not be set in the update data (keep client-supplied value)
+      const updateArgs = (mockPrisma.mediaItem.update as jest.Mock).mock.calls;
+      if (updateArgs.length > 0) {
+        expect(updateArgs[0][0].data).not.toHaveProperty('contentHash');
+      }
+    });
+
+    it('sets contentHash when the MediaItem contentHash is null (normal backfill)', async () => {
+      const storageObjectId = randomUUID();
+      const mediaItemId = randomUUID();
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue(
+        makeStorageObject({
+          id: storageObjectId,
+          metadata: {
+            _processing: {
+              'content-hash': { sha256: SERVER_HASH },
+            },
+          },
+        }) as any,
+      );
+      // MediaItem has no hash yet
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem({ id: mediaItemId, contentHash: null }) as any,
+      );
+      mockPrisma.mediaItem.update.mockResolvedValue(makeMediaItem({ id: mediaItemId }) as any);
+
+      await service.syncFromStorageObject(storageObjectId);
+
+      expect(mockPrisma.mediaItem.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ contentHash: SERVER_HASH }),
+        }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // P2002 guard on backfill update
+  // -------------------------------------------------------------------------
+
+  describe('P2002 guard on backfill update', () => {
+    it('does NOT throw when update hits P2002; retries without contentHash to preserve other fields', async () => {
+      const storageObjectId = randomUUID();
+      const mediaItemId = randomUUID();
+      const SERVER_HASH = 'b'.repeat(64);
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue(
+        makeStorageObject({
+          id: storageObjectId,
+          metadata: {
+            _processing: {
+              'content-hash': { sha256: SERVER_HASH },
+              exif: { cameraMake: 'Canon' },
+            },
+          },
+        }) as any,
+      );
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem({ id: mediaItemId, contentHash: null }) as any,
+      );
+
+      // First update attempt throws P2002
+      // Second update (retry without contentHash) succeeds
+      mockPrisma.mediaItem.update
+        .mockRejectedValueOnce(makeP2002Error())
+        .mockResolvedValueOnce(makeMediaItem({ id: mediaItemId }) as any);
+
+      await expect(service.syncFromStorageObject(storageObjectId)).resolves.toBeUndefined();
+
+      expect(mockPrisma.mediaItem.update).toHaveBeenCalledTimes(2);
+
+      // Second call must not include contentHash
+      const retryArgs = (mockPrisma.mediaItem.update as jest.Mock).mock.calls[1][0];
+      expect(retryArgs.data).not.toHaveProperty('contentHash');
+      // But it must include other enrichment fields (cameraMake)
+      expect(retryArgs.data).toHaveProperty('cameraMake', 'Canon');
+    });
+
+    it('does NOT perform the retry update when only contentHash was in the update set', async () => {
+      // Edge case: processing block has only content-hash, no other enrichment fields
+      // After dropping contentHash, the update set is empty — retry should be skipped
+      const storageObjectId = randomUUID();
+      const mediaItemId = randomUUID();
+      const HASH = 'd'.repeat(64);
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue(
+        makeStorageObject({
+          id: storageObjectId,
+          metadata: {
+            _processing: {
+              'content-hash': { sha256: HASH },
+              // No other processors ran
+            },
+          },
+        }) as any,
+      );
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem({ id: mediaItemId, contentHash: null }) as any,
+      );
+
+      // First (and only) update throws P2002
+      mockPrisma.mediaItem.update.mockRejectedValueOnce(makeP2002Error());
+
+      await expect(service.syncFromStorageObject(storageObjectId)).resolves.toBeUndefined();
+
+      // Only 1 update was attempted (no retry because nothing left to update)
+      expect(mockPrisma.mediaItem.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('rethrows non-P2002 errors from the update', async () => {
+      const storageObjectId = randomUUID();
+      const mediaItemId = randomUUID();
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue(
+        makeStorageObject({
+          id: storageObjectId,
+          metadata: {
+            _processing: { 'content-hash': { sha256: 'e'.repeat(64) } },
+          },
+        }) as any,
+      );
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem({ id: mediaItemId, contentHash: null }) as any,
+      );
+
+      const networkError = new Error('DB connection lost');
+      mockPrisma.mediaItem.update.mockRejectedValue(networkError);
+
+      await expect(service.syncFromStorageObject(storageObjectId)).rejects.toBe(networkError);
     });
   });
 });

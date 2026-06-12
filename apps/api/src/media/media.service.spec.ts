@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { MediaService } from './media.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -14,6 +15,19 @@ import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interfac
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { randomUUID } from 'crypto';
+
+// ---------------------------------------------------------------------------
+// Helper: build a Prisma P2002 error the way Prisma actually throws it
+// ---------------------------------------------------------------------------
+function makeP2002Error(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(
+    'Unique constraint failed',
+    { code: 'P2002', clientVersion: '0.0.0', meta: { target: ['owner_id', 'content_hash'] } },
+  );
+}
+
+// A valid 64-char lowercase hex SHA-256 string for use in tests
+const TEST_HASH = 'a'.repeat(64);
 
 // ---------------------------------------------------------------------------
 // Test factories
@@ -144,13 +158,14 @@ const noPerms: string[] = [];
 describe('MediaService', () => {
   let service: MediaService;
   let mockPrisma: MockPrismaService;
-  let mockStorageProvider: { getSignedDownloadUrl: jest.Mock };
+  let mockStorageProvider: { getSignedDownloadUrl: jest.Mock; delete: jest.Mock };
   let mockSyncService: jest.Mocked<Pick<MediaMetadataSyncService, 'syncFromStorageObject'>>;
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
     mockStorageProvider = {
       getSignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/signed'),
+      delete: jest.fn().mockResolvedValue(undefined),
     };
     mockSyncService = {
       syncFromStorageObject: jest.fn().mockResolvedValue(undefined),
@@ -194,7 +209,9 @@ describe('MediaService', () => {
 
       const result = await service.createMedia(dto, 'user-1');
 
-      expect(result).toEqual(createdItem);
+      // Fresh create: result is the created item spread with deduplicated: false
+      expect(result).toMatchObject({ ...createdItem, deduplicated: false });
+      expect(result.deduplicated).toBe(false);
       expect(mockPrisma.storageObject.findUnique).toHaveBeenCalledWith({
         where: { id: dto.storageObjectId },
       });
@@ -308,7 +325,150 @@ describe('MediaService', () => {
       );
 
       // createMedia must resolve despite sync failure
-      expect(result).toEqual(createdItem);
+      expect(result).toMatchObject(createdItem);
+      expect(result.deduplicated).toBe(false);
+    });
+
+    it('stores contentHash on the created item when provided in the DTO', async () => {
+      const storageObject = makeStorageObject({ uploadedById: 'user-1' });
+      const createdItem = makeMediaItem({ storageObjectId: storageObject.id, contentHash: TEST_HASH });
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue(storageObject as any);
+      // findUnique for "already linked" check → null
+      // findFirst for dedup pre-check → null (no existing item with this hash)
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
+      mockPrisma.mediaItem.findFirst.mockResolvedValue(null);
+      mockPrisma.mediaItem.create.mockResolvedValue(createdItem as any);
+
+      await service.createMedia(
+        {
+          storageObjectId: storageObject.id,
+          type: 'photo',
+          source: 'web',
+          originalFilename: 'photo.jpg',
+          contentHash: TEST_HASH,
+        },
+        'user-1',
+      );
+
+      expect(mockPrisma.mediaItem.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ contentHash: TEST_HASH }),
+        }),
+      );
+    });
+
+    it('returns the existing item (deduplicated: true) when pre-check finds a hash match', async () => {
+      const storageObject = makeStorageObject({ uploadedById: 'user-1', storageKey: 'uploads/new.jpg' });
+      const existingItem = makeMediaItem({ ownerId: 'user-1', contentHash: TEST_HASH });
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue(storageObject as any);
+      // "already linked" check on storageObjectId → no match
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
+      // Dedup pre-check by (ownerId, contentHash) → existing item found
+      mockPrisma.mediaItem.findFirst.mockResolvedValue(existingItem as any);
+
+      const result = await service.createMedia(
+        {
+          storageObjectId: storageObject.id,
+          type: 'photo',
+          source: 'web',
+          originalFilename: 'dup.jpg',
+          contentHash: TEST_HASH,
+        },
+        'user-1',
+      );
+
+      expect(result.deduplicated).toBe(true);
+      expect(result.id).toBe(existingItem.id);
+      // A new MediaItem must NOT have been created
+      expect(mockPrisma.mediaItem.create).not.toHaveBeenCalled();
+      // Redundant blob should be cleaned up (best-effort)
+      expect(mockStorageProvider.delete).toHaveBeenCalledWith(storageObject.storageKey);
+      expect(mockPrisma.storageObject.delete).toHaveBeenCalledWith({
+        where: { id: storageObject.id },
+      });
+    });
+
+    it('returns the existing item (deduplicated: true) when P2002 fires on concurrent create', async () => {
+      const storageObject = makeStorageObject({ uploadedById: 'user-1', storageKey: 'uploads/new2.jpg' });
+      const winnerItem = makeMediaItem({ ownerId: 'user-1', contentHash: TEST_HASH });
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue(storageObject as any);
+      // "already linked" check → no match
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
+      // Dedup pre-check → not found (concurrent race)
+      mockPrisma.mediaItem.findFirst
+        .mockResolvedValueOnce(null)       // pre-check: not found yet
+        .mockResolvedValueOnce(winnerItem as any); // post-P2002 re-query: winner found
+      // create throws P2002
+      mockPrisma.mediaItem.create.mockRejectedValue(makeP2002Error());
+
+      const result = await service.createMedia(
+        {
+          storageObjectId: storageObject.id,
+          type: 'photo',
+          source: 'web',
+          originalFilename: 'race.jpg',
+          contentHash: TEST_HASH,
+        },
+        'user-1',
+      );
+
+      expect(result.deduplicated).toBe(true);
+      expect(result.id).toBe(winnerItem.id);
+      // Redundant blob should be cleaned up
+      expect(mockStorageProvider.delete).toHaveBeenCalledWith(storageObject.storageKey);
+    });
+
+    it('rethrows P2002 when post-race re-query finds nothing (winner was hard-deleted)', async () => {
+      const storageObject = makeStorageObject({ uploadedById: 'user-1' });
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue(storageObject as any);
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
+      // pre-check → not found, post-P2002 re-query → still not found
+      mockPrisma.mediaItem.findFirst.mockResolvedValue(null);
+      mockPrisma.mediaItem.create.mockRejectedValue(makeP2002Error());
+
+      await expect(
+        service.createMedia(
+          {
+            storageObjectId: storageObject.id,
+            type: 'photo',
+            source: 'web',
+            originalFilename: 'ghost.jpg',
+            contentHash: TEST_HASH,
+          },
+          'user-1',
+        ),
+      ).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+    });
+
+    it('cleanup failures do NOT prevent the dedup hit from being returned', async () => {
+      const storageObject = makeStorageObject({ uploadedById: 'user-1', storageKey: 'uploads/err.jpg' });
+      const existingItem = makeMediaItem({ ownerId: 'user-1', contentHash: TEST_HASH });
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue(storageObject as any);
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
+      mockPrisma.mediaItem.findFirst.mockResolvedValue(existingItem as any);
+      // Both cleanup steps fail
+      mockStorageProvider.delete.mockRejectedValue(new Error('blob delete failed'));
+      mockPrisma.storageObject.delete.mockRejectedValue(new Error('db delete failed'));
+
+      const result = await service.createMedia(
+        {
+          storageObjectId: storageObject.id,
+          type: 'photo',
+          source: 'web',
+          originalFilename: 'dup.jpg',
+          contentHash: TEST_HASH,
+        },
+        'user-1',
+      );
+
+      // Despite both cleanup failures, the dedup result is still returned
+      expect(result.deduplicated).toBe(true);
+      expect(result.id).toBe(existingItem.id);
     });
   });
 
