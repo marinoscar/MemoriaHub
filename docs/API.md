@@ -1509,6 +1509,64 @@ Soft-delete a `MediaItem`. Sets `deletedAt`; does not remove the underlying `Sto
 
 ---
 
+#### GET /api/media/locations
+
+**Requires:** `media:read` permission
+
+Return all of the caller's geotagged, non-deleted media items as a flat array — no pagination. This endpoint is the data source for the `/map` clustered map view. Admins holding `media:read_any` see all users' items.
+
+Only items with non-null `takenLat` **and** `takenLng` are included. `thumbnailUrl` is a freshly-signed S3 URL generated at response time (the same `signThumb` helper used by `GET /api/media`).
+
+The route is registered before `GET /api/media/:id` in the controller so that the literal path segment `locations` is never treated as a UUID parameter.
+
+**Query Parameters** (all optional — same geo/date/type filters as `GET /api/media`):
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `type` | `"photo"` \| `"video"` | Filter by media type |
+| `capturedAtFrom` | ISO 8601 datetime | Lower bound on `capturedAt` |
+| `capturedAtTo` | ISO 8601 datetime | Upper bound on `capturedAt` |
+| `country` | string | Matches `geoCountry` (contains) or `geoCountryCode` (exact), case-insensitive |
+| `region` | string | Substring match on `geoAdmin1`, case-insensitive |
+| `locality` | string | Substring match on `geoLocality`, case-insensitive |
+| `place` | string | Substring match on `geoPlaceName`, case-insensitive |
+| `location` | string | Free-text search across all geo tiers |
+
+**Response:** Array of location objects.
+
+```json
+[
+  {
+    "id": "uuid",
+    "takenLat": 9.9281,
+    "takenLng": -84.0907,
+    "capturedAt": "2024-07-15T14:30:00.000Z",
+    "geoLocality": "San José",
+    "thumbnailUrl": "https://s3.amazonaws.com/..."
+  }
+]
+```
+
+**Response item fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | `MediaItem` identifier |
+| `takenLat` | number | GPS latitude (always non-null) |
+| `takenLng` | number | GPS longitude (always non-null) |
+| `capturedAt` | ISO 8601 datetime \| null | When the photo/video was taken |
+| `geoLocality` | string \| null | Reverse-geocoded city/locality name |
+| `thumbnailUrl` | string \| null | Fresh signed S3 URL for the thumbnail |
+
+**Error Cases:**
+- 401 Unauthorized — missing or expired JWT
+- 403 Forbidden — caller lacks `media:read` permission
+
+**DTO source:** `apps/api/src/media/dto/media-locations-query.dto.ts`
+**Service method:** `MediaService.listLocations`
+
+---
+
 ### Health
 
 **Public endpoints** - Used for Kubernetes liveness/readiness probes.

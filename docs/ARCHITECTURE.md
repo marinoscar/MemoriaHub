@@ -970,6 +970,8 @@ Before OAuth authentication completes:
 | Auth Callback | `/auth/callback` | Public | - | Token handling |
 | Home | `/` | Required | Any | Dashboard |
 | User Settings | `/settings` | Required | Any | User preferences |
+| Media Library | `/media` | Required | Any | Browse and upload media |
+| Map | `/map` | Required | Any | Clustered map of geotagged media |
 | System Settings | `/admin/settings` | Required | Admin | App configuration |
 | User Management | `/admin/users` | Required | Admin | User/allowlist mgmt |
 | Device Activation | `/device` | Required | Any | Device auth approval |
@@ -1018,6 +1020,46 @@ interface AuthContext {
   </ProtectedRoute>
 } />
 ```
+
+### 9.5 Media Viewing
+
+The media library ships three specialised viewing components beyond the basic thumbnail grid.
+
+#### Video player (`apps/web/src/components/media/VideoPlayer.tsx`)
+
+Built on [Vidstack](https://www.vidstack.io/) (`@vidstack/react`) using `DefaultVideoLayout`. Key capabilities:
+
+- Full playback controls: play/pause, scrubber, elapsed/remaining time, volume, fullscreen, Picture-in-Picture.
+- Playback-speed menu (0.25× – 2×) provided by `DefaultVideoLayout` out of the box.
+- Double-tap seek gestures (YouTube-mobile style): left half of the player = −10 s, right half = +10 s. Implemented via Vidstack `<Gesture event="dblpointerup" action="seek:±10" />` declarative descriptors.
+- 16:9 aspect-ratio wrapper so the player scales to the containing column width.
+- Video source is the signed S3 `downloadUrl` returned by `GET /api/media/:id`; the URL supports HTTP range requests, enabling seeking without buffering the entire file.
+
+The player is rendered inside `MediaDetailDrawer` for items of type `"video"`. The drawer fetches the full item via `getMedia(id)` before opening so that `downloadUrl` is available.
+
+#### Location mini-map (`apps/web/src/components/media/LocationMiniMap.tsx`)
+
+A compact Leaflet map pinning a single GPS coordinate. Rendered in the Location section of `MediaDetailDrawer` when `takenLat` and `takenLng` are non-null. Characteristics:
+
+- Fixed 200 px height, full container width, 8 px border-radius.
+- Scroll-wheel zoom disabled to avoid hijacking page scroll inside the drawer.
+- Zoom level 13 (neighbourhood level) centred on the coordinate.
+- Tile source: OpenStreetMap (`https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png`). The OSM copyright attribution is rendered inside the map as required by the [OpenStreetMap tile usage policy](https://operations.osmfoundation.org/policies/tiles/). No API key or third-party map provider is needed.
+- An optional label string is shown in a Leaflet `Popup` attached to the marker.
+
+#### Clustered map page (`apps/web/src/pages/MediaMapPage/MediaMapPage.tsx`)
+
+The `/map` route renders a full-viewport Leaflet map of all the caller's geotagged media.
+
+| Aspect | Detail |
+|--------|--------|
+| Data source | `GET /api/media/locations` — single unbounded request; all geotagged items loaded once on mount |
+| Tile source | OpenStreetMap (same tiles as the mini-map; OSM attribution displayed) |
+| Clustering | `leaflet.markercluster` via the custom `MarkerClusterGroup` wrapper (`apps/web/src/components/map/MarkerClusterGroup.tsx`). The wrapper manages the cluster group imperatively via `useMap()` and uses a `WeakMap` to associate each `L.Marker` with its media ID without attaching non-standard properties to Leaflet objects. |
+| Cluster click | Emits the collected media IDs → opens a right-side `Drawer` ("album panel") showing a thumbnail grid of the items at that location. |
+| Single-marker click | Calls `getMedia(id)` to obtain the full item (including `downloadUrl`) then opens `MediaDetailDrawer` — the same drawer used in the library view. |
+| Fit-bounds | After locations load the map auto-fits to the bounding box of all points (single point: zoom 13; multiple: `fitBounds` with 40 px padding). |
+| Empty state | When the user has no geotagged media a centred empty-state message is shown over the map. |
 
 ---
 
