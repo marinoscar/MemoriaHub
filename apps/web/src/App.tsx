@@ -19,6 +19,7 @@ const UserSettingsPage = lazy(() => import('./pages/UserSettingsPage'));
 const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage'));
 const UserManagementPage = lazy(() => import('./pages/UserManagementPage'));
 const MediaLibraryPage = lazy(() => import('./pages/MediaLibrary'));
+const MediaMapPage = lazy(() => import('./pages/MediaMapPage'));
 
 // Test login page (development only)
 const TestLoginPage = import.meta.env.PROD
@@ -52,6 +53,7 @@ function AppRoutes() {
                 <Route path="/" element={<HomePage />} />
                 <Route path="/settings" element={<UserSettingsPage />} />
                 <Route path="/media" element={<MediaLibraryPage />} />
+                <Route path="/map" element={<MediaMapPage />} />
                 <Route path="/admin/users" element={<UserManagementPage />} />
                 <Route path="/admin/settings" element={<SystemSettingsPage />} />
               </Route>

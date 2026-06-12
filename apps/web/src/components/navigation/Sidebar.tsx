@@ -17,6 +17,7 @@ import {
   AdminPanelSettings as AdminIcon,
   People as PeopleIcon,
   PhotoLibrary as PhotoLibraryIcon,
+  Map as MapIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -45,6 +46,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       label: 'Media Library',
       icon: <PhotoLibraryIcon />,
       path: '/media',
+      visible: true,
+    },
+    {
+      label: 'Map',
+      icon: <MapIcon />,
+      path: '/map',
       visible: true,
     },
     {
