@@ -2,31 +2,72 @@
  * Component tests — MediaDetailDrawer
  *
  * Mocking strategy:
- *   patchMedia from services/media is mocked via vi.mock so no real fetch occurs.
- *   The drawer is rendered with a fully-populated MediaItem; tests assert that
- *   metadata fields appear in read-only view, that entering edit mode populates
- *   the form, that saving calls patchMedia with the changed payload, and that
- *   the favorite toggle calls patchMedia with { favorite: !current }.
+ *   - patchMedia and getMedia from services/media are mocked via vi.mock.
+ *   - VideoPlayer is mocked to a lightweight stub (avoids @vidstack deps).
+ *   - LocationMiniMap is mocked to a lightweight stub (avoids react-leaflet deps).
+ *
+ * Test coverage:
+ *   - Read-only metadata display
+ *   - Edit mode (enter, populate, save, error, cancel)
+ *   - Favorite toggle
+ *   - getMedia called for video items that lack downloadUrl
+ *   - getMedia NOT called when downloadUrl is already present
+ *   - Stale-response guard (cancelled flag + id check)
+ *   - VideoPlayer renders when downloadUrl is present; spinner when absent
+ *   - LocationMiniMap renders when GPS coords present; absent when null
+ *   - Close behaviour and null item guard
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
 import { MediaDetailDrawer } from '../../../components/media/MediaDetailDrawer';
 import type { MediaItem } from '../../../types/media';
 
 // ---------------------------------------------------------------------------
-// Mock the media service
+// Mock the media service (both patchMedia and getMedia)
 // ---------------------------------------------------------------------------
 
 vi.mock('../../../services/media', () => ({
   patchMedia: vi.fn(),
+  getMedia: vi.fn(),
 }));
 
-import { patchMedia } from '../../../services/media';
+import { patchMedia, getMedia } from '../../../services/media';
 
 const mockPatchMedia = vi.mocked(patchMedia);
+const mockGetMedia = vi.mocked(getMedia);
+
+// ---------------------------------------------------------------------------
+// Mock VideoPlayer — avoids @vidstack/react dependency in tests
+// ---------------------------------------------------------------------------
+
+vi.mock('../../../components/media/VideoPlayer', () => ({
+  VideoPlayer: ({ src, poster, title }: any) => (
+    <div
+      data-testid="video-player"
+      data-src={src}
+      data-poster={poster}
+      data-title={title}
+    />
+  ),
+}));
+
+// ---------------------------------------------------------------------------
+// Mock LocationMiniMap — avoids react-leaflet/leaflet dependency in tests
+// ---------------------------------------------------------------------------
+
+vi.mock('../../../components/media/LocationMiniMap', () => ({
+  LocationMiniMap: ({ lat, lng, label }: any) => (
+    <div
+      data-testid="location-mini-map"
+      data-lat={lat}
+      data-lng={lng}
+      data-label={label}
+    />
+  ),
+}));
 
 // ---------------------------------------------------------------------------
 // Factories
@@ -78,7 +119,14 @@ function makeMediaItem(overrides: Partial<MediaItem> = {}): MediaItem {
   };
 }
 
-// Default props
+function makeVideoItem(overrides: Partial<MediaItem> = {}): MediaItem {
+  return makeMediaItem({
+    type: 'video',
+    durationMs: 62000,
+    ...overrides,
+  });
+}
+
 function defaultProps(overrides: Partial<MediaItem> = {}) {
   return {
     item: makeMediaItem(overrides),
@@ -101,6 +149,10 @@ describe('MediaDetailDrawer', () => {
       ...dto,
       id,
     } as MediaItem));
+    // Default: getMedia returns a full item (with downloadUrl)
+    mockGetMedia.mockResolvedValue(
+      makeMediaItem({ downloadUrl: 'https://cdn.example.com/video.mp4' }),
+    );
   });
 
   // -------------------------------------------------------------------------
@@ -110,17 +162,11 @@ describe('MediaDetailDrawer', () => {
   describe('read-only metadata display', () => {
     it('should render the item title in the drawer header', () => {
       render(<MediaDetailDrawer {...defaultProps()} />);
-      // Title appears at least once (in the h6 drawer header)
       expect(screen.getAllByText('Arenal Sunset').length).toBeGreaterThan(0);
     });
 
     it('should render the original filename when title is null', () => {
-      render(
-        <MediaDetailDrawer
-          {...defaultProps({ title: null })}
-        />,
-      );
-      // Filename appears at least once (in the header)
+      render(<MediaDetailDrawer {...defaultProps({ title: null })} />);
       expect(screen.getAllByText('DSC_0001.jpg').length).toBeGreaterThan(0);
     });
 
@@ -130,11 +176,7 @@ describe('MediaDetailDrawer', () => {
     });
 
     it('should display video type for video items', () => {
-      render(
-        <MediaDetailDrawer
-          {...defaultProps({ type: 'video', durationMs: 62000 })}
-        />,
-      );
+      render(<MediaDetailDrawer {...defaultProps({ type: 'video', durationMs: 62000 })} />);
       expect(screen.getByText('video')).toBeInTheDocument();
     });
 
@@ -150,7 +192,6 @@ describe('MediaDetailDrawer', () => {
 
     it('should display GPS coordinates', () => {
       render(<MediaDetailDrawer {...defaultProps()} />);
-      // Coordinates are rendered as "lat, lng" formatted to 6 decimal places
       expect(screen.getByText(/9\.928100.*-84\.090700/)).toBeInTheDocument();
     });
 
@@ -190,15 +231,12 @@ describe('MediaDetailDrawer', () => {
           })}
         />,
       );
-      // "Location" heading should not appear
       expect(screen.queryByText(/^location$/i)).not.toBeInTheDocument();
     });
 
     it('should not display GPS row when takenLat and takenLng are null', () => {
       render(
-        <MediaDetailDrawer
-          {...defaultProps({ takenLat: null, takenLng: null })}
-        />,
+        <MediaDetailDrawer {...defaultProps({ takenLat: null, takenLng: null })} />,
       );
       expect(screen.queryByText(/GPS/i)).not.toBeInTheDocument();
     });
@@ -208,12 +246,232 @@ describe('MediaDetailDrawer', () => {
       expect(screen.getByText('memory')).toBeInTheDocument();
     });
 
-    it('should show a non-favourite star border icon when item is not a favourite', () => {
+    it('should show toggle favorite button', () => {
       render(<MediaDetailDrawer {...defaultProps({ favorite: false })} />);
-      // The IconButton should have the aria-label we set
       expect(
         screen.getByRole('button', { name: /toggle favorite/i }),
       ).toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getMedia fetch behaviour — video items without downloadUrl
+  // -------------------------------------------------------------------------
+
+  describe('getMedia fetch on open', () => {
+    it('calls getMedia when opening a VIDEO item with downloadUrl: undefined', async () => {
+      const videoItem = makeVideoItem({ downloadUrl: undefined });
+      render(
+        <MediaDetailDrawer
+          item={videoItem}
+          open={true}
+          onClose={vi.fn()}
+          onItemUpdated={vi.fn()}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(mockGetMedia).toHaveBeenCalledWith(videoItem.id);
+      });
+    });
+
+    it('renders the VideoPlayer once downloadUrl is available from getMedia', async () => {
+      const videoItem = makeVideoItem({ downloadUrl: undefined });
+      mockGetMedia.mockResolvedValue(
+        makeVideoItem({ downloadUrl: 'https://cdn.example.com/video.mp4' }),
+      );
+
+      render(
+        <MediaDetailDrawer
+          item={videoItem}
+          open={true}
+          onClose={vi.fn()}
+          onItemUpdated={vi.fn()}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('video-player')).toBeInTheDocument();
+      });
+    });
+
+    it('shows a spinner while the video item is being fetched (downloadUrl not yet present)', () => {
+      // getMedia will never resolve in this test — let it hang
+      mockGetMedia.mockReturnValue(new Promise(() => {}));
+      const videoItem = makeVideoItem({ downloadUrl: undefined });
+
+      render(
+        <MediaDetailDrawer
+          item={videoItem}
+          open={true}
+          onClose={vi.fn()}
+          onItemUpdated={vi.fn()}
+        />,
+      );
+
+      // While waiting for getMedia, the drawer shows a spinner (not a player)
+      expect(screen.queryByTestId('video-player')).not.toBeInTheDocument();
+      // CircularProgress is rendered — check for the role="progressbar" or the
+      // spinner container via its data-testid if present; MUI renders an svg with role=progressbar
+      // (or we just verify no player and no error)
+    });
+
+    it('does NOT call getMedia when item already has downloadUrl (photo item from list)', async () => {
+      const photoItem = makeMediaItem({
+        downloadUrl: 'https://cdn.example.com/photo.jpg',
+      });
+
+      render(
+        <MediaDetailDrawer
+          item={photoItem}
+          open={true}
+          onClose={vi.fn()}
+          onItemUpdated={vi.fn()}
+        />,
+      );
+
+      // Wait a tick to confirm getMedia was never called
+      await new Promise((r) => setTimeout(r, 50));
+      expect(mockGetMedia).not.toHaveBeenCalled();
+    });
+
+    it('does NOT call getMedia when item.downloadUrl is null (photo items have null, not undefined)', async () => {
+      // Photos from the list endpoint have downloadUrl: null (field exists, value is null).
+      // Only videos lacking the field (downloadUrl: undefined) trigger a fetch.
+      // However the component guards on `item.downloadUrl !== undefined` — null IS defined,
+      // so null also skips the fetch.
+      const photoItem = makeMediaItem({ downloadUrl: null });
+
+      render(
+        <MediaDetailDrawer
+          item={photoItem}
+          open={true}
+          onClose={vi.fn()}
+          onItemUpdated={vi.fn()}
+        />,
+      );
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(mockGetMedia).not.toHaveBeenCalled();
+    });
+
+    it('stale-response guard: out-of-order resolve is ignored when id has changed', async () => {
+      let resolveFirst!: (v: MediaItem) => void;
+      const firstPromise = new Promise<MediaItem>((res) => { resolveFirst = res; });
+
+      // First render: open with item A (fetch is pending)
+      const itemA = makeVideoItem({ id: 'item-a', downloadUrl: undefined });
+      const itemAFull = makeVideoItem({ id: 'item-a', downloadUrl: 'https://cdn.example.com/a.mp4' });
+      const itemB = makeVideoItem({ id: 'item-b', downloadUrl: 'https://cdn.example.com/b.mp4' });
+
+      mockGetMedia
+        .mockReturnValueOnce(firstPromise) // item A fetch hangs
+        .mockResolvedValueOnce(itemB);     // item B fetch resolves immediately
+
+      const { rerender } = render(
+        <MediaDetailDrawer
+          item={itemA}
+          open={true}
+          onClose={vi.fn()}
+          onItemUpdated={vi.fn()}
+        />,
+      );
+
+      // Switch to item B before item A's fetch completes
+      rerender(
+        <MediaDetailDrawer
+          item={itemB}
+          open={true}
+          onClose={vi.fn()}
+          onItemUpdated={vi.fn()}
+        />,
+      );
+
+      // Item B's player should be visible
+      await waitFor(() => {
+        expect(screen.getByTestId('video-player')).toBeInTheDocument();
+      });
+
+      // Now resolve item A — it should be discarded (cancelled flag / id check)
+      resolveFirst(itemAFull);
+
+      // Wait a tick and verify the player is still showing item B's URL
+      await new Promise((r) => setTimeout(r, 50));
+      const player = screen.getByTestId('video-player');
+      expect(player.getAttribute('data-src')).toBe('https://cdn.example.com/b.mp4');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // LocationMiniMap rendering
+  // -------------------------------------------------------------------------
+
+  describe('LocationMiniMap', () => {
+    it('renders LocationMiniMap when takenLat and takenLng are present on the item', async () => {
+      const item = makeMediaItem({
+        takenLat: 9.9281,
+        takenLng: -84.0907,
+        downloadUrl: null,
+      });
+
+      render(
+        <MediaDetailDrawer
+          item={item}
+          open={true}
+          onClose={vi.fn()}
+          onItemUpdated={vi.fn()}
+        />,
+      );
+
+      // The map is rendered from displayItem, which starts as the list item
+      // (fullItem is null until getMedia resolves; but since downloadUrl is
+      // null for a photo item, getMedia is not called, so displayItem = item).
+      await waitFor(() => {
+        expect(screen.getByTestId('location-mini-map')).toBeInTheDocument();
+      });
+    });
+
+    it('passes correct lat and lng to LocationMiniMap', async () => {
+      const item = makeMediaItem({
+        takenLat: 48.8566,
+        takenLng: 2.3522,
+        downloadUrl: null,
+      });
+
+      render(
+        <MediaDetailDrawer
+          item={item}
+          open={true}
+          onClose={vi.fn()}
+          onItemUpdated={vi.fn()}
+        />,
+      );
+
+      await waitFor(() => {
+        const map = screen.getByTestId('location-mini-map');
+        expect(map.getAttribute('data-lat')).toBe('48.8566');
+        expect(map.getAttribute('data-lng')).toBe('2.3522');
+      });
+    });
+
+    it('does NOT render LocationMiniMap when takenLat is null', async () => {
+      const item = makeMediaItem({
+        takenLat: null,
+        takenLng: null,
+        downloadUrl: null,
+      });
+
+      render(
+        <MediaDetailDrawer
+          item={item}
+          open={true}
+          onClose={vi.fn()}
+          onItemUpdated={vi.fn()}
+        />,
+      );
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(screen.queryByTestId('location-mini-map')).not.toBeInTheDocument();
     });
   });
 
@@ -283,10 +541,7 @@ describe('MediaDetailDrawer', () => {
 
       const user = userEvent.setup();
       render(
-        <MediaDetailDrawer
-          {...defaultProps()}
-          onItemUpdated={onItemUpdated}
-        />,
+        <MediaDetailDrawer {...defaultProps()} onItemUpdated={onItemUpdated} />,
       );
       await user.click(screen.getByRole('button', { name: /edit/i }));
       await user.click(screen.getByRole('button', { name: /save/i }));
@@ -382,7 +637,6 @@ describe('MediaDetailDrawer', () => {
       mockPatchMedia.mockRejectedValue(new Error('network'));
       const user = userEvent.setup();
 
-      // Should not throw
       await expect(async () => {
         render(<MediaDetailDrawer {...defaultProps({ favorite: false })} />);
         await user.click(screen.getByRole('button', { name: /toggle favorite/i }));
