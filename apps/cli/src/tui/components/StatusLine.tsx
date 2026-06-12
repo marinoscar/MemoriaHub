@@ -13,6 +13,7 @@ interface StatusLineProps {
   folderCount: number;
   isDone: boolean;
   durationMs?: number;
+  title?: string;
 }
 
 export function StatusLine({
@@ -20,6 +21,7 @@ export function StatusLine({
   folderCount,
   isDone,
   durationMs,
+  title = 'Sync',
 }: StatusLineProps): React.ReactElement {
   const [elapsed, setElapsed] = useState(0);
 
@@ -38,7 +40,7 @@ export function StatusLine({
 
   return (
     <Box flexDirection="row" gap={2} paddingX={1}>
-      <Text bold color="cyan">MemoriaHub Sync</Text>
+      <Text bold color="cyan">MemoriaHub {title}</Text>
       <Text dimColor>│</Text>
       <Text dimColor>{serverUrl}</Text>
       <Text dimColor>│</Text>

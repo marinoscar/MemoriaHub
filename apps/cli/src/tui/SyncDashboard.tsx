@@ -46,6 +46,8 @@ export interface SyncDashboardProps {
   db: BetterSqlite3.Database;
   all?: boolean;
   folderIds?: number[];
+  /** When true, engine is invoked with retryFailedOnly=true and trigger='retry'. */
+  retryFailedOnly?: boolean;
   onHome: () => void;
   /**
    * Optional pre-built engine instance for tests.
@@ -84,6 +86,7 @@ export function SyncDashboard({
   db,
   all,
   folderIds,
+  retryFailedOnly,
   onHome,
   _engineForTesting,
 }: SyncDashboardProps): React.ReactElement {
@@ -256,9 +259,10 @@ export function SyncDashboard({
     // (Test engines have their run() called externally.)
     if (!_engineForTesting) {
       engine.run({
-        trigger: 'menu',
+        trigger: retryFailedOnly ? 'retry' : 'menu',
         all: all ?? false,
         folderIds: folderIds ?? [],
+        retryFailedOnly: retryFailedOnly ?? false,
       }).catch(() => {
         // Fatal errors emitted via EV.ERROR already
       });
@@ -308,6 +312,8 @@ export function SyncDashboard({
     ? (new FolderRepo(db).list({ enabledOnly: true }).length)
     : (folderIds?.length ?? 0);
 
+  const dashboardTitle = retryFailedOnly ? 'Retry' : 'Sync';
+
   return (
     <Box flexDirection="column" gap={1}>
       {/* Header */}
@@ -317,6 +323,7 @@ export function SyncDashboard({
           folderCount={folderCount}
           isDone={isDone}
           durationMs={durationMs}
+          title={dashboardTitle}
         />
       </Box>
 

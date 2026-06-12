@@ -34,7 +34,7 @@ type Screen =
   | { kind: 'login' }
   | { kind: 'folders' }
   | { kind: 'pickFolders' }
-  | { kind: 'dashboard'; all?: boolean; folderIds?: number[] }
+  | { kind: 'dashboard'; all?: boolean; folderIds?: number[]; retryFailedOnly?: boolean }
   | { kind: 'help' }
   | { kind: 'status' }
   | { kind: 'settings' };
@@ -118,8 +118,7 @@ function App(): React.ReactElement {
         setScreen({ kind: 'pickFolders' });
         break;
       case 'retry':
-        // Retry: run dashboard in all mode; engine handles retryFailedOnly logic
-        setScreen({ kind: 'dashboard', all: true });
+        setScreen({ kind: 'dashboard', all: true, retryFailedOnly: true });
         break;
       case 'status':
         setScreen({ kind: 'status' });
@@ -210,6 +209,7 @@ function App(): React.ReactElement {
           db={db}
           all={screen.all}
           folderIds={screen.folderIds}
+          retryFailedOnly={screen.retryFailedOnly}
           onHome={() => setScreen({ kind: 'home' })}
         />
       );

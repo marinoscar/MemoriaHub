@@ -12,10 +12,12 @@
  * setTimeout so React can flush state updates before asserting.
  */
 
+import { jest } from '@jest/globals';
 import React from 'react';
 import { render, cleanup } from 'ink-testing-library';
 import { TypedEmitter, EV } from '../../src/sync/events.js';
 import { SyncDashboard } from '../../src/tui/SyncDashboard.js';
+import { SyncEngine } from '../../src/sync/sync-engine.js';
 import { openDb } from '../../src/db/database.js';
 import type { SyncOptions, SyncRunResult, SyncEngine as SyncEngineType } from '../../src/sync/sync-engine.js';
 import type BetterSqlite3 from 'better-sqlite3';
@@ -265,5 +267,77 @@ describe('SyncDashboard', () => {
 
     const plain = stripAnsi(lastFrame()!);
     expect(plain).toContain('broken.jpg');
+  });
+
+  // -------------------------------------------------------------------------
+  // retryFailedOnly prop wires correct run options
+  // -------------------------------------------------------------------------
+
+  describe('retryFailedOnly prop', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let runSpy: ReturnType<typeof jest.spyOn<any, any>>;
+
+    beforeEach(() => {
+      // Spy on SyncEngine.prototype.run so we can capture options without
+      // a real DB, network, or file system.  The spy immediately emits
+      // EV.RUN_DONE so the dashboard reaches a terminal state cleanly.
+      runSpy = jest
+        .spyOn(SyncEngine.prototype, 'run')
+        .mockImplementation(async function (this: SyncEngine, _opts: SyncOptions) {
+          this.emit(EV.RUN_DONE, {
+            runId: 1,
+            stats: { uploaded: 0, skipped: 0, failed: 0 },
+            durationMs: 0,
+          });
+          return { runId: 1, stats: { uploaded: 0, skipped: 0, failed: 0 }, durationMs: 0 };
+        });
+    });
+
+    afterEach(() => {
+      runSpy.mockRestore();
+    });
+
+    it('calls engine.run with retryFailedOnly=true and trigger="retry" when retryFailedOnly prop is set', async () => {
+      render(
+        <SyncDashboard
+          config={FAKE_CONFIG}
+          db={db}
+          all={true}
+          retryFailedOnly={true}
+          onHome={() => {}}
+        />,
+      );
+
+      await flushAsync(200);
+
+      expect(runSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          retryFailedOnly: true,
+          trigger: 'retry',
+          all: true,
+        }),
+      );
+    });
+
+    it('calls engine.run with retryFailedOnly=false and trigger="menu" when retryFailedOnly prop is absent', async () => {
+      render(
+        <SyncDashboard
+          config={FAKE_CONFIG}
+          db={db}
+          all={true}
+          onHome={() => {}}
+        />,
+      );
+
+      await flushAsync(200);
+
+      expect(runSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          retryFailedOnly: false,
+          trigger: 'menu',
+          all: true,
+        }),
+      );
+    });
   });
 });
