@@ -88,8 +88,10 @@ describe('Sidebar', () => {
 
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
-      // Non-admin users should see Home and User Settings (use container to bypass aria-hidden)
+      // Non-admin users should see Home, Media Library, Map, and User Settings
       expect(container.textContent).toContain('Home');
+      expect(container.textContent).toContain('Media Library');
+      expect(container.textContent).toContain('Map');
       expect(container.textContent).toContain('User Settings');
     });
 
@@ -130,6 +132,8 @@ describe('Sidebar', () => {
 
       // All menu items should be visible
       expect(container.textContent).toContain('Home');
+      expect(container.textContent).toContain('Media Library');
+      expect(container.textContent).toContain('Map');
       expect(container.textContent).toContain('User Settings');
       expect(container.textContent).toContain('User Management');
       expect(container.textContent).toContain('System Settings');
@@ -192,8 +196,9 @@ describe('Sidebar', () => {
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
       // Only items with visible: true should be rendered
+      // Non-admin: Home, Media Library, Map, User Settings
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(menuButtons).toHaveLength(2); // Home and User Settings
+      expect(menuButtons).toHaveLength(4);
     });
 
     it('should show all menu items when user is admin', () => {
@@ -212,8 +217,9 @@ describe('Sidebar', () => {
         wrapperOptions: { user: mockAdminUser },
       });
 
+      // Admin: Home, Media Library, Map, User Settings, User Management, System Settings
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(menuButtons).toHaveLength(4); // All menu items visible
+      expect(menuButtons).toHaveLength(6);
     });
 
     it('should dynamically update menu items when isAdmin changes', () => {
@@ -277,7 +283,7 @@ describe('Sidebar', () => {
       const { container } = render(<Sidebar open={true} onClose={trackingOnClose} />);
 
       const buttons = container.querySelectorAll('.MuiListItemButton-root');
-      const settingsButton = buttons[1]; // User Settings is second button
+      const settingsButton = buttons[3]; // User Settings is fourth button (index 3)
       await user.click(settingsButton);
 
       // onClose should be called immediately (synchronously)
@@ -334,11 +340,61 @@ describe('Sidebar', () => {
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
       const buttons = container.querySelectorAll('.MuiListItemButton-root');
-      const settingsButton = buttons[1]; // User Settings is second button
+      const settingsButton = buttons[3]; // User Settings is fourth button (index 3)
       await user.click(settingsButton);
 
       await waitFor(() => {
         expect(mockNavigate).toHaveBeenCalledWith('/settings');
+      });
+    });
+
+    it('should navigate to /media when Media Library is clicked', async () => {
+      const user = userEvent.setup();
+
+      vi.mocked(usePermissions).mockReturnValue({
+        permissions: new Set(),
+        roles: new Set(),
+        hasPermission: vi.fn(),
+        hasAnyPermission: vi.fn(),
+        hasAllPermissions: vi.fn(),
+        hasRole: vi.fn(),
+        hasAnyRole: vi.fn(),
+        isAdmin: false,
+      });
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      const buttons = container.querySelectorAll('.MuiListItemButton-root');
+      const mediaButton = buttons[1]; // Media Library is second button (index 1)
+      await user.click(mediaButton);
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/media');
+      });
+    });
+
+    it('should navigate to /map when Map is clicked', async () => {
+      const user = userEvent.setup();
+
+      vi.mocked(usePermissions).mockReturnValue({
+        permissions: new Set(),
+        roles: new Set(),
+        hasPermission: vi.fn(),
+        hasAnyPermission: vi.fn(),
+        hasAllPermissions: vi.fn(),
+        hasRole: vi.fn(),
+        hasAnyRole: vi.fn(),
+        isAdmin: false,
+      });
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      const buttons = container.querySelectorAll('.MuiListItemButton-root');
+      const mapButton = buttons[2]; // Map is third button (index 2)
+      await user.click(mapButton);
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/map');
       });
     });
 
@@ -361,7 +417,7 @@ describe('Sidebar', () => {
       });
 
       const buttons = container.querySelectorAll('.MuiListItemButton-root');
-      const userMgmtButton = buttons[2]; // User Management is third button
+      const userMgmtButton = buttons[4]; // User Management is fifth button (index 4)
       await user.click(userMgmtButton);
 
       await waitFor(() => {
@@ -388,7 +444,7 @@ describe('Sidebar', () => {
       });
 
       const buttons = container.querySelectorAll('.MuiListItemButton-root');
-      const systemSettingsButton = buttons[3]; // System Settings is fourth button
+      const systemSettingsButton = buttons[5]; // System Settings is sixth button (index 5)
       await user.click(systemSettingsButton);
 
       await waitFor(() => {
@@ -415,7 +471,7 @@ describe('Sidebar', () => {
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
       const buttons = container.querySelectorAll('.MuiListItemButton-root');
-      const settingsButton = buttons[1]; // User Settings
+      const settingsButton = buttons[3]; // User Settings is fourth button (index 3)
       expect(settingsButton.classList.contains('Mui-selected')).toBe(true);
     });
 
@@ -436,7 +492,7 @@ describe('Sidebar', () => {
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
       const buttons = container.querySelectorAll('.MuiListItemButton-root');
-      const settingsButton = buttons[1]; // User Settings
+      const settingsButton = buttons[3]; // User Settings is fourth button (index 3)
       expect(settingsButton.classList.contains('Mui-selected')).toBe(false);
     });
 
@@ -459,7 +515,7 @@ describe('Sidebar', () => {
       });
 
       const buttons = container.querySelectorAll('.MuiListItemButton-root');
-      const userMgmtButton = buttons[2]; // User Management
+      const userMgmtButton = buttons[4]; // User Management is fifth button (index 4)
       expect(userMgmtButton.classList.contains('Mui-selected')).toBe(true);
     });
   });
@@ -507,7 +563,7 @@ describe('Sidebar', () => {
 
       expect(mockOnClose).toHaveBeenCalledTimes(1);
 
-      const settingsButton = buttons[1];
+      const settingsButton = buttons[3]; // User Settings is fourth button (index 3)
       await user.click(settingsButton);
 
       expect(mockOnClose).toHaveBeenCalledTimes(2);
@@ -532,8 +588,9 @@ describe('Sidebar', () => {
       });
 
       // Each menu item should have an icon
+      // Admin sees: Home, Media Library, Map, User Settings, User Management, System Settings
       const icons = container.querySelectorAll('.MuiListItemIcon-root');
-      expect(icons).toHaveLength(4); // Home, User Settings, User Management, System Settings
+      expect(icons).toHaveLength(6);
     });
 
     it('should highlight icon for selected menu item', () => {
@@ -553,7 +610,7 @@ describe('Sidebar', () => {
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
       const buttons = container.querySelectorAll('.MuiListItemButton-root');
-      const settingsButton = buttons[1]; // User Settings
+      const settingsButton = buttons[3]; // User Settings is fourth button (index 3)
       const icon = settingsButton?.querySelector('.MuiListItemIcon-root');
 
       expect(icon).not.toBeNull();
@@ -598,6 +655,8 @@ describe('Sidebar', () => {
 
       // Verify text content for accessibility
       expect(container.textContent).toContain('Home');
+      expect(container.textContent).toContain('Media Library');
+      expect(container.textContent).toContain('Map');
       expect(container.textContent).toContain('User Settings');
     });
 
