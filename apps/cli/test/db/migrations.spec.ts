@@ -29,10 +29,10 @@ function openRaw(): BetterSqlite3.Database {
 // We do NOT override HOME here — we just use ':memory:' which bypasses the file path.
 
 describe('migrations — fresh :memory: database', () => {
-  it('reaches the latest user_version (1)', () => {
+  it('reaches the latest user_version (2)', () => {
     const db = openDb(':memory:');
     const version = db.pragma('user_version', { simple: true }) as number;
-    expect(version).toBe(1);
+    expect(version).toBe(2);
     db.close();
   });
 
@@ -123,17 +123,44 @@ describe('migrations — fresh :memory: database', () => {
     // Use raw DB so importLegacyManifests does not interfere with the settings count.
     const db = openRaw();
 
-    // Run again — should be a no-op (version already at 1, all seeds use INSERT OR IGNORE)
+    // Run again — should be a no-op (version already at 2, all seeds use INSERT OR IGNORE)
     runMigrations(db);
 
     const version = db.pragma('user_version', { simple: true }) as number;
-    expect(version).toBe(1);
+    expect(version).toBe(2);
 
     const count = (
       db.prepare('SELECT COUNT(*) as cnt FROM settings').get() as { cnt: number }
     ).cnt;
     // Exactly the 3 seed rows — no duplicates
     expect(count).toBe(3);
+
+    db.close();
+  });
+
+  it('migration 2 adds the mtime_ms column to the files table', () => {
+    const db = openDb(':memory:');
+    const cols = (
+      db.prepare("PRAGMA table_info('files')").all() as Array<{ name: string; type: string; notnull: number }>
+    );
+    const mtimeCol = cols.find((c) => c.name === 'mtime_ms');
+    expect(mtimeCol).toBeDefined();
+    // Column must be nullable (notnull=0) and INTEGER type
+    expect(mtimeCol!.type).toBe('INTEGER');
+    expect(mtimeCol!.notnull).toBe(0);
+    db.close();
+  });
+
+  it('migration 2 is idempotent — re-running on an already-migrated db is a no-op', () => {
+    const db = openRaw();
+    // openRaw() already runs all migrations including v2
+    const versionBefore = db.pragma('user_version', { simple: true }) as number;
+    expect(versionBefore).toBe(2);
+
+    // Re-running must not throw and must not change version
+    runMigrations(db);
+    const versionAfter = db.pragma('user_version', { simple: true }) as number;
+    expect(versionAfter).toBe(2);
 
     db.close();
   });

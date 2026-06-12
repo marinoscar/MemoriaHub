@@ -722,4 +722,213 @@ describe('SyncEngine', () => {
       expect(errorMsg).not.toBeNull();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // contentHash in register body
+  // -------------------------------------------------------------------------
+
+  describe('contentHash sent to server on registration', () => {
+    it('includes contentHash in the POST /api/media body', async () => {
+      writeTmpJpeg(tmpDir, 'hash-reg.jpg');
+
+      const postFn = mockResolving({ id: 'media-hash-reg' });
+      const ctx = makeEngine(
+        db,
+        {
+          get: mockResolving({ items: [] }),
+          post: postFn,
+        },
+        makeUploadFn('obj-hash-reg'),
+        makeHashFn('aabbccddeeff0011aabbccddeeff0011aabbccddeeff0011aabbccddeeff0011'),
+      );
+
+      const folder = ctx.folders.add({ path: tmpDir });
+      await ctx.engine.run({ trigger: 'cli', folderIds: [folder.id] });
+
+      expect(postFn).toHaveBeenCalledTimes(1);
+      const callArgs = postFn.mock.calls[0] as [string, Record<string, unknown>];
+      expect(callArgs[0]).toBe('/api/media');
+      expect(callArgs[1]).toMatchObject({
+        contentHash: 'aabbccddeeff0011aabbccddeeff0011aabbccddeeff0011aabbccddeeff0011',
+      });
+    });
+
+    it('sets status=skipped (reason=dedup) when register returns deduplicated:true', async () => {
+      writeTmpJpeg(tmpDir, 'server-dedup.jpg');
+
+      const postFn = mockResolving({ id: 'media-server-dedup', deduplicated: true });
+      const ctx = makeEngine(
+        db,
+        {
+          get: mockResolving({ items: [] }), // pre-check returns empty (no hit)
+          post: postFn,
+        },
+        makeUploadFn('obj-server-dedup'),
+        makeHashFn('deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef'),
+      );
+
+      const folder = ctx.folders.add({ path: tmpDir });
+
+      const skippedEvents: FileSkippedPayload[] = [];
+      const doneEvents: FileDonePayload[] = [];
+      ctx.engine.on(EV.FILE_SKIPPED, (p) => skippedEvents.push(p));
+      ctx.engine.on(EV.FILE_DONE, (p) => doneEvents.push(p));
+
+      await ctx.engine.run({ trigger: 'cli', folderIds: [folder.id] });
+
+      // Should emit file:skipped with reason=dedup, not file:done
+      expect(skippedEvents).toHaveLength(1);
+      expect(skippedEvents[0].reason).toBe('dedup');
+      expect(doneEvents).toHaveLength(0);
+
+      // DB record must reflect skipped, not uploaded
+      const rec = ctx.files.listByFolder(folder.id)[0];
+      expect(rec.status).toBe('skipped');
+      expect(rec.media_item_id).toBe('media-server-dedup');
+    });
+
+    it('sets status=uploaded when register returns deduplicated:false (normal path)', async () => {
+      writeTmpJpeg(tmpDir, 'normal-reg.jpg');
+
+      const postFn = mockResolving({ id: 'media-normal', deduplicated: false });
+      const ctx = makeEngine(
+        db,
+        {
+          get: mockResolving({ items: [] }),
+          post: postFn,
+        },
+        makeUploadFn('obj-normal'),
+      );
+
+      const folder = ctx.folders.add({ path: tmpDir });
+
+      const doneEvents: FileDonePayload[] = [];
+      ctx.engine.on(EV.FILE_DONE, (p) => doneEvents.push(p));
+
+      await ctx.engine.run({ trigger: 'cli', folderIds: [folder.id] });
+
+      expect(doneEvents).toHaveLength(1);
+      const rec = ctx.files.listByFolder(folder.id)[0];
+      expect(rec.status).toBe('uploaded');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // mtime hash cache — avoid re-hashing unchanged files across runs
+  // -------------------------------------------------------------------------
+
+  describe('mtime hash cache', () => {
+    it('does NOT call hashFn when size+mtime match stored sha256', async () => {
+      writeTmpJpeg(tmpDir, 'cached.jpg');
+
+      // First run: hash is computed and persisted
+      const hash1 = makeHashFn('cafecafe' + 'cafecafe'.repeat(7));
+      const ctx1 = makeEngine(
+        db,
+        {
+          get: mockResolving({ items: [] }),
+          post: mockResolving({ id: 'media-cached' }),
+        },
+        makeUploadFn('obj-cached'),
+        hash1,
+      );
+      const folder = ctx1.folders.add({ path: tmpDir });
+      await ctx1.engine.run({ trigger: 'cli', folderIds: [folder.id] });
+
+      // After first run: sha256 and mtime_ms must be stored
+      const recAfterFirstRun = ctx1.files.listByFolder(folder.id)[0];
+      expect(recAfterFirstRun.sha256).not.toBeNull();
+      expect(recAfterFirstRun.mtime_ms).not.toBeNull();
+      expect(hash1).toHaveBeenCalledTimes(1);
+
+      // Mark the file as queued again (simulating a retry scenario) so the engine will
+      // process it, but keep sha256 and mtime_ms intact.
+      ctx1.files.setStatus(recAfterFirstRun.id, 'queued');
+
+      // Second run with a fresh hash mock — should NOT be called because cache hits
+      const hash2 = makeHashFn('cafecafe' + 'cafecafe'.repeat(7));
+      const ctx2 = makeEngine(
+        db,
+        {
+          get: mockResolving({ items: [] }),
+          post: mockResolving({ id: 'media-cached2' }),
+        },
+        makeUploadFn('obj-cached2'),
+        hash2,
+      );
+
+      await ctx2.engine.run({ trigger: 'cli', folderIds: [folder.id] });
+
+      // hashFn must NOT have been called because size+mtime match
+      expect(hash2).not.toHaveBeenCalled();
+    });
+
+    it('calls hashFn when mtime differs from stored value (file was modified)', async () => {
+      const filePath = writeTmpJpeg(tmpDir, 'modified.jpg');
+
+      // Seed the file record with a stale mtime_ms (different from the actual file)
+      const ctx1 = makeEngine(db, {
+        get: mockResolving({ items: [] }),
+        post: mockResolving({ id: 'media-mod' }),
+      }, makeUploadFn('obj-mod'));
+
+      const folder = ctx1.folders.add({ path: tmpDir });
+
+      // Pre-seed with a very old mtime to simulate a changed file
+      const rec = ctx1.files.upsert(folder.id, filePath, {
+        sha256: 'oldhash' + '0'.repeat(57),
+        size_bytes: fs.statSync(filePath).size,
+        mtime_ms: 1000, // deliberately stale mtime
+        status: 'queued',
+      });
+
+      // Now run — mtime won't match so hashFn must be called
+      const hash = makeHashFn('newhash' + '0'.repeat(57));
+      const ctx2 = makeEngine(
+        db,
+        {
+          get: mockResolving({ items: [] }),
+          post: mockResolving({ id: 'media-mod2' }),
+        },
+        makeUploadFn('obj-mod2'),
+        hash,
+      );
+
+      await ctx2.engine.run({ trigger: 'cli', folderIds: [folder.id] });
+
+      // hashFn must have been called since mtime didn't match
+      expect(hash).toHaveBeenCalledTimes(1);
+
+      // Updated mtime_ms must be persisted after the run
+      const recAfter = ctx2.files.getByFolderAndPath(folder.id, filePath);
+      expect(recAfter!.mtime_ms).not.toBe(1000);
+      expect(recAfter!.sha256).toBe('newhash' + '0'.repeat(57));
+
+      // Suppress unused variable warning
+      void rec;
+    });
+
+    it('stores mtime_ms alongside sha256 after computing hash on first run', async () => {
+      writeTmpJpeg(tmpDir, 'store-mtime.jpg');
+
+      const ctx = makeEngine(
+        db,
+        {
+          get: mockResolving({ items: [] }),
+          post: mockResolving({ id: 'media-mt' }),
+        },
+        makeUploadFn('obj-mt'),
+        makeHashFn('ffffffff' + 'ffffffff'.repeat(7)),
+      );
+
+      const folder = ctx.folders.add({ path: tmpDir });
+      await ctx.engine.run({ trigger: 'cli', folderIds: [folder.id] });
+
+      const rec = ctx.files.listByFolder(folder.id)[0];
+      // Both sha256 and mtime_ms must be stored after a successful upload
+      expect(rec.sha256).toBe('ffffffff' + 'ffffffff'.repeat(7));
+      expect(typeof rec.mtime_ms).toBe('number');
+      expect(rec.mtime_ms).toBeGreaterThan(0);
+    });
+  });
 });
