@@ -1282,4 +1282,236 @@ describe('MediaService', () => {
       ).rejects.toThrow(ForbiddenException);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // listLocations — where-clause assertions, shape, and URL signing
+  // -------------------------------------------------------------------------
+
+  describe('listLocations', () => {
+    // Default (empty) query for listLocations — all fields optional.
+    const emptyLocQuery = {} as any;
+
+    function makeGeoItem(overrides: Partial<any> = {}) {
+      return {
+        id: randomUUID(),
+        takenLat: 9.9281,
+        takenLng: -84.0907,
+        capturedAt: new Date('2024-06-15'),
+        geoLocality: 'La Fortuna',
+        metadata: { thumbnailStorageKey: 'thumbs/abc.jpg' },
+        ...overrides,
+      };
+    }
+
+    beforeEach(() => {
+      // Default: prisma returns an empty array.
+      mockPrisma.mediaItem.findMany.mockResolvedValue([]);
+    });
+
+    // ----- Where-clause: mandatory conditions -----
+
+    it('always includes takenLat:{not:null} in the where clause', async () => {
+      await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({ takenLat: { not: null } });
+    });
+
+    it('always includes takenLng:{not:null} in the where clause', async () => {
+      await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({ takenLng: { not: null } });
+    });
+
+    it('always includes deletedAt:null in the where clause', async () => {
+      await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({ deletedAt: null });
+    });
+
+    // ----- Where-clause: ownership branch -----
+
+    it('filters by ownerId for callers without media:read_any', async () => {
+      await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({ ownerId: 'user-1' });
+    });
+
+    it('does NOT filter by ownerId when caller holds media:read_any', async () => {
+      await service.listLocations(emptyLocQuery, 'user-1', anyPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).not.toHaveProperty('ownerId');
+    });
+
+    // ----- Where-clause: NO pagination -----
+
+    it('does NOT pass skip or take (no pagination)', async () => {
+      await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0]).not.toHaveProperty('skip');
+      expect(call[0]).not.toHaveProperty('take');
+    });
+
+    // ----- Where-clause: optional filters -----
+
+    it('filters by type when provided', async () => {
+      await service.listLocations({ type: 'video' } as any, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({ type: 'video' });
+    });
+
+    it('filters by capturedAt date range', async () => {
+      const from = new Date('2024-01-01');
+      const to = new Date('2024-12-31');
+      await service.listLocations(
+        { capturedAtFrom: from, capturedAtTo: to } as any,
+        'user-1',
+        ownPerms,
+      );
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where.capturedAt).toMatchObject({ gte: from, lte: to });
+    });
+
+    it('filters by country via OR across geoCountry and geoCountryCode', async () => {
+      await service.listLocations({ country: 'CR' } as any, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where.OR).toEqual(
+        expect.arrayContaining([
+          { geoCountry: { contains: 'CR', mode: 'insensitive' } },
+          { geoCountryCode: { equals: 'CR', mode: 'insensitive' } },
+        ]),
+      );
+    });
+
+    it('filters by region (geoAdmin1 contains, case-insensitive)', async () => {
+      await service.listLocations({ region: 'Alajuela' } as any, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({
+        geoAdmin1: { contains: 'Alajuela', mode: 'insensitive' },
+      });
+    });
+
+    it('filters by locality (geoLocality contains, case-insensitive)', async () => {
+      await service.listLocations({ locality: 'La Fortuna' } as any, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({
+        geoLocality: { contains: 'La Fortuna', mode: 'insensitive' },
+      });
+    });
+
+    it('filters by place (geoPlaceName contains, case-insensitive)', async () => {
+      await service.listLocations({ place: 'Arenal' } as any, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({
+        geoPlaceName: { contains: 'Arenal', mode: 'insensitive' },
+      });
+    });
+
+    it('free-text location filter spans all geo tiers via OR', async () => {
+      await service.listLocations({ location: 'Costa Rica' } as any, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where.OR).toEqual(
+        expect.arrayContaining([
+          { geoCountry: { contains: 'Costa Rica', mode: 'insensitive' } },
+          { geoAdmin1: { contains: 'Costa Rica', mode: 'insensitive' } },
+          { geoLocality: { contains: 'Costa Rica', mode: 'insensitive' } },
+          { geoPlaceName: { contains: 'Costa Rica', mode: 'insensitive' } },
+        ]),
+      );
+    });
+
+    // ----- Select: minimal fields -----
+
+    it('selects only the 6 required fields (id, takenLat, takenLng, capturedAt, geoLocality, metadata)', async () => {
+      await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].select).toEqual({
+        id: true,
+        takenLat: true,
+        takenLng: true,
+        capturedAt: true,
+        geoLocality: true,
+        metadata: true,
+      });
+    });
+
+    // ----- Return shape and thumbnail signing -----
+
+    it('returns the 6-field MediaLocation shape with a signed thumbnailUrl', async () => {
+      const item = makeGeoItem();
+      mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
+      mockStorageProvider.getSignedDownloadUrl.mockResolvedValue('https://cdn.example.com/thumb.jpg');
+
+      const results = await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
+
+      expect(results).toHaveLength(1);
+      expect(results[0]).toEqual({
+        id: item.id,
+        takenLat: item.takenLat,
+        takenLng: item.takenLng,
+        capturedAt: item.capturedAt,
+        geoLocality: item.geoLocality,
+        thumbnailUrl: 'https://cdn.example.com/thumb.jpg',
+      });
+    });
+
+    it('does NOT include metadata in the returned objects', async () => {
+      const item = makeGeoItem();
+      mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
+
+      const results = await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
+
+      expect(results[0]).not.toHaveProperty('metadata');
+    });
+
+    it('calls getSignedDownloadUrl with the thumbnailStorageKey from metadata', async () => {
+      const item = makeGeoItem({ metadata: { thumbnailStorageKey: 'thumbs/xyz.jpg' } });
+      mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
+
+      await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
+
+      expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledWith('thumbs/xyz.jpg');
+    });
+
+    it('returns thumbnailUrl: null when metadata has no thumbnailStorageKey', async () => {
+      const item = makeGeoItem({ metadata: null });
+      mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
+
+      const results = await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
+
+      expect(results[0].thumbnailUrl).toBeNull();
+      expect(mockStorageProvider.getSignedDownloadUrl).not.toHaveBeenCalled();
+    });
+
+    it('returns thumbnailUrl: null when getSignedDownloadUrl throws (signing failure)', async () => {
+      const item = makeGeoItem({ metadata: { thumbnailStorageKey: 'thumbs/broken.jpg' } });
+      mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
+      mockStorageProvider.getSignedDownloadUrl.mockRejectedValue(new Error('S3 error'));
+
+      const results = await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
+
+      // Signing failure is swallowed; thumbnailUrl falls back to null.
+      expect(results[0].thumbnailUrl).toBeNull();
+    });
+
+    it('returns an empty array when no geotagged items exist', async () => {
+      mockPrisma.mediaItem.findMany.mockResolvedValue([]);
+      const results = await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
+      expect(results).toEqual([]);
+    });
+
+    it('signs multiple thumbnails in parallel (all items get a URL)', async () => {
+      const items = [
+        makeGeoItem({ id: 'a', metadata: { thumbnailStorageKey: 'thumbs/a.jpg' } }),
+        makeGeoItem({ id: 'b', metadata: { thumbnailStorageKey: 'thumbs/b.jpg' } }),
+        makeGeoItem({ id: 'c', metadata: { thumbnailStorageKey: 'thumbs/c.jpg' } }),
+      ];
+      mockPrisma.mediaItem.findMany.mockResolvedValue(items as any);
+      mockStorageProvider.getSignedDownloadUrl.mockResolvedValue('https://cdn.example.com/signed');
+
+      const results = await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
+
+      expect(results).toHaveLength(3);
+      expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledTimes(3);
+    });
+  });
 });
