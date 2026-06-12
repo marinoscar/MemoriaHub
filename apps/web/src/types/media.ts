@@ -1,4 +1,17 @@
 // ---------------------------------------------------------------------------
+// MediaLocation — lightweight shape returned by GET /api/media/locations
+// ---------------------------------------------------------------------------
+
+export interface MediaLocation {
+  id: string;
+  takenLat: number;
+  takenLng: number;
+  capturedAt: string | null;
+  geoLocality: string | null;
+  thumbnailUrl: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // MediaItem types (mirrors the Prisma model + thumbnail enrichment)
 // ---------------------------------------------------------------------------
 

@@ -3,6 +3,7 @@ import type {
   MediaItem,
   MediaListResponse,
   MediaQueryParams,
+  MediaLocation,
   PatchMediaDto,
   RegisterMediaDto,
   RegisterMediaResponse,
@@ -48,6 +49,37 @@ export async function listMedia(params?: MediaQueryParams): Promise<MediaListRes
 
 export async function getMedia(id: string): Promise<MediaItem> {
   return api.get<MediaItem>(`/media/${id}`);
+}
+
+// ---------------------------------------------------------------------------
+// Geo locations index (for map view)
+// ---------------------------------------------------------------------------
+
+export interface MediaLocationFilters {
+  type?: 'photo' | 'video';
+  country?: string;
+  region?: string;
+  locality?: string;
+  place?: string;
+  location?: string;
+  capturedAtFrom?: string;
+  capturedAtTo?: string;
+}
+
+export async function listMediaLocations(
+  filters?: MediaLocationFilters,
+): Promise<MediaLocation[]> {
+  const searchParams = new URLSearchParams();
+  if (filters?.type) searchParams.set('type', filters.type);
+  if (filters?.country) searchParams.set('country', filters.country);
+  if (filters?.region) searchParams.set('region', filters.region);
+  if (filters?.locality) searchParams.set('locality', filters.locality);
+  if (filters?.place) searchParams.set('place', filters.place);
+  if (filters?.location) searchParams.set('location', filters.location);
+  if (filters?.capturedAtFrom) searchParams.set('capturedAtFrom', filters.capturedAtFrom);
+  if (filters?.capturedAtTo) searchParams.set('capturedAtTo', filters.capturedAtTo);
+  const qs = searchParams.toString();
+  return api.get<MediaLocation[]>(`/media/locations${qs ? `?${qs}` : ''}`);
 }
 
 export async function patchMedia(id: string, dto: PatchMediaDto): Promise<MediaItem> {
