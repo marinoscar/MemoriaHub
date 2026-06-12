@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   Drawer,
   Box,
@@ -30,7 +30,9 @@ import {
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import type { MediaItem, MediaClassification, PatchMediaDto } from '../../types/media';
-import { patchMedia as patchMediaApi } from '../../services/media';
+import { patchMedia as patchMediaApi, getMedia } from '../../services/media';
+import { VideoPlayer } from './VideoPlayer';
+import { LocationMiniMap } from './LocationMiniMap';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -110,6 +112,9 @@ export function MediaDetailDrawer({
   const theme = useTheme();
   const isSmall = useMediaQuery(theme.breakpoints.down('sm'));
 
+  // Full item fetched from GET /api/media/:id (has downloadUrl)
+  const [fullItem, setFullItem] = useState<MediaItem | null>(null);
+
   // Editable field state
   const [editing, setEditing] = useState(false);
   const [editCapturedAt, setEditCapturedAt] = useState('');
@@ -124,6 +129,39 @@ export function MediaDetailDrawer({
 
   // Image load state
   const [imgError, setImgError] = useState(false);
+
+  // ---------------------------------------------------------------------------
+  // Fetch full item (with downloadUrl) when drawer opens for a new item.
+  // The list endpoint does not populate downloadUrl; only GET /media/:id does.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!open || !item) {
+      setFullItem(null);
+      return;
+    }
+    // If the list item already carries downloadUrl (e.g. after an edit), skip fetch.
+    if (item.downloadUrl !== undefined) {
+      setFullItem(item);
+      return;
+    }
+
+    let cancelled = false;
+    const requestedId = item.id;
+
+    getMedia(requestedId)
+      .then((fetched) => {
+        if (!cancelled && fetched.id === requestedId) {
+          setFullItem(fetched);
+        }
+      })
+      .catch(() => {
+        // Silently swallow — displayItem falls back to the list item.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [item?.id, open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleStartEdit = useCallback(() => {
     if (!item) return;
@@ -154,6 +192,10 @@ export function MediaDetailDrawer({
         description: editDescription || null,
       };
       const updated = await patchMediaApi(item.id, dto);
+      // Keep fullItem consistent with the saved data so edits persist in the drawer.
+      if (fullItem) {
+        setFullItem({ ...fullItem, ...updated });
+      }
       onItemUpdated(updated);
       setEditing(false);
     } catch (err) {
@@ -163,6 +205,7 @@ export function MediaDetailDrawer({
     }
   }, [
     item,
+    fullItem,
     editCapturedAt,
     editClassification,
     editTitle,
@@ -183,7 +226,10 @@ export function MediaDetailDrawer({
 
   if (!item) return null;
 
-  const previewUrl = item.thumbnailUrl ?? (item.downloadUrl ?? null);
+  // Use the full item (with downloadUrl) when available; fall back to the list item.
+  const displayItem = fullItem ?? item;
+
+  const previewUrl = displayItem.thumbnailUrl ?? (displayItem.downloadUrl ?? null);
 
   return (
     <Drawer
@@ -229,12 +275,12 @@ export function MediaDetailDrawer({
           </IconButton>
         </Tooltip>
 
-        {/* Download link */}
-        {item.downloadUrl && (
+        {/* Download link — only shown once the full item (with signed URL) is loaded */}
+        {displayItem.downloadUrl && (
           <Tooltip title="Download original">
             <IconButton
               component="a"
-              href={item.downloadUrl}
+              href={displayItem.downloadUrl}
               target="_blank"
               rel="noopener noreferrer"
               aria-label="Download original file"
@@ -245,39 +291,72 @@ export function MediaDetailDrawer({
         )}
       </Box>
 
-      {/* Preview image */}
-      <Box
-        sx={{
-          backgroundColor: theme.palette.grey[900],
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          flexShrink: 0,
-          height: 240,
-          overflow: 'hidden',
-        }}
-      >
-        {previewUrl && !imgError ? (
-          <Box
-            component="img"
-            src={previewUrl}
-            alt={item.title ?? item.originalFilename}
-            onError={() => setImgError(true)}
-            sx={{
-              maxWidth: '100%',
-              maxHeight: '100%',
-              objectFit: 'contain',
-            }}
-          />
-        ) : (
-          <Box sx={{ textAlign: 'center', color: theme.palette.grey[500] }}>
-            <BrokenImageIcon sx={{ fontSize: 64 }} />
-            <Typography variant="caption" sx={{ display: 'block' }}>
-              {item.type === 'video' ? 'Video preview not available' : 'Image not available'}
-            </Typography>
+      {/* Preview — branches on media type */}
+      {displayItem.type === 'video' ? (
+        /*
+         * Video branch:
+         *   - downloadUrl available → full Vidstack player (16:9 ratio, no fixed height)
+         *   - downloadUrl not yet fetched → centered spinner
+         */
+        displayItem.downloadUrl ? (
+          <Box sx={{ width: '100%', flexShrink: 0, backgroundColor: 'black' }}>
+            <VideoPlayer
+              src={displayItem.downloadUrl}
+              poster={displayItem.thumbnailUrl}
+              title={displayItem.title ?? displayItem.originalFilename}
+            />
           </Box>
-        )}
-      </Box>
+        ) : (
+          <Box
+            sx={{
+              backgroundColor: theme.palette.grey[900],
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              flexShrink: 0,
+              height: 240,
+            }}
+          >
+            <CircularProgress size={40} />
+          </Box>
+        )
+      ) : (
+        /*
+         * Photo branch — existing image display with error fallback.
+         */
+        <Box
+          sx={{
+            backgroundColor: theme.palette.grey[900],
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            flexShrink: 0,
+            height: 240,
+            overflow: 'hidden',
+          }}
+        >
+          {previewUrl && !imgError ? (
+            <Box
+              component="img"
+              src={previewUrl}
+              alt={item.title ?? item.originalFilename}
+              onError={() => setImgError(true)}
+              sx={{
+                maxWidth: '100%',
+                maxHeight: '100%',
+                objectFit: 'contain',
+              }}
+            />
+          ) : (
+            <Box sx={{ textAlign: 'center', color: theme.palette.grey[500] }}>
+              <BrokenImageIcon sx={{ fontSize: 64 }} />
+              <Typography variant="caption" sx={{ display: 'block' }}>
+                Image not available
+              </Typography>
+            </Box>
+          )}
+        </Box>
+      )}
 
       {/* Scrollable content */}
       <Box sx={{ flex: 1, overflowY: 'auto', px: 2, py: 1.5 }}>
@@ -445,7 +524,7 @@ export function MediaDetailDrawer({
         <MetaRow label="Content Hash" value={item.contentHash} />
         <MetaRow label="Filename" value={item.originalFilename} />
 
-        {/* Geo fields */}
+        {/* Geo fields + mini-map */}
         {(item.geoCountry || item.geoAdmin1 || item.geoLocality || item.geoPlaceName) && (
           <>
             <Divider sx={{ my: 1.5 }} />
@@ -463,6 +542,17 @@ export function MediaDetailDrawer({
             <MetaRow label="Place" value={item.geoPlaceName} />
             <MetaRow label="Geo Source" value={item.geoSource} />
           </>
+        )}
+
+        {/* Mini-map — shown when GPS coordinates are present */}
+        {displayItem.takenLat !== null && displayItem.takenLng !== null && (
+          <Box sx={{ mt: 1.5 }}>
+            <LocationMiniMap
+              lat={displayItem.takenLat}
+              lng={displayItem.takenLng}
+              label={displayItem.geoPlaceName ?? displayItem.geoLocality}
+            />
+          </Box>
         )}
 
         {/* Timestamps */}
