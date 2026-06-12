@@ -5,6 +5,7 @@ import type {
   MediaQueryParams,
   PatchMediaDto,
   RegisterMediaDto,
+  RegisterMediaResponse,
   TagItem,
   InitUploadDto,
   InitUploadResponse,
@@ -39,6 +40,7 @@ export async function listMedia(params?: MediaQueryParams): Promise<MediaListRes
   if (params?.location) searchParams.set('location', params.location);
   if (params?.sortBy) searchParams.set('sortBy', params.sortBy);
   if (params?.sortOrder) searchParams.set('sortOrder', params.sortOrder);
+  if (params?.contentHash) searchParams.set('contentHash', params.contentHash);
 
   const qs = searchParams.toString();
   return api.get<MediaListResponse>(`/media${qs ? `?${qs}` : ''}`);
@@ -115,8 +117,8 @@ export async function completeUpload(
 // Register media after upload
 // ---------------------------------------------------------------------------
 
-export async function registerMedia(dto: RegisterMediaDto): Promise<MediaItem> {
-  return api.post<MediaItem>('/media', dto);
+export async function registerMedia(dto: RegisterMediaDto): Promise<RegisterMediaResponse> {
+  return api.post<RegisterMediaResponse>('/media', dto);
 }
 
 // ---------------------------------------------------------------------------

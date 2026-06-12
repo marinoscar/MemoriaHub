@@ -87,6 +87,8 @@ export interface MediaQueryParams {
   location?: string;
   sortBy?: MediaSortBy;
   sortOrder?: SortOrder;
+  /** Filter by exact SHA-256 hex digest (64 lower-case hex chars). */
+  contentHash?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,6 +120,19 @@ export interface RegisterMediaDto {
   caption?: string;
   description?: string;
   favorite?: boolean;
+  /** SHA-256 hex digest (64 lower-case hex chars) of the file bytes. */
+  contentHash?: string;
+}
+
+/**
+ * Response from POST /api/media.
+ * Extends MediaItem with a server-side deduplication flag:
+ *   - `true`  → server matched an existing item by contentHash (HTTP 200)
+ *   - `false` → fresh creation (HTTP 201)
+ *   - absent  → server does not support the field (treat as fresh)
+ */
+export interface RegisterMediaResponse extends MediaItem {
+  deduplicated?: boolean;
 }
 
 // ---------------------------------------------------------------------------

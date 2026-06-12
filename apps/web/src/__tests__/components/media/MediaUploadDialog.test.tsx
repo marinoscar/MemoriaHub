@@ -2,13 +2,14 @@
  * Component tests — MediaUploadDialog
  *
  * Mocking strategy:
- *   The four media service functions used inside MediaUploadDialog
- *   (initUpload, uploadPart, completeUpload, registerMedia) are all
+ *   The media service functions used inside MediaUploadDialog
+ *   (initUpload, uploadPart, completeUpload, registerMedia, listMedia) are all
  *   module-level mocks via vi.mock('../../services/media').  No real
  *   fetch or presigned-URL PUT is made.
  *
- *   The global fetch used by uploadPart is NOT called because uploadPart
- *   itself is mocked — no additional fetch mock needed.
+ *   sha256File is mocked via vi.mock('../../utils/sha256') so that hashing
+ *   does not depend on WebAssembly being available in jsdom. Tests can
+ *   control the returned hash value or simulate a hash failure.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -26,6 +27,7 @@ vi.mock('../../../services/media', () => ({
   uploadPart: vi.fn(),
   completeUpload: vi.fn(),
   registerMedia: vi.fn(),
+  listMedia: vi.fn(),
 }));
 
 import {
@@ -33,18 +35,32 @@ import {
   uploadPart,
   completeUpload,
   registerMedia,
+  listMedia,
 } from '../../../services/media';
 
 const mockInitUpload = vi.mocked(initUpload);
 const mockUploadPart = vi.mocked(uploadPart);
 const mockCompleteUpload = vi.mocked(completeUpload);
 const mockRegisterMedia = vi.mocked(registerMedia);
+const mockListMedia = vi.mocked(listMedia);
+
+// ---------------------------------------------------------------------------
+// Mock sha256File
+// ---------------------------------------------------------------------------
+
+vi.mock('../../../utils/sha256', () => ({
+  sha256File: vi.fn(),
+}));
+
+import { sha256File } from '../../../utils/sha256';
+const mockSha256File = vi.mocked(sha256File);
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const OBJECT_ID = 'test-object-id';
+const FAKE_HASH = 'a'.repeat(64); // 64 lower-case hex chars
 
 /** Returns an initUpload response for a single-part upload of a tiny file. */
 function makeInitUploadResponse() {
@@ -71,6 +87,19 @@ function getFileInput() {
   return document.querySelector('input[type="file"]') as HTMLInputElement;
 }
 
+/** Empty listMedia response — no existing items. */
+function emptyListResponse() {
+  return { items: [], meta: { page: 1, pageSize: 1, totalItems: 0, totalPages: 0 } };
+}
+
+/** ListMedia response with one existing item (dedup hit). */
+function hitListResponse() {
+  return {
+    items: [{ id: 'existing-media-id' }],
+    meta: { page: 1, pageSize: 1, totalItems: 1, totalPages: 1 },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Default props
 // ---------------------------------------------------------------------------
@@ -92,7 +121,9 @@ describe('MediaUploadDialog', () => {
     mockInitUpload.mockResolvedValue(makeInitUploadResponse());
     mockUploadPart.mockResolvedValue('"etag-001"');
     mockCompleteUpload.mockResolvedValue(undefined as any);
-    mockRegisterMedia.mockResolvedValue({ id: 'media-001' } as any);
+    mockRegisterMedia.mockResolvedValue({ id: 'media-001', deduplicated: false } as any);
+    mockListMedia.mockResolvedValue(emptyListResponse() as any);
+    mockSha256File.mockResolvedValue(FAKE_HASH);
   });
 
   // -------------------------------------------------------------------------
@@ -121,14 +152,11 @@ describe('MediaUploadDialog', () => {
 
     it('should not render the Upload N file(s) button when no files are selected', () => {
       render(<MediaUploadDialog {...defaultProps} />);
-      // The "Upload N file(s)" contained button should not exist without files;
-      // only the Close-icon button and the Cancel button are present.
       expect(screen.queryByRole('button', { name: /upload \d+ file/i })).not.toBeInTheDocument();
     });
 
     it('should not render when open=false', () => {
       render(<MediaUploadDialog {...defaultProps} open={false} />);
-      // Dialog is not in DOM when closed (MUI Dialog with keepMounted=false)
       expect(screen.queryByText(/upload media/i)).not.toBeInTheDocument();
     });
   });
@@ -204,7 +232,6 @@ describe('MediaUploadDialog', () => {
 
     it('should show a warning for files exceeding 500 MB', async () => {
       render(<MediaUploadDialog {...defaultProps} />);
-      // Create a fake large file by overriding size
       const largeFile = Object.defineProperty(
         makeImageFile('huge.jpg', 'image/jpeg', 1),
         'size',
@@ -280,7 +307,7 @@ describe('MediaUploadDialog', () => {
       );
     });
 
-    it('should call registerMedia after completeUpload', async () => {
+    it('should call registerMedia with contentHash after completeUpload', async () => {
       const user = userEvent.setup();
       render(<MediaUploadDialog {...defaultProps} />);
       const input = getFileInput();
@@ -298,6 +325,7 @@ describe('MediaUploadDialog', () => {
           type: 'photo',
           source: 'web',
           originalFilename: 'test.jpg',
+          contentHash: FAKE_HASH,
         }),
       );
     });
@@ -331,9 +359,8 @@ describe('MediaUploadDialog', () => {
       await user.click(screen.getByRole('button', { name: /upload \d+ file/i }));
 
       await waitFor(() => {
-        expect(
-          screen.getByText(/all files uploaded successfully/i),
-        ).toBeInTheDocument();
+        // Summary includes "1 uploaded"
+        expect(screen.getByText(/1 uploaded/i)).toBeInTheDocument();
       });
     });
 
@@ -349,15 +376,230 @@ describe('MediaUploadDialog', () => {
       await user.click(screen.getByRole('button', { name: /upload \d+ file/i }));
 
       await waitFor(() => {
-        // The Cancel button text changes to "Close" after all succeed
-        // (it's in the DialogActions, not the header icon button)
         const closeButtons = screen.getAllByRole('button', { name: /close/i });
-        // At least one of them is the Cancel→Close text button in DialogActions
         const dialogCloseBtn = closeButtons.find(
           (b) => b.tagName === 'BUTTON' && !b.getAttribute('aria-label'),
         );
         expect(dialogCloseBtn).toBeDefined();
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Deduplication — pre-check hit (listMedia returns ≥1 item)
+  // -------------------------------------------------------------------------
+
+  describe('deduplication — pre-check hit', () => {
+    it('should NOT call initUpload when the pre-check finds an existing file', async () => {
+      mockListMedia.mockResolvedValue(hitListResponse() as any);
+
+      const user = userEvent.setup();
+      render(<MediaUploadDialog {...defaultProps} />);
+      const input = getFileInput();
+      fireEvent.change(input, { target: { files: [makeImageFile('dup.jpg')] } });
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /upload \d+ file/i })).toBeInTheDocument(),
+      );
+      await user.click(screen.getByRole('button', { name: /upload \d+ file/i }));
+
+      // Both the per-file secondary label and the summary Alert contain "Already in library".
+      // Wait until at least one is present before asserting the service mocks.
+      await waitFor(() => {
+        expect(screen.getAllByText(/already in library/i).length).toBeGreaterThan(0);
+      });
+
+      expect(mockInitUpload).not.toHaveBeenCalled();
+      expect(mockUploadPart).not.toHaveBeenCalled();
+      expect(mockCompleteUpload).not.toHaveBeenCalled();
+      expect(mockRegisterMedia).not.toHaveBeenCalled();
+    });
+
+    it('should mark the file as duplicate and show the "Already in library" label', async () => {
+      mockListMedia.mockResolvedValue(hitListResponse() as any);
+
+      const user = userEvent.setup();
+      render(<MediaUploadDialog {...defaultProps} />);
+      const input = getFileInput();
+      fireEvent.change(input, { target: { files: [makeImageFile('dup.jpg')] } });
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /upload \d+ file/i })).toBeInTheDocument(),
+      );
+      await user.click(screen.getByRole('button', { name: /upload \d+ file/i }));
+
+      // The per-file secondary text reads "Already in library" (exact case)
+      await waitFor(() => {
+        expect(screen.getAllByText(/already in library/i).length).toBeGreaterThan(0);
+      });
+    });
+
+    it('should include duplicate count in end-of-run summary', async () => {
+      mockListMedia.mockResolvedValue(hitListResponse() as any);
+
+      const user = userEvent.setup();
+      render(<MediaUploadDialog {...defaultProps} />);
+      const input = getFileInput();
+      fireEvent.change(input, { target: { files: [makeImageFile('dup.jpg')] } });
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /upload \d+ file/i })).toBeInTheDocument(),
+      );
+      await user.click(screen.getByRole('button', { name: /upload \d+ file/i }));
+
+      // Summary should mention "1 already in library"
+      await waitFor(() => {
+        expect(screen.getByText(/1 already in library/i)).toBeInTheDocument();
+      });
+    });
+
+    it('should call listMedia with the contentHash from sha256File', async () => {
+      mockListMedia.mockResolvedValue(emptyListResponse() as any);
+
+      const user = userEvent.setup();
+      render(<MediaUploadDialog {...defaultProps} />);
+      const input = getFileInput();
+      fireEvent.change(input, { target: { files: [makeImageFile()] } });
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /upload \d+ file/i })).toBeInTheDocument(),
+      );
+      await user.click(screen.getByRole('button', { name: /upload \d+ file/i }));
+
+      await waitFor(() => expect(mockListMedia).toHaveBeenCalledTimes(1));
+      expect(mockListMedia).toHaveBeenCalledWith(
+        expect.objectContaining({ contentHash: FAKE_HASH, pageSize: 1 }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Deduplication — server-side race (registerMedia returns deduplicated:true)
+  // -------------------------------------------------------------------------
+
+  describe('deduplication — server-side race', () => {
+    it('should mark the file as duplicate when registerMedia returns deduplicated:true', async () => {
+      // Pre-check misses (empty list), but server deduplicates on register
+      mockListMedia.mockResolvedValue(emptyListResponse() as any);
+      mockRegisterMedia.mockResolvedValue({ id: 'existing-001', deduplicated: true } as any);
+
+      const user = userEvent.setup();
+      render(<MediaUploadDialog {...defaultProps} />);
+      const input = getFileInput();
+      fireEvent.change(input, { target: { files: [makeImageFile('race.jpg')] } });
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /upload \d+ file/i })).toBeInTheDocument(),
+      );
+      await user.click(screen.getByRole('button', { name: /upload \d+ file/i }));
+
+      await waitFor(() => {
+        expect(screen.getAllByText(/already in library/i).length).toBeGreaterThan(0);
+      });
+    });
+
+    it('should include the server-deduped file in the duplicate count', async () => {
+      mockListMedia.mockResolvedValue(emptyListResponse() as any);
+      mockRegisterMedia.mockResolvedValue({ id: 'existing-001', deduplicated: true } as any);
+
+      const user = userEvent.setup();
+      render(<MediaUploadDialog {...defaultProps} />);
+      const input = getFileInput();
+      fireEvent.change(input, { target: { files: [makeImageFile('race.jpg')] } });
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /upload \d+ file/i })).toBeInTheDocument(),
+      );
+      await user.click(screen.getByRole('button', { name: /upload \d+ file/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/1 already in library/i)).toBeInTheDocument();
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Hashing fallback — sha256File throws
+  // -------------------------------------------------------------------------
+
+  describe('hashing fallback', () => {
+    it('should still upload when sha256File throws (no hash sent)', async () => {
+      // Simulate a WebAssembly / hash-wasm failure
+      mockSha256File.mockRejectedValue(new Error('WASM init failed'));
+
+      const user = userEvent.setup();
+      render(<MediaUploadDialog {...defaultProps} />);
+      const input = getFileInput();
+      fireEvent.change(input, { target: { files: [makeImageFile('fallback.jpg')] } });
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /upload \d+ file/i })).toBeInTheDocument(),
+      );
+      await user.click(screen.getByRole('button', { name: /upload \d+ file/i }));
+
+      await waitFor(() => expect(mockRegisterMedia).toHaveBeenCalledTimes(1));
+
+      // listMedia should NOT have been called (no hash available)
+      expect(mockListMedia).not.toHaveBeenCalled();
+
+      // registerMedia should have been called WITHOUT contentHash
+      expect(mockRegisterMedia).toHaveBeenCalledWith(
+        expect.not.objectContaining({ contentHash: expect.anything() }),
+      );
+    });
+
+    it('should show success after fallback upload completes', async () => {
+      mockSha256File.mockRejectedValue(new Error('WASM init failed'));
+
+      const user = userEvent.setup();
+      render(<MediaUploadDialog {...defaultProps} />);
+      const input = getFileInput();
+      fireEvent.change(input, { target: { files: [makeImageFile('fallback.jpg')] } });
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /upload \d+ file/i })).toBeInTheDocument(),
+      );
+      await user.click(screen.getByRole('button', { name: /upload \d+ file/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/1 uploaded/i)).toBeInTheDocument();
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Mixed batch: one fresh + one duplicate
+  // -------------------------------------------------------------------------
+
+  describe('mixed batch', () => {
+    it('should show correct counts for a batch with one fresh and one duplicate', async () => {
+      // First call (for fresh.jpg): no match → upload proceeds
+      // Second call (for dup.jpg): match → skip upload
+      mockListMedia
+        .mockResolvedValueOnce(emptyListResponse() as any)
+        .mockResolvedValueOnce(hitListResponse() as any);
+      mockRegisterMedia.mockResolvedValue({ id: 'media-001', deduplicated: false } as any);
+
+      const user = userEvent.setup();
+      render(<MediaUploadDialog {...defaultProps} />);
+      const input = getFileInput();
+      fireEvent.change(input, {
+        target: { files: [makeImageFile('fresh.jpg'), makeImageFile('dup.jpg')] },
+      });
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /upload 2 file/i })).toBeInTheDocument(),
+      );
+      await user.click(screen.getByRole('button', { name: /upload 2 file/i }));
+
+      await waitFor(() => {
+        // Summary: "1 uploaded, 1 already in library"
+        expect(screen.getByText(/1 uploaded/i)).toBeInTheDocument();
+        expect(screen.getByText(/1 already in library/i)).toBeInTheDocument();
+      });
+
+      // Only one initUpload (the fresh file)
+      expect(mockInitUpload).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -416,7 +658,6 @@ describe('MediaUploadDialog', () => {
       await user.click(screen.getByRole('button', { name: /upload \d+ file/i }));
 
       await waitFor(() => {
-        // Error shown means upload finished — the per-file retry button appears
         expect(
           screen.getByRole('button', { name: /retry uploading onSuccess.jpg/i }),
         ).toBeInTheDocument();
@@ -443,13 +684,10 @@ describe('MediaUploadDialog', () => {
         ).toBeInTheDocument();
       });
 
-      // Click the per-file retry icon button
       await user.click(
         screen.getByRole('button', { name: /retry uploading retry.jpg/i }),
       );
 
-      // After retry click the file returns to pending (shows "Retry Failed" bulk button
-      // or the Upload button again, and the error text should be cleared)
       await waitFor(() => {
         expect(screen.queryByText(/fail/i)).not.toBeInTheDocument();
       });

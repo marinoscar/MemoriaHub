@@ -22,6 +22,7 @@ import {
   Error as ErrorIcon,
   Close as CloseIcon,
   Replay as RetryIcon,
+  ContentCopy as DuplicateIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import {
@@ -29,7 +30,9 @@ import {
   uploadPart,
   completeUpload,
   registerMedia,
+  listMedia,
 } from '../../services/media';
+import { sha256File } from '../../utils/sha256';
 import type { UploadPart, MediaType } from '../../types/media';
 
 // ---------------------------------------------------------------------------
@@ -40,7 +43,11 @@ const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB
 const MAX_RETRIES = 3;
 const ALLOWED_TYPES = ['image/', 'video/'];
 
-type FileStatus = 'pending' | 'uploading' | 'success' | 'error';
+/**
+ * 'duplicate' — file already exists in the library (pre-check hit or server
+ *               dedup on registerMedia). No bytes were re-uploaded.
+ */
+type FileStatus = 'pending' | 'uploading' | 'success' | 'error' | 'duplicate';
 
 interface FileState {
   file: File;
@@ -67,10 +74,17 @@ function detectMediaType(file: File): MediaType {
   return file.type.startsWith('video/') ? 'video' : 'photo';
 }
 
+/**
+ * Upload a single file to storage and register it as a MediaItem.
+ * Returns `true` when the server treated it as a duplicate (race condition
+ * where another session registered the same hash between our pre-check and
+ * completeUpload).
+ */
 async function uploadFileWithRetry(
   file: File,
+  contentHash: string | null,
   onProgress: (pct: number) => void,
-): Promise<void> {
+): Promise<{ deduplicated: boolean }> {
   // 1. Init upload
   const { objectId, partSize, totalParts, presignedUrls } = await initUpload({
     name: file.name,
@@ -79,7 +93,7 @@ async function uploadFileWithRetry(
   });
 
   const parts: UploadPart[] = [];
-  let urlMap = new Map<number, string>(
+  const urlMap = new Map<number, string>(
     presignedUrls.map((p) => [p.partNumber, p.url]),
   );
 
@@ -89,12 +103,7 @@ async function uploadFileWithRetry(
     const end = Math.min(start + partSize, file.size);
     const chunk = file.slice(start, end);
 
-    // Fetch URL if not in the initial batch
     if (!urlMap.has(partNumber)) {
-      // For files > 10 parts we need to fetch more URLs.
-      // We keep things simple: the spec guarantees a 50 MB file (5 parts) fits
-      // in the initial batch. For safety we throw a user-friendly error if
-      // a URL is missing rather than silently skipping.
       throw new Error(
         `No presigned URL available for part ${partNumber}. ` +
           `File may be too large for the initial upload batch.`,
@@ -126,15 +135,18 @@ async function uploadFileWithRetry(
   await completeUpload(objectId, parts);
   onProgress(95);
 
-  // 4. Register as MediaItem
-  await registerMedia({
+  // 4. Register as MediaItem (pass contentHash when available)
+  const response = await registerMedia({
     storageObjectId: objectId,
     type: detectMediaType(file),
     source: 'web',
     originalFilename: file.name,
+    ...(contentHash !== null ? { contentHash } : {}),
   });
 
   onProgress(100);
+
+  return { deduplicated: response.deduplicated === true };
 }
 
 // ---------------------------------------------------------------------------
@@ -204,10 +216,40 @@ export function MediaUploadDialog({ open, onClose, onSuccess }: MediaUploadDialo
       updateFileState(i, { status: 'uploading', progress: 0 });
 
       try {
-        await uploadFileWithRetry(fileStates[i].file, (pct) => {
-          updateFileState(i, { progress: pct });
-        });
-        updateFileState(i, { status: 'success', progress: 100 });
+        // --- Client-side SHA-256 (streaming, never loads full file into memory)
+        let contentHash: string | null = null;
+        try {
+          contentHash = await sha256File(fileStates[i].file);
+        } catch {
+          // Hash failure is non-fatal — fall back to uploading without a hash.
+          contentHash = null;
+        }
+
+        // --- Pre-check: does the library already contain this hash?
+        if (contentHash !== null) {
+          const existing = await listMedia({ contentHash, pageSize: 1 });
+          if (existing.items.length > 0) {
+            // Already in the library — skip the upload entirely.
+            updateFileState(i, { status: 'duplicate', progress: 100 });
+            continue;
+          }
+        }
+
+        // --- Upload + register
+        const { deduplicated } = await uploadFileWithRetry(
+          fileStates[i].file,
+          contentHash,
+          (pct) => {
+            updateFileState(i, { progress: pct });
+          },
+        );
+
+        // Server dedup race: another session registered the same hash first.
+        if (deduplicated) {
+          updateFileState(i, { status: 'duplicate', progress: 100 });
+        } else {
+          updateFileState(i, { status: 'success', progress: 100 });
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Upload failed';
         updateFileState(i, { status: 'error', error: message });
@@ -216,9 +258,12 @@ export function MediaUploadDialog({ open, onClose, onSuccess }: MediaUploadDialo
 
     setIsUploading(false);
 
-    // If all succeeded, notify parent
+    // Notify parent if every file is either success or duplicate (no errors, no pending)
     setFileStates((current) => {
-      if (current.every((fs) => fs.status === 'success')) {
+      const allTerminal = current.every(
+        (fs) => fs.status === 'success' || fs.status === 'duplicate',
+      );
+      if (allTerminal && current.length > 0) {
         onSuccess();
       }
       return current;
@@ -243,10 +288,35 @@ export function MediaUploadDialog({ open, onClose, onSuccess }: MediaUploadDialo
     onClose();
   }, [isUploading, onClose]);
 
+  // ---------------------------------------------------------------------------
+  // Derived state
+  // ---------------------------------------------------------------------------
+
+  const successCount = fileStates.filter((fs) => fs.status === 'success').length;
+  const duplicateCount = fileStates.filter((fs) => fs.status === 'duplicate').length;
+  const errorCount = fileStates.filter((fs) => fs.status === 'error').length;
+  const pendingCount = fileStates.filter((fs) => fs.status === 'pending').length;
+
   const allDone =
-    fileStates.length > 0 && fileStates.every((fs) => fs.status === 'success');
-  const hasErrors = fileStates.some((fs) => fs.status === 'error');
-  const hasPending = fileStates.some((fs) => fs.status === 'pending');
+    fileStates.length > 0 &&
+    fileStates.every(
+      (fs) => fs.status === 'success' || fs.status === 'duplicate',
+    );
+  const hasErrors = errorCount > 0;
+  const hasPending = pendingCount > 0;
+
+  // ---------------------------------------------------------------------------
+  // Summary message shown after the run completes
+  // ---------------------------------------------------------------------------
+
+  function buildSummary(): string {
+    const parts: string[] = [];
+    if (successCount > 0) parts.push(`${successCount} uploaded`);
+    if (duplicateCount > 0)
+      parts.push(`${duplicateCount} already in library`);
+    if (errorCount > 0) parts.push(`${errorCount} failed`);
+    return parts.join(', ');
+  }
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
@@ -316,6 +386,12 @@ export function MediaUploadDialog({ open, onClose, onSuccess }: MediaUploadDialo
                   <ListItemIcon sx={{ minWidth: 36 }}>
                     {fs.status === 'success' && <CheckIcon color="success" />}
                     {fs.status === 'error' && <ErrorIcon color="error" />}
+                    {fs.status === 'duplicate' && (
+                      <DuplicateIcon
+                        sx={{ color: theme.palette.info.main }}
+                        aria-label="Already in library"
+                      />
+                    )}
                     {(fs.status === 'pending' || fs.status === 'uploading') && (
                       <Chip
                         label={fs.status === 'uploading' ? `${fs.progress}%` : 'queued'}
@@ -332,9 +408,15 @@ export function MediaUploadDialog({ open, onClose, onSuccess }: MediaUploadDialo
                       </Typography>
                     }
                     secondary={
-                      <Typography variant="caption">
-                        {`${(fs.file.size / 1024 / 1024).toFixed(1)} MB`}
-                      </Typography>
+                      fs.status === 'duplicate' ? (
+                        <Typography variant="caption" sx={{ color: theme.palette.info.main }}>
+                          Already in library
+                        </Typography>
+                      ) : (
+                        <Typography variant="caption">
+                          {`${(fs.file.size / 1024 / 1024).toFixed(1)} MB`}
+                        </Typography>
+                      )
                     }
                     sx={{ flex: 1, mr: 1 }}
                   />
@@ -383,9 +465,10 @@ export function MediaUploadDialog({ open, onClose, onSuccess }: MediaUploadDialo
           </List>
         )}
 
+        {/* End-of-run summary */}
         {allDone && (
-          <Alert severity="success">
-            All files uploaded successfully. The library will refresh.
+          <Alert severity={duplicateCount > 0 && successCount === 0 ? 'info' : 'success'}>
+            {buildSummary()}. The library will refresh.
           </Alert>
         )}
       </DialogContent>
@@ -401,7 +484,9 @@ export function MediaUploadDialog({ open, onClose, onSuccess }: MediaUploadDialo
             disabled={isUploading}
             startIcon={<UploadIcon />}
           >
-            {isUploading ? 'Uploading...' : `Upload ${fileStates.filter((f) => f.status === 'pending').length} file(s)`}
+            {isUploading
+              ? 'Uploading...'
+              : `Upload ${fileStates.filter((f) => f.status === 'pending').length} file(s)`}
           </Button>
         )}
         {hasErrors && !isUploading && !hasPending && (
