@@ -1,5 +1,9 @@
 # SSL & Nginx Reverse Proxy Setup for memoriahub.dev.marin.cr
 
+> **Production deployment** (`memoriahub.marin.cr`) is covered in a separate guide:
+> [docs/prod-deploy.md](prod-deploy.md). This document covers the development
+> environment only.
+
 ## Overview
 
 MemoriaHub is deployed behind a two-tier Nginx reverse proxy on the `dev.marin.cr` VPS, sharing the wildcard SSL certificate and subdomain routing infrastructure with the other projects on the host (Knecta, Knotes, Clipboard, ShellKeep, etc.).
