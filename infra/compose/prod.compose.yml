@@ -39,3 +39,7 @@ services:
   # ---------------------------------------------------------------------------
   nginx:
     restart: unless-stopped
+    volumes:
+      # Override the dev nginx.conf with the prod variant that routes to web:80
+      # (production web container serves static files on :80, not Vite :5173)
+      - ../nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
