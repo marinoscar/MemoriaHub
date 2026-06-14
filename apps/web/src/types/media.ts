@@ -24,7 +24,8 @@ export type SortOrder = 'asc' | 'desc';
 export interface MediaItem {
   id: string;
   storageObjectId: string;
-  ownerId: string;
+  addedById: string;
+  circleId: string;
   type: MediaType;
   capturedAt: string | null;
   capturedAtOffset: number | null;
@@ -102,6 +103,7 @@ export interface MediaQueryParams {
   sortOrder?: SortOrder;
   /** Filter by exact SHA-256 hex digest (64 lower-case hex chars). */
   contentHash?: string;
+  circleId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +128,7 @@ export interface RegisterMediaDto {
   type: MediaType;
   source: MediaSource;
   originalFilename: string;
+  circleId: string;
   capturedAt?: string;
   capturedAtOffset?: number;
   classification?: MediaClassification;
@@ -157,6 +160,7 @@ export interface TagItem {
   name: string;
   count: number;
   createdAt: string;
+  circleId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -199,7 +203,8 @@ export interface Album {
   id: string;
   name: string;
   description: string | null;
-  ownerId: string;
+  addedById: string;
+  circleId: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -216,6 +221,7 @@ export interface AlbumDetail extends Album {
 export interface CreateAlbumDto {
   name: string;
   description?: string;
+  circleId: string;
 }
 
 export interface AlbumQueryParams {
@@ -223,4 +229,5 @@ export interface AlbumQueryParams {
   pageSize?: number;
   sortBy?: 'name' | 'createdAt' | 'updatedAt';
   sortOrder?: SortOrder;
+  circleId?: string;
 }

@@ -20,6 +20,7 @@ export interface UserSettings {
     useProviderImage: boolean;
     customImageUrl?: string | null;
   };
+  activeCircleId?: string | null;
   updatedAt: string;
   version: number;
 }
