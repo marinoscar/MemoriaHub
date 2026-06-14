@@ -640,9 +640,11 @@ export class MediaService {
   /**
    * List the caller's tags with the count of active (non-deleted) MediaItems attached.
    */
-  async listTags(userId: string) {
+  async listTags(circleId: string, userId: string, userPermissions: string[]) {
+    await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
+
     const tags = await this.prisma.tag.findMany({
-      where: { ownerId: userId },
+      where: { circleId },
       include: {
         _count: {
           select: {
@@ -680,10 +682,10 @@ export class MediaService {
     const result: Array<{ tagId: string; name: string }> = [];
 
     for (const name of dto.names) {
-      // Upsert Tag (idempotent per ownerId + name unique constraint)
+      // Upsert Tag (idempotent per circleId + name unique constraint)
       const tag = await this.prisma.tag.upsert({
-        where: { ownerId_name: { ownerId: userId, name } },
-        create: { ownerId: userId, name },
+        where: { circleId_name: { circleId: item.circleId, name } },
+        create: { addedById: userId, circleId: item.circleId, name },
         update: {},
       });
 
@@ -744,10 +746,13 @@ export class MediaService {
   /**
    * Create a new album owned by the caller.
    */
-  async createAlbum(dto: CreateAlbumDto, userId: string) {
+  async createAlbum(dto: CreateAlbumDto, userId: string, userPermissions: string[]) {
+    await this.circleMembershipService.assertCircleAccess(userId, dto.circleId, userPermissions, 'collaborator' as CircleRole);
+
     const album = await this.prisma.album.create({
       data: {
-        ownerId: userId,
+        addedById: userId,
+        circleId: dto.circleId,
         name: dto.name,
         description: dto.description ?? null,
       },
@@ -762,11 +767,12 @@ export class MediaService {
    * List caller's albums with pagination.
    */
   async listAlbums(query: AlbumQueryDto, userId: string, userPermissions: string[]) {
-    const { page, pageSize, sortBy, sortOrder } = query;
+    const { circleId, page, pageSize, sortBy, sortOrder } = query;
     const skip = (page - 1) * pageSize;
-    const canReadAny = userPermissions.includes(PERMISSIONS.MEDIA_READ_ANY);
 
-    const where: Prisma.AlbumWhereInput = canReadAny ? {} : { ownerId: userId };
+    await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
+
+    const where: Prisma.AlbumWhereInput = { circleId };
 
     const [items, totalItems] = await Promise.all([
       this.prisma.album.findMany({
@@ -810,10 +816,7 @@ export class MediaService {
       throw new NotFoundException(`Album with id ${id} not found`);
     }
 
-    const canReadAny = userPermissions.includes(PERMISSIONS.MEDIA_READ_ANY);
-    if (!canReadAny && album.ownerId !== userId) {
-      throw new ForbiddenException('You do not have access to this album');
-    }
+    await this.circleMembershipService.assertCircleAccess(userId, album.circleId, userPermissions, 'viewer' as CircleRole);
 
     return album;
   }
@@ -831,7 +834,7 @@ export class MediaService {
       id,
       userId,
       userPermissions,
-      PERMISSIONS.MEDIA_WRITE_ANY,
+      'collaborator' as CircleRole,
     );
 
     const updated = await this.prisma.album.update({
@@ -855,7 +858,7 @@ export class MediaService {
       id,
       userId,
       userPermissions,
-      PERMISSIONS.MEDIA_DELETE_ANY,
+      'collaborator' as CircleRole,
     );
 
     // Cascade in the schema deletes AlbumItems when Album is deleted
@@ -877,17 +880,15 @@ export class MediaService {
       albumId,
       userId,
       userPermissions,
-      PERMISSIONS.MEDIA_WRITE_ANY,
+      'collaborator' as CircleRole,
     );
 
-    const canWriteAny = userPermissions.includes(PERMISSIONS.MEDIA_WRITE_ANY);
-
-    // Verify all mediaItemIds exist and caller owns them (or holds write_any)
+    // Verify all mediaItemIds exist and belong to the same circle
     const mediaItems = await this.prisma.mediaItem.findMany({
       where: {
         id: { in: dto.mediaItemIds },
         deletedAt: null,
-        ...(canWriteAny ? {} : { ownerId: userId }),
+        circleId: album.circleId,
       },
     });
 
@@ -930,7 +931,7 @@ export class MediaService {
       albumId,
       userId,
       userPermissions,
-      PERMISSIONS.MEDIA_WRITE_ANY,
+      'collaborator' as CircleRole,
     );
 
     const albumItem = await this.prisma.albumItem.findUnique({
@@ -1285,7 +1286,7 @@ export class MediaService {
     id: string,
     userId: string,
     userPermissions: string[],
-    anyPermission: string,
+    required: CircleRole,
   ) {
     const album = await this.prisma.album.findUnique({ where: { id } });
 
@@ -1293,10 +1294,7 @@ export class MediaService {
       throw new NotFoundException(`Album with id ${id} not found`);
     }
 
-    const canAny = userPermissions.includes(anyPermission);
-    if (!canAny && album.ownerId !== userId) {
-      throw new ForbiddenException('You do not have access to this album');
-    }
+    await this.circleMembershipService.assertCircleAccess(userId, album.circleId, userPermissions, required);
 
     return album;
   }
