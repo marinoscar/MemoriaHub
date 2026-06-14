@@ -19,6 +19,7 @@ import {
   PhotoLibrary as PhotoLibraryIcon,
   Map as MapIcon,
   GroupWork as GroupWorkIcon,
+  Backup as BackupIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -83,6 +84,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       label: 'Admin Circles',
       icon: <GroupWorkIcon />,
       path: '/admin/circles',
+      visible: isAdmin,
+    },
+    {
+      label: 'Backup',
+      icon: <BackupIcon />,
+      path: '/admin/backup',
       visible: isAdmin,
     },
   ];

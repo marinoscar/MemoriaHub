@@ -24,6 +24,7 @@ const MediaMapPage = lazy(() => import('./pages/MediaMapPage'));
 const CircleListPage = lazy(() => import('./pages/Circles/CircleListPage'));
 const CircleDetailPage = lazy(() => import('./pages/Circles/CircleDetailPage'));
 const AdminCirclesPage = lazy(() => import('./pages/Admin/AdminCirclesPage'));
+const BackupPage = lazy(() => import('./pages/Admin/BackupPage'));
 
 // Test login page (development only)
 const TestLoginPage = import.meta.env.PROD
@@ -63,6 +64,7 @@ function AppRoutes() {
                 <Route path="/admin/users" element={<UserManagementPage />} />
                 <Route path="/admin/settings" element={<SystemSettingsPage />} />
                 <Route path="/admin/circles" element={<AdminCirclesPage />} />
+                <Route path="/admin/backup" element={<BackupPage />} />
               </Route>
             </Route>
 
