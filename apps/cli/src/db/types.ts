@@ -17,6 +17,7 @@ export interface Folder {
   enabled: boolean;
   added_at: string;       // ISO 8601
   last_sync_at: string | null;
+  circle_id: string | null;
 }
 
 // ---------------------------------------------------------------------------

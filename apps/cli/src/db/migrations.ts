@@ -20,6 +20,7 @@ import {
   CREATE_SETTINGS,
   SEED_SETTINGS,
   ALTER_FILES_ADD_MTIME_MS,
+  ALTER_FOLDERS_ADD_CIRCLE_ID,
 } from './schema.js';
 
 interface Migration {
@@ -59,6 +60,14 @@ const MIGRATIONS: Migration[] = [
       // so existing rows get NULL (meaning "no cached mtime yet"), and the
       // engine will recompute and store it on the next sync.
       db.exec(ALTER_FILES_ADD_MTIME_MS);
+    },
+  },
+  {
+    version: 3,
+    up(db: BetterSqlite3.Database): void {
+      // Add circle_id column to folders table for per-folder circle binding.
+      // Nullable: existing rows get NULL (no circle bound yet).
+      db.exec(ALTER_FOLDERS_ADD_CIRCLE_ID);
     },
   },
 ];

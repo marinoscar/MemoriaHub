@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS folders (
   recursive   INTEGER NOT NULL DEFAULT 0,
   enabled     INTEGER NOT NULL DEFAULT 1,
   added_at    TEXT    NOT NULL,
-  last_sync_at TEXT
+  last_sync_at TEXT,
+  circle_id   TEXT
 )`;
 
 export const CREATE_FOLDERS_IDX_ENABLED = `
@@ -50,6 +51,10 @@ CREATE INDEX IF NOT EXISTS idx_files_sha256 ON files(sha256)`;
 /** Migration 2: add mtime_ms column to files for hash-cache invalidation. */
 export const ALTER_FILES_ADD_MTIME_MS = `
 ALTER TABLE files ADD COLUMN mtime_ms INTEGER`;
+
+/** Migration 3: add circle_id column to folders for per-folder circle binding. */
+export const ALTER_FOLDERS_ADD_CIRCLE_ID = `
+ALTER TABLE folders ADD COLUMN circle_id TEXT`;
 
 export const CREATE_SYNC_RUNS = `
 CREATE TABLE IF NOT EXISTS sync_runs (
