@@ -464,21 +464,94 @@ apps/api/src/storage/
         └── base-processor.interface.ts
 ```
 
-### 5.5 Content-Hash Deduplication
+### 5.5 Family Circles Module
+
+The `circles/` module provides the shared-library collaboration layer. It is the authorization root for all circle-scoped resources.
+
+#### Module Structure
+
+```
+apps/api/src/circles/
+├── circles.module.ts
+├── circles.controller.ts          # CRUD + members + invites endpoints
+├── circles.service.ts             # Business logic (create, list, members, invites)
+├── circle-membership.service.ts   # resolveRole, assertCircleAccess (separate service
+│                                  # to avoid circular imports with MediaModule/StorageModule)
+├── guards/
+│   └── circle-member.guard.ts
+├── decorators/
+│   └── circle-role.decorator.ts
+└── dto/
+    ├── create-circle.dto.ts
+    ├── update-circle.dto.ts
+    ├── circles-query.dto.ts
+    ├── add-member.dto.ts
+    ├── update-member-role.dto.ts
+    └── create-invite.dto.ts
+```
+
+#### Authorization Flow
+
+```
+API request with circleId
+        │
+        ▼
+CircleMembershipService.assertCircleAccess(userId, circleId, permissions, required)
+        │
+        ├── isSuperAdmin = permissions includes circles:manage_any
+        │   OR media:read_any OR media:write_any
+        │   └── if true: bypass membership check, return { role, isSuperAdmin: true }
+        │
+        ├── circle existence check (404 if not found)
+        │
+        ├── resolveRole(userId, circleId) → CircleRole | null
+        │   └── null → 403 "not a member of this circle"
+        │
+        └── ROLE_RANK[role] >= ROLE_RANK[required]
+            └── if insufficient → 403 "requires <role> or higher"
+```
+
+Per-circle role ranking: `viewer (1) < collaborator (2) < circle_admin (3)`.
+
+#### Backup Module
+
+```
+apps/api/src/jobs/backup/
+├── backup.module.ts
+├── backup.controller.ts           # @Controller('admin/backup')
+├── backup.service.ts              # runBackup, getRecentRuns, getRunStatus, listObjects
+└── dto/
+    └── trigger-backup.dto.ts
+```
+
+The backup job mirrors ready `MediaItem` blobs from S3 to the local provider rooted at `BACKUP_LOCAL_PATH`. Runs are tracked as `audit_events` records.
+
+#### LocalDiskStorageProvider
+
+```
+apps/api/src/storage/providers/local/
+└── local-disk.provider.ts         # Implements StorageProvider interface
+```
+
+Selected when `STORAGE_BACKUP_PROVIDER=local`. Used exclusively by the backup job; the primary upload path continues to use the S3 provider.
+
+---
+
+### 5.6 Content-Hash Deduplication
 
 #### Overview
 
 The system performs **byte-exact (tier-1) deduplication** on media items. Two files are considered identical if and only if their SHA-256 content hashes match. Re-encoded or visually similar files are NOT caught by this mechanism; near-duplicate detection via perceptual hashing is a planned tier-2 enhancement (see [Phase 09 — Long-Term Enrichment](plan/phase-09-longterm-enrichment.md)).
 
-The dedup key is the tuple `(owner_id, content_hash)`. Deduplication is scoped to the owner — two users can independently hold files with the same content hash.
+The dedup key is the tuple `(circle_id, content_hash)`. Deduplication is scoped to the circle — the same file may legitimately exist in different circles (e.g., a user's personal circle and a shared family circle), but within one circle only one copy is kept.
 
 #### Database Backstop
 
 A partial unique index on `media_items` enforces the invariant at the database level:
 
 ```sql
-CREATE UNIQUE INDEX "media_items_owner_content_hash_active_key"
-  ON "media_items" ("owner_id", "content_hash")
+CREATE UNIQUE INDEX "media_items_circle_content_hash_active_key"
+  ON "media_items" ("circle_id", "content_hash")
   WHERE "content_hash" IS NOT NULL AND "deleted_at" IS NULL;
 ```
 
@@ -570,6 +643,54 @@ The server-computed hash is authoritative for integrity verification. If the cli
 ## 6. Data Architecture
 
 ### 6.1 Entity Relationship Diagram
+
+#### Family Circles (new in FC)
+
+```
+┌────────────────────┐       ┌─────────────────────────┐
+│      circles       │       │     circle_members      │
+├────────────────────┤       ├─────────────────────────┤
+│ id (PK, UUID)      │──┐    │ id (PK, UUID)           │
+│ name               │  │    │ circle_id (FK)    ◀─────┘
+│ description        │  └───▶│ user_id (FK)            │
+│ owner_id (FK)      │       │ role (CircleRole enum)  │
+│ is_personal        │       │ created_at              │
+│ created_at         │       │ updated_at              │
+│ updated_at         │       │ UNIQUE(circle_id,user_id)│
+└────────────────────┘       └─────────────────────────┘
+         │
+         ▼
+┌────────────────────┐
+│   circle_invites   │
+├────────────────────┤
+│ id (PK, UUID)      │
+│ circle_id (FK)     │
+│ email              │
+│ role (CircleRole)  │
+│ added_by_id (FK)   │
+│ added_at           │
+│ claimed_by_id (FK) │
+│ claimed_at         │
+│ notes              │
+│ UNIQUE(circle_id,  │
+│   email)           │
+└────────────────────┘
+```
+
+`CircleRole` enum values: `circle_admin`, `collaborator`, `viewer`.
+
+`circles.owner_id` is a display/seed convenience. Authorization always derives from `circle_members.role`, never from `owner_id` directly.
+
+#### Media Domain (circle-scoped since FC)
+
+`media_items`, `albums`, and `tags` all carry a `circle_id (FK → circles)` and `added_by_id (FK → users)`. The field was renamed from `owner_id` to `added_by_id` (mapped column `added_by_id`) to reflect the shared-library semantic — any collaborator can add items; the field records who added it, not who "owns" it.
+
+Tag uniqueness is `(circle_id, name)` (was `(owner_id, name)`).
+Content-hash dedup is `(circle_id, content_hash)` (was `(owner_id, content_hash)`).
+
+`storage_objects` has no `circle_id`. Download authorization resolves via `storage_object → media_item → circle_id`.
+
+#### Legacy ERD
 
 ```
 ┌────────────────────┐       ┌────────────────────┐
@@ -685,9 +806,13 @@ The server-computed hash is authoritative for integrity verification. If the cli
     "displayName": "string | null",
     "useProviderImage": true,
     "customImageUrl": "string | null"
-  }
+  },
+  "activeCircleId": "uuid | null"
 }
 ```
+
+`activeCircleId` is a UX convenience: it records which circle the user last selected in the web app or CLI. It is **never trusted for authorization** — the API always re-verifies membership via `circle_members`.
+
 
 #### System Settings Shape
 
@@ -755,6 +880,12 @@ The server-computed hash is authoritative for integrity verification. If the cli
      │                    │                    │                    │
      │                    │                    │ 7. Check allowlist │
      │                    │                    │    Provision user  │
+     │                    │                    │    (new user only) │
+     │                    │                    │    Create personal │
+     │                    │                    │    circle + admin  │
+     │                    │                    │    membership      │
+     │                    │                    │    Claim pending   │
+     │                    │                    │    circle invites  │
      │                    │                    │    Generate JWT    │
      │                    │                    │    Store refresh   │
      │                    │                    │                    │
@@ -781,18 +912,26 @@ The server-computed hash is authoritative for integrity verification. If the cli
 - Refresh token rotation on each use (reuse detection)
 - Database allows server-side revocation
 
-### 7.3 RBAC Model
+### 7.3 RBAC Model (Two-Layer Authorization)
+
+The system uses two independent authorization layers that work together.
+
+**Layer 1: Global system RBAC** (unchanged from the foundation)
 
 ```
                     ┌─────────────────────────────────────────────┐
-                    │                 PERMISSIONS                  │
+                    │         GLOBAL PERMISSIONS (excerpt)         │
                     ├─────────────────────────────────────────────┤
-                    │ system_settings:read  │ system_settings:write│
-                    │ user_settings:read    │ user_settings:write  │
-                    │ users:read            │ users:write          │
-                    │ rbac:manage           │ allowlist:read       │
-                    │ allowlist:write       │                      │
-                    └────────────┬───────────┴──────────────────────┘
+                    │ system_settings:read/write                   │
+                    │ user_settings:read/write                     │
+                    │ users:read/write  │  rbac:manage             │
+                    │ allowlist:read/write                         │
+                    │ media:read/write/delete                      │
+                    │ media:read_any / write_any / delete_any      │
+                    │ circles:read  │  circles:write               │
+                    │ circles:manage_any (Admin)                   │
+                    │ backup:run  │  backup:read (Admin)           │
+                    └────────────┬─────────────────────────────────┘
                                  │
         ┌────────────────────────┼────────────────────────┐
         │                        │                        │
@@ -800,36 +939,50 @@ The server-computed hash is authoritative for integrity verification. If the cli
 ┌───────────────┐      ┌───────────────┐      ┌───────────────┐
 │     ADMIN     │      │  CONTRIBUTOR  │      │    VIEWER     │
 ├───────────────┤      ├───────────────┤      ├───────────────┤
-│ ALL           │      │ user_settings:│      │ user_settings:│
-│ PERMISSIONS   │      │   read/write  │      │   read        │
-│               │      │               │      │               │
-│ (Full Access) │      │ (Standard     │      │ (Least        │
-│               │      │  User)        │      │  Privilege)   │
+│ ALL perms     │      │ circles:read/ │      │ circles:read/ │
+│ incl. _any    │      │   write       │      │   write       │
+│ backup:run/   │      │ media:read/   │      │ media:read/   │
+│   read        │      │   write/delete│      │   write/delete│
+│               │      │ user_settings:│      │ user_settings:│
+│ Super-admin   │      │   read/write  │      │   read/write  │
+│ bypass for    │      │               │      │               │
+│ all circles   │      │ (Standard     │      │ (Least        │
+│               │      │  user)        │      │  privilege)   │
 └───────────────┘      └───────────────┘      └───────────────┘
-        │                        │                        │
-        └────────────────────────┼────────────────────────┘
-                                 │
-                                 ▼
-                        ┌───────────────┐
-                        │     USERS     │
-                        │  (Many-to-Many│
-                        │   Assignment) │
-                        └───────────────┘
 ```
+
+Note: `circles:read` and `circles:write` are granted to all three global roles. They grant API access to the circles endpoints; the per-circle role (Layer 2) governs what a user can do within a specific circle.
+
+**Layer 2: Per-circle roles** (new in FC)
+
+Each `circle_members` row carries a `CircleRole` enum. This layer is enforced by `CircleMembershipService.assertCircleAccess()` inside service methods, not by NestJS guards.
+
+| Per-circle Role | Rank | Capabilities |
+|-----------------|------|--------------|
+| `viewer` | 1 | Read media, albums, tags in the circle |
+| `collaborator` | 2 | All viewer capabilities + add/edit/delete media, albums, tags |
+| `circle_admin` | 3 | All collaborator capabilities + manage members and invites |
+
+**Super-admin bypass**: If the caller's global permissions include `circles:manage_any`, `media:read_any`, or `media:write_any`, the per-circle membership check is skipped entirely (`isSuperAdmin: true`). This allows the global Admin to manage any circle's content without being a member.
 
 ### 7.4 Access Control Layers
 
 ```
 Request → Nginx → JwtAuthGuard → RolesGuard → PermissionsGuard → Controller
-            │           │             │              │
-            │           │             │              └── Check @Permissions()
-            │           │             │                  AND logic (all required)
-            │           │             │
-            │           │             └── Check @Roles() decorator
-            │           │                 OR logic (any role matches)
-            │           │
-            │           └── Validate JWT, load user+roles+permissions
-            │               Check user is active
+            │           │             │              │                  │
+            │           │             │              └── Check @Permissions()   │
+            │           │             │                  AND logic (all required)│
+            │           │             │                                          │
+            │           │             └── Check @Roles()                        │
+            │           │                 OR logic (any role matches)           │
+            │           │                                                        │
+            │           └── Validate JWT, load user+roles+permissions           │
+            │               Check user is active                                │
+            │                                                          ▼
+            │                                              (circle-scoped endpoints only)
+            │                                              CircleMembershipService
+            │                                              .assertCircleAccess()
+            │                                              per-circle role check
             │
             └── Security headers, rate limiting (optional)
 ```
@@ -863,6 +1016,9 @@ Before OAuth authentication completes:
 | **Settings** | `/api/user-settings/*` | Yes | User preferences |
 | **System Settings** | `/api/system-settings/*` | Yes (Admin) | App configuration |
 | **Allowlist** | `/api/allowlist/*` | Yes (Admin) | Access control |
+| **Circles** | `/api/circles/*` | Yes | Circle CRUD, members, invites |
+| **Admin Circles** | `/api/admin/circles` | Yes (Admin) | Cross-circle admin view |
+| **Admin Backup** | `/api/admin/backup/*` | Yes (Admin) | Local-drive backup/replication |
 
 ### 8.2 Complete Endpoint Reference
 
@@ -926,6 +1082,33 @@ Before OAuth authentication completes:
 | `GET` | `/api/health/live` | Public | Liveness probe |
 | `GET` | `/api/health/ready` | Public | Readiness probe (+ DB) |
 
+#### Circles
+
+| Method | Path | Permission | Per-circle Role | Purpose |
+|--------|------|------------|-----------------|---------|
+| `POST` | `/api/circles` | `circles:write` | — | Create circle |
+| `GET` | `/api/circles` | `circles:read` | — | List member circles (`?all=true` admin) |
+| `GET` | `/api/circles/:id` | `circles:read` | viewer | Get circle details |
+| `PATCH` | `/api/circles/:id` | `circles:write` | circle_admin | Update circle |
+| `DELETE` | `/api/circles/:id` | `circles:write` | circle_admin | Delete circle (not personal) |
+| `GET` | `/api/circles/:id/members` | `circles:read` | viewer | List members |
+| `POST` | `/api/circles/:id/members` | `circles:write` | circle_admin | Add member by user ID |
+| `PATCH` | `/api/circles/:id/members/:userId` | `circles:write` | circle_admin | Change member role |
+| `DELETE` | `/api/circles/:id/members/:userId` | `circles:read` | viewer (self-leave) or circle_admin | Remove member |
+| `GET` | `/api/circles/:id/invites` | `circles:read` | circle_admin | List invites |
+| `POST` | `/api/circles/:id/invites` | `circles:write` | circle_admin | Create invite + allowlist upsert |
+| `DELETE` | `/api/circles/:id/invites/:inviteId` | `circles:write` | circle_admin | Revoke pending invite |
+
+#### Admin Backup
+
+| Method | Path | Permission | Purpose |
+|--------|------|------------|---------|
+| `POST` | `/api/admin/backup` | `backup:run` (Admin role required) | Trigger local-drive replication |
+| `GET` | `/api/admin/backup/runs` | `backup:read` (Admin) | List recent backup runs |
+| `GET` | `/api/admin/backup/status` | `backup:read` (Admin) | Alias for `/runs` |
+| `GET` | `/api/admin/backup/runs/:runId` | `backup:read` (Admin) | Get specific run status |
+| `GET` | `/api/admin/backup/objects` | `backup:read` (Admin) | List objects with signed URLs |
+
 ### 8.3 Response Format
 
 #### Success Response
@@ -970,10 +1153,14 @@ Before OAuth authentication completes:
 | Auth Callback | `/auth/callback` | Public | - | Token handling |
 | Home | `/` | Required | Any | Dashboard |
 | User Settings | `/settings` | Required | Any | User preferences |
-| Media Library | `/media` | Required | Any | Browse and upload media |
-| Map | `/map` | Required | Any | Clustered map of geotagged media |
+| Media Library | `/media` | Required | Any | Browse and upload media (active circle) |
+| Map | `/map` | Required | Any | Clustered map of geotagged media (active circle) |
+| Circle List | `/circles` | Required | Any | List and create circles |
+| Circle Detail | `/circles/:id` | Required | Any | Members, invites, and content for one circle |
 | System Settings | `/admin/settings` | Required | Admin | App configuration |
 | User Management | `/admin/users` | Required | Admin | User/allowlist mgmt |
+| Admin Circles | `/admin/circles` | Required | Admin | Cross-circle admin view |
+| Admin Backup | `/admin/backup` | Required | Admin | Trigger and monitor backup runs |
 | Device Activation | `/device` | Required | Any | Device auth approval |
 | Test Login | `/testing/login` | Public | - | Test auth bypass (dev only) |
 
@@ -985,12 +1172,14 @@ Before OAuth authentication completes:
 <App>
   <ThemeProvider>        {/* MUI theme + dark mode */}
     <AuthProvider>       {/* Authentication state */}
-      <SettingsProvider> {/* User settings */}
-        <RouterProvider> {/* React Router */}
-          <Layout>
-            <Pages />
-          </Layout>
-        </RouterProvider>
+      <SettingsProvider> {/* User settings (includes activeCircleId) */}
+        <CircleProvider> {/* Active circle, member circles, per-circle role */}
+          <RouterProvider> {/* React Router */}
+            <Layout>       {/* AppBar includes CircleSwitcher */}
+              <Pages />
+            </Layout>
+          </RouterProvider>
+        </CircleProvider>
       </SettingsProvider>
     </AuthProvider>
   </ThemeProvider>
