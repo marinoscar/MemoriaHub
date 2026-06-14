@@ -1309,13 +1309,15 @@ The storage system provides file upload and management capabilities with support
 
 Media endpoints register uploaded `StorageObject` blobs as `MediaItem` records in the library and provide list/get/update/delete access to those records. All media endpoints require `media:read` or `media:write` permission. Admins holding `media:read_any` can read all users' items; `media:write_any` and `media:delete_any` extend that to mutations.
 
+**Circle scope is required on all media endpoints.** Create and list endpoints require an explicit `circleId`. The caller must be a member of that circle with at least `viewer` (reads) or `collaborator` (writes) role. Item-level endpoints (GET/PATCH/DELETE by ID) derive the circle from the loaded resource — the caller does not pass `circleId` for those.
+
 #### POST /api/media
 
-**Requires:** `media:write` permission
+**Requires:** `media:write` permission + `collaborator` role in the target circle
 
 Register an uploaded `StorageObject` as a `MediaItem`.
 
-**Idempotent deduplication behavior:** When `contentHash` is supplied the server checks whether the caller already owns a non-deleted `MediaItem` with the same hash. If one exists the redundant `StorageObject` blob is deleted best-effort and the **existing** item is returned. A concurrent registration of the same hash (race condition) is caught via the database partial unique index on `(owner_id, content_hash)` — the server fetches the winning row, cleans up the redundant blob, and returns the winner. The `deduplicated` field in the response indicates which path was taken.
+**Idempotent deduplication behavior:** When `contentHash` is supplied the server checks for an existing non-deleted `MediaItem` with the same `(circleId, contentHash)` tuple. If one exists the redundant `StorageObject` blob is deleted best-effort and the **existing** item is returned. A concurrent registration of the same hash (race condition) is caught via the database partial unique index on `(circle_id, content_hash)` — the server fetches the winning row, cleans up the redundant blob, and returns the winner. The `deduplicated` field in the response indicates which path was taken.
 
 | HTTP Status | Meaning |
 |-------------|---------|
@@ -1326,11 +1328,12 @@ Register an uploaded `StorageObject` as a `MediaItem`.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `storageObjectId` | UUID | Yes | ID of an already-uploaded `StorageObject` owned by the caller |
+| `circleId` | UUID | **Yes** | Circle to add this item to. Caller must be a `collaborator` or `circle_admin` in this circle. |
+| `storageObjectId` | UUID | Yes | ID of an already-uploaded `StorageObject` |
 | `type` | `"photo"` \| `"video"` | Yes | Media type |
 | `source` | `"web"` \| `"cli"` \| `"android"` \| `"import"` \| `"sync"` | Yes | Upload origin |
 | `originalFilename` | string (1–1024 chars) | Yes | Original file name |
-| `contentHash` | string (64 lowercase hex chars) | No | SHA-256 hex digest of the file bytes. When supplied the server deduplicates by `(ownerId, contentHash)`. |
+| `contentHash` | string (64 lowercase hex chars) | No | SHA-256 hex digest of the file bytes. When supplied the server deduplicates by `(circleId, contentHash)`. |
 | `capturedAt` | ISO 8601 datetime | No | When the photo/video was taken |
 | `capturedAtOffset` | integer (minutes) | No | UTC offset of `capturedAt` |
 | `classification` | `"memory"` \| `"low_value"` \| `"unreviewed"` | No | Defaults to `"unreviewed"` |
@@ -1361,7 +1364,8 @@ Register an uploaded `StorageObject` as a `MediaItem`.
 ```json
 {
   "id": "uuid",
-  "ownerId": "uuid",
+  "circleId": "uuid",
+  "addedById": "uuid",
   "storageObjectId": "uuid",
   "type": "photo",
   "source": "web",
@@ -1390,14 +1394,15 @@ Same shape as above but `deduplicated: true`. The returned item is the **existin
 
 #### GET /api/media
 
-**Requires:** `media:read` permission
+**Requires:** `media:read` permission + `viewer` role in the target circle
 
-List the caller's active (non-deleted) media items with pagination and filtering. Admins holding `media:read_any` see all users' items.
+List active (non-deleted) media items for a circle. Admins holding `media:read_any` may omit `circleId` to query across all circles, but should normally scope to a specific circle.
 
 **Query Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
+| `circleId` | UUID | **required** | Circle to query (caller must be a viewer or higher) |
 | `page` | number | 1 | Page number (1-indexed) |
 | `pageSize` | number | 20 | Items per page (max 100) |
 | `type` | `"photo"` \| `"video"` | — | Filter by media type |
@@ -1421,10 +1426,10 @@ List the caller's active (non-deleted) media items with pagination and filtering
 Before uploading, clients should query:
 
 ```
-GET /api/media?contentHash=<sha256>&pageSize=1
+GET /api/media?circleId=<uuid>&contentHash=<sha256>&pageSize=1
 ```
 
-If `items.length > 0` the file already exists in the library and the upload can be skipped entirely. This saves both bandwidth and storage. The web upload dialog and the CLI sync engine both perform this check.
+If `items.length > 0` the file already exists in that circle and the upload can be skipped entirely. This saves both bandwidth and storage. The web upload dialog and the CLI sync engine both perform this check. Note that dedup is scoped to the circle: the same file may exist in two different circles.
 
 **Response:**
 
@@ -1433,7 +1438,8 @@ If `items.length > 0` the file already exists in the library and the upload can 
   "items": [
     {
       "id": "uuid",
-      "ownerId": "uuid",
+      "circleId": "uuid",
+      "addedById": "uuid",
       "type": "photo",
       "originalFilename": "IMG_4521.jpg",
       "contentHash": "e3b0c44298fc1c149afbf4c8996fb924...",
@@ -1619,6 +1625,262 @@ Readiness check - includes database connectivity test.
 
 **Error Cases:**
 - 503 Service Unavailable - Database connection failed
+
+---
+
+## Family Circles
+
+### Circle-Scoped Media Note
+
+All media, album, and tag endpoints now require a `circleId` to scope queries:
+- **List endpoints** (`GET /media`, `/albums`, `/tags`, `/locations`, `/export`): `circleId` is a required query parameter
+- **Create endpoints** (`POST /media`, `/albums`): `circleId` is a required body field
+- **Item endpoints** (`GET/PATCH/DELETE /media/:id`, etc.): derive the circle from the loaded resource — callers do not need to pass `circleId`
+
+The `circleId` must be a circle the caller is a member of (minimum `viewer` for reads, `collaborator` for writes).
+
+---
+
+### Circles CRUD
+
+#### POST /circles
+**Requires:** `circles:write` permission
+
+Create a new circle.
+
+**Request Body:**
+```json
+{
+  "name": "Smith Family",
+  "description": "Photos for the whole family"
+}
+```
+
+**Response 201:**
+```json
+{
+  "id": "uuid",
+  "name": "Smith Family",
+  "description": "Photos for the whole family",
+  "ownerId": "uuid",
+  "isPersonal": false,
+  "createdAt": "ISO8601",
+  "updatedAt": "ISO8601"
+}
+```
+
+---
+
+#### GET /circles
+**Requires:** `circles:read` permission
+
+List circles the caller belongs to. Admins may pass `?all=true` to list all circles in the system.
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `all` | boolean | Admin-only: return all circles across all users |
+
+**Response 200:** Array of circle objects
+
+---
+
+#### GET /circles/:id
+**Requires:** `circles:read` + viewer membership (or super-admin)
+
+**Response 200:** Circle object with member count
+
+**Error Cases:**
+- 403 - Not a member of this circle
+- 404 - Circle not found
+
+---
+
+#### PATCH /circles/:id
+**Requires:** `circles:write` + `circle_admin` membership (or super-admin)
+
+**Request Body:** Partial circle fields (`name`, `description`)
+
+**Response 200:** Updated circle object
+
+---
+
+#### DELETE /circles/:id
+**Requires:** `circles:write` + `circle_admin` membership (or super-admin)
+
+Cannot delete a personal circle (`isPersonal: true`).
+
+**Response 204 No Content**
+
+**Error Cases:**
+- 400 - Cannot delete a personal circle
+
+---
+
+### Circle Members
+
+#### GET /circles/:id/members
+**Requires:** `circles:read` + viewer membership (or super-admin)
+
+**Response 200:** Array of `{ id, circleId, userId, role, createdAt, updatedAt, user: { id, email, displayName } }`
+
+---
+
+#### POST /circles/:id/members
+**Requires:** `circles:write` + `circle_admin` membership (or super-admin)
+
+Add an existing registered user by ID.
+
+**Request Body:**
+```json
+{
+  "userId": "uuid",
+  "role": "collaborator"
+}
+```
+`role` must be `circle_admin`, `collaborator`, or `viewer`.
+
+**Response 201:** Created member object
+
+---
+
+#### PATCH /circles/:id/members/:userId
+**Requires:** `circles:write` + `circle_admin` membership (or super-admin)
+
+Change a member's per-circle role.
+
+**Request Body:**
+```json
+{
+  "role": "viewer"
+}
+```
+
+**Response 200:** Updated member object
+
+**Error Cases:**
+- 400 - Cannot demote the last circle_admin
+
+---
+
+#### DELETE /circles/:id/members/:userId
+**Requires:** `circles:read` + (circle_admin OR caller === :userId)
+
+Remove a member, or self-leave the circle.
+
+**Response 204 No Content**
+
+**Error Cases:**
+- 400 - Cannot remove the last circle_admin (use delete circle instead)
+
+---
+
+### Circle Invites
+
+#### GET /circles/:id/invites
+**Requires:** `circles:read` + `circle_admin` membership (or super-admin)
+
+**Response 200:** Array of invite objects
+
+---
+
+#### POST /circles/:id/invites
+**Requires:** `circles:write` + `circle_admin` membership (or super-admin)
+
+Create an invite and automatically upsert the email into the application allowlist.
+
+**Request Body:**
+```json
+{
+  "email": "family@example.com",
+  "role": "collaborator",
+  "notes": "Cousin joining the family circle"
+}
+```
+
+**Response 201:** Invite object `{ id, circleId, email, role, addedById, addedAt, claimedById, claimedAt, notes }`
+
+**Side effect:** The email is upserted into `allowed_emails` so the invitee can log in. If the invitee is already a registered user, they are immediately added as a member (invite is auto-claimed).
+
+---
+
+#### DELETE /circles/:id/invites/:inviteId
+**Requires:** `circles:write` + `circle_admin` membership (or super-admin)
+
+Revoke a pending invite. Cannot revoke a claimed invite.
+
+**Response 204 No Content**
+
+**Error Cases:**
+- 400 - Cannot revoke a claimed invite
+- 404 - Invite not found in this circle
+
+---
+
+## Admin: Backup
+
+All backup endpoints require the global `admin` role and `backup:run` or `backup:read` permission.
+
+#### POST /admin/backup
+**Requires:** Admin role + `backup:run` permission
+
+Trigger a local-drive replication job. Copies ready `MediaItem` blobs from S3 to `BACKUP_LOCAL_PATH`. Writes a per-circle manifest alongside the blobs.
+
+**Request Body:**
+```json
+{
+  "circleId": "uuid"
+}
+```
+Omit `circleId` to back up all circles.
+
+**Response 200:**
+```json
+{
+  "runId": "audit-event-uuid",
+  "status": "started",
+  "circleId": "uuid | null",
+  "startedAt": "ISO8601"
+}
+```
+
+---
+
+#### GET /admin/backup/runs
+#### GET /admin/backup/status
+**Requires:** Admin role + `backup:read` permission
+
+List recent backup runs (sourced from `audit_events`).
+
+**Query Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | number | 20 | Number of runs to return |
+
+**Response 200:** Array of run summary objects
+
+---
+
+#### GET /admin/backup/runs/:runId
+**Requires:** Admin role + `backup:read` permission
+
+Get the status and result of a specific backup run.
+
+**Response 200:** Run detail object including item count, errors, and timing
+
+---
+
+#### GET /admin/backup/objects
+**Requires:** Admin role + `backup:read` permission
+
+List media objects available for backup, each with a signed download URL.
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `circleId` | uuid (optional) | Filter to one circle |
+
+**Response 200:** Array of `{ storageKey, downloadUrl, mediaItemId, circleId, size }`
 
 ---
 
