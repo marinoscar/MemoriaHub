@@ -174,6 +174,15 @@ describe('MediaService', () => {
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
+    // Configure $transaction to execute the callback with mockPrisma as the tx
+    (mockPrisma.$transaction as jest.Mock).mockImplementation(async (arg: any) => {
+      if (typeof arg === 'function') {
+        return arg(mockPrisma);
+      } else if (Array.isArray(arg)) {
+        return Promise.all(arg);
+      }
+      return arg;
+    });
     mockStorageProvider = {
       getSignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/signed'),
       delete: jest.fn().mockResolvedValue(undefined),

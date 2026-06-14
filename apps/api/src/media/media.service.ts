@@ -29,6 +29,10 @@ import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from './geo/geo-location-provider.interface';
+import { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
+import { BulkTagsDto } from './dto/bulk-tags.dto';
+import { BulkDeleteDto } from './dto/bulk-delete.dto';
+import { geoResultToMediaColumns, GEO_CLEAR_COLUMNS } from './geo/geo-result.mapper';
 
 /** Shape of each element returned by listLocations. */
 export interface MediaLocation {
@@ -1223,9 +1227,156 @@ export class MediaService {
     );
   }
 
+  async bulkUpdateMedia(
+    dto: BulkUpdateMediaDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ updated: number }> {
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
+
+    const data: Record<string, unknown> = {};
+
+    if (dto.set.classification !== undefined) {
+      data['classification'] = dto.set.classification;
+    }
+    if (dto.set.favorite !== undefined) {
+      data['favorite'] = dto.set.favorite;
+    }
+
+    if (dto.set.location === null) {
+      Object.assign(data, GEO_CLEAR_COLUMNS);
+    } else if (dto.set.location !== undefined) {
+      const { lat, lng, altitude } = dto.set.location;
+      const result = await this.geoProvider.reverseGeocode(lat, lng);
+      Object.assign(data, {
+        takenLat: lat,
+        takenLng: lng,
+        takenAltitude: altitude ?? null,
+        ...geoResultToMediaColumns(result ?? {}, 'manual'),
+      });
+    }
+
+    const { count } = await this.prisma.mediaItem.updateMany({
+      where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: null },
+      data,
+    });
+
+    this.logger.log(
+      `bulkUpdateMedia: updated ${count} items in circle ${dto.circleId} by user ${userId}`,
+    );
+
+    return { updated: count };
+  }
+
+  async bulkTags(
+    dto: BulkTagsDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ added: number; removed: number }> {
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
+
+    let added = 0;
+    let removed = 0;
+
+    await this.prisma.$transaction(async (tx) => {
+      if (dto.add && dto.add.length > 0) {
+        const tagIds: string[] = [];
+        for (const name of dto.add) {
+          const tag = await tx.tag.upsert({
+            where: { circleId_name: { circleId: dto.circleId, name } },
+            create: { addedById: userId, circleId: dto.circleId, name },
+            update: {},
+          });
+          tagIds.push(tag.id);
+        }
+
+        const pairs = dto.ids.flatMap((mediaItemId) =>
+          tagIds.map((tagId) => ({ mediaItemId, tagId })),
+        );
+        const result = await tx.mediaTag.createMany({ data: pairs, skipDuplicates: true });
+        added = result.count;
+      }
+
+      if (dto.remove && dto.remove.length > 0) {
+        const tags = await tx.tag.findMany({
+          where: {
+            circleId: dto.circleId,
+            name: { in: dto.remove },
+          },
+          select: { id: true },
+        });
+        if (tags.length > 0) {
+          const removeTagIds = tags.map((t) => t.id);
+          const result = await tx.mediaTag.deleteMany({
+            where: {
+              tagId: { in: removeTagIds },
+              mediaItemId: { in: dto.ids },
+            },
+          });
+          removed = result.count;
+        }
+      }
+    });
+
+    this.logger.log(
+      `bulkTags: added=${added} removed=${removed} for ${dto.ids.length} items by user ${userId}`,
+    );
+
+    return { added, removed };
+  }
+
+  async bulkDelete(
+    dto: BulkDeleteDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ deleted: number }> {
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
+
+    const { count } = await this.prisma.mediaItem.updateMany({
+      where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+
+    this.logger.log(
+      `bulkDelete: soft-deleted ${count} items in circle ${dto.circleId} by user ${userId}`,
+    );
+
+    return { deleted: count };
+  }
+
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * Verify circle access, then confirm all ids are non-deleted members of circleId.
+   * Mirrors addAlbumItems cross-circle guard.
+   * Throws NotFoundException if any id is missing, deleted, or in a different circle.
+   */
+  private async assertAllInCircle(
+    ids: string[],
+    circleId: string,
+    userId: string,
+    perms: string[],
+    role: CircleRole,
+  ): Promise<void> {
+    await this.circleMembershipService.assertCircleAccess(userId, circleId, perms, role);
+
+    const uniqueIds = [...new Set(ids)];
+
+    const found = await this.prisma.mediaItem.findMany({
+      where: { id: { in: uniqueIds }, circleId, deletedAt: null },
+      select: { id: true },
+    });
+
+    if (found.length !== uniqueIds.length) {
+      const foundSet = new Set(found.map((f) => f.id));
+      const missing = uniqueIds.filter((id) => !foundSet.has(id));
+      throw new NotFoundException(
+        `MediaItems not found or not accessible: ${missing.join(', ')}`,
+      );
+    }
+  }
 
   /**
    * Fetch a MediaItem (excluding soft-deleted) and enforce ownership/any-permission.

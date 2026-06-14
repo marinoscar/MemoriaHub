@@ -37,6 +37,9 @@ import { AlbumQueryDto } from './dto/album-query.dto';
 import { AddAlbumItemsDto } from './dto/add-album-items.dto';
 import { ExportQueryDto } from './dto/export-query.dto';
 import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
+import { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
+import { BulkTagsDto } from './dto/bulk-tags.dto';
+import { BulkDeleteDto } from './dto/bulk-delete.dto';
 
 @ApiTags('Media')
 @ApiBearerAuth('JWT-auth')
@@ -143,6 +146,52 @@ export class MediaController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.mediaService.listLocations(query, user.id, user.permissions);
+  }
+
+  /**
+   * PATCH /api/media/bulk
+   * Bulk update location, classification, or favorite on a set of media items.
+   */
+  @Patch('bulk')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @ApiOperation({ summary: 'Bulk update media items (location, classification, favorite)' })
+  @ApiResponse({ status: 200, description: 'Items updated' })
+  async bulkUpdateMedia(
+    @Body() dto: BulkUpdateMediaDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.bulkUpdateMedia(dto, user.id, user.permissions);
+  }
+
+  /**
+   * POST /api/media/bulk/tags
+   * Add and/or remove tags on multiple media items.
+   */
+  @Post('bulk/tags')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @ApiOperation({ summary: 'Bulk add/remove tags on media items' })
+  @ApiResponse({ status: 200, description: 'Tags updated' })
+  async bulkTags(
+    @Body() dto: BulkTagsDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.bulkTags(dto, user.id, user.permissions);
+  }
+
+  /**
+   * POST /api/media/bulk/delete
+   * Soft-delete multiple media items.
+   */
+  @Post('bulk/delete')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Bulk soft-delete media items' })
+  @ApiResponse({ status: 200, description: 'Items soft-deleted' })
+  async bulkDelete(
+    @Body() dto: BulkDeleteDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.bulkDelete(dto, user.id, user.permissions);
   }
 
   /**

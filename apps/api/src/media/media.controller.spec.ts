@@ -70,6 +70,9 @@ const mockMediaService = {
   addAlbumItems: jest.fn(),
   removeAlbumItem: jest.fn(),
   streamExport: jest.fn(),
+  bulkUpdateMedia: jest.fn(),
+  bulkTags: jest.fn(),
+  bulkDelete: jest.fn(),
 };
 
 // ---------------------------------------------------------------------------
