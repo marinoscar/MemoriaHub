@@ -980,29 +980,16 @@ export class MediaService {
     res: FastifyReply,
   ): Promise<void> {
     // ------------------------------------------------------------------
-    // 1. Permission + owner resolution (MUST happen before first write)
+    // 1. Circle access check (MUST happen before first write)
     // ------------------------------------------------------------------
-    const canReadAny = userPermissions.includes(PERMISSIONS.MEDIA_READ_ANY);
-    let targetOwnerId: string;
-
-    if (dto.ownerId && dto.ownerId !== userId) {
-      if (!canReadAny) {
-        throw new ForbiddenException(
-          'You do not have permission to export other users\' media',
-        );
-      }
-      targetOwnerId = dto.ownerId;
-    } else {
-      targetOwnerId = userId;
-    }
+    const { circleId, type, from, to } = dto;
+    await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
 
     // ------------------------------------------------------------------
     // 2. Build Prisma where clause
     // ------------------------------------------------------------------
-    const { type, from, to } = dto;
-
     const where: Prisma.MediaItemWhereInput = {
-      ownerId: targetOwnerId,
+      circleId,
       deletedAt: null,
       ...(type && { type }),
       ...((from ?? to)
@@ -1219,7 +1206,7 @@ export class MediaService {
     }
 
     this.logger.log(
-      `Media export (${dto.format}) streamed for owner ${targetOwnerId} by user ${userId}`,
+      `Media export (${dto.format}) streamed for circle ${circleId} by user ${userId}`,
     );
   }
 
