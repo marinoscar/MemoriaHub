@@ -6,8 +6,10 @@ import { vi } from 'vitest';
 
 // Import AuthContext and ThemeContextProvider
 import { AuthContext } from '../../contexts/AuthContext';
+import { CircleContext } from '../../contexts/CircleContext';
 import { ThemeContextProvider } from '../../contexts/ThemeContext';
 import type { AuthProvider as AuthProviderType } from '../../types';
+import type { Circle, CircleRole } from '../../types/circles';
 
 interface WrapperOptions {
   route?: string;
@@ -16,6 +18,8 @@ interface WrapperOptions {
   user?: MockUser | null;
   isLoading?: boolean;
   providers?: AuthProviderType[];
+  activeCircle?: Circle | null;
+  activeCircleRole?: CircleRole | null;
 }
 
 export interface MockUser {
@@ -64,6 +68,45 @@ const defaultMockProviders: AuthProviderType[] = [
   { name: 'google', authUrl: '/api/auth/google' },
 ];
 
+const defaultMockCircle: Circle = {
+  id: 'circle-1',
+  name: "Test User's Library",
+  description: null,
+  ownerId: 'test-user-id',
+  isPersonal: true,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
+// Mock Circle Provider for testing
+interface MockCircleProviderProps {
+  children: ReactNode;
+  activeCircle?: Circle | null;
+  activeCircleRole?: CircleRole | null;
+}
+
+function MockCircleProvider({
+  children,
+  activeCircle = defaultMockCircle,
+  activeCircleRole = 'circle_admin',
+}: MockCircleProviderProps) {
+  const contextValue = {
+    circles: activeCircle ? [activeCircle] : [],
+    activeCircle,
+    activeCircleId: activeCircle?.id ?? null,
+    activeCircleRole,
+    loading: false,
+    setActiveCircle: vi.fn().mockResolvedValue(undefined),
+    refreshCircles: vi.fn().mockResolvedValue(undefined),
+  };
+
+  return (
+    <CircleContext.Provider value={contextValue}>
+      {children}
+    </CircleContext.Provider>
+  );
+}
+
 // Mock Auth Provider for testing
 interface MockAuthProviderProps {
   children: ReactNode;
@@ -104,6 +147,8 @@ function createWrapper(options: WrapperOptions = {}) {
     user = mockUser,
     isLoading = false,
     providers = defaultMockProviders,
+    activeCircle = defaultMockCircle,
+    activeCircleRole = 'circle_admin',
   } = options;
 
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -117,7 +162,9 @@ function createWrapper(options: WrapperOptions = {}) {
             isLoading={isLoading}
             providers={providers}
           >
-            {children}
+            <MockCircleProvider activeCircle={activeCircle} activeCircleRole={activeCircleRole}>
+              {children}
+            </MockCircleProvider>
           </MockAuthProvider>
         </ThemeContextProvider>
       </MemoryRouter>

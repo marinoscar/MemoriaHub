@@ -39,16 +39,46 @@ vi.mock('../../services/media', () => ({
   completeUpload: vi.fn(),
   registerMedia: vi.fn(),
   listAlbums: vi.fn(),
+  exportMedia: vi.fn(),
+}));
+
+vi.mock('../../hooks/useCircle', () => ({
+  useCircle: vi.fn(),
 }));
 
 import { useMedia } from '../../hooks/useMedia';
 import { useAlbums } from '../../hooks/useAlbums';
 import { listTags, patchMedia } from '../../services/media';
+import { useCircle } from '../../hooks/useCircle';
 
 const mockUseMedia = vi.mocked(useMedia);
 const mockUseAlbums = vi.mocked(useAlbums);
 const mockListTags = vi.mocked(listTags);
 const mockPatchMedia = vi.mocked(patchMedia);
+const mockUseCircle = vi.mocked(useCircle);
+
+const mockActiveCircle = {
+  id: 'circle-1',
+  name: "Test User's Library",
+  description: null,
+  ownerId: 'test-user-id',
+  isPersonal: true,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
+function makeUseCircleDefaults(overrides: Record<string, unknown> = {}) {
+  return {
+    circles: [mockActiveCircle],
+    activeCircle: mockActiveCircle,
+    activeCircleId: 'circle-1',
+    activeCircleRole: 'circle_admin' as const,
+    loading: false,
+    setActiveCircle: vi.fn().mockResolvedValue(undefined),
+    refreshCircles: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Factories
@@ -65,7 +95,8 @@ function makeMediaItem(id: string, overrides: Partial<MediaItem> = {}): MediaIte
   return {
     id,
     storageObjectId: `storage-${id}`,
-    ownerId: 'user-001',
+    addedById: 'user-001',
+    circleId: 'circle-1',
     type: 'photo',
     capturedAt: '2024-06-15T10:30:00.000Z',
     capturedAtOffset: null,
@@ -151,6 +182,7 @@ describe('MediaLibraryPage', () => {
     mockUseAlbums.mockReturnValue(makeUseAlbumsDefaults());
     mockListTags.mockResolvedValue([]);
     mockPatchMedia.mockResolvedValue(makeMediaItem('media-001'));
+    mockUseCircle.mockReturnValue(makeUseCircleDefaults());
   });
 
   // -------------------------------------------------------------------------
@@ -521,6 +553,28 @@ describe('MediaLibraryPage', () => {
       mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
       render(<MediaLibraryPage />);
       expect(screen.queryByTestId('play-indicator')).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Circle scoping
+  // -------------------------------------------------------------------------
+
+  describe('circle scoping', () => {
+    it('should show "Select a circle" message when no active circle', () => {
+      mockUseCircle.mockReturnValue(makeUseCircleDefaults({ activeCircle: null }));
+      render(<MediaLibraryPage />);
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+      expect(screen.getByText(/select a circle/i)).toBeInTheDocument();
+    });
+
+    it('should call fetchMedia with circleId when active circle is set', () => {
+      const fetchMedia = vi.fn().mockResolvedValue([]);
+      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
+      render(<MediaLibraryPage />);
+      expect(fetchMedia).toHaveBeenCalledWith(
+        expect.objectContaining({ circleId: 'circle-1' }),
+      );
     });
   });
 

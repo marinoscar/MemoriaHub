@@ -14,8 +14,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
-import { listMediaLocations } from '../../services/media';
-import type { MediaLocation } from '../../types/media';
+import { listMediaLocations, listTags } from '../../services/media';
+import type { MediaLocation, TagItem } from '../../types/media';
 
 // ---------------------------------------------------------------------------
 // Test data
@@ -154,5 +154,48 @@ describe('listMediaLocations', () => {
 
     const result = await listMediaLocations();
     expect(result).toEqual([]);
+  });
+
+  it('should include circleId in the query string when provided', async () => {
+    await listMediaLocations({ circleId: 'circle-1' });
+    expect(capturedUrl!.searchParams.get('circleId')).toBe('circle-1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listTags
+// ---------------------------------------------------------------------------
+
+describe('listTags', () => {
+  const mockTags: TagItem[] = [
+    { id: 'tag-1', name: 'vacation', count: 5, createdAt: '2024-01-01T00:00:00.000Z' },
+    { id: 'tag-2', name: 'family', count: 3, createdAt: '2024-01-02T00:00:00.000Z' },
+  ];
+
+  it('fetches tags without circleId by default', async () => {
+    let capturedUrl: URL | null = null;
+    server.use(
+      http.get('*/api/media/tags', ({ request }) => {
+        capturedUrl = new URL(request.url);
+        return HttpResponse.json(mockTags);
+      }),
+    );
+
+    const result = await listTags();
+    expect(result).toEqual(mockTags);
+    expect(capturedUrl!.search).toBe('');
+  });
+
+  it('includes circleId query param when provided', async () => {
+    let capturedUrl: URL | null = null;
+    server.use(
+      http.get('*/api/media/tags', ({ request }) => {
+        capturedUrl = new URL(request.url);
+        return HttpResponse.json(mockTags);
+      }),
+    );
+
+    await listTags('circle-1');
+    expect(capturedUrl!.searchParams.get('circleId')).toBe('circle-1');
   });
 });

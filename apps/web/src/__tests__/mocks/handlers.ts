@@ -22,6 +22,7 @@ const mockUserSettings = {
     useProviderImage: true,
     customImageUrl: null,
   },
+  activeCircleId: 'circle-1',
   updatedAt: new Date().toISOString(),
   version: 1,
 };
@@ -241,5 +242,61 @@ export const handlers = [
           : 'Device access denied.',
       },
     });
+  }),
+
+  // Circles endpoints
+  http.get(`${API_BASE}/circles`, () => {
+    return HttpResponse.json({
+      items: [
+        {
+          id: 'circle-1',
+          name: "Test User's Library",
+          description: null,
+          ownerId: 'test-user-id',
+          isPersonal: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 10,
+      totalPages: 1,
+    });
+  }),
+
+  http.get(`${API_BASE}/circles/:id`, ({ params }) => {
+    return HttpResponse.json({
+      id: params.id,
+      name: "Test User's Library",
+      description: null,
+      ownerId: 'test-user-id',
+      isPersonal: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  }),
+
+  http.get(`${API_BASE}/circles/:id/members`, () => {
+    return HttpResponse.json({ items: [], total: 0 });
+  }),
+
+  http.get(`${API_BASE}/circles/:id/invites`, () => {
+    return HttpResponse.json({ items: [], total: 0 });
+  }),
+
+  http.post(`${API_BASE}/circles`, async ({ request }) => {
+    const body = (await request.json()) as { name: string; description?: string };
+    return HttpResponse.json(
+      {
+        id: 'new-circle-id',
+        ...body,
+        ownerId: 'test-user-id',
+        isPersonal: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      { status: 201 },
+    );
   }),
 ];

@@ -64,7 +64,7 @@ function AdminCirclesContent() {
               {circles.map((circle) => (
                 <TableRow key={circle.id}>
                   <TableCell>
-                    <Typography variant="body2" fontWeight="medium">
+                    <Typography variant="body2" sx={{ fontWeight: 'medium' }}>
                       {circle.name}
                     </Typography>
                     {circle.description && (
