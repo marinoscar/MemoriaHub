@@ -73,6 +73,9 @@ const mockMediaService = {
   bulkUpdateMedia: jest.fn(),
   bulkTags: jest.fn(),
   bulkDelete: jest.fn(),
+  reverseGeocodeOnDemand: jest.fn(),
+  searchPlaces: jest.fn(),
+  getDashboard: jest.fn(),
 };
 
 // ---------------------------------------------------------------------------

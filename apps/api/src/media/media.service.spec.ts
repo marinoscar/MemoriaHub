@@ -17,6 +17,7 @@ import { PERMISSIONS } from '../common/constants/roles.constants';
 import { randomUUID } from 'crypto';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
+import { ForwardGeocodeService } from './geo/forward-geocode.service';
 
 // ---------------------------------------------------------------------------
 // Helper: build a Prisma P2002 error the way Prisma actually throws it
@@ -171,6 +172,7 @@ describe('MediaService', () => {
   let mockSyncService: jest.Mocked<Pick<MediaMetadataSyncService, 'syncFromStorageObject'>>;
   let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
   let mockGeoProvider: { reverseGeocode: jest.Mock };
+  let mockForwardGeocodeService: { searchPlaces: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -194,6 +196,7 @@ describe('MediaService', () => {
       assertCircleAccess: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
     };
     mockGeoProvider = { reverseGeocode: jest.fn().mockResolvedValue(null) };
+    mockForwardGeocodeService = { searchPlaces: jest.fn().mockResolvedValue([]) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -203,6 +206,7 @@ describe('MediaService', () => {
         { provide: MediaMetadataSyncService, useValue: mockSyncService },
         { provide: CircleMembershipService, useValue: mockCircleMembershipService },
         { provide: GEO_LOCATION_PROVIDER, useValue: mockGeoProvider },
+        { provide: ForwardGeocodeService, useValue: mockForwardGeocodeService },
       ],
     }).compile();
 
@@ -725,7 +729,7 @@ describe('MediaService', () => {
   describe('getMedia', () => {
     it('should return a MediaItem for the owner', async () => {
       const item = makeMediaItem({ addedById: 'user-1' });
-      mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({ ...item, mediaTags: [] } as any);
       mockPrisma.storageObject.findUnique.mockResolvedValue(
         makeStorageObject({ id: item.storageObjectId, uploadedById: 'user-1' }) as any,
       );
@@ -745,7 +749,7 @@ describe('MediaService', () => {
 
     it('should throw NotFoundException for soft-deleted items', async () => {
       const item = makeMediaItem({ deletedAt: new Date() });
-      mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({ ...item, mediaTags: [] } as any);
 
       await expect(
         service.getMedia(item.id, 'user-1', ownPerms),
@@ -754,7 +758,7 @@ describe('MediaService', () => {
 
     it('should throw ForbiddenException when non-owner without _any permission accesses', async () => {
       const item = makeMediaItem({ addedById: 'other-user' });
-      mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({ ...item, mediaTags: [] } as any);
       mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
@@ -764,7 +768,7 @@ describe('MediaService', () => {
 
     it('should allow Admin with media:read_any to access another user\'s item', async () => {
       const item = makeMediaItem({ addedById: 'other-user' });
-      mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({ ...item, mediaTags: [] } as any);
       mockPrisma.storageObject.findUnique.mockResolvedValue(
         makeStorageObject({ id: item.storageObjectId, uploadedById: 'other-user' }) as any,
       );

@@ -6,6 +6,7 @@ import { GeoLocationModule } from './geo/geo-location.module';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
+import { ForwardGeocodeService } from './geo/forward-geocode.service';
 
 /**
  * MediaModule
@@ -23,7 +24,7 @@ import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 @Module({
   imports: [PrismaModule, StorageProvidersModule, CirclesModule, GeoLocationModule],
   controllers: [MediaController],
-  providers: [MediaService, MediaMetadataSyncService],
+  providers: [MediaService, MediaMetadataSyncService, ForwardGeocodeService],
   exports: [MediaService],
 })
 export class MediaModule {}
