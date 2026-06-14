@@ -110,10 +110,26 @@ vi.mock('../../services/media', () => ({
   getMedia: vi.fn(),
 }));
 
+vi.mock('../../hooks/useCircle', () => ({
+  useCircle: vi.fn(),
+}));
+
 import { listMediaLocations, getMedia } from '../../services/media';
+import { useCircle } from '../../hooks/useCircle';
 
 const mockListMediaLocations = vi.mocked(listMediaLocations);
 const mockGetMedia = vi.mocked(getMedia);
+const mockUseCircle = vi.mocked(useCircle);
+
+const mockActiveCircle = {
+  id: 'circle-1',
+  name: "Test User's Library",
+  description: null,
+  ownerId: 'test-user-id',
+  isPersonal: true,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
 
 // ---------------------------------------------------------------------------
 // Now import the component under test (after all mocks are registered)
@@ -141,7 +157,8 @@ function makeFullItem(id: string): MediaItem {
   return {
     id,
     storageObjectId: 'storage-obj-001',
-    ownerId: 'user-001',
+    addedById: 'user-001',
+    circleId: 'circle-1',
     type: 'photo',
     capturedAt: '2024-06-15T10:30:00.000Z',
     capturedAtOffset: null,
@@ -190,6 +207,15 @@ describe('MediaMapPage', () => {
     capturedClusterProps = null;
     mockListMediaLocations.mockResolvedValue([]);
     mockGetMedia.mockResolvedValue(makeFullItem('loc-1'));
+    mockUseCircle.mockReturnValue({
+      circles: [mockActiveCircle],
+      activeCircle: mockActiveCircle,
+      activeCircleId: 'circle-1',
+      activeCircleRole: 'circle_admin',
+      loading: false,
+      setActiveCircle: vi.fn().mockResolvedValue(undefined),
+      refreshCircles: vi.fn().mockResolvedValue(undefined),
+    });
   });
 
   // -------------------------------------------------------------------------

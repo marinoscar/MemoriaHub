@@ -3,9 +3,11 @@
 **Version:** 1.0
 **Last Updated:** June 2026
 
-MemoriaHub is a personal media ownership platform that gives families full control over their photos and videos — independent of any single cloud provider. The product vision (see [`../../VISION.MD`](../../VISION.MD)) defines fourteen MVP capabilities spanning upload, metadata extraction, web browsing, CLI import, Android sync, multi-provider storage, replication, export, and long-term enrichment. This roadmap translates that vision into nine sequenced phases built on top of the already-implemented resumable-upload and event-driven processing backbone, so that every phase adds media-domain value rather than rebuilding infrastructure.
+MemoriaHub is a personal media ownership platform that gives families full control over their photos and videos — independent of any single cloud provider. The product vision (see [`../../VISION.MD`](../../VISION.MD)) defines fourteen MVP capabilities spanning upload, metadata extraction, web browsing, CLI import, Android sync, multi-provider storage, replication, export, and long-term enrichment. This roadmap translates that vision into sequenced phases built on top of the already-implemented resumable-upload and event-driven processing backbone, so that every phase adds media-domain value rather than rebuilding infrastructure.
 
 **Phase 01 (Media Domain Foundation) is implemented and deployed at https://memoriahub.dev.marin.cr.**
+
+**Family Circles (Collaboration Foundation) is implemented on branch `feat/family-circles`.** This is a cross-cutting feature that touches the data model, API, web, CLI, and admin backup — it is tracked separately from the numbered phases because it is an architectural foundation rather than an enrichment layer.
 
 **Backbone already in place (satisfies vision item #3 — AWS storage):**
 The `S3StorageProvider`, resumable multipart upload flow (`StorageObject` / `StorageObjectChunk`), JSONB `metadata` field, `ObjectProcessor` plugin interface, and `OBJECT_UPLOADED_EVENT` pipeline all exist today. Every enrichment processor described in phases 02 through 09 is a new implementation of that existing interface — no pipeline changes are needed.
@@ -22,8 +24,9 @@ The `S3StorageProvider`, resumable multipart upload flow (`StorageObject` / `Sto
 | [04](phase-04-metadata-export.md) | Metadata Export | API, Web | #10 | 02 |
 | [05](phase-05-cli-importer.md) | CLI Importer | CLI, API | #8, #12 | 02 |
 | [06](phase-06-storage-replication.md) | Storage Providers and Replication | API, Infra | #3, #4, #5 | 01 |
-| [07](phase-07-memory-prioritization.md) | Memory Prioritization | API, Web | #14, #11 | 02, 03 |
-| [08](phase-08-android-sync.md) | Android Sync | Android, API | #7 | 02, 03 |
+| FC | **Family Circles** (collaboration foundation) | API, Web, CLI, DB | #6, #7, #8, #9 | 01–05 |
+| [07](phase-07-memory-prioritization.md) | Memory Prioritization | API, Web | #14, #11 | FC, 02, 03 |
+| [08](phase-08-android-sync.md) | Android Sync | Android, API | #7 | FC, 02, 03 |
 | [09](phase-09-longterm-enrichment.md) | Long-Term Enrichment | API, Web, Infra | #11, #13 | 05, 08 |
 
 ---
@@ -41,18 +44,21 @@ The `S3StorageProvider`, resumable multipart upload flow (`StorageObject` / `Sto
  |           |              |
  03 (Web)   04 (Export)   05 (CLI)
  |
- 07 (Memory Prioritization)
+ FC (Family Circles — collaboration foundation)
  |
- 08 (Android Sync)
- |
- 09 (Long-Term Enrichment)
+ +──────────────────────────+
+ |                          |
+ 07 (Memory Prioritization)  08 (Android Sync)
+                             |
+                             09 (Long-Term Enrichment)
 ```
 
 Full notation:
 - 01 is the root; nothing depends on the backbone infrastructure layer
 - 06 runs in parallel after 01 (no dependency on 02)
-- 07 depends on both 02 (processor infrastructure) and 03 (web review UI)
-- 08 depends on 02 (enrichment pipeline) and 03 (upload client patterns)
+- FC (Family Circles) is implemented after 01–05; it adds circle-scoped data model, per-circle authorization, shared media library, invite flow, web UI, CLI circle commands, and local-drive backup
+- 07 depends on FC (review actions are per-circle), 02 (processor infrastructure), and 03 (web review UI)
+- 08 depends on FC (Android uploads target a circle), 02 (enrichment pipeline), and 03 (upload client patterns)
 - 09 depends on 05 and 08 (ingestion paths mature)
 
 ---
@@ -82,6 +88,7 @@ The following principles are restated directly from [`../../VISION.MD`](../../VI
 | 04 | Metadata Export | Done |
 | 05 | CLI Importer | Done — upgraded in 05.1 with SQLite-backed multi-folder sync and interactive Ink TUI |
 | 06 | Storage Providers and Replication | Not Started |
+| FC | Family Circles | Done — circle data model, per-circle RBAC, shared library, invite flow, web CircleSwitcher + admin pages, CLI circles/backup commands, LocalDiskStorageProvider, admin backup job |
 | 07 | Memory Prioritization | Not Started |
 | 08 | Android Sync | Not Started |
 | 09 | Long-Term Enrichment | Not Started |
@@ -96,11 +103,11 @@ The following principles are restated directly from [`../../VISION.MD`](../../VI
 | #2 | Extract and store key media metadata (incl. location reverse-geocoding for country/region/city search) | 01, 02 |
 | #3 | AWS storage as first cloud option | Already done (backbone) |
 | #4 | Future Azure and other provider support | 06 |
-| #5 | Sync with local hard drives or network storage | 06 |
-| #6 | Web application for browsing, uploading, managing | 01, 03 |
-| #7 | Android app for mobile sync | 08 |
-| #8 | CLI for importing and syncing from a computer | 05 |
-| #9 | API support for external tools and automations | 01 |
+| #5 | Sync with local hard drives or network storage | 06, FC (LocalDiskStorageProvider + backup job) |
+| #6 | Web application for browsing, uploading, managing | 01, 03, FC (circle-scoped library) |
+| #7 | Android app for mobile sync | 08 (circle-scoped from day one) |
+| #8 | CLI for importing and syncing from a computer | 05, FC (circle commands + backup) |
+| #9 | API support for external tools and automations | 01, FC (circles + backup API) |
 | #10 | Metadata export in JSON and CSV | 03, 04 |
 | #11 | Future processor extensibility | 02, 07, 09 |
 | #12 | Import from local folders and exported libraries | 05 |

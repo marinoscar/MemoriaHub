@@ -143,6 +143,9 @@ export class AuthService {
       },
     });
 
+    // Claim any pending circle invites for this email
+    await this.claimPendingCircleInvites(email, user.id);
+
     // Check if user is disabled
     if (!user.isActive) {
       this.logger.warn(`Login attempt by disabled user: ${user.email}`);
@@ -234,6 +237,23 @@ export class AuthService {
           },
         },
       });
+
+      // Create personal circle for the new user
+      const personalCircle = await tx.circle.create({
+        data: {
+          name: `${profile.displayName || profile.email}'s Library`,
+          ownerId: newUser.id,
+          isPersonal: true,
+        },
+      });
+      await tx.circleMember.create({
+        data: {
+          circleId: personalCircle.id,
+          userId: newUser.id,
+          role: 'circle_admin' as const,
+        },
+      });
+      this.logger.log(`Personal circle created for user: ${newUser.id}`);
 
       // Grant admin role if applicable
       if (shouldGrantAdmin) {
@@ -629,6 +649,55 @@ export class AuthService {
       roles,
       permissions,
     };
+  }
+
+  /**
+   * Claims all pending circle invites for a given email, joining the user as a member.
+   * Mirrors AllowlistService.markEmailClaimed pattern.
+   */
+  private async claimPendingCircleInvites(email: string, userId: string): Promise<void> {
+    const pendingInvites = await this.prisma.circleInvite.findMany({
+      where: { email: email.toLowerCase(), claimedAt: null },
+    });
+
+    const ROLE_RANK: Record<string, number> = {
+      viewer: 1,
+      collaborator: 2,
+      circle_admin: 3,
+    };
+
+    for (const invite of pendingInvites) {
+      await this.prisma.$transaction(async (tx) => {
+        // Check if already a member
+        const existing = await tx.circleMember.findUnique({
+          where: { circleId_userId: { circleId: invite.circleId, userId } },
+        });
+
+        if (existing) {
+          // Only upgrade role, never downgrade
+          const existingRank = ROLE_RANK[existing.role] ?? 0;
+          const inviteRank = ROLE_RANK[invite.role] ?? 0;
+          if (inviteRank > existingRank) {
+            await tx.circleMember.update({
+              where: { circleId_userId: { circleId: invite.circleId, userId } },
+              data: { role: invite.role },
+            });
+          }
+        } else {
+          await tx.circleMember.create({
+            data: { circleId: invite.circleId, userId, role: invite.role },
+          });
+        }
+
+        // Mark invite as claimed
+        await tx.circleInvite.update({
+          where: { id: invite.id },
+          data: { claimedById: userId, claimedAt: new Date() },
+        });
+      });
+
+      this.logger.log(`Circle invite ${invite.id} claimed by user ${userId} for circle ${invite.circleId}`);
+    }
   }
 
   /**

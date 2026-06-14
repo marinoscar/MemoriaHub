@@ -14,6 +14,8 @@ import { extname } from 'path';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
+import { CircleRole } from '@prisma/client';
+import { CircleMembershipService } from '../../circles/circle-membership.service';
 import { STORAGE_PROVIDER } from '../providers/storage-provider.interface';
 import type { StorageProvider } from '../providers/storage-provider.interface';
 import {
@@ -62,6 +64,7 @@ export class ObjectsService {
     private readonly storageProvider: StorageProvider,
     private readonly config: ConfigService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly circleMembershipService: CircleMembershipService,
   ) {}
 
   /**
@@ -480,8 +483,8 @@ export class ObjectsService {
   /**
    * Get object by ID with ownership check
    */
-  async getById(id: string, userId: string): Promise<ObjectResponseDto> {
-    const object = await this.getObjectWithAuthCheck(id, userId);
+  async getById(id: string, userId: string, userPermissions: string[]): Promise<ObjectResponseDto> {
+    const object = await this.getObjectWithAuthCheck(id, userId, userPermissions, 'viewer' as CircleRole);
     return this.mapToResponseDto(object);
   }
 
@@ -492,8 +495,9 @@ export class ObjectsService {
     id: string,
     userId: string,
     expiresIn?: number,
+    userPermissions: string[] = [],
   ): Promise<DownloadUrlResponseDto> {
-    const object = await this.getObjectWithAuthCheck(id, userId);
+    const object = await this.getObjectWithAuthCheck(id, userId, userPermissions, 'viewer' as CircleRole);
 
     // Verify status is ready
     if (object.status !== 'ready') {
@@ -524,8 +528,8 @@ export class ObjectsService {
   /**
    * Delete object from storage and database
    */
-  async delete(id: string, userId: string): Promise<void> {
-    const object = await this.getObjectWithAuthCheck(id, userId);
+  async delete(id: string, userId: string, userPermissions: string[]): Promise<void> {
+    const object = await this.getObjectWithAuthCheck(id, userId, userPermissions, 'collaborator' as CircleRole);
 
     this.logger.log(`Deleting object ${id} from storage and database`);
 
@@ -554,8 +558,9 @@ export class ObjectsService {
     id: string,
     dto: UpdateMetadataDto,
     userId: string,
+    userPermissions: string[],
   ): Promise<ObjectResponseDto> {
-    const object = await this.getObjectWithAuthCheck(id, userId);
+    const object = await this.getObjectWithAuthCheck(id, userId, userPermissions, 'collaborator' as CircleRole);
 
     // Merge new metadata with existing
     const existingMetadata = (object.metadata as Record<string, unknown>) || {};
@@ -588,18 +593,31 @@ export class ObjectsService {
   private async getObjectWithAuthCheck(
     id: string,
     userId: string,
+    userPermissions: string[],
+    required: CircleRole,
   ): Promise<any> {
     const object = await this.prisma.storageObject.findUnique({
       where: { id },
+      include: { mediaItem: true },
     });
 
     if (!object) {
       throw new NotFoundException('Object not found');
     }
 
-    // Check ownership
-    if (object.uploadedById !== userId) {
-      throw new ForbiddenException('You do not have access to this object');
+    if (object.mediaItem) {
+      // Access controlled via circle membership
+      await this.circleMembershipService.assertCircleAccess(
+        userId,
+        object.mediaItem.circleId,
+        userPermissions,
+        required,
+      );
+    } else {
+      // In-progress upload with no linked MediaItem: owner-only
+      if (object.uploadedById !== userId) {
+        throw new ForbiddenException('You do not have access to this object');
+      }
     }
 
     return object;

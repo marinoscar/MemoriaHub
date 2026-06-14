@@ -24,6 +24,7 @@ import { BOX_BORDER, banner, dim } from './theme.js';
 export type MenuAction =
   | 'login'
   | 'folders'
+  | 'circles'
   | 'sync-all'
   | 'sync-select'
   | 'status'
@@ -37,6 +38,7 @@ type MenuItem = { label: string; value: MenuAction };
 interface HomeMenuProps {
   config: CliConfig | null;
   identity: string | null;   // email from /api/auth/me, null if not logged in
+  activeCircleName?: string | null;
   onSelect: (action: MenuAction) => void;
 }
 
@@ -47,6 +49,7 @@ interface HomeMenuProps {
 const ALL_ITEMS: MenuItem[] = [
   { label: 'Login / Change server',    value: 'login'       },
   { label: 'Manage folders',           value: 'folders'     },
+  { label: 'Manage circles',           value: 'circles'     },
   { label: 'Sync all folders',         value: 'sync-all'    },
   { label: 'Sync selected folders',    value: 'sync-select' },
   { label: 'Status',                   value: 'status'      },
@@ -77,6 +80,7 @@ const BANNER = [
 export function HomeMenu({
   config,
   identity,
+  activeCircleName,
   onSelect,
 }: HomeMenuProps): React.ReactElement {
   const isLoggedIn = Boolean(config && identity);
@@ -111,6 +115,12 @@ export function HomeMenu({
               <Text dimColor>User:  </Text>
               <Text color="green">{identity}</Text>
             </Box>
+            {activeCircleName && (
+              <Box flexDirection="row" gap={2}>
+                <Text dimColor>Circle:</Text>
+                <Text color="cyan">{activeCircleName}</Text>
+              </Box>
+            )}
           </>
         ) : (
           <Text color="yellow">Not logged in — select Login to configure your server.</Text>

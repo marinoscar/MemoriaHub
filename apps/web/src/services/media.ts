@@ -42,6 +42,7 @@ export async function listMedia(params?: MediaQueryParams): Promise<MediaListRes
   if (params?.sortBy) searchParams.set('sortBy', params.sortBy);
   if (params?.sortOrder) searchParams.set('sortOrder', params.sortOrder);
   if (params?.contentHash) searchParams.set('contentHash', params.contentHash);
+  if (params?.circleId) searchParams.set('circleId', params.circleId);
 
   const qs = searchParams.toString();
   return api.get<MediaListResponse>(`/media${qs ? `?${qs}` : ''}`);
@@ -64,6 +65,7 @@ export interface MediaLocationFilters {
   location?: string;
   capturedAtFrom?: string;
   capturedAtTo?: string;
+  circleId?: string;
 }
 
 export async function listMediaLocations(
@@ -78,6 +80,7 @@ export async function listMediaLocations(
   if (filters?.location) searchParams.set('location', filters.location);
   if (filters?.capturedAtFrom) searchParams.set('capturedAtFrom', filters.capturedAtFrom);
   if (filters?.capturedAtTo) searchParams.set('capturedAtTo', filters.capturedAtTo);
+  if (filters?.circleId) searchParams.set('circleId', filters.circleId);
   const qs = searchParams.toString();
   return api.get<MediaLocation[]>(`/media/locations${qs ? `?${qs}` : ''}`);
 }
@@ -94,9 +97,10 @@ export async function deleteMedia(id: string): Promise<void> {
 // Tags
 // ---------------------------------------------------------------------------
 
-export async function listTags(): Promise<TagItem[]> {
+export async function listTags(circleId?: string): Promise<TagItem[]> {
   // GET /api/media/tags returns an array of { id, name, count, createdAt }
-  return api.get<TagItem[]>('/media/tags');
+  const qs = circleId ? `?circleId=${encodeURIComponent(circleId)}` : '';
+  return api.get<TagItem[]>(`/media/tags${qs}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -163,6 +167,7 @@ export async function listAlbums(params?: AlbumQueryParams): Promise<AlbumListRe
   if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
   if (params?.sortBy) searchParams.set('sortBy', params.sortBy);
   if (params?.sortOrder) searchParams.set('sortOrder', params.sortOrder);
+  if (params?.circleId) searchParams.set('circleId', params.circleId);
 
   const qs = searchParams.toString();
   return api.get<AlbumListResponse>(`/media/albums${qs ? `?${qs}` : ''}`);
@@ -184,6 +189,7 @@ export interface ExportFilters {
   type?: 'photo' | 'video';
   from?: string; // ISO 8601
   to?: string;   // ISO 8601
+  circleId?: string;
 }
 
 /**
@@ -205,6 +211,7 @@ export async function exportMedia(
   if (filters?.type) searchParams.set('type', filters.type);
   if (filters?.from) searchParams.set('from', filters.from);
   if (filters?.to) searchParams.set('to', filters.to);
+  if (filters?.circleId) searchParams.set('circleId', filters.circleId);
 
   const token = api.getAccessToken();
   const headers: HeadersInit = {};

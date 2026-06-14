@@ -136,4 +136,7 @@ The Android app consumes existing endpoints. No new server-side endpoints are re
 - Two-way sync (delete on server → delete on device; deferred — too risky for MVP)
 - Import from Google Photos or Apple Photos app libraries (Phase 09)
 - End-to-end encryption of media in transit (standard HTTPS used; E2EE deferred)
-- Family sharing or multi-user device support (out of scope per VISION.MD)
+
+## 10. Circle Integration
+
+Family Circles (phase FC) is a prerequisite for this phase. The Android sync app must include a `circleId` in the `POST /api/media` body when registering uploads. Resolution order for the active circle: app-level setting (persisted in `EncryptedSharedPreferences`) → default to the user's personal circle. The app should expose a circle selector in Settings so users can direct syncs at a shared family circle. The `GET /api/media?contentHash=<sha256>` dedup check must also include `circleId` as a query parameter to scope dedup to the correct circle.

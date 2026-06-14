@@ -375,8 +375,8 @@ npx tsx prisma/seed.ts
 
 **What Gets Seeded:**
 - RBAC roles (admin, contributor, viewer)
-- RBAC permissions (users:read, users:write, system_settings:read, etc.)
-- Role-permission assignments
+- RBAC permissions (users:read, users:write, system_settings:read, circles:read, circles:write, circles:manage_any, backup:run, backup:read, etc.)
+- Role-permission assignments (Admin gets all permissions; Contributor and Viewer both get circles:read + circles:write)
 - Default system settings
 
 **When to Run Seeds:**
@@ -643,6 +643,64 @@ const response = await request(app.getHttpServer())
    ```
 
 3. **Index frequently queried fields** - Already done in schema for email, provider combinations
+
+---
+
+## Family Circles Development Patterns
+
+### Two-Layer Authorization
+
+Every circle-scoped operation requires two authorization checks:
+
+1. **Global permission** (system RBAC guard) — the endpoint declares `permissions: [PERMISSIONS.CIRCLES_READ]` or `PERMISSIONS.CIRCLES_WRITE`. This gates access at the route level.
+2. **Per-circle role** (CircleMembershipService) — inside the service, call `assertCircleAccess(userId, circleId, minRole)` to verify the caller holds at least the required per-circle role.
+
+```typescript
+// Example service method pattern
+async updateCircle(userId: string, circleId: string, dto: UpdateCircleDto) {
+  // Verify caller is circle_admin (or super-admin) in this circle
+  await this.membershipService.assertCircleAccess(
+    userId,
+    circleId,
+    CircleRole.circle_admin,
+  );
+  return this.prisma.circle.update({ where: { id: circleId }, data: dto });
+}
+```
+
+**Super-admin bypass:** `assertCircleAccess` skips the per-circle check if the caller holds `circles:manage_any`, `media:write_any`, or `media:read_any`. You do not need to handle this case yourself.
+
+### Personal Circle Creation (User Signup)
+
+When provisioning a new user in `AuthService.findOrCreateUser()`, the transaction must also:
+1. Create a `circles` row with `isPersonal: true` and `ownerId = user.id`.
+2. Create a `circle_members` row for that user at `circle_admin`.
+3. Call `CircleInviteService.claimPendingInvites(user.email, user.id)` to accept any circle invites that arrived before the user registered.
+
+This chain must be inside the same Prisma transaction as user creation to avoid orphaned records.
+
+### Invite Flow
+
+Sending an invite (`POST /api/circles/:id/invites`) does two things atomically:
+1. Upserts the email into `allowed_emails` (so the invitee can log in even if not otherwise allowlisted).
+2. Creates a `circle_invites` row with `claimedById = null`.
+
+On login, `claimPendingInvites` scans `circle_invites` for unclaimed rows matching the user's email, creates the `circle_members` rows, and marks the invites as claimed.
+
+### Working with circleId in Media Endpoints
+
+All media, album, and tag operations are circle-scoped. The `circleId` must be provided by the caller (request body for mutations, query parameter for reads). The server verifies membership before reading or writing.
+
+Deduplication for `MediaItem` uses a unique index on `(circle_id, content_hash)`. A pre-upload dedup check (`GET /api/media?circleId=<id>&contentHash=<hash>`) must include `circleId` to scope the check to the correct circle.
+
+### Adding New Circle Endpoints
+
+Follow the same pattern as existing circle endpoints in `apps/api/src/circles/`:
+
+1. Declare the endpoint in `circles.controller.ts` with `@Auth({ permissions: [PERMISSIONS.CIRCLES_WRITE] })`.
+2. Implement the service method in `circles.service.ts` or a focused sub-service.
+3. Call `assertCircleAccess` with the minimum required per-circle role.
+4. Write a unit test in `circles.service.spec.ts` and an E2E test in `test/circles.e2e.spec.ts`.
 
 ---
 

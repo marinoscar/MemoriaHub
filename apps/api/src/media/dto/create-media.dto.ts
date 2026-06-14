@@ -20,10 +20,11 @@ export const createMediaSchema = z.object({
   sourcePath: z.string().max(2048).optional(),
   sourceDeviceId: z.string().max(256).optional(),
   sourceDeviceName: z.string().max(256).optional(),
+  circleId: z.string().uuid(),
   /**
    * Client-provided SHA-256 content hash (64 lowercase hex characters).
    * When supplied, the server uses it to deduplicate: if an active MediaItem
-   * with the same (ownerId, contentHash) already exists the existing item is
+   * with the same (circle_id, content_hash) already exists the existing item is
    * returned without creating a new one. The redundant StorageObject blob is
    * cleaned up best-effort. If omitted, dedup still occurs via the database
    * unique-index when the hash is later computed by the content-hash processor.

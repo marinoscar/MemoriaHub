@@ -217,10 +217,11 @@ export function FolderManager({ db, onBack }: FolderManagerProps): React.ReactEl
           <Box flexDirection="row" gap={1}>
             <Text bold dimColor>{' '.padEnd(2)}</Text>
             <Text bold dimColor>{'ID'.padEnd(4)}</Text>
-            <Text bold dimColor>{'Path'.padEnd(42)}</Text>
+            <Text bold dimColor>{'Path'.padEnd(36)}</Text>
             <Text bold dimColor>{'Rec'.padEnd(4)}</Text>
             <Text bold dimColor>{'En'.padEnd(4)}</Text>
             <Text bold dimColor>{'Last Sync'.padEnd(12)}</Text>
+            <Text bold dimColor>{'Circle'.padEnd(20)}</Text>
           </Box>
           {folders.map((f, i) => {
             const isSelected = i === selected;
@@ -228,14 +229,17 @@ export function FolderManager({ db, onBack }: FolderManagerProps): React.ReactEl
               <Box key={f.id} flexDirection="row" gap={1}>
                 <Text color={isSelected ? 'cyan' : undefined}>{isSelected ? '▶' : ' '} </Text>
                 <Text color={isSelected ? 'cyanBright' : undefined}>{String(f.id).padEnd(4)}</Text>
-                <Text color={isSelected ? 'cyanBright' : undefined}>{truncatePath(f.path, 40).padEnd(42)}</Text>
+                <Text color={isSelected ? 'cyanBright' : undefined}>{truncatePath(f.path, 34).padEnd(36)}</Text>
                 <Text color={f.recursive ? 'cyan' : undefined} dimColor={!f.recursive}>
                   {f.recursive ? 'yes' : 'no '}{'  '}
                 </Text>
                 <Text color={f.enabled ? 'green' : 'red'}>
                   {f.enabled ? 'on' : 'off'}{'  '}
                 </Text>
-                <Text dimColor>{formatDate(f.last_sync_at)}</Text>
+                <Text dimColor>{formatDate(f.last_sync_at).padEnd(12)}</Text>
+                <Text dimColor>
+                  {f.circle_id ? f.circle_id.slice(0, 18) : '—'}
+                </Text>
               </Box>
             );
           })}

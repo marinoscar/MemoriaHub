@@ -189,9 +189,12 @@ Provider config is environment-driven:
   - Assign default role (recommended Viewer)
   - Store provider identity record (provider + subject/sub)
   - Store provider display name + provider image URL
+  - Create a personal circle for the user (`isPersonal: true`, `ownerId = user.id`); add user as `circle_admin`
+  - Claim any pending `circle_invites` matching the user's email: mark `claimedById` and `claimedAt`, create `circle_members` row at the invited role
 - Subsequent logins:
   - Match by provider identity (preferred) or email (acceptable MVP)
   - Update provider fields; do not overwrite user overrides
+  - Claim any new pending circle invites that arrived since last login
 
 ### 6.3 User Override Fields
 User may override:
@@ -228,7 +231,7 @@ If cookies are used:
 ## 7. Authorization (RBAC)
 
 ### 7.1 Roles (Minimum)
-- Admin: manage users and system settings
+- Admin: manage users, system settings, and all circles
 - Contributor: standard capabilities (future expansion); manage own settings
 - Viewer: least privilege; manage own settings based on policy
 
@@ -243,15 +246,37 @@ Permissions are strings mapped to roles:
 - `users:read`
 - `users:write`
 - `rbac:manage`
+- `circles:read` — list and read circles the user is a member of
+- `circles:write` — create circles and manage circles the user owns
+- `circles:manage_any` — read/write/delete any circle (Admin only)
+- `backup:run` — trigger a backup job (Admin only)
+- `backup:read` — read backup run history and object list (Admin only)
 
 Admin: all  
-Contributor/Viewer: limited subsets
+Contributor/Viewer: limited subsets (circles:read + circles:write for both)
 
 ### 7.3 Enforcement Rules
 - Every protected endpoint declares required roles/permissions
 - System settings write is Admin-only
 - User settings endpoints scoped to authenticated user
 - User admin endpoints Admin-only
+- Circle endpoints enforce two-layer authorization: global permission check (circles:read / circles:write) followed by per-circle role check via `CircleMembershipService.assertCircleAccess()`
+- Backup endpoints require Admin role and backup:run / backup:read permission
+
+### 7.4 Per-Circle Role Model (Family Circles)
+In addition to system-level RBAC, each circle has per-circle roles that control what members can do within that circle:
+
+| Per-Circle Role | Rank | Capabilities |
+|-----------------|------|--------------|
+| `viewer`        | 1    | Browse and download media in the circle |
+| `collaborator`  | 2    | Upload, tag, and organize media; invite others at viewer level |
+| `circle_admin`  | 3    | All collaborator actions plus remove members, delete circle |
+
+The circle owner is automatically assigned `circle_admin` on circle creation.
+
+**Super-admin bypass:** A user holding any of the permissions `circles:manage_any`, `media:write_any`, or `media:read_any` bypasses per-circle role checks and has full access to all circles. This allows system Admins to moderate content without needing an explicit circle membership.
+
+**Personal circles:** Every user gets a personal circle at signup (`isPersonal: true`). The personal circle cannot be deleted. It is the default target for uploads when no circle is explicitly selected.
 
 ---
 
@@ -292,6 +317,27 @@ Consistent success/error format:
 - `GET /api/system-settings`
 - `PUT /api/system-settings`
 - `PATCH /api/system-settings`
+
+**Family Circles**
+- `POST /api/circles` — create a circle (circles:write)
+- `GET /api/circles` — list circles the caller is a member of (circles:read)
+- `GET /api/circles/:id` — get circle detail (circles:read + circle membership)
+- `PATCH /api/circles/:id` — update circle name/description (circles:write + circle_admin)
+- `DELETE /api/circles/:id` — delete circle, must not be personal (circles:write + circle_admin)
+- `GET /api/circles/:id/members` — list members (circles:read + membership)
+- `POST /api/circles/:id/members` — add member by userId (circles:write + circle_admin)
+- `PATCH /api/circles/:id/members/:userId` — update member role (circles:write + circle_admin)
+- `DELETE /api/circles/:id/members/:userId` — remove member (circles:write + circle_admin)
+- `GET /api/circles/:id/invites` — list pending invites (circles:write + circle_admin)
+- `POST /api/circles/:id/invites` — send invite by email; upserts allowed_emails (circles:write + circle_admin rank)
+- `DELETE /api/circles/:id/invites/:inviteId` — cancel pending invite (circles:write + circle_admin)
+
+**Admin: Backup**
+- `POST /api/admin/backup` — trigger backup run (Admin + backup:run)
+- `GET /api/admin/backup/runs` — list recent backup runs (Admin + backup:read)
+- `GET /api/admin/backup/status` — alias for /runs (Admin + backup:read)
+- `GET /api/admin/backup/runs/:runId` — get single run detail (Admin + backup:read)
+- `GET /api/admin/backup/objects` — list objects in the backup destination (Admin + backup:read)
 
 **Health**
 - `GET /api/health/live`
@@ -384,6 +430,39 @@ PK: (user_id, role_id)
 - meta (jsonb)
 - created_at (timestamptz)
 
+**circles** (Family Circles)
+- id (uuid pk)
+- name (text not null)
+- description (text null)
+- owner_id (uuid fk users.id)
+- is_personal (boolean default false) — personal circles cannot be deleted
+- created_at, updated_at (timestamptz)
+Table: `circles`
+
+**circle_members**
+- id (uuid pk)
+- circle_id (uuid fk circles.id)
+- user_id (uuid fk users.id)
+- role (CircleRole enum: `circle_admin` | `collaborator` | `viewer`, default `viewer`)
+- created_at, updated_at (timestamptz)
+Unique: (circle_id, user_id)
+Table: `circle_members`
+
+**circle_invites**
+- id (uuid pk)
+- circle_id (uuid fk circles.id)
+- email (text) — the invited email address
+- role (CircleRole default `viewer`) — the role to assign on claim
+- added_by_id (uuid fk users.id null) — who sent the invite
+- added_at (timestamptz)
+- claimed_by_id (uuid fk users.id null) — set when the invite is accepted
+- claimed_at (timestamptz null)
+- notes (text null)
+Unique: (circle_id, email)
+Table: `circle_invites`
+
+**Note on addedById:** The `media_items`, `albums`, and `tags` tables use `added_by_id` (not `owner_id`) to record which user uploaded or created the record. The uniqueness constraint for deduplication on `media_items` is `(circle_id, content_hash)` — not `(owner_id, content_hash)`. Tag names are unique per `(circle_id, name)`.
+
 ### 9.3 Settings JSON Shapes (Recommended)
 User settings example:
 ```json
@@ -393,9 +472,12 @@ User settings example:
     "displayName": "string",
     "useProviderImage": true,
     "customImageUrl": "string | null"
-  }
+  },
+  "activeCircleId": "uuid | null"
 }
 ```
+
+`activeCircleId` stores the user's last selected circle as a UX convenience (the UI restores the active circle across sessions). It is **never trusted for authorization** — all circle access checks use server-side membership lookups.
 
 System settings example:
 ```json
@@ -434,8 +516,11 @@ System settings example:
 ### 10.3 Seeding
 Seed:
 - Roles (Admin/Contributor/Viewer)
-- Permissions
-- Role-permission mappings
+- Permissions (including `circles:read`, `circles:write`, `circles:manage_any`, `backup:run`, `backup:read`)
+- Role-permission mappings:
+  - Admin: all permissions including `circles:manage_any`, `backup:run`, `backup:read`
+  - Contributor: `circles:read`, `circles:write`
+  - Viewer: `circles:read`, `circles:write`
 - system_settings row (`key=global`) with defaults
 
 Initial Admin bootstrap:

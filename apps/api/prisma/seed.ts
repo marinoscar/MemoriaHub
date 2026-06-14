@@ -55,6 +55,15 @@ const PERMISSIONS = [
   { name: 'media:read_any', description: 'Admin: read any user media items' },
   { name: 'media:write_any', description: 'Admin: update any user media items' },
   { name: 'media:delete_any', description: 'Admin: delete any user media items' },
+
+  // Circles (per-circle role still gates which circle; these grant API access)
+  { name: 'circles:read', description: 'Read circles and memberships' },
+  { name: 'circles:write', description: 'Create and manage own circles' },
+  { name: 'circles:manage_any', description: 'Admin: manage any circle' },
+
+  // Backup (admin-only: local-drive backup/replication)
+  { name: 'backup:run', description: 'Admin: trigger local-drive backup job' },
+  { name: 'backup:read', description: 'Admin: read backup status and manifests' },
 ] as const;
 
 // Role to permissions mapping
@@ -75,6 +84,13 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'media:read_any',
     'media:write_any',
     'media:delete_any',
+    // Circles: full access including super-admin operations
+    'circles:read',
+    'circles:write',
+    'circles:manage_any',
+    // Backup: admin-only
+    'backup:run',
+    'backup:read',
   ],
   contributor: [
     'user_settings:read',
@@ -84,6 +100,9 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'media:read',
     'media:write',
     'media:delete',
+    // Circles: any user can use circles; per-circle role gates which circle
+    'circles:read',
+    'circles:write',
   ],
   viewer: [
     'user_settings:read',
@@ -92,6 +111,9 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'media:read',
     'media:write',
     'media:delete',
+    // Circles: any user can use circles; per-circle role gates which circle
+    'circles:read',
+    'circles:write',
   ],
 };
 

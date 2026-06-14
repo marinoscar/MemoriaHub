@@ -2,6 +2,7 @@ import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
+import { CircleProvider } from './contexts/CircleContext';
 import { ThemeContextProvider, useThemeContext } from './contexts/ThemeContext';
 import { ProtectedRoute } from './components/common/ProtectedRoute';
 import { Layout } from './components/common/Layout';
@@ -20,6 +21,10 @@ const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage'));
 const UserManagementPage = lazy(() => import('./pages/UserManagementPage'));
 const MediaLibraryPage = lazy(() => import('./pages/MediaLibrary'));
 const MediaMapPage = lazy(() => import('./pages/MediaMapPage'));
+const CircleListPage = lazy(() => import('./pages/Circles/CircleListPage'));
+const CircleDetailPage = lazy(() => import('./pages/Circles/CircleDetailPage'));
+const AdminCirclesPage = lazy(() => import('./pages/Admin/AdminCirclesPage'));
+const BackupPage = lazy(() => import('./pages/Admin/BackupPage'));
 
 // Test login page (development only)
 const TestLoginPage = import.meta.env.PROD
@@ -54,8 +59,12 @@ function AppRoutes() {
                 <Route path="/settings" element={<UserSettingsPage />} />
                 <Route path="/media" element={<MediaLibraryPage />} />
                 <Route path="/map" element={<MediaMapPage />} />
+                <Route path="/circles" element={<CircleListPage />} />
+                <Route path="/circles/:id" element={<CircleDetailPage />} />
                 <Route path="/admin/users" element={<UserManagementPage />} />
                 <Route path="/admin/settings" element={<SystemSettingsPage />} />
+                <Route path="/admin/circles" element={<AdminCirclesPage />} />
+                <Route path="/admin/backup" element={<BackupPage />} />
               </Route>
             </Route>
 
@@ -72,7 +81,9 @@ export default function App() {
   return (
     <ThemeContextProvider>
       <AuthProvider>
-        <AppRoutes />
+        <CircleProvider>
+          <AppRoutes />
+        </CircleProvider>
       </AuthProvider>
     </ThemeContextProvider>
   );

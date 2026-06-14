@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-06-14
+
+### Added
+
+- **Family Circles**: Collaborative shared-media library feature. Every media item, album, and tag belongs to exactly one circle. All circle members see the same content, scoped by per-circle role.
+  - `circles`, `circle_members`, and `circle_invites` database tables
+  - `CircleRole` enum: `circle_admin` | `collaborator` | `viewer`
+  - Personal circle created automatically on first login (`isPersonal: true`); cannot be deleted
+  - 13 new API endpoints under `GET/POST/PATCH/DELETE /api/circles` for circle CRUD, member management, and invite management
+  - Invite flow: sending an invite upserts the invited email into `allowed_emails`; pending invites are claimed automatically when the invitee logs in for the first time
+  - Two-layer authorization: system RBAC guard (`circles:read` / `circles:write`) followed by per-circle role check (`CircleMembershipService.assertCircleAccess`); Admins holding `circles:manage_any` bypass per-circle checks
+  - New permissions: `circles:read`, `circles:write`, `circles:manage_any`
+  - `activeCircleId` in user settings JSONB for UX circle persistence (not trusted for authz)
+  - Web UI: `CircleContext`, `CircleSwitcher` in AppBar, `/circles`, `/circles/:id`, `/admin/circles` pages
+  - CLI: `circles list`, `circles use <id>` commands; per-folder circle binding in SQLite sync state v3; `--circle <id>` flag on `sync` and `backup` commands
+
+- **Backup Job**: Local-disk backup for circle media via `LocalDiskStorageProvider`.
+  - 5 new API endpoints under `POST/GET /api/admin/backup` for triggering and inspecting backup runs (Admin only)
+  - New permissions: `backup:run`, `backup:read`
+  - New environment variables: `BACKUP_LOCAL_PATH`, `STORAGE_BACKUP_PROVIDER`
+  - Web UI: `/admin/backup` page with run history and object browser
+
+### Changed
+
+- **Media, Album, Tag ownership field renamed**: `ownerId` → `addedById` (`@map("added_by_id")`) on `media_items`, `albums`, and `tags` tables. All API responses use `addedById`.
+- **Media deduplication key changed**: uniqueness constraint on `media_items` is now `(circle_id, content_hash)` instead of `(owner_id, content_hash)`. The `GET /api/media?contentHash=<hash>` dedup pre-check now requires a `circleId` query parameter.
+- **Tag name uniqueness**: tags are now unique per `(circle_id, name)` instead of `(owner_id, name)`.
+- **Storage download authorization**: `GET /api/storage/objects/:id/download` verifies access by resolving `storageObject → mediaItem → circleId → circle membership`. Direct owner checks are replaced by circle membership checks.
+- **POST /api/media**: now requires `circleId` in the request body. The `source` field accepts `android` for mobile sync uploads.
+- **GET /api/media**: now requires `circleId` as a query parameter to scope results to a circle.
+- **POST /api/circles/:id/invites**: also upserts the invited email into `allowed_emails` so the invitee can log in without a separate admin allowlist action.
+
 ## [1.1.0] - 2026-06-10
 
 ### Changed

@@ -64,6 +64,23 @@ describe('AuthService', () => {
     }).compile();
 
     service = module.get<AuthService>(AuthService);
+
+    // Default mocks for circle-related calls added in step 3.
+    // These ensure existing tests don't break when createNewUser now creates a personal
+    // circle, and when handleGoogleLogin now calls claimPendingCircleInvites.
+    mockPrisma.circle.create.mockResolvedValue({
+      id: 'default-personal-circle',
+      name: "Test User's Library",
+      isPersonal: true,
+      ownerId: 'user-1',
+    } as any);
+    mockPrisma.circleMember.create.mockResolvedValue({
+      id: 'default-cm-1',
+      circleId: 'default-personal-circle',
+      userId: 'user-1',
+      role: 'circle_admin',
+    } as any);
+    mockPrisma.circleInvite.findMany.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -748,6 +765,164 @@ describe('AuthService', () => {
       const result = await service.cleanupExpiredTokens();
 
       expect(result).toBe(0);
+    });
+  });
+
+  describe('createNewUser - personal circle', () => {
+    it('should create a personal circle for the new user inside the transaction', async () => {
+      const mockRole = { id: 'role-1', name: 'viewer', rolePermissions: [] };
+      const mockUser = {
+        id: 'user-personal-1',
+        email: mockGoogleProfile.email,
+        isActive: true,
+        userRoles: [{ role: mockRole }],
+      };
+      const mockPersonalCircle = {
+        id: 'personal-circle-1',
+        name: "Test User's Library",
+        isPersonal: true,
+        ownerId: mockUser.id,
+      };
+      const mockCircleMember = {
+        id: 'cm-1',
+        circleId: mockPersonalCircle.id,
+        userId: mockUser.id,
+        role: 'circle_admin',
+      };
+
+      // Setup: no existing identity or user by email — triggers createNewUser
+      mockPrisma.userIdentity.findUnique.mockResolvedValue(null);
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.role.findUnique.mockResolvedValue(mockRole as any);
+
+      // $transaction callback receives mockPrisma as tx
+      mockPrisma.$transaction.mockImplementation(async (callback: any) => callback(mockPrisma));
+
+      // Calls inside the transaction
+      mockPrisma.user.create.mockResolvedValue(mockUser as any);
+      mockPrisma.circle.create.mockResolvedValue(mockPersonalCircle as any);
+      mockPrisma.circleMember.create.mockResolvedValue(mockCircleMember as any);
+
+      // Calls outside the transaction
+      mockPrisma.user.update.mockResolvedValue(mockUser as any);
+      mockPrisma.refreshToken.create.mockResolvedValue({} as any);
+
+      // handleGoogleLogin → createNewUser (private) → circle.create inside $transaction
+      await service.handleGoogleLogin(mockGoogleProfile);
+
+      // The personal circle must be created with isPersonal: true
+      expect(mockPrisma.circle.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            isPersonal: true,
+            ownerId: mockUser.id,
+          }),
+        }),
+      );
+
+      // The creator must be added as circle_admin
+      expect(mockPrisma.circleMember.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            circleId: mockPersonalCircle.id,
+            userId: mockUser.id,
+            role: 'circle_admin',
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('handleGoogleLogin - invite claim', () => {
+    it('should claim pending circle invites on login', async () => {
+      // Existing identity found — no createNewUser path
+      const existingUser = {
+        id: 'existing-user',
+        email: 'test@example.com',
+        isActive: true,
+        userRoles: [{ role: { name: 'viewer', rolePermissions: [] } }],
+      };
+
+      mockPrisma.userIdentity.findUnique.mockResolvedValue({
+        user: existingUser,
+      } as any);
+      mockPrisma.user.update.mockResolvedValue(existingUser as any);
+      mockPrisma.refreshToken.create.mockResolvedValue({} as any);
+
+      // Pending invites to claim
+      const pendingInvite = {
+        id: 'inv-1',
+        circleId: 'c1',
+        role: 'viewer' as const,
+        email: 'test@example.com',
+        claimedAt: null,
+      };
+      mockPrisma.circleInvite.findMany.mockResolvedValue([pendingInvite] as any);
+
+      // The per-invite $transaction: tx has circleMember.findUnique, circleMember.create, circleInvite.update
+      mockPrisma.$transaction.mockImplementation(async (callback: any) => {
+        // Provide a tx object with the necessary methods
+        const tx = {
+          circleMember: {
+            findUnique: jest.fn().mockResolvedValue(null), // not yet a member
+            create: jest.fn().mockResolvedValue({}),
+            update: jest.fn().mockResolvedValue({}),
+          },
+          circleInvite: {
+            update: jest.fn().mockResolvedValue({}),
+          },
+        };
+        await callback(tx);
+        // Keep a reference so we can assert on it
+        (mockPrisma.$transaction as any)._lastTx = tx;
+        return undefined;
+      });
+
+      await service.handleGoogleLogin(mockGoogleProfile);
+
+      // claimPendingCircleInvites should have looked up pending invites
+      expect(mockPrisma.circleInvite.findMany).toHaveBeenCalledWith({
+        where: { email: 'test@example.com', claimedAt: null },
+      });
+
+      // $transaction was called at least once (for the invite)
+      expect(mockPrisma.$transaction).toHaveBeenCalled();
+
+      // circleInvite.update inside the tx must mark it as claimed
+      const lastTx = (mockPrisma.$transaction as any)._lastTx;
+      expect(lastTx.circleInvite.update).toHaveBeenCalledWith({
+        where: { id: 'inv-1' },
+        data: expect.objectContaining({
+          claimedById: existingUser.id,
+          claimedAt: expect.any(Date),
+        }),
+      });
+    });
+
+    it('should not call $transaction when there are no pending invites', async () => {
+      const existingUser = {
+        id: 'existing-user-2',
+        email: 'test@example.com',
+        isActive: true,
+        userRoles: [{ role: { name: 'viewer', rolePermissions: [] } }],
+      };
+
+      mockPrisma.userIdentity.findUnique.mockResolvedValue({
+        user: existingUser,
+      } as any);
+      mockPrisma.user.update.mockResolvedValue(existingUser as any);
+      mockPrisma.refreshToken.create.mockResolvedValue({} as any);
+
+      // No pending invites
+      mockPrisma.circleInvite.findMany.mockResolvedValue([]);
+
+      await service.handleGoogleLogin(mockGoogleProfile);
+
+      expect(mockPrisma.circleInvite.findMany).toHaveBeenCalledWith({
+        where: { email: 'test@example.com', claimedAt: null },
+      });
+      // $transaction should not have been called at all (no invites to process)
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     });
   });
 });

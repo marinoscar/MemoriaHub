@@ -24,8 +24,8 @@ import {
   useTheme,
 } from '@mui/material';
 import { Close as CloseIcon, Map as MapIcon } from '@mui/icons-material';
-import { listMediaLocations } from '../../services/media';
-import { getMedia } from '../../services/media';
+import { listMediaLocations, getMedia } from '../../services/media';
+import { useCircle } from '../../hooks/useCircle';
 import { MarkerClusterGroup } from '../../components/map/MarkerClusterGroup';
 import { MediaDetailDrawer } from '../../components/media/MediaDetailDrawer';
 import type { MediaLocation, MediaItem } from '../../types/media';
@@ -126,6 +126,7 @@ function AlbumTile({ point, onClick }: AlbumTileProps) {
 
 export default function MediaMapPage() {
   const theme = useTheme();
+  const { activeCircle } = useCircle();
 
   // ----- Location data -----
   const [points, setPoints] = useState<MediaLocation[]>([]);
@@ -133,11 +134,16 @@ export default function MediaMapPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!activeCircle) {
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
     setLoading(true);
     setError(null);
 
-    listMediaLocations()
+    listMediaLocations({ circleId: activeCircle.id })
       .then((data) => {
         if (!cancelled) {
           setPoints(data);
@@ -154,7 +160,7 @@ export default function MediaMapPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [activeCircle]);
 
   // ----- Album panel (cluster click) -----
   const [albumIds, setAlbumIds] = useState<string[] | null>(null);
@@ -213,6 +219,14 @@ export default function MediaMapPage() {
   }, []);
 
   // ----- Render -----
+
+  if (!activeCircle) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="info">Select a circle to view the map.</Alert>
+      </Box>
+    );
+  }
 
   return (
     <Box

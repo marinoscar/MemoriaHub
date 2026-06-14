@@ -432,6 +432,28 @@ The MVP should support metadata export in common formats such as:
 
 Exporting metadata is important because users should be able to analyze, migrate, back up, or reuse their media information outside of MemoriaHub.
 
+## Family Circles — Collaborative Family Library
+
+Family Circles is the central collaborative feature of MemoriaHub. It transforms MemoriaHub from a single-user media archive into a shared family memory platform, while preserving every user's full ownership and privacy of their personal library.
+
+### What Family Circles Means
+
+Every user belongs to at least one circle. On signup, a personal circle is automatically created for that user — all their previously imported media lives there. Family members can then create additional shared circles and invite others by email.
+
+**Fully shared circle library.** Every media item belongs to exactly one circle and is visible to all members of that circle. There is no per-item private flag. MemoriaHub tracks who contributed each item via `addedById`, but all members with sufficient role can view, organize, and (if authorized) edit any item in the circle.
+
+**Multiple circles per user.** A user may belong to several circles at the same time — their own personal library plus shared family circles or other groups. The web app and CLI both provide a circle switcher so users can move between active circles. The active circle is persisted in user settings as a convenience.
+
+**Per-circle roles.** Each circle has three roles: `circle_admin` (manages the circle and its members), `collaborator` (adds and organizes media), and `viewer` (read-only access). These roles are independent of the global system roles.
+
+**Invite flow.** A circle admin invites someone by email. Sending the invite automatically adds that email to the application allowlist so the invitee can log in. On first login, pending invites for that email are claimed and the user is added as a member of the relevant circles.
+
+**Two-layer admin model.** The existing global Admin role is the super-admin layer: it can manage any circle, any media, and run admin-level backup operations, bypassing per-circle membership checks. Per-circle roles govern day-to-day access within each circle.
+
+### Local-Drive Backup
+
+System admins can trigger a server-side backup job (`POST /api/admin/backup`) that replicates ready media blobs from S3 (for a given circle or all circles) to a local disk path (`BACKUP_LOCAL_PATH`). A per-circle manifest is written alongside the blobs. Backup runs are tracked in the audit event log. The CLI provides a complementary `memoriahub backup` command for operators who prefer to pull blobs to their own machine using a Personal Access Token.
+
 ## What MemoriaHub Is Not in the MVP
 
 The MVP should avoid trying to do too much too early.
@@ -444,12 +466,11 @@ MemoriaHub does not need to initially include:
 * Complex AI search
 * Full replacement of every Google Photos feature
 * Printed photo products
-* Collaborative family accounts
 * Advanced mobile editing tools
 
 These features may be considered later, but they are not part of the initial focus.
 
-The MVP should stay focused on ownership, storage flexibility, importing, syncing, metadata, export, family memory prioritization, and extensibility.
+The MVP should stay focused on ownership, storage flexibility, importing, syncing, metadata, export, family collaboration through circles, memory prioritization, and extensibility.
 
 ## Long-Term Vision
 

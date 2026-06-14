@@ -22,6 +22,7 @@ interface FolderRow {
   enabled: number;
   added_at: string;
   last_sync_at: string | null;
+  circle_id: string | null;
 }
 
 function rowToFolder(row: FolderRow): Folder {
@@ -33,6 +34,7 @@ function rowToFolder(row: FolderRow): Folder {
     enabled: row.enabled !== 0,
     added_at: row.added_at,
     last_sync_at: row.last_sync_at,
+    circle_id: row.circle_id,
   };
 }
 
@@ -59,12 +61,14 @@ export class FolderRepo {
     path: string;
     recursive?: boolean;
     enabled?: boolean;
+    circleId?: string;
   }): Folder {
     const absPath = path.resolve(opts.path);
     const pathHash = sha256Hex(absPath);
     const now = new Date().toISOString();
     const recursive = opts.recursive ?? false;
     const enabled = opts.enabled ?? true;
+    const circleId = opts.circleId ?? null;
 
     // Check for duplicate before running INSERT so we can give a clear error.
     const existing = this.db
@@ -76,10 +80,10 @@ export class FolderRepo {
 
     const info = this.db
       .prepare(
-        `INSERT INTO folders (path, path_hash, recursive, enabled, added_at)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO folders (path, path_hash, recursive, enabled, added_at, circle_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
       )
-      .run(absPath, pathHash, recursive ? 1 : 0, enabled ? 1 : 0, now);
+      .run(absPath, pathHash, recursive ? 1 : 0, enabled ? 1 : 0, now, circleId);
 
     const row = this.db
       .prepare<[number], FolderRow>('SELECT * FROM folders WHERE id = ?')

@@ -31,11 +31,12 @@ export function syncCommand(): Command {
     .option('--all', 'Sync all registered enabled folders', false)
     .option('--dry-run', 'Show what would be uploaded without actually uploading', false)
     .option('-r, --recursive', 'Descend into sub-directories (when auto-registering a folder)', false)
-    .option('--concurrency <n>', 'Number of concurrent upload workers', parseInt);
+    .option('--concurrency <n>', 'Number of concurrent upload workers', parseInt)
+    .option('--circle <id>', 'Target circle ID (overrides active circle in config)');
 
   cmd.action(async (
     folderArgs: string[],
-    options: { all: boolean; dryRun: boolean; recursive: boolean; concurrency?: number },
+    options: { all: boolean; dryRun: boolean; recursive: boolean; concurrency?: number; circle?: string },
   ) => {
     // Validate invocation
     if (folderArgs.length === 0 && !options.all) {
@@ -96,6 +97,7 @@ export function syncCommand(): Command {
         all:         options.all,
         dryRun:      options.dryRun,
         concurrency: options.concurrency,
+        circleId:    options.circle ?? cfg.activeCircleId,
         trigger:     'cli',
       });
     } catch (err) {

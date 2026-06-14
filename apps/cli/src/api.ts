@@ -3,6 +3,36 @@ export interface ApiClientOptions {
   pat: string;
 }
 
+export interface Circle {
+  id: string;
+  name: string;
+  isPersonal: boolean;
+  // other fields may be present but we only need these
+}
+
+export interface BackupRunResult {
+  runId: string;
+  scope: string;
+  copied: number;
+  skipped: number;
+  failed: number;
+  errors: string[];
+}
+
+export interface BackupObject {
+  mediaItemId: string;
+  storageKey: string;
+  downloadUrl: string;
+  originalFilename: string;
+  mimeType: string;
+  size: number;
+  circleId: string;
+}
+
+export interface BackupObjectsResult {
+  items: BackupObject[];
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -37,6 +67,19 @@ export class ApiClient {
       },
     });
     return this.parseResponse<T>(res);
+  }
+
+  async listCircles(): Promise<Circle[]> {
+    return this.get<Circle[]>('/api/circles');
+  }
+
+  async triggerBackup(body: { circleId?: string; all?: boolean }): Promise<BackupRunResult> {
+    return this.post<BackupRunResult>('/api/admin/backup', body);
+  }
+
+  async listBackupObjects(circleId?: string): Promise<BackupObjectsResult> {
+    const qs = circleId ? `?circleId=${encodeURIComponent(circleId)}` : '';
+    return this.get<BackupObjectsResult>(`/api/admin/backup/objects${qs}`);
   }
 
   async post<T>(path: string, body: unknown): Promise<T> {

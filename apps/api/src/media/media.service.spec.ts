@@ -15,6 +15,7 @@ import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interfac
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { randomUUID } from 'crypto';
+import { CircleMembershipService } from '../circles/circle-membership.service';
 
 // ---------------------------------------------------------------------------
 // Helper: build a Prisma P2002 error the way Prisma actually throws it
@@ -28,6 +29,8 @@ function makeP2002Error(): Prisma.PrismaClientKnownRequestError {
 
 // A valid 64-char lowercase hex SHA-256 string for use in tests
 const TEST_HASH = 'a'.repeat(64);
+
+const CIRCLE_ID = 'circle-uuid-0001-0002-0003';
 
 // ---------------------------------------------------------------------------
 // Test factories
@@ -56,7 +59,8 @@ function makeMediaItem(overrides: Partial<any> = {}) {
   return {
     id: randomUUID(),
     storageObjectId: randomUUID(),
-    ownerId: 'user-1',
+    addedById: 'user-1',
+    circleId: CIRCLE_ID,
     type: 'photo' as const,
     source: 'web' as const,
     originalFilename: 'photo.jpg',
@@ -101,7 +105,8 @@ function makeMediaItem(overrides: Partial<any> = {}) {
 function makeAlbum(overrides: Partial<any> = {}) {
   return {
     id: randomUUID(),
-    ownerId: 'user-1',
+    addedById: 'user-1',
+    circleId: CIRCLE_ID,
     name: 'My Album',
     description: null,
     createdAt: new Date(),
@@ -113,7 +118,8 @@ function makeAlbum(overrides: Partial<any> = {}) {
 function makeTag(overrides: Partial<any> = {}) {
   return {
     id: randomUUID(),
-    ownerId: 'user-1',
+    addedById: 'user-1',
+    circleId: CIRCLE_ID,
     name: 'nature',
     createdAt: new Date(),
     ...overrides,
@@ -124,6 +130,7 @@ function makeTag(overrides: Partial<any> = {}) {
 // Cast to any to avoid strict DTO type checking in unit tests
 // (the DTO has a `favorite` field with transform that TypeScript marks as required)
 const defaultMediaQuery = {
+  circleId: CIRCLE_ID,
   page: 1,
   pageSize: 20,
   sortBy: 'capturedAt' as const,
@@ -131,6 +138,7 @@ const defaultMediaQuery = {
 } as any;
 
 const defaultAlbumQuery = {
+  circleId: CIRCLE_ID,
   page: 1,
   pageSize: 20,
   sortBy: 'createdAt' as const,
@@ -160,6 +168,7 @@ describe('MediaService', () => {
   let mockPrisma: MockPrismaService;
   let mockStorageProvider: { getSignedDownloadUrl: jest.Mock; delete: jest.Mock };
   let mockSyncService: jest.Mocked<Pick<MediaMetadataSyncService, 'syncFromStorageObject'>>;
+  let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -170,6 +179,9 @@ describe('MediaService', () => {
     mockSyncService = {
       syncFromStorageObject: jest.fn().mockResolvedValue(undefined),
     };
+    mockCircleMembershipService = {
+      assertCircleAccess: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -177,6 +189,7 @@ describe('MediaService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },
+        { provide: CircleMembershipService, useValue: mockCircleMembershipService },
       ],
     }).compile();
 
@@ -205,9 +218,10 @@ describe('MediaService', () => {
         type: 'photo' as const,
         source: 'web' as const,
         originalFilename: 'photo.jpg',
+        circleId: CIRCLE_ID,
       };
 
-      const result = await service.createMedia(dto, 'user-1');
+      const result = await service.createMedia(dto, 'user-1', ownPerms);
 
       // Fresh create: result is the created item spread with deduplicated: false
       expect(result).toMatchObject({ ...createdItem, deduplicated: false });
@@ -219,7 +233,7 @@ describe('MediaService', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             storageObjectId: dto.storageObjectId,
-            ownerId: 'user-1',
+            addedById: 'user-1',
             type: 'photo',
             source: 'web',
             originalFilename: 'photo.jpg',
@@ -239,8 +253,10 @@ describe('MediaService', () => {
             type: 'photo',
             source: 'web',
             originalFilename: 'photo.jpg',
+            circleId: CIRCLE_ID,
           },
           'user-1',
+          ownPerms,
         ),
       ).rejects.toThrow(NotFoundException);
     });
@@ -257,8 +273,10 @@ describe('MediaService', () => {
             type: 'photo',
             source: 'web',
             originalFilename: 'photo.jpg',
+            circleId: CIRCLE_ID,
           },
           'user-1',
+          ownPerms,
         ),
       ).rejects.toThrow(ForbiddenException);
     });
@@ -277,8 +295,10 @@ describe('MediaService', () => {
             type: 'photo',
             source: 'web',
             originalFilename: 'photo.jpg',
+            circleId: CIRCLE_ID,
           },
           'user-1',
+          ownPerms,
         ),
       ).rejects.toThrow(BadRequestException);
     });
@@ -297,8 +317,10 @@ describe('MediaService', () => {
           type: 'photo',
           source: 'web',
           originalFilename: 'photo.jpg',
+          circleId: CIRCLE_ID,
         },
         'user-1',
+        ownPerms,
       );
 
       expect(mockSyncService.syncFromStorageObject).toHaveBeenCalledTimes(1);
@@ -320,8 +342,10 @@ describe('MediaService', () => {
           type: 'photo',
           source: 'web',
           originalFilename: 'photo.jpg',
+          circleId: CIRCLE_ID,
         },
         'user-1',
+        ownPerms,
       );
 
       // createMedia must resolve despite sync failure
@@ -347,8 +371,10 @@ describe('MediaService', () => {
           source: 'web',
           originalFilename: 'photo.jpg',
           contentHash: TEST_HASH,
+          circleId: CIRCLE_ID,
         },
         'user-1',
+        ownPerms,
       );
 
       expect(mockPrisma.mediaItem.create).toHaveBeenCalledWith(
@@ -360,12 +386,12 @@ describe('MediaService', () => {
 
     it('returns the existing item (deduplicated: true) when pre-check finds a hash match', async () => {
       const storageObject = makeStorageObject({ uploadedById: 'user-1', storageKey: 'uploads/new.jpg' });
-      const existingItem = makeMediaItem({ ownerId: 'user-1', contentHash: TEST_HASH });
+      const existingItem = makeMediaItem({ addedById: 'user-1', contentHash: TEST_HASH });
 
       mockPrisma.storageObject.findUnique.mockResolvedValue(storageObject as any);
       // "already linked" check on storageObjectId → no match
       mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
-      // Dedup pre-check by (ownerId, contentHash) → existing item found
+      // Dedup pre-check by (circleId, contentHash) → existing item found
       mockPrisma.mediaItem.findFirst.mockResolvedValue(existingItem as any);
 
       const result = await service.createMedia(
@@ -375,8 +401,10 @@ describe('MediaService', () => {
           source: 'web',
           originalFilename: 'dup.jpg',
           contentHash: TEST_HASH,
+          circleId: CIRCLE_ID,
         },
         'user-1',
+        ownPerms,
       );
 
       expect(result.deduplicated).toBe(true);
@@ -392,7 +420,7 @@ describe('MediaService', () => {
 
     it('returns the existing item (deduplicated: true) when P2002 fires on concurrent create', async () => {
       const storageObject = makeStorageObject({ uploadedById: 'user-1', storageKey: 'uploads/new2.jpg' });
-      const winnerItem = makeMediaItem({ ownerId: 'user-1', contentHash: TEST_HASH });
+      const winnerItem = makeMediaItem({ addedById: 'user-1', contentHash: TEST_HASH });
 
       mockPrisma.storageObject.findUnique.mockResolvedValue(storageObject as any);
       // "already linked" check → no match
@@ -411,8 +439,10 @@ describe('MediaService', () => {
           source: 'web',
           originalFilename: 'race.jpg',
           contentHash: TEST_HASH,
+          circleId: CIRCLE_ID,
         },
         'user-1',
+        ownPerms,
       );
 
       expect(result.deduplicated).toBe(true);
@@ -438,15 +468,17 @@ describe('MediaService', () => {
             source: 'web',
             originalFilename: 'ghost.jpg',
             contentHash: TEST_HASH,
+            circleId: CIRCLE_ID,
           },
           'user-1',
+          ownPerms,
         ),
       ).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
     });
 
     it('cleanup failures do NOT prevent the dedup hit from being returned', async () => {
       const storageObject = makeStorageObject({ uploadedById: 'user-1', storageKey: 'uploads/err.jpg' });
-      const existingItem = makeMediaItem({ ownerId: 'user-1', contentHash: TEST_HASH });
+      const existingItem = makeMediaItem({ addedById: 'user-1', contentHash: TEST_HASH });
 
       mockPrisma.storageObject.findUnique.mockResolvedValue(storageObject as any);
       mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
@@ -462,8 +494,10 @@ describe('MediaService', () => {
           source: 'web',
           originalFilename: 'dup.jpg',
           contentHash: TEST_HASH,
+          circleId: CIRCLE_ID,
         },
         'user-1',
+        ownPerms,
       );
 
       // Despite both cleanup failures, the dedup result is still returned
@@ -489,18 +523,18 @@ describe('MediaService', () => {
       expect(findManyCall[0].where).toMatchObject({ deletedAt: null });
     });
 
-    it('filters by ownerId for non-admin callers', async () => {
+    it('filters by circleId from query', async () => {
       await service.listMedia({ ...defaultMediaQuery }, 'user-1', ownPerms);
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({ ownerId: 'user-1' });
+      expect(call[0].where).toMatchObject({ circleId: CIRCLE_ID });
     });
 
-    it('does NOT filter by ownerId when caller holds media:read_any', async () => {
+    it('always filters by circleId from query regardless of permissions', async () => {
       await service.listMedia({ ...defaultMediaQuery }, 'user-1', anyPerms);
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).not.toHaveProperty('ownerId');
+      expect(call[0].where).toMatchObject({ circleId: CIRCLE_ID });
     });
 
     it('filters by type when provided', async () => {
@@ -677,7 +711,7 @@ describe('MediaService', () => {
 
   describe('getMedia', () => {
     it('should return a MediaItem for the owner', async () => {
-      const item = makeMediaItem({ ownerId: 'user-1' });
+      const item = makeMediaItem({ addedById: 'user-1' });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
       mockPrisma.storageObject.findUnique.mockResolvedValue(
         makeStorageObject({ id: item.storageObjectId, uploadedById: 'user-1' }) as any,
@@ -685,7 +719,7 @@ describe('MediaService', () => {
 
       const result = await service.getMedia(item.id, 'user-1', ownPerms);
 
-      expect(result).toMatchObject({ id: item.id, ownerId: 'user-1' });
+      expect(result).toMatchObject({ id: item.id, addedById: 'user-1' });
     });
 
     it('should throw NotFoundException if item does not exist', async () => {
@@ -706,8 +740,9 @@ describe('MediaService', () => {
     });
 
     it('should throw ForbiddenException when non-owner without _any permission accesses', async () => {
-      const item = makeMediaItem({ ownerId: 'other-user' });
+      const item = makeMediaItem({ addedById: 'other-user' });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
         service.getMedia(item.id, 'user-1', ownPerms),
@@ -715,7 +750,7 @@ describe('MediaService', () => {
     });
 
     it('should allow Admin with media:read_any to access another user\'s item', async () => {
-      const item = makeMediaItem({ ownerId: 'other-user' });
+      const item = makeMediaItem({ addedById: 'other-user' });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
       mockPrisma.storageObject.findUnique.mockResolvedValue(
         makeStorageObject({ id: item.storageObjectId, uploadedById: 'other-user' }) as any,
@@ -723,7 +758,7 @@ describe('MediaService', () => {
 
       const result = await service.getMedia(item.id, 'user-1', anyPerms);
 
-      expect(result).toMatchObject({ id: item.id, ownerId: 'other-user' });
+      expect(result).toMatchObject({ id: item.id, addedById: 'other-user' });
     });
   });
 
@@ -733,7 +768,7 @@ describe('MediaService', () => {
 
   describe('updateMedia', () => {
     it('should update mutable fields for the owner', async () => {
-      const item = makeMediaItem({ ownerId: 'user-1' });
+      const item = makeMediaItem({ addedById: 'user-1' });
       const updated = { ...item, title: 'New Title', favorite: true };
 
       // findUnique called by getMediaWithOwnershipCheck
@@ -757,8 +792,9 @@ describe('MediaService', () => {
     });
 
     it('should throw ForbiddenException for non-owner without _any permission', async () => {
-      const item = makeMediaItem({ ownerId: 'other-user' });
+      const item = makeMediaItem({ addedById: 'other-user' });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
         service.updateMedia(item.id, { title: 'hack' }, 'user-1', ownPerms),
@@ -768,7 +804,7 @@ describe('MediaService', () => {
     });
 
     it('should allow Admin with media:write_any to update another user\'s item', async () => {
-      const item = makeMediaItem({ ownerId: 'other-user' });
+      const item = makeMediaItem({ addedById: 'other-user' });
       const updated = { ...item, title: 'Admin Updated' };
 
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
@@ -799,7 +835,7 @@ describe('MediaService', () => {
 
   describe('deleteMedia', () => {
     it('should set deletedAt on the MediaItem (soft-delete)', async () => {
-      const item = makeMediaItem({ ownerId: 'user-1' });
+      const item = makeMediaItem({ addedById: 'user-1' });
 
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
       mockPrisma.mediaItem.update.mockResolvedValue({
@@ -818,7 +854,7 @@ describe('MediaService', () => {
     });
 
     it('should NOT call storageObject.delete (blob stays intact)', async () => {
-      const item = makeMediaItem({ ownerId: 'user-1' });
+      const item = makeMediaItem({ addedById: 'user-1' });
 
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
       mockPrisma.mediaItem.update.mockResolvedValue({
@@ -832,8 +868,9 @@ describe('MediaService', () => {
     });
 
     it('should throw ForbiddenException for non-owner without _any permission', async () => {
-      const item = makeMediaItem({ ownerId: 'other-user' });
+      const item = makeMediaItem({ addedById: 'other-user' });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
         service.deleteMedia(item.id, 'user-1', ownPerms),
@@ -841,7 +878,7 @@ describe('MediaService', () => {
     });
 
     it('should allow Admin with media:delete_any to soft-delete another user\'s item', async () => {
-      const item = makeMediaItem({ ownerId: 'other-user' });
+      const item = makeMediaItem({ addedById: 'other-user' });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
       mockPrisma.mediaItem.update.mockResolvedValue({
         ...item,
@@ -871,13 +908,13 @@ describe('MediaService', () => {
   describe('listTags', () => {
     it('should return caller\'s tags with count', async () => {
       const tags = [
-        { id: randomUUID(), name: 'nature', createdAt: new Date(), ownerId: 'user-1', _count: { mediaTags: 3 } },
-        { id: randomUUID(), name: 'travel', createdAt: new Date(), ownerId: 'user-1', _count: { mediaTags: 1 } },
+        { id: randomUUID(), name: 'nature', createdAt: new Date(), addedById: 'user-1', circleId: CIRCLE_ID, _count: { mediaTags: 3 } },
+        { id: randomUUID(), name: 'travel', createdAt: new Date(), addedById: 'user-1', circleId: CIRCLE_ID, _count: { mediaTags: 1 } },
       ];
 
       mockPrisma.tag.findMany.mockResolvedValue(tags as any);
 
-      const result = await service.listTags('user-1');
+      const result = await service.listTags(CIRCLE_ID, 'user-1', ownPerms);
 
       expect(result).toEqual([
         { id: tags[0].id, name: 'nature', createdAt: tags[0].createdAt, count: 3 },
@@ -885,7 +922,7 @@ describe('MediaService', () => {
       ]);
       expect(mockPrisma.tag.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { ownerId: 'user-1' },
+          where: { circleId: CIRCLE_ID },
         }),
       );
     });
@@ -897,7 +934,7 @@ describe('MediaService', () => {
 
   describe('attachTags', () => {
     it('should upsert Tag and MediaTag for each name (idempotent)', async () => {
-      const item = makeMediaItem({ ownerId: 'user-1' });
+      const item = makeMediaItem({ addedById: 'user-1' });
       const tag = makeTag({ name: 'nature' });
 
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
@@ -918,8 +955,8 @@ describe('MediaService', () => {
       // Verify tag upsert args for first name
       expect(mockPrisma.tag.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { ownerId_name: { ownerId: 'user-1', name: 'nature' } },
-          create: { ownerId: 'user-1', name: 'nature' },
+          where: { circleId_name: { circleId: CIRCLE_ID, name: 'nature' } },
+          create: { addedById: 'user-1', circleId: CIRCLE_ID, name: 'nature' },
           update: {},
         }),
       );
@@ -928,8 +965,9 @@ describe('MediaService', () => {
     });
 
     it('should throw ForbiddenException for non-owner without _any permission', async () => {
-      const item = makeMediaItem({ ownerId: 'other-user' });
+      const item = makeMediaItem({ addedById: 'other-user' });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
         service.attachTags(item.id, { names: ['nature'] }, 'user-1', ownPerms),
@@ -937,8 +975,8 @@ describe('MediaService', () => {
     });
 
     it('should allow Admin with media:write_any to attach tags to another user\'s item', async () => {
-      const item = makeMediaItem({ ownerId: 'other-user' });
-      const tag = makeTag({ ownerId: 'user-1', name: 'nature' });
+      const item = makeMediaItem({ addedById: 'other-user' });
+      const tag = makeTag({ addedById: 'user-1', name: 'nature' });
 
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
       mockPrisma.tag.upsert.mockResolvedValue(tag as any);
@@ -956,7 +994,7 @@ describe('MediaService', () => {
 
   describe('removeTag', () => {
     it('should delete the MediaTag join record', async () => {
-      const item = makeMediaItem({ ownerId: 'user-1' });
+      const item = makeMediaItem({ addedById: 'user-1' });
       const tag = makeTag();
       const mediaTag = { id: randomUUID(), tagId: tag.id, mediaItemId: item.id, addedAt: new Date() };
 
@@ -972,7 +1010,7 @@ describe('MediaService', () => {
     });
 
     it('should throw NotFoundException when the tag is not attached', async () => {
-      const item = makeMediaItem({ ownerId: 'user-1' });
+      const item = makeMediaItem({ addedById: 'user-1' });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
       mockPrisma.mediaTag.findUnique.mockResolvedValue(null);
 
@@ -982,8 +1020,9 @@ describe('MediaService', () => {
     });
 
     it('should throw ForbiddenException for non-owner without _any permission', async () => {
-      const item = makeMediaItem({ ownerId: 'other-user' });
+      const item = makeMediaItem({ addedById: 'other-user' });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
         service.removeTag(item.id, randomUUID(), 'user-1', ownPerms),
@@ -1000,12 +1039,12 @@ describe('MediaService', () => {
       const album = makeAlbum({ name: 'Vacation' });
       mockPrisma.album.create.mockResolvedValue(album as any);
 
-      const result = await service.createAlbum({ name: 'Vacation' }, 'user-1');
+      const result = await service.createAlbum({ name: 'Vacation', circleId: CIRCLE_ID }, 'user-1', ownPerms);
 
       expect(result).toEqual(album);
       expect(mockPrisma.album.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ ownerId: 'user-1', name: 'Vacation' }),
+          data: expect.objectContaining({ addedById: 'user-1', name: 'Vacation' }),
         }),
       );
     });
@@ -1021,18 +1060,18 @@ describe('MediaService', () => {
       mockPrisma.album.count.mockResolvedValue(0);
     });
 
-    it('should filter by ownerId for non-admin callers', async () => {
+    it('should filter by circleId from query', async () => {
       await service.listAlbums(defaultAlbumQuery, 'user-1', ownPerms);
 
       const [call] = (mockPrisma.album.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({ ownerId: 'user-1' });
+      expect(call[0].where).toMatchObject({ circleId: CIRCLE_ID });
     });
 
-    it('should NOT filter by ownerId for admin with media:read_any', async () => {
+    it('should always filter by circleId from query regardless of permissions', async () => {
       await service.listAlbums(defaultAlbumQuery, 'user-1', anyPerms);
 
       const [call] = (mockPrisma.album.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toEqual({});
+      expect(call[0].where).toMatchObject({ circleId: CIRCLE_ID });
     });
 
     it('should return correct pagination meta', async () => {
@@ -1076,8 +1115,9 @@ describe('MediaService', () => {
     });
 
     it('should throw ForbiddenException for non-owner without _any permission', async () => {
-      const album = { ...makeAlbum({ ownerId: 'other-user' }), items: [] };
+      const album = { ...makeAlbum({ addedById: 'other-user' }), items: [] };
       mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
         service.getAlbum(album.id, 'user-1', ownPerms),
@@ -1085,7 +1125,7 @@ describe('MediaService', () => {
     });
 
     it('should allow Admin with media:read_any to access another user\'s album', async () => {
-      const album = { ...makeAlbum({ ownerId: 'other-user' }), items: [] };
+      const album = { ...makeAlbum({ addedById: 'other-user' }), items: [] };
       mockPrisma.album.findUnique.mockResolvedValue(album as any);
 
       const result = await service.getAlbum(album.id, 'user-1', anyPerms);
@@ -1100,7 +1140,7 @@ describe('MediaService', () => {
 
   describe('updateAlbum', () => {
     it('should update album name and description for owner', async () => {
-      const album = makeAlbum({ ownerId: 'user-1' });
+      const album = makeAlbum({ addedById: 'user-1' });
       const updated = { ...album, name: 'New Name' };
 
       // getAlbumWithOwnershipCheck uses album.findUnique
@@ -1124,8 +1164,9 @@ describe('MediaService', () => {
     });
 
     it('should throw ForbiddenException for non-owner without _any permission', async () => {
-      const album = makeAlbum({ ownerId: 'other-user' });
+      const album = makeAlbum({ addedById: 'other-user' });
       mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
         service.updateAlbum(album.id, { name: 'hack' }, 'user-1', ownPerms),
@@ -1139,7 +1180,7 @@ describe('MediaService', () => {
 
   describe('deleteAlbum', () => {
     it('should delete the album (and cascade AlbumItems) for the owner', async () => {
-      const album = makeAlbum({ ownerId: 'user-1' });
+      const album = makeAlbum({ addedById: 'user-1' });
       mockPrisma.album.findUnique.mockResolvedValue(album as any);
       mockPrisma.album.delete.mockResolvedValue(album as any);
 
@@ -1151,7 +1192,7 @@ describe('MediaService', () => {
     });
 
     it('should NOT call mediaItem.delete (MediaItems are not deleted)', async () => {
-      const album = makeAlbum({ ownerId: 'user-1' });
+      const album = makeAlbum({ addedById: 'user-1' });
       mockPrisma.album.findUnique.mockResolvedValue(album as any);
       mockPrisma.album.delete.mockResolvedValue(album as any);
 
@@ -1162,8 +1203,9 @@ describe('MediaService', () => {
     });
 
     it('should throw ForbiddenException for non-owner without _any permission', async () => {
-      const album = makeAlbum({ ownerId: 'other-user' });
+      const album = makeAlbum({ addedById: 'other-user' });
       mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
         service.deleteAlbum(album.id, 'user-1', ownPerms),
@@ -1177,9 +1219,9 @@ describe('MediaService', () => {
 
   describe('addAlbumItems', () => {
     it('should upsert AlbumItem joins (idempotent)', async () => {
-      const album = makeAlbum({ ownerId: 'user-1' });
-      const item1 = makeMediaItem({ ownerId: 'user-1' });
-      const item2 = makeMediaItem({ ownerId: 'user-1' });
+      const album = makeAlbum({ addedById: 'user-1' });
+      const item1 = makeMediaItem({ addedById: 'user-1' });
+      const item2 = makeMediaItem({ addedById: 'user-1' });
 
       mockPrisma.album.findUnique.mockResolvedValue(album as any);
       mockPrisma.mediaItem.findMany.mockResolvedValue([item1, item2] as any);
@@ -1202,7 +1244,7 @@ describe('MediaService', () => {
     });
 
     it('should throw NotFoundException when a mediaItemId is not found', async () => {
-      const album = makeAlbum({ ownerId: 'user-1' });
+      const album = makeAlbum({ addedById: 'user-1' });
       mockPrisma.album.findUnique.mockResolvedValue(album as any);
       // Return only 1 item when 2 were requested
       mockPrisma.mediaItem.findMany.mockResolvedValue([makeMediaItem()] as any);
@@ -1224,8 +1266,8 @@ describe('MediaService', () => {
 
   describe('removeAlbumItem', () => {
     it('should delete the AlbumItem join record', async () => {
-      const album = makeAlbum({ ownerId: 'user-1' });
-      const item = makeMediaItem({ ownerId: 'user-1' });
+      const album = makeAlbum({ addedById: 'user-1' });
+      const item = makeMediaItem({ addedById: 'user-1' });
       const albumItem = {
         id: randomUUID(),
         albumId: album.id,
@@ -1245,8 +1287,8 @@ describe('MediaService', () => {
     });
 
     it('should NOT delete the underlying MediaItem', async () => {
-      const album = makeAlbum({ ownerId: 'user-1' });
-      const item = makeMediaItem({ ownerId: 'user-1' });
+      const album = makeAlbum({ addedById: 'user-1' });
+      const item = makeMediaItem({ addedById: 'user-1' });
       const albumItem = {
         id: randomUUID(),
         albumId: album.id,
@@ -1264,7 +1306,7 @@ describe('MediaService', () => {
     });
 
     it('should throw NotFoundException when the item is not in the album', async () => {
-      const album = makeAlbum({ ownerId: 'user-1' });
+      const album = makeAlbum({ addedById: 'user-1' });
       mockPrisma.album.findUnique.mockResolvedValue(album as any);
       mockPrisma.albumItem.findUnique.mockResolvedValue(null);
 
@@ -1274,8 +1316,9 @@ describe('MediaService', () => {
     });
 
     it('should throw ForbiddenException for non-owner without _any permission', async () => {
-      const album = makeAlbum({ ownerId: 'other-user' });
+      const album = makeAlbum({ addedById: 'other-user' });
       mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
         service.removeAlbumItem(album.id, randomUUID(), 'user-1', ownPerms),
@@ -1289,7 +1332,7 @@ describe('MediaService', () => {
 
   describe('listLocations', () => {
     // Default (empty) query for listLocations — all fields optional.
-    const emptyLocQuery = {} as any;
+    const emptyLocQuery = { circleId: CIRCLE_ID } as any;
 
     function makeGeoItem(overrides: Partial<any> = {}) {
       return {
@@ -1330,16 +1373,16 @@ describe('MediaService', () => {
 
     // ----- Where-clause: ownership branch -----
 
-    it('filters by ownerId for callers without media:read_any', async () => {
-      await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
+    it('filters by circleId from query', async () => {
+      await service.listLocations({ circleId: CIRCLE_ID } as any, 'user-1', ownPerms);
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({ ownerId: 'user-1' });
+      expect(call[0].where).toMatchObject({ circleId: CIRCLE_ID });
     });
 
-    it('does NOT filter by ownerId when caller holds media:read_any', async () => {
-      await service.listLocations(emptyLocQuery, 'user-1', anyPerms);
+    it('always filters by circleId from query regardless of permissions', async () => {
+      await service.listLocations({ circleId: CIRCLE_ID } as any, 'user-1', anyPerms);
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).not.toHaveProperty('ownerId');
+      expect(call[0].where).toMatchObject({ circleId: CIRCLE_ID });
     });
 
     // ----- Where-clause: NO pagination -----
@@ -1354,7 +1397,7 @@ describe('MediaService', () => {
     // ----- Where-clause: optional filters -----
 
     it('filters by type when provided', async () => {
-      await service.listLocations({ type: 'video' } as any, 'user-1', ownPerms);
+      await service.listLocations({ circleId: CIRCLE_ID, type: 'video' } as any, 'user-1', ownPerms);
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
       expect(call[0].where).toMatchObject({ type: 'video' });
     });
@@ -1363,7 +1406,7 @@ describe('MediaService', () => {
       const from = new Date('2024-01-01');
       const to = new Date('2024-12-31');
       await service.listLocations(
-        { capturedAtFrom: from, capturedAtTo: to } as any,
+        { circleId: CIRCLE_ID, capturedAtFrom: from, capturedAtTo: to } as any,
         'user-1',
         ownPerms,
       );
@@ -1372,7 +1415,7 @@ describe('MediaService', () => {
     });
 
     it('filters by country via OR across geoCountry and geoCountryCode', async () => {
-      await service.listLocations({ country: 'CR' } as any, 'user-1', ownPerms);
+      await service.listLocations({ circleId: CIRCLE_ID, country: 'CR' } as any, 'user-1', ownPerms);
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
       expect(call[0].where.OR).toEqual(
         expect.arrayContaining([
@@ -1383,7 +1426,7 @@ describe('MediaService', () => {
     });
 
     it('filters by region (geoAdmin1 contains, case-insensitive)', async () => {
-      await service.listLocations({ region: 'Alajuela' } as any, 'user-1', ownPerms);
+      await service.listLocations({ circleId: CIRCLE_ID, region: 'Alajuela' } as any, 'user-1', ownPerms);
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
       expect(call[0].where).toMatchObject({
         geoAdmin1: { contains: 'Alajuela', mode: 'insensitive' },
@@ -1391,7 +1434,7 @@ describe('MediaService', () => {
     });
 
     it('filters by locality (geoLocality contains, case-insensitive)', async () => {
-      await service.listLocations({ locality: 'La Fortuna' } as any, 'user-1', ownPerms);
+      await service.listLocations({ circleId: CIRCLE_ID, locality: 'La Fortuna' } as any, 'user-1', ownPerms);
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
       expect(call[0].where).toMatchObject({
         geoLocality: { contains: 'La Fortuna', mode: 'insensitive' },
@@ -1399,7 +1442,7 @@ describe('MediaService', () => {
     });
 
     it('filters by place (geoPlaceName contains, case-insensitive)', async () => {
-      await service.listLocations({ place: 'Arenal' } as any, 'user-1', ownPerms);
+      await service.listLocations({ circleId: CIRCLE_ID, place: 'Arenal' } as any, 'user-1', ownPerms);
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
       expect(call[0].where).toMatchObject({
         geoPlaceName: { contains: 'Arenal', mode: 'insensitive' },
@@ -1407,7 +1450,7 @@ describe('MediaService', () => {
     });
 
     it('free-text location filter spans all geo tiers via OR', async () => {
-      await service.listLocations({ location: 'Costa Rica' } as any, 'user-1', ownPerms);
+      await service.listLocations({ circleId: CIRCLE_ID, location: 'Costa Rica' } as any, 'user-1', ownPerms);
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
       expect(call[0].where.OR).toEqual(
         expect.arrayContaining([

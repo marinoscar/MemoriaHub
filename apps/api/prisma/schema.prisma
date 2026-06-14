@@ -37,9 +37,14 @@ model User {
   deviceCodes               DeviceCode[]     @relation("UserDeviceCodes")
   storageObjects            StorageObject[]  @relation("UserStorageObjects")
   personalAccessTokens      PersonalAccessToken[] @relation("UserPersonalAccessTokens")
-  mediaItems                MediaItem[]
-  albums                    Album[]
-  tags                      Tag[]
+  mediaItems                MediaItem[]      @relation("MediaAddedBy")
+  albums                    Album[]          @relation("AlbumAddedBy")
+  tags                      Tag[]            @relation("TagAddedBy")
+  // Circle relations
+  ownedCircles              Circle[]         @relation("CircleOwner")
+  circleMemberships         CircleMember[]
+  circleInvitesAdded        CircleInvite[]   @relation("CircleInviteAddedBy")
+  circleInvitesClaimed      CircleInvite[]   @relation("CircleInviteClaimedBy")
 
   @@map("users")
 }
@@ -322,6 +327,77 @@ model StorageObjectChunk {
 }
 
 // =============================================================================
+// Family Circles
+// =============================================================================
+
+enum CircleRole {
+  circle_admin
+  collaborator
+  viewer
+}
+
+model Circle {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  description String?
+  ownerId     String   @map("owner_id") @db.Uuid
+  isPersonal  Boolean  @default(false) @map("is_personal")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  owner      User           @relation("CircleOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  members    CircleMember[]
+  invites    CircleInvite[]
+  mediaItems MediaItem[]
+  albums     Album[]
+  tags       Tag[]
+
+  @@index([ownerId])
+  @@map("circles")
+}
+
+model CircleMember {
+  id        String     @id @default(uuid()) @db.Uuid
+  circleId  String     @map("circle_id") @db.Uuid
+  userId    String     @map("user_id") @db.Uuid
+  role      CircleRole @default(viewer)
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  circle Circle @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([circleId, userId])
+  @@index([userId])
+  @@index([circleId])
+  @@map("circle_members")
+}
+
+model CircleInvite {
+  id          String     @id @default(uuid()) @db.Uuid
+  circleId    String     @map("circle_id") @db.Uuid
+  email       String
+  role        CircleRole @default(viewer)
+  addedById   String?    @map("added_by_id") @db.Uuid
+  addedAt     DateTime   @default(now()) @map("added_at") @db.Timestamptz
+  claimedById String?    @map("claimed_by_id") @db.Uuid
+  claimedAt   DateTime?  @map("claimed_at") @db.Timestamptz
+  notes       String?
+
+  // Relations
+  circle    Circle @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  addedBy   User?  @relation("CircleInviteAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
+  claimedBy User?  @relation("CircleInviteClaimedBy", fields: [claimedById], references: [id], onDelete: SetNull)
+
+  @@unique([circleId, email])
+  @@index([email])
+  @@index([circleId])
+  @@map("circle_invites")
+}
+
+// =============================================================================
 // Media Domain
 // =============================================================================
 
@@ -349,8 +425,10 @@ model MediaItem {
   id              String        @id @default(uuid()) @db.Uuid
   storageObjectId String        @unique @map("storage_object_id") @db.Uuid
   storageObject   StorageObject @relation(fields: [storageObjectId], references: [id])
-  ownerId         String        @map("owner_id") @db.Uuid
-  owner           User          @relation(fields: [ownerId], references: [id])
+  circleId        String        @map("circle_id") @db.Uuid
+  circle          Circle        @relation(fields: [circleId], references: [id])
+  addedById       String        @map("added_by_id") @db.Uuid
+  addedBy         User          @relation("MediaAddedBy", fields: [addedById], references: [id])
 
   // --- Audit timestamps ---
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
@@ -405,7 +483,8 @@ model MediaItem {
   albumItems AlbumItem[]
   mediaTags  MediaTag[]
 
-  @@index([ownerId])
+  @@index([circleId])
+  @@index([addedById])
   @@index([capturedAt])
   @@index([contentHash])
   @@index([classification])
@@ -420,15 +499,17 @@ model MediaItem {
 
 model Album {
   id          String    @id @default(uuid()) @db.Uuid
-  ownerId     String    @map("owner_id") @db.Uuid
-  owner       User      @relation(fields: [ownerId], references: [id])
+  circleId    String    @map("circle_id") @db.Uuid
+  circle      Circle    @relation(fields: [circleId], references: [id])
+  addedById   String    @map("added_by_id") @db.Uuid
+  addedBy     User      @relation("AlbumAddedBy", fields: [addedById], references: [id])
   name        String
   description String?
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz
   items       AlbumItem[]
 
-  @@index([ownerId])
+  @@index([circleId])
   @@map("albums")
 }
 
@@ -447,14 +528,16 @@ model AlbumItem {
 
 model Tag {
   id        String     @id @default(uuid()) @db.Uuid
-  ownerId   String     @map("owner_id") @db.Uuid
-  owner     User       @relation(fields: [ownerId], references: [id])
+  circleId  String     @map("circle_id") @db.Uuid
+  circle    Circle     @relation(fields: [circleId], references: [id])
+  addedById String     @map("added_by_id") @db.Uuid
+  addedBy   User       @relation("TagAddedBy", fields: [addedById], references: [id])
   name      String
   createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz
   mediaTags MediaTag[]
 
-  @@unique([ownerId, name])
-  @@index([ownerId])
+  @@unique([circleId, name])
+  @@index([circleId])
   @@map("tags")
 }
 

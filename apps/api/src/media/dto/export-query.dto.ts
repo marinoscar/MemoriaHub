@@ -5,8 +5,8 @@ import { isoDateTimeInput } from '../../common/schemas/iso-date';
 export const exportQuerySchema = z.object({
   /** Output format: newline-delimited JSON or RFC 4180 CSV */
   format: z.enum(['json', 'csv']).default('json'),
-  /** Admin only: export a specific user's media items */
-  ownerId: z.string().uuid().optional(),
+  /** Circle whose media items to export */
+  circleId: z.string().uuid(),
   /** Filter by media type */
   type: z.enum(['photo', 'video']).optional(),
   /** Filter capturedAt >= from */

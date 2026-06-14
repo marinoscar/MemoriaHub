@@ -14,6 +14,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useThemeContext } from '../../contexts/ThemeContext';
 import { UserMenu } from './UserMenu';
+import { CircleSwitcher } from '../circles/CircleSwitcher';
 import { APP_NAME } from '../../constants/app';
 
 interface AppBarProps {
@@ -61,6 +62,9 @@ export function AppBar({ onMenuClick }: AppBarProps) {
 
         {/* Spacer */}
         <Box sx={{ flexGrow: 1 }} />
+
+        {/* Circle Switcher */}
+        <CircleSwitcher />
 
         {/* Theme Toggle */}
         <IconButton

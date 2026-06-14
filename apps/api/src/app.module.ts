@@ -16,6 +16,8 @@ import { DeviceAuthModule } from './device-auth/device-auth.module';
 import { StorageModule } from './storage/storage.module';
 import { PatModule } from './pat/pat.module';
 import { MediaModule } from './media/media.module';
+import { CirclesModule } from './circles/circles.module';
+import { BackupModule } from './jobs/backup/backup.module';
 import { LoggerModule } from './common/logger/logger.module';
 import { TestAuthModule } from './test-auth/test-auth.module';
 
@@ -57,6 +59,8 @@ import configuration from './config/configuration';
     StorageModule,
     PatModule,
     MediaModule,
+    CirclesModule,
+    BackupModule,
 
     // Test modules (non-production only)
     ...(process.env.NODE_ENV !== 'production' ? [TestAuthModule] : []),

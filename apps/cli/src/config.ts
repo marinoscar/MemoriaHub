@@ -6,6 +6,7 @@ import { configDir } from './paths.js';
 export interface CliConfig {
   serverUrl: string;
   pat: string;
+  activeCircleId?: string;
 }
 
 function configPath(): string {

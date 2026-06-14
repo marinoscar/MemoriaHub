@@ -51,6 +51,10 @@ CREATE INDEX IF NOT EXISTS idx_files_sha256 ON files(sha256)`;
 export const ALTER_FILES_ADD_MTIME_MS = `
 ALTER TABLE files ADD COLUMN mtime_ms INTEGER`;
 
+/** Migration 3: add circle_id column to folders for per-folder circle binding. */
+export const ALTER_FOLDERS_ADD_CIRCLE_ID = `
+ALTER TABLE folders ADD COLUMN circle_id TEXT`;
+
 export const CREATE_SYNC_RUNS = `
 CREATE TABLE IF NOT EXISTS sync_runs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,

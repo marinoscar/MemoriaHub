@@ -48,6 +48,7 @@ import {
 import { useTheme } from '@mui/material/styles';
 import { useMedia } from '../../hooks/useMedia';
 import { useAlbums } from '../../hooks/useAlbums';
+import { useCircle } from '../../hooks/useCircle';
 import { listTags, exportMedia } from '../../services/media';
 import type { ExportFilters } from '../../services/media';
 import { MediaDetailDrawer } from '../../components/media/MediaDetailDrawer';
@@ -325,6 +326,7 @@ export default function MediaLibraryPage() {
   const isXl = useMediaQuery(theme.breakpoints.up('xl'));
   const isLg = useMediaQuery(theme.breakpoints.up('lg'));
   const isMd = useMediaQuery(theme.breakpoints.up('md'));
+  const { activeCircle } = useCircle();
 
   const colCount = isXl || isLg ? 4 : isMd ? 2 : 1;
 
@@ -386,6 +388,7 @@ export default function MediaLibraryPage() {
       sortBy,
       sortOrder,
     };
+    if (activeCircle) params.circleId = activeCircle.id;
     if (filterType) params.type = filterType;
     if (filterClassification) params.classification = filterClassification;
     if (filterFavorite) params.favorite = true;
@@ -402,6 +405,7 @@ export default function MediaLibraryPage() {
     page,
     sortBy,
     sortOrder,
+    activeCircle,
     filterType,
     filterClassification,
     filterFavorite,
@@ -418,6 +422,7 @@ export default function MediaLibraryPage() {
   // Load data on mount and when filters change.
   // Also stop any running enrichment poll so it doesn't fight a user-initiated refetch.
   useEffect(() => {
+    if (!activeCircle) return;
     if (enrichmentPollRef.current !== null) {
       clearInterval(enrichmentPollRef.current);
       enrichmentPollRef.current = null;
@@ -425,6 +430,7 @@ export default function MediaLibraryPage() {
     void fetchMedia(buildParams());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    activeCircle,
     page,
     filterType,
     filterClassification,
@@ -442,11 +448,12 @@ export default function MediaLibraryPage() {
   ]);
 
   useEffect(() => {
-    void fetchAlbums({ pageSize: 100 });
-    listTags()
+    if (!activeCircle) return;
+    void fetchAlbums({ pageSize: 100, circleId: activeCircle.id });
+    listTags(activeCircle.id)
       .then(setTags)
       .catch(() => setTags([]));
-  }, [fetchAlbums]);
+  }, [fetchAlbums, activeCircle]);
 
   // Clear any running enrichment poll on unmount so it never leaks.
   useEffect(() => {
@@ -562,6 +569,7 @@ export default function MediaLibraryPage() {
 
       // Only forward the filters the export endpoint supports (type + date range)
       const filters: ExportFilters = {};
+      if (activeCircle) filters.circleId = activeCircle.id;
       if (filterType) filters.type = filterType;
       if (filterDateFrom) filters.from = new Date(filterDateFrom).toISOString();
       if (filterDateTo) filters.to = new Date(filterDateTo).toISOString();
@@ -576,7 +584,7 @@ export default function MediaLibraryPage() {
         setExportLoading(false);
       }
     },
-    [filterType, filterDateFrom, filterDateTo],
+    [activeCircle, filterType, filterDateFrom, filterDateTo],
   );
 
   const grouped = useMemo(() => groupByYearMonth(items), [items]);
@@ -591,6 +599,16 @@ export default function MediaLibraryPage() {
           geoFacets.citiesByRegion.get(`${filterCountry}::${filterRegion}`) ?? [],
         ).sort()
       : [];
+
+  if (!activeCircle) {
+    return (
+      <Box sx={{ p: { xs: 2, md: 3 } }}>
+        <Alert severity="info">
+          Select a circle to view media.
+        </Alert>
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ p: { xs: 2, md: 3 } }}>
@@ -1036,6 +1054,7 @@ export default function MediaLibraryPage() {
         open={uploadOpen}
         onClose={() => setUploadOpen(false)}
         onSuccess={handleUploadSuccess}
+        circleId={activeCircle.id}
       />
     </Box>
   );

@@ -14,6 +14,7 @@ import { STORAGE_PROVIDER } from '../providers/storage-provider.interface';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
 import { createMockStorageProvider } from '../../../test/mocks/storage-provider.mock';
 import { OBJECT_UPLOADED_EVENT } from '../processing/events/object-uploaded.event';
+import { CircleMembershipService } from '../../circles/circle-membership.service';
 
 describe('ObjectsService', () => {
   let service: ObjectsService;
@@ -21,6 +22,7 @@ describe('ObjectsService', () => {
   let mockStorageProvider: ReturnType<typeof createMockStorageProvider>;
   let mockConfig: jest.Mocked<ConfigService>;
   let mockEventEmitter: jest.Mocked<EventEmitter2>;
+  let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
 
   const testUserId = 'user-123';
   const otherUserId = 'user-456';
@@ -37,6 +39,7 @@ describe('ObjectsService', () => {
     s3UploadId: null,
     uploadedById: testUserId,
     metadata: null,
+    mediaItem: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -50,6 +53,9 @@ describe('ObjectsService', () => {
     mockEventEmitter = {
       emit: jest.fn(),
     } as any;
+    mockCircleMembershipService = {
+      assertCircleAccess: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -58,6 +64,7 @@ describe('ObjectsService', () => {
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: ConfigService, useValue: mockConfig },
         { provide: EventEmitter2, useValue: mockEventEmitter },
+        { provide: CircleMembershipService, useValue: mockCircleMembershipService },
       ],
     }).compile();
 
@@ -678,7 +685,7 @@ describe('ObjectsService', () => {
     it('should return object metadata', async () => {
       mockPrisma.storageObject.findUnique.mockResolvedValue(mockStorageObject as any);
 
-      const result = await service.getById(mockStorageObject.id, testUserId);
+      const result = await service.getById(mockStorageObject.id, testUserId, []);
 
       expect(result.id).toBe(mockStorageObject.id);
       expect(result.name).toBe(mockStorageObject.name);
@@ -687,7 +694,7 @@ describe('ObjectsService', () => {
     it('should throw NotFoundException for non-existent object', async () => {
       mockPrisma.storageObject.findUnique.mockResolvedValue(null);
 
-      await expect(service.getById('non-existent', testUserId)).rejects.toThrow(
+      await expect(service.getById('non-existent', testUserId, [])).rejects.toThrow(
         NotFoundException,
       );
     });
@@ -699,7 +706,7 @@ describe('ObjectsService', () => {
       } as any);
 
       await expect(
-        service.getById(mockStorageObject.id, testUserId),
+        service.getById(mockStorageObject.id, testUserId, []),
       ).rejects.toThrow(ForbiddenException);
     });
   });
@@ -715,7 +722,7 @@ describe('ObjectsService', () => {
         'https://signed-url.com/download',
       );
 
-      const result = await service.getDownloadUrl(mockStorageObject.id, testUserId);
+      const result = await service.getDownloadUrl(mockStorageObject.id, testUserId, undefined, []);
 
       expect(result.url).toBe('https://signed-url.com/download');
       expect(result.expiresIn).toBe(3600);
@@ -732,10 +739,10 @@ describe('ObjectsService', () => {
       } as any);
 
       await expect(
-        service.getDownloadUrl(mockStorageObject.id, testUserId),
+        service.getDownloadUrl(mockStorageObject.id, testUserId, undefined, []),
       ).rejects.toThrow(BadRequestException);
       await expect(
-        service.getDownloadUrl(mockStorageObject.id, testUserId),
+        service.getDownloadUrl(mockStorageObject.id, testUserId, undefined, []),
       ).rejects.toThrow('Object is not ready for download');
     });
   });
@@ -747,7 +754,7 @@ describe('ObjectsService', () => {
       mockPrisma.storageObject.delete.mockResolvedValue({} as any);
       mockPrisma.auditEvent.create.mockResolvedValue({} as any);
 
-      await service.delete(mockStorageObject.id, testUserId);
+      await service.delete(mockStorageObject.id, testUserId, []);
 
       expect(mockStorageProvider.delete).toHaveBeenCalledWith(
         mockStorageObject.storageKey,
@@ -763,7 +770,7 @@ describe('ObjectsService', () => {
       mockPrisma.storageObject.delete.mockResolvedValue({} as any);
       mockPrisma.auditEvent.create.mockResolvedValue({} as any);
 
-      await service.delete(mockStorageObject.id, testUserId);
+      await service.delete(mockStorageObject.id, testUserId, []);
 
       expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -795,6 +802,7 @@ describe('ObjectsService', () => {
         mockStorageObject.id,
         { metadata: newMetadata },
         testUserId,
+        [],
       );
 
       expect(mockPrisma.storageObject.update).toHaveBeenCalledWith({
@@ -819,6 +827,7 @@ describe('ObjectsService', () => {
         mockStorageObject.id,
         { metadata: newMetadata },
         testUserId,
+        [],
       );
 
       expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith({

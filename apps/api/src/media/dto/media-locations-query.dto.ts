@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { isoDateTimeInput } from '../../common/schemas/iso-date';
 
 export const mediaLocationsQuerySchema = z.object({
+  circleId: z.string().uuid(),
   // Type filter
   type: z.enum(['photo', 'video']).optional(),
   // Date range filters
