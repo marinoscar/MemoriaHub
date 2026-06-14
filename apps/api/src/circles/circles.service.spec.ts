@@ -516,10 +516,84 @@ describe('CirclesService', () => {
     });
   });
 
+  // ---- list() ----
+
+  describe('list()', () => {
+    it('should return paginated envelope with member circles for regular user', async () => {
+      const mockMemberships = [
+        {
+          role: CircleRole.circle_admin,
+          circle: {
+            id: 'c1',
+            name: 'Alpha Circle',
+            _count: { members: 3 },
+          },
+        },
+        {
+          role: CircleRole.viewer,
+          circle: {
+            id: 'c2',
+            name: 'Beta Circle',
+            _count: { members: 1 },
+          },
+        },
+      ];
+
+      mockPrisma.circleMember.findMany.mockResolvedValue(mockMemberships as any);
+
+      const result = await service.list(mockUser, false);
+
+      expect(result.items).toHaveLength(2);
+      expect(result.items[0]).toMatchObject({ id: 'c1', memberRole: CircleRole.circle_admin });
+      expect(result.items[1]).toMatchObject({ id: 'c2', memberRole: CircleRole.viewer });
+      expect(result.total).toBe(2);
+      expect(result.page).toBe(1);
+      expect(result.totalPages).toBe(1);
+      expect(result.pageSize).toBe(2);
+    });
+
+    it('should return empty envelope when user has no memberships', async () => {
+      mockPrisma.circleMember.findMany.mockResolvedValue([]);
+
+      const result = await service.list(mockUser, false);
+
+      expect(result.items).toHaveLength(0);
+      expect(result.total).toBe(0);
+      expect(result.page).toBe(1);
+      expect(result.totalPages).toBe(1);
+    });
+
+    it('should throw ForbiddenException when non-super-admin requests all=true', async () => {
+      const regularUser = { ...mockUser, permissions: [] };
+
+      await expect(service.list(regularUser, true)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should return all circles in envelope for super-admin with all=true', async () => {
+      const superAdminUser = {
+        ...mockUser,
+        permissions: ['circles:manage_any'],
+      };
+      const mockCircles = [
+        { id: 'c1', name: 'Circle 1', _count: { members: 2 } },
+        { id: 'c2', name: 'Circle 2', _count: { members: 5 } },
+      ];
+
+      mockPrisma.circle.findMany.mockResolvedValue(mockCircles as any);
+
+      const result = await service.list(superAdminUser as any, true);
+
+      expect(result.items).toEqual(mockCircles);
+      expect(result.total).toBe(2);
+      expect(result.page).toBe(1);
+      expect(result.totalPages).toBe(1);
+    });
+  });
+
   // ---- listInvites() ----
 
   describe('listInvites()', () => {
-    it('should return invites for circle_admin', async () => {
+    it('should return invite envelope for circle_admin', async () => {
       const mockInvites = [
         { id: 'inv-1', circleId: 'c1', email: 'a@test.com', claimedAt: null },
         { id: 'inv-2', circleId: 'c1', email: 'b@test.com', claimedAt: new Date() },
@@ -539,14 +613,15 @@ describe('CirclesService', () => {
         [],
         CircleRole.circle_admin,
       );
-      expect(result).toEqual(mockInvites);
+      expect(result.items).toEqual(mockInvites);
+      expect(result.total).toBe(2);
     });
   });
 
   // ---- listMembers() ----
 
   describe('listMembers()', () => {
-    it('should return members for a circle viewer', async () => {
+    it('should return member envelope for a circle viewer', async () => {
       const mockMembers = [
         { id: 'm1', userId: 'u1', role: CircleRole.circle_admin, user: { id: 'u1', email: 'u1@test.com' } },
         { id: 'm2', userId: 'u2', role: CircleRole.viewer, user: { id: 'u2', email: 'u2@test.com' } },
@@ -566,7 +641,8 @@ describe('CirclesService', () => {
         [],
         CircleRole.viewer,
       );
-      expect(result).toEqual(mockMembers);
+      expect(result.items).toEqual(mockMembers);
+      expect(result.total).toBe(2);
     });
   });
 });
