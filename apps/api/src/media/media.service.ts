@@ -7,6 +7,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { CircleRole } from '@prisma/client';
 import { FastifyReply } from 'fastify';
 import { stringify as csvStringify } from 'csv-stringify';
 import { PrismaService } from '../prisma/prisma.service';
@@ -26,6 +27,7 @@ import { AddAlbumItemsDto } from './dto/add-album-items.dto';
 import { ExportQueryDto } from './dto/export-query.dto';
 import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
+import { CircleMembershipService } from '../circles/circle-membership.service';
 
 /** Shape of each element returned by listLocations. */
 export interface MediaLocation {
@@ -46,6 +48,7 @@ export class MediaService {
     @Inject(STORAGE_PROVIDER)
     private readonly storageProvider: StorageProvider,
     private readonly mediaMetadataSyncService: MediaMetadataSyncService,
+    private readonly circleMembershipService: CircleMembershipService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -72,7 +75,7 @@ export class MediaService {
    *   object to signal to callers whether the result is a fresh create or a
    *   dedup hit (clients may use it to decide HTTP status codes or UI feedback).
    */
-  async createMedia(dto: CreateMediaDto, userId: string) {
+  async createMedia(dto: CreateMediaDto, userId: string, userPermissions: string[]) {
     // Verify the StorageObject exists and belongs to the caller
     const storageObject = await this.prisma.storageObject.findUnique({
       where: { id: dto.storageObjectId },
@@ -101,6 +104,8 @@ export class MediaService {
       );
     }
 
+    await this.circleMembershipService.assertCircleAccess(userId, dto.circleId, userPermissions, 'collaborator' as CircleRole);
+
     // Normalize the client-supplied hash once
     const hash = dto.contentHash?.toLowerCase() ?? null;
 
@@ -109,7 +114,7 @@ export class MediaService {
     // -----------------------------------------------------------------------
     if (hash) {
       const duplicate = await this.prisma.mediaItem.findFirst({
-        where: { ownerId: userId, contentHash: hash, deletedAt: null },
+        where: { circleId: dto.circleId, contentHash: hash, deletedAt: null },
       });
 
       if (duplicate) {
@@ -131,7 +136,8 @@ export class MediaService {
       mediaItem = await this.prisma.mediaItem.create({
         data: {
           storageObjectId: dto.storageObjectId,
-          ownerId: userId,
+          addedById: userId,
+          circleId: dto.circleId,
           type: dto.type,
           source: dto.source,
           originalFilename: dto.originalFilename,
@@ -152,7 +158,7 @@ export class MediaService {
       });
     } catch (err) {
       // P2002 = unique constraint violation — the partial index on
-      // (owner_id, content_hash) WHERE content_hash IS NOT NULL AND deleted_at IS NULL
+      // (circle_id, content_hash) WHERE content_hash IS NOT NULL AND deleted_at IS NULL
       // fired because a concurrent request registered the same hash first.
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&
@@ -165,7 +171,7 @@ export class MediaService {
         );
 
         const winner = await this.prisma.mediaItem.findFirst({
-          where: { ownerId: userId, contentHash: hash, deletedAt: null },
+          where: { circleId: dto.circleId, contentHash: hash, deletedAt: null },
         });
 
         if (!winner) {
@@ -243,6 +249,7 @@ export class MediaService {
    */
   async listMedia(query: MediaQueryDto, userId: string, userPermissions: string[]) {
     const {
+      circleId,
       page,
       pageSize,
       type,
@@ -263,11 +270,11 @@ export class MediaService {
     } = query;
 
     const skip = (page - 1) * pageSize;
-    const canReadAny = userPermissions.includes(PERMISSIONS.MEDIA_READ_ANY);
+
+    await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
 
     const where: Prisma.MediaItemWhereInput = {
-      // Only show own items unless caller holds media:read_any
-      ...(canReadAny ? {} : { ownerId: userId }),
+      circleId,
       // Exclude soft-deleted items
       deletedAt: null,
       // Optional filters
@@ -409,6 +416,7 @@ export class MediaService {
     userPermissions: string[],
   ): Promise<MediaLocation[]> {
     const {
+      circleId,
       type,
       capturedAtFrom,
       capturedAtTo,
@@ -419,11 +427,10 @@ export class MediaService {
       location,
     } = query;
 
-    const canReadAny = userPermissions.includes(PERMISSIONS.MEDIA_READ_ANY);
+    await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
 
     const where: Prisma.MediaItemWhereInput = {
-      // Ownership guard: only own items unless caller holds media:read_any
-      ...(canReadAny ? {} : { ownerId: userId }),
+      circleId,
       // Must have coordinates
       takenLat: { not: null },
       takenLng: { not: null },
@@ -540,10 +547,7 @@ export class MediaService {
       throw new NotFoundException(`MediaItem with id ${id} not found`);
     }
 
-    const canReadAny = userPermissions.includes(PERMISSIONS.MEDIA_READ_ANY);
-    if (!canReadAny && item.ownerId !== userId) {
-      throw new ForbiddenException('You do not have access to this media item');
-    }
+    await this.circleMembershipService.assertCircleAccess(userId, item.circleId, userPermissions, 'viewer' as CircleRole);
 
     // Fetch only the storageKey of the linked StorageObject to avoid spreading
     // a BigInt `size` field into the response.
@@ -579,7 +583,7 @@ export class MediaService {
       id,
       userId,
       userPermissions,
-      PERMISSIONS.MEDIA_WRITE_ANY,
+      'collaborator' as CircleRole,
     );
 
     const updated = await this.prisma.mediaItem.update({
@@ -618,7 +622,7 @@ export class MediaService {
       id,
       userId,
       userPermissions,
-      PERMISSIONS.MEDIA_DELETE_ANY,
+      'collaborator' as CircleRole,
     );
 
     await this.prisma.mediaItem.update({
@@ -670,7 +674,7 @@ export class MediaService {
       mediaItemId,
       userId,
       userPermissions,
-      PERMISSIONS.MEDIA_WRITE_ANY,
+      'collaborator' as CircleRole,
     );
 
     const result: Array<{ tagId: string; name: string }> = [];
@@ -713,7 +717,7 @@ export class MediaService {
       mediaItemId,
       userId,
       userPermissions,
-      PERMISSIONS.MEDIA_WRITE_ANY,
+      'collaborator' as CircleRole,
     );
 
     const mediaTag = await this.prisma.mediaTag.findUnique({
@@ -1230,7 +1234,7 @@ export class MediaService {
     id: string,
     userId: string,
     userPermissions: string[],
-    anyPermission: string,
+    required: CircleRole,
   ) {
     const item = await this.prisma.mediaItem.findUnique({ where: { id } });
 
@@ -1238,10 +1242,7 @@ export class MediaService {
       throw new NotFoundException(`MediaItem with id ${id} not found`);
     }
 
-    const canAny = userPermissions.includes(anyPermission);
-    if (!canAny && item.ownerId !== userId) {
-      throw new ForbiddenException('You do not have access to this media item');
-    }
+    await this.circleMembershipService.assertCircleAccess(userId, item.circleId, userPermissions, required);
 
     return item;
   }
