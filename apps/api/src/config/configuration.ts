@@ -78,6 +78,9 @@ export default () => {
     ).split(','),
     signedUrlExpiry: parseInt(process.env.SIGNED_URL_EXPIRY || '3600', 10), // 1 hour default
     partSize: parseInt(process.env.STORAGE_PART_SIZE || '10485760', 10), // 10MB default
+    backup: {
+      localPath: process.env.BACKUP_LOCAL_PATH || '/tmp/memoriahub-backup',
+    },
   },
 
   logLevel: process.env.LOG_LEVEL || 'info',
