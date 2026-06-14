@@ -46,6 +46,15 @@ export const PERMISSIONS = {
   MEDIA_READ_ANY: 'media:read_any',
   MEDIA_WRITE_ANY: 'media:write_any',
   MEDIA_DELETE_ANY: 'media:delete_any',
+
+  // Circles (per-circle role still gates which circle; these grant API access)
+  CIRCLES_READ: 'circles:read',
+  CIRCLES_WRITE: 'circles:write',
+  CIRCLES_MANAGE_ANY: 'circles:manage_any', // Admin: manage any circle
+
+  // Backup (admin-only: local-drive backup/replication)
+  BACKUP_RUN: 'backup:run',
+  BACKUP_READ: 'backup:read',
 } as const;
 
 export type PermissionName = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
