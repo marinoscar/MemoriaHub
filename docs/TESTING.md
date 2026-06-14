@@ -944,6 +944,190 @@ The test authentication endpoint (`/api/auth/test/login`) and the test login pag
 
 ---
 
+## Testing Family Circles
+
+### Circle Test Helpers
+
+Circle-aware tests need helpers that set up circles and memberships alongside test users. The recommended pattern extends the existing `auth.helper.ts` pattern:
+
+```typescript
+import { PrismaClient, CircleRole } from '@prisma/client';
+
+// Create a circle with an owner (circle_admin membership auto-created)
+export async function createTestCircle(
+  prisma: PrismaClient,
+  ownerId: string,
+  options?: { isPersonal?: boolean; name?: string },
+) {
+  const circle = await prisma.circle.create({
+    data: {
+      name: options?.name ?? 'Test Circle',
+      ownerId,
+      isPersonal: options?.isPersonal ?? false,
+    },
+  });
+  await prisma.circleMember.create({
+    data: { circleId: circle.id, userId: ownerId, role: CircleRole.circle_admin },
+  });
+  return circle;
+}
+
+// Add a user to a circle at a given role
+export async function addCircleMember(
+  prisma: PrismaClient,
+  circleId: string,
+  userId: string,
+  role: CircleRole = CircleRole.viewer,
+) {
+  return prisma.circleMember.create({
+    data: { circleId, userId, role },
+  });
+}
+```
+
+### Circle Authorization Matrix Tests
+
+Every endpoint that touches a circle must have E2E tests covering all three per-circle roles plus the non-member case:
+
+```typescript
+describe('PATCH /api/circles/:id (update circle)', () => {
+  let circle: Circle;
+  let owner: TestUser;          // circle_admin
+  let collaborator: TestUser;   // collaborator
+  let viewer: TestUser;         // viewer
+  let nonMember: TestUser;      // not in circle
+
+  beforeEach(async () => {
+    // reset DB, create users and circle with memberships
+    owner = await createTestUser(context, { role: 'contributor' });
+    collaborator = await createTestUser(context, { role: 'contributor' });
+    viewer = await createTestUser(context, { role: 'contributor' });
+    nonMember = await createTestUser(context, { role: 'contributor' });
+    circle = await createTestCircle(context.prisma, owner.user.id);
+    await addCircleMember(context.prisma, circle.id, collaborator.user.id, CircleRole.collaborator);
+    await addCircleMember(context.prisma, circle.id, viewer.user.id, CircleRole.viewer);
+  });
+
+  it('allows circle_admin to update', async () => {
+    await request(context.app.getHttpServer())
+      .patch(`/api/circles/${circle.id}`)
+      .set(authHeader(owner.accessToken))
+      .send({ name: 'New Name' })
+      .expect(200);
+  });
+
+  it('rejects collaborator with 403', async () => {
+    await request(context.app.getHttpServer())
+      .patch(`/api/circles/${circle.id}`)
+      .set(authHeader(collaborator.accessToken))
+      .send({ name: 'New Name' })
+      .expect(403);
+  });
+
+  it('rejects viewer with 403', async () => {
+    await request(context.app.getHttpServer())
+      .patch(`/api/circles/${circle.id}`)
+      .set(authHeader(viewer.accessToken))
+      .send({ name: 'New Name' })
+      .expect(403);
+  });
+
+  it('rejects non-member with 403', async () => {
+    await request(context.app.getHttpServer())
+      .patch(`/api/circles/${circle.id}`)
+      .set(authHeader(nonMember.accessToken))
+      .send({ name: 'New Name' })
+      .expect(403);
+  });
+
+  it('allows admin (super-admin bypass) to update any circle', async () => {
+    const admin = await createTestUser(context, { role: 'admin' });
+    await request(context.app.getHttpServer())
+      .patch(`/api/circles/${circle.id}`)
+      .set(authHeader(admin.accessToken))
+      .send({ name: 'Admin Override' })
+      .expect(200);
+  });
+});
+```
+
+Apply this matrix pattern to: GET circle detail, PATCH circle, DELETE circle, POST/PATCH/DELETE members, GET/POST/DELETE invites.
+
+### Personal Circle Guard Tests
+
+The `DELETE /api/circles/:id` endpoint must reject deletion of personal circles even for circle_admin:
+
+```typescript
+it('cannot delete a personal circle', async () => {
+  const personalCircle = await createTestCircle(context.prisma, owner.user.id, {
+    isPersonal: true,
+  });
+  await request(context.app.getHttpServer())
+    .delete(`/api/circles/${personalCircle.id}`)
+    .set(authHeader(owner.accessToken))
+    .expect(400); // or 422
+});
+```
+
+### Invite Claim Integration Test
+
+Test the end-to-end invite → login → membership flow:
+
+```typescript
+it('claims circle invite on login', async () => {
+  const inviterUser = await createTestUser(context);
+  const circle = await createTestCircle(context.prisma, inviterUser.user.id);
+
+  // Invite an email that has no account yet
+  await context.prisma.circleInvite.create({
+    data: {
+      circleId: circle.id,
+      email: 'newcomer@example.com',
+      role: CircleRole.collaborator,
+      addedById: inviterUser.user.id,
+      addedAt: new Date(),
+    },
+  });
+
+  // Simulate login for newcomer — this calls findOrCreateUser which claimsPendingInvites
+  MockGoogleStrategy.setMockProfile({ email: 'newcomer@example.com' });
+  await request(context.app.getHttpServer())
+    .get('/api/auth/google/callback')
+    .expect(302);
+
+  // Verify invite was claimed and membership created
+  const invite = await context.prisma.circleInvite.findFirst({
+    where: { circleId: circle.id, email: 'newcomer@example.com' },
+  });
+  expect(invite?.claimedById).not.toBeNull();
+
+  const member = await context.prisma.circleMember.findFirst({
+    where: { circleId: circle.id },
+  });
+  expect(member?.role).toBe(CircleRole.collaborator);
+});
+```
+
+### DB-Gated Migration and Backfill Tests
+
+If a migration backfills data (e.g., creating personal circles for existing users), write a migration test that:
+1. Inserts pre-migration data into the test database.
+2. Runs the migration.
+3. Verifies the backfilled data is correct.
+
+These tests live in `apps/api/test/migrations/` and run in CI with a fresh test database. They are skipped in unit test runs.
+
+### CircleSwitcher Frontend Tests
+
+Test the `CircleSwitcher` component (in AppBar) to verify:
+- It renders the list of circles from the MSW-mocked `GET /api/circles` response.
+- Selecting a circle updates `activeCircleId` in user settings via `PATCH /api/user-settings`.
+- The active circle name is shown in the switcher.
+
+Use `server.use(http.get('/api/circles', ...))` to control which circles are returned for each test case.
+
+---
+
 ## Resources
 
 - [Jest Documentation](https://jestjs.io/docs/getting-started)
