@@ -217,9 +217,9 @@ describe('Sidebar', () => {
         wrapperOptions: { user: mockAdminUser },
       });
 
-      // Admin: Home, Media Library, Map, Circles, User Settings, User Management, System Settings, Admin Circles
+      // Admin: Home, Media Library, Map, Circles, User Settings, User Management, System Settings, Admin Circles, Backup
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(menuButtons).toHaveLength(8);
+      expect(menuButtons).toHaveLength(9);
     });
 
     it('should dynamically update menu items when isAdmin changes', () => {
@@ -588,9 +588,9 @@ describe('Sidebar', () => {
       });
 
       // Each menu item should have an icon
-      // Admin sees: Home, Media Library, Map, Circles, User Settings, User Management, System Settings, Admin Circles
+      // Admin sees: Home, Media Library, Map, Circles, User Settings, User Management, System Settings, Admin Circles, Backup
       const icons = container.querySelectorAll('.MuiListItemIcon-root');
-      expect(icons).toHaveLength(8);
+      expect(icons).toHaveLength(9);
     });
 
     it('should highlight icon for selected menu item', () => {
