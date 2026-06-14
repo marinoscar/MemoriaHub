@@ -16,6 +16,7 @@ import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { randomUUID } from 'crypto';
 import { CircleMembershipService } from '../circles/circle-membership.service';
+import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
 
 // ---------------------------------------------------------------------------
 // Helper: build a Prisma P2002 error the way Prisma actually throws it
@@ -169,6 +170,7 @@ describe('MediaService', () => {
   let mockStorageProvider: { getSignedDownloadUrl: jest.Mock; delete: jest.Mock };
   let mockSyncService: jest.Mocked<Pick<MediaMetadataSyncService, 'syncFromStorageObject'>>;
   let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
+  let mockGeoProvider: { reverseGeocode: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -182,6 +184,7 @@ describe('MediaService', () => {
     mockCircleMembershipService = {
       assertCircleAccess: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
     };
+    mockGeoProvider = { reverseGeocode: jest.fn().mockResolvedValue(null) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -190,6 +193,7 @@ describe('MediaService', () => {
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },
         { provide: CircleMembershipService, useValue: mockCircleMembershipService },
+        { provide: GEO_LOCATION_PROVIDER, useValue: mockGeoProvider },
       ],
     }).compile();
 

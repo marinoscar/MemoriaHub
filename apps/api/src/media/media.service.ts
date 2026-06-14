@@ -28,6 +28,7 @@ import { ExportQueryDto } from './dto/export-query.dto';
 import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
+import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from './geo/geo-location-provider.interface';
 
 /** Shape of each element returned by listLocations. */
 export interface MediaLocation {
@@ -49,6 +50,7 @@ export class MediaService {
     private readonly storageProvider: StorageProvider,
     private readonly mediaMetadataSyncService: MediaMetadataSyncService,
     private readonly circleMembershipService: CircleMembershipService,
+    @Inject(GEO_LOCATION_PROVIDER) private readonly geoProvider: GeoLocationProvider,
   ) {}
 
   // ---------------------------------------------------------------------------
