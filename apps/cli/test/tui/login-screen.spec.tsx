@@ -33,10 +33,13 @@ import React from 'react';
 // ---------------------------------------------------------------------------
 // Fake os module — must be declared BEFORE the mocks that import os
 // ---------------------------------------------------------------------------
-jest.unstable_mockModule('os', () => ({
-  hostname: jest.fn(() => 'test-host'),
-  platform: jest.fn(() => 'linux'),
-}));
+jest.unstable_mockModule('os', () => {
+  const mod = {
+    hostname: jest.fn(() => 'test-host'),
+    platform: jest.fn(() => 'linux'),
+  };
+  return { ...mod, default: mod };
+});
 
 // ---------------------------------------------------------------------------
 // Mock open-browser — no-op
