@@ -3,6 +3,13 @@ export interface ApiClientOptions {
   pat: string;
 }
 
+export interface Circle {
+  id: string;
+  name: string;
+  isPersonal: boolean;
+  // other fields may be present but we only need these
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -37,6 +44,10 @@ export class ApiClient {
       },
     });
     return this.parseResponse<T>(res);
+  }
+
+  async listCircles(): Promise<Circle[]> {
+    return this.get<Circle[]>('/api/circles');
   }
 
   async post<T>(path: string, body: unknown): Promise<T> {
