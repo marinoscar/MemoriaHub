@@ -13,3 +13,4 @@ export {
 } from './storage-provider.types';
 export { StorageProvidersModule } from './storage-providers.module';
 export { S3StorageProvider } from './s3/s3-storage.provider';
+export { LocalDiskStorageProvider } from './local/local-disk.provider';
