@@ -64,13 +64,16 @@ sequenceDiagram
    - Default user settings (theme, locale)
    - Linked OAuth identity
    - Mark allowlist entry as claimed (`claimedById`, `claimedAt`)
+   - **Create a personal circle** (`isPersonal: true`) with the user as `circle_admin`
 6. Check if user email matches `INITIAL_ADMIN_EMAIL`
 7. If match and no other admins exist, grant admin role
 8. Update provider profile information (display name, profile image)
-9. Generate JWT tokens
+9. **Claim pending circle invites** — for each row in `circle_invites` where `email = <login_email>` and `claimed_at IS NULL`, upsert a `circle_members` row with the invite's role and mark the invite claimed
+10. Generate JWT tokens
 
 **Allowlist Security:**
-- Only admins can add/remove emails from the allowlist
+- Only admins can add/remove emails from the allowlist directly via `POST /api/allowlist`
+- **Circle invites automatically upsert the allowlist**: when a circle admin sends an invite (`POST /api/circles/:id/invites`), the invitee's email is upserted into `allowed_emails` so they can log in. This is intentional — inviting someone to a circle implies granting them application access
 - The `INITIAL_ADMIN_EMAIL` bypasses allowlist check (bootstrap access)
 - Allowlist entries that have been claimed cannot be removed (prevents accidentally removing existing user access)
 - All allowlist operations are audit logged
@@ -316,6 +319,31 @@ erDiagram
 | `allowlist:write` | Add/remove emails from allowlist | ✅ | ❌ | ❌ |
 | `user_settings:read` | View own user settings | ✅ | ✅ | ✅ |
 | `user_settings:write` | Modify own user settings | ✅ | ✅ | ✅ |
+| `circles:read` | Access circles API endpoints | ✅ | ✅ | ✅ |
+| `circles:write` | Create circles, manage own circles | ✅ | ✅ | ✅ |
+| `circles:manage_any` | Manage any circle (super-admin bypass) | ✅ | ❌ | ❌ |
+| `backup:run` | Trigger local-drive backup job | ✅ | ❌ | ❌ |
+| `backup:read` | View backup run history and status | ✅ | ❌ | ❌ |
+
+**Important distinction:** `circles:read` and `circles:write` grant access to the circles API endpoints; they do **not** grant access to specific circles. Within a circle, the per-circle role (`circle_admin | collaborator | viewer`) controls what the user can do. The global `circles:manage_any` permission is the super-admin bypass that skips per-circle membership checks entirely.
+
+### Per-Circle Role Semantics
+
+Per-circle roles live in the `circle_members.role` column (`CircleRole` enum). They are enforced by `CircleMembershipService.assertCircleAccess()` inside service methods, not by the global guard stack.
+
+| Per-circle Role | Rank | What It Allows |
+|-----------------|------|----------------|
+| `viewer` | 1 | Read media, albums, tags; view member list; self-leave |
+| `collaborator` | 2 | All viewer + add/edit/delete media, albums, tags in the circle |
+| `circle_admin` | 3 | All collaborator + manage circle metadata, add/remove members, send and revoke invites |
+
+**Ranking rule:** A required role is met if `ROLE_RANK[actual] >= ROLE_RANK[required]`.
+
+**Super-admin bypass:** If the caller holds `circles:manage_any`, `media:read_any`, or `media:write_any`, the membership check is skipped and the caller is treated as if they have `circle_admin` for any circle. This is the mechanism that allows the global `admin` role to manage any circle's content.
+
+**Cannot demote last circle_admin:** The service refuses to demote or remove the last `circle_admin` of a circle, preventing lockout.
+
+**Cannot delete personal circle:** A user's personal circle (`isPersonal: true`) cannot be deleted. It is created on signup and serves as the default destination for all single-user content.
 
 **Role Descriptions:**
 - **Admin**: Full system access - manage users, roles, and all settings
@@ -877,6 +905,9 @@ The `audit_events` table provides a comprehensive audit trail for compliance and
 - Allowlist email additions/removals
 - Allowlist entry claims (when user first logs in)
 - Authentication events (login, logout, token refresh)
+- Circle membership changes (member added, role changed, member removed)
+- Circle invite events (invite created, invite claimed on login, invite revoked)
+- Backup runs (start, completion, item count, circle scope)
 
 **Audit Event Structure:**
 ```typescript
@@ -960,41 +991,36 @@ STORAGE_ALLOWED_MIME_TYPES=application/pdf,image/jpeg,image/png,application/zip
 
 The storage system enforces strict ownership and permission-based access:
 
-**Owner-Only Access (Default):**
-- Users can only access their own uploaded files
-- Object queries filtered by `owner_id = current_user.id`
-- Download URLs only generated for owned objects
-- Delete operations restricted to owner
+**Circle-Based Access (since Family Circles):**
+
+Storage download authorization now flows through the circle membership rather than simple ownership:
+
+1. Look up the `StorageObject` by ID
+2. If the object is linked to a `MediaItem` (status `ready`):
+   - Read `mediaItem.circleId`
+   - Call `assertCircleAccess(userId, circleId, permissions, 'viewer')`
+   - Any circle `viewer` (or higher) can download any item in that circle — including items they did not upload
+3. If the object has **no linked `MediaItem`** (upload in progress / `pending` or `uploading` status):
+   - Fall back to `uploadedById === userId` check (uploader-only access during in-flight uploads)
+   - This preserves the security invariant: incomplete uploads are owner-only
 
 **Admin Override:**
 - Users with `storage:delete_any` permission can access all objects
 - Useful for moderation and content management
 - All admin operations logged to audit trail
 
+**Why this change is safe:**
+- Circle membership is server-verified on every request (never trusted from client)
+- In-progress uploads remain owner-only until a `MediaItem` row is created
+- Non-members receive 403 regardless of whether they know the storage object ID
+- The `storage_objects` table has no `circle_id` column — authorization always resolves through the `media_items` relation, avoiding dual-write consistency risks
+
 **Permission Model:**
 | Permission | Description | Granted To |
 |------------|-------------|------------|
-| `storage:read` | View own storage objects | All authenticated users |
+| `storage:read` | Upload and initiate downloads | All authenticated users |
 | `storage:write` | Upload and update own objects | All authenticated users |
-| `storage:delete` | Delete own storage objects | All authenticated users |
-| `storage:read_any` | View all storage objects | Admin |
-| `storage:write_any` | Update any storage object | Admin |
 | `storage:delete_any` | Delete any storage object | Admin |
-
-**Ownership Validation Example:**
-```typescript
-// Controller method enforces ownership
-async getObject(objectId: string, userId: string) {
-  const object = await this.objectsService.findById(objectId);
-
-  // Check ownership (or admin permission)
-  if (object.ownerId !== userId && !user.hasPermission('storage:read_any')) {
-    throw new ForbiddenException('Access denied');
-  }
-
-  return object;
-}
-```
 
 ### Signed URLs
 
