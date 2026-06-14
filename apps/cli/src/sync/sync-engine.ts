@@ -46,6 +46,8 @@ export interface SyncOptions {
   force?: boolean;
   /** Source trigger label recorded in the sync_runs table. */
   trigger: 'cli' | 'menu' | 'retry';
+  /** Target circle ID for media registration. Overrides config.activeCircleId. */
+  circleId?: string;
 }
 
 export interface SyncRunResult {
@@ -304,7 +306,26 @@ export class SyncEngine extends TypedEmitter {
     const isDryRun = opts.dryRun ?? false;
 
     await runPool(workList, concurrency, async (item) => {
-      const { fileId, filePath, mimeType, folderId: _folderId } = item;
+      const { fileId, filePath, mimeType, folderId } = item;
+
+      // Resolve circleId for this file: folder.circle_id → opts.circleId → (error)
+      const folder = folders.getById(folderId);
+      const resolvedCircleId = folder?.circle_id ?? opts.circleId ?? undefined;
+
+      if (!resolvedCircleId) {
+        const errorMsg = 'No target circle. Run `memoriahub circles use <id>` or pass --circle <id>.';
+        files.setError(fileId, errorMsg);
+        files.setStatus(fileId, 'failed');
+        this.emit(EV.FILE_FAILED, {
+          fileId,
+          path: filePath,
+          error: errorMsg,
+          attempt: 1,
+          willRetry: false,
+        });
+        this._emitProgress(files, targetFolderIds, total);
+        return;
+      }
 
       // Fetch current attempt_count before incrementing
       let currentAttempt = 0;
@@ -324,7 +345,7 @@ export class SyncEngine extends TypedEmitter {
       // Re-read attempt_count after increment
       try {
         const row = files.listByFolder(
-          item.folderId,
+          folderId,
           { status: 'uploading' },
         ).find((r) => r.id === fileId);
         if (row) currentAttempt = row.attempt_count;
@@ -337,7 +358,7 @@ export class SyncEngine extends TypedEmitter {
         // Check if the stored sha256 is still valid: size AND mtime must both match.
         // fileStatCache holds the stat taken during the work-set build phase (same run).
         const statForFile = fileStatCache.get(fileId);
-        const currentFileRecord = files.getByFolderAndPath(item.folderId, filePath);
+        const currentFileRecord = files.getByFolderAndPath(folderId, filePath);
 
         let sha256: string;
         if (
@@ -425,6 +446,7 @@ export class SyncEngine extends TypedEmitter {
           source: 'cli',
           originalFilename: basename,
           contentHash: sha256,
+          circleId: resolvedCircleId,
         });
 
         // If the server deduplicated (race: another device registered same content first),

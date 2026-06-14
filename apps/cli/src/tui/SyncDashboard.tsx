@@ -263,6 +263,7 @@ export function SyncDashboard({
         all: all ?? false,
         folderIds: folderIds ?? [],
         retryFailedOnly: retryFailedOnly ?? false,
+        circleId: config.activeCircleId,
       }).catch(() => {
         // Fatal errors emitted via EV.ERROR already
       });
