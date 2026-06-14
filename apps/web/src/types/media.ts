@@ -63,6 +63,8 @@ export interface MediaItem {
   thumbnailUrl: string | null;
   // Only on GET /api/media/:id
   downloadUrl?: string | null;
+  // Tag names associated with this item
+  tags?: string[];
 }
 
 export interface MediaListMeta {
@@ -104,6 +106,11 @@ export interface MediaQueryParams {
   /** Filter by exact SHA-256 hex digest (64 lower-case hex chars). */
   contentHash?: string;
   circleId?: string;
+  cameraMake?: string;
+  cameraModel?: string;
+  sourceDeviceId?: string;
+  sourceDeviceName?: string;
+  missingGeo?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -230,4 +237,65 @@ export interface AlbumQueryParams {
   sortBy?: 'name' | 'createdAt' | 'updatedAt';
   sortOrder?: SortOrder;
   circleId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Bulk operation DTOs
+// ---------------------------------------------------------------------------
+
+export interface BulkUpdateDto {
+  circleId: string;
+  ids: string[];
+  set: {
+    location?: { lat: number; lng: number; altitude?: number } | null;
+    classification?: MediaClassification;
+    favorite?: boolean;
+  };
+}
+
+export interface BulkTagsDto {
+  circleId: string;
+  ids: string[];
+  add?: string[];
+  remove?: string[];
+}
+
+export interface BulkDeleteDto {
+  circleId: string;
+  ids: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Geo search / reverse geocode
+// ---------------------------------------------------------------------------
+
+export interface GeoSearchResult {
+  lat: number;
+  lng: number;
+  label: string;
+}
+
+export interface GeoReverseResult {
+  country: string | null;
+  countryCode: string | null;
+  admin1: string | null;
+  admin2: string | null;
+  locality: string | null;
+  placeName: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard
+// ---------------------------------------------------------------------------
+
+export interface DashboardResponse {
+  onThisDay: MediaItem[];
+  recent: MediaItem[];
+  favorites: MediaItem[];
+  counts: {
+    total: number;
+    unreviewed: number;
+    lowValue: number;
+    missingGeo: number;
+  };
 }
