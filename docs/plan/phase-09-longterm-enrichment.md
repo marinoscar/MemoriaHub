@@ -225,7 +225,16 @@ Each sub-project defines its own acceptance criteria when planned. The shared ac
 ## 9. Out of Scope / Deferred
 
 - Real-time AI inference in the request path (all AI enrichment is async post-upload)
-- Collaborative family accounts or shared albums (out of scope per VISION.MD)
 - Advanced photo editing (out of scope per VISION.MD)
 - Social sharing / public albums (out of scope per VISION.MD)
 - Printed photo products (out of scope per VISION.MD)
+
+## 10. Circle Integration
+
+Family Circles (phase FC) is a prerequisite for all sub-projects in this phase. The circle data model provides the scoping for each enrichment type:
+
+- **Face recognition**: `Person` and `MediaPerson` models should be circle-scoped. Each circle maintains its own named persons registry. A person named "Grandma" in one circle is independent of the same name in another circle.
+- **Object and scene detection**: No schema changes; `MediaItem.metadata.detectedObjects` is stored at the item level and the item is already circle-scoped.
+- **Duplicate detection**: The `DuplicateDetectionService` must scope its Hamming-distance queries to items within the same circle. Cross-circle deduplication is intentionally not performed — the same photo may legitimately exist in a personal circle and a shared family circle.
+- **Trip and event grouping**: `Album` records created by `TripGroupingService` are circle-scoped (they require a `circleId`). Trip detection runs per circle independently.
+- **Platform imports**: Import commands target a specific circle (passed as `--circle <id>`) consistent with the CLI sync pattern from phase FC.

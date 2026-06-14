@@ -150,4 +150,7 @@ The `classificationReason` field shape written by processors:
 - Object and scene detection (Phase 09)
 - Duplicate detection and review UI (Phase 09 — content hash exists from Phase 02)
 - Auto-deletion rules or schedules (explicitly out of scope per VISION.MD — user must always review)
-- Collaborative review (multi-user family accounts — out of scope per VISION.MD MVP)
+
+## 10. Circle Integration
+
+Family Circles (phase FC) is a prerequisite for this phase. The review actions in this phase (`POST /api/media/review`, `BulkReviewPanel`) operate on media belonging to the active circle. The `POST /api/media/review` endpoint requires `collaborator` role or higher for the item's circle (per the circle authorization rules). The acceptance criteria for cross-user review no longer applies: any collaborator in the circle can classify any item in that circle — the previous "owner-only" check is replaced by the per-circle role check.
