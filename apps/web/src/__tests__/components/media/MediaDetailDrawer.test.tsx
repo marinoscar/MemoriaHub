@@ -32,6 +32,9 @@ import type { MediaItem } from '../../../types/media';
 vi.mock('../../../services/media', () => ({
   patchMedia: vi.fn(),
   getMedia: vi.fn(),
+  bulkUpdateMedia: vi.fn(),
+  bulkTags: vi.fn(),
+  listTags: vi.fn().mockResolvedValue([]),
 }));
 
 import { patchMedia, getMedia } from '../../../services/media';
@@ -66,6 +69,37 @@ vi.mock('../../../components/media/LocationMiniMap', () => ({
       data-lng={lng}
       data-label={label}
     />
+  ),
+}));
+
+// ---------------------------------------------------------------------------
+// Mock LocationPickerMap — avoids react-leaflet/leaflet dependency in tests
+// ---------------------------------------------------------------------------
+
+vi.mock('../../../components/media/LocationPickerMap', () => ({
+  LocationPickerMap: ({ value, onChange }: any) => (
+    <div
+      data-testid="location-picker-map"
+      data-lat={value?.lat}
+      data-lng={value?.lng}
+      onClick={() => onChange({ lat: 10, lng: 20 })}
+    />
+  ),
+}));
+
+// ---------------------------------------------------------------------------
+// Mock TagAutocomplete — avoids Autocomplete complexity in tests
+// ---------------------------------------------------------------------------
+
+vi.mock('../../../components/media/TagAutocomplete', () => ({
+  TagAutocomplete: ({ label, value, onChange }: any) => (
+    <div data-testid={`tag-autocomplete-${label.toLowerCase().replace(/\s/g, '-')}`}>
+      <input
+        aria-label={label}
+        value={value.join(',')}
+        onChange={(e) => onChange(e.target.value ? e.target.value.split(',') : [])}
+      />
+    </div>
   ),
 }));
 
@@ -217,7 +251,8 @@ describe('MediaDetailDrawer', () => {
 
     it('should display location section heading when geo fields are present', () => {
       render(<MediaDetailDrawer {...defaultProps()} />);
-      expect(screen.getByText(/location/i)).toBeInTheDocument();
+      // Use exact match to avoid matching "Edit Location" / "Set Location" button text
+      expect(screen.getByText(/^location$/i)).toBeInTheDocument();
     });
 
     it('should NOT display location section when all geo fields are null', () => {
@@ -482,13 +517,14 @@ describe('MediaDetailDrawer', () => {
   describe('edit mode', () => {
     it('should show Edit button in read-only mode', () => {
       render(<MediaDetailDrawer {...defaultProps()} />);
-      expect(screen.getByRole('button', { name: /edit/i })).toBeInTheDocument();
+      // Use exact name to avoid matching "Edit Tags" button
+      expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
     });
 
     it('should switch to edit mode when Edit is clicked', async () => {
       const user = userEvent.setup();
       render(<MediaDetailDrawer {...defaultProps()} />);
-      await user.click(screen.getByRole('button', { name: /edit/i }));
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument();
@@ -498,7 +534,7 @@ describe('MediaDetailDrawer', () => {
     it('should pre-populate the Title field with the item title', async () => {
       const user = userEvent.setup();
       render(<MediaDetailDrawer {...defaultProps()} />);
-      await user.click(screen.getByRole('button', { name: /edit/i }));
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
       await waitFor(() => {
         const titleInput = screen.getByLabelText(/title/i);
         expect(titleInput).toHaveValue('Arenal Sunset');
@@ -508,7 +544,7 @@ describe('MediaDetailDrawer', () => {
     it('should pre-populate the Caption field with the item caption', async () => {
       const user = userEvent.setup();
       render(<MediaDetailDrawer {...defaultProps()} />);
-      await user.click(screen.getByRole('button', { name: /edit/i }));
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
       await waitFor(() => {
         const captionInput = screen.getByLabelText(/caption/i);
         expect(captionInput).toHaveValue('Beautiful sunset at Arenal');
@@ -518,7 +554,7 @@ describe('MediaDetailDrawer', () => {
     it('should call patchMedia with changed title on Save', async () => {
       const user = userEvent.setup();
       render(<MediaDetailDrawer {...defaultProps()} />);
-      await user.click(screen.getByRole('button', { name: /edit/i }));
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
 
       const titleInput = await screen.findByLabelText(/title/i);
       await user.clear(titleInput);
@@ -543,7 +579,7 @@ describe('MediaDetailDrawer', () => {
       render(
         <MediaDetailDrawer {...defaultProps()} onItemUpdated={onItemUpdated} />,
       );
-      await user.click(screen.getByRole('button', { name: /edit/i }));
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
       await user.click(screen.getByRole('button', { name: /save/i }));
 
       await waitFor(() => {
@@ -554,12 +590,12 @@ describe('MediaDetailDrawer', () => {
     it('should return to read-only mode after successful save', async () => {
       const user = userEvent.setup();
       render(<MediaDetailDrawer {...defaultProps()} />);
-      await user.click(screen.getByRole('button', { name: /edit/i }));
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
       await user.click(screen.getByRole('button', { name: /save/i }));
 
       await waitFor(() => {
         expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /edit/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
       });
     });
 
@@ -567,7 +603,7 @@ describe('MediaDetailDrawer', () => {
       mockPatchMedia.mockRejectedValue(new Error('Server error'));
       const user = userEvent.setup();
       render(<MediaDetailDrawer {...defaultProps()} />);
-      await user.click(screen.getByRole('button', { name: /edit/i }));
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
       await user.click(screen.getByRole('button', { name: /save/i }));
 
       await waitFor(() => {
@@ -579,12 +615,12 @@ describe('MediaDetailDrawer', () => {
     it('should return to read-only mode when Cancel is clicked', async () => {
       const user = userEvent.setup();
       render(<MediaDetailDrawer {...defaultProps()} />);
-      await user.click(screen.getByRole('button', { name: /edit/i }));
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
       await user.click(screen.getByRole('button', { name: /cancel/i }));
 
       await waitFor(() => {
         expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /edit/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
       });
     });
   });
