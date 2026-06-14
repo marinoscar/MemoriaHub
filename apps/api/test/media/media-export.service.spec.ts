@@ -24,6 +24,7 @@ import { MediaService } from '../../src/media/media.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { STORAGE_PROVIDER } from '../../src/storage/providers/storage-provider.interface';
 import { MediaMetadataSyncService } from '../../src/media/sync/media-metadata-sync.service';
+import { CircleMembershipService } from '../../src/circles/circle-membership.service';
 import {
   createMockPrismaService,
   MockPrismaService,
@@ -160,6 +161,7 @@ describe('MediaService.streamExport', () => {
   let service: MediaService;
   let mockPrisma: MockPrismaService;
   let mockStorageProvider: any;
+  let mockCircleMembership: { assertCircleAccess: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -167,6 +169,11 @@ describe('MediaService.streamExport', () => {
     // MediaService @Inject(STORAGE_PROVIDER) — provide a no-op stub; streamExport
     // does not use the storage provider, but the constructor requires it.
     mockStorageProvider = {};
+
+    // Default: all callers are circle members (collaborator role)
+    mockCircleMembership = {
+      assertCircleAccess: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -176,6 +183,9 @@ describe('MediaService.streamExport', () => {
         // MediaService constructor index [2]: syncFromStorageObject is not
         // exercised by export tests — a no-op mock satisfies the dependency.
         { provide: MediaMetadataSyncService, useValue: { syncFromStorageObject: jest.fn() } },
+        // MediaService constructor index [3]: CircleMembershipService; export
+        // tests don't exercise circle-auth paths so a stub is sufficient.
+        { provide: CircleMembershipService, useValue: mockCircleMembership },
       ],
     }).compile();
 
@@ -412,32 +422,46 @@ describe('MediaService.streamExport', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Step 9 — Permission / ownership enforcement (403)
+  // Step 9 — Circle-based access enforcement (updated for Family Circles)
+  // NOTE: streamExport was refactored from ownerId-based to circleId-based
+  //       access control in feat/family-circles. These tests verify the new
+  //       circle membership enforcement behavior.
   // -------------------------------------------------------------------------
 
-  describe('Permission enforcement', () => {
-    it('should throw ForbiddenException when ownerId != caller and caller lacks MEDIA_READ_ANY', async () => {
+  const CIRCLE_ID = 'circle-export-test-0000-0001';
+
+  describe('Circle-based access enforcement', () => {
+    it('should throw ForbiddenException when assertCircleAccess rejects (non-member)', async () => {
       const { fakeRes, writeHead } = makeFakeReply();
+
+      // Simulate non-member: assertCircleAccess rejects
+      mockCircleMembership.assertCircleAccess.mockRejectedValueOnce(
+        new ForbiddenException('You are not a member of this circle'),
+      );
 
       await expect(
         service.streamExport(
-          { format: 'json', ownerId: OTHER_ID } as any,
+          { format: 'json', circleId: CIRCLE_ID } as any,
           CALLER_ID,
-          OWN_PERMS, // no MEDIA_READ_ANY
+          OWN_PERMS,
           fakeRes as any,
         ),
       ).rejects.toThrow(ForbiddenException);
 
-      // Verify no bytes were written before the throw
+      // No bytes written before the throw
       expect(writeHead).not.toHaveBeenCalled();
     });
 
-    it('should NOT call prisma.mediaItem.findMany when 403 is thrown', async () => {
+    it('should NOT call prisma.mediaItem.findMany when assertCircleAccess throws', async () => {
       const { fakeRes } = makeFakeReply();
+
+      mockCircleMembership.assertCircleAccess.mockRejectedValueOnce(
+        new ForbiddenException('You are not a member of this circle'),
+      );
 
       await expect(
         service.streamExport(
-          { format: 'json', ownerId: OTHER_ID } as any,
+          { format: 'json', circleId: CIRCLE_ID } as any,
           CALLER_ID,
           OWN_PERMS,
           fakeRes as any,
@@ -447,55 +471,50 @@ describe('MediaService.streamExport', () => {
       expect(mockPrisma.mediaItem.findMany).not.toHaveBeenCalled();
     });
 
-    it('should allow caller with MEDIA_READ_ANY to export another user\'s media', async () => {
-      const otherUserBatch = [makeMediaRow({ ownerId: OTHER_ID })];
-      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValueOnce(otherUserBatch);
+    it('should filter by circleId in the prisma where clause', async () => {
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValueOnce([]);
+
+      const { fakeRes, finished } = makeFakeReply();
+      await service.streamExport({ format: 'json', circleId: CIRCLE_ID } as any, CALLER_ID, OWN_PERMS, fakeRes as any);
+      await finished;
+
+      expect(mockPrisma.mediaItem.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ circleId: CIRCLE_ID }),
+        }),
+      );
+    });
+
+    it('should allow a circle member to export circle media', async () => {
+      // Default mock in beforeEach: assertCircleAccess resolves → member
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValueOnce([]);
 
       const { fakeRes, finished } = makeFakeReply();
 
       await expect(
         service.streamExport(
-          { format: 'json', ownerId: OTHER_ID } as any,
+          { format: 'json', circleId: CIRCLE_ID } as any,
           CALLER_ID,
-          ANY_PERMS, // includes MEDIA_READ_ANY
+          OWN_PERMS,
           fakeRes as any,
         ),
       ).resolves.not.toThrow();
 
       await finished;
-
-      // Verify prisma was called with where.ownerId = OTHER_ID
-      expect(mockPrisma.mediaItem.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ ownerId: OTHER_ID }),
-        }),
-      );
     });
 
-    it('should use caller\'s own id as ownerId when ownerId is not specified', async () => {
-      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValueOnce([]);
-
-      const { fakeRes, finished } = makeFakeReply();
-      await service.streamExport({ format: 'json' } as any, CALLER_ID, OWN_PERMS, fakeRes as any);
-      await finished;
-
-      expect(mockPrisma.mediaItem.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ ownerId: CALLER_ID }),
-        }),
-      );
-    });
-
-    it('should allow caller to export their own media even when ownerId equals caller id', async () => {
+    it('should allow super-admin (MEDIA_READ_ANY) to export any circle media', async () => {
+      // assertCircleAccess resolves with isSuperAdmin: true for admin with _any permissions
+      mockCircleMembership.assertCircleAccess.mockResolvedValueOnce({ role: 'circle_admin', isSuperAdmin: true });
       (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValueOnce([]);
 
       const { fakeRes, finished } = makeFakeReply();
 
       await expect(
         service.streamExport(
-          { format: 'json', ownerId: CALLER_ID } as any,
+          { format: 'json', circleId: CIRCLE_ID } as any,
           CALLER_ID,
-          OWN_PERMS, // no MEDIA_READ_ANY needed when ownerId === callerId
+          ANY_PERMS, // includes MEDIA_READ_ANY
           fakeRes as any,
         ),
       ).resolves.not.toThrow();
