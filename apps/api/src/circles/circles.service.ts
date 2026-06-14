@@ -60,10 +60,11 @@ export class CirclesService {
       if (!isSuperAdmin) {
         throw new ForbiddenException('circles:manage_any permission required');
       }
-      return this.prisma.circle.findMany({
+      const items = await this.prisma.circle.findMany({
         include: { _count: { select: { members: true } } },
         orderBy: { name: 'asc' },
       });
+      return { items, total: items.length, page: 1, pageSize: items.length, totalPages: 1 };
     }
 
     const memberships = await this.prisma.circleMember.findMany({
@@ -75,7 +76,8 @@ export class CirclesService {
       },
       orderBy: { circle: { name: 'asc' } },
     });
-    return memberships.map((m) => ({ ...m.circle, memberRole: m.role }));
+    const items = memberships.map((m) => ({ ...m.circle, memberRole: m.role }));
+    return { items, total: items.length, page: 1, pageSize: items.length, totalPages: 1 };
   }
 
   async getById(user: RequestUser, id: string) {
@@ -126,7 +128,7 @@ export class CirclesService {
 
   async listMembers(user: RequestUser, circleId: string) {
     await this.membership.assertCircleAccess(user.id, circleId, user.permissions, CircleRole.viewer);
-    return this.prisma.circleMember.findMany({
+    const items = await this.prisma.circleMember.findMany({
       where: { circleId },
       include: {
         user: {
@@ -142,6 +144,7 @@ export class CirclesService {
       },
       orderBy: { createdAt: 'asc' },
     });
+    return { items, total: items.length };
   }
 
   async addMember(user: RequestUser, circleId: string, dto: AddMemberDto) {
@@ -233,10 +236,11 @@ export class CirclesService {
 
   async listInvites(user: RequestUser, circleId: string) {
     await this.membership.assertCircleAccess(user.id, circleId, user.permissions, CircleRole.circle_admin);
-    return this.prisma.circleInvite.findMany({
+    const items = await this.prisma.circleInvite.findMany({
       where: { circleId },
       orderBy: { addedAt: 'desc' },
     });
+    return { items, total: items.length };
   }
 
   async createInvite(user: RequestUser, circleId: string, dto: CreateInviteDto) {

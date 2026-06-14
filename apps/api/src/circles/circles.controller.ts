@@ -55,7 +55,7 @@ export class CirclesController {
   @Auth({ permissions: [PERMISSIONS.CIRCLES_READ] })
   @ApiOperation({ summary: 'List circles (member circles; ?all=true for super-admin)' })
   @ApiQuery({ name: 'all', required: false, type: Boolean })
-  @ApiResponse({ status: 200, description: 'List of circles' })
+  @ApiResponse({ status: 200, description: 'Paginated list of circles ({ items, total, page, pageSize, totalPages })' })
   async list(
     @Query() query: CirclesQueryDto,
     @CurrentUser() user: RequestUser,
@@ -110,7 +110,7 @@ export class CirclesController {
   @Auth({ permissions: [PERMISSIONS.CIRCLES_READ] })
   @ApiOperation({ summary: 'List circle members' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Member list' })
+  @ApiResponse({ status: 200, description: 'Member list envelope ({ items, total })' })
   async listMembers(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: RequestUser,
@@ -169,7 +169,7 @@ export class CirclesController {
   @Auth({ permissions: [PERMISSIONS.CIRCLES_READ] })
   @ApiOperation({ summary: 'List circle invites (circle_admin or super-admin)' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Invite list' })
+  @ApiResponse({ status: 200, description: 'Invite list envelope ({ items, total })' })
   async listInvites(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: RequestUser,
