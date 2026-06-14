@@ -18,6 +18,7 @@ import {
   People as PeopleIcon,
   PhotoLibrary as PhotoLibraryIcon,
   Map as MapIcon,
+  GroupWork as GroupWorkIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -55,6 +56,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       visible: true,
     },
     {
+      label: 'Circles',
+      icon: <GroupWorkIcon />,
+      path: '/circles',
+      visible: true,
+    },
+    {
       label: 'User Settings',
       icon: <SettingsIcon />,
       path: '/settings',
@@ -70,6 +77,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       label: 'System Settings',
       icon: <AdminIcon />,
       path: '/admin/settings',
+      visible: isAdmin,
+    },
+    {
+      label: 'Admin Circles',
+      icon: <GroupWorkIcon />,
+      path: '/admin/circles',
       visible: isAdmin,
     },
   ];
