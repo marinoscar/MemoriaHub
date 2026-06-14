@@ -60,6 +60,7 @@ interface MediaUploadDialogProps {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  circleId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +85,7 @@ async function uploadFileWithRetry(
   file: File,
   contentHash: string | null,
   onProgress: (pct: number) => void,
+  circleId?: string,
 ): Promise<{ deduplicated: boolean }> {
   // 1. Init upload
   const { objectId, partSize, totalParts, presignedUrls } = await initUpload({
@@ -141,6 +143,7 @@ async function uploadFileWithRetry(
     type: detectMediaType(file),
     source: 'web',
     originalFilename: file.name,
+    circleId: circleId ?? '',
     ...(contentHash !== null ? { contentHash } : {}),
   });
 
@@ -153,7 +156,7 @@ async function uploadFileWithRetry(
 // Component
 // ---------------------------------------------------------------------------
 
-export function MediaUploadDialog({ open, onClose, onSuccess }: MediaUploadDialogProps) {
+export function MediaUploadDialog({ open, onClose, onSuccess, circleId }: MediaUploadDialogProps) {
   const theme = useTheme();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [fileStates, setFileStates] = useState<FileState[]>([]);
@@ -242,6 +245,7 @@ export function MediaUploadDialog({ open, onClose, onSuccess }: MediaUploadDialo
           (pct) => {
             updateFileState(i, { progress: pct });
           },
+          circleId,
         );
 
         // Server dedup race: another session registered the same hash first.
