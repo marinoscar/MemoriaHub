@@ -34,6 +34,9 @@ import {
   ToggleButtonGroup,
   Paper,
   Menu,
+  Snackbar,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import {
   Star as StarIcon,
@@ -44,8 +47,11 @@ import {
   FileDownload as ExportIcon,
   PhotoLibrary as PhotoLibraryIcon,
   PlayCircleOutlined as PlayCircleOutlinedIcon,
+  CheckBox as CheckBoxIcon,
+  CheckBoxOutlineBlank as CheckBoxOutlineBlankIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
+import { useSearchParams } from 'react-router-dom';
 import { useMedia } from '../../hooks/useMedia';
 import { useAlbums } from '../../hooks/useAlbums';
 import { useCircle } from '../../hooks/useCircle';
@@ -53,6 +59,9 @@ import { listTags, exportMedia } from '../../services/media';
 import type { ExportFilters } from '../../services/media';
 import { MediaDetailDrawer } from '../../components/media/MediaDetailDrawer';
 import { MediaUploadDialog } from '../../components/media/MediaUploadDialog';
+import { BulkActionToolbar } from '../../components/media/BulkActionToolbar';
+import { BulkLocationDialog } from '../../components/media/BulkLocationDialog';
+import { BulkTagsDialog } from '../../components/media/BulkTagsDialog';
 import type { MediaItem, MediaQueryParams, TagItem, MediaType, MediaClassification } from '../../types/media';
 
 // ---------------------------------------------------------------------------
@@ -153,9 +162,12 @@ interface MediaTileProps {
   colCount: number;
   onSelect: (item: MediaItem) => void;
   onToggleFavorite: (item: MediaItem) => void;
+  isSelected: boolean;
+  anySelected: boolean;
+  onToggleSelect: (id: string) => void;
 }
 
-function MediaTile({ item, onSelect, onToggleFavorite }: MediaTileProps) {
+function MediaTile({ item, onSelect, onToggleFavorite, isSelected, anySelected, onToggleSelect }: MediaTileProps) {
   const theme = useTheme();
   const [imgError, setImgError] = useState(false);
 
@@ -163,8 +175,15 @@ function MediaTile({ item, onSelect, onToggleFavorite }: MediaTileProps) {
 
   return (
     <ImageListItem
-      onClick={() => onSelect(item)}
+      onClick={() => {
+        if (anySelected) {
+          onToggleSelect(item.id);
+        } else {
+          onSelect(item);
+        }
+      }}
       sx={{
+        position: 'relative',
         cursor: 'pointer',
         overflow: 'hidden',
         borderRadius: 1,
@@ -274,6 +293,34 @@ function MediaTile({ item, onSelect, onToggleFavorite }: MediaTileProps) {
         </Box>
       )}
 
+      {/* Selection checkbox — shown on hover or when any item is selected */}
+      <Box
+        className="select-overlay"
+        sx={{
+          position: 'absolute',
+          top: 4,
+          left: 4,
+          zIndex: 2,
+          opacity: anySelected || isSelected ? 1 : 0,
+          transition: 'opacity 0.15s',
+          '.MuiImageListItem-root:hover &': { opacity: 1 },
+        }}
+      >
+        <IconButton
+          size="small"
+          onClick={(e) => { e.stopPropagation(); onToggleSelect(item.id); }}
+          aria-label={isSelected ? 'Deselect item' : 'Select item'}
+          sx={{
+            color: isSelected ? 'primary.main' : 'white',
+            backgroundColor: 'rgba(0,0,0,0.4)',
+            '&:hover': { backgroundColor: 'rgba(0,0,0,0.6)' },
+            p: 0.25,
+          }}
+        >
+          {isSelected ? <CheckBoxIcon fontSize="small" /> : <CheckBoxOutlineBlankIcon fontSize="small" />}
+        </IconButton>
+      </Box>
+
       {/* Overlay with favorite toggle */}
       <Box
         className="media-overlay"
@@ -326,9 +373,11 @@ export default function MediaLibraryPage() {
   const isXl = useMediaQuery(theme.breakpoints.up('xl'));
   const isLg = useMediaQuery(theme.breakpoints.up('lg'));
   const isMd = useMediaQuery(theme.breakpoints.up('md'));
-  const { activeCircle } = useCircle();
+  const { activeCircle, activeCircleRole } = useCircle();
 
   const colCount = isXl || isLg ? 4 : isMd ? 2 : 1;
+
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const {
     items,
@@ -352,15 +401,25 @@ export default function MediaLibraryPage() {
 
   // Filter state
   const [showFilters, setShowFilters] = useState(false);
-  const [filterType, setFilterType] = useState<MediaType | ''>('');
-  const [filterClassification, setFilterClassification] = useState<MediaClassification | ''>('');
-  const [filterFavorite, setFilterFavorite] = useState(false);
+  const [filterType, setFilterType] = useState<MediaType | ''>((searchParams.get('type') as MediaType) || '');
+  const [filterClassification, setFilterClassification] = useState<MediaClassification | ''>((searchParams.get('classification') as MediaClassification) || '');
+  const [filterFavorite, setFilterFavorite] = useState(searchParams.get('favorite') === '1');
   const [filterAlbum, setFilterAlbum] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   const [sortBy, setSortBy] = useState<'capturedAt' | 'importedAt' | 'createdAt'>('capturedAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
+  const [filterMissingGeo, setFilterMissingGeo] = useState<boolean>(searchParams.get('missingGeo') === '1');
+  const [filterCameraMake, setFilterCameraMake] = useState<string>(searchParams.get('cameraMake') || '');
+  const [filterCameraModel, setFilterCameraModel] = useState<string>(searchParams.get('cameraModel') || '');
+  const [filterDeviceName, setFilterDeviceName] = useState<string>(searchParams.get('sourceDeviceName') || '');
+
+  // Selection state
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkLocationOpen, setBulkLocationOpen] = useState(false);
+  const [bulkTagsOpen, setBulkTagsOpen] = useState(false);
+  const [snackbar, setSnackbar] = useState<{ message: string; severity: 'success' | 'error' } | null>(null);
 
   // Location drill-down
   const [filterCountry, setFilterCountry] = useState('');
@@ -400,6 +459,10 @@ export default function MediaLibraryPage() {
     if (filterRegion) params.region = filterRegion;
     if (filterLocality) params.locality = filterLocality;
     if (locationSearch) params.location = locationSearch;
+    if (filterCameraMake) params.cameraMake = filterCameraMake;
+    if (filterCameraModel) params.cameraModel = filterCameraModel;
+    if (filterDeviceName) params.sourceDeviceName = filterDeviceName;
+    if (filterMissingGeo) params.missingGeo = true;
     return params;
   }, [
     page,
@@ -417,6 +480,10 @@ export default function MediaLibraryPage() {
     filterRegion,
     filterLocality,
     locationSearch,
+    filterCameraMake,
+    filterCameraModel,
+    filterDeviceName,
+    filterMissingGeo,
   ]);
 
   // Load data on mount and when filters change.
@@ -445,7 +512,24 @@ export default function MediaLibraryPage() {
     locationSearch,
     sortBy,
     sortOrder,
+    filterMissingGeo,
+    filterCameraMake,
+    filterCameraModel,
+    filterDeviceName,
   ]);
+
+  // Reflect filter changes to URL params
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (filterClassification) params.set('classification', filterClassification);
+    if (filterMissingGeo) params.set('missingGeo', '1');
+    if (filterCameraMake) params.set('cameraMake', filterCameraMake);
+    if (filterCameraModel) params.set('cameraModel', filterCameraModel);
+    if (filterDeviceName) params.set('sourceDeviceName', filterDeviceName);
+    if (filterType) params.set('type', filterType);
+    if (filterFavorite) params.set('favorite', '1');
+    setSearchParams(params, { replace: true });
+  }, [filterClassification, filterMissingGeo, filterCameraMake, filterCameraModel, filterDeviceName, filterType, filterFavorite, setSearchParams]);
 
   useEffect(() => {
     if (!activeCircle) return;
@@ -560,6 +644,25 @@ export default function MediaLibraryPage() {
     setLocationSearch('');
     setPage(1);
   }, []);
+
+  const handleToggleSelect = useCallback((id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleClearSelection = useCallback(() => {
+    setSelected(new Set());
+  }, []);
+
+  const handleBulkSuccess = useCallback((message: string) => {
+    setSnackbar({ message, severity: 'success' });
+    setSelected(new Set());
+    void fetchMedia(buildParams());
+  }, [fetchMedia, buildParams]);
 
   const handleExport = useCallback(
     async (format: 'json' | 'csv') => {
@@ -808,6 +911,47 @@ export default function MediaLibraryPage() {
               </ToggleButtonGroup>
             </Grid>
 
+            {/* Camera / device filters */}
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <TextField
+                label="Camera Make"
+                size="small"
+                fullWidth
+                value={filterCameraMake}
+                onChange={(e) => { setFilterCameraMake(e.target.value); setPage(1); }}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <TextField
+                label="Camera Model"
+                size="small"
+                fullWidth
+                value={filterCameraModel}
+                onChange={(e) => { setFilterCameraModel(e.target.value); setPage(1); }}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <TextField
+                label="Device Name"
+                size="small"
+                fullWidth
+                value={filterDeviceName}
+                onChange={(e) => { setFilterDeviceName(e.target.value); setPage(1); }}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={filterMissingGeo}
+                    onChange={(e) => { setFilterMissingGeo(e.target.checked); setPage(1); }}
+                    size="small"
+                  />
+                }
+                label="Missing location only"
+              />
+            </Grid>
+
             {/* Location drill-down */}
             <Grid size={{ xs: 12 }}>
               <Divider sx={{ my: 0.5 }} />
@@ -980,17 +1124,43 @@ export default function MediaLibraryPage() {
         <>
           {grouped.map((group) => (
             <Box key={group.key} sx={{ mb: 3 }}>
-              <Typography
-                variant="subtitle2"
-                color="text.secondary"
-                sx={{
-                  mb: 1,
-                  pb: 0.5,
-                  borderBottom: `1px solid ${theme.palette.divider}`,
-                }}
-              >
-                {group.label}
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1, pb: 0.5, borderBottom: `1px solid ${theme.palette.divider}` }}>
+                <Typography variant="subtitle2" color="text.secondary">
+                  {group.label}
+                </Typography>
+                <Stack direction="row" spacing={0.5}>
+                  <Button
+                    size="small"
+                    variant="text"
+                    sx={{ minWidth: 'auto', fontSize: '0.7rem', py: 0 }}
+                    onClick={() => {
+                      setSelected(prev => {
+                        const next = new Set(prev);
+                        group.items.forEach(item => next.add(item.id));
+                        return next;
+                      });
+                    }}
+                  >
+                    Select all
+                  </Button>
+                  {group.items.some(item => selected.has(item.id)) && (
+                    <Button
+                      size="small"
+                      variant="text"
+                      sx={{ minWidth: 'auto', fontSize: '0.7rem', py: 0 }}
+                      onClick={() => {
+                        setSelected(prev => {
+                          const next = new Set(prev);
+                          group.items.forEach(item => next.delete(item.id));
+                          return next;
+                        });
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  )}
+                </Stack>
+              </Box>
 
               {/* Responsive grid using MUI Grid v2 */}
               <Box
@@ -1011,6 +1181,9 @@ export default function MediaLibraryPage() {
                     colCount={colCount}
                     onSelect={handleSelectItem}
                     onToggleFavorite={handleToggleFavorite}
+                    isSelected={selected.has(item.id)}
+                    anySelected={selected.size > 0}
+                    onToggleSelect={handleToggleSelect}
                   />
                 ))}
               </Box>
@@ -1056,6 +1229,52 @@ export default function MediaLibraryPage() {
         onSuccess={handleUploadSuccess}
         circleId={activeCircle.id}
       />
+
+      {/* Bulk action toolbar */}
+      <BulkActionToolbar
+        selected={selected}
+        circleId={activeCircle.id}
+        activeCircleRole={activeCircleRole}
+        onClear={handleClearSelection}
+        onOpenLocation={() => setBulkLocationOpen(true)}
+        onOpenTags={() => setBulkTagsOpen(true)}
+        onSuccess={handleBulkSuccess}
+        onError={(msg) => setSnackbar({ message: msg, severity: 'error' })}
+      />
+
+      {/* Bulk location dialog */}
+      <BulkLocationDialog
+        open={bulkLocationOpen}
+        onClose={() => setBulkLocationOpen(false)}
+        circleId={activeCircle.id}
+        ids={Array.from(selected)}
+        onSuccess={(msg) => { setBulkLocationOpen(false); handleBulkSuccess(msg); }}
+      />
+
+      {/* Bulk tags dialog */}
+      <BulkTagsDialog
+        open={bulkTagsOpen}
+        onClose={() => setBulkTagsOpen(false)}
+        circleId={activeCircle.id}
+        ids={Array.from(selected)}
+        onSuccess={(msg) => { setBulkTagsOpen(false); handleBulkSuccess(msg); }}
+      />
+
+      {/* Snackbar */}
+      <Snackbar
+        open={snackbar !== null}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setSnackbar(null)}
+          severity={snackbar?.severity ?? 'success'}
+          sx={{ width: '100%' }}
+        >
+          {snackbar?.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

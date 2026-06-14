@@ -244,6 +244,102 @@ export const handlers = [
     });
   }),
 
+  // Media endpoints
+  http.get(`${API_BASE}/media`, () => {
+    return HttpResponse.json({ items: [], meta: { page: 1, pageSize: 20, totalItems: 0, totalPages: 0 } });
+  }),
+
+  http.get(`${API_BASE}/media/tags`, () => {
+    return HttpResponse.json([]);
+  }),
+
+  http.get(`${API_BASE}/media/albums`, () => {
+    return HttpResponse.json({ items: [], meta: { page: 1, pageSize: 20, totalItems: 0, totalPages: 0 } });
+  }),
+
+  http.get(`${API_BASE}/media/dashboard`, () => {
+    return HttpResponse.json({
+      onThisDay: [],
+      recent: [],
+      favorites: [],
+      counts: { total: 0, unreviewed: 0, lowValue: 0, missingGeo: 0 },
+    });
+  }),
+
+  http.get(`${API_BASE}/media/geo/reverse`, () => {
+    return HttpResponse.json(null);
+  }),
+
+  http.get(`${API_BASE}/media/geo/search`, () => {
+    return new HttpResponse(null, { status: 503 });
+  }),
+
+  http.patch(`${API_BASE}/media/bulk`, () => {
+    return HttpResponse.json({ updated: 0 });
+  }),
+
+  http.post(`${API_BASE}/media/bulk/tags`, () => {
+    return HttpResponse.json({ added: 0, removed: 0 });
+  }),
+
+  http.post(`${API_BASE}/media/bulk/delete`, () => {
+    return HttpResponse.json({ deleted: 0 });
+  }),
+
+  http.get(`${API_BASE}/media/locations`, () => {
+    return HttpResponse.json([]);
+  }),
+
+  http.get(`${API_BASE}/media/:id`, ({ params }) => {
+    return HttpResponse.json({
+      id: params.id,
+      storageObjectId: 'obj-1',
+      addedById: 'test-user-id',
+      circleId: 'circle-1',
+      type: 'photo',
+      capturedAt: null,
+      capturedAtOffset: null,
+      importedAt: new Date().toISOString(),
+      source: 'web',
+      contentHash: null,
+      classification: 'unreviewed',
+      width: null,
+      height: null,
+      durationMs: null,
+      orientation: null,
+      takenLat: null,
+      takenLng: null,
+      takenAltitude: null,
+      cameraMake: null,
+      cameraModel: null,
+      originalFilename: 'test.jpg',
+      title: null,
+      caption: null,
+      description: null,
+      favorite: false,
+      geoCountry: null,
+      geoCountryCode: null,
+      geoAdmin1: null,
+      geoAdmin2: null,
+      geoLocality: null,
+      geoPlaceName: null,
+      geoSource: null,
+      geocodedAt: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      deletedAt: null,
+      metadata: null,
+      thumbnailUrl: null,
+      downloadUrl: null,
+      tags: [],
+    });
+  }),
+
+  http.patch(`${API_BASE}/media/:id`, async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    return HttpResponse.json({ ...body, id: 'test-id', updatedAt: new Date().toISOString() });
+  }),
+
   // Circles endpoints
   http.get(`${API_BASE}/circles`, () => {
     return HttpResponse.json({
