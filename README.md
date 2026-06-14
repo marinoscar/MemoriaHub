@@ -6,26 +6,34 @@ MemoriaHub is a personal media-ownership platform that gives families full contr
 
 ## Features
 
+### Family Circles (Collaborative Library)
+- **Shared Circle Library**: Every media item belongs to exactly one circle and is visible to all circle members — photos uploaded by any collaborator appear in the shared timeline
+- **Multiple Circles per User**: Belong to your personal library and several family circles simultaneously; switch active circle in the web app or CLI
+- **Per-Circle Roles**: `circle_admin` manages members and content; `collaborator` adds and organizes media; `viewer` has read-only access
+- **Email Invites**: Circle admins invite by email; the invite automatically allowlists the recipient so they can log in and join immediately on first sign-in
+- **Two-Layer Admin Model**: The global system Admin bypasses per-circle membership for full cross-circle management; per-circle roles govern everyday access
+- **Local-Drive Backup**: Admin-triggered server-side backup replicates S3 blobs to `BACKUP_LOCAL_PATH`; CLI `memoriahub backup` command lets operators pull blobs to their own drive
+
 ### Media and Storage
-- **Media Domain**: Photos and videos as first-class `MediaItem` records with typed columns for capture date, camera make/model, GPS coordinates, reverse-geocoded country/region/city, tags, albums, favorites, classification, and soft-delete
-- **Pluggable Storage**: AWS S3 today; local and Azure planned — storage providers are interchangeable by design
+- **Media Domain**: Photos and videos as first-class `MediaItem` records with typed columns for capture date, camera make/model, GPS coordinates, reverse-geocoded country/region/city, tags, albums, favorites, classification, and soft-delete. All items are circle-scoped (`circleId` required on create and list endpoints)
+- **Pluggable Storage**: AWS S3 (primary) and local-disk (backup); additional providers are interchangeable by design
 - **Resumable Uploads**: Multipart upload with pre-signed URLs and event-driven post-upload processing pipeline
 - **Personal Access Tokens**: Long-lived tokens for CLI tools, scripts, and automation workflows
-- **Metadata-First**: All media metadata stored in typed columns and queryable; exportable in JSON and CSV (roadmap Phase 04)
+- **Metadata-First**: All media metadata stored in typed columns and queryable; exportable in JSON and CSV
 
 ### Foundation
 - **Authentication**: Google OAuth 2.0 with JWT access tokens and refresh token rotation
 - **Device Authorization**: RFC 8628 Device Authorization Flow for CLI tools, mobile apps, and IoT devices
-- **Authorization**: Role-Based Access Control (RBAC) with three roles (Admin, Contributor, Viewer)
-- **Access Control**: Email allowlist restricts application access to pre-authorized users
+- **Authorization**: Role-Based Access Control (RBAC) with three global roles (Admin, Contributor, Viewer) plus per-circle roles
+- **Access Control**: Email allowlist restricts application access; circle invites upsert the allowlist automatically
 - **User Management**: Admin interface for managing users, role assignments, and allowlist
-- **Settings Framework**: System-wide and per-user settings with type-safe schemas
+- **Settings Framework**: System-wide and per-user settings with type-safe schemas (includes `activeCircleId`)
 - **Observability**: OpenTelemetry instrumentation with traces, metrics, and structured logging
 - **API Documentation**: Swagger/OpenAPI documentation at `/api/docs`
 - **Same-Origin Architecture**: Frontend and API served from the same host via Nginx reverse proxy
 
 ### Planned Capabilities
-The roadmap covers metadata extraction and reverse geocoding (Phase 02), web media library (Phase 03), metadata export (Phase 04), CLI importer (Phase 05), storage replication and local storage (Phase 06), memory prioritization (Phase 07), Android sync (Phase 08), and long-term enrichment such as face recognition, object detection, and duplicate detection (Phase 09). See [docs/plan/ROADMAP.md](docs/plan/ROADMAP.md) for details.
+The roadmap covers memory prioritization (Phase 07), Android sync (Phase 08 — circle-scoped from day one), and long-term enrichment such as face recognition, object detection, and duplicate detection (Phase 09). See [docs/plan/ROADMAP.md](docs/plan/ROADMAP.md) for details.
 
 ## Technology Stack
 
@@ -263,16 +271,37 @@ Interactive API documentation is available at `/api/docs` when running the appli
 - `GET /api/auth/device/sessions` - List authorized devices
 - `DELETE /api/auth/device/sessions/:id` - Revoke device access
 
-**Media (Phase 01 — implemented):**
-- `POST /api/media` - Register an uploaded file as a MediaItem
-- `GET /api/media` - List media (paginated; filter by type, date, classification, album, tag, location)
+**Family Circles:**
+- `POST /api/circles` - Create a new circle
+- `GET /api/circles` - List circles you belong to (`?all=true` for admin)
+- `GET /api/circles/:id` - Get circle details
+- `PATCH /api/circles/:id` - Update circle (circle_admin or super-admin)
+- `DELETE /api/circles/:id` - Delete circle (not personal circles)
+- `GET /api/circles/:id/members` - List circle members
+- `POST /api/circles/:id/members` - Add a member by user ID (circle_admin)
+- `PATCH /api/circles/:id/members/:userId` - Change member role
+- `DELETE /api/circles/:id/members/:userId` - Remove member or self-leave
+- `GET /api/circles/:id/invites` - List invites (circle_admin)
+- `POST /api/circles/:id/invites` - Create invite + upsert allowlist entry
+- `DELETE /api/circles/:id/invites/:inviteId` - Revoke pending invite
+
+**Admin — Backup:**
+- `POST /api/admin/backup` - Trigger local-drive backup replication
+- `GET /api/admin/backup/runs` - List recent backup runs
+- `GET /api/admin/backup/status` - Alias for `/runs`
+- `GET /api/admin/backup/runs/:runId` - Get status of a specific run
+- `GET /api/admin/backup/objects` - List media objects with signed download URLs
+
+**Media (circle-scoped — `circleId` required):**
+- `POST /api/media` - Register an uploaded file as a MediaItem (body: `circleId` required)
+- `GET /api/media` - List media (query: `circleId` required; filter by type, date, classification, album, tag, location)
 - `GET /api/media/:id` - Get a single MediaItem
 - `PATCH /api/media/:id` - Update mutable fields (title, caption, favorite, classification, etc.)
 - `DELETE /api/media/:id` - Soft-delete MediaItem (moves to trash; blob preserved)
-- `GET /api/media/tags` - List caller's tags
+- `GET /api/media/tags` - List tags for active circle (query: `circleId` required)
 - `POST /api/media/:id/tags` - Attach tags to a MediaItem
-- `POST /api/media/albums` - Create album
-- `GET /api/media/albums` - List albums
+- `POST /api/media/albums` - Create album (body: `circleId` required)
+- `GET /api/media/albums` - List albums (query: `circleId` required)
 - `POST /api/media/albums/:id/items` - Add items to album
 
 **Storage:**
@@ -341,6 +370,10 @@ AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=your-access-key
 AWS_SECRET_ACCESS_KEY=your-secret-key
 S3_BUCKET=your-bucket-name
+
+# Backup / Local-Drive Replication (Admin only)
+# BACKUP_LOCAL_PATH=/mnt/external-drive/memoriahub-backup
+# STORAGE_BACKUP_PROVIDER=local
 
 # Observability
 OTEL_ENABLED=true
