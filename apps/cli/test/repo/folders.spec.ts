@@ -234,6 +234,45 @@ describe('FolderRepo', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // circle_id
+  // ---------------------------------------------------------------------------
+
+  describe('circle_id', () => {
+    it('defaults to null when circleId not specified', () => {
+      const folder = repo.add({ path: '/tmp/nocircle' });
+      expect(folder.circle_id).toBeNull();
+    });
+
+    it('stores and returns circleId when provided', () => {
+      const folder = repo.add({ path: '/tmp/withcircle', circleId: 'circle-abc-123' });
+      expect(folder.circle_id).toBe('circle-abc-123');
+    });
+
+    it('circle_id is returned by list()', () => {
+      repo.add({ path: '/tmp/listcircle', circleId: 'circle-xyz' });
+      const all = repo.list();
+      const found = all.find((f) => f.path.endsWith('listcircle'));
+      expect(found?.circle_id).toBe('circle-xyz');
+    });
+
+    it('circle_id is returned by getById()', () => {
+      const inserted = repo.add({ path: '/tmp/byidcircle', circleId: 'circle-byid' });
+      const found = repo.getById(inserted.id);
+      expect(found?.circle_id).toBe('circle-byid');
+    });
+
+    it('folders without circleId have null circle_id in list()', () => {
+      repo.add({ path: '/tmp/nullcircle1' });
+      repo.add({ path: '/tmp/nullcircle2', circleId: 'circle-set' });
+      const all = repo.list();
+      const noCircle = all.find((f) => f.path.endsWith('nullcircle1'));
+      const withCircle = all.find((f) => f.path.endsWith('nullcircle2'));
+      expect(noCircle?.circle_id).toBeNull();
+      expect(withCircle?.circle_id).toBe('circle-set');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // remove (cascade)
   // ---------------------------------------------------------------------------
 

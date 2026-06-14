@@ -143,7 +143,7 @@ describe('SyncEngine', () => {
       writeTmpJpeg(tmpDir, 'photo.jpg');
 
       const { engine, folders } = makeEngine(db);
-      const folder = folders.add({ path: tmpDir });
+      const folder = folders.add({ path: tmpDir, circleId: 'test-circle' });
 
       const events: string[] = [];
       engine.on(EV.RUN_START, () => events.push('run:start'));
@@ -164,7 +164,7 @@ describe('SyncEngine', () => {
       writeTmpJpeg(tmpDir, 'b.jpg');
 
       const { engine, folders } = makeEngine(db);
-      const folder = folders.add({ path: tmpDir });
+      const folder = folders.add({ path: tmpDir, circleId: 'test-circle' });
 
       let startPayload: RunStartPayload | null = null;
       engine.on(EV.RUN_START, (p) => { startPayload = p; });
@@ -181,7 +181,7 @@ describe('SyncEngine', () => {
       writeTmpJpeg(tmpDir, 'x.jpg');
 
       const { engine, folders } = makeEngine(db);
-      const folder = folders.add({ path: tmpDir });
+      const folder = folders.add({ path: tmpDir, circleId: 'test-circle' });
 
       let donePayload: RunDonePayload | null = null;
       engine.on(EV.RUN_DONE, (p) => { donePayload = p; });
@@ -198,7 +198,7 @@ describe('SyncEngine', () => {
       writeTmpJpeg(tmpDir, 'p2.jpg');
 
       const { engine, folders } = makeEngine(db);
-      const folder = folders.add({ path: tmpDir });
+      const folder = folders.add({ path: tmpDir, circleId: 'test-circle' });
 
       const progresses: RunProgressPayload[] = [];
       engine.on(EV.RUN_PROGRESS, (p) => progresses.push(p));
@@ -220,7 +220,7 @@ describe('SyncEngine', () => {
         { post: mockResolving({ id: 'media-abc' }) },
         makeUploadFn('obj-xyz'),
       );
-      const folder = folders.add({ path: tmpDir });
+      const folder = folders.add({ path: tmpDir, circleId: 'test-circle' });
 
       await engine.run({ trigger: 'cli', folderIds: [folder.id] });
 
@@ -252,7 +252,7 @@ describe('SyncEngine', () => {
         makeUploadFn(),
       );
 
-      const folder = ctx.folders.add({ path: tmpDir });
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
 
       const skippedEvents: FileSkippedPayload[] = [];
       ctx.engine.on(EV.FILE_SKIPPED, (p) => skippedEvents.push(p));
@@ -282,7 +282,7 @@ describe('SyncEngine', () => {
         post: mockResolving({ id: 'media-stable' }),
       }, makeUploadFn('obj-stable'));
 
-      const folder = ctx.folders.add({ path: tmpDir });
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
 
       // First run — uploads the file
       await ctx.engine.run({ trigger: 'cli', folderIds: [folder.id] });
@@ -337,7 +337,7 @@ describe('SyncEngine', () => {
         uploadFn,
       );
 
-      const folder = ctx.folders.add({ path: tmpDir });
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
 
       const failedEvents: FileFailedPayload[] = [];
       const doneEvents: FileDonePayload[] = [];
@@ -375,7 +375,7 @@ describe('SyncEngine', () => {
         uploadFn,
       );
 
-      const folder = ctx.folders.add({ path: tmpDir });
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
 
       const failedEvents: FileFailedPayload[] = [];
       ctx.engine.on(EV.FILE_FAILED, (p) => failedEvents.push(p));
@@ -405,7 +405,7 @@ describe('SyncEngine', () => {
         { get: mockResolving({ items: [] }) },
         failUpload,
       );
-      const folder = ctx1.folders.add({ path: tmpDir });
+      const folder = ctx1.folders.add({ path: tmpDir, circleId: 'test-circle' });
       await ctx1.engine.run({ trigger: 'cli', folderIds: [folder.id] });
 
       // Confirm file is failed
@@ -442,7 +442,7 @@ describe('SyncEngine', () => {
 
       // Upsert the file at cap=5 with status=failed
       const { folders, files } = makeEngine(db);
-      const folder = folders.add({ path: tmpDir });
+      const folder = folders.add({ path: tmpDir, circleId: 'test-circle' });
       const rec = files.upsert(folder.id, path.join(tmpDir, 'blocked.jpg'), { status: 'failed' });
       files.setStatus(rec.id, 'failed', { attempt_count: 5 }); // at cap
 
@@ -469,7 +469,7 @@ describe('SyncEngine', () => {
       writeTmpJpeg(tmpDir, 'force-retry.jpg');
 
       const { folders, files } = makeEngine(db);
-      const folder = folders.add({ path: tmpDir });
+      const folder = folders.add({ path: tmpDir, circleId: 'test-circle' });
       const rec = files.upsert(folder.id, path.join(tmpDir, 'force-retry.jpg'), { status: 'failed' });
       files.setStatus(rec.id, 'failed', { attempt_count: 5 }); // at cap
 
@@ -508,7 +508,7 @@ describe('SyncEngine', () => {
       writeTmpJpeg(tmpDir, 'stale.jpg');
 
       const { folders, files } = makeEngine(db);
-      const folder = folders.add({ path: tmpDir });
+      const folder = folders.add({ path: tmpDir, circleId: 'test-circle' });
 
       // Pre-seed the file as uploading (simulating a crash mid-upload)
       const rec = files.upsert(folder.id, path.join(tmpDir, 'stale.jpg'), {
@@ -556,7 +556,7 @@ describe('SyncEngine', () => {
         uploadFn,
       );
 
-      const folder = ctx.folders.add({ path: tmpDir });
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
       const doneEvents: FileDonePayload[] = [];
       ctx.engine.on(EV.FILE_DONE, (p) => doneEvents.push(p));
 
@@ -577,7 +577,7 @@ describe('SyncEngine', () => {
         uploadFn,
       );
 
-      const folder = ctx.folders.add({ path: tmpDir });
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
 
       await ctx.engine.run({ trigger: 'cli', folderIds: [folder.id], dryRun: true });
 
@@ -594,7 +594,7 @@ describe('SyncEngine', () => {
         { get: mockResolving({ items: [] }) },
       );
 
-      const folder = ctx.folders.add({ path: tmpDir });
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
 
       let capturedRunId: number | null = null;
       ctx.engine.on(EV.RUN_START, (p) => { capturedRunId = p.runId; });
@@ -637,7 +637,7 @@ describe('SyncEngine', () => {
         uploadFn,
       );
 
-      const folder = ctx.folders.add({ path: tmpDir });
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
 
       await ctx.engine.run({
         trigger: 'cli',
@@ -676,7 +676,7 @@ describe('SyncEngine', () => {
         makeUploadFn('obj-1'),
       );
 
-      const folder = ctx1.folders.add({ path: tmpDir });
+      const folder = ctx1.folders.add({ path: tmpDir, circleId: 'test-circle' });
       await ctx1.engine.run({ trigger: 'cli', folderIds: [folder.id] });
 
       const upload1Count = (ctx1.uploadFn as jest.MockedFunction<typeof ctx1.uploadFn>).mock.calls.length;
@@ -724,6 +724,119 @@ describe('SyncEngine', () => {
   });
 
   // -------------------------------------------------------------------------
+  // circleId resolution
+  // -------------------------------------------------------------------------
+
+  describe('circleId resolution', () => {
+    it('uses folder.circle_id when set', async () => {
+      const postFn = mockResolving({ id: 'media-1' });
+      const { engine, folders } = makeEngine(
+        db,
+        { get: mockResolving({ items: [] }), post: postFn },
+        makeUploadFn('obj-1'),
+        makeHashFn(),
+      );
+
+      const folder = folders.add({ path: tmpDir, circleId: 'circle-from-folder' });
+      writeTmpJpeg(tmpDir, 'circle-test1.jpg');
+
+      await engine.run({ folderIds: [folder.id], dryRun: false, trigger: 'cli' });
+
+      const mediaCalls = (postFn.mock.calls as Array<[string, Record<string, unknown>]>)
+        .filter(([p]) => p === '/api/media');
+      expect(mediaCalls).toHaveLength(1);
+      expect(mediaCalls[0][1].circleId).toBe('circle-from-folder');
+    });
+
+    it('uses opts.circleId when folder.circle_id is null', async () => {
+      // Use a fresh db and dir to avoid leftover files from other tests
+      const db2 = makeDb();
+      const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'circle-test-opts-'));
+      try {
+        const postFn = mockResolving({ id: 'media-2' });
+        const { engine, folders } = makeEngine(
+          db2,
+          { get: mockResolving({ items: [] }), post: postFn },
+          makeUploadFn('obj-2'),
+          makeHashFn(),
+        );
+
+        const folder = folders.add({ path: dir2 }); // no circleId
+        writeTmpJpeg(dir2, 'circle-test2.jpg');
+
+        await engine.run({ folderIds: [folder.id], circleId: 'circle-from-opts', dryRun: false, trigger: 'cli' });
+
+        const mediaCalls = (postFn.mock.calls as Array<[string, Record<string, unknown>]>)
+          .filter(([p]) => p === '/api/media');
+        expect(mediaCalls).toHaveLength(1);
+        expect(mediaCalls[0][1].circleId).toBe('circle-from-opts');
+      } finally {
+        db2.close();
+        fs.rmSync(dir2, { recursive: true, force: true });
+      }
+    });
+
+    it('folder.circle_id takes priority over opts.circleId', async () => {
+      const db3 = makeDb();
+      const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), 'circle-test-prio-'));
+      try {
+        const postFn = mockResolving({ id: 'media-3' });
+        const { engine, folders } = makeEngine(
+          db3,
+          { get: mockResolving({ items: [] }), post: postFn },
+          makeUploadFn('obj-3'),
+          makeHashFn(),
+        );
+
+        const folder = folders.add({ path: dir3, circleId: 'circle-folder-wins' });
+        writeTmpJpeg(dir3, 'circle-test3.jpg');
+
+        await engine.run({ folderIds: [folder.id], circleId: 'circle-opts-loses', dryRun: false, trigger: 'cli' });
+
+        const mediaCalls = (postFn.mock.calls as Array<[string, Record<string, unknown>]>)
+          .filter(([p]) => p === '/api/media');
+        expect(mediaCalls).toHaveLength(1);
+        expect(mediaCalls[0][1].circleId).toBe('circle-folder-wins');
+      } finally {
+        db3.close();
+        fs.rmSync(dir3, { recursive: true, force: true });
+      }
+    });
+
+    it('fails fast when no circleId resolves', async () => {
+      const db4 = makeDb();
+      const dir4 = fs.mkdtempSync(path.join(os.tmpdir(), 'circle-test-fail-'));
+      try {
+        const postFn = mockResolving({ id: 'media-4' });
+        const { engine, folders } = makeEngine(
+          db4,
+          { get: mockResolving({ items: [] }), post: postFn },
+          makeUploadFn('obj-4'),
+          makeHashFn(),
+        );
+
+        const folder = folders.add({ path: dir4 }); // no circleId
+        writeTmpJpeg(dir4, 'circle-test4.jpg');
+
+        // No circleId in opts either
+        const result = await engine.run({ folderIds: [folder.id], dryRun: false, trigger: 'cli' });
+
+        // File should be failed, not uploaded
+        expect(result.stats.failed).toBe(1);
+        expect(result.stats.uploaded).toBe(0);
+
+        // POST /api/media should NOT have been called
+        const mediaCalls = (postFn.mock.calls as Array<[string, string]>)
+          .filter(([p]) => p === '/api/media');
+        expect(mediaCalls).toHaveLength(0);
+      } finally {
+        db4.close();
+        fs.rmSync(dir4, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // contentHash in register body
   // -------------------------------------------------------------------------
 
@@ -742,7 +855,7 @@ describe('SyncEngine', () => {
         makeHashFn('aabbccddeeff0011aabbccddeeff0011aabbccddeeff0011aabbccddeeff0011'),
       );
 
-      const folder = ctx.folders.add({ path: tmpDir });
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
       await ctx.engine.run({ trigger: 'cli', folderIds: [folder.id] });
 
       expect(postFn).toHaveBeenCalledTimes(1);
@@ -767,7 +880,7 @@ describe('SyncEngine', () => {
         makeHashFn('deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef'),
       );
 
-      const folder = ctx.folders.add({ path: tmpDir });
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
 
       const skippedEvents: FileSkippedPayload[] = [];
       const doneEvents: FileDonePayload[] = [];
@@ -800,7 +913,7 @@ describe('SyncEngine', () => {
         makeUploadFn('obj-normal'),
       );
 
-      const folder = ctx.folders.add({ path: tmpDir });
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
 
       const doneEvents: FileDonePayload[] = [];
       ctx.engine.on(EV.FILE_DONE, (p) => doneEvents.push(p));
@@ -832,7 +945,7 @@ describe('SyncEngine', () => {
         makeUploadFn('obj-cached'),
         hash1,
       );
-      const folder = ctx1.folders.add({ path: tmpDir });
+      const folder = ctx1.folders.add({ path: tmpDir, circleId: 'test-circle' });
       await ctx1.engine.run({ trigger: 'cli', folderIds: [folder.id] });
 
       // After first run: sha256 and mtime_ms must be stored
@@ -872,7 +985,7 @@ describe('SyncEngine', () => {
         post: mockResolving({ id: 'media-mod' }),
       }, makeUploadFn('obj-mod'));
 
-      const folder = ctx1.folders.add({ path: tmpDir });
+      const folder = ctx1.folders.add({ path: tmpDir, circleId: 'test-circle' });
 
       // Pre-seed with a very old mtime to simulate a changed file
       const rec = ctx1.files.upsert(folder.id, filePath, {
@@ -921,7 +1034,7 @@ describe('SyncEngine', () => {
         makeHashFn('ffffffff' + 'ffffffff'.repeat(7)),
       );
 
-      const folder = ctx.folders.add({ path: tmpDir });
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
       await ctx.engine.run({ trigger: 'cli', folderIds: [folder.id] });
 
       const rec = ctx.files.listByFolder(folder.id)[0];

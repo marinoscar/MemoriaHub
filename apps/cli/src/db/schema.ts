@@ -13,8 +13,7 @@ CREATE TABLE IF NOT EXISTS folders (
   recursive   INTEGER NOT NULL DEFAULT 0,
   enabled     INTEGER NOT NULL DEFAULT 1,
   added_at    TEXT    NOT NULL,
-  last_sync_at TEXT,
-  circle_id   TEXT
+  last_sync_at TEXT
 )`;
 
 export const CREATE_FOLDERS_IDX_ENABLED = `
