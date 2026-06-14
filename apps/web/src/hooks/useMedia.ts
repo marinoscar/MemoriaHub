@@ -29,6 +29,7 @@ export interface MediaFilters {
   sortBy?: MediaQueryParams['sortBy'];
   sortOrder?: MediaQueryParams['sortOrder'];
   page?: number;
+  circleId?: string;
 }
 
 interface UseMediaResult {
