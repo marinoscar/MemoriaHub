@@ -246,6 +246,7 @@ function App(): React.ReactElement {
           <Text dimColor>Headless commands (bypass TUI):</Text>
           <Text>  memoriahub login      Configure server + PAT</Text>
           <Text>  memoriahub folders    Manage watched folders</Text>
+          <Text>  memoriahub circles    Manage active circle</Text>
           <Text>  memoriahub sync       Run a sync</Text>
           <Text>  memoriahub status     Show sync status</Text>
           <Text>  memoriahub retry      Retry failed files</Text>
