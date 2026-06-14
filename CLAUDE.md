@@ -305,16 +305,37 @@ cd apps/api && npm run prisma:migrate
 - `GET /api/pat` - List current user's tokens
 - `DELETE /api/pat/{id}` - Revoke a token
 
+### Family Circles (circles:read / circles:write)
+- `POST /api/circles` - Create a circle
+- `GET /api/circles` - List circles the caller is a member of
+- `GET /api/circles/:id` - Get circle detail
+- `PATCH /api/circles/:id` - Update circle name/description (circle_admin role required)
+- `DELETE /api/circles/:id` - Delete circle — personal circles cannot be deleted (circle_admin role required)
+- `GET /api/circles/:id/members` - List members
+- `POST /api/circles/:id/members` - Add member by userId (circle_admin role required)
+- `PATCH /api/circles/:id/members/:userId` - Update member role (circle_admin role required)
+- `DELETE /api/circles/:id/members/:userId` - Remove member (circle_admin role required)
+- `GET /api/circles/:id/invites` - List pending invites (circle_admin role required)
+- `POST /api/circles/:id/invites` - Send invite by email; upserts allowed_emails (circle_admin role required)
+- `DELETE /api/circles/:id/invites/:inviteId` - Cancel pending invite (circle_admin role required)
+
+### Admin: Backup (Admin role + backup:run / backup:read)
+- `POST /api/admin/backup` - Trigger a backup run
+- `GET /api/admin/backup/runs` - List recent backup runs
+- `GET /api/admin/backup/status` - Alias for /runs
+- `GET /api/admin/backup/runs/:runId` - Get single run detail
+- `GET /api/admin/backup/objects` - List objects in the backup destination
+
 ### Health
 - `GET /api/health/live` - Liveness check
 - `GET /api/health/ready` - Readiness check (includes DB)
 
 ## RBAC Model
 
-### Roles
-- **Admin**: Full access, manage users and system settings
-- **Contributor**: Standard capabilities, manage own settings
-- **Viewer**: Least privilege (default), manage own settings
+### System Roles
+- **Admin**: Full access, manage users, system settings, and all circles
+- **Contributor**: Standard capabilities, manage own settings, create/manage circles
+- **Viewer**: Least privilege (default), manage own settings, create/manage circles
 
 ### Key Permissions
 - `system_settings:read/write` - System settings access
@@ -324,6 +345,24 @@ cd apps/api && npm run prisma:migrate
 - `allowlist:read/write` - Allowlist management (Admin only)
 - `storage:read/write/delete` - Storage object access (own objects)
 - `storage:read_any/write_any/delete_any` - Storage object access (all objects, Admin only)
+- `circles:read` - List and read circles the user is a member of (all roles)
+- `circles:write` - Create circles and manage circles the user owns (all roles)
+- `circles:manage_any` - Read/write/delete any circle regardless of membership (Admin only)
+- `backup:run` - Trigger backup jobs (Admin only)
+- `backup:read` - Read backup run history and object list (Admin only)
+
+### Per-Circle Roles
+Each circle has its own role for each member, independent of the system role:
+
+| Per-Circle Role | Rank | Capabilities |
+|-----------------|------|--------------|
+| `viewer`        | 1    | Browse and download media in the circle |
+| `collaborator`  | 2    | Upload, tag, and organize media; invite others at viewer level |
+| `circle_admin`  | 3    | All collaborator actions plus remove members, delete circle |
+
+The circle owner is automatically assigned `circle_admin` on circle creation. Every user also has a personal circle (`isPersonal: true`) created at signup, where they are the sole member at `circle_admin`.
+
+**Super-admin bypass:** A user holding `circles:manage_any`, `media:write_any`, or `media:read_any` bypasses per-circle role checks entirely. This lets system Admins moderate any circle without being a member.
 
 ## Database Tables
 
@@ -332,14 +371,19 @@ cd apps/api && npm run prisma:migrate
 - `roles` / `permissions` / `role_permissions` - RBAC
 - `user_roles` - User-to-role assignments
 - `system_settings` - Global app settings (JSONB)
-- `user_settings` - Per-user settings (JSONB)
+- `user_settings` - Per-user settings (JSONB); includes `activeCircleId` (UX convenience, never trusted for authz)
 - `audit_events` - Action audit log
 - `refresh_tokens` - JWT refresh tokens (hashed)
-- `allowed_emails` - Allowlist for access control
+- `allowed_emails` - Allowlist for access control; circle invites also upsert here
 - `device_codes` - Device authorization codes (RFC 8628)
-- `storage_objects` - File metadata, status, storage references
+- `storage_objects` - File metadata, status, storage references (no circle_id; auth resolves via media_item)
 - `storage_object_chunks` - Multipart upload chunk tracking
 - `personal_access_tokens` - User-created long-lived API tokens (hashed)
+- `circles` - Family circles; `is_personal=true` circles cannot be deleted
+- `circle_members` - Per-circle memberships with `CircleRole` enum (`circle_admin` | `collaborator` | `viewer`)
+- `circle_invites` - Email invites for circles; claimed on invited user's first login
+
+**Note:** `media_items`, `albums`, and `tags` use `added_by_id` (not `owner_id`) to track the uploading user. Dedup uniqueness for `media_items` is `(circle_id, content_hash)`. Tag names are unique per `(circle_id, name)`.
 
 ## Access Control: Email Allowlist
 
