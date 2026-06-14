@@ -9,7 +9,6 @@ FROM node:26-alpine AS base
 WORKDIR /app
 # Install OpenSSL for Prisma compatibility and ffmpeg for video processing
 RUN apk add --no-cache openssl openssl-dev ffmpeg
-RUN corepack enable
 
 # -----------------------------------------------------------------------------
 # Dependencies stage
