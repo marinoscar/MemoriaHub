@@ -267,6 +267,11 @@ export class MediaService {
       contentHash,
       sortBy,
       sortOrder,
+      cameraMake,
+      cameraModel,
+      sourceDeviceId,
+      sourceDeviceName,
+      missingGeo,
     } = query;
 
     const skip = (page - 1) * pageSize;
@@ -364,6 +369,12 @@ export class MediaService {
             ],
           }
         : {}),
+      ...(cameraMake ? { cameraMake: { contains: cameraMake, mode: 'insensitive' as const } } : {}),
+      ...(cameraModel ? { cameraModel: { contains: cameraModel, mode: 'insensitive' as const } } : {}),
+      ...(sourceDeviceName ? { sourceDeviceName: { contains: sourceDeviceName, mode: 'insensitive' as const } } : {}),
+      ...(sourceDeviceId ? { sourceDeviceId } : {}),
+      ...(missingGeo === true ? { takenLat: null, takenLng: null } : {}),
+      ...(missingGeo === false ? { takenLat: { not: null }, takenLng: { not: null } } : {}),
     };
 
     const orderBy: Prisma.MediaItemOrderByWithRelationInput = {

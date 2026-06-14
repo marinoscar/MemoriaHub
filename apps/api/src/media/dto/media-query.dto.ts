@@ -29,6 +29,11 @@ export const mediaQuerySchema = z.object({
   // Sort
   sortBy: z.enum(['capturedAt', 'importedAt', 'createdAt']).default('capturedAt'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
+  cameraMake: z.string().optional(),
+  cameraModel: z.string().optional(),
+  sourceDeviceId: z.string().optional(),
+  sourceDeviceName: z.string().optional(),
+  missingGeo: z.string().optional().transform(v => v === 'true' ? true : v === 'false' ? false : undefined),
 });
 
 export class MediaQueryDto extends createZodDto(mediaQuerySchema) {}

@@ -331,6 +331,11 @@ export class MediaController {
   @ApiQuery({ name: 'location', required: false, type: String, description: 'Free-text search across all geo tiers' })
   @ApiQuery({ name: 'sortBy', required: false, enum: ['capturedAt', 'importedAt', 'createdAt'] })
   @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'] })
+  @ApiQuery({ name: 'cameraMake', required: false, type: String, description: 'Camera make (contains, case-insensitive)' })
+  @ApiQuery({ name: 'cameraModel', required: false, type: String, description: 'Camera model (contains, case-insensitive)' })
+  @ApiQuery({ name: 'sourceDeviceId', required: false, type: String, description: 'Exact source device ID' })
+  @ApiQuery({ name: 'sourceDeviceName', required: false, type: String, description: 'Source device name (contains, case-insensitive)' })
+  @ApiQuery({ name: 'missingGeo', required: false, type: Boolean, description: 'true = missing GPS, false = has GPS' })
   @ApiResponse({ status: 200, description: 'Paginated media list' })
   async listMedia(
     @Query() query: MediaQueryDto,
