@@ -54,9 +54,13 @@ export class MediaController {
   @Get('tags')
   @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: "List caller's tags with attach counts" })
+  @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Tag list returned' })
-  async listTags(@CurrentUser('id') userId: string) {
-    return this.mediaService.listTags(userId);
+  async listTags(
+    @Query('circleId') circleId: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.listTags(circleId, user.id, user.permissions);
   }
 
   /**
@@ -89,11 +93,11 @@ export class MediaController {
     summary: 'Stream metadata export for the caller\'s media items',
     description:
       'Returns a streaming download of MediaItem metadata in JSON (NDJSON) or CSV format. ' +
-      'Admins with media:read_any can supply ?ownerId=<userId> to export another user\'s records. ' +
+      'All records for the specified circle are included. ' +
       'The response is chunked — no size limit for the caller\'s own data.',
   })
   @ApiQuery({ name: 'format', required: false, enum: ['json', 'csv'], description: 'Export format (default: json)' })
-  @ApiQuery({ name: 'ownerId', required: false, type: String, format: 'uuid', description: 'Admin only: export a specific user\'s media' })
+  @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid', description: 'Circle ID to export media from' })
   @ApiQuery({ name: 'type', required: false, enum: ['photo', 'video'], description: 'Filter by media type' })
   @ApiQuery({ name: 'from', required: false, type: String, description: 'ISO 8601 datetime — filter capturedAt >= from' })
   @ApiQuery({ name: 'to', required: false, type: String, description: 'ISO 8601 datetime — filter capturedAt <= to' })
@@ -150,9 +154,9 @@ export class MediaController {
   @ApiResponse({ status: 201, description: 'Album created' })
   async createAlbum(
     @Body() dto: CreateAlbumDto,
-    @CurrentUser('id') userId: string,
+    @CurrentUser() user: RequestUser,
   ) {
-    return this.mediaService.createAlbum(dto, userId);
+    return this.mediaService.createAlbum(dto, user.id, user.permissions);
   }
 
   /**
@@ -288,10 +292,10 @@ export class MediaController {
   @ApiResponse({ status: 404, description: 'StorageObject not found' })
   async createMedia(
     @Body() dto: CreateMediaDto,
-    @CurrentUser('id') userId: string,
+    @CurrentUser() user: RequestUser,
     @Res({ passthrough: true }) res: FastifyReply,
   ) {
-    const result = await this.mediaService.createMedia(dto, userId);
+    const result = await this.mediaService.createMedia(dto, user.id, user.permissions);
     // Signal dedup vs. fresh create via HTTP status while keeping the body shape
     // consistent so downstream consumers can also inspect `deduplicated`.
     if (result.deduplicated) {
