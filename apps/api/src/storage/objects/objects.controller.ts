@@ -27,6 +27,7 @@ import { ZodValidationPipe } from 'nestjs-zod';
 
 import { Auth } from '../../auth/decorators/auth.decorator';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
+import { RequestUser } from '../../auth/interfaces/authenticated-user.interface';
 import { ObjectsService } from './objects.service';
 import {
   InitUploadDto,
@@ -114,9 +115,9 @@ export class ObjectsController {
   })
   async getById(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser('id') userId: string,
+    @CurrentUser() user: RequestUser,
   ): Promise<{ data: ObjectResponseDto }> {
-    const result = await this.objectsService.getById(id, userId);
+    const result = await this.objectsService.getById(id, user.id, user.permissions);
     return { data: result };
   }
 
@@ -149,9 +150,9 @@ export class ObjectsController {
   async getDownloadUrl(
     @Param('id', ParseUUIDPipe) id: string,
     @Query('expiresIn') expiresIn: number | undefined,
-    @CurrentUser('id') userId: string,
+    @CurrentUser() user: RequestUser,
   ): Promise<{ data: DownloadUrlResponseDto }> {
-    const result = await this.objectsService.getDownloadUrl(id, userId, expiresIn);
+    const result = await this.objectsService.getDownloadUrl(id, user.id, expiresIn, user.permissions);
     return { data: result };
   }
 
@@ -179,9 +180,9 @@ export class ObjectsController {
   })
   async deleteObject(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser('id') userId: string,
+    @CurrentUser() user: RequestUser,
   ): Promise<void> {
-    await this.objectsService.delete(id, userId);
+    await this.objectsService.delete(id, user.id, user.permissions);
   }
 
   /**
@@ -209,9 +210,9 @@ export class ObjectsController {
   async updateMetadata(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(updateMetadataSchema)) dto: UpdateMetadataDto,
-    @CurrentUser('id') userId: string,
+    @CurrentUser() user: RequestUser,
   ): Promise<{ data: ObjectResponseDto }> {
-    const result = await this.objectsService.updateMetadata(id, dto, userId);
+    const result = await this.objectsService.updateMetadata(id, dto, user.id, user.permissions);
     return { data: result };
   }
 
