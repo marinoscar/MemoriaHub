@@ -1,11 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { Readable } from 'stream';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 import { ObjectProcessingService } from './object-processing.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { STORAGE_PROVIDER } from '../providers/storage-provider.interface';
 import { OBJECT_PROCESSOR, ObjectProcessor } from './object-processor.interface';
 import { ObjectUploadedEvent } from './events/object-uploaded.event';
+import { OBJECT_PROCESSED_EVENT } from './events/object-processed.event';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
 import { createMockStorageProvider } from '../../../test/mocks/storage-provider.mock';
 
@@ -13,6 +15,7 @@ describe('ObjectProcessingService', () => {
   let service: ObjectProcessingService;
   let mockPrisma: MockPrismaService;
   let mockStorageProvider: ReturnType<typeof createMockStorageProvider>;
+  let mockEventEmitter: jest.Mocked<Pick<EventEmitter2, 'emit' | 'emitAsync'>>;
 
   const mockStorageObject = {
     id: 'obj-123',
@@ -33,6 +36,10 @@ describe('ObjectProcessingService', () => {
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
     mockStorageProvider = createMockStorageProvider();
+    mockEventEmitter = {
+      emit: jest.fn().mockReturnValue(true),
+      emitAsync: jest.fn().mockResolvedValue([]),
+    };
   });
 
   afterEach(() => {
@@ -46,6 +53,7 @@ describe('ObjectProcessingService', () => {
           ObjectProcessingService,
           { provide: PrismaService, useValue: mockPrisma },
           { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
+          { provide: EventEmitter2, useValue: mockEventEmitter },
         ],
       }).compile();
 
@@ -75,6 +83,11 @@ describe('ObjectProcessingService', () => {
           }),
         },
       });
+
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        OBJECT_PROCESSED_EVENT,
+        expect.objectContaining({ storageObjectId: mockStorageObject.id }),
+      );
     });
   });
 
@@ -108,6 +121,7 @@ describe('ObjectProcessingService', () => {
           ObjectProcessingService,
           { provide: PrismaService, useValue: mockPrisma },
           { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
+          { provide: EventEmitter2, useValue: mockEventEmitter },
           {
             provide: OBJECT_PROCESSOR,
             useValue: [mockProcessor1, mockProcessor2],
@@ -464,6 +478,7 @@ describe('ObjectProcessingService', () => {
           ObjectProcessingService,
           { provide: PrismaService, useValue: mockPrisma },
           { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
+          { provide: EventEmitter2, useValue: mockEventEmitter },
           {
             provide: OBJECT_PROCESSOR,
             useValue: mockProcessor, // Single processor, not array
