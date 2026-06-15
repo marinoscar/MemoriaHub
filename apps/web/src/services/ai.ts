@@ -14,8 +14,9 @@ export interface AiProvider {
 
 export interface AiSettingsResponse {
   providers: AiProvider[];
+  knownProviders: AiProvider[];
   features: {
-    search: { provider: string; model: string } | null;
+    search: { provider: string | null; model: string | null } | null;
   };
   conversations: {
     archiveAfterDays: number;

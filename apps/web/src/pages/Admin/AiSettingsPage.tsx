@@ -61,23 +61,28 @@ function AiSettingsContent() {
   // Sync enabled toggles from settings
   useEffect(() => {
     if (!settings) return;
+    const allProviders = [
+      ...(settings.providers ?? []),
+      ...(settings.knownProviders ?? []),
+    ];
+
     const enabledMap: Record<string, boolean> = {};
-    settings.providers.forEach((p) => {
+    allProviders.forEach((p) => {
       enabledMap[p.provider] = p.enabled;
     });
     setProviderEnabled(enabledMap);
 
     // Pre-populate base URL if present
     const baseUrlMap: Record<string, string> = {};
-    settings.providers.forEach((p) => {
+    allProviders.forEach((p) => {
       if (p.baseUrl) baseUrlMap[p.provider] = p.baseUrl;
     });
     setProviderBaseUrls(baseUrlMap);
 
-    // Pre-populate search feature selections
+    // Pre-populate search feature selections (guard against null provider/model)
     if (settings.features.search) {
-      setSearchProvider(settings.features.search.provider);
-      setSearchModel(settings.features.search.model);
+      setSearchProvider(settings.features.search.provider ?? '');
+      setSearchModel(settings.features.search.model ?? '');
     }
   }, [settings]);
 
@@ -171,8 +176,8 @@ function AiSettingsContent() {
           Configure AI provider credentials and feature settings
         </Typography>
 
-        {/* Provider sections */}
-        {(settings?.providers ?? []).map((providerConfig) => (
+        {/* Provider sections — show configured providers AND known-but-unconfigured providers */}
+        {[...(settings?.providers ?? []), ...(settings?.knownProviders ?? [])].map((providerConfig) => (
           <Paper key={providerConfig.provider} variant="outlined" sx={{ p: 3, mb: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
               <Typography variant="h6">
