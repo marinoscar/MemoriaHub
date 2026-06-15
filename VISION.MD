@@ -189,6 +189,8 @@ The MVP web app should allow users to:
 * Manage basic storage settings.
 * Review import and sync status.
 * Identify media that may not be a meaningful family memory.
+* Browse a memories dashboard showing On This Day highlights, recent imports, favorites, and a review queue of unclassified or geoless items.
+* Bulk-edit location, tags, classification, and favorite flag across many items at once, reducing the time to organize large imports.
 
 The web app should be clean, simple, and focused on control rather than social sharing.
 

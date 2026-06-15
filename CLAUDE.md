@@ -326,6 +326,18 @@ cd apps/api && npm run prisma:migrate
 - `GET /api/admin/backup/runs/:runId` - Get single run detail
 - `GET /api/admin/backup/objects` - List objects in the backup destination
 
+### Media — Bulk Operations (circle-scoped, collaborator role required)
+- `PATCH /api/media/bulk` - Bulk update location / classification / favorite on 1–500 items
+- `POST /api/media/bulk/tags` - Bulk add/remove tags on 1–500 items
+- `POST /api/media/bulk/delete` - Bulk soft-delete 1–500 items
+
+### Media — Geo Services
+- `GET /api/media/geo/reverse?lat=&lng=` - On-demand reverse geocoding (offline provider by default)
+- `GET /api/media/geo/search?q=&limit=` - Forward geocoding via Nominatim (requires `GEO_FORWARD_SEARCH_ENABLED=true`)
+
+### Media — Circle Dashboard
+- `GET /api/media/dashboard?circleId=` - On This Day + recent/favorites + review-queue counts
+
 ### Health
 - `GET /api/health/live` - Liveness check
 - `GET /api/health/ready` - Readiness check (includes DB)
@@ -459,6 +471,11 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 - `OTEL_ENABLED` - Enable OpenTelemetry (default: true)
 - `OTEL_EXPORTER_OTLP_ENDPOINT` - OTEL Collector endpoint
 - `UPTRACE_DSN` - Uptrace connection string
+
+**Geo Services:**
+- `GEO_PROVIDER` - Reverse geocoding provider: `offline` (default, on-server GeoNames dataset) or `nominatim` (HTTP, sends GPS off-server)
+- `NOMINATIM_BASE_URL` - Nominatim endpoint (default: `https://nominatim.openstreetmap.org`)
+- `GEO_FORWARD_SEARCH_ENABLED` - Enable `GET /api/media/geo/search` forward geocoding (default: `false`; only typed query leaves server, never GPS)
 
 ## Common Patterns
 
