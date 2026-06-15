@@ -7,7 +7,7 @@ import { AiProviderRegistry } from '../../ai/providers/ai-provider.registry';
 import { ChatMessage } from '../../ai/providers/ai-provider.interface';
 
 export interface ConversationListResult {
-  data: SearchConversation[];
+  items: SearchConversation[];
   meta: {
     page: number;
     pageSize: number;
@@ -79,7 +79,7 @@ export class ConversationsService {
 
     const skip = (page - 1) * pageSize;
 
-    const [data, totalItems] = await Promise.all([
+    const [items, totalItems] = await Promise.all([
       this.prisma.searchConversation.findMany({
         where,
         orderBy: { updatedAt: 'desc' },
@@ -90,7 +90,7 @@ export class ConversationsService {
     ]);
 
     return {
-      data,
+      items,
       meta: {
         page,
         pageSize,
