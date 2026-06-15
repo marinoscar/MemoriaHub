@@ -307,15 +307,99 @@ describe('BulkLocationDialog', () => {
       expect(screen.getByLabelText(/search place/i)).toBeInTheDocument();
     });
 
-    it('clears results when search field is empty', async () => {
+    it('does not call searchPlaces when input is fewer than 2 chars', async () => {
       const user = userEvent.setup();
       render(<BulkLocationDialog {...defaultProps} />);
 
       const input = screen.getByLabelText(/search place/i);
-      // Type then clear — should not call searchPlaces with empty query
-      await user.clear(input);
+      await user.type(input, 'S');
 
       expect(mockSearchPlaces).not.toHaveBeenCalled();
+    });
+
+    it('calls searchPlaces after debounce when typing 3+ chars', async () => {
+      mockSearchPlaces.mockResolvedValue([]);
+      vi.useFakeTimers();
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      render(<BulkLocationDialog {...defaultProps} />);
+
+      const input = screen.getByLabelText(/search place/i);
+      await user.type(input, 'San');
+
+      // Before debounce fires, searchPlaces should not be called
+      expect(mockSearchPlaces).not.toHaveBeenCalled();
+
+      // Advance timers past the 400ms debounce
+      act(() => { vi.advanceTimersByTime(500); });
+
+      await waitFor(() => {
+        expect(mockSearchPlaces).toHaveBeenCalledWith('San', 8);
+      });
+
+      vi.useRealTimers();
+    });
+
+    it('shows a result option when searchPlaces returns data', async () => {
+      mockSearchPlaces.mockResolvedValue([{ lat: 10, lng: 20, label: 'Test City' }]);
+      vi.useFakeTimers();
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      render(<BulkLocationDialog {...defaultProps} />);
+
+      const input = screen.getByLabelText(/search place/i);
+      await user.type(input, 'Test');
+
+      act(() => { vi.advanceTimersByTime(500); });
+
+      await waitFor(() => {
+        expect(screen.getByText('Test City')).toBeInTheDocument();
+      });
+
+      vi.useRealTimers();
+    });
+
+    it('shows Place search unavailable alert on 503 error', async () => {
+      const { ApiError } = await import('../../../services/api');
+      mockSearchPlaces.mockRejectedValue(new ApiError('Service Unavailable', 503));
+      vi.useFakeTimers();
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      render(<BulkLocationDialog {...defaultProps} />);
+
+      const input = screen.getByLabelText(/search place/i);
+      await user.type(input, 'San');
+
+      act(() => { vi.advanceTimersByTime(500); });
+
+      await waitFor(() => {
+        expect(screen.getByText(/place search unavailable/i)).toBeInTheDocument();
+      });
+
+      vi.useRealTimers();
+    });
+
+    it('re-enables search input when dialog closes and reopens', async () => {
+      const { ApiError } = await import('../../../services/api');
+      mockSearchPlaces.mockRejectedValue(new ApiError('Service Unavailable', 503));
+      vi.useFakeTimers();
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const { rerender } = render(<BulkLocationDialog {...defaultProps} />);
+
+      // Trigger 503 to disable search
+      const input = screen.getByLabelText(/search place/i);
+      await user.type(input, 'San');
+      act(() => { vi.advanceTimersByTime(500); });
+      await waitFor(() => {
+        expect(screen.getByText(/place search unavailable/i)).toBeInTheDocument();
+      });
+
+      // Close dialog
+      rerender(<BulkLocationDialog {...defaultProps} open={false} />);
+      // Reopen dialog
+      rerender(<BulkLocationDialog {...defaultProps} open={true} />);
+
+      // Search input should be visible again (searchDisabled reset to false)
+      expect(screen.getByLabelText(/search place/i)).toBeInTheDocument();
+
+      vi.useRealTimers();
     });
   });
 
