@@ -1257,15 +1257,20 @@ export class MediaService {
     const month = now.getUTCMonth() + 1; // 1-12
     const day = now.getUTCDate();        // 1-31
 
-    // On This Day: raw SQL query using functional index on EXTRACT(MONTH/DAY FROM captured_at)
+    // On This Day: raw SQL query using the functional index on
+    // EXTRACT(MONTH/DAY FROM (captured_at AT TIME ZONE 'UTC')).
+    // The AT TIME ZONE 'UTC' cast converts timestamptz → timestamp so that
+    // EXTRACT is IMMUTABLE and the index expression matches exactly.
+    // month/day are computed via getUTCMonth()/getUTCDate() above, so UTC
+    // semantics are consistent between the index and this query.
     const onThisDayRaw = await this.prisma.$queryRaw<Array<{ id: string }>>(
       Prisma.sql`
         SELECT id FROM media_items
         WHERE circle_id = ${circleId}::uuid
           AND deleted_at IS NULL
           AND captured_at IS NOT NULL
-          AND EXTRACT(MONTH FROM captured_at) = ${month}
-          AND EXTRACT(DAY FROM captured_at) = ${day}
+          AND EXTRACT(MONTH FROM (captured_at AT TIME ZONE 'UTC')) = ${month}
+          AND EXTRACT(DAY FROM (captured_at AT TIME ZONE 'UTC')) = ${day}
         ORDER BY captured_at DESC
         LIMIT 24
       `,
