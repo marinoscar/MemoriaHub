@@ -396,3 +396,10 @@ export const handlers = [
     );
   }),
 ];
+
+// Named handler variants for use with server.use(...) in individual tests
+export const geoSearchSuccessHandler = http.get(`${API_BASE}/media/geo/search`, ({ request }) => {
+  const url = new URL(request.url);
+  const q = url.searchParams.get('q') ?? '';
+  return HttpResponse.json([{ lat: 10, lng: 20, label: `Result for ${q}` }]);
+});

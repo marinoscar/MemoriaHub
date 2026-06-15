@@ -9,7 +9,7 @@
  *   player has a downloadUrl and no extra fetch is needed inside the drawer.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { MapContainer, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import {
@@ -66,6 +66,32 @@ function FitBounds({ points }: FitBoundsProps) {
     map.fitBounds(bounds, { padding: [40, 40] });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [points]);
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// GeoLocationCenter — centers the map to user's geolocation when there are no points
+// ---------------------------------------------------------------------------
+
+function GeoLocationCenter() {
+  const map = useMap();
+  const requestedRef = useRef(false);
+
+  useEffect(() => {
+    if (requestedRef.current) return;
+    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) return;
+    requestedRef.current = true;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        map.setView([pos.coords.latitude, pos.coords.longitude], 10);
+      },
+      () => {
+        // denied or timeout — keep world overview
+      },
+      { timeout: 8000 },
+    );
+  }, [map]);
 
   return null;
 }
@@ -321,6 +347,9 @@ export default function MediaMapPage() {
             onMarkerClick={handleMarkerClick}
           />
         )}
+
+        {/* Center on user's geolocation when no points are loaded */}
+        {!loading && points.length === 0 && <GeoLocationCenter />}
       </MapContainer>
 
       {/* Fetching-item spinner — briefly shown while getMedia is in flight */}

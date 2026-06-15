@@ -11,9 +11,8 @@ import {
   CircularProgress,
   Alert,
   Stack,
-  List,
-  ListItemButton,
-  ListItemText,
+  Autocomplete,
+  InputAdornment,
 } from '@mui/material';
 import {
   LocationOn as LocationOnIcon,
@@ -40,8 +39,9 @@ export function BulkLocationDialog({
   ids,
   onSuccess,
 }: BulkLocationDialogProps) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<GeoSearchResult[]>([]);
+  const [inputValue, setInputValue] = useState('');
+  const [options, setOptions] = useState<GeoSearchResult[]>([]);
+  const [autocompleteValue, setAutocompleteValue] = useState<GeoSearchResult | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchDisabled, setSearchDisabled] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -59,34 +59,36 @@ export function BulkLocationDialog({
   // Reset state when dialog opens/closes
   useEffect(() => {
     if (!open) {
-      setSearchQuery('');
-      setSearchResults([]);
+      setInputValue('');
+      setOptions([]);
+      setAutocompleteValue(null);
       setPinLocation(null);
       setMapCenter(null);
       setGeoPreview(null);
       setError(null);
       setSearchError(null);
+      setSearchDisabled(false);
     }
   }, [open]);
 
-  // Debounced place search
-  const handleSearchChange = useCallback((q: string) => {
-    setSearchQuery(q);
+  // Debounced place search — called by Autocomplete's onInputChange
+  const handleInputChange = useCallback((_event: React.SyntheticEvent, value: string) => {
+    setInputValue(value);
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-    if (!q.trim() || searchDisabled) {
-      setSearchResults([]);
+    if (!value.trim() || value.trim().length < 2 || searchDisabled) {
+      setOptions([]);
       return;
     }
     searchDebounceRef.current = setTimeout(() => {
       setSearchLoading(true);
-      searchPlaces(q, 5)
+      searchPlaces(value, 8)
         .then((results) => {
-          setSearchResults(results);
+          setOptions(results);
         })
         .catch((err) => {
           if (err instanceof ApiError && err.status === 503) {
             setSearchDisabled(true);
-            setSearchResults([]);
+            setOptions([]);
           } else {
             setSearchError('Search failed');
           }
@@ -94,16 +96,25 @@ export function BulkLocationDialog({
         .finally(() => {
           setSearchLoading(false);
         });
-    }, 500);
+    }, 400);
   }, [searchDisabled]);
 
   // When a search result is selected, recenter map + set pin
   const handleSelectResult = useCallback((result: GeoSearchResult) => {
     setPinLocation({ lat: result.lat, lng: result.lng });
     setMapCenter([result.lat, result.lng]);
-    setSearchQuery(result.label);
-    setSearchResults([]);
   }, []);
+
+  // Called by Autocomplete's onChange when the user selects an option
+  const handleAutocompleteChange = useCallback(
+    (_event: React.SyntheticEvent, selected: GeoSearchResult | null) => {
+      setAutocompleteValue(selected);
+      if (selected) {
+        handleSelectResult(selected);
+      }
+    },
+    [handleSelectResult],
+  );
 
   // When pin changes, reverse geocode for preview
   const handlePinChange = useCallback((latlng: { lat: number; lng: number }) => {
@@ -173,48 +184,44 @@ export function BulkLocationDialog({
 
         {/* Place search */}
         {!searchDisabled ? (
-          <Box sx={{ mb: 2, position: 'relative' }}>
-            <TextField
-              fullWidth
-              size="small"
-              label="Search place"
-              value={searchQuery}
-              onChange={(e) => handleSearchChange(e.target.value)}
+          <Box sx={{ mb: 2 }}>
+            <Autocomplete<GeoSearchResult, false, false, false>
+              options={options}
+              value={autocompleteValue}
+              inputValue={inputValue}
+              loading={searchLoading}
+              filterOptions={(x) => x}
+              getOptionLabel={(opt) => opt.label}
+              isOptionEqualToValue={(opt, val) => opt.label === val.label && opt.lat === val.lat}
+              onInputChange={handleInputChange}
+              onChange={handleAutocompleteChange}
+              noOptionsText="No results found"
+              loadingText="Searching..."
               disabled={saving}
-              slotProps={{
-                input: {
-                  startAdornment: searchLoading
-                    ? <CircularProgress size={16} sx={{ mr: 1 }} />
-                    : <SearchIcon fontSize="small" sx={{ mr: 0.5, color: 'text.secondary' }} />,
-                },
-              }}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Search place"
+                  size="small"
+                  error={!!searchError}
+                  helperText={searchError ?? undefined}
+                  slotProps={{
+                    ...params.slotProps,
+                    input: {
+                      ...params.slotProps.input,
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          {searchLoading
+                            ? <CircularProgress size={16} />
+                            : <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                          }
+                        </InputAdornment>
+                      ),
+                    },
+                  }}
+                />
+              )}
             />
-            {searchError && (
-              <Typography variant="caption" color="error">{searchError}</Typography>
-            )}
-            {searchResults.length > 0 && (
-              <List
-                dense
-                sx={{
-                  position: 'absolute',
-                  zIndex: 10,
-                  width: '100%',
-                  backgroundColor: 'background.paper',
-                  border: 1,
-                  borderColor: 'divider',
-                  borderRadius: 1,
-                  maxHeight: 200,
-                  overflowY: 'auto',
-                  boxShadow: 3,
-                }}
-              >
-                {searchResults.map((r, i) => (
-                  <ListItemButton key={i} onClick={() => handleSelectResult(r)}>
-                    <ListItemText primary={r.label} />
-                  </ListItemButton>
-                ))}
-              </List>
-            )}
           </Box>
         ) : (
           <Alert severity="info" sx={{ mb: 2 }}>
