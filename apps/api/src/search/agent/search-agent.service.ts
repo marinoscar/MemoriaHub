@@ -77,10 +77,22 @@ export class SearchAgentService {
     messages.push({ role: 'user', content: userContent });
 
     // 6. Multi-turn tool-calling loop
+    // Hard cap to prevent infinite loops in case of pathological tool-call chains
+    const MAX_ROUNDS = 6;
+    let round = 0;
     let continueLoop = true;
-    while (continueLoop) {
+
+    while (continueLoop && round < MAX_ROUNDS) {
+      round++;
       let accumulatedText = '';
-      let shouldContinue = false;
+      // Track whether any tool was called in this round — used for loop continuation
+      let didToolCall = false;
+
+      // Collect all tool calls in this round so we can attach them to a single
+      // assistant message (required by OpenAI: every tool result must be preceded
+      // by an assistant message with a matching tool_calls entry).
+      const roundToolCalls: Array<{ id: string; name: string; input: unknown }> = [];
+      const roundToolResults: Array<{ toolCallId: string; toolName: string; result: unknown }> = [];
 
       for await (const event of provider.chat(creds, {
         model,
@@ -108,41 +120,48 @@ export class SearchAgentService {
           // Emit results SSE event
           yield { event: 'results', data: searchResult };
 
-          // Track in accumulator
+          // Track in accumulator and for this round's message construction
           accumulator.toolCalls.push({ id: event.id, name: event.name, input: toolInput });
           accumulator.toolResults.push({ toolCallId: event.id, result: searchResult });
+          roundToolCalls.push({ id: event.id, name: event.name, input: toolInput });
+          roundToolResults.push({ toolCallId: event.id, toolName: event.name, result: searchResult });
 
-          // Append assistant message with any text accumulated so far in this round
-          messages.push({
-            role: 'assistant',
-            content:
-              accumulatedText ||
-              `[Calling search_media with ${JSON.stringify(toolInput)}]`,
-          });
-
-          // Append tool result message so the model can see the outcome
-          messages.push({
-            role: 'tool',
-            content: JSON.stringify(searchResult),
-            toolCallId: event.id,
-            toolName: event.name,
-          });
-
-          accumulatedText = '';
+          didToolCall = true;
         } else if (event.type === 'done') {
           accumulator.finalText += accumulatedText;
-          if (event.stopReason === 'tool_use') {
-            // Model wants to continue after tool results — loop again
-            shouldContinue = true;
-          } else {
-            shouldContinue = false;
-          }
           // Always break out of the for-await after done
           break;
         }
       }
 
-      continueLoop = shouldContinue;
+      // After the streaming turn ends, append a single assistant message with
+      // all structured tool calls (required by OpenAI for tool round-trips).
+      if (didToolCall) {
+        messages.push({
+          role: 'assistant',
+          content: accumulatedText,
+          toolCalls: roundToolCalls,
+        });
+
+        // Append one tool result message per tool call
+        for (const tr of roundToolResults) {
+          messages.push({
+            role: 'tool',
+            content: JSON.stringify(tr.result),
+            toolCallId: tr.toolCallId,
+            toolName: tr.toolName,
+          });
+        }
+      }
+
+      // Continue looping if and only if a tool was called this round.
+      // Do NOT rely on stopReason — it differs between providers
+      // ('tool_use' for Anthropic, 'tool_calls' for OpenAI).
+      continueLoop = didToolCall;
+    }
+
+    if (round >= MAX_ROUNDS && continueLoop) {
+      this.logger.warn(`SearchAgentService: hit MAX_ROUNDS (${MAX_ROUNDS}) limit, stopping loop`);
     }
   }
 }

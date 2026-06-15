@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type {
   AiProvider,
   AiProviderCredentials,
+  ChatMessage,
   ChatRequest,
   ChatStreamEvent,
 } from './ai-provider.interface';
@@ -19,28 +20,55 @@ export class AnthropicProvider implements AiProvider {
   async *chat(creds: AiProviderCredentials, req: ChatRequest): AsyncIterable<ChatStreamEvent> {
     const client = new Anthropic({ apiKey: creds.apiKey });
 
-    // Map ChatMessage[] to Anthropic MessageParam format
-    const messages: Anthropic.MessageParam[] = req.messages
-      .filter(m => m.role !== 'system')
-      .map(m => {
-        if (m.role === 'tool') {
-          // Tool result messages → role: 'user' with tool_result content block
-          return {
-            role: 'user' as const,
-            content: [
-              {
-                type: 'tool_result' as const,
-                tool_use_id: m.toolCallId ?? '',
-                content: m.content,
-              },
-            ],
-          };
-        }
-        return {
-          role: m.role as 'user' | 'assistant',
+    // Map ChatMessage[] to Anthropic MessageParam format.
+    // Consecutive tool-result messages must be batched into a single user turn.
+    const rawParams = req.messages.filter((m: ChatMessage) => m.role !== 'system');
+    const messages: Anthropic.MessageParam[] = [];
+    for (const m of rawParams) {
+      if (m.role === 'tool') {
+        // Tool result → role:'user' with tool_result content block.
+        // If the previous message is already a user message that contains only
+        // tool_result blocks, batch into it (Anthropic requires all tool results
+        // for a single assistant turn to appear in ONE user message).
+        const prev = messages[messages.length - 1];
+        const toolResultBlock: Anthropic.ToolResultBlockParam = {
+          type: 'tool_result' as const,
+          tool_use_id: m.toolCallId ?? '',
           content: m.content,
         };
-      });
+        if (prev && prev.role === 'user' && Array.isArray(prev.content)) {
+          (prev.content as Anthropic.ToolResultBlockParam[]).push(toolResultBlock);
+        } else {
+          messages.push({ role: 'user' as const, content: [toolResultBlock] });
+        }
+        continue;
+      }
+
+      if (m.role === 'assistant') {
+        // If this assistant turn invoked tools, include tool_use content blocks
+        // so the subsequent tool_result user message is valid.
+        if (m.toolCalls && m.toolCalls.length > 0) {
+          const content: Anthropic.ContentBlock[] = [];
+          if (m.content) {
+            content.push({ type: 'text' as const, text: m.content } as Anthropic.TextBlock);
+          }
+          for (const tc of m.toolCalls) {
+            content.push({
+              type: 'tool_use' as const,
+              id: tc.id,
+              name: tc.name,
+              input: tc.input ?? {},
+            } as Anthropic.ToolUseBlock);
+          }
+          messages.push({ role: 'assistant' as const, content });
+          continue;
+        }
+        messages.push({ role: 'assistant' as const, content: m.content });
+        continue;
+      }
+
+      messages.push({ role: m.role as 'user', content: m.content });
+    }
 
     // Map AiToolDef[] to Anthropic Tool format
     const tools: Anthropic.Tool[] | undefined =

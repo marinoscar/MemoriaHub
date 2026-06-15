@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import type {
   AiProvider,
   AiProviderCredentials,
+  ChatMessage,
   ChatRequest,
   ChatStreamEvent,
 } from './ai-provider.interface';
@@ -56,7 +57,7 @@ export class OpenAiProvider implements AiProvider {
     });
 
     // Map ChatMessage[] to OpenAI ChatCompletionMessageParam format
-    const messages: OpenAI.ChatCompletionMessageParam[] = req.messages.map(m => {
+    const messages: OpenAI.ChatCompletionMessageParam[] = req.messages.map((m: ChatMessage) => {
       if (m.role === 'tool') {
         return {
           role: 'tool' as const,
@@ -68,6 +69,21 @@ export class OpenAiProvider implements AiProvider {
         return { role: 'system' as const, content: m.content };
       }
       if (m.role === 'assistant') {
+        // If this assistant turn invoked tools, include structured tool_calls so
+        // the subsequent tool-result messages are valid (OpenAI requires each
+        // role:'tool' message to be preceded by an assistant message with a
+        // matching tool_calls entry).
+        if (m.toolCalls && m.toolCalls.length > 0) {
+          return {
+            role: 'assistant' as const,
+            content: m.content || null,
+            tool_calls: m.toolCalls.map(tc => ({
+              id: tc.id,
+              type: 'function' as const,
+              function: { name: tc.name, arguments: JSON.stringify(tc.input ?? {}) },
+            })),
+          };
+        }
         return { role: 'assistant' as const, content: m.content };
       }
       return { role: 'user' as const, content: m.content };
@@ -90,7 +106,12 @@ export class OpenAiProvider implements AiProvider {
       model: req.model,
       stream: true,
       messages,
-      ...(tools && { tools }),
+      ...(tools && {
+        tools,
+        // Limit to one tool call per response so the per-tool assistant+result
+        // append pattern stays valid across all turns.
+        parallel_tool_calls: false,
+      }),
     });
 
     // Accumulate tool call chunks across deltas — keyed by tool call index

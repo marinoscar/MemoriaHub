@@ -7,9 +7,16 @@ export interface AiProviderCredentials {
   baseUrl?: string;
 }
 
+export interface ChatMessageToolCall {
+  id: string;
+  name: string;
+  input: unknown;
+}
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  toolCalls?: ChatMessageToolCall[]; // assistant turns that invoked tools
   toolCallId?: string; // for tool result messages
   toolName?: string; // for tool result messages
 }
