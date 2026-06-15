@@ -84,5 +84,14 @@ export default () => {
   },
 
   logLevel: process.env.LOG_LEVEL || 'info',
+
+  // Geo Services
+  geo: {
+    provider: process.env.GEO_PROVIDER || 'offline',
+    nominatimBaseUrl: process.env.NOMINATIM_BASE_URL || 'https://nominatim.openstreetmap.org',
+    forwardSearchEnabled: process.env.GEO_FORWARD_SEARCH_ENABLED === 'true',
+    forwardProvider: process.env.GEO_FORWARD_PROVIDER || 'nominatim',
+    googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY || '',
+  },
   };
 };

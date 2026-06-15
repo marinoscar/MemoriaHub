@@ -1564,9 +1564,9 @@ Returns `null` if no result is found for the given coordinates.
 
 **Requires:** `media:read` permission
 
-Forward geocode — search places by typed name. Sends the query string to Nominatim's `/search` API. **Disabled by default** (`GEO_FORWARD_SEARCH_ENABLED=false`). When disabled the endpoint returns 503.
+Forward geocode — search places by typed name. Supports real street addresses when `GEO_FORWARD_PROVIDER=google`. **Disabled by default** (`GEO_FORWARD_SEARCH_ENABLED=false`). When disabled the endpoint returns 503.
 
-**Privacy note:** Only the typed place name query leaves the server — photo GPS coordinates are never sent to Nominatim. Enable explicitly with `GEO_FORWARD_SEARCH_ENABLED=true` and optionally point `NOMINATIM_BASE_URL` at a private instance.
+**Privacy note:** Only the typed place name query leaves the server — photo GPS coordinates are never sent by this endpoint. Provider is selected by `GEO_FORWARD_PROVIDER` (default `nominatim`). When `google` is selected, the typed query is sent to Google Maps Geocoding API; `GOOGLE_MAPS_API_KEY` is required (server-side only). If the key is absent the service falls back to Nominatim automatically.
 
 **Query Parameters:**
 

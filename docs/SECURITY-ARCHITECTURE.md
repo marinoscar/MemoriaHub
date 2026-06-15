@@ -519,23 +519,35 @@ Reverse geocoding fires automatically after upload (EXIF extraction) and on-dema
 
 ### Forward geocoding (opt-in, typed query only)
 
-`ForwardGeocodeService` sends a typed place-name query (the text the user typed in the location search box) to Nominatim's `/search` endpoint. **Photo GPS coordinates are never sent by this path.**
+`ForwardGeocodeService` sends a typed place-name query (the text the user typed in the location search box) to an external geocoding provider. **Photo GPS coordinates are never sent by this path — only the typed query string.**
 
 The service is disabled by default. Set `GEO_FORWARD_SEARCH_ENABLED=true` to enable `GET /api/media/geo/search`. When disabled the endpoint returns 503.
 
+Two forward-geocoding providers are available, selected by `GEO_FORWARD_PROVIDER`:
+
+| Provider | Data sent off-server | Notes |
+|----------|---------------------|-------|
+| `nominatim` (default) | Typed query string → OSM Nominatim | Use a self-hosted instance for full privacy |
+| `google` | Typed query string → Google Maps Geocoding API | Supports real street addresses; requires billing-enabled GCP project and `GOOGLE_MAPS_API_KEY` |
+
+If `GEO_FORWARD_PROVIDER=google` but `GOOGLE_MAPS_API_KEY` is not set, the service logs a warning and falls back to Nominatim automatically.
+
 **Operator checklist for enabling forward geocoding:**
 
-- [ ] Understand that typed search queries (not GPS) will be sent to `NOMINATIM_BASE_URL`
-- [ ] Consider deploying a self-hosted Nominatim instance and setting `NOMINATIM_BASE_URL` to its URL
-- [ ] Ensure the Nominatim endpoint is accessible from the API container
-- [ ] Review Nominatim's [usage policy](https://operations.osmfoundation.org/policies/nominatim/) if using the public instance
+- [ ] Understand that typed search queries (not GPS) will be sent to the selected provider
+- [ ] Choose a provider: `nominatim` (OSM, default) or `google` (real street addresses, billing required)
+- [ ] If using `nominatim`: optionally point `NOMINATIM_BASE_URL` at a self-hosted instance
+- [ ] If using `google`: obtain a Maps Geocoding API key from GCP; set `GOOGLE_MAPS_API_KEY` (server-side only, never sent to clients); ensure billing is enabled on the GCP project
+- [ ] Review the provider's usage policy: [Nominatim](https://operations.osmfoundation.org/policies/nominatim/) / [Google Maps Platform Terms](https://cloud.google.com/maps-platform/terms)
 
 **Environment variables:**
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `GEO_FORWARD_SEARCH_ENABLED` | `false` | Enable/disable `GET /api/media/geo/search` |
+| `GEO_FORWARD_PROVIDER` | `nominatim` | Forward geocoding provider: `nominatim` or `google` |
 | `NOMINATIM_BASE_URL` | `https://nominatim.openstreetmap.org` | Nominatim endpoint for both reverse (`nominatim` provider) and forward search |
+| `GOOGLE_MAPS_API_KEY` | _(unset)_ | API key for Google Maps Geocoding (required when `GEO_FORWARD_PROVIDER=google`; key stays server-side) |
 | `GEO_PROVIDER` | `offline` | Reverse geocoding provider: `offline` or `nominatim` |
 
 ---
