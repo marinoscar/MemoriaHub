@@ -153,8 +153,12 @@ export class ConversationsService {
         conversationId,
         role: 'assistant',
         content,
-        ...(toolCalls !== undefined ? { toolCalls } : {}),
-        ...(toolResults !== undefined ? { toolResults } : {}),
+        ...(toolCalls !== undefined && toolCalls !== null
+          ? { toolCalls: toolCalls as Prisma.InputJsonValue }
+          : {}),
+        ...(toolResults !== undefined && toolResults !== null
+          ? { toolResults: toolResults as Prisma.InputJsonValue }
+          : {}),
       },
     });
   }
