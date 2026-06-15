@@ -20,10 +20,17 @@ import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 import L from 'leaflet';
 
 // Patch the default icon options once.
+// iconAnchor: [12, 41] and popupAnchor: [1, -34] match the Leaflet default
+// marker geometry — setting them explicitly ensures correct pin placement
+// regardless of how the bundler resolves CSS anchor overrides.
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: markerIcon2x,
   iconUrl: markerIcon,
   shadowUrl: markerShadow,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41],
 });
 
 /**
