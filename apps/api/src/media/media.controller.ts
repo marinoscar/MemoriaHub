@@ -37,6 +37,12 @@ import { AlbumQueryDto } from './dto/album-query.dto';
 import { AddAlbumItemsDto } from './dto/add-album-items.dto';
 import { ExportQueryDto } from './dto/export-query.dto';
 import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
+import { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
+import { BulkTagsDto } from './dto/bulk-tags.dto';
+import { BulkDeleteDto } from './dto/bulk-delete.dto';
+import { ReverseGeocodeQueryDto } from './dto/reverse-geocode-query.dto';
+import { GeoSearchQueryDto } from './dto/geo-search-query.dto';
+import { DashboardQueryDto } from './dto/dashboard-query.dto';
 
 @ApiTags('Media')
 @ApiBearerAuth('JWT-auth')
@@ -143,6 +149,106 @@ export class MediaController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.mediaService.listLocations(query, user.id, user.permissions);
+  }
+
+  /**
+   * PATCH /api/media/bulk
+   * Bulk update location, classification, or favorite on a set of media items.
+   */
+  @Patch('bulk')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @ApiOperation({ summary: 'Bulk update media items (location, classification, favorite)' })
+  @ApiResponse({ status: 200, description: 'Items updated' })
+  async bulkUpdateMedia(
+    @Body() dto: BulkUpdateMediaDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.bulkUpdateMedia(dto, user.id, user.permissions);
+  }
+
+  /**
+   * POST /api/media/bulk/tags
+   * Add and/or remove tags on multiple media items.
+   */
+  @Post('bulk/tags')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @ApiOperation({ summary: 'Bulk add/remove tags on media items' })
+  @ApiResponse({ status: 200, description: 'Tags updated' })
+  async bulkTags(
+    @Body() dto: BulkTagsDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.bulkTags(dto, user.id, user.permissions);
+  }
+
+  /**
+   * POST /api/media/bulk/delete
+   * Soft-delete multiple media items.
+   */
+  @Post('bulk/delete')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Bulk soft-delete media items' })
+  @ApiResponse({ status: 200, description: 'Items soft-deleted' })
+  async bulkDelete(
+    @Body() dto: BulkDeleteDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.bulkDelete(dto, user.id, user.permissions);
+  }
+
+  /**
+   * GET /api/media/geo/reverse
+   * On-demand reverse geocoding for a coordinate pair.
+   */
+  @Get('geo/reverse')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({ summary: 'Reverse geocode a coordinate pair on demand' })
+  @ApiQuery({ name: 'lat', required: true, type: Number })
+  @ApiQuery({ name: 'lng', required: true, type: Number })
+  @ApiResponse({ status: 200, description: 'Geocoding result (null if not found)' })
+  async reverseGeocodeOnDemand(
+    @Query() query: ReverseGeocodeQueryDto,
+  ) {
+    return this.mediaService.reverseGeocodeOnDemand(query.lat, query.lng);
+  }
+
+  /**
+   * GET /api/media/geo/search
+   * Forward geocode — search places by name. Gated by GEO_FORWARD_SEARCH_ENABLED.
+   */
+  @Get('geo/search')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({ summary: 'Search places by name (forward geocoding, requires GEO_FORWARD_SEARCH_ENABLED=true)' })
+  @ApiQuery({ name: 'q', required: true, type: String })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiResponse({ status: 200, description: 'Array of place results [{lat, lng, label}]' })
+  @ApiResponse({ status: 503, description: 'Place search is disabled (GEO_FORWARD_SEARCH_ENABLED=false)' })
+  async searchPlaces(
+    @Query() query: GeoSearchQueryDto,
+  ) {
+    return this.mediaService.searchPlaces(query.q, query.limit);
+  }
+
+  /**
+   * GET /api/media/dashboard
+   * Returns dashboard aggregation: On This Day, recent, favorites, and review queue counts.
+   */
+  @Get('dashboard')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({
+    summary: 'Get circle dashboard aggregation',
+    description:
+      'Returns On This Day (same month/day across all years), recent uploads, favorites, ' +
+      'and counts for the review queue (total, unreviewed, low-value, missing-geo).',
+  })
+  @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Dashboard data returned' })
+  async getDashboard(
+    @Query() query: DashboardQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.getDashboard(query, user.id, user.permissions);
   }
 
   /**
@@ -331,6 +437,11 @@ export class MediaController {
   @ApiQuery({ name: 'location', required: false, type: String, description: 'Free-text search across all geo tiers' })
   @ApiQuery({ name: 'sortBy', required: false, enum: ['capturedAt', 'importedAt', 'createdAt'] })
   @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'] })
+  @ApiQuery({ name: 'cameraMake', required: false, type: String, description: 'Camera make (contains, case-insensitive)' })
+  @ApiQuery({ name: 'cameraModel', required: false, type: String, description: 'Camera model (contains, case-insensitive)' })
+  @ApiQuery({ name: 'sourceDeviceId', required: false, type: String, description: 'Exact source device ID' })
+  @ApiQuery({ name: 'sourceDeviceName', required: false, type: String, description: 'Source device name (contains, case-insensitive)' })
+  @ApiQuery({ name: 'missingGeo', required: false, type: Boolean, description: 'true = missing GPS, false = has GPS' })
   @ApiResponse({ status: 200, description: 'Paginated media list' })
   async listMedia(
     @Query() query: MediaQueryDto,

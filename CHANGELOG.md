@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-06-15
+
+### Added
+
+- **Circle Dashboard** (`GET /api/media/dashboard`): New home page (`/`) shows a per-circle dashboard. Returns On This Day (up to 24 items where `MONTH(capturedAt) = today` and `DAY(capturedAt) = today` across all years), recent imports (12), favorites (12), and review-queue counts (`total`, `unreviewed`, `lowValue`, `missingGeo`). Includes deep-links to `/media?missingGeo=1` and other review filters.
+
+- **Bulk media editing** — three new circle-scoped endpoints requiring `collaborator` per-circle role:
+  - `PATCH /api/media/bulk` (`media:write`) — update `location` (with on-demand reverse geocode, `geoSource='manual'`), `classification`, and/or `favorite` on 1–500 items. Setting `location: null` clears all geo columns
+  - `POST /api/media/bulk/tags` (`media:write`) — add and/or remove tags on 1–500 items atomically inside a single transaction
+  - `POST /api/media/bulk/delete` (`media:delete`) — soft-delete 1–500 items. All bulk endpoints validate that every ID belongs to the stated circle before any write; mismatches return 404 without partial side-effects
+
+- **Geo endpoints** (`media:read`):
+  - `GET /api/media/geo/reverse?lat=&lng=` — on-demand reverse geocoding using the configured provider (default: offline on-server GeoNames dataset)
+  - `GET /api/media/geo/search?q=&limit=` — forward geocoding (place-name search) via Nominatim. Disabled by default; enable with `GEO_FORWARD_SEARCH_ENABLED=true`. Only the typed query leaves the server — photo GPS coordinates are never sent
+
+- **`GET /api/media/:id` now returns `tags: string[]`** — flat array of tag names attached to the item
+
+- **New `GET /api/media` query parameters**: `cameraMake`, `cameraModel`, `sourceDeviceId`, `sourceDeviceName`, `missingGeo` (boolean: `true` = no GPS, `false` = has GPS)
+
+- **On-This-Day functional index** (`migration 20260615000000_media_oncethisday_index`): a PostgreSQL expression index on `(EXTRACT(MONTH FROM captured_at), EXTRACT(DAY FROM captured_at)) WHERE deleted_at IS NULL` accelerates the dashboard query. Hand-authored because Prisma's DSL cannot express functional indexes
+
+- **New environment variable**: `GEO_FORWARD_SEARCH_ENABLED` (default `false`) — gates the forward-geocoding endpoint. `NOMINATIM_BASE_URL` (already present) configures the Nominatim endpoint for both reverse (`nominatim` provider) and forward search
+
+- **Web UI**: redesigned home page is now a circle dashboard (On This Day, recent, favorites, review queue with deep-links); media library supports multi-select with a bulk-action toolbar (location via map-pin + place search, tags, classification, favorite, delete); `MediaDetailDrawer` now allows editing location and tags inline
+
 ## [1.2.0] - 2026-06-14
 
 ### Added

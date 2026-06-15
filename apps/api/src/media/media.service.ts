@@ -28,6 +28,13 @@ import { ExportQueryDto } from './dto/export-query.dto';
 import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
+import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from './geo/geo-location-provider.interface';
+import { ForwardGeocodeService } from './geo/forward-geocode.service';
+import { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
+import { BulkTagsDto } from './dto/bulk-tags.dto';
+import { BulkDeleteDto } from './dto/bulk-delete.dto';
+import { geoResultToMediaColumns, GEO_CLEAR_COLUMNS } from './geo/geo-result.mapper';
+import { DashboardQueryDto } from './dto/dashboard-query.dto';
 
 /** Shape of each element returned by listLocations. */
 export interface MediaLocation {
@@ -49,6 +56,8 @@ export class MediaService {
     private readonly storageProvider: StorageProvider,
     private readonly mediaMetadataSyncService: MediaMetadataSyncService,
     private readonly circleMembershipService: CircleMembershipService,
+    @Inject(GEO_LOCATION_PROVIDER) private readonly geoProvider: GeoLocationProvider,
+    private readonly forwardGeocodeService: ForwardGeocodeService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -267,6 +276,11 @@ export class MediaService {
       contentHash,
       sortBy,
       sortOrder,
+      cameraMake,
+      cameraModel,
+      sourceDeviceId,
+      sourceDeviceName,
+      missingGeo,
     } = query;
 
     const skip = (page - 1) * pageSize;
@@ -364,6 +378,12 @@ export class MediaService {
             ],
           }
         : {}),
+      ...(cameraMake ? { cameraMake: { contains: cameraMake, mode: 'insensitive' as const } } : {}),
+      ...(cameraModel ? { cameraModel: { contains: cameraModel, mode: 'insensitive' as const } } : {}),
+      ...(sourceDeviceName ? { sourceDeviceName: { contains: sourceDeviceName, mode: 'insensitive' as const } } : {}),
+      ...(sourceDeviceId ? { sourceDeviceId } : {}),
+      ...(missingGeo === true ? { takenLat: null, takenLng: null } : {}),
+      ...(missingGeo === false ? { takenLat: { not: null }, takenLng: { not: null } } : {}),
     };
 
     const orderBy: Prisma.MediaItemOrderByWithRelationInput = {
@@ -541,7 +561,14 @@ export class MediaService {
    * BigInt `size` field never appears in the returned object.
    */
   async getMedia(id: string, userId: string, userPermissions: string[]) {
-    const item = await this.prisma.mediaItem.findUnique({ where: { id } });
+    const item = await this.prisma.mediaItem.findUnique({
+      where: { id },
+      include: {
+        mediaTags: {
+          include: { tag: true },
+        },
+      },
+    });
 
     if (!item || item.deletedAt !== null) {
       throw new NotFoundException(`MediaItem with id ${id} not found`);
@@ -563,8 +590,11 @@ export class MediaService {
         : Promise.resolve(null),
     ]);
 
+    const { mediaTags, ...rest } = item;
+
     return {
-      ...item,
+      ...rest,
+      tags: mediaTags.map((mt) => mt.tag.name),
       thumbnailUrl,
       downloadUrl,
     };
@@ -1210,9 +1240,253 @@ export class MediaService {
     );
   }
 
+  async reverseGeocodeOnDemand(lat: number, lng: number) {
+    return this.geoProvider.reverseGeocode(lat, lng);
+  }
+
+  async searchPlaces(q: string, limit: number) {
+    return this.forwardGeocodeService.searchPlaces(q, limit);
+  }
+
+  async getDashboard(query: DashboardQueryDto, userId: string, perms: string[]) {
+    const { circleId } = query;
+
+    await this.circleMembershipService.assertCircleAccess(userId, circleId, perms, 'viewer' as CircleRole);
+
+    const now = new Date();
+    const month = now.getUTCMonth() + 1; // 1-12
+    const day = now.getUTCDate();        // 1-31
+
+    // On This Day: raw SQL query using functional index on EXTRACT(MONTH/DAY FROM captured_at)
+    const onThisDayRaw = await this.prisma.$queryRaw<Array<{ id: string }>>(
+      Prisma.sql`
+        SELECT id FROM media_items
+        WHERE circle_id = ${circleId}::uuid
+          AND deleted_at IS NULL
+          AND captured_at IS NOT NULL
+          AND EXTRACT(MONTH FROM captured_at) = ${month}
+          AND EXTRACT(DAY FROM captured_at) = ${day}
+        ORDER BY captured_at DESC
+        LIMIT 24
+      `,
+    );
+
+    const onThisDayIds = onThisDayRaw.map((r) => r.id);
+
+    const [onThisDayItems, recentItems, favoriteItems, totalCount, unreviewedCount, lowValueCount, missingGeoCount] =
+      await Promise.all([
+        onThisDayIds.length > 0
+          ? this.prisma.mediaItem.findMany({
+              where: { id: { in: onThisDayIds } },
+              orderBy: { capturedAt: 'desc' },
+            })
+          : Promise.resolve([]),
+        this.prisma.mediaItem.findMany({
+          where: { circleId, deletedAt: null },
+          orderBy: { importedAt: 'desc' },
+          take: 12,
+        }),
+        this.prisma.mediaItem.findMany({
+          where: { circleId, deletedAt: null, favorite: true },
+          orderBy: { capturedAt: 'desc' },
+          take: 12,
+        }),
+        this.prisma.mediaItem.count({ where: { circleId, deletedAt: null } }),
+        this.prisma.mediaItem.count({
+          where: { circleId, deletedAt: null, classification: 'unreviewed' },
+        }),
+        this.prisma.mediaItem.count({
+          where: { circleId, deletedAt: null, classification: 'low_value' },
+        }),
+        this.prisma.mediaItem.count({
+          where: { circleId, deletedAt: null, takenLat: null },
+        }),
+      ]);
+
+    const [onThisDay, recent, favorites] = await Promise.all([
+      Promise.all(
+        onThisDayItems.map(async (item) => ({
+          ...item,
+          thumbnailUrl: await this.signThumb(item.metadata),
+        })),
+      ),
+      Promise.all(
+        recentItems.map(async (item) => ({
+          ...item,
+          thumbnailUrl: await this.signThumb(item.metadata),
+        })),
+      ),
+      Promise.all(
+        favoriteItems.map(async (item) => ({
+          ...item,
+          thumbnailUrl: await this.signThumb(item.metadata),
+        })),
+      ),
+    ]);
+
+    return {
+      onThisDay,
+      recent,
+      favorites,
+      counts: {
+        total: totalCount,
+        unreviewed: unreviewedCount,
+        lowValue: lowValueCount,
+        missingGeo: missingGeoCount,
+      },
+    };
+  }
+
+  async bulkUpdateMedia(
+    dto: BulkUpdateMediaDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ updated: number }> {
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
+
+    const data: Record<string, unknown> = {};
+
+    if (dto.set.classification !== undefined) {
+      data['classification'] = dto.set.classification;
+    }
+    if (dto.set.favorite !== undefined) {
+      data['favorite'] = dto.set.favorite;
+    }
+
+    if (dto.set.location === null) {
+      Object.assign(data, GEO_CLEAR_COLUMNS);
+    } else if (dto.set.location !== undefined) {
+      const { lat, lng, altitude } = dto.set.location;
+      const result = await this.geoProvider.reverseGeocode(lat, lng);
+      Object.assign(data, {
+        takenLat: lat,
+        takenLng: lng,
+        takenAltitude: altitude ?? null,
+        ...geoResultToMediaColumns(result ?? {}, 'manual'),
+      });
+    }
+
+    const { count } = await this.prisma.mediaItem.updateMany({
+      where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: null },
+      data,
+    });
+
+    this.logger.log(
+      `bulkUpdateMedia: updated ${count} items in circle ${dto.circleId} by user ${userId}`,
+    );
+
+    return { updated: count };
+  }
+
+  async bulkTags(
+    dto: BulkTagsDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ added: number; removed: number }> {
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
+
+    let added = 0;
+    let removed = 0;
+
+    await this.prisma.$transaction(async (tx) => {
+      if (dto.add && dto.add.length > 0) {
+        const tagIds: string[] = [];
+        for (const name of dto.add) {
+          const tag = await tx.tag.upsert({
+            where: { circleId_name: { circleId: dto.circleId, name } },
+            create: { addedById: userId, circleId: dto.circleId, name },
+            update: {},
+          });
+          tagIds.push(tag.id);
+        }
+
+        const pairs = dto.ids.flatMap((mediaItemId) =>
+          tagIds.map((tagId) => ({ mediaItemId, tagId })),
+        );
+        const result = await tx.mediaTag.createMany({ data: pairs, skipDuplicates: true });
+        added = result.count;
+      }
+
+      if (dto.remove && dto.remove.length > 0) {
+        const tags = await tx.tag.findMany({
+          where: {
+            circleId: dto.circleId,
+            name: { in: dto.remove },
+          },
+          select: { id: true },
+        });
+        if (tags.length > 0) {
+          const removeTagIds = tags.map((t) => t.id);
+          const result = await tx.mediaTag.deleteMany({
+            where: {
+              tagId: { in: removeTagIds },
+              mediaItemId: { in: dto.ids },
+            },
+          });
+          removed = result.count;
+        }
+      }
+    });
+
+    this.logger.log(
+      `bulkTags: added=${added} removed=${removed} for ${dto.ids.length} items by user ${userId}`,
+    );
+
+    return { added, removed };
+  }
+
+  async bulkDelete(
+    dto: BulkDeleteDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ deleted: number }> {
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
+
+    const { count } = await this.prisma.mediaItem.updateMany({
+      where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+
+    this.logger.log(
+      `bulkDelete: soft-deleted ${count} items in circle ${dto.circleId} by user ${userId}`,
+    );
+
+    return { deleted: count };
+  }
+
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * Verify circle access, then confirm all ids are non-deleted members of circleId.
+   * Mirrors addAlbumItems cross-circle guard.
+   * Throws NotFoundException if any id is missing, deleted, or in a different circle.
+   */
+  private async assertAllInCircle(
+    ids: string[],
+    circleId: string,
+    userId: string,
+    perms: string[],
+    role: CircleRole,
+  ): Promise<void> {
+    await this.circleMembershipService.assertCircleAccess(userId, circleId, perms, role);
+
+    const uniqueIds = [...new Set(ids)];
+
+    const found = await this.prisma.mediaItem.findMany({
+      where: { id: { in: uniqueIds }, circleId, deletedAt: null },
+      select: { id: true },
+    });
+
+    if (found.length !== uniqueIds.length) {
+      const foundSet = new Set(found.map((f) => f.id));
+      const missing = uniqueIds.filter((id) => !foundSet.has(id));
+      throw new NotFoundException(
+        `MediaItems not found or not accessible: ${missing.join(', ')}`,
+      );
+    }
+  }
 
   /**
    * Fetch a MediaItem (excluding soft-deleted) and enforce ownership/any-permission.

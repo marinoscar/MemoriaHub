@@ -472,6 +472,74 @@ async getProviders() {
 
 ---
 
+## 3a. Bulk Media Authorization
+
+All three bulk media endpoints (`PATCH /api/media/bulk`, `POST /api/media/bulk/tags`, `POST /api/media/bulk/delete`) share the same two-layer authorization pattern enforced inside `MediaService`:
+
+### Layer 1: Global permission (NestJS guard)
+
+| Endpoint | Required permission |
+|----------|---------------------|
+| `PATCH /api/media/bulk` | `media:write` |
+| `POST /api/media/bulk/tags` | `media:write` |
+| `POST /api/media/bulk/delete` | `media:delete` |
+
+### Layer 2: Circle scope (service-level)
+
+After the permission guard passes, the private helper `assertAllInCircle` enforces:
+
+1. **`CircleMembershipService.assertCircleAccess(userId, circleId, perms, 'collaborator')`** — the caller must be a circle collaborator or higher (or hold a super-admin permission). Returns 403 if not.
+
+2. **ID cross-circle check** — every ID in the request is verified to exist, be non-deleted, and belong to the stated `circleId` in a single `findMany` query. If `found.length !== uniqueIds.length` the request is rejected with 404. **No partial writes occur**: the full list is validated before any database mutation.
+
+### Why all-or-nothing?
+
+Partial writes would silently skip IDs that don't belong to the circle, allowing a caller to discover which IDs exist in other circles through the difference between the submitted list and the updated count. Rejecting the entire operation on any mismatch eliminates this information-disclosure vector.
+
+### ID cap
+
+All bulk endpoints cap `ids` at 500 entries per request (enforced by Zod). This prevents memory exhaustion and long-running transactions that could block the database.
+
+---
+
+## 3b. Geo Services Privacy
+
+Two geocoding paths exist; they have different privacy profiles.
+
+### Reverse geocoding (offline by default)
+
+The `GEO_PROVIDER` environment variable selects the active `GeoLocationProvider`:
+
+| Value | Sends GPS off-server? | Notes |
+|-------|-----------------------|-------|
+| `offline` (default) | **No** | local-reverse-geocoder backed by GeoNames dataset on the application server |
+| `nominatim` | **Yes** — GPS coordinates sent to Nominatim HTTP API | Use only with a self-hosted Nominatim instance for privacy |
+
+Reverse geocoding fires automatically after upload (EXIF extraction) and on-demand when `PATCH /api/media/bulk` sets `location`. Because the default provider is offline, GPS coordinates never leave the server in the default configuration.
+
+### Forward geocoding (opt-in, typed query only)
+
+`ForwardGeocodeService` sends a typed place-name query (the text the user typed in the location search box) to Nominatim's `/search` endpoint. **Photo GPS coordinates are never sent by this path.**
+
+The service is disabled by default. Set `GEO_FORWARD_SEARCH_ENABLED=true` to enable `GET /api/media/geo/search`. When disabled the endpoint returns 503.
+
+**Operator checklist for enabling forward geocoding:**
+
+- [ ] Understand that typed search queries (not GPS) will be sent to `NOMINATIM_BASE_URL`
+- [ ] Consider deploying a self-hosted Nominatim instance and setting `NOMINATIM_BASE_URL` to its URL
+- [ ] Ensure the Nominatim endpoint is accessible from the API container
+- [ ] Review Nominatim's [usage policy](https://operations.osmfoundation.org/policies/nominatim/) if using the public instance
+
+**Environment variables:**
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `GEO_FORWARD_SEARCH_ENABLED` | `false` | Enable/disable `GET /api/media/geo/search` |
+| `NOMINATIM_BASE_URL` | `https://nominatim.openstreetmap.org` | Nominatim endpoint for both reverse (`nominatim` provider) and forward search |
+| `GEO_PROVIDER` | `offline` | Reverse geocoding provider: `offline` or `nominatim` |
+
+---
+
 ## 4. Email Allowlist Access Control
 
 ### Overview

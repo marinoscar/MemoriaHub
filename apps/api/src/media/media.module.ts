@@ -2,9 +2,11 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 import { CirclesModule } from '../circles/circles.module';
+import { GeoLocationModule } from './geo/geo-location.module';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
+import { ForwardGeocodeService } from './geo/forward-geocode.service';
 
 /**
  * MediaModule
@@ -20,9 +22,9 @@ import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
  *   dependency on MediaModule — so there is no cycle.
  */
 @Module({
-  imports: [PrismaModule, StorageProvidersModule, CirclesModule],
+  imports: [PrismaModule, StorageProvidersModule, CirclesModule, GeoLocationModule],
   controllers: [MediaController],
-  providers: [MediaService, MediaMetadataSyncService],
+  providers: [MediaService, MediaMetadataSyncService, ForwardGeocodeService],
   exports: [MediaService],
 })
 export class MediaModule {}

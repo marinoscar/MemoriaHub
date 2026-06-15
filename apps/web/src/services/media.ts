@@ -16,6 +16,12 @@ import type {
   AlbumDetail,
   CreateAlbumDto,
   AlbumQueryParams,
+  BulkUpdateDto,
+  BulkTagsDto,
+  BulkDeleteDto,
+  GeoSearchResult,
+  GeoReverseResult,
+  DashboardResponse,
 } from '../types/media';
 
 // ---------------------------------------------------------------------------
@@ -43,6 +49,11 @@ export async function listMedia(params?: MediaQueryParams): Promise<MediaListRes
   if (params?.sortOrder) searchParams.set('sortOrder', params.sortOrder);
   if (params?.contentHash) searchParams.set('contentHash', params.contentHash);
   if (params?.circleId) searchParams.set('circleId', params.circleId);
+  if (params?.cameraMake) searchParams.set('cameraMake', params.cameraMake);
+  if (params?.cameraModel) searchParams.set('cameraModel', params.cameraModel);
+  if (params?.sourceDeviceId) searchParams.set('sourceDeviceId', params.sourceDeviceId);
+  if (params?.sourceDeviceName) searchParams.set('sourceDeviceName', params.sourceDeviceName);
+  if (params?.missingGeo !== undefined) searchParams.set('missingGeo', params.missingGeo ? '1' : '0');
 
   const qs = searchParams.toString();
   return api.get<MediaListResponse>(`/media${qs ? `?${qs}` : ''}`);
@@ -179,6 +190,44 @@ export async function createAlbum(dto: CreateAlbumDto): Promise<Album> {
 
 export async function getAlbum(id: string): Promise<AlbumDetail> {
   return api.get<AlbumDetail>(`/media/albums/${id}`);
+}
+
+// ---------------------------------------------------------------------------
+// Bulk operations
+// ---------------------------------------------------------------------------
+
+export async function bulkUpdateMedia(dto: BulkUpdateDto): Promise<{ updated: number }> {
+  return api.patch<{ updated: number }>('/media/bulk', dto);
+}
+
+export async function bulkTags(dto: BulkTagsDto): Promise<{ added: number; removed: number }> {
+  return api.post<{ added: number; removed: number }>('/media/bulk/tags', dto);
+}
+
+export async function bulkDelete(dto: BulkDeleteDto): Promise<{ deleted: number }> {
+  return api.post<{ deleted: number }>('/media/bulk/delete', dto);
+}
+
+// ---------------------------------------------------------------------------
+// Geo search / reverse geocode
+// ---------------------------------------------------------------------------
+
+export async function reverseGeocode(lat: number, lng: number): Promise<GeoReverseResult | null> {
+  return api.get<GeoReverseResult | null>(`/media/geo/reverse?lat=${lat}&lng=${lng}`);
+}
+
+export async function searchPlaces(q: string, limit?: number): Promise<GeoSearchResult[]> {
+  const qs = new URLSearchParams({ q });
+  if (limit) qs.set('limit', String(limit));
+  return api.get<GeoSearchResult[]>(`/media/geo/search?${qs.toString()}`);
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard
+// ---------------------------------------------------------------------------
+
+export async function getDashboard(circleId: string): Promise<DashboardResponse> {
+  return api.get<DashboardResponse>(`/media/dashboard?circleId=${encodeURIComponent(circleId)}`);
 }
 
 // ---------------------------------------------------------------------------

@@ -16,6 +16,9 @@ MemoriaHub is a personal media-ownership platform that gives families full contr
 
 ### Media and Storage
 - **Media Domain**: Photos and videos as first-class `MediaItem` records with typed columns for capture date, camera make/model, GPS coordinates, reverse-geocoded country/region/city, tags, albums, favorites, classification, and soft-delete. All items are circle-scoped (`circleId` required on create and list endpoints)
+- **Circle Dashboard**: The home page (`/`) shows a per-circle dashboard — On This Day (same month/day across all years), recent imports, favorites, and a review queue with deep-links to unreviewed and missing-location items
+- **Bulk Editing**: Multi-select media library with a bulk-action toolbar for setting location (map pin + place search), tags, classification, favorite flag, and soft-delete across up to 500 items at once. The location picker reverse-geocodes the dropped pin using the offline on-server provider by default
+- **Geo Services**: On-demand reverse geocoding (`GET /api/media/geo/reverse`) and optional place-name forward search (`GET /api/media/geo/search`, requires `GEO_FORWARD_SEARCH_ENABLED=true`). Forward search sends only the typed query to Nominatim — GPS coordinates never leave the server
 - **Pluggable Storage**: AWS S3 (primary) and local-disk (backup); additional providers are interchangeable by design
 - **Resumable Uploads**: Multipart upload with pre-signed URLs and event-driven post-upload processing pipeline
 - **Personal Access Tokens**: Long-lived tokens for CLI tools, scripts, and automation workflows
@@ -293,11 +296,17 @@ Interactive API documentation is available at `/api/docs` when running the appli
 - `GET /api/admin/backup/objects` - List media objects with signed download URLs
 
 **Media (circle-scoped — `circleId` required):**
+- `GET /api/media/dashboard` - Circle dashboard (On This Day, recent, favorites, review-queue counts)
 - `POST /api/media` - Register an uploaded file as a MediaItem (body: `circleId` required)
-- `GET /api/media` - List media (query: `circleId` required; filter by type, date, classification, album, tag, location)
-- `GET /api/media/:id` - Get a single MediaItem
+- `GET /api/media` - List media (query: `circleId` required; filter by type, date, classification, album, tag, location, cameraMake, missingGeo, etc.)
+- `GET /api/media/:id` - Get a single MediaItem (includes `tags[]`)
 - `PATCH /api/media/:id` - Update mutable fields (title, caption, favorite, classification, etc.)
 - `DELETE /api/media/:id` - Soft-delete MediaItem (moves to trash; blob preserved)
+- `PATCH /api/media/bulk` - Bulk update location / classification / favorite on 1–500 items
+- `POST /api/media/bulk/tags` - Bulk add/remove tags on 1–500 items
+- `POST /api/media/bulk/delete` - Bulk soft-delete 1–500 items
+- `GET /api/media/geo/reverse` - On-demand reverse geocoding
+- `GET /api/media/geo/search` - Forward place-name search (requires `GEO_FORWARD_SEARCH_ENABLED=true`)
 - `GET /api/media/tags` - List tags for active circle (query: `circleId` required)
 - `POST /api/media/:id/tags` - Attach tags to a MediaItem
 - `POST /api/media/albums` - Create album (body: `circleId` required)

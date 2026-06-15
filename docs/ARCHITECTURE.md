@@ -537,7 +537,131 @@ Selected when `STORAGE_BACKUP_PROVIDER=local`. Used exclusively by the backup jo
 
 ---
 
-### 5.6 Content-Hash Deduplication
+### 5.6 Bulk Media Editing
+
+The `MediaService` provides three bulk-operation methods invoked by the static routes registered before `/:id` in `MediaController`:
+
+| Route | Permission | Min per-circle role | Operation |
+|-------|------------|---------------------|-----------|
+| `PATCH /api/media/bulk` | `media:write` | `collaborator` | Update location, classification, or favorite on 1–500 items |
+| `POST /api/media/bulk/tags` | `media:write` | `collaborator` | Add/remove tags on 1–500 items (transactional) |
+| `POST /api/media/bulk/delete` | `media:delete` | `collaborator` | Soft-delete 1–500 items |
+
+#### Authorization pattern
+
+All three bulk methods share the same private helper `assertAllInCircle`:
+
+```
+assertAllInCircle(ids, circleId, userId, perms, 'collaborator')
+  1. CircleMembershipService.assertCircleAccess → 403 if not a collaborator
+  2. prisma.mediaItem.findMany where id IN ids AND circleId = ? AND deletedAt IS NULL
+  3. If found.length !== uniqueIds.length → 404 (missing, deleted, or wrong circle)
+```
+
+No partial writes occur: the full ID list is validated before any update or delete is executed.
+
+#### Bulk location update flow
+
+When `set.location = {lat, lng, altitude?}` is provided, `bulkUpdateMedia` calls `geoProvider.reverseGeocode(lat, lng)` synchronously and propagates the result through `geoResultToMediaColumns(result, 'manual')` before issuing a single `prisma.mediaItem.updateMany`. This sets `geoSource = 'manual'` and overwrites all geo tier columns. When `set.location = null`, `GEO_CLEAR_COLUMNS` nulls every coordinate and derived field in the same `updateMany`.
+
+#### Bulk tag operation flow
+
+`bulkTags` runs inside a single Prisma `$transaction`:
+
+```
+for each name in dto.add → upsert Tag (circleId_name unique); collect tagIds
+prisma.mediaTag.createMany({ data: ids × tagIds, skipDuplicates: true })
+
+for each name in dto.remove → findMany Tag by name in circle; collect removeTagIds
+prisma.mediaTag.deleteMany where tagId IN removeTagIds AND mediaItemId IN ids
+```
+
+Returns `{ added: number, removed: number }` counts.
+
+---
+
+### 5.7 Circle Dashboard
+
+`GET /api/media/dashboard?circleId=<uuid>` is handled by `MediaService.getDashboard` and executes seven parallel database operations after a single circle-access check:
+
+| Data | Query |
+|------|-------|
+| On This Day IDs | Raw SQL using `EXTRACT(MONTH/DAY FROM captured_at)` filtered by the functional index |
+| On This Day items | `findMany where id IN onThisDayIds`, ordered `capturedAt DESC`, limit 24 |
+| Recent items | `findMany where circleId`, ordered `importedAt DESC`, limit 12 |
+| Favorites | `findMany where circleId AND favorite = true`, ordered `capturedAt DESC`, limit 12 |
+| Total count | `count where circleId AND deletedAt IS NULL` |
+| Unreviewed count | `count where classification = 'unreviewed'` |
+| Low-value count | `count where classification = 'low_value'` |
+| Missing-geo count | `count where takenLat IS NULL` |
+
+Thumbnail URLs are signed in parallel via `signThumb` after the DB queries complete.
+
+#### On-This-Day functional index
+
+The raw SQL query that drives the On-This-Day panel reads:
+
+```sql
+SELECT id FROM media_items
+WHERE circle_id = $1::uuid
+  AND deleted_at IS NULL
+  AND captured_at IS NOT NULL
+  AND EXTRACT(MONTH FROM captured_at) = $2
+  AND EXTRACT(DAY FROM captured_at) = $3
+ORDER BY captured_at DESC
+LIMIT 24
+```
+
+PostgreSQL cannot use a plain B-tree index on `captured_at` for this pattern. A dedicated functional partial index accelerates it:
+
+```sql
+CREATE INDEX "media_items_captured_md_idx"
+  ON "media_items" (EXTRACT(MONTH FROM "captured_at"), EXTRACT(DAY FROM "captured_at"))
+  WHERE "deleted_at" IS NULL;
+```
+
+This index is hand-authored in migration `20260615000000_media_oncethisday_index` and is not represented in `schema.prisma` (Prisma's DSL cannot express expression indexes).
+
+---
+
+### 5.8 Geo Services
+
+The media module maintains two distinct geocoding paths:
+
+#### Reverse geocoding (on-server, offline by default)
+
+The `GeoLocationProvider` interface is injected as `GEO_LOCATION_PROVIDER`. The active provider is selected by the `GEO_PROVIDER` environment variable:
+
+| Value | Provider | Data leaves server? |
+|-------|----------|---------------------|
+| `offline` (default) | `OfflineGeoLocationProvider` — local-reverse-geocoder backed by GeoNames dataset | No — GPS stays on server |
+| `nominatim` | `NominatimGeoLocationProvider` — OSM Nominatim HTTP `/reverse` API | Yes — GPS sent to Nominatim |
+
+Reverse geocoding fires in two contexts:
+1. **Post-upload (automatic)**: `MediaMetadataSyncService.syncFromStorageObject` after EXIF extraction
+2. **On-demand (manual bulk)**: `PATCH /api/media/bulk` triggers `geoProvider.reverseGeocode` when `set.location` contains coordinates
+
+The on-demand path is also exposed directly as `GET /api/media/geo/reverse?lat=&lng=` for the UI location picker.
+
+#### Forward geocoding (Nominatim, opt-in)
+
+`ForwardGeocodeService` sends a typed place-name query to Nominatim's `/search` endpoint and returns `[{lat, lng, label}]`. **Photo GPS coordinates are never sent by this path** — only the text query the user typed.
+
+The service is gated by `GEO_FORWARD_SEARCH_ENABLED` (default `false`). When disabled, `GET /api/media/geo/search` returns 503. The `NOMINATIM_BASE_URL` variable (default `https://nominatim.openstreetmap.org`) can point the service at a private Nominatim instance.
+
+```
+apps/api/src/media/geo/
+├── geo-location-provider.interface.ts   # GeoLocationProvider + GeoLocationResult
+├── geo-location.module.ts               # Selects provider by GEO_PROVIDER env var
+├── offline-geo-location.provider.ts     # local-reverse-geocoder backed by GeoNames
+├── nominatim-geo-location.provider.ts   # Nominatim HTTP reverse geocoding
+├── forward-geocode.service.ts           # Nominatim forward search (opt-in)
+└── geo-result.mapper.ts                 # geoResultToMediaColumns + GEO_CLEAR_COLUMNS
+```
+
+---
+
+### 5.9 Content-Hash Deduplication
 
 #### Overview
 
@@ -1019,6 +1143,9 @@ Before OAuth authentication completes:
 | **Circles** | `/api/circles/*` | Yes | Circle CRUD, members, invites |
 | **Admin Circles** | `/api/admin/circles` | Yes (Admin) | Cross-circle admin view |
 | **Admin Backup** | `/api/admin/backup/*` | Yes (Admin) | Local-drive backup/replication |
+| **Media Bulk** | `/api/media/bulk*` | Yes (`media:write` / `media:delete`) | Bulk update/tag/delete media items |
+| **Geo** | `/api/media/geo/*` | Yes (`media:read`) | Reverse and forward geocoding |
+| **Dashboard** | `/api/media/dashboard` | Yes (`media:read`) | Circle dashboard aggregation |
 
 ### 8.2 Complete Endpoint Reference
 
@@ -1099,6 +1226,27 @@ Before OAuth authentication completes:
 | `POST` | `/api/circles/:id/invites` | `circles:write` | circle_admin | Create invite + allowlist upsert |
 | `DELETE` | `/api/circles/:id/invites/:inviteId` | `circles:write` | circle_admin | Revoke pending invite |
 
+#### Media Bulk Operations
+
+| Method | Path | Permission | Per-circle Role | Purpose |
+|--------|------|------------|-----------------|---------|
+| `PATCH` | `/api/media/bulk` | `media:write` | collaborator | Bulk update location / classification / favorite |
+| `POST` | `/api/media/bulk/tags` | `media:write` | collaborator | Bulk add/remove tags |
+| `POST` | `/api/media/bulk/delete` | `media:delete` | collaborator | Bulk soft-delete |
+
+#### Geo Services
+
+| Method | Path | Permission | Purpose |
+|--------|------|------------|---------|
+| `GET` | `/api/media/geo/reverse` | `media:read` | On-demand reverse geocode (offline by default) |
+| `GET` | `/api/media/geo/search` | `media:read` | Forward geocoding via Nominatim (requires `GEO_FORWARD_SEARCH_ENABLED=true`) |
+
+#### Circle Dashboard
+
+| Method | Path | Permission | Per-circle Role | Purpose |
+|--------|------|------------|-----------------|---------|
+| `GET` | `/api/media/dashboard` | `media:read` | viewer | On This Day, recent, favorites, review-queue counts |
+
 #### Admin Backup
 
 | Method | Path | Permission | Purpose |
@@ -1151,9 +1299,9 @@ Before OAuth authentication completes:
 |------|-------|------|------|---------|
 | Login | `/login` | Public | - | OAuth provider selection |
 | Auth Callback | `/auth/callback` | Public | - | Token handling |
-| Home | `/` | Required | Any | Dashboard |
+| Home | `/` | Required | Any | Circle dashboard — On This Day, recent, favorites, review queue |
 | User Settings | `/settings` | Required | Any | User preferences |
-| Media Library | `/media` | Required | Any | Browse and upload media (active circle) |
+| Media Library | `/media` | Required | Any | Browse and upload media; multi-select with bulk geo/tag/classification/delete toolbar |
 | Map | `/map` | Required | Any | Clustered map of geotagged media (active circle) |
 | Circle List | `/circles` | Required | Any | List and create circles |
 | Circle Detail | `/circles/:id` | Required | Any | Members, invites, and content for one circle |

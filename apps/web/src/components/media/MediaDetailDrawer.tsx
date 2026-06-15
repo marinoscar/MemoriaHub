@@ -27,12 +27,15 @@ import {
   Cancel as CancelIcon,
   Download as DownloadIcon,
   BrokenImage as BrokenImageIcon,
+  AddLocation as AddLocationIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import type { MediaItem, MediaClassification, PatchMediaDto } from '../../types/media';
-import { patchMedia as patchMediaApi, getMedia } from '../../services/media';
+import { patchMedia as patchMediaApi, getMedia, bulkUpdateMedia, bulkTags } from '../../services/media';
 import { VideoPlayer } from './VideoPlayer';
 import { LocationMiniMap } from './LocationMiniMap';
+import { LocationPickerMap } from './LocationPickerMap';
+import { TagAutocomplete } from './TagAutocomplete';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -130,6 +133,20 @@ export function MediaDetailDrawer({
   // Image load state
   const [imgError, setImgError] = useState(false);
 
+  // Location edit state
+  const [locationEditOpen, setLocationEditOpen] = useState(false);
+  const [editPinLocation, setEditPinLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [locationSaving, setLocationSaving] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
+
+  // Tag edit state
+  const [tagEditOpen, setTagEditOpen] = useState(false);
+  const [editTagsAdd, setEditTagsAdd] = useState<string[]>([]);
+  const [editTagsRemove, setEditTagsRemove] = useState<string[]>([]);
+  const [tagSaving, setTagSaving] = useState(false);
+  const [tagError, setTagError] = useState<string | null>(null);
+  const [tagSuccess, setTagSuccess] = useState<string | null>(null);
+
   // ---------------------------------------------------------------------------
   // Fetch full item (with downloadUrl) when drawer opens for a new item.
   // The list endpoint does not populate downloadUrl; only GET /media/:id does.
@@ -137,6 +154,11 @@ export function MediaDetailDrawer({
   useEffect(() => {
     if (!open || !item) {
       setFullItem(null);
+      setLocationEditOpen(false);
+      setTagEditOpen(false);
+      setEditTagsAdd([]);
+      setEditTagsRemove([]);
+      setTagSuccess(null);
       return;
     }
     // If the list item already carries downloadUrl (e.g. after an edit), skip fetch.
@@ -213,6 +235,53 @@ export function MediaDetailDrawer({
     editDescription,
     onItemUpdated,
   ]);
+
+  const handleSaveLocation = useCallback(async () => {
+    if (!item || !editPinLocation) return;
+    setLocationSaving(true);
+    setLocationError(null);
+    try {
+      await bulkUpdateMedia({
+        circleId: item.circleId,
+        ids: [item.id],
+        set: { location: { lat: editPinLocation.lat, lng: editPinLocation.lng } },
+      });
+      const refreshed = await getMedia(item.id);
+      setFullItem(refreshed);
+      onItemUpdated(refreshed);
+      setLocationEditOpen(false);
+    } catch (err) {
+      setLocationError(err instanceof Error ? err.message : 'Failed to save location');
+    } finally {
+      setLocationSaving(false);
+    }
+  }, [item, editPinLocation, onItemUpdated]);
+
+  const handleSaveTags = useCallback(async () => {
+    if (!item) return;
+    if (editTagsAdd.length === 0 && editTagsRemove.length === 0) return;
+    setTagSaving(true);
+    setTagError(null);
+    try {
+      await bulkTags({
+        circleId: item.circleId,
+        ids: [item.id],
+        add: editTagsAdd.length > 0 ? editTagsAdd : undefined,
+        remove: editTagsRemove.length > 0 ? editTagsRemove : undefined,
+      });
+      const refreshed = await getMedia(item.id);
+      setFullItem(refreshed);
+      onItemUpdated(refreshed);
+      setEditTagsAdd([]);
+      setEditTagsRemove([]);
+      setTagEditOpen(false);
+      setTagSuccess('Tags updated');
+    } catch (err) {
+      setTagError(err instanceof Error ? err.message : 'Failed to update tags');
+    } finally {
+      setTagSaving(false);
+    }
+  }, [item, editTagsAdd, editTagsRemove, onItemUpdated]);
 
   const handleToggleFavorite = useCallback(async () => {
     if (!item) return;
@@ -544,8 +613,53 @@ export function MediaDetailDrawer({
           </>
         )}
 
-        {/* Mini-map — shown when GPS coordinates are present */}
-        {displayItem.takenLat !== null && displayItem.takenLng !== null && (
+        {/* Edit Location affordance */}
+        <Box sx={{ mt: 1, mb: 0.5 }}>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<AddLocationIcon />}
+            onClick={() => {
+              setEditPinLocation(
+                displayItem.takenLat !== null && displayItem.takenLng !== null
+                  ? { lat: displayItem.takenLat, lng: displayItem.takenLng }
+                  : null,
+              );
+              setLocationEditOpen(true);
+            }}
+          >
+            {displayItem.takenLat !== null ? 'Edit Location' : 'Set Location'}
+          </Button>
+        </Box>
+
+        {/* Inline location editor */}
+        {locationEditOpen && (
+          <Box sx={{ mt: 1 }}>
+            <LocationPickerMap
+              value={editPinLocation}
+              onChange={setEditPinLocation}
+              height={220}
+            />
+            {locationError && <Alert severity="error" sx={{ mt: 1 }}>{locationError}</Alert>}
+            <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+              <Button size="small" onClick={() => setLocationEditOpen(false)} disabled={locationSaving}>
+                Cancel
+              </Button>
+              <Button
+                size="small"
+                variant="contained"
+                onClick={() => void handleSaveLocation()}
+                disabled={!editPinLocation || locationSaving}
+                startIcon={locationSaving ? <CircularProgress size={12} /> : undefined}
+              >
+                Save Location
+              </Button>
+            </Stack>
+          </Box>
+        )}
+
+        {/* Mini-map — shown when GPS coordinates are present and not editing */}
+        {!locationEditOpen && displayItem.takenLat !== null && displayItem.takenLng !== null && (
           <Box sx={{ mt: 1.5 }}>
             <LocationMiniMap
               lat={displayItem.takenLat}
@@ -553,6 +667,73 @@ export function MediaDetailDrawer({
               label={displayItem.geoPlaceName ?? displayItem.geoLocality}
             />
           </Box>
+        )}
+
+        {/* Tags */}
+        <Divider sx={{ my: 1.5 }} />
+        <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+          Tags
+        </Typography>
+
+        {displayItem.tags && displayItem.tags.length > 0 ? (
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
+            {displayItem.tags.map((tag) => (
+              <Chip key={tag} label={tag} size="small" variant="outlined" />
+            ))}
+          </Box>
+        ) : (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>No tags</Typography>
+        )}
+
+        {tagSuccess && (
+          <Alert severity="success" sx={{ mb: 1 }} onClose={() => setTagSuccess(null)}>{tagSuccess}</Alert>
+        )}
+
+        {!tagEditOpen ? (
+          <Button size="small" variant="outlined" onClick={() => setTagEditOpen(true)}>
+            Edit Tags
+          </Button>
+        ) : (
+          <Stack spacing={1.5}>
+            <TagAutocomplete
+              label="Add tags"
+              value={editTagsAdd}
+              onChange={setEditTagsAdd}
+              circleId={item?.circleId}
+              disabled={tagSaving}
+            />
+            <TagAutocomplete
+              label="Remove tags"
+              value={editTagsRemove}
+              onChange={setEditTagsRemove}
+              circleId={item?.circleId}
+              disabled={tagSaving}
+            />
+            {tagError && <Alert severity="error">{tagError}</Alert>}
+            <Stack direction="row" spacing={1}>
+              <Button
+                size="small"
+                onClick={() => {
+                  setTagEditOpen(false);
+                  setEditTagsAdd([]);
+                  setEditTagsRemove([]);
+                  setTagError(null);
+                }}
+                disabled={tagSaving}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="small"
+                variant="contained"
+                onClick={() => void handleSaveTags()}
+                disabled={(editTagsAdd.length === 0 && editTagsRemove.length === 0) || tagSaving}
+                startIcon={tagSaving ? <CircularProgress size={12} /> : undefined}
+              >
+                Save Tags
+              </Button>
+            </Stack>
+          </Stack>
         )}
 
         {/* Timestamps */}

@@ -1418,6 +1418,11 @@ List active (non-deleted) media items for a circle. Admins holding `media:read_a
 | `place` | string | — | Substring match on `geoPlaceName` |
 | `location` | string | — | Free-text match across all geo tiers |
 | `contentHash` | string (64 hex chars) | — | Return the item matching this exact SHA-256 hash. Used as a deduplication pre-check: if the response contains at least one item the file is already in the library and the upload can be skipped. |
+| `cameraMake` | string | — | Substring match on `cameraMake`, case-insensitive |
+| `cameraModel` | string | — | Substring match on `cameraModel`, case-insensitive |
+| `sourceDeviceId` | string | — | Exact match on `sourceDeviceId` |
+| `sourceDeviceName` | string | — | Substring match on `sourceDeviceName`, case-insensitive |
+| `missingGeo` | boolean | — | `true` = items with no GPS (`takenLat IS NULL`); `false` = items with GPS |
 | `sortBy` | enum | `capturedAt` | `capturedAt`, `importedAt`, or `createdAt` |
 | `sortOrder` | enum | `desc` | `asc` or `desc` |
 
@@ -1463,29 +1468,35 @@ If `items.length > 0` the file already exists in that circle and the upload can 
 
 #### GET /api/media/:id
 
-**Requires:** `media:read` permission
+**Requires:** `media:read` permission + `viewer` role in the item's circle
 
-Get a single `MediaItem` by ID. Returns fresh signed URLs for the thumbnail and the original blob.
+Get a single `MediaItem` by ID. Returns fresh signed URLs for the thumbnail and the original blob, plus the item's tag names.
 
 **Response:**
 
 ```json
 {
   "id": "uuid",
-  "ownerId": "uuid",
+  "circleId": "uuid",
+  "addedById": "uuid",
   "type": "photo",
   "originalFilename": "IMG_4521.jpg",
   "contentHash": "e3b0c44298fc1c149afbf4c8996fb924...",
   "capturedAt": "2024-07-15T14:30:00.000Z",
   "importedAt": "2026-06-12T10:00:00.000Z",
+  "classification": "memory",
+  "favorite": false,
+  "tags": ["vacation", "summer"],
   "thumbnailUrl": "https://s3.amazonaws.com/...",
   "downloadUrl": "https://s3.amazonaws.com/..."
 }
 ```
 
+`tags` is a flat array of tag name strings. The array is empty (`[]`) when no tags are attached.
+
 **Error Cases:**
 - 404 Not Found — item does not exist or is soft-deleted
-- 403 Forbidden — caller does not own the item and lacks `media:read_any`
+- 403 Forbidden — caller is not a member of the item's circle and lacks `media:read_any`
 
 ---
 
@@ -1512,6 +1523,253 @@ Soft-delete a `MediaItem`. Sets `deletedAt`; does not remove the underlying `Sto
 **Response:** HTTP 204 No Content
 
 **Note:** A soft-deleted item is excluded from `GET /api/media` results and from the dedup unique index, so the same content hash can be re-imported after deletion.
+
+---
+
+#### GET /api/media/geo/reverse
+
+**Requires:** `media:read` permission
+
+Reverse geocode a coordinate pair on demand. Uses the offline provider configured by `GEO_PROVIDER` (default `offline`). GPS coordinates are never sent to external services when the offline provider is active.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `lat` | number | Yes | Latitude (-90 to 90) |
+| `lng` | number | Yes | Longitude (-180 to 180) |
+
+**Response:**
+
+```json
+{
+  "country": "Costa Rica",
+  "countryCode": "CR",
+  "admin1": "San José",
+  "admin2": null,
+  "locality": "San José",
+  "placeName": "San José, San José, Costa Rica"
+}
+```
+
+Returns `null` if no result is found for the given coordinates.
+
+**Error Cases:**
+- 401 Unauthorized — missing or expired JWT
+- 403 Forbidden — caller lacks `media:read` permission
+
+---
+
+#### GET /api/media/geo/search
+
+**Requires:** `media:read` permission
+
+Forward geocode — search places by typed name. Sends the query string to Nominatim's `/search` API. **Disabled by default** (`GEO_FORWARD_SEARCH_ENABLED=false`). When disabled the endpoint returns 503.
+
+**Privacy note:** Only the typed place name query leaves the server — photo GPS coordinates are never sent to Nominatim. Enable explicitly with `GEO_FORWARD_SEARCH_ENABLED=true` and optionally point `NOMINATIM_BASE_URL` at a private instance.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `q` | string | Yes | — | Place name to search |
+| `limit` | number | No | 5 | Max results (1–20) |
+
+**Response (200 — enabled):**
+
+```json
+[
+  {
+    "lat": 9.9281,
+    "lng": -84.0907,
+    "label": "San José, Costa Rica"
+  }
+]
+```
+
+**Error Cases:**
+- 503 Service Unavailable — `GEO_FORWARD_SEARCH_ENABLED` is `false`
+- 401 Unauthorized — missing or expired JWT
+
+---
+
+#### GET /api/media/dashboard
+
+**Requires:** `media:read` permission + `viewer` role in the target circle
+
+Returns aggregated dashboard data for a circle: On This Day (same month/day across all years), recent uploads, favorites, and review-queue counts.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `circleId` | UUID | Yes | Circle to aggregate (caller must be a viewer or higher) |
+
+**Response:**
+
+```json
+{
+  "onThisDay": [
+    {
+      "id": "uuid",
+      "type": "photo",
+      "capturedAt": "2022-07-15T14:30:00.000Z",
+      "thumbnailUrl": "https://...",
+      "..."
+    }
+  ],
+  "recent": [ /* up to 12 most recently imported items */ ],
+  "favorites": [ /* up to 12 favorited items ordered by capturedAt desc */ ],
+  "counts": {
+    "total": 1842,
+    "unreviewed": 304,
+    "lowValue": 92,
+    "missingGeo": 517
+  }
+}
+```
+
+**Response fields:**
+
+| Field | Description |
+|-------|-------------|
+| `onThisDay` | Up to 24 items where `MONTH(capturedAt) = today_month AND DAY(capturedAt) = today_day` across all years, ordered `capturedAt DESC`. Uses the functional index `media_items_captured_md_idx`. |
+| `recent` | Up to 12 items ordered by `importedAt DESC` |
+| `favorites` | Up to 12 favorited items ordered by `capturedAt DESC` |
+| `counts.total` | Non-deleted items in the circle |
+| `counts.unreviewed` | Items with `classification = 'unreviewed'` |
+| `counts.lowValue` | Items with `classification = 'low_value'` |
+| `counts.missingGeo` | Items with `takenLat IS NULL` |
+
+All items include a freshly signed `thumbnailUrl`.
+
+**Error Cases:**
+- 403 Forbidden — caller is not a member of the circle
+- 404 Not Found — circle does not exist
+
+---
+
+#### PATCH /api/media/bulk
+
+**Requires:** `media:write` permission + `collaborator` role in the target circle
+
+Bulk update location, classification, or favorite flag on up to 500 media items in a single operation. All IDs must belong to the specified circle and must not be soft-deleted; any mismatch returns 404 without updating any items.
+
+When `set.location` contains coordinates, the server immediately performs an on-demand reverse geocode using the configured provider and overwrites all geo columns (`geoCountry`, `geoAdmin1`, `geoLocality`, etc.) with `geoSource = 'manual'`. When `set.location` is explicitly `null`, all geo columns and coordinates are cleared.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `circleId` | UUID | Yes | Circle that owns all IDs |
+| `ids` | UUID[] | Yes | 1–500 MediaItem IDs |
+| `set` | object | Yes | Fields to update (at least one required) |
+| `set.location` | `{lat, lng, altitude?}` \| `null` | No | Set (reverse-geocodes) or clear (`null`) GPS + geo columns |
+| `set.location.lat` | number | Conditional | -90 to 90 |
+| `set.location.lng` | number | Conditional | -180 to 180 |
+| `set.location.altitude` | number | No | Altitude in metres |
+| `set.classification` | `"memory"` \| `"low_value"` \| `"unreviewed"` | No | New classification |
+| `set.favorite` | boolean | No | New favorite flag |
+
+**Example request:**
+
+```json
+{
+  "circleId": "a1b2c3d4-...",
+  "ids": ["uuid-1", "uuid-2", "uuid-3"],
+  "set": {
+    "location": { "lat": 9.9281, "lng": -84.0907 },
+    "classification": "memory"
+  }
+}
+```
+
+**Response:**
+
+```json
+{ "updated": 3 }
+```
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | `set` is empty; `ids` empty or > 500; invalid lat/lng |
+| 403 | Caller lacks `media:write` or is not a `collaborator` in the circle |
+| 404 | Any ID not found, soft-deleted, or in a different circle |
+
+---
+
+#### POST /api/media/bulk/tags
+
+**Requires:** `media:write` permission + `collaborator` role in the target circle
+
+Add and/or remove tags on up to 500 media items atomically. All IDs are verified against the circle before any writes. Tag names are matched case-sensitively; tags are created if they do not exist (idempotent per `(circleId, name)`). At least one of `add` or `remove` must be non-empty.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `circleId` | UUID | Yes | Circle that owns all IDs |
+| `ids` | UUID[] | Yes | 1–500 MediaItem IDs |
+| `add` | string[] | No | Tag names to attach (max 128 chars each) |
+| `remove` | string[] | No | Tag names to detach |
+
+**Example request:**
+
+```json
+{
+  "circleId": "a1b2c3d4-...",
+  "ids": ["uuid-1", "uuid-2"],
+  "add": ["vacation", "summer"],
+  "remove": ["untagged"]
+}
+```
+
+**Response:**
+
+```json
+{ "added": 4, "removed": 2 }
+```
+
+`added` is the count of new `MediaTag` join rows created (skips duplicates). `removed` is the count of `MediaTag` rows deleted.
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | Both `add` and `remove` are empty; `ids` empty or > 500 |
+| 403 | Caller lacks `media:write` or is not a `collaborator` in the circle |
+| 404 | Any ID not found, soft-deleted, or in a different circle |
+
+---
+
+#### POST /api/media/bulk/delete
+
+**Requires:** `media:delete` permission + `collaborator` role in the target circle
+
+Soft-delete up to 500 media items in a single operation. Sets `deletedAt` on each item; underlying `StorageObject` blobs are preserved. All IDs must be non-deleted members of the circle; any mismatch returns 404 without deleting any items.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `circleId` | UUID | Yes | Circle that owns all IDs |
+| `ids` | UUID[] | Yes | 1–500 MediaItem IDs |
+
+**Response:**
+
+```json
+{ "deleted": 3 }
+```
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | `ids` empty or > 500 |
+| 403 | Caller lacks `media:delete` or is not a `collaborator` in the circle |
+| 404 | Any ID not found, soft-deleted, or in a different circle |
 
 ---
 
