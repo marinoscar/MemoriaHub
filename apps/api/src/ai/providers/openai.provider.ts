@@ -52,7 +52,7 @@ export class OpenAiProvider implements AiProvider {
             function: {
               name: t.name,
               description: t.description,
-              parameters: t.inputSchema,
+              parameters: t.inputSchema as Record<string, unknown>,
             },
           }))
         : undefined;

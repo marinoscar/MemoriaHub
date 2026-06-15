@@ -107,6 +107,10 @@ describe('SystemSettingsService', () => {
       const newSettings: SystemSettingsValue = {
         ui: { allowUserThemeOverride: false },
         features: { newFeature: true },
+        ai: {
+          features: { search: { provider: null, model: null } },
+          conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 30 },
+        },
       };
 
       mockPrisma.systemSettings.upsert.mockResolvedValue({
@@ -148,6 +152,10 @@ describe('SystemSettingsService', () => {
       const newSettings: SystemSettingsValue = {
         ui: { allowUserThemeOverride: true },
         features: {},
+        ai: {
+          features: { search: { provider: null, model: null } },
+          conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 30 },
+        },
       };
 
       mockPrisma.systemSettings.upsert.mockResolvedValue({
@@ -174,6 +182,10 @@ describe('SystemSettingsService', () => {
       const newSettings: SystemSettingsValue = {
         ui: { allowUserThemeOverride: false },
         features: {},
+        ai: {
+          features: { search: { provider: null, model: null } },
+          conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 30 },
+        },
       };
 
       mockPrisma.systemSettings.upsert.mockResolvedValue({
