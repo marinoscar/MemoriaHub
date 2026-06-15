@@ -49,6 +49,7 @@ import {
   PlayCircleOutlined as PlayCircleOutlinedIcon,
   CheckBox as CheckBoxIcon,
   CheckBoxOutlineBlank as CheckBoxOutlineBlankIcon,
+  Checklist as ChecklistIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { useSearchParams } from 'react-router-dom';
@@ -165,9 +166,10 @@ interface MediaTileProps {
   isSelected: boolean;
   anySelected: boolean;
   onToggleSelect: (id: string) => void;
+  selectionMode: boolean;
 }
 
-function MediaTile({ item, onSelect, onToggleFavorite, isSelected, anySelected, onToggleSelect }: MediaTileProps) {
+function MediaTile({ item, onSelect, onToggleFavorite, isSelected, anySelected, onToggleSelect, selectionMode }: MediaTileProps) {
   const theme = useTheme();
   const [imgError, setImgError] = useState(false);
 
@@ -176,7 +178,7 @@ function MediaTile({ item, onSelect, onToggleFavorite, isSelected, anySelected, 
   return (
     <ImageListItem
       onClick={() => {
-        if (anySelected) {
+        if (selectionMode || anySelected) {
           onToggleSelect(item.id);
         } else {
           onSelect(item);
@@ -301,7 +303,7 @@ function MediaTile({ item, onSelect, onToggleFavorite, isSelected, anySelected, 
           top: 4,
           left: 4,
           zIndex: 2,
-          opacity: anySelected || isSelected ? 1 : 0,
+          opacity: selectionMode || anySelected || isSelected ? 1 : 0,
           transition: 'opacity 0.15s',
           '.MuiImageListItem-root:hover &': { opacity: 1 },
         }}
@@ -417,6 +419,7 @@ export default function MediaLibraryPage() {
 
   // Selection state
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
   const [bulkLocationOpen, setBulkLocationOpen] = useState(false);
   const [bulkTagsOpen, setBulkTagsOpen] = useState(false);
   const [snackbar, setSnackbar] = useState<{ message: string; severity: 'success' | 'error' } | null>(null);
@@ -656,11 +659,13 @@ export default function MediaLibraryPage() {
 
   const handleClearSelection = useCallback(() => {
     setSelected(new Set());
+    setSelectionMode(false);
   }, []);
 
   const handleBulkSuccess = useCallback((message: string) => {
     setSnackbar({ message, severity: 'success' });
     setSelected(new Set());
+    setSelectionMode(false);
     void fetchMedia(buildParams());
   }, [fetchMedia, buildParams]);
 
@@ -731,6 +736,26 @@ export default function MediaLibraryPage() {
         </Typography>
 
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+          {/* Select toggle button — touch-friendly multi-select */}
+          {activeCircleRole !== 'viewer' && (
+            <Button
+              variant={selectionMode ? 'contained' : 'outlined'}
+              startIcon={<ChecklistIcon />}
+              onClick={() => {
+                if (selectionMode) {
+                  setSelectionMode(false);
+                  setSelected(new Set());
+                } else {
+                  setSelectionMode(true);
+                }
+              }}
+              aria-pressed={selectionMode}
+              aria-label={selectionMode ? 'Exit selection mode' : 'Enter selection mode'}
+            >
+              {selectionMode ? 'Done' : 'Select'}
+            </Button>
+          )}
+
           {/* Export button — opens JSON / CSV format menu */}
           <Tooltip title="Export metadata">
             <span>
@@ -1184,6 +1209,7 @@ export default function MediaLibraryPage() {
                     isSelected={selected.has(item.id)}
                     anySelected={selected.size > 0}
                     onToggleSelect={handleToggleSelect}
+                    selectionMode={selectionMode}
                   />
                 ))}
               </Box>
