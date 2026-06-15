@@ -26,6 +26,7 @@ const CircleDetailPage = lazy(() => import('./pages/Circles/CircleDetailPage'));
 const AdminCirclesPage = lazy(() => import('./pages/Admin/AdminCirclesPage'));
 const BackupPage = lazy(() => import('./pages/Admin/BackupPage'));
 const AiSettingsPage = lazy(() => import('./pages/Admin/AiSettingsPage'));
+const SearchPage = lazy(() => import('./pages/SearchPage'));
 
 // Test login page (development only)
 const TestLoginPage = import.meta.env.PROD
@@ -67,6 +68,7 @@ function AppRoutes() {
                 <Route path="/admin/circles" element={<AdminCirclesPage />} />
                 <Route path="/admin/backup" element={<BackupPage />} />
                 <Route path="/admin/ai-settings" element={<AiSettingsPage />} />
+                <Route path="/search" element={<SearchPage />} />
               </Route>
             </Route>
 
