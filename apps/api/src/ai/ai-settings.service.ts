@@ -133,10 +133,27 @@ export class AiSettingsService {
     return provider.testModel(creds, dto.model);
   }
 
-  /** List models for a provider */
+  /** List models for a provider (works even without a configured credential) */
   async listModels(providerKey: string) {
-    const creds = await this.resolveCredentials(providerKey);
+    // Validate the provider key — registry.get throws for unknown providers.
     const provider = this.registry.get(providerKey);
+
+    // Credential is optional: pass key only when a row exists AND is enabled.
+    const cred = await this.prisma.aiProviderCredential.findUnique({
+      where: { provider: providerKey },
+    });
+
+    let creds: { apiKey: string; baseUrl?: string };
+    if (cred && cred.enabled) {
+      creds = { apiKey: decryptSecret(cred.encryptedKey), baseUrl: cred.baseUrl ?? undefined };
+    } else if (cred) {
+      // Row exists but provider is disabled — pass empty key so curated list is used.
+      creds = { apiKey: '', baseUrl: cred.baseUrl ?? undefined };
+    } else {
+      // No credential row — return curated/static list without a key.
+      creds = { apiKey: '' };
+    }
+
     return provider.listModels(creds);
   }
 
