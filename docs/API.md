@@ -2237,3 +2237,325 @@ The API currently does not use versioning (v1, v2, etc.). Breaking changes will 
 3. Implemented with a transition period when feasible
 
 For future versions, the API may adopt URL-based versioning: `/api/v2/...`
+
+---
+
+## AI Settings
+
+All endpoints in this group require the Admin system role plus the listed permission.
+
+### GET /ai/settings
+
+**Permission:** `ai_settings:read`
+
+Returns configured and known (unconfigured) AI providers, the active search feature configuration, and conversation lifecycle settings. The raw API key is never returned — only `last4`.
+
+**Response:**
+```json
+{
+  "providers": [
+    {
+      "provider": "anthropic",
+      "configured": true,
+      "enabled": true,
+      "last4": "Ab1Z",
+      "baseUrl": null,
+      "updatedAt": "2026-06-15T12:00:00.000Z"
+    }
+  ],
+  "knownProviders": [
+    { "provider": "openai", "configured": false, "enabled": false, "last4": null, "baseUrl": null }
+  ],
+  "features": {
+    "search": { "provider": "anthropic", "model": "claude-opus-4-8" }
+  },
+  "conversations": {
+    "archiveAfterDays": 30,
+    "deleteAfterArchiveDays": 30
+  }
+}
+```
+
+---
+
+### PUT /ai/credentials/:provider
+
+**Permission:** `ai_settings:write`
+
+Upsert credentials for the given provider key (`anthropic` or `openai`). The API key is encrypted at rest with AES-256-GCM; the plaintext is never stored or returned.
+
+**Path Parameter:** `provider` — `anthropic` | `openai`
+
+**Request Body:**
+```json
+{
+  "apiKey": "sk-...",
+  "baseUrl": "https://api.moonshot.cn/v1",
+  "enabled": true
+}
+```
+
+`baseUrl` is optional and enables OpenAI-compatible providers (see [Agentic Search spec](specs/agentic-search.md#10-how-to-add-a-new-ai-provider)).
+
+**Response:**
+```json
+{
+  "provider": "openai",
+  "configured": true,
+  "enabled": true,
+  "last4": "Ab1Z",
+  "baseUrl": "https://api.moonshot.cn/v1"
+}
+```
+
+---
+
+### DELETE /ai/credentials/:provider
+
+**Permission:** `ai_settings:write`
+
+Remove stored credentials for the given provider. Returns 404 if no credential exists.
+
+**Response:**
+```json
+{ "deleted": true, "provider": "anthropic" }
+```
+
+---
+
+### POST /ai/test
+
+**Permission:** `ai_settings:read`
+
+Test provider connectivity by issuing a minimal chat completion request.
+
+**Request Body:**
+```json
+{
+  "provider": "anthropic",
+  "model": "claude-opus-4-8"
+}
+```
+
+**Response:**
+```json
+{ "ok": true }
+```
+
+On failure:
+```json
+{ "ok": false, "error": "Invalid API key" }
+```
+
+---
+
+### GET /ai/models
+
+**Permission:** `ai_settings:read`
+
+List available models for a configured provider using its stored credentials.
+
+**Query Parameters:** `provider` (required) — provider key
+
+**Response:**
+```json
+{
+  "provider": "anthropic",
+  "models": ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"]
+}
+```
+
+---
+
+### PUT /ai/features/search
+
+**Permission:** `ai_settings:write`
+
+Set the active AI provider and model used by the conversational search feature. Stored in system settings under `ai.features.search`.
+
+**Request Body:**
+```json
+{
+  "provider": "anthropic",
+  "model": "claude-opus-4-8"
+}
+```
+
+**Response:**
+```json
+{
+  "provider": "anthropic",
+  "model": "claude-opus-4-8"
+}
+```
+
+---
+
+## Deterministic Media Search
+
+### POST /search
+
+**Permissions:** `media:read` + `search:use`
+
+Execute a deterministic media search using explicit filter criteria. Filter semantics are identical to `GET /api/media`. Unknown filter keys return 400. Returns the same paginated envelope as `GET /api/media`.
+
+**Request Body:**
+```json
+{
+  "circleId": "uuid",
+  "filters": {
+    "type": "photo",
+    "capturedAt": { "from": "2024-06-01T00:00:00Z", "to": "2024-08-31T23:59:59Z" },
+    "country": "Costa Rica",
+    "classification": "memory"
+  },
+  "page": 1,
+  "pageSize": 20,
+  "sort": "capturedAt_desc"
+}
+```
+
+All `filters` fields are optional and AND-composed. Available filter keys are returned by `GET /api/search/fields`.
+
+**Error Cases:**
+- 400 — Unknown filter key(s)
+- 403 — Not a member of the circle or insufficient permissions
+
+---
+
+### GET /search/fields
+
+**Permission:** `search:use`
+
+Return the registry of all available filter dimensions. The frontend uses this to render the filter builder dynamically. The AI agent uses the `description` and `type` fields to generate the `search_media` tool schema.
+
+**Response:**
+```json
+[
+  {
+    "key": "type",
+    "label": "Media type",
+    "type": "enum",
+    "enumValues": ["photo", "video"],
+    "description": "Filter by media type. Accepts \"photo\" or \"video\"."
+  },
+  {
+    "key": "capturedAt",
+    "label": "Capture date range",
+    "type": "date-range",
+    "description": "Filter by capture date. Pass an object { from?: ISO8601, to?: ISO8601 }."
+  }
+]
+```
+
+---
+
+## Search Conversations (Agentic Search)
+
+All endpoints require `search:use`. The `circleId` used for media authorization always comes from the persisted conversation row — it cannot be overridden by request input.
+
+For the complete SSE protocol, conversation lifecycle details, and architecture, see [docs/specs/agentic-search.md](specs/agentic-search.md).
+
+---
+
+### POST /search/conversations
+
+**Permission:** `search:use`
+
+Create a new search conversation for the specified circle. Requires that an AI provider and model are configured in AI Settings.
+
+**Request Body:**
+```json
+{ "circleId": "uuid" }
+```
+
+**Response:** 201 — Created conversation object
+
+**Error Cases:**
+- 400 — AI search not configured
+- 403 — Not a member of the circle
+
+---
+
+### GET /search/conversations
+
+**Permission:** `search:use`
+
+List the caller's conversations for a circle.
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `circleId` | UUID (required) | Filter to this circle |
+| `favorite` | boolean | Filter by favorite flag |
+| `archived` | boolean | Filter by archived state |
+| `page` | integer (default 1) | Page number |
+| `pageSize` | integer (default 20, max 100) | Items per page |
+
+**Response:** Paginated list of conversation summaries (no messages).
+
+---
+
+### GET /search/conversations/:id
+
+**Permission:** `search:use`
+
+Get a single conversation with its full message history. Returns 404 if the conversation does not exist or is not owned by the caller.
+
+---
+
+### PATCH /search/conversations/:id
+
+**Permission:** `search:use`
+
+Update conversation title or favorite flag.
+
+**Request Body:**
+```json
+{
+  "title": "Costa Rica Summer 2024",
+  "favorite": true
+}
+```
+
+Both fields are optional.
+
+---
+
+### DELETE /search/conversations/:id
+
+**Permission:** `search:use`
+
+Soft-delete the conversation (sets `deletedAt`). Returns 204 No Content.
+
+---
+
+### POST /search/conversations/:id/messages
+
+**Permission:** `search:use`
+
+Send a user message and receive the AI response as a Server-Sent Events (SSE) stream.
+
+**Request Body:**
+```json
+{ "content": "Show me photos from our trip to Costa Rica last summer" }
+```
+
+**Response:** `200 OK`, `Content-Type: text/event-stream`
+
+SSE event types:
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `token` | `{ text: string }` | A chunk of the model's response text |
+| `tool_call` | `{ name: "search_media", args: { ... } }` | Model is executing a search |
+| `results` | `{ items: [...], meta: { total, ... } }` | Search results returned to the model |
+| `done` | `{ messageId: string }` | Stream complete; `messageId` is the persisted DB record |
+| `error` | `{ message: string }` | Error occurred |
+
+The user and assistant messages are persisted to the database after the stream closes. If the conversation has no title, an auto-title is generated from the first exchange.
+
+**Error Cases:**
+- 400 — AI not configured or invalid input
+- 404 — Conversation not found

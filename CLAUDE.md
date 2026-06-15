@@ -338,6 +338,26 @@ cd apps/api && npm run prisma:migrate
 ### Media — Circle Dashboard
 - `GET /api/media/dashboard?circleId=` - On This Day + recent/favorites + review-queue counts
 
+### AI Settings (Admin only — ai_settings:read / ai_settings:write)
+- `GET /api/ai/settings` - Get configured providers, search feature config, and conversation lifecycle settings (ai_settings:read)
+- `PUT /api/ai/credentials/:provider` - Upsert provider credentials, encrypted at rest (ai_settings:write)
+- `DELETE /api/ai/credentials/:provider` - Remove provider credentials (ai_settings:write)
+- `POST /api/ai/test` - Test provider connectivity (ai_settings:read)
+- `GET /api/ai/models?provider=` - List available models for a provider (ai_settings:read)
+- `PUT /api/ai/features/search` - Set active provider and model for AI search (ai_settings:write)
+
+### Deterministic Search (search:use)
+- `POST /api/search` - Execute deterministic media search with explicit filters (media:read + search:use)
+- `GET /api/search/fields` - List all searchable field descriptors from the registry (search:use)
+
+### Search Conversations — Agentic Search (search:use)
+- `POST /api/search/conversations` - Create a search conversation for a circle
+- `GET /api/search/conversations?circleId=&favorite=&archived=&page=&pageSize=` - List caller's conversations
+- `GET /api/search/conversations/:id` - Get conversation with full message history
+- `PATCH /api/search/conversations/:id` - Update title or favorite flag
+- `DELETE /api/search/conversations/:id` - Soft-delete conversation
+- `POST /api/search/conversations/:id/messages` - Send message; stream AI response via SSE (text/event-stream)
+
 ### Health
 - `GET /api/health/live` - Liveness check
 - `GET /api/health/ready` - Readiness check (includes DB)
@@ -362,6 +382,9 @@ cd apps/api && npm run prisma:migrate
 - `circles:manage_any` - Read/write/delete any circle regardless of membership (Admin only)
 - `backup:run` - Trigger backup jobs (Admin only)
 - `backup:read` - Read backup run history and object list (Admin only)
+- `ai_settings:read` - View AI provider config, test connectivity, list models (Admin only)
+- `ai_settings:write` - Configure AI provider credentials and set active search model (Admin only)
+- `search:use` - Use deterministic search and conversational (agentic) search (all roles)
 
 ### Per-Circle Roles
 Each circle has its own role for each member, independent of the system role:
@@ -394,8 +417,13 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `circles` - Family circles; `is_personal=true` circles cannot be deleted
 - `circle_members` - Per-circle memberships with `CircleRole` enum (`circle_admin` | `collaborator` | `viewer`)
 - `circle_invites` - Email invites for circles; claimed on invited user's first login
+- `ai_provider_credentials` - AI provider API keys (AES-256-GCM encrypted); one row per provider; `last4` exposed for display; plaintext never stored or returned
+- `search_conversations` - Agentic search conversation sessions; scoped to one circle and one user; includes `favorite`, `archived_at`, `deleted_at` for lifecycle management
+- `search_messages` - Individual messages within a conversation; `role` is `user` or `assistant`; `tool_calls` and `tool_results` are JSON columns for search tool invocations
 
 **Note:** `media_items`, `albums`, and `tags` use `added_by_id` (not `owner_id`) to track the uploading user. Dedup uniqueness for `media_items` is `(circle_id, content_hash)`. Tag names are unique per `(circle_id, name)`.
+
+**AI provider key encryption:** `SECRETS_ENCRYPTION_KEY` (base64-encoded 32-byte AES key) must be set at startup. Generate with `openssl rand -base64 32`. The API fails to start if the variable is missing or incorrectly sized.
 
 ## Access Control: Email Allowlist
 

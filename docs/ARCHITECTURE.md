@@ -764,6 +764,52 @@ The server-computed hash is authoritative for integrity verification. If the cli
 
 ---
 
+### 5.10 AI / Search Subsystem
+
+The AI / Search subsystem provides two complementary modes for finding media within a circle:
+
+| Mode | Endpoint | Description |
+|------|----------|-------------|
+| **Deterministic** | `POST /api/search` | Explicit filter criteria; same semantics as `GET /api/media` |
+| **Agentic / Conversational** | `POST /api/search/conversations/:id/messages` | Natural-language queries streamed via SSE |
+
+Both modes are driven by the same `SearchableFieldRegistry` — the registry is the single source of truth for all filter dimensions. Adding a new search dimension (e.g. people via face recognition) requires only one edit to `searchable-fields.registry.ts` and both modes gain the capability automatically.
+
+```
+apps/api/src/
+├── ai/
+│   ├── ai-settings.controller.ts    # Admin credential + feature config endpoints
+│   ├── ai-settings.service.ts       # Encrypt/decrypt credentials; settings CRUD
+│   └── providers/
+│       ├── ai-provider.interface.ts  # AiProvider interface (chat/listModels/testModel)
+│       ├── ai-provider.registry.ts   # Registry: anthropic, openai
+│       ├── anthropic.provider.ts     # Anthropic SDK adapter
+│       └── openai.provider.ts        # OpenAI SDK adapter (also handles compatible APIs)
+└── search/
+    ├── search.controller.ts          # POST /search, GET /search/fields
+    ├── searchable-fields.registry.ts # SEARCHABLE_FIELDS + buildWhereFromFields
+    ├── media-where.builder.ts        # Leaf Prisma where-clause helpers
+    ├── agent/
+    │   ├── search-agent.service.ts   # Multi-turn tool-call loop + SSE emitter
+    │   └── search-tool-schema.ts     # Derives search_media JSON Schema from registry
+    ├── conversations/
+    │   ├── conversations.controller.ts
+    │   └── conversations.service.ts
+    └── tasks/
+        └── conversation-lifecycle.task.ts  # Daily cron: archive + soft-delete
+```
+
+**Key design properties:**
+
+- The `search_media` tool schema is derived at runtime from `SEARCHABLE_FIELDS` on every agent turn — the tool and the deterministic endpoint always accept the same fields with no divergence risk.
+- The agent's `circleId` is pinned server-side from the `SearchConversation` row; the model cannot redirect a search to a different circle.
+- AI provider API keys are stored AES-256-GCM encrypted via `SECRETS_ENCRYPTION_KEY`. Plaintext keys are never stored or returned.
+- Conversations auto-archive after `ai.conversations.archiveAfterDays` days of inactivity and are soft-deleted after a further `deleteAfterArchiveDays` days. Favorites are exempt.
+
+For the complete specification including the extensibility recipe, provider abstraction, SSE protocol, and security details, see **[docs/specs/agentic-search.md](specs/agentic-search.md)**.
+
+---
+
 ## 6. Data Architecture
 
 ### 6.1 Entity Relationship Diagram
