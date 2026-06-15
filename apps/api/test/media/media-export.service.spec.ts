@@ -30,6 +30,8 @@ import {
   MockPrismaService,
 } from '../mocks/prisma.mock';
 import { PERMISSIONS } from '../../src/common/constants/roles.constants';
+import { GEO_LOCATION_PROVIDER } from '../../src/media/geo/geo-location-provider.interface';
+import { ForwardGeocodeService } from '../../src/media/geo/forward-geocode.service';
 import { randomUUID } from 'crypto';
 
 // ---------------------------------------------------------------------------
@@ -186,6 +188,8 @@ describe('MediaService.streamExport', () => {
         // MediaService constructor index [3]: CircleMembershipService; export
         // tests don't exercise circle-auth paths so a stub is sufficient.
         { provide: CircleMembershipService, useValue: mockCircleMembership },
+        { provide: GEO_LOCATION_PROVIDER, useValue: { reverseGeocode: jest.fn() } },
+        { provide: ForwardGeocodeService, useValue: { searchPlaces: jest.fn() } },
       ],
     }).compile();
 

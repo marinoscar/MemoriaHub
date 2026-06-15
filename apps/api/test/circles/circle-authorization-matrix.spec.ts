@@ -8,6 +8,8 @@ import { STORAGE_PROVIDER } from '../../src/storage/providers/storage-provider.i
 import { MediaMetadataSyncService } from '../../src/media/sync/media-metadata-sync.service';
 import { PERMISSIONS } from '../../src/common/constants/roles.constants';
 import { CircleMembershipService } from '../../src/circles/circle-membership.service';
+import { GEO_LOCATION_PROVIDER } from '../../src/media/geo/geo-location-provider.interface';
+import { ForwardGeocodeService } from '../../src/media/geo/forward-geocode.service';
 import { randomUUID } from 'crypto';
 
 // ---------------------------------------------------------------------------
@@ -145,6 +147,8 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },
         { provide: CircleMembershipService, useValue: mockCircleMembershipService },
+        { provide: GEO_LOCATION_PROVIDER, useValue: { reverseGeocode: jest.fn() } },
+        { provide: ForwardGeocodeService, useValue: { searchPlaces: jest.fn() } },
       ],
     }).compile();
 
@@ -163,7 +167,7 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
     it('member B can see a MediaItem added by member A in the same circle (getMedia resolves)', async () => {
       // The item was created by USER_A but USER_B is also a member → access granted
       const item = makeMediaItem({ addedById: USER_A, circleId: CIRCLE_A });
-      mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({ ...item, mediaTags: [] } as any);
       mockPrisma.storageObject.findUnique.mockResolvedValue(
         makeStorageObject({ id: item.storageObjectId }) as any,
       );
@@ -384,7 +388,7 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
 
     it('super-admin can read media from any circle', async () => {
       const item = makeMediaItem({ circleId: CIRCLE_B, addedById: USER_B });
-      mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({ ...item, mediaTags: [] } as any);
       mockPrisma.storageObject.findUnique.mockResolvedValue(
         makeStorageObject({ id: item.storageObjectId }) as any,
       );
