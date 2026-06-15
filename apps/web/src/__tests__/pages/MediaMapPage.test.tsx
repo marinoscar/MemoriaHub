@@ -50,9 +50,7 @@ vi.mock('leaflet.markercluster', () => ({}));
 vi.mock('leaflet.markercluster/dist/MarkerCluster.css', () => ({}));
 vi.mock('leaflet.markercluster/dist/MarkerCluster.Default.css', () => ({}));
 vi.mock('leaflet/dist/leaflet.css', () => ({}));
-vi.mock('leaflet/dist/images/marker-icon-2x.png', () => ({ default: 'marker-icon-2x.png' }));
-vi.mock('leaflet/dist/images/marker-icon.png', () => ({ default: 'marker-icon.png' }));
-vi.mock('leaflet/dist/images/marker-shadow.png', () => ({ default: 'marker-shadow.png' }));
+// PNG image mocks removed — leaflet-setup now uses inline SVG (no PNG imports)
 vi.mock('../../lib/leaflet-setup', () => ({ defaultIcon: {} }));
 
 // ---------------------------------------------------------------------------
