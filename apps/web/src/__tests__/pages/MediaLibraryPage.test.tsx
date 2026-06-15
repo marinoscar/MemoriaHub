@@ -448,6 +448,95 @@ describe('MediaLibraryPage', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Selection mode — Select / Done toggle button
+  // -------------------------------------------------------------------------
+
+  describe('selection mode', () => {
+    it("should render the 'Select' button in the header for non-viewers", () => {
+      render(<MediaLibraryPage />);
+      expect(
+        screen.getByRole('button', { name: /enter selection mode/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("should NOT render the 'Select' button for viewers", () => {
+      mockUseCircle.mockReturnValue(
+        makeUseCircleDefaults({ activeCircleRole: 'viewer' as const }),
+      );
+      render(<MediaLibraryPage />);
+      expect(
+        screen.queryByRole('button', { name: /enter selection mode/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("should switch to 'Done' label and show as pressed after clicking Select", async () => {
+      const user = userEvent.setup();
+      render(<MediaLibraryPage />);
+
+      const selectBtn = screen.getByRole('button', { name: /enter selection mode/i });
+      await user.click(selectBtn);
+
+      const doneBtn = screen.getByRole('button', { name: /exit selection mode/i });
+      expect(doneBtn).toBeInTheDocument();
+      expect(doneBtn).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('should clear selection and exit selection mode when Done is clicked', async () => {
+      const user = userEvent.setup();
+      const items = [
+        makeMediaItem('sel-1', {
+          title: 'Selectable Item',
+          thumbnailUrl: 'http://cdn/sel-1.jpg',
+        }),
+      ];
+      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
+      render(<MediaLibraryPage />);
+
+      // Enter selection mode
+      await user.click(screen.getByRole('button', { name: /enter selection mode/i }));
+      expect(
+        screen.getByRole('button', { name: /exit selection mode/i }),
+      ).toBeInTheDocument();
+
+      // Click Done to exit
+      await user.click(screen.getByRole('button', { name: /exit selection mode/i }));
+
+      // Should be back to "Select"
+      expect(
+        screen.getByRole('button', { name: /enter selection mode/i }),
+      ).toBeInTheDocument();
+    });
+
+    it('should not open the drawer when a tile is clicked in selection mode', async () => {
+      const user = userEvent.setup();
+      const items = [
+        makeMediaItem('click-me', {
+          title: 'Click Target',
+          thumbnailUrl: 'http://cdn/click-me.jpg',
+        }),
+      ];
+      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
+      render(<MediaLibraryPage />);
+
+      // Verify tile image is present before entering selection mode
+      expect(screen.getByAltText('Click Target')).toBeInTheDocument();
+
+      // Enter selection mode
+      await user.click(screen.getByRole('button', { name: /enter selection mode/i }));
+
+      // Click the tile image — in selection mode this should toggle selection, NOT open drawer
+      const tileImg = screen.getByAltText('Click Target');
+      await user.click(tileImg);
+
+      // The drawer "Close detail panel" button only appears when the drawer is open.
+      // After clicking in selection mode the drawer must NOT have opened.
+      expect(
+        screen.queryByRole('button', { name: /close detail panel/i }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Mount / unmount
   // -------------------------------------------------------------------------
 
