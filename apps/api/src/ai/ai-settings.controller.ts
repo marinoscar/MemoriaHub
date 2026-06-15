@@ -80,8 +80,7 @@ export class AiSettingsController {
   @ApiQuery({ name: 'provider', required: true, description: 'Provider key' })
   @ApiResponse({ status: 200, description: 'List of model IDs' })
   async listModels(@Query('provider') provider: string) {
-    const models = await this.aiSettingsService.listModels(provider);
-    return { provider, models };
+    return this.aiSettingsService.listModels(provider);
   }
 
   @Put('features/search')
