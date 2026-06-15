@@ -15,14 +15,17 @@ import type {
 //   and set baseUrl to the compatible endpoint (e.g. 'https://api.moonshot.cn/v1').
 //   This provider handles it automatically when baseUrl is set.
 //
-// Curated fallback list — only GPT versions strictly greater than 5.4.
+// Curated fallback list — GPT versions >= 5.4, including mini/nano variants.
 // Shown when no API key is configured yet so the UI still has a selection.
-const OPENAI_CURATED_MODELS = ['gpt-5.5'] as const;
+const OPENAI_CURATED_MODELS = ['gpt-5.4', 'gpt-5.5'] as const;
 
 /**
  * Returns true for OpenAI chat/LLM model ids that have a GPT major.minor
- * version strictly greater than 5.4 AND are not a non-text modality
- * (embeddings, audio, realtime, TTS, image-generation, moderation, etc.).
+ * version of 5.4 or greater AND are not a non-text modality (embeddings,
+ * audio, realtime, TTS, image-generation, moderation, etc.).
+ *
+ * Mini and nano variants (e.g. gpt-5.4-mini, gpt-5.5-nano) are included
+ * because they are text chat models — only modality keywords exclude a model.
  *
  * Exported so it can be unit-tested independently of the provider class.
  */
@@ -38,9 +41,9 @@ export function isEligibleOpenAiModel(id: string): boolean {
   if (!m) return false;
   const major = parseInt(m[1], 10);
   const minor = m[2] ? parseInt(m[2], 10) : 0;
-  // Strictly greater than 5.4 — compare major/minor separately to avoid
+  // Greater than or equal to 5.4 — compare major/minor separately to avoid
   // floating-point issues with multi-digit minors (e.g. 5.10 > 5.4)
-  return major > 5 || (major === 5 && minor > 4);
+  return major > 5 || (major === 5 && minor >= 4);
 }
 
 export class OpenAiProvider implements AiProvider {
@@ -166,7 +169,7 @@ export class OpenAiProvider implements AiProvider {
         return ids.sort();
       }
 
-      // Standard OpenAI: filter to chat models with GPT version > 5.4
+      // Standard OpenAI: filter to chat models with GPT version >= 5.4
       const eligible = ids.filter(isEligibleOpenAiModel).sort();
       // Fall back to curated list if the API returned nothing recognisable
       return eligible.length > 0 ? eligible : [...OPENAI_CURATED_MODELS];
