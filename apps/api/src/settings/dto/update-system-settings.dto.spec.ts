@@ -3,6 +3,12 @@ import {
   patchSystemSettingsSchema,
 } from './update-system-settings.dto';
 
+// Canonical valid ai block for PUT (full-replace) fixtures
+const validAiBlock = {
+  features: { search: { provider: null, model: null } },
+  conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 30 },
+};
+
 describe('UpdateSystemSettingsDto (PUT)', () => {
   describe('ui field', () => {
     it('should accept valid ui settings object', () => {
@@ -11,6 +17,7 @@ describe('UpdateSystemSettingsDto (PUT)', () => {
           allowUserThemeOverride: true,
         },
         features: {},
+        ai: validAiBlock,
       });
 
       expect(result.ui.allowUserThemeOverride).toBe(true);
@@ -22,6 +29,7 @@ describe('UpdateSystemSettingsDto (PUT)', () => {
           allowUserThemeOverride: false,
         },
         features: {},
+        ai: validAiBlock,
       });
 
       expect(result.ui.allowUserThemeOverride).toBe(false);
@@ -32,6 +40,7 @@ describe('UpdateSystemSettingsDto (PUT)', () => {
         updateSystemSettingsSchema.parse({
           ui: {},
           features: {},
+          ai: validAiBlock,
         }),
       ).toThrow();
     });
@@ -43,6 +52,7 @@ describe('UpdateSystemSettingsDto (PUT)', () => {
             allowUserThemeOverride: 'true',
           },
           features: {},
+          ai: validAiBlock,
         }),
       ).toThrow();
     });
@@ -51,6 +61,7 @@ describe('UpdateSystemSettingsDto (PUT)', () => {
       expect(() =>
         updateSystemSettingsSchema.parse({
           features: {},
+          ai: validAiBlock,
         }),
       ).toThrow();
     });
@@ -63,6 +74,7 @@ describe('UpdateSystemSettingsDto (PUT)', () => {
           allowUserThemeOverride: true,
         },
         features: {},
+        ai: validAiBlock,
       });
 
       expect(result.features).toEqual({});
@@ -77,6 +89,7 @@ describe('UpdateSystemSettingsDto (PUT)', () => {
           enableNotifications: true,
           enableAnalytics: false,
         },
+        ai: validAiBlock,
       });
 
       expect(result.features).toEqual({
@@ -94,6 +107,7 @@ describe('UpdateSystemSettingsDto (PUT)', () => {
           features: {
             enableNotifications: 'true',
           },
+          ai: validAiBlock,
         }),
       ).toThrow();
     });
@@ -103,6 +117,74 @@ describe('UpdateSystemSettingsDto (PUT)', () => {
         updateSystemSettingsSchema.parse({
           ui: {
             allowUserThemeOverride: true,
+          },
+          ai: validAiBlock,
+        }),
+      ).toThrow();
+    });
+  });
+
+  describe('ai field', () => {
+    it('should require ai field', () => {
+      expect(() =>
+        updateSystemSettingsSchema.parse({
+          ui: { allowUserThemeOverride: true },
+          features: {},
+        }),
+      ).toThrow();
+    });
+
+    it('should accept a valid ai block with null provider and model', () => {
+      const result = updateSystemSettingsSchema.parse({
+        ui: { allowUserThemeOverride: true },
+        features: {},
+        ai: {
+          features: { search: { provider: null, model: null } },
+          conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 30 },
+        },
+      });
+
+      expect(result.ai.features.search.provider).toBeNull();
+      expect(result.ai.features.search.model).toBeNull();
+      expect(result.ai.conversations.archiveAfterDays).toBe(30);
+      expect(result.ai.conversations.deleteAfterArchiveDays).toBe(30);
+    });
+
+    it('should accept a valid ai block with string provider and model', () => {
+      const result = updateSystemSettingsSchema.parse({
+        ui: { allowUserThemeOverride: false },
+        features: {},
+        ai: {
+          features: { search: { provider: 'openai', model: 'gpt-4o' } },
+          conversations: { archiveAfterDays: 90, deleteAfterArchiveDays: 365 },
+        },
+      });
+
+      expect(result.ai.features.search.provider).toBe('openai');
+      expect(result.ai.features.search.model).toBe('gpt-4o');
+    });
+
+    it('should reject archiveAfterDays less than 1', () => {
+      expect(() =>
+        updateSystemSettingsSchema.parse({
+          ui: { allowUserThemeOverride: true },
+          features: {},
+          ai: {
+            features: { search: { provider: null, model: null } },
+            conversations: { archiveAfterDays: 0, deleteAfterArchiveDays: 30 },
+          },
+        }),
+      ).toThrow();
+    });
+
+    it('should reject deleteAfterArchiveDays less than 1', () => {
+      expect(() =>
+        updateSystemSettingsSchema.parse({
+          ui: { allowUserThemeOverride: true },
+          features: {},
+          ai: {
+            features: { search: { provider: null, model: null } },
+            conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 0 },
           },
         }),
       ).toThrow();
@@ -119,6 +201,10 @@ describe('UpdateSystemSettingsDto (PUT)', () => {
           enableNotifications: true,
           enableAdvancedFeatures: false,
         },
+        ai: {
+          features: { search: { provider: null, model: null } },
+          conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 30 },
+        },
       });
 
       expect(result).toEqual({
@@ -128,6 +214,10 @@ describe('UpdateSystemSettingsDto (PUT)', () => {
         features: {
           enableNotifications: true,
           enableAdvancedFeatures: false,
+        },
+        ai: {
+          features: { search: { provider: null, model: null } },
+          conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 30 },
         },
       });
     });
@@ -244,6 +334,25 @@ describe('PatchSystemSettingsDto (PATCH)', () => {
           experimental: true,
         },
       });
+    });
+
+    it('should accept partial ai block', () => {
+      const result = patchSystemSettingsSchema.parse({
+        ai: {
+          features: { search: { provider: 'openai', model: 'gpt-4o' } },
+        },
+      });
+
+      expect(result.ai?.features?.search?.provider).toBe('openai');
+      expect(result.ai?.features?.search?.model).toBe('gpt-4o');
+    });
+
+    it('should accept empty ai block (all sub-fields optional in patch)', () => {
+      const result = patchSystemSettingsSchema.parse({
+        ai: {},
+      });
+
+      expect(result.ai).toEqual({});
     });
   });
 });
