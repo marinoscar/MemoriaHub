@@ -124,9 +124,28 @@ export class AnthropicProvider implements AiProvider {
     }
   }
 
-  async listModels(_creds: AiProviderCredentials): Promise<string[]> {
-    // Return static curated list — Anthropic does not expose a public models list endpoint
-    return [...ANTHROPIC_MODELS];
+  async listModels(creds: AiProviderCredentials): Promise<string[]> {
+    // No API key yet — return the curated fallback so the UI still has options
+    if (!creds.apiKey) {
+      return [...ANTHROPIC_MODELS];
+    }
+
+    try {
+      const client = new Anthropic({
+        apiKey: creds.apiKey,
+        ...(creds.baseUrl && { baseURL: creds.baseUrl }),
+      });
+
+      // Auto-paginate through the full model catalog via the Models API
+      const ids: string[] = [];
+      for await (const m of client.models.list()) {
+        ids.push(m.id);
+      }
+      return ids.sort();
+    } catch {
+      // On any network or auth error fall back to the curated list
+      return [...ANTHROPIC_MODELS];
+    }
   }
 
   async testModel(
