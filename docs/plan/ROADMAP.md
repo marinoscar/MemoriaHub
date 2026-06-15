@@ -89,6 +89,7 @@ The following principles are restated directly from [`../../VISION.MD`](../../VI
 | 05 | CLI Importer | Done — upgraded in 05.1 with SQLite-backed multi-folder sync and interactive Ink TUI |
 | 06 | Storage Providers and Replication | Not Started |
 | FC | Family Circles | Done — circle data model, per-circle RBAC, shared library, invite flow, web CircleSwitcher + admin pages, CLI circles/backup commands, LocalDiskStorageProvider, admin backup job |
+| AI | **Agentic Search + AI Settings** | Done — deterministic `POST /api/search`, conversational SSE search with tool-calling loop, AI provider registry (Anthropic / OpenAI), admin credential management with AES-256-GCM encryption at rest, conversation lifecycle cron. See [docs/specs/agentic-search.md](../specs/agentic-search.md). |
 | 07 | Memory Prioritization | Not Started |
 | 08 | Android Sync | Not Started |
 | 09 | Long-Term Enrichment | Not Started |

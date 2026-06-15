@@ -55,6 +55,13 @@ export const PERMISSIONS = {
   // Backup (admin-only: local-drive backup/replication)
   BACKUP_RUN: 'backup:run',
   BACKUP_READ: 'backup:read',
+
+  // AI Settings
+  AI_SETTINGS_READ: 'ai_settings:read',
+  AI_SETTINGS_WRITE: 'ai_settings:write',
+
+  // Search feature usage
+  SEARCH_USE: 'search:use',
 } as const;
 
 export type PermissionName = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

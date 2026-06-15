@@ -28,6 +28,7 @@ import { ExportQueryDto } from './dto/export-query.dto';
 import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
+import { buildMediaWhere } from '../search/media-where.builder';
 import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
@@ -287,104 +288,26 @@ export class MediaService {
 
     await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
 
-    const where: Prisma.MediaItemWhereInput = {
-      circleId,
-      // Exclude soft-deleted items
-      deletedAt: null,
-      // Optional filters
-      ...(type && { type }),
-      ...(classification && { classification }),
-      ...(favorite !== undefined && { favorite }),
-      ...(contentHash && { contentHash }),
-      // Date range
-      ...(capturedAtFrom || capturedAtTo
-        ? {
-            capturedAt: {
-              ...(capturedAtFrom && { gte: capturedAtFrom }),
-              ...(capturedAtTo && { lte: capturedAtTo }),
-            },
-          }
-        : {}),
-      // Album filter — join via AlbumItem
-      ...(albumId
-        ? {
-            albumItems: {
-              some: { albumId },
-            },
-          }
-        : {}),
-      // Tag filter — join via MediaTag → Tag.name
-      ...(tag
-        ? {
-            mediaTags: {
-              some: {
-                tag: {
-                  name: { equals: tag, mode: 'insensitive' },
-                },
-              },
-            },
-          }
-        : {}),
-      // Individual geo filters
-      ...(country
-        ? {
-            OR: [
-              {
-                geoCountry: { contains: country, mode: 'insensitive' as const },
-              },
-              {
-                geoCountryCode: { equals: country, mode: 'insensitive' as const },
-              },
-            ],
-          }
-        : {}),
-      ...(region
-        ? { geoAdmin1: { contains: region, mode: 'insensitive' as const } }
-        : {}),
-      ...(locality
-        ? { geoLocality: { contains: locality, mode: 'insensitive' as const } }
-        : {}),
-      ...(place
-        ? { geoPlaceName: { contains: place, mode: 'insensitive' as const } }
-        : {}),
-      // Combined free-text location search across all geo tiers
-      ...(location
-        ? {
-            OR: [
-              {
-                geoCountry: { contains: location, mode: 'insensitive' as const },
-              },
-              {
-                geoCountryCode: {
-                  contains: location,
-                  mode: 'insensitive' as const,
-                },
-              },
-              {
-                geoAdmin1: { contains: location, mode: 'insensitive' as const },
-              },
-              {
-                geoLocality: {
-                  contains: location,
-                  mode: 'insensitive' as const,
-                },
-              },
-              {
-                geoPlaceName: {
-                  contains: location,
-                  mode: 'insensitive' as const,
-                },
-              },
-            ],
-          }
-        : {}),
-      ...(cameraMake ? { cameraMake: { contains: cameraMake, mode: 'insensitive' as const } } : {}),
-      ...(cameraModel ? { cameraModel: { contains: cameraModel, mode: 'insensitive' as const } } : {}),
-      ...(sourceDeviceName ? { sourceDeviceName: { contains: sourceDeviceName, mode: 'insensitive' as const } } : {}),
-      ...(sourceDeviceId ? { sourceDeviceId } : {}),
-      ...(missingGeo === true ? { takenLat: null, takenLng: null } : {}),
-      ...(missingGeo === false ? { takenLat: { not: null }, takenLng: { not: null } } : {}),
-    };
+    const where = buildMediaWhere(circleId, {
+      type,
+      capturedAtFrom,
+      capturedAtTo,
+      classification,
+      albumId,
+      favorite,
+      tag,
+      country,
+      region,
+      locality,
+      place,
+      location,
+      contentHash,
+      cameraMake,
+      cameraModel,
+      sourceDeviceId,
+      sourceDeviceName,
+      missingGeo,
+    });
 
     const orderBy: Prisma.MediaItemOrderByWithRelationInput = {
       [sortBy]: sortOrder,

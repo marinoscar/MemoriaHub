@@ -64,6 +64,13 @@ const PERMISSIONS = [
   // Backup (admin-only: local-drive backup/replication)
   { name: 'backup:run', description: 'Admin: trigger local-drive backup job' },
   { name: 'backup:read', description: 'Admin: read backup status and manifests' },
+
+  // AI Settings
+  { name: 'ai_settings:read', description: 'Read AI provider settings and status' },
+  { name: 'ai_settings:write', description: 'Configure AI provider credentials and settings' },
+
+  // Search feature usage
+  { name: 'search:use', description: 'Use the AI-powered search feature' },
 ] as const;
 
 // Role to permissions mapping
@@ -91,6 +98,11 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     // Backup: admin-only
     'backup:run',
     'backup:read',
+    // AI: admin-only credential management
+    'ai_settings:read',
+    'ai_settings:write',
+    // Search: all authenticated users
+    'search:use',
   ],
   contributor: [
     'user_settings:read',
@@ -103,6 +115,8 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     // Circles: any user can use circles; per-circle role gates which circle
     'circles:read',
     'circles:write',
+    // Search: contributors can use AI search
+    'search:use',
   ],
   viewer: [
     'user_settings:read',
@@ -114,6 +128,8 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     // Circles: any user can use circles; per-circle role gates which circle
     'circles:read',
     'circles:write',
+    // Search: viewers can use AI search
+    'search:use',
   ],
 };
 
@@ -123,6 +139,15 @@ const DEFAULT_SYSTEM_SETTINGS = {
     allowUserThemeOverride: true,
   },
   features: {},
+  ai: {
+    features: {
+      search: { provider: null, model: null },
+    },
+    conversations: {
+      archiveAfterDays: 30,
+      deleteAfterArchiveDays: 30,
+    },
+  },
 };
 
 // =============================================================================

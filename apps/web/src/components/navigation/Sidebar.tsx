@@ -20,6 +20,8 @@ import {
   Map as MapIcon,
   GroupWork as GroupWorkIcon,
   Backup as BackupIcon,
+  Search as SearchIcon,
+  SmartToy as AiIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -63,6 +65,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       visible: true,
     },
     {
+      label: 'Search',
+      icon: <SearchIcon />,
+      path: '/search',
+      visible: true,
+    },
+    {
       label: 'User Settings',
       icon: <SettingsIcon />,
       path: '/settings',
@@ -90,6 +98,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       label: 'Backup',
       icon: <BackupIcon />,
       path: '/admin/backup',
+      visible: isAdmin,
+    },
+    {
+      label: 'AI Settings',
+      icon: <AiIcon />,
+      path: '/admin/ai-settings',
       visible: isAdmin,
     },
   ];

@@ -24,6 +24,18 @@ export interface SystemSettingsValue {
   features: {
     [key: string]: boolean;
   };
+  ai: {
+    features: {
+      search: {
+        provider: string | null;
+        model: string | null;
+      };
+    };
+    conversations: {
+      archiveAfterDays: number;
+      deleteAfterArchiveDays: number;
+    };
+  };
 }
 
 /**
@@ -44,4 +56,13 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     allowUserThemeOverride: true,
   },
   features: {},
+  ai: {
+    features: {
+      search: { provider: null, model: null },
+    },
+    conversations: {
+      archiveAfterDays: 30,
+      deleteAfterArchiveDays: 30,
+    },
+  },
 };

@@ -45,6 +45,9 @@ model User {
   circleMemberships         CircleMember[]
   circleInvitesAdded        CircleInvite[]   @relation("CircleInviteAddedBy")
   circleInvitesClaimed      CircleInvite[]   @relation("CircleInviteClaimedBy")
+  // AI Search relations
+  aiCredentialsUpdated      AiProviderCredential[] @relation("AiCredentialUpdater")
+  searchConversations       SearchConversation[]   @relation("ConversationUser")
 
   @@map("users")
 }
@@ -346,12 +349,13 @@ model Circle {
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  owner      User           @relation("CircleOwner", fields: [ownerId], references: [id], onDelete: Restrict)
-  members    CircleMember[]
-  invites    CircleInvite[]
-  mediaItems MediaItem[]
-  albums     Album[]
-  tags       Tag[]
+  owner               User                 @relation("CircleOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  members             CircleMember[]
+  invites             CircleInvite[]
+  mediaItems          MediaItem[]
+  albums              Album[]
+  tags                Tag[]
+  searchConversations SearchConversation[] @relation("ConversationCircle")
 
   @@index([ownerId])
   @@map("circles")
@@ -552,4 +556,67 @@ model MediaTag {
   @@unique([tagId, mediaItemId])
   @@index([mediaItemId])
   @@map("media_tags")
+}
+
+// =============================================================================
+// AI Search
+// =============================================================================
+
+model AiProviderCredential {
+  id              String   @id @default(uuid()) @db.Uuid
+  provider        String   @unique
+  encryptedKey    String   @map("encrypted_key")
+  baseUrl         String?  @map("base_url")
+  last4           String   @map("last4")
+  enabled         Boolean  @default(true)
+  updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  updatedByUser User? @relation("AiCredentialUpdater", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@map("ai_provider_credentials")
+}
+
+model SearchConversation {
+  id         String    @id @default(uuid()) @db.Uuid
+  circleId   String    @map("circle_id") @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  title      String?
+  provider   String
+  model      String
+  favorite   Boolean   @default(false)
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  circle   Circle          @relation("ConversationCircle", fields: [circleId], references: [id], onDelete: Cascade)
+  user     User            @relation("ConversationUser", fields: [userId], references: [id], onDelete: Cascade)
+  messages SearchMessage[]
+
+  @@index([circleId])
+  @@index([userId])
+  @@index([archivedAt])
+  @@index([favorite])
+  @@index([deletedAt])
+  @@map("search_conversations")
+}
+
+model SearchMessage {
+  id             String   @id @default(uuid()) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  role           String
+  content        String   @db.Text
+  toolCalls      Json?    @map("tool_calls")
+  toolResults    Json?    @map("tool_results")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  conversation SearchConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@map("search_messages")
 }

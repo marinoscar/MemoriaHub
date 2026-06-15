@@ -1816,6 +1816,93 @@ apps/web/src/
 
 ---
 
+## AI Provider Key Encryption at Rest
+
+### Overview
+
+AI provider API keys (e.g. Anthropic, OpenAI) are stored encrypted in the `ai_provider_credentials` table. Plaintext keys are never written to the database, never returned by any endpoint, and never appear in logs.
+
+### Encryption Scheme
+
+Algorithm: **AES-256-GCM** (authenticated encryption — provides both confidentiality and integrity).
+
+Implementation: `apps/api/src/common/crypto/secret-cipher.ts`
+
+Payload layout stored in the `encrypted_key` column (base64-encoded):
+
+```
+[iv: 12 bytes][authTag: 16 bytes][ciphertext: variable length]
+```
+
+The 12-byte IV is randomly generated per write; reusing the same key for two encryptions never produces the same ciphertext.
+
+### Key Management
+
+| Variable | Purpose |
+|----------|---------|
+| `SECRETS_ENCRYPTION_KEY` | Base64-encoded 32-byte AES key. Required at API startup; the API fails immediately if missing or incorrectly sized. |
+
+Generate:
+
+```bash
+openssl rand -base64 32
+```
+
+The key is cached in memory after first read. It must be identical across all API replicas and must be preserved across deployments (losing it makes all stored credentials unreadable).
+
+### What Is and Is Not Stored
+
+| Stored | Not Stored |
+|--------|-----------|
+| `encrypted_key` — AES-256-GCM ciphertext | Plaintext API key |
+| `last4` — final four characters of the key | Full key in any log |
+| `base_url` — provider endpoint (not sensitive) | Key in any HTTP response |
+
+`GET /api/ai/settings` returns only `last4`, `baseUrl`, and `enabled`. The `encrypted_key` column is excluded from all Prisma `select` queries in `AiSettingsService`.
+
+### Key Rotation Procedure
+
+1. Generate a new key: `openssl rand -base64 32`
+2. For each row in `ai_provider_credentials`: decrypt `encrypted_key` with the old key, re-encrypt with the new key, update the row
+3. Update `SECRETS_ENCRYPTION_KEY` in the environment
+4. Restart API
+
+No automated rotation tooling is included; this is a manual migration step.
+
+---
+
+## Agent Circle-Scoped Authorization
+
+When a user sends a message to the conversational search agent, the agent calls the `search_media` tool. The `circleId` used for authorization is always taken from the `SearchConversation` database row — **not** from the model's tool call arguments.
+
+```
+POST /search/conversations/:id/messages
+
+SearchAgentService.streamTurn()
+  ↓
+  Tool call: search_media({ type: "photo", country: "Costa Rica", ... })
+                          ↑
+                          circleId NOT passed by model — forbidden by tool description
+  ↓
+  searchService.runSearch(userId, conversation.circleId, permissions, toolInput)
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                  Always from DB row, never from model input
+  ↓
+  CircleMembershipService.assertCircleAccess(userId, conversation.circleId, ...)
+```
+
+Even if a malicious or hallucinating model includes a `circleId` field in its tool arguments, the service layer ignores it. A user can only search within circles they are a member of, enforced by the same `assertCircleAccess` guard used by all other circle-scoped endpoints.
+
+### AI Settings Permissions
+
+| Permission | Scope | Notes |
+|------------|-------|-------|
+| `ai_settings:read` | Admin only | View provider config, list models, test connectivity |
+| `ai_settings:write` | Admin only | Configure credentials, set active search model |
+| `search:use` | All roles | Use deterministic search and conversational search |
+
+---
+
 ## Conclusion
 
 This security architecture provides defense-in-depth through multiple layers:
@@ -1824,5 +1911,7 @@ This security architecture provides defense-in-depth through multiple layers:
 3. **Authorization**: Fine-grained RBAC with roles and permissions
 4. **Infrastructure**: Security headers and same-origin architecture
 5. **Audit**: Comprehensive logging for compliance and monitoring
+6. **AI Key Encryption**: AES-256-GCM encryption at rest for provider credentials; keys never returned or logged
+7. **Agent Authz**: Circle-scoped search enforced server-side regardless of model output
 
 The system is designed for production use and follows industry best practices for web application security. Regular security audits and updates are recommended to maintain security posture.
