@@ -183,7 +183,10 @@ describe('AiSettingsPage', () => {
     it('shows Enabled chip for enabled provider', () => {
       render(<AiSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      expect(screen.getByText('Enabled')).toBeInTheDocument();
+      // MUI Chip renders the label text in a span; may appear in multiple elements
+      // (e.g. the chip itself and an ARIA label). getAllByText is safe here.
+      const enabledElements = screen.getAllByText('Enabled');
+      expect(enabledElements.length).toBeGreaterThan(0);
     });
 
     it('shows Configured chip for configured provider', () => {
@@ -273,7 +276,9 @@ describe('AiSettingsPage', () => {
       render(<AiSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
 
       expect(screen.getByText(/archive after:/i)).toBeInTheDocument();
-      expect(screen.getByText(/30 days/i)).toBeInTheDocument();
+      // "30 days" appears twice (archive + delete), getAllByText is safe
+      const dayMatches = screen.getAllByText(/30 days/i);
+      expect(dayMatches.length).toBeGreaterThan(0);
     });
   });
 

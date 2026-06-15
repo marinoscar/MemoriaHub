@@ -36,6 +36,16 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, './src'),
+      // Pin React to the monorepo root copy to prevent dual-instance errors.
+      // In a git worktree at worktrees/ai-search/, npm installs a sibling
+      // node_modules/ at the worktree root, while the monorepo root also has
+      // node_modules/. Vitest/vite would resolve react from the worktree and
+      // react-dom from the monorepo root, causing two React instances.
+      'react': resolve(__dirname, '../../../../node_modules/react'),
+      'react-dom': resolve(__dirname, '../../../../node_modules/react-dom'),
+      'react/jsx-runtime': resolve(__dirname, '../../../../node_modules/react/jsx-runtime'),
+      'react/jsx-dev-runtime': resolve(__dirname, '../../../../node_modules/react/jsx-dev-runtime'),
     },
+    dedupe: ['react', 'react-dom'],
   },
 });

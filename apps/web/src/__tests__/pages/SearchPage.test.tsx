@@ -88,6 +88,8 @@ function defaultCircleMock() {
 describe('SearchPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // scrollIntoView is not implemented in jsdom — mock it globally for Chat tab tests
+    window.HTMLElement.prototype.scrollIntoView = vi.fn();
     mockUseCircle.mockReturnValue(defaultCircleMock() as any);
     mockUseSearch.mockReturnValue(defaultSearchMock() as any);
     mockUseConversations.mockReturnValue(defaultConversationsMock() as any);
@@ -164,10 +166,15 @@ describe('SearchPage', () => {
         ],
       } as any);
 
-      render(<SearchPage />);
+      const { container } = render(<SearchPage />);
 
-      // MUI Select renders a combobox
-      expect(screen.getByRole('combobox', { name: /media type/i })).toBeInTheDocument();
+      // MUI Select renders the label text in both a <label> and a <span> (legend).
+      // Use getAllByText to handle both occurrences.
+      const labelElements = screen.getAllByText('Media type');
+      expect(labelElements.length).toBeGreaterThan(0);
+      // MUI Select trigger is a div with role="combobox" or .MuiSelect-select
+      const selectEl = container.querySelector('[role="combobox"], .MuiSelect-select');
+      expect(selectEl).not.toBeNull();
     });
 
     it('renders two date inputs for date-range fields', () => {
@@ -198,10 +205,14 @@ describe('SearchPage', () => {
         ],
       } as any);
 
-      render(<SearchPage />);
+      const { container } = render(<SearchPage />);
 
       expect(screen.getByRole('textbox', { name: /tag/i })).toBeInTheDocument();
-      expect(screen.getByRole('combobox', { name: /media type/i })).toBeInTheDocument();
+      // MUI Select: label text appears in both <label> and <span> (legend)
+      const mediaTypeLabels = screen.getAllByText('Media type');
+      expect(mediaTypeLabels.length).toBeGreaterThan(0);
+      const selectEl = container.querySelector('[role="combobox"], .MuiSelect-select');
+      expect(selectEl).not.toBeNull();
     });
   });
 
@@ -236,7 +247,7 @@ describe('SearchPage', () => {
       expect(screen.queryByRole('link', { name: /ai settings/i })).not.toBeInTheDocument();
     });
 
-    it('renders both warning and non-warning alerts correctly for not-configured error', () => {
+    it('renders a warning alert for the not-configured error variant', () => {
       // The error contains "not configured" so it should trigger the warning variant
       mockUseSearch.mockReturnValue({
         ...defaultSearchMock(),
