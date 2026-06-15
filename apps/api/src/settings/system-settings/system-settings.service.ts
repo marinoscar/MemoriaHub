@@ -56,6 +56,7 @@ export class SystemSettingsService {
     return {
       ui: value.ui,
       features: value.features,
+      ai: value.ai,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -100,6 +101,7 @@ export class SystemSettingsService {
     return {
       ui: value.ui,
       features: value.features,
+      ai: value.ai,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -134,6 +136,18 @@ export class SystemSettingsService {
         ...current.features,
         ...(dto.features || {}),
       },
+      ai: {
+        features: {
+          search: {
+            provider: (dto as any).ai?.features?.search?.provider ?? current.ai?.features?.search?.provider ?? null,
+            model: (dto as any).ai?.features?.search?.model ?? current.ai?.features?.search?.model ?? null,
+          },
+        },
+        conversations: {
+          archiveAfterDays: (dto as any).ai?.conversations?.archiveAfterDays ?? current.ai?.conversations?.archiveAfterDays ?? 30,
+          deleteAfterArchiveDays: (dto as any).ai?.conversations?.deleteAfterArchiveDays ?? current.ai?.conversations?.deleteAfterArchiveDays ?? 30,
+        },
+      },
     };
 
     // Validate merged result
@@ -166,6 +180,7 @@ export class SystemSettingsService {
     return {
       ui: value.ui,
       features: value.features,
+      ai: value.ai,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
