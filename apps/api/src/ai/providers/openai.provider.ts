@@ -15,7 +15,33 @@ import type {
 //   and set baseUrl to the compatible endpoint (e.g. 'https://api.moonshot.cn/v1').
 //   This provider handles it automatically when baseUrl is set.
 //
-const OPENAI_CURATED_MODELS = ['gpt-5', 'gpt-5.5'] as const;
+// Curated fallback list — only GPT versions strictly greater than 5.4.
+// Shown when no API key is configured yet so the UI still has a selection.
+const OPENAI_CURATED_MODELS = ['gpt-5.5'] as const;
+
+/**
+ * Returns true for OpenAI chat/LLM model ids that have a GPT major.minor
+ * version strictly greater than 5.4 AND are not a non-text modality
+ * (embeddings, audio, realtime, TTS, image-generation, moderation, etc.).
+ *
+ * Exported so it can be unit-tested independently of the provider class.
+ */
+export function isEligibleOpenAiModel(id: string): boolean {
+  // Exclude non-text / non-chat modalities by keyword
+  if (
+    /embedding|audio|realtime|tts|whisper|transcribe|image|dall-?e|moderation|search/i.test(id)
+  ) {
+    return false;
+  }
+  // Must match gpt-<major>[.<minor>]
+  const m = /^gpt-(\d+)(?:\.(\d+))?/i.exec(id);
+  if (!m) return false;
+  const major = parseInt(m[1], 10);
+  const minor = m[2] ? parseInt(m[2], 10) : 0;
+  // Strictly greater than 5.4 — compare major/minor separately to avoid
+  // floating-point issues with multi-digit minors (e.g. 5.10 > 5.4)
+  return major > 5 || (major === 5 && minor > 4);
+}
 
 export class OpenAiProvider implements AiProvider {
   readonly key = 'openai';
@@ -117,17 +143,36 @@ export class OpenAiProvider implements AiProvider {
   }
 
   async listModels(creds: AiProviderCredentials): Promise<string[]> {
-    // When baseUrl is set, attempt to list models from the compatible provider
-    if (creds.baseUrl) {
-      try {
-        const client = new OpenAI({ apiKey: creds.apiKey, baseURL: creds.baseUrl });
-        const models = await client.models.list();
-        return models.data.map(m => m.id);
-      } catch {
-        return [...OPENAI_CURATED_MODELS];
-      }
+    // No API key yet — return the curated fallback so the UI still has options
+    if (!creds.apiKey) {
+      return [...OPENAI_CURATED_MODELS];
     }
-    return [...OPENAI_CURATED_MODELS];
+
+    // Detect custom / OpenAI-compatible endpoints (e.g. Moonshot, Together).
+    // The GPT-version filter is OpenAI-specific and must NOT be applied to them.
+    const isCustomEndpoint =
+      !!creds.baseUrl && !/(^|\/\/)api\.openai\.com/i.test(creds.baseUrl);
+
+    try {
+      const client = new OpenAI({
+        apiKey: creds.apiKey,
+        ...(creds.baseUrl && { baseURL: creds.baseUrl }),
+      });
+      const models = await client.models.list();
+      const ids = models.data.map(m => m.id);
+
+      if (isCustomEndpoint) {
+        // Return all model ids from the compatible provider, sorted
+        return ids.sort();
+      }
+
+      // Standard OpenAI: filter to chat models with GPT version > 5.4
+      const eligible = ids.filter(isEligibleOpenAiModel).sort();
+      // Fall back to curated list if the API returned nothing recognisable
+      return eligible.length > 0 ? eligible : [...OPENAI_CURATED_MODELS];
+    } catch {
+      return [...OPENAI_CURATED_MODELS];
+    }
   }
 
   async testModel(
