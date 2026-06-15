@@ -15,6 +15,23 @@ export type SearchFieldDescriptor = Pick<
   'key' | 'label' | 'type' | 'enumValues' | 'description'
 >;
 
+export interface SearchPaging {
+  page?: number;
+  pageSize?: number;
+  sortBy?: string;
+  sortOrder?: string;
+}
+
+export interface SearchResult {
+  items: Prisma.MediaItemGetPayload<Record<string, never>>[];
+  meta: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
+}
+
 @Injectable()
 export class SearchService {
   private readonly logger = new Logger(SearchService.name);
@@ -24,19 +41,28 @@ export class SearchService {
     private readonly circleMembershipService: CircleMembershipService,
   ) {}
 
-  async search(dto: SearchQueryDto, userId: string, userPermissions: string[]) {
-    const { circleId, filters, page, pageSize, sortBy, sortOrder } = dto;
+  async runSearch(
+    userId: string,
+    circleId: string,
+    permissions: string[],
+    filters: Record<string, unknown>,
+    paging?: SearchPaging,
+  ): Promise<SearchResult> {
+    const page = paging?.page ?? 1;
+    const pageSize = paging?.pageSize ?? 20;
+    const sortBy = paging?.sortBy ?? 'capturedAt';
+    const sortOrder = paging?.sortOrder ?? 'desc';
 
     await this.circleMembershipService.assertCircleAccess(
       userId,
       circleId,
-      userPermissions,
+      permissions,
       'viewer' as CircleRole,
     );
 
-    const where = buildWhereFromFields(circleId, filters as Record<string, unknown>);
+    const where = buildWhereFromFields(circleId, filters);
     const skip = (page - 1) * pageSize;
-    const orderBy: Prisma.MediaItemOrderByWithRelationInput = { [sortBy]: sortOrder };
+    const orderBy: Prisma.MediaItemOrderByWithRelationInput = { [sortBy]: sortOrder as Prisma.SortOrder };
 
     const [items, totalItems] = await Promise.all([
       this.prisma.mediaItem.findMany({ where, orderBy, skip, take: pageSize }),
@@ -56,6 +82,18 @@ export class SearchService {
         totalPages: Math.ceil(totalItems / pageSize),
       },
     };
+  }
+
+  async search(dto: SearchQueryDto, userId: string, userPermissions: string[]): Promise<SearchResult> {
+    const { circleId, filters, page, pageSize, sortBy, sortOrder } = dto;
+
+    return this.runSearch(
+      userId,
+      circleId,
+      userPermissions,
+      filters as Record<string, unknown>,
+      { page, pageSize, sortBy, sortOrder },
+    );
   }
 
   getFields(): SearchFieldDescriptor[] {
