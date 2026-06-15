@@ -14,7 +14,7 @@ export class SearchController {
   constructor(private readonly searchService: SearchService) {}
 
   @Post()
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ, PERMISSIONS.SEARCH_USE] })
+  @Auth({ permissions: [PERMISSIONS.SEARCH_USE] })
   @ApiOperation({
     summary: 'Deterministic media search',
     description:
