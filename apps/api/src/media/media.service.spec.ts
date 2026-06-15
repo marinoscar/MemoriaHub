@@ -1574,4 +1574,651 @@ describe('MediaService', () => {
       expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledTimes(3);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // bulkUpdateMedia
+  // -------------------------------------------------------------------------
+
+  describe('bulkUpdateMedia', () => {
+    const makeIds = (n: number) =>
+      Array.from({ length: n }, () => randomUUID());
+
+    function makeBulkUpdateDto(overrides: Partial<any> = {}): any {
+      return {
+        circleId: CIRCLE_ID,
+        ids: makeIds(2),
+        set: { classification: 'memory' as const },
+        ...overrides,
+      };
+    }
+
+    it('assertAllInCircle rejects (NotFoundException) when not all ids belong to circle', async () => {
+      const ids = makeIds(3);
+      const dto = makeBulkUpdateDto({ ids, set: { classification: 'memory' as const } });
+      // findMany returns only 2 out of 3 ids
+      mockPrisma.mediaItem.findMany.mockResolvedValue([
+        { id: ids[0] },
+        { id: ids[1] },
+      ] as any);
+
+      await expect(
+        service.bulkUpdateMedia(dto, 'user-1', ownPerms),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws ForbiddenException when assertCircleAccess rejects (collaborator gate)', async () => {
+      const dto = makeBulkUpdateDto();
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+        new ForbiddenException('Insufficient circle role'),
+      );
+
+      await expect(
+        service.bulkUpdateMedia(dto, 'user-1', ownPerms),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('sets location fields + reverseGeocode + geoSource:manual when location is provided', async () => {
+      const ids = makeIds(2);
+      const dto = makeBulkUpdateDto({
+        ids,
+        set: {
+          location: { lat: 9.9281, lng: -84.0907 },
+        },
+      });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+      mockGeoProvider.reverseGeocode.mockResolvedValue({
+        country: 'Costa Rica',
+        countryCode: 'CR',
+        admin1: 'Alajuela',
+        locality: 'La Fortuna',
+      });
+      mockPrisma.mediaItem.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.bulkUpdateMedia(dto, 'user-1', ownPerms);
+
+      const [updateCall] = (mockPrisma.mediaItem.updateMany as jest.Mock).mock.calls;
+      expect(updateCall[0].data).toMatchObject({
+        takenLat: 9.9281,
+        takenLng: -84.0907,
+        geoSource: 'manual',
+        geoCountry: 'Costa Rica',
+        geoCountryCode: 'CR',
+        geoAdmin1: 'Alajuela',
+        geoLocality: 'La Fortuna',
+      });
+      expect(updateCall[0].data.geocodedAt).toBeInstanceOf(Date);
+    });
+
+    it('sets GEO_CLEAR_COLUMNS when location is null', async () => {
+      const ids = makeIds(2);
+      const dto = makeBulkUpdateDto({ ids, set: { location: null } });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+      mockPrisma.mediaItem.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.bulkUpdateMedia(dto, 'user-1', ownPerms);
+
+      const [updateCall] = (mockPrisma.mediaItem.updateMany as jest.Mock).mock.calls;
+      expect(updateCall[0].data).toMatchObject({
+        takenLat: null,
+        takenLng: null,
+        takenAltitude: null,
+        geoCountry: null,
+        geoCountryCode: null,
+        geoAdmin1: null,
+        geoAdmin2: null,
+        geoLocality: null,
+        geoPlaceName: null,
+        geoSource: null,
+        geocodedAt: null,
+      });
+    });
+
+    it('updates classification and favorite only (no location)', async () => {
+      const ids = makeIds(2);
+      const dto = makeBulkUpdateDto({
+        ids,
+        set: { classification: 'memory' as const, favorite: true },
+      });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+      mockPrisma.mediaItem.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.bulkUpdateMedia(dto, 'user-1', ownPerms);
+
+      expect(mockGeoProvider.reverseGeocode).not.toHaveBeenCalled();
+      const [updateCall] = (mockPrisma.mediaItem.updateMany as jest.Mock).mock.calls;
+      expect(updateCall[0].data).toMatchObject({
+        classification: 'memory',
+        favorite: true,
+      });
+    });
+
+    it('returns { updated: count }', async () => {
+      const ids = makeIds(3);
+      const dto = makeBulkUpdateDto({ ids, set: { classification: 'memory' as const } });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+      mockPrisma.mediaItem.updateMany.mockResolvedValue({ count: 3 });
+
+      const result = await service.bulkUpdateMedia(dto, 'user-1', ownPerms);
+
+      expect(result).toEqual({ updated: 3 });
+    });
+
+    it('does not call reverseGeocode when location is undefined', async () => {
+      const ids = makeIds(2);
+      const dto = makeBulkUpdateDto({ ids, set: { favorite: false } });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+      mockPrisma.mediaItem.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.bulkUpdateMedia(dto, 'user-1', ownPerms);
+
+      expect(mockGeoProvider.reverseGeocode).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // bulkTags
+  // -------------------------------------------------------------------------
+
+  describe('bulkTags', () => {
+    function makeBulkTagsDto(overrides: Partial<any> = {}): any {
+      return {
+        circleId: CIRCLE_ID,
+        ids: [randomUUID(), randomUUID()],
+        add: ['nature'],
+        ...overrides,
+      };
+    }
+
+    it('throws ForbiddenException when assertCircleAccess rejects', async () => {
+      const dto = makeBulkTagsDto();
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+        new ForbiddenException('Insufficient circle role'),
+      );
+
+      await expect(
+        service.bulkTags(dto, 'user-1', ownPerms),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('upserts tag per name and createMany skipDuplicates with ids×tagIds for add operation', async () => {
+      const ids = [randomUUID(), randomUUID()];
+      const tagId = randomUUID();
+      const dto = makeBulkTagsDto({ ids, add: ['nature', 'travel'] });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+      const tag1 = makeTag({ id: tagId, name: 'nature' });
+      const tag2 = makeTag({ id: randomUUID(), name: 'travel' });
+      mockPrisma.tag.upsert
+        .mockResolvedValueOnce(tag1 as any)
+        .mockResolvedValueOnce(tag2 as any);
+      mockPrisma.mediaTag.createMany.mockResolvedValue({ count: 4 });
+
+      await service.bulkTags(dto, 'user-1', ownPerms);
+
+      // upsert called twice (once per tag name)
+      expect(mockPrisma.tag.upsert).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.tag.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { circleId_name: { circleId: CIRCLE_ID, name: 'nature' } },
+        }),
+      );
+
+      // createMany called with ids × tagIds cross-product
+      expect(mockPrisma.mediaTag.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          skipDuplicates: true,
+          data: expect.arrayContaining([
+            expect.objectContaining({ mediaItemId: ids[0], tagId: tag1.id }),
+            expect.objectContaining({ mediaItemId: ids[1], tagId: tag1.id }),
+            expect.objectContaining({ mediaItemId: ids[0], tagId: tag2.id }),
+            expect.objectContaining({ mediaItemId: ids[1], tagId: tag2.id }),
+          ]),
+        }),
+      );
+    });
+
+    it('remove operation resolves existing tag ids and calls deleteMany', async () => {
+      const ids = [randomUUID(), randomUUID()];
+      const tagId = randomUUID();
+      const dto = makeBulkTagsDto({ ids, add: undefined, remove: ['nature'] });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+      mockPrisma.tag.findMany.mockResolvedValue([{ id: tagId }] as any);
+      mockPrisma.mediaTag.deleteMany.mockResolvedValue({ count: 2 });
+
+      await service.bulkTags(dto, 'user-1', ownPerms);
+
+      expect(mockPrisma.mediaTag.deleteMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tagId: { in: [tagId] },
+            mediaItemId: { in: ids },
+          }),
+        }),
+      );
+    });
+
+    it('non-existent remove names are a no-op (tag.findMany returns [])', async () => {
+      const ids = [randomUUID()];
+      const dto = makeBulkTagsDto({ ids, add: undefined, remove: ['nonexistent'] });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+      mockPrisma.tag.findMany.mockResolvedValue([] as any);
+
+      await service.bulkTags(dto, 'user-1', ownPerms);
+
+      expect(mockPrisma.mediaTag.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('uses $transaction', async () => {
+      const ids = [randomUUID()];
+      const dto = makeBulkTagsDto({ ids });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue([{ id: ids[0] }] as any);
+      mockPrisma.tag.upsert.mockResolvedValue(makeTag({ name: 'nature' }) as any);
+      mockPrisma.mediaTag.createMany.mockResolvedValue({ count: 1 });
+
+      await service.bulkTags(dto, 'user-1', ownPerms);
+
+      expect(mockPrisma.$transaction).toHaveBeenCalled();
+    });
+
+    it('returns { added, removed }', async () => {
+      const ids = [randomUUID(), randomUUID()];
+      const dto = makeBulkTagsDto({ ids, add: ['nature', 'travel'], remove: ['old'] });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+      mockPrisma.tag.upsert
+        .mockResolvedValueOnce(makeTag({ name: 'nature' }) as any)
+        .mockResolvedValueOnce(makeTag({ name: 'travel' }) as any);
+      mockPrisma.mediaTag.createMany.mockResolvedValue({ count: 4 });
+      mockPrisma.tag.findMany.mockResolvedValue([{ id: randomUUID() }] as any);
+      mockPrisma.mediaTag.deleteMany.mockResolvedValue({ count: 2 });
+
+      const result = await service.bulkTags(dto, 'user-1', ownPerms);
+
+      expect(result).toEqual({ added: 4, removed: 2 });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // bulkDelete
+  // -------------------------------------------------------------------------
+
+  describe('bulkDelete', () => {
+    function makeBulkDeleteDto(overrides: Partial<any> = {}): any {
+      return {
+        circleId: CIRCLE_ID,
+        ids: [randomUUID(), randomUUID()],
+        ...overrides,
+      };
+    }
+
+    it('throws ForbiddenException when assertCircleAccess rejects', async () => {
+      const dto = makeBulkDeleteDto();
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+        new ForbiddenException('Insufficient circle role'),
+      );
+
+      await expect(
+        service.bulkDelete(dto, 'user-1', ownPerms),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('calls updateMany with deletedAt:new Date() where id in ids, circleId, deletedAt:null', async () => {
+      const ids = [randomUUID(), randomUUID()];
+      const dto = makeBulkDeleteDto({ ids });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+      mockPrisma.mediaItem.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.bulkDelete(dto, 'user-1', ownPerms);
+
+      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: { in: ids },
+            circleId: CIRCLE_ID,
+            deletedAt: null,
+          }),
+          data: expect.objectContaining({
+            deletedAt: expect.any(Date),
+          }),
+        }),
+      );
+    });
+
+    it('returns { deleted: count }', async () => {
+      const ids = [randomUUID(), randomUUID()];
+      const dto = makeBulkDeleteDto({ ids });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+      mockPrisma.mediaItem.updateMany.mockResolvedValue({ count: 2 });
+
+      const result = await service.bulkDelete(dto, 'user-1', ownPerms);
+
+      expect(result).toEqual({ deleted: 2 });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // listMedia — new filters
+  // -------------------------------------------------------------------------
+
+  describe('listMedia — new device and geo-missing filters', () => {
+    beforeEach(() => {
+      mockPrisma.mediaItem.findMany.mockResolvedValue([]);
+      mockPrisma.mediaItem.count.mockResolvedValue(0);
+    });
+
+    it('filters by cameraMake (contains, insensitive)', async () => {
+      await service.listMedia(
+        { ...defaultMediaQuery, cameraMake: 'Canon' },
+        'user-1',
+        ownPerms,
+      );
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({
+        cameraMake: { contains: 'Canon', mode: 'insensitive' },
+      });
+    });
+
+    it('filters by cameraModel (contains, insensitive)', async () => {
+      await service.listMedia(
+        { ...defaultMediaQuery, cameraModel: 'EOS R5' },
+        'user-1',
+        ownPerms,
+      );
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({
+        cameraModel: { contains: 'EOS R5', mode: 'insensitive' },
+      });
+    });
+
+    it('filters by sourceDeviceName (contains, insensitive)', async () => {
+      await service.listMedia(
+        { ...defaultMediaQuery, sourceDeviceName: 'iPhone' },
+        'user-1',
+        ownPerms,
+      );
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({
+        sourceDeviceName: { contains: 'iPhone', mode: 'insensitive' },
+      });
+    });
+
+    it('filters by sourceDeviceId (exact match)', async () => {
+      await service.listMedia(
+        { ...defaultMediaQuery, sourceDeviceId: 'dev-123' },
+        'user-1',
+        ownPerms,
+      );
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({ sourceDeviceId: 'dev-123' });
+      // Exact match — NOT wrapped in { contains: ... }
+      expect(call[0].where.sourceDeviceId).toBe('dev-123');
+    });
+
+    it('missingGeo:true → { takenLat: null, takenLng: null } in where', async () => {
+      await service.listMedia(
+        { ...defaultMediaQuery, missingGeo: true },
+        'user-1',
+        ownPerms,
+      );
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({ takenLat: null, takenLng: null });
+    });
+
+    it('missingGeo:false → { takenLat: { not: null }, takenLng: { not: null } } in where', async () => {
+      await service.listMedia(
+        { ...defaultMediaQuery, missingGeo: false },
+        'user-1',
+        ownPerms,
+      );
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({
+        takenLat: { not: null },
+        takenLng: { not: null },
+      });
+    });
+
+    it('no missingGeo filter when undefined', async () => {
+      // defaultMediaQuery has no missingGeo field
+      await service.listMedia({ ...defaultMediaQuery }, 'user-1', ownPerms);
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      // where must NOT contain takenLat or takenLng as top-level keys
+      // (they would only appear if missingGeo filter was applied)
+      expect(call[0].where).not.toHaveProperty('takenLat');
+      expect(call[0].where).not.toHaveProperty('takenLng');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getMedia — tags mapping
+  // -------------------------------------------------------------------------
+
+  describe('getMedia — tags mapping', () => {
+    it('returns tags string[] mapped from mediaTags', async () => {
+      const item = makeMediaItem({ addedById: 'user-1' });
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({
+        ...item,
+        mediaTags: [
+          { tag: { name: 'vacation' } },
+          { tag: { name: 'nature' } },
+        ],
+      } as any);
+      mockPrisma.storageObject.findUnique.mockResolvedValue(
+        makeStorageObject({ id: item.storageObjectId, uploadedById: 'user-1' }) as any,
+      );
+
+      const result = await service.getMedia(item.id, 'user-1', ownPerms);
+
+      expect(result.tags).toEqual(['vacation', 'nature']);
+    });
+
+    it('returns tags: [] when mediaTags is empty', async () => {
+      const item = makeMediaItem({ addedById: 'user-1' });
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({
+        ...item,
+        mediaTags: [],
+      } as any);
+      mockPrisma.storageObject.findUnique.mockResolvedValue(
+        makeStorageObject({ id: item.storageObjectId, uploadedById: 'user-1' }) as any,
+      );
+
+      const result = await service.getMedia(item.id, 'user-1', ownPerms);
+
+      expect(result.tags).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getDashboard
+  // -------------------------------------------------------------------------
+
+  describe('getDashboard', () => {
+    const dashboardQuery = { circleId: CIRCLE_ID } as any;
+
+    it('throws ForbiddenException when assertCircleAccess rejects', async () => {
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+        new ForbiddenException('Not a circle member'),
+      );
+
+      await expect(
+        service.getDashboard(dashboardQuery, 'user-1', ownPerms),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('returns shape { onThisDay, recent, favorites, counts }', async () => {
+      // $queryRaw returns empty — no onThisDay items to hydrate
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+      // Promise.all: onThisDay hydration skipped (empty ids), recent, favorites
+      mockPrisma.mediaItem.findMany
+        .mockResolvedValueOnce([]) // recent
+        .mockResolvedValueOnce([]); // favorites
+      // count calls: total, unreviewed, lowValue, missingGeo
+      mockPrisma.mediaItem.count
+        .mockResolvedValueOnce(100)
+        .mockResolvedValueOnce(20)
+        .mockResolvedValueOnce(5)
+        .mockResolvedValueOnce(10);
+
+      const result = await service.getDashboard(dashboardQuery, 'user-1', ownPerms);
+
+      expect(result).toHaveProperty('onThisDay');
+      expect(result).toHaveProperty('recent');
+      expect(result).toHaveProperty('favorites');
+      expect(result).toHaveProperty('counts');
+      expect(result.counts).toMatchObject({
+        total: 100,
+        unreviewed: 20,
+        lowValue: 5,
+        missingGeo: 10,
+      });
+    });
+
+    it('getDashboard passes correct where to count queries', async () => {
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+      mockPrisma.mediaItem.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+      mockPrisma.mediaItem.count
+        .mockResolvedValueOnce(50)  // total
+        .mockResolvedValueOnce(10)  // unreviewed
+        .mockResolvedValueOnce(3)   // low_value
+        .mockResolvedValueOnce(7);  // missingGeo
+
+      await service.getDashboard(dashboardQuery, 'user-1', ownPerms);
+
+      const countCalls = (mockPrisma.mediaItem.count as jest.Mock).mock.calls;
+
+      // All count calls must include circleId and deletedAt: null
+      for (const call of countCalls) {
+        expect(call[0].where).toMatchObject({
+          circleId: CIRCLE_ID,
+          deletedAt: null,
+        });
+      }
+
+      // Verify specific classification filters
+      const allWheres = countCalls.map((c: any) => c[0].where);
+      const unreviewedWhere = allWheres.find(
+        (w: any) => w.classification === 'unreviewed',
+      );
+      const lowValueWhere = allWheres.find(
+        (w: any) => w.classification === 'low_value',
+      );
+      const missingGeoWhere = allWheres.find(
+        (w: any) => w.takenLat === null,
+      );
+
+      expect(unreviewedWhere).toBeDefined();
+      expect(lowValueWhere).toBeDefined();
+      expect(missingGeoWhere).toBeDefined();
+    });
+
+    it('onThisDay uses $queryRaw and hydrates ids via findMany', async () => {
+      const mediaId = randomUUID();
+      const item = makeMediaItem({ id: mediaId });
+
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([{ id: mediaId }]);
+      // First findMany call is for onThisDay hydration, then recent, then favorites
+      mockPrisma.mediaItem.findMany
+        .mockResolvedValueOnce([item] as any) // onThisDay hydration
+        .mockResolvedValueOnce([])            // recent
+        .mockResolvedValueOnce([]);           // favorites
+      mockPrisma.mediaItem.count
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
+
+      const result = await service.getDashboard(dashboardQuery, 'user-1', ownPerms);
+
+      // Assert findMany was called with id in [mediaId] for hydration
+      const findManyCalls = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      const hydrateCall = findManyCalls.find(
+        (c: any) => c[0].where?.id?.in?.includes(mediaId),
+      );
+      expect(hydrateCall).toBeDefined();
+
+      expect(result.onThisDay).toHaveLength(1);
+      expect(result.onThisDay[0].id).toBe(mediaId);
+    });
+
+    it('recent ordered by importedAt desc take 12', async () => {
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+      mockPrisma.mediaItem.findMany
+        .mockResolvedValueOnce([])  // recent
+        .mockResolvedValueOnce([]); // favorites
+      mockPrisma.mediaItem.count
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
+
+      await service.getDashboard(dashboardQuery, 'user-1', ownPerms);
+
+      const findManyCalls = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      const recentCall = findManyCalls.find(
+        (c: any) =>
+          c[0].orderBy?.importedAt === 'desc' && c[0].take === 12,
+      );
+      expect(recentCall).toBeDefined();
+    });
+
+    it('favorites filtered by favorite:true take 12', async () => {
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+      mockPrisma.mediaItem.findMany
+        .mockResolvedValueOnce([])  // recent
+        .mockResolvedValueOnce([]); // favorites
+      mockPrisma.mediaItem.count
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
+
+      await service.getDashboard(dashboardQuery, 'user-1', ownPerms);
+
+      const findManyCalls = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      const favoritesCall = findManyCalls.find(
+        (c: any) => c[0].where?.favorite === true && c[0].take === 12,
+      );
+      expect(favoritesCall).toBeDefined();
+    });
+  });
 });

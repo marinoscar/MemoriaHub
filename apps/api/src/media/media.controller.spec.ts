@@ -22,6 +22,13 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import type { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import type { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
+import type { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
+import type { BulkTagsDto } from './dto/bulk-tags.dto';
+import type { BulkDeleteDto } from './dto/bulk-delete.dto';
+import type { DashboardQueryDto } from './dto/dashboard-query.dto';
+import type { ReverseGeocodeQueryDto } from './dto/reverse-geocode-query.dto';
+import type { GeoSearchQueryDto } from './dto/geo-search-query.dto';
+import { randomUUID } from 'crypto';
 
 // ---------------------------------------------------------------------------
 // Pass-through guard — allows all requests without DI dependencies
@@ -175,6 +182,164 @@ describe('MediaController', () => {
       const result = await controller.listLocations({} as MediaLocationsQueryDto, user);
 
       expect(result).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // bulkUpdateMedia handler
+  // -------------------------------------------------------------------------
+
+  describe('bulkUpdateMedia', () => {
+    it('should call mediaService.bulkUpdateMedia with dto and user context', async () => {
+      const user = makeUser({
+        id: 'user-42',
+        permissions: [PERMISSIONS.MEDIA_WRITE],
+      });
+      const dto: Partial<BulkUpdateMediaDto> = {
+        circleId: randomUUID(),
+        ids: [randomUUID()],
+        set: { classification: 'memory' as const },
+      };
+      const expectedResult = { updated: 1 };
+      mockMediaService.bulkUpdateMedia.mockResolvedValue(expectedResult);
+
+      const result = await controller.bulkUpdateMedia(dto as BulkUpdateMediaDto, user);
+
+      expect(mockMediaService.bulkUpdateMedia).toHaveBeenCalledTimes(1);
+      expect(mockMediaService.bulkUpdateMedia).toHaveBeenCalledWith(
+        dto,
+        user.id,
+        user.permissions,
+      );
+      expect(result).toBe(expectedResult);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // bulkTags handler
+  // -------------------------------------------------------------------------
+
+  describe('bulkTags', () => {
+    it('should call mediaService.bulkTags with dto and user context', async () => {
+      const user = makeUser({ permissions: [PERMISSIONS.MEDIA_WRITE] });
+      const dto: Partial<BulkTagsDto> = {
+        circleId: randomUUID(),
+        ids: [randomUUID()],
+        add: ['nature'],
+      };
+      const expectedResult = { added: 1, removed: 0 };
+      mockMediaService.bulkTags.mockResolvedValue(expectedResult);
+
+      const result = await controller.bulkTags(dto as BulkTagsDto, user);
+
+      expect(mockMediaService.bulkTags).toHaveBeenCalledWith(
+        dto,
+        user.id,
+        user.permissions,
+      );
+      expect(result).toBe(expectedResult);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // bulkDelete handler
+  // -------------------------------------------------------------------------
+
+  describe('bulkDelete', () => {
+    it('should call mediaService.bulkDelete with dto and user context', async () => {
+      const user = makeUser({ permissions: [PERMISSIONS.MEDIA_DELETE] });
+      const dto: Partial<BulkDeleteDto> = {
+        circleId: randomUUID(),
+        ids: [randomUUID()],
+      };
+      const expectedResult = { deleted: 1 };
+      mockMediaService.bulkDelete.mockResolvedValue(expectedResult);
+
+      const result = await controller.bulkDelete(dto as BulkDeleteDto, user);
+
+      expect(mockMediaService.bulkDelete).toHaveBeenCalledWith(
+        dto,
+        user.id,
+        user.permissions,
+      );
+      expect(result).toBe(expectedResult);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getDashboard handler
+  // -------------------------------------------------------------------------
+
+  describe('getDashboard', () => {
+    it('should call mediaService.getDashboard with query and user context', async () => {
+      const user = makeUser({ permissions: [PERMISSIONS.MEDIA_READ] });
+      const query: DashboardQueryDto = { circleId: randomUUID() };
+      const expectedResult = {
+        onThisDay: [],
+        recent: [],
+        favorites: [],
+        counts: { total: 0, unreviewed: 0, lowValue: 0, missingGeo: 0 },
+      };
+      mockMediaService.getDashboard.mockResolvedValue(expectedResult);
+
+      const result = await controller.getDashboard(query, user);
+
+      expect(mockMediaService.getDashboard).toHaveBeenCalledTimes(1);
+      expect(mockMediaService.getDashboard).toHaveBeenCalledWith(
+        query,
+        user.id,
+        user.permissions,
+      );
+      expect(result).toBe(expectedResult);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // reverseGeocodeOnDemand handler
+  // -------------------------------------------------------------------------
+
+  describe('reverseGeocodeOnDemand', () => {
+    it('should call mediaService.reverseGeocodeOnDemand with lat and lng from query', async () => {
+      const query: ReverseGeocodeQueryDto = { lat: 9.9281, lng: -84.0907 };
+      const expectedResult = {
+        country: 'Costa Rica',
+        countryCode: 'CR',
+        admin1: 'Alajuela',
+        locality: 'La Fortuna',
+      };
+      mockMediaService.reverseGeocodeOnDemand.mockResolvedValue(expectedResult);
+
+      const result = await controller.reverseGeocodeOnDemand(query);
+
+      expect(mockMediaService.reverseGeocodeOnDemand).toHaveBeenCalledTimes(1);
+      expect(mockMediaService.reverseGeocodeOnDemand).toHaveBeenCalledWith(
+        query.lat,
+        query.lng,
+      );
+      expect(result).toBe(expectedResult);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // searchPlaces handler
+  // -------------------------------------------------------------------------
+
+  describe('searchPlaces', () => {
+    it('should call mediaService.searchPlaces with q and limit from query', async () => {
+      const query: GeoSearchQueryDto = { q: 'La Fortuna', limit: 5 };
+      const expectedResult = [
+        { lat: 9.9281, lng: -84.0907, label: 'La Fortuna, Alajuela, Costa Rica' },
+      ];
+      mockMediaService.searchPlaces.mockResolvedValue(expectedResult);
+
+      const result = await controller.searchPlaces(query);
+
+      expect(mockMediaService.searchPlaces).toHaveBeenCalledTimes(1);
+      expect(mockMediaService.searchPlaces).toHaveBeenCalledWith(
+        query.q,
+        query.limit,
+      );
+      expect(result).toBe(expectedResult);
     });
   });
 
