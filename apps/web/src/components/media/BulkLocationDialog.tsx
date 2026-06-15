@@ -206,8 +206,9 @@ export function BulkLocationDialog({
                   error={!!searchError}
                   helperText={searchError ?? undefined}
                   slotProps={{
+                    ...params.slotProps,
                     input: {
-                      ...params.InputProps,
+                      ...params.slotProps.input,
                       startAdornment: (
                         <InputAdornment position="start">
                           {searchLoading
