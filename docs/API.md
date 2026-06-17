@@ -2240,6 +2240,182 @@ For future versions, the API may adopt URL-based versioning: `/api/v2/...`
 
 ---
 
+## Face Recognition — Face Settings
+
+All endpoints in this group require the Admin system role plus the listed permission. This group mirrors the [AI Settings](#ai-settings) group in structure and credential-handling approach. Only the settings API is active in Phase 1; detection, people management, and recognition endpoints ship in later phases.
+
+**Provider abstraction:** The face domain supports pluggable providers via a `FaceProvider` interface. Two providers are shipped:
+
+| Provider key | Type | Embeddings | Notes |
+|---|---|---|---|
+| `compreface` | Self-hosted sidecar (default) | 512-d ArcFace, owned by app | CompreFace runs as a Docker sidecar with its own bundled Postgres. The app calls it, stores the returned embeddings in its own database, and owns the vectors. |
+| `rekognition` | AWS managed (opt-in) | None returned | Delegated recognition — AWS performs matching against a gallery indexed by the app; only `externalFaceId` is stored. |
+
+Adding a new provider requires implementing the `FaceProvider` interface and adding one registry entry.
+
+**Credential encryption:** Face provider credentials are encrypted at rest using AES-256-GCM via the same `SECRETS_ENCRYPTION_KEY` used for AI provider credentials. The raw key is never returned — only `last4`.
+
+---
+
+### GET /face/settings
+
+**Permission:** `face_settings:read`
+
+Returns configured and known (unconfigured) face providers, per-provider capabilities, and the active detection feature configuration. Raw credentials are never returned — only `last4`.
+
+**Response:**
+```json
+{
+  "providers": [
+    {
+      "provider": "compreface",
+      "configured": true,
+      "enabled": true,
+      "last4": "Xk9Z",
+      "baseUrl": "http://compreface:8000",
+      "updatedAt": "2026-06-17T10:00:00.000Z"
+    }
+  ],
+  "knownProviders": [
+    {
+      "provider": "rekognition",
+      "configured": false,
+      "enabled": false,
+      "last4": null,
+      "baseUrl": null,
+      "region": null
+    }
+  ],
+  "capabilities": {
+    "compreface": { "detect": true, "embed": true, "delegatedRecognize": false },
+    "rekognition": { "detect": true, "embed": false, "delegatedRecognize": true }
+  },
+  "features": {
+    "detection": { "provider": "compreface", "model": "arcface-r100-v1" }
+  }
+}
+```
+
+---
+
+### PUT /face/credentials/:provider
+
+**Permission:** `face_settings:write`
+
+Upsert credentials for the given provider key. The API key (and region for Rekognition) is encrypted at rest with AES-256-GCM; the plaintext is never stored or returned.
+
+**Path Parameter:** `provider` — `compreface` | `rekognition`
+
+**Request Body:**
+```json
+{
+  "apiKey": "...",
+  "baseUrl": "http://compreface:8000",
+  "region": "us-east-1",
+  "enabled": true
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `apiKey` | string | Yes | Provider API key or secret |
+| `baseUrl` | string | No | Override default base URL (CompreFace only) |
+| `region` | string | No | AWS region (Rekognition only) |
+| `enabled` | boolean | No | Enable or disable this provider (default: `true`) |
+
+**Response:**
+```json
+{
+  "provider": "compreface",
+  "configured": true,
+  "enabled": true,
+  "last4": "Xk9Z",
+  "baseUrl": "http://compreface:8000"
+}
+```
+
+---
+
+### DELETE /face/credentials/:provider
+
+**Permission:** `face_settings:write`
+
+Remove stored credentials for the given provider. Returns 404 if no credential exists.
+
+**Response:**
+```json
+{ "deleted": true, "provider": "compreface" }
+```
+
+---
+
+### POST /face/test
+
+**Permission:** `face_settings:read`
+
+Test provider connectivity by issuing a minimal API call to the provider's endpoint.
+
+**Request Body:**
+```json
+{
+  "provider": "compreface"
+}
+```
+
+**Response:**
+```json
+{ "ok": true }
+```
+
+On failure:
+```json
+{ "ok": false, "error": "Connection refused at http://compreface:8000" }
+```
+
+---
+
+### GET /face/models
+
+**Permission:** `face_settings:read`
+
+List available models for a configured provider using its stored credentials.
+
+**Query Parameters:** `provider` (required) — provider key
+
+**Response:**
+```json
+{
+  "provider": "compreface",
+  "models": ["arcface-r100-v1"]
+}
+```
+
+---
+
+### PUT /face/features/detection
+
+**Permission:** `face_settings:write`
+
+Set the active face provider and model used for background face detection. Stored in system settings under `face.features.detection`. Only one provider/model pair can be active at a time — mixing providers across a library is not supported (embeddings from different models are not cross-comparable).
+
+**Request Body:**
+```json
+{
+  "provider": "compreface",
+  "model": "arcface-r100-v1"
+}
+```
+
+**Response:**
+```json
+{
+  "provider": "compreface",
+  "model": "arcface-r100-v1"
+}
+```
+
+---
+
 ## AI Settings
 
 All endpoints in this group require the Admin system role plus the listed permission.

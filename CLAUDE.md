@@ -346,6 +346,15 @@ cd apps/api && npm run prisma:migrate
 - `GET /api/ai/models?provider=` - List available models for a provider (ai_settings:read)
 - `PUT /api/ai/features/search` - Set active provider and model for AI search (ai_settings:write)
 
+### Face Recognition / Face Settings (Admin only — face_settings:read / face_settings:write)
+Phase 1 ships the settings API. Detection, recognition, and people management come in later phases.
+- `GET /api/face/settings` - Get configured providers (masked), known providers, capabilities, and active detection feature (face_settings:read)
+- `PUT /api/face/credentials/:provider` - Upsert provider credentials, encrypted at rest (face_settings:write)
+- `DELETE /api/face/credentials/:provider` - Remove provider credentials (face_settings:write)
+- `POST /api/face/test` - Test provider connectivity (face_settings:read)
+- `GET /api/face/models?provider=` - List available models for a provider (face_settings:read)
+- `PUT /api/face/features/detection` - Set active face-detection provider and model (face_settings:write)
+
 ### Deterministic Search (search:use)
 - `POST /api/search` - Execute deterministic media search with explicit filters (media:read + search:use)
 - `GET /api/search/fields` - List all searchable field descriptors from the registry (search:use)
@@ -385,6 +394,8 @@ cd apps/api && npm run prisma:migrate
 - `ai_settings:read` - View AI provider config, test connectivity, list models (Admin only)
 - `ai_settings:write` - Configure AI provider credentials and set active search model (Admin only)
 - `search:use` - Use deterministic search and conversational (agentic) search (all roles)
+- `face_settings:read` - View face provider config, test connectivity, list models (Admin only)
+- `face_settings:write` - Configure face provider credentials and set active detection provider/model (Admin only)
 
 ### Per-Circle Roles
 Each circle has its own role for each member, independent of the system role:
@@ -420,6 +431,11 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `ai_provider_credentials` - AI provider API keys (AES-256-GCM encrypted); one row per provider; `last4` exposed for display; plaintext never stored or returned
 - `search_conversations` - Agentic search conversation sessions; scoped to one circle and one user; includes `favorite`, `archived_at`, `deleted_at` for lifecycle management
 - `search_messages` - Individual messages within a conversation; `role` is `user` or `assistant`; `tool_calls` and `tool_results` are JSON columns for search tool invocations
+- `face_provider_credentials` - Face provider API keys/config (AES-256-GCM encrypted via same key as AI); one row per provider; `last4` exposed; plaintext never stored or returned (Phase 1 active)
+- `people` - Per-circle identity records for recognized individuals; supports `mergedIntoId` self-FK for cluster merge audit; `deletedAt` soft-delete (scaffolded; Phase 3)
+- `faces` - Individual detected face records with bounding box, confidence, optional 512-d ArcFace embedding (`Float[]` fallback or pgvector column), and `externalFaceId` for Rekognition delegated path; keyed to `mediaItemId` + `circleId` (scaffolded; Phase 2)
+- `face_jobs` - Async face-detection job queue (no BullMQ); statuses: `pending`, `running`, `succeeded`, `failed`; reasons: `upload`, `rerun`, `backfill` (scaffolded; Phase 2)
+- `media_face_status` - Per-media-item detection status tracking (one row per item); records which provider/model processed the item and when (scaffolded; Phase 2)
 
 **Note:** `media_items`, `albums`, and `tags` use `added_by_id` (not `owner_id`) to track the uploading user. Dedup uniqueness for `media_items` is `(circle_id, content_hash)`. Tag names are unique per `(circle_id, name)`.
 
@@ -504,6 +520,13 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 - `GEO_PROVIDER` - Reverse geocoding provider: `offline` (default, on-server GeoNames dataset) or `nominatim` (HTTP, sends GPS off-server)
 - `NOMINATIM_BASE_URL` - Nominatim endpoint (default: `https://nominatim.openstreetmap.org`)
 - `GEO_FORWARD_SEARCH_ENABLED` - Enable `GET /api/media/geo/search` forward geocoding (default: `false`; only typed query leaves server, never GPS)
+
+**Face Recognition:**
+- `FACE_COMPREFACE_URL` - Base URL of the CompreFace sidecar (default: `http://compreface:8000`); used as the default `baseUrl` for the CompreFace provider
+- `FACE_JOB_POLL_MS` - Polling interval for the face-job worker in milliseconds (default: `5000`; Phase 2+)
+- `FACE_MATCH_THRESHOLD` - Cosine-similarity threshold for assigning a detected face to a known `Person` (default: `0.38`; Phase 3+)
+- `FACE_VECTOR_BACKEND` - Vector storage and matching backend: `app` (default; `Float[]` column + in-process cosine) or `pgvector` (requires the pgvector extension; Phase 3+)
+- `COMPREFACE_DB_PASSWORD` - Password for the CompreFace bundled Postgres container (set in `infra/compose/.env`; keep separate from the app DB credentials)
 
 ## Common Patterns
 
