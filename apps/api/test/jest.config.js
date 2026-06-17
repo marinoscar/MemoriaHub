@@ -4,7 +4,7 @@ module.exports = {
   rootDir: '..',
   testRegex: '.*\\.spec\\.ts$',
   transform: {
-    '^.+\\.(t|j)s$': ['ts-jest', { diagnostics: false }],
+    '^.+\\.(t|j)s$': 'ts-jest',
   },
   collectCoverageFrom: [
     'src/**/*.ts',
@@ -18,7 +18,6 @@ module.exports = {
   roots: ['<rootDir>/src/', '<rootDir>/test/'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
-    '^@aws-sdk/(.*)$': '<rootDir>/test/mocks/optional-dep.mock.js',
   },
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],
   globalTeardown: '<rootDir>/test/teardown.ts',
