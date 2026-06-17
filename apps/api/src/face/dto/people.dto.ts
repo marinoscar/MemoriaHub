@@ -1,0 +1,61 @@
+import { createZodDto } from 'nestjs-zod';
+import { z } from 'zod';
+
+// ---------------------------------------------------------------------------
+// ListPeopleQuery
+// ---------------------------------------------------------------------------
+
+export const listPeopleQuerySchema = z.object({
+  circleId: z.string().uuid(),
+  includeUnlabeled: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true'),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export class ListPeopleQueryDto extends createZodDto(listPeopleQuerySchema) {}
+
+// ---------------------------------------------------------------------------
+// CreatePersonDto
+// ---------------------------------------------------------------------------
+
+export const createPersonSchema = z.object({
+  circleId: z.string().uuid(),
+  name: z.string().min(1).max(100).optional(),
+  faceIds: z.array(z.string().uuid()).max(500).optional(),
+});
+
+export class CreatePersonDto extends createZodDto(createPersonSchema) {}
+
+// ---------------------------------------------------------------------------
+// UpdatePersonDto
+// ---------------------------------------------------------------------------
+
+export const updatePersonSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  coverFaceId: z.string().uuid().optional().nullable(),
+});
+
+export class UpdatePersonDto extends createZodDto(updatePersonSchema) {}
+
+// ---------------------------------------------------------------------------
+// AssignFacesDto
+// ---------------------------------------------------------------------------
+
+export const assignFacesSchema = z.object({
+  faceIds: z.array(z.string().uuid()).min(1).max(500),
+});
+
+export class AssignFacesDto extends createZodDto(assignFacesSchema) {}
+
+// ---------------------------------------------------------------------------
+// ClusterDto
+// ---------------------------------------------------------------------------
+
+export const clusterSchema = z.object({
+  circleId: z.string().uuid(),
+});
+
+export class ClusterDto extends createZodDto(clusterSchema) {}
