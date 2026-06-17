@@ -60,6 +60,10 @@ export const PERMISSIONS = {
   AI_SETTINGS_READ: 'ai_settings:read',
   AI_SETTINGS_WRITE: 'ai_settings:write',
 
+  // Face Recognition Settings (Admin only)
+  FACE_SETTINGS_READ: 'face_settings:read',
+  FACE_SETTINGS_WRITE: 'face_settings:write',
+
   // Search feature usage
   SEARCH_USE: 'search:use',
 } as const;
