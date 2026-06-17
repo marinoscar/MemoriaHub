@@ -11,6 +11,7 @@ import {
 } from '@mui/material';
 import { Face as FaceIcon, Refresh as RefreshIcon } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
+import type { Theme } from '@mui/material/styles';
 import { useMediaFaces } from '../../hooks/useMediaFaces';
 import type { MediaFaceStatusType, DetectedFaceDto } from '../../services/face';
 
@@ -57,7 +58,7 @@ export function FaceThumbnails({ mediaId, mediaType, thumbnailUrl }: FaceThumbna
   return (
     <Box>
       {/* Status row */}
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1, flexWrap: 'wrap' }}>
+      <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap', alignItems: 'center' }}>
         <Chip label={chipProps.label} color={chipProps.color} size="small" icon={<FaceIcon />} />
         {status?.providerKey && (
           <Typography variant="caption" color="text.secondary">
@@ -119,7 +120,7 @@ function FaceBox({
   theme,
 }: {
   face: DetectedFaceDto;
-  theme: ReturnType<typeof useTheme>;
+  theme: Theme;
 }) {
   const { x, y, w, h } = face.boundingBox;
   const confidenceLabel =
