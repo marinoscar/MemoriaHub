@@ -343,13 +343,14 @@ enum CircleRole {
 }
 
 model Circle {
-  id          String   @id @default(uuid()) @db.Uuid
-  name        String
-  description String?
-  ownerId     String   @map("owner_id") @db.Uuid
-  isPersonal  Boolean  @default(false) @map("is_personal")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id                     String   @id @default(uuid()) @db.Uuid
+  name                   String
+  description            String?
+  ownerId                String   @map("owner_id") @db.Uuid
+  isPersonal             Boolean  @default(false) @map("is_personal")
+  faceRecognitionEnabled Boolean  @default(false) @map("face_recognition_enabled")
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
   owner               User                 @relation("CircleOwner", fields: [ownerId], references: [id], onDelete: Restrict)
