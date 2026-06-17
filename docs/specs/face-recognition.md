@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
+| **Version** | 2.0 |
 | **Last Updated** | June 2026 |
-| **Status** | Phase 1 implemented |
+| **Status** | All 4 phases implemented |
 | **Branch** | `feat/face-recognition` |
 
 ---
@@ -152,32 +152,61 @@ One row per media item — answers "has this item been processed, by whom, and w
 
 ## 4. Four-Phase Roadmap
 
-| Phase | Shippable outcome | Key components |
-|-------|-------------------|----------------|
-| **Phase 1** (current) | Admins configure and test face providers in the Admin UI | Settings API, provider abstraction, CompreFace sidecar, DB schema scaffold |
-| **Phase 2** | Faces detected in background; boxes visible on photos; re-runnable | `FaceJob` worker, `FaceDetectionService`, re-run + backfill endpoints, face thumbnails UI |
-| **Phase 3** | Same person recognized across photos; unknown clusters surfaced | Embedding matching + cosine similarity, `PeopleController`, cluster review UI |
-| **Phase 4** | Full label/merge/search + biometric safeguards | Cluster merge, `DELETE /face/biometrics`, per-circle opt-in, search-by-person |
+| Phase | Shippable outcome | Status |
+|-------|-------------------|--------|
+| **Phase 1** | Admins configure and test face providers in the Admin UI | Implemented |
+| **Phase 2** | Faces detected in background; boxes visible on photos; re-runnable | Implemented |
+| **Phase 3** | Same person recognized across photos; unknown clusters surfaced | Implemented |
+| **Phase 4** | Full label/merge/search + biometric safeguards | Implemented |
 
 ---
 
-## 5. Phase 1: Settings — What Is Implemented Now
+## 5. What Is Implemented
 
-Phase 1 delivers everything needed for an admin to configure a face provider and verify connectivity before detection work begins. No photos are processed in Phase 1.
+All four phases are fully implemented on the `feat/face-recognition` branch.
 
-### What is active
+### Phase 1 — Settings and Provider Abstraction
 
-- **Database tables:** All five tables above are created by migration. Only `face_provider_credentials` is written to in Phase 1.
-- **Permissions:** `face_settings:read` and `face_settings:write` are seeded to the Admin role.
+- **Database tables:** All five tables created by migration and active.
+- **Permissions:** `face_settings:read` and `face_settings:write` seeded to the Admin role.
 - **Settings API** (`FaceSettingsController` under `apps/api/src/face/`): six endpoints mirroring the AI Settings API.
-- **Provider abstraction:** `FaceProvider` interface, `FaceProviderRegistry`, `ComprefaceProvider`, `RekognitionProvider` (stubs for Phase 2 detection methods).
+- **Provider abstraction:** `FaceProvider` interface, `FaceProviderRegistry`, `ComprefaceProvider`, `RekognitionProvider`.
 - **Admin UI:** `FaceSettingsPage` at `/admin/face-settings` with per-provider credential form, test button, model selector, and active-detection selector. Gated by `face_settings:read`.
 - **CompreFace sidecar:** Added to `infra/compose/base.compose.yml` with its own bundled Postgres container.
 
-### What is scaffolded but not yet active
+### Phase 2 — Background Detection
 
-- The `people`, `faces`, `face_jobs`, and `media_face_status` tables exist in the schema but no API endpoints read or write them in Phase 1.
-- `FaceEnqueueListener`, `FaceJobWorker`, and `FaceDetectionService` are not yet wired.
+The detection pipeline runs entirely outside the synchronous upload path via a polling worker:
+
+1. **`FaceEnqueueListener`** (`apps/api/src/face/processing/`) listens for `OBJECT_PROCESSED_EVENT`. If the media item's circle has `faceRecognitionEnabled=true` and `FACE_AUTO_DETECT` is not `false`, it inserts a `FaceJob(reason:upload)` and upserts `MediaFaceStatus(pending)`.
+2. **`FaceJobWorker`** polls the `face_jobs` table on a configurable interval (`FACE_JOB_POLL_MS`, default 5 s). It claims the oldest `pending` job via `UPDATE … RETURNING`, runs `FaceDetectionService.processMediaItem`, and updates job status. Claims are atomic (no concurrent double-processing). Max 3 attempts before marking `failed`. Disabled via `FACE_WORKER_ENABLED=false`.
+3. **`FaceDetectionService.processMediaItem`**: resolves the active provider/credentials from system settings → streams the image bytes from S3 → calls `provider.detect()` → deletes prior non-`manuallyAssigned` Face rows (re-run idempotency) → persists new Face rows (box, confidence, embedding/externalFaceId, providerKey, modelVersion) → updates `MediaFaceStatus`.
+
+New endpoints: `GET /media/:id/faces`, `GET /media/:id/faces/status`, `POST /media/:id/faces/rerun`, `POST /face/backfill`.
+
+### Phase 3 — Embedding Matching and People
+
+After detection, `FaceDetectionService` attempts to assign each face to a known `Person` in the circle:
+
+- Embeddings are L2-normalized 512-d vectors (CompreFace/ArcFace path).
+- In-app cosine similarity is computed against per-person centroids (`FACE_VECTOR_BACKEND=app`, the default). When `FACE_VECTOR_BACKEND=pgvector` and the pgvector extension is installed, the `<=>` cosine distance operator and an `hnsw` index are used instead.
+- If the best similarity is ≥ `FACE_MATCH_THRESHOLD` (default 0.38), the face is assigned to that person and the centroid is recomputed as the mean of all normalized member embeddings.
+- Faces below threshold remain unknown (`personId=null`).
+
+**Rekognition path (delegated):** `provider.recognize()` calls `SearchFacesByImage` against the AWS collection. Matched faces receive the corresponding `personId`; unmatched faces get `externalFaceId` only.
+
+**Unknown clustering** (`POST /people/cluster`): greedy union-find over all unassigned faces using `FACE_CLUSTER_THRESHOLD` (default 0.45). Clusters with ≥ `FACE_CLUSTER_MIN_SIZE` (default 2) faces create unlabeled `Person` records. Singletons remain unassigned. Requires circle_admin role and circle opt-in.
+
+New endpoints: `GET /people`, `GET /people/:id`, `POST /people`, `PATCH /people/:id`, `POST /people/:id/faces`, `DELETE /people/:id/faces/:faceId`, `POST /people/cluster`. Also extends `GET /media` with `?personId=` filter.
+
+### Phase 4 — Merge, Lifecycle, and Biometric Safeguards
+
+- **Merge** (`POST /people/merge`): In a single database transaction, reassigns all `Face.personId` from source to target, sets `source.mergedIntoId=targetId` (audit breadcrumb), soft-deletes source, recomputes the target centroid. Eager face reassignment means `WHERE personId=target` always returns the full merged person without chain resolution. Emits `person:merge` audit event.
+- **Delete person** (`DELETE /people/:id`): Soft-deletes the person; sets `personId=null` and `manuallyAssigned=false` on all associated faces. Face rows and embeddings are retained. Emits `person:delete` audit event.
+- **Per-circle opt-in** (`GET/PUT /circles/:id/face-settings`): `faceRecognitionEnabled` column on `circles` (default `false`). Auto-enqueue, backfill, and clustering all check this flag. Emits `circle:face_settings_update` audit event.
+- **Biometric erase** (`DELETE /face/biometrics?circleId=`): Permanently deletes all Face, Person, MediaFaceStatus, and FaceJob rows for a circle in a single transaction; sets `faceRecognitionEnabled=false`. Requires system Admin or circle_admin. Emits `face:biometrics_delete` audit event. This action is irreversible.
+
+New endpoints: `POST /people/merge`, `DELETE /people/:id`, `GET /circles/:id/face-settings`, `PUT /circles/:id/face-settings`, `DELETE /face/biometrics`.
 
 ---
 
@@ -191,18 +220,34 @@ Face provider credentials use the same encryption path as AI provider credential
 
 Face embeddings are biometric data and require careful handling:
 
-- **Per-circle opt-in (Phase 4):** Face detection defaults to off per circle. Admins must explicitly enable it.
-- **Delete all biometrics (Phase 4):** `DELETE /api/face/biometrics?circleId=` will cascade-delete all `Face`, `Person`, and `MediaFaceStatus` rows for a circle. Operators should document this capability in their privacy policies.
-- **Model version pinning:** Each `Face` row records `providerKey` and `modelVersion`. Embeddings from different model versions are not cross-comparable. Switching providers or model versions requires re-processing all photos.
-- **No cross-provider matching:** The CompreFace embedding space and the Rekognition gallery are independent. A library must use one provider consistently.
+- **Per-circle opt-in (default off):** The `faceRecognitionEnabled` flag on the `circles` table defaults to `false`. Auto-enqueue (on upload), backfill, and clustering all check this flag. Operators must explicitly enable face recognition per circle.
+- **Delete all biometrics:** `DELETE /api/face/biometrics?circleId=` permanently deletes all `Face`, `Person`, `MediaFaceStatus`, and `FaceJob` rows for a circle and resets `faceRecognitionEnabled=false`. This is the designated GDPR right-to-erasure action for biometric data. Operators should document this capability in their privacy policies.
+- **Model version pinning:** Each `Face` row records `providerKey` and `modelVersion`. Embeddings from different model versions are not cross-comparable. Switching providers or model versions requires re-processing all photos from the original S3 blobs.
+- **No cross-provider matching:** The CompreFace embedding space and the Rekognition collection are independent. A library must use one provider consistently.
+- **`manuallyAssigned` protection:** Faces explicitly labeled by users (`manuallyAssigned=true`) are not overwritten by subsequent auto-detection runs or re-clustering.
+
+### Audit events
+
+All sensitive face operations emit records to the `audit_events` table:
+
+| Event | Trigger |
+|-------|---------|
+| `person:merge` | `POST /people/merge` |
+| `person:delete` | `DELETE /people/:id` |
+| `face:biometrics_delete` | `DELETE /face/biometrics` |
+| `circle:face_settings_update` | `PUT /circles/:id/face-settings` |
 
 ### Access control
 
-All `/api/face/*` settings endpoints require:
-- System role: `Admin`
-- Permission: `face_settings:read` (GET, POST/test) or `face_settings:write` (PUT, DELETE)
-
-People management and face browsing in later phases will use `media:read`/`media:write` system permissions combined with per-circle `viewer`/`collaborator` role checks, consistent with the rest of the media domain.
+| Operation | System permission | Per-circle role |
+|-----------|-------------------|-----------------|
+| View face settings / test / list models | `face_settings:read` (Admin) | — |
+| Configure credentials / set active provider | `face_settings:write` (Admin) | — |
+| Backfill / biometric erase | `face_settings:write` (Admin) | `circle_admin` (biometric erase only) |
+| Read faces, status, list people | `media:read` | viewer |
+| Rerun detection, create/update/assign people | `media:write` | collaborator |
+| Cluster unknowns, manage circle face settings | `media:write` | circle_admin |
+| Filter media by personId | `media:read` | viewer |
 
 ---
 
@@ -220,32 +265,41 @@ CompreFace runs as a Docker service in `infra/compose/base.compose.yml`. Key dec
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `FACE_COMPREFACE_URL` | `http://compreface:8000` | CompreFace sidecar base URL |
-| `FACE_JOB_POLL_MS` | `5000` | Face worker poll interval (Phase 2+) |
-| `FACE_MATCH_THRESHOLD` | `0.38` | Cosine similarity threshold (Phase 3+) |
-| `FACE_VECTOR_BACKEND` | `app` | `app` or `pgvector` (Phase 3+) |
+| `FACE_AUTO_DETECT` | `true` | Global kill-switch for auto-enqueue on upload; per-circle opt-in still applies |
+| `FACE_JOB_POLL_MS` | `5000` | Face worker poll interval in ms |
+| `FACE_WORKER_ENABLED` | `true` | Set to `false` to disable the background worker (useful in test/CI) |
+| `FACE_MATCH_THRESHOLD` | `0.38` | Cosine similarity threshold for assigning a face to a known person |
+| `FACE_CLUSTER_THRESHOLD` | `0.45` | Cosine similarity threshold for grouping unknown faces during clustering |
+| `FACE_CLUSTER_MIN_SIZE` | `2` | Minimum faces in a cluster to create a provisional Person; singletons stay unknown |
+| `FACE_VECTOR_BACKEND` | `app` | `app` (Float[] + in-process cosine) or `pgvector` (native index via pgvector extension) |
 | `COMPREFACE_DB_PASSWORD` | — | Password for CompreFace bundled Postgres |
 
 ---
 
 ## 8. Endpoint and Permission Reference
 
-All endpoints require the `Admin` system role.
-
-| Method | Path | Permission | Phase | Description |
-|--------|------|------------|-------|-------------|
-| `GET` | `/api/face/settings` | `face_settings:read` | 1 | Get providers, capabilities, active detection feature |
-| `PUT` | `/api/face/credentials/:provider` | `face_settings:write` | 1 | Upsert encrypted credentials |
-| `DELETE` | `/api/face/credentials/:provider` | `face_settings:write` | 1 | Remove credentials |
-| `POST` | `/api/face/test` | `face_settings:read` | 1 | Test provider connectivity |
-| `GET` | `/api/face/models` | `face_settings:read` | 1 | List models for a provider |
-| `PUT` | `/api/face/features/detection` | `face_settings:write` | 1 | Set active detection provider/model |
-| `GET` | `/api/media/:id/faces` | `media:read` + viewer | 2 | List faces on a media item |
-| `GET` | `/api/media/:id/faces/status` | `media:read` + viewer | 2 | Get face detection status |
-| `POST` | `/api/media/:id/faces/rerun` | `media:write` + collaborator | 2 | Re-enqueue face detection |
-| `POST` | `/api/face/backfill` | `face_settings:write` | 2 | Bulk-enqueue a circle for detection |
-| `GET` | `/api/people` | `media:read` + viewer | 3 | List people in a circle |
-| `GET` | `/api/people/:id` | `media:read` + viewer | 3 | Get a person with their faces |
-| `PATCH` | `/api/people/:id` | `media:write` + collaborator | 3 | Rename person or set cover face |
-| `POST` | `/api/people/merge` | `media:write` + collaborator | 4 | Merge two person clusters |
-| `DELETE` | `/api/people/:id` | `media:write` + collaborator | 4 | Delete person (faces become unknown) |
-| `DELETE` | `/api/face/biometrics` | `face_settings:write` | 4 | Delete all biometric data for a circle |
+| Method | Path | Permission | Per-circle role | Phase | Description |
+|--------|------|------------|-----------------|-------|-------------|
+| `GET` | `/api/face/settings` | `face_settings:read` | — | 1 | Get providers, capabilities, active detection feature |
+| `PUT` | `/api/face/credentials/:provider` | `face_settings:write` | — | 1 | Upsert encrypted credentials |
+| `DELETE` | `/api/face/credentials/:provider` | `face_settings:write` | — | 1 | Remove credentials |
+| `POST` | `/api/face/test` | `face_settings:read` | — | 1 | Test provider connectivity |
+| `GET` | `/api/face/models` | `face_settings:read` | — | 1 | List models for a provider |
+| `PUT` | `/api/face/features/detection` | `face_settings:write` | — | 1 | Set active detection provider/model |
+| `GET` | `/api/media/:id/faces` | `media:read` | viewer | 2 | List faces on a media item |
+| `GET` | `/api/media/:id/faces/status` | `media:read` | viewer | 2 | Get face detection status |
+| `POST` | `/api/media/:id/faces/rerun` | `media:write` | collaborator | 2 | Re-enqueue face detection |
+| `POST` | `/api/face/backfill` | `face_settings:write` | — | 2 | Bulk-enqueue a circle for detection (requires opt-in) |
+| `GET` | `/api/people` | `media:read` | viewer | 3 | List people in a circle |
+| `GET` | `/api/people/:id` | `media:read` | viewer | 3 | Get a person with their faces |
+| `POST` | `/api/people` | `media:write` | collaborator | 3 | Create a person |
+| `PATCH` | `/api/people/:id` | `media:write` | collaborator | 3 | Rename person or set cover face |
+| `POST` | `/api/people/:id/faces` | `media:write` | collaborator | 3 | Assign faces to a person |
+| `DELETE` | `/api/people/:id/faces/:faceId` | `media:write` | collaborator | 3 | Unassign a face |
+| `POST` | `/api/people/cluster` | `media:write` | circle_admin | 3 | Cluster unknown faces (requires opt-in) |
+| `GET` | `/api/media` (`?personId=`) | `media:read` | viewer | 3 | Filter media by person |
+| `POST` | `/api/people/merge` | `media:write` | collaborator | 4 | Merge two person clusters |
+| `DELETE` | `/api/people/:id` | `media:write` | collaborator | 4 | Delete person (faces become unknown) |
+| `GET` | `/api/circles/:id/face-settings` | `circles:read` | viewer | 4 | Get per-circle face recognition opt-in |
+| `PUT` | `/api/circles/:id/face-settings` | `circles:write` | circle_admin | 4 | Enable/disable face recognition for circle |
+| `DELETE` | `/api/face/biometrics` | `face_settings:write` | circle_admin | 4 | Permanently erase all biometric data for a circle |

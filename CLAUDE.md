@@ -306,6 +306,7 @@ cd apps/api && npm run prisma:migrate
 - `DELETE /api/pat/{id}` - Revoke a token
 
 ### Family Circles (circles:read / circles:write)
+Face recognition is per-circle opt-in (default off); see Circle Face Settings endpoints below.
 - `POST /api/circles` - Create a circle
 - `GET /api/circles` - List circles the caller is a member of
 - `GET /api/circles/:id` - Get circle detail
@@ -347,13 +348,31 @@ cd apps/api && npm run prisma:migrate
 - `PUT /api/ai/features/search` - Set active provider and model for AI search (ai_settings:write)
 
 ### Face Recognition / Face Settings (Admin only — face_settings:read / face_settings:write)
-Phase 1 ships the settings API. Detection, recognition, and people management come in later phases.
 - `GET /api/face/settings` - Get configured providers (masked), known providers, capabilities, and active detection feature (face_settings:read)
 - `PUT /api/face/credentials/:provider` - Upsert provider credentials, encrypted at rest (face_settings:write)
 - `DELETE /api/face/credentials/:provider` - Remove provider credentials (face_settings:write)
 - `POST /api/face/test` - Test provider connectivity (face_settings:read)
 - `GET /api/face/models?provider=` - List available models for a provider (face_settings:read)
 - `PUT /api/face/features/detection` - Set active face-detection provider and model (face_settings:write)
+- `POST /api/face/backfill` body `{circleId, force?}` - Bulk-enqueue unprocessed photos in a circle; requires circle opt-in (face_settings:write)
+- `DELETE /api/face/biometrics?circleId=` - Permanently erase all Face, Person, MediaFaceStatus, and FaceJob rows for a circle; sets faceRecognitionEnabled=false (face_settings:write + circle_admin)
+
+### Face Recognition — Detection (media:read / media:write + per-circle viewer/collaborator role)
+- `GET /api/media/:id/faces` - List detected faces on a media item: id, boundingBox (normalized 0–1), confidence, landmarks, personId, providerKey, modelVersion, manuallyAssigned (media:read + viewer)
+- `GET /api/media/:id/faces/status` - Get per-item detection status: status, faceCount, providerKey, modelVersion, processedAt, lastError (media:read + viewer)
+- `POST /api/media/:id/faces/rerun` - Re-enqueue face detection for a media item; returns `{jobId, status}` (media:write + collaborator)
+
+### Face Recognition — People (media:read / media:write + per-circle viewer/collaborator/circle_admin role)
+- `GET /api/people?circleId=&includeUnlabeled=&page=&pageSize=` - List person records in a circle; paginated (media:read + viewer)
+- `GET /api/people/:id` - Get a person with their associated faces (media:read + viewer)
+- `POST /api/people` body `{circleId, name?, faceIds?}` - Create a person, optionally assigning initial faces (media:write + collaborator)
+- `PATCH /api/people/:id` body `{name?, coverFaceId?}` - Rename a person or set cover face (media:write + collaborator)
+- `POST /api/people/:id/faces` body `{faceIds[]}` - Assign faces to a person (sets manuallyAssigned=true) (media:write + collaborator)
+- `DELETE /api/people/:id/faces/:faceId` - Unassign a face; face returns to unknown pool (media:write + collaborator) — 204 No Content
+- `POST /api/people/cluster` body `{circleId}` - Cluster unknown faces into provisional Person records; requires circle opt-in (media:write + circle_admin)
+- `POST /api/people/merge` body `{sourceId, targetId}` - Reassign all faces source→target, soft-delete source with mergedIntoId audit breadcrumb (media:write + collaborator)
+- `DELETE /api/people/:id` - Soft-delete a person; all faces return to unknown pool (media:write + collaborator) — 204 No Content
+- `GET /api/media?personId=` - Filter media list to items containing faces assigned to a specific person (media:read + viewer)
 
 ### Deterministic Search (search:use)
 - `POST /api/search` - Execute deterministic media search with explicit filters (media:read + search:use)
@@ -425,17 +444,17 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `storage_objects` - File metadata, status, storage references (no circle_id; auth resolves via media_item)
 - `storage_object_chunks` - Multipart upload chunk tracking
 - `personal_access_tokens` - User-created long-lived API tokens (hashed)
-- `circles` - Family circles; `is_personal=true` circles cannot be deleted
+- `circles` - Family circles; `is_personal=true` circles cannot be deleted; `face_recognition_enabled` column (default false) controls per-circle opt-in
 - `circle_members` - Per-circle memberships with `CircleRole` enum (`circle_admin` | `collaborator` | `viewer`)
 - `circle_invites` - Email invites for circles; claimed on invited user's first login
 - `ai_provider_credentials` - AI provider API keys (AES-256-GCM encrypted); one row per provider; `last4` exposed for display; plaintext never stored or returned
 - `search_conversations` - Agentic search conversation sessions; scoped to one circle and one user; includes `favorite`, `archived_at`, `deleted_at` for lifecycle management
 - `search_messages` - Individual messages within a conversation; `role` is `user` or `assistant`; `tool_calls` and `tool_results` are JSON columns for search tool invocations
-- `face_provider_credentials` - Face provider API keys/config (AES-256-GCM encrypted via same key as AI); one row per provider; `last4` exposed; plaintext never stored or returned (Phase 1 active)
-- `people` - Per-circle identity records for recognized individuals; supports `mergedIntoId` self-FK for cluster merge audit; `deletedAt` soft-delete (scaffolded; Phase 3)
-- `faces` - Individual detected face records with bounding box, confidence, optional 512-d ArcFace embedding (`Float[]` fallback or pgvector column), and `externalFaceId` for Rekognition delegated path; keyed to `mediaItemId` + `circleId` (scaffolded; Phase 2)
-- `face_jobs` - Async face-detection job queue (no BullMQ); statuses: `pending`, `running`, `succeeded`, `failed`; reasons: `upload`, `rerun`, `backfill` (scaffolded; Phase 2)
-- `media_face_status` - Per-media-item detection status tracking (one row per item); records which provider/model processed the item and when (scaffolded; Phase 2)
+- `face_provider_credentials` - Face provider API keys/config (AES-256-GCM encrypted via same key as AI); one row per provider; `last4` exposed; plaintext never stored or returned
+- `people` - Per-circle identity records for recognized individuals; supports `mergedIntoId` self-FK for cluster merge audit; `deletedAt` soft-delete
+- `faces` - Individual detected face records with bounding box, confidence, optional 512-d ArcFace embedding (`Float[]` fallback or pgvector column), and `externalFaceId` for Rekognition delegated path; keyed to `mediaItemId` + `circleId`; `manuallyAssigned` flag protects user-labeled faces from re-clustering
+- `face_jobs` - Async face-detection job queue (no BullMQ); statuses: `pending`, `running`, `succeeded`, `failed`; reasons: `upload`, `rerun`, `backfill`
+- `media_face_status` - Per-media-item detection status tracking (one row per item); records which provider/model processed the item and when; statuses: `not_processed`, `pending`, `processing`, `processed`, `failed`, `no_faces`
 
 **Note:** `media_items`, `albums`, and `tags` use `added_by_id` (not `owner_id`) to track the uploading user. Dedup uniqueness for `media_items` is `(circle_id, content_hash)`. Tag names are unique per `(circle_id, name)`.
 
@@ -523,9 +542,13 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 
 **Face Recognition:**
 - `FACE_COMPREFACE_URL` - Base URL of the CompreFace sidecar (default: `http://compreface:8000`); used as the default `baseUrl` for the CompreFace provider
-- `FACE_JOB_POLL_MS` - Polling interval for the face-job worker in milliseconds (default: `5000`; Phase 2+)
-- `FACE_MATCH_THRESHOLD` - Cosine-similarity threshold for assigning a detected face to a known `Person` (default: `0.38`; Phase 3+)
-- `FACE_VECTOR_BACKEND` - Vector storage and matching backend: `app` (default; `Float[]` column + in-process cosine) or `pgvector` (requires the pgvector extension; Phase 3+)
+- `FACE_AUTO_DETECT` - Global kill-switch for auto-enqueue on upload; set to `false` to disable globally (per-circle opt-in still applies when `true`; default: `true`)
+- `FACE_JOB_POLL_MS` - Polling interval for the face-job worker in milliseconds (default: `5000`)
+- `FACE_WORKER_ENABLED` - Set to `false` to disable the FaceJobWorker (useful in test/CI environments; default: `true`)
+- `FACE_MATCH_THRESHOLD` - Cosine-similarity threshold for assigning a detected face to a known `Person` (default: `0.38`)
+- `FACE_CLUSTER_THRESHOLD` - Cosine-similarity threshold for grouping unknown faces during clustering (default: `0.45`; stricter than match threshold)
+- `FACE_CLUSTER_MIN_SIZE` - Minimum cluster size to create a provisional Person; singletons remain unknown (default: `2`)
+- `FACE_VECTOR_BACKEND` - Vector storage and matching backend: `app` (default; `Float[]` column + in-process cosine) or `pgvector` (requires the pgvector extension)
 - `COMPREFACE_DB_PASSWORD` - Password for the CompreFace bundled Postgres container (set in `infra/compose/.env`; keep separate from the app DB credentials)
 
 ## Common Patterns

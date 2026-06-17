@@ -2416,6 +2416,421 @@ Set the active face provider and model used for background face detection. Store
 
 ---
 
+## Face Recognition — Detection
+
+These endpoints expose face detection results for individual media items. Authentication requires a valid JWT plus `media:read` (GET) or `media:write` (POST). Authorization is enforced at the circle level using per-circle roles — the caller must be at least a **viewer** for read operations and at least a **collaborator** for write/rerun operations.
+
+---
+
+### GET /media/:id/faces
+
+**Permissions:** `media:read` + circle viewer role
+
+List all detected faces for a media item. The embedding vector is omitted from this response (it is large and is only used internally for matching).
+
+**Path Parameter:** `id` — media item UUID
+
+**Response:**
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "boundingBox": { "x": 0.1, "y": 0.15, "width": 0.2, "height": 0.3 },
+      "confidence": 0.98,
+      "landmarks": null,
+      "externalFaceId": null,
+      "providerKey": "compreface",
+      "modelVersion": "arcface-r100-v1",
+      "manuallyAssigned": false,
+      "personId": "uuid-or-null",
+      "createdAt": "2026-06-17T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+`boundingBox` coordinates are normalized fractions of the image dimensions (0.0–1.0). `personId` is `null` for unknown (unassigned) faces.
+
+---
+
+### GET /media/:id/faces/status
+
+**Permissions:** `media:read` + circle viewer role
+
+Get the detection status for a specific media item. Returns a sentinel `not_processed` response if no `MediaFaceStatus` row exists yet.
+
+**Path Parameter:** `id` — media item UUID
+
+**Response:**
+```json
+{
+  "data": {
+    "status": "processed",
+    "faceCount": 2,
+    "providerKey": "compreface",
+    "modelVersion": "arcface-r100-v1",
+    "processedAt": "2026-06-17T10:05:00.000Z",
+    "lastError": null,
+    "updatedAt": "2026-06-17T10:05:00.000Z"
+  }
+}
+```
+
+**Status values:** `not_processed` | `pending` | `processing` | `processed` | `failed` | `no_faces`
+
+---
+
+### POST /media/:id/faces/rerun
+
+**Permissions:** `media:write` + circle collaborator role
+
+Enqueue a new face detection job for the media item. Returns the job ID immediately; detection runs asynchronously.
+
+**Path Parameter:** `id` — media item UUID
+
+**Response:** 201 Created
+```json
+{
+  "data": {
+    "jobId": "uuid",
+    "status": "pending"
+  }
+}
+```
+
+---
+
+### POST /face/backfill
+
+**Permissions:** `face_settings:write` (Admin only)
+
+Bulk-enqueue unprocessed photos in a circle for face detection. The circle must have `faceRecognitionEnabled=true` (set via `PUT /circles/:id/face-settings`); returns 400 otherwise.
+
+**Request Body:**
+```json
+{
+  "circleId": "uuid",
+  "force": false
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `circleId` | UUID | Yes | Circle to backfill |
+| `force` | boolean | No | When `true`, re-enqueues items already marked `processed` or `no_faces`. Default: `false` |
+
+**Response:** 201 Created
+```json
+{
+  "data": {
+    "queued": 147
+  }
+}
+```
+
+---
+
+### DELETE /face/biometrics
+
+**Permissions:** `face_settings:write` (system Admin) **or** `circle_admin` role in the target circle
+
+Permanently delete all biometric data for a circle (GDPR right to erasure). In a single transaction: deletes all `Face`, `Person`, and `MediaFaceStatus` rows for the circle; cancels all pending `FaceJob` rows; sets `faceRecognitionEnabled=false` on the circle. **This action is irreversible.** Emits `face:biometrics_delete` audit event.
+
+**Query Parameters:** `circleId` (required) — UUID of the circle
+
+**Response:** 200 OK
+```json
+{
+  "data": {
+    "deletedFaces": 312,
+    "deletedPeople": 8
+  }
+}
+```
+
+**Error Cases:**
+- 400 — `circleId` query parameter missing
+- 403 — Caller is not system Admin and does not hold `circle_admin` in the target circle
+- 404 — Circle not found
+
+---
+
+## Face Recognition — People
+
+People endpoints manage identity records within a circle. `media:read` + viewer role is required for reads; `media:write` + collaborator or circle_admin role is required for writes.
+
+---
+
+### GET /people
+
+**Permissions:** `media:read` + circle viewer role
+
+List person records in a circle. Includes a `coverFace` thumbnail reference and a `faceCount`.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `circleId` | UUID (required) | — | Circle to query |
+| `includeUnlabeled` | boolean | `false` | Include persons with no name (provisional clusters) |
+| `page` | integer | 1 | Page number |
+| `pageSize` | integer | 20 (max 100) | Items per page |
+
+**Response:**
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "name": "Oscar",
+      "isUnlabeled": false,
+      "faceCount": 47,
+      "coverFace": {
+        "faceId": "uuid",
+        "mediaItemId": "uuid",
+        "boundingBox": { "x": 0.1, "y": 0.15, "width": 0.2, "height": 0.3 }
+      },
+      "createdAt": "2026-06-01T00:00:00.000Z",
+      "updatedAt": "2026-06-17T10:00:00.000Z"
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 5,
+    "totalPages": 1
+  }
+}
+```
+
+---
+
+### GET /people/:id
+
+**Permissions:** `media:read` + circle viewer role
+
+Get a person with their full list of associated face references. Embedding vectors are not included.
+
+**Path Parameter:** `id` — person UUID
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "name": "Oscar",
+  "isUnlabeled": false,
+  "circleId": "uuid",
+  "coverFace": {
+    "faceId": "uuid",
+    "mediaItemId": "uuid",
+    "boundingBox": { "x": 0.1, "y": 0.15, "width": 0.2, "height": 0.3 }
+  },
+  "faces": [
+    {
+      "faceId": "uuid",
+      "mediaItemId": "uuid",
+      "boundingBox": { "x": 0.1, "y": 0.15, "width": 0.2, "height": 0.3 },
+      "confidence": 0.98,
+      "manuallyAssigned": true,
+      "createdAt": "2026-06-17T10:00:00.000Z"
+    }
+  ],
+  "createdAt": "2026-06-01T00:00:00.000Z",
+  "updatedAt": "2026-06-17T10:00:00.000Z"
+}
+```
+
+---
+
+### POST /people
+
+**Permissions:** `media:write` + circle collaborator role
+
+Create a new person in a circle, optionally assigning initial faces at creation time.
+
+**Request Body:**
+```json
+{
+  "circleId": "uuid",
+  "name": "Oscar",
+  "faceIds": ["uuid", "uuid"]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `circleId` | UUID | Yes | Circle this person belongs to |
+| `name` | string (1–100 chars) | No | Display name (omit to create an unlabeled provisional cluster) |
+| `faceIds` | UUID[] (max 500) | No | Face IDs to assign at creation |
+
+**Response:** 201 Created — person object (same shape as `GET /people/:id`, without full faces array)
+
+---
+
+### PATCH /people/:id
+
+**Permissions:** `media:write` + circle collaborator role
+
+Rename a person or update their cover face.
+
+**Path Parameter:** `id` — person UUID
+
+**Request Body:**
+```json
+{
+  "name": "Oscar Marin",
+  "coverFaceId": "uuid"
+}
+```
+
+Both fields are optional. Pass `coverFaceId: null` to clear the cover face.
+
+**Response:** 200 OK — updated person object
+
+---
+
+### POST /people/:id/faces
+
+**Permissions:** `media:write` + circle collaborator role
+
+Manually assign one or more faces to a person. Sets `manuallyAssigned=true` on the face rows, protecting them from future re-clustering.
+
+**Path Parameter:** `id` — person UUID
+
+**Request Body:**
+```json
+{
+  "faceIds": ["uuid", "uuid"]
+}
+```
+
+`faceIds` is required (1–500 items); all faces must belong to the same circle as the person.
+
+**Response:** 200 OK
+```json
+{
+  "personId": "uuid",
+  "assignedCount": 2
+}
+```
+
+---
+
+### DELETE /people/:id/faces/:faceId
+
+**Permissions:** `media:write` + circle collaborator role
+
+Unassign a single face from a person. The face is returned to the unknown pool (`personId=null`, `manuallyAssigned=false`). The face row and its embedding are retained.
+
+**Response:** 204 No Content
+
+---
+
+### POST /people/cluster
+
+**Permissions:** `media:write` + circle_admin role
+
+Trigger clustering of all unassigned faces in a circle into provisional Person records. Uses greedy union-find over cosine similarity (`FACE_CLUSTER_THRESHOLD`). Clusters meeting `FACE_CLUSTER_MIN_SIZE` create new unlabeled Person records; singletons remain unassigned. The circle must have `faceRecognitionEnabled=true`.
+
+**Request Body:**
+```json
+{
+  "circleId": "uuid"
+}
+```
+
+**Response:** 200 OK — clustering summary
+```json
+{
+  "data": {
+    "clustersCreated": 3,
+    "facesAssigned": 42,
+    "singletonsSkipped": 7
+  }
+}
+```
+
+---
+
+### POST /people/merge
+
+**Permissions:** `media:write` + circle collaborator role
+
+Merge two persons into one. In a single transaction: all faces belonging to `sourceId` are reassigned to `targetId`; `sourceId` is soft-deleted with `mergedIntoId` set to `targetId` as an audit breadcrumb; the target person's embedding centroid is recomputed. Both persons must belong to the same circle. Emits `person:merge` audit event.
+
+**Request Body:**
+```json
+{
+  "sourceId": "uuid",
+  "targetId": "uuid"
+}
+```
+
+`sourceId` and `targetId` must differ.
+
+**Response:** 200 OK — updated target person object
+
+**Error Cases:**
+- 400 — `sourceId === targetId`, or persons are in different circles
+- 403 — Collaborator role not held in target circle
+- 404 — Source or target person not found
+
+---
+
+### DELETE /people/:id
+
+**Permissions:** `media:write` + circle collaborator role
+
+Soft-delete a person. All associated face rows have their `personId` set to `null` and `manuallyAssigned` set to `false`, returning them to the unknown pool. Face rows and embeddings are **not** deleted (use `DELETE /face/biometrics` for full erasure). Emits `person:delete` audit event.
+
+**Response:** 204 No Content
+
+---
+
+## Face Recognition — Circle Face Settings
+
+### GET /circles/:id/face-settings
+
+**Permissions:** `circles:read` (any circle member)
+
+Return the per-circle face recognition opt-in flag.
+
+**Response:** 200 OK
+```json
+{
+  "data": {
+    "faceRecognitionEnabled": false
+  }
+}
+```
+
+---
+
+### PUT /circles/:id/face-settings
+
+**Permissions:** `circles:write` + circle_admin role
+
+Enable or disable face recognition for a circle. When disabled, the auto-enqueue listener skips new uploads for this circle. Setting `enabled: false` does **not** erase existing biometric data — use `DELETE /face/biometrics` for that. Emits `circle:face_settings_update` audit event.
+
+**Request Body:**
+```json
+{
+  "enabled": true
+}
+```
+
+**Response:** 200 OK
+```json
+{
+  "data": {
+    "faceRecognitionEnabled": true
+  }
+}
+```
+
+---
+
 ## AI Settings
 
 All endpoints in this group require the Admin system role plus the listed permission.
