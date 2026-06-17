@@ -12,12 +12,14 @@ import { CircleRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { FaceClusteringService } from './face-clustering.service';
+import { FaceMatchingService } from './face-matching.service';
 import {
   ListPeopleQueryDto,
   CreatePersonDto,
   UpdatePersonDto,
   AssignFacesDto,
 } from './dto/people.dto';
+import { MergePeopleDto } from './dto/merge-people.dto';
 
 @Injectable()
 export class PeopleService {
@@ -27,6 +29,7 @@ export class PeopleService {
     private readonly prisma: PrismaService,
     private readonly circleMembershipService: CircleMembershipService,
     private readonly clusteringService: FaceClusteringService,
+    private readonly matchingService: FaceMatchingService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -388,6 +391,180 @@ export class PeopleService {
     );
 
     return result;
+  }
+
+  // ---------------------------------------------------------------------------
+  // mergePeople
+  // ---------------------------------------------------------------------------
+
+  async mergePeople(
+    dto: MergePeopleDto,
+    userId: string,
+    userPermissions: string[],
+  ) {
+    const { sourceId, targetId } = dto;
+
+    const [source, target] = await Promise.all([
+      this.prisma.person.findUnique({ where: { id: sourceId } }),
+      this.prisma.person.findUnique({ where: { id: targetId } }),
+    ]);
+
+    if (!source || source.deletedAt) {
+      throw new NotFoundException(`Source person ${sourceId} not found`);
+    }
+    if (!target || target.deletedAt) {
+      throw new NotFoundException(`Target person ${targetId} not found`);
+    }
+    if (source.circleId !== target.circleId) {
+      throw new BadRequestException('Both persons must belong to the same circle');
+    }
+    if (source.mergedIntoId !== null) {
+      throw new BadRequestException(`Source person ${sourceId} has already been merged`);
+    }
+
+    const circleId = source.circleId;
+
+    await this.circleMembershipService.assertCircleAccess(
+      userId,
+      circleId,
+      userPermissions,
+      'collaborator' as CircleRole,
+    );
+
+    const now = new Date();
+
+    const updatedTarget = await this.prisma.$transaction(async (tx) => {
+      // 1. Reassign all faces from source to target
+      await tx.face.updateMany({
+        where: { personId: sourceId },
+        data: { personId: targetId },
+      });
+
+      // 2. Carry over coverFace if target has none but source did
+      let coverFaceId = target.coverFaceId;
+      if (!coverFaceId && source.coverFaceId) {
+        // source.coverFaceId face is now assigned to target
+        coverFaceId = source.coverFaceId;
+      }
+
+      // 3. Soft-delete source; set mergedIntoId; clear coverFaceId
+      await tx.person.update({
+        where: { id: sourceId },
+        data: {
+          mergedIntoId: targetId,
+          deletedAt: now,
+          coverFaceId: null,
+        },
+      });
+
+      // 4. Update target's coverFaceId if carrying it over
+      const updatedT = await tx.person.update({
+        where: { id: targetId },
+        data: {
+          ...(coverFaceId && !target.coverFaceId ? { coverFaceId } : {}),
+        },
+        select: {
+          id: true,
+          name: true,
+          circleId: true,
+          coverFaceId: true,
+          _count: { select: { faces: true } },
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+
+      // 5. Audit
+      await tx.auditEvent.create({
+        data: {
+          actorUserId: userId,
+          action: 'person:merge',
+          targetType: 'person',
+          targetId: targetId,
+          meta: { sourceId, targetId, circleId } as any,
+        },
+      });
+
+      return updatedT;
+    });
+
+    // 6. Recompute target centroid (best-effort; failure logged, not thrown)
+    try {
+      await this.matchingService.computePersonCentroid(targetId);
+    } catch (err) {
+      this.logger.warn(`Centroid recompute failed post-merge for person ${targetId}: ${err}`);
+    }
+
+    this.logger.log(
+      `Person merge: ${sourceId} → ${targetId} in circle ${circleId} by user ${userId}`,
+    );
+
+    return {
+      id: updatedTarget.id,
+      name: updatedTarget.name,
+      circleId: updatedTarget.circleId,
+      coverFaceId: updatedTarget.coverFaceId,
+      faceCount: updatedTarget._count.faces,
+      mergedSourceId: sourceId,
+      updatedAt: updatedTarget.updatedAt,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // deletePerson
+  // ---------------------------------------------------------------------------
+
+  async deletePerson(
+    personId: string,
+    userId: string,
+    userPermissions: string[],
+  ) {
+    const person = await this.prisma.person.findUnique({
+      where: { id: personId },
+    });
+
+    if (!person || person.deletedAt) {
+      throw new NotFoundException(`Person ${personId} not found`);
+    }
+
+    await this.circleMembershipService.assertCircleAccess(
+      userId,
+      person.circleId,
+      userPermissions,
+      'collaborator' as CircleRole,
+    );
+
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Release faces back to unknown pool
+      await tx.face.updateMany({
+        where: { personId },
+        data: { personId: null, manuallyAssigned: false },
+      });
+
+      // 2. Soft-delete person
+      await tx.person.update({
+        where: { id: personId },
+        data: {
+          deletedAt: new Date(),
+          coverFaceId: null, // clear FK
+        },
+      });
+
+      // 3. Audit
+      await tx.auditEvent.create({
+        data: {
+          actorUserId: userId,
+          action: 'person:delete',
+          targetType: 'person',
+          targetId: personId,
+          meta: { circleId: person.circleId, name: person.name } as any,
+        },
+      });
+    });
+
+    this.logger.log(
+      `Person ${personId} soft-deleted by user ${userId}; faces returned to unknown pool`,
+    );
   }
 
   // ---------------------------------------------------------------------------

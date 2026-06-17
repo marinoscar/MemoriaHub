@@ -34,6 +34,7 @@ import {
   AssignFacesDto,
   ClusterDto,
 } from './dto/people.dto';
+import { MergePeopleDto } from './dto/merge-people.dto';
 
 @ApiTags('People')
 @ApiBearerAuth('JWT-auth')
@@ -71,6 +72,30 @@ export class PeopleController {
       user.id,
       user.permissions,
     );
+  }
+
+  /**
+   * POST /api/people/merge
+   * Merge source person into target. All faces reassigned to target.
+   * Source is soft-deleted with mergedIntoId set for audit.
+   */
+  @Post('merge')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Merge two people into one (collaborator+)',
+    description:
+      'Reassigns all faces from sourceId to targetId, soft-deletes source, recomputes target centroid.',
+  })
+  @ApiResponse({ status: 200, description: 'Merged; returns updated target person' })
+  @ApiResponse({ status: 400, description: 'Invalid merge request (same circle required, must differ)' })
+  @ApiResponse({ status: 404, description: 'Source or target person not found' })
+  @ApiResponse({ status: 403, description: 'Access denied (collaborator required)' })
+  async mergePeople(
+    @Body() dto: MergePeopleDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.peopleService.mergePeople(dto, user.id, user.permissions);
   }
 
   /**
@@ -168,6 +193,7 @@ export class PeopleController {
   /**
    * DELETE /api/people/:id/faces/:faceId
    * Unassign a face from a Person.
+   * NOTE: Declared before DELETE :id to avoid Fastify route shadowing.
    */
   @Delete(':id/faces/:faceId')
   @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
@@ -184,5 +210,29 @@ export class PeopleController {
     @CurrentUser() user: RequestUser,
   ): Promise<void> {
     await this.peopleService.unassignFace(id, faceId, user.id, user.permissions);
+  }
+
+  /**
+   * DELETE /api/people/:id
+   * Soft-delete a Person; release faces back to unknown pool.
+   */
+  @Delete(':id')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Delete a person (collaborator+)',
+    description:
+      'Soft-deletes the person and returns all associated faces to the unknown pool ' +
+      '(personId=null, manuallyAssigned=false). Face rows and embeddings are retained.',
+  })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiResponse({ status: 204, description: 'Person deleted; faces returned to unknown pool' })
+  @ApiResponse({ status: 404, description: 'Person not found' })
+  @ApiResponse({ status: 403, description: 'Access denied (collaborator required)' })
+  async deletePerson(
+    @Param('id') id: string,
+    @CurrentUser() user: RequestUser,
+  ): Promise<void> {
+    await this.peopleService.deletePerson(id, user.id, user.permissions);
   }
 }
