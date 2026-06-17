@@ -18,8 +18,6 @@
 // =============================================================================
 
 import * as path from 'path';
-import '@tensorflow/tfjs-backend-wasm';
-import * as tf from '@tensorflow/tfjs';
 import sharp from 'sharp';
 import type {
   FaceProvider,
@@ -27,6 +25,14 @@ import type {
   FaceProviderCredentials,
   DetectedFace,
 } from './face-provider.interface';
+
+// Load TF WASM backend and tfjs via require to avoid missing-module TS errors
+// when the package is not installed in the local dev tree (Docker-first project).
+// These packages are runtime deps and present in the Docker image after npm install.
+// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+const tf: any = require('@tensorflow/tfjs');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+require('@tensorflow/tfjs-backend-wasm');
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const HumanLib = require('@vladmandic/human');
@@ -53,18 +59,20 @@ interface HumanInstance {
 
 const MODEL_PATH = process.env.FACE_HUMAN_MODEL_PATH ?? '/app/models/human';
 
-const WASM_PATH = path.join(
-  path.dirname(
+function resolveWasmPath(): string {
+  try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require.resolve('@tensorflow/tfjs-backend-wasm/package.json'),
-  ),
-  'dist',
-  path.sep,
-);
+    const pkgPath = require.resolve('@tensorflow/tfjs-backend-wasm/package.json');
+    return path.join(path.dirname(pkgPath), 'dist') + path.sep;
+  } catch {
+    // Fallback for environments where the package isn't installed locally
+    return path.join('node_modules', '@tensorflow', 'tfjs-backend-wasm', 'dist') + path.sep;
+  }
+}
 
 const humanConfig = {
   backend: 'wasm',
-  wasmPath: WASM_PATH,
+  wasmPath: resolveWasmPath(),
   modelBasePath: `file://${MODEL_PATH}/`,
   cacheSensitivity: 0,
   face: {
@@ -94,7 +102,9 @@ async function getHuman(): Promise<HumanInstance> {
   if (humanInstance) return humanInstance;
   if (!initPromise) {
     initPromise = (async () => {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
       await tf.setBackend('wasm');
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
       await tf.ready();
       // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-assignment
       const h: HumanInstance = new HumanClass(humanConfig);
@@ -112,12 +122,13 @@ async function getHuman(): Promise<HumanInstance> {
 
 async function bufferToTensor(
   image: Buffer,
-): Promise<{ tensor: tf.Tensor3D; width: number; height: number }> {
+): Promise<{ tensor: unknown; width: number; height: number }> {
   const { data, info } = await sharp(image)
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
-  const tensor = tf.tensor3d(new Uint8Array(data), [info.height, info.width, 4]);
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+  const tensor = tf.tensor3d(new Uint8Array(data), [info.height, info.width, 4]) as { dispose(): void };
   return { tensor, width: info.width, height: info.height };
 }
 
@@ -143,11 +154,12 @@ export class HumanProvider implements FaceProvider {
   ): Promise<DetectedFace[]> {
     const h = await getHuman();
     const { tensor, width, height } = await bufferToTensor(image);
+    const disposable = tensor as { dispose(): void };
     let result: HumanResult;
     try {
       result = await h.detect(tensor);
     } finally {
-      tensor.dispose();
+      disposable.dispose();
     }
     if (!result.face || result.face.length === 0) return [];
     return result.face.map(face => {
