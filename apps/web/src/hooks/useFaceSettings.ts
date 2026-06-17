@@ -42,8 +42,8 @@ export function useFaceSettings() {
   }, []);
 
   const testProvider = useCallback(
-    async (provider: string, model: string): Promise<FaceTestResult> => {
-      return testFaceProvider({ provider, model });
+    async (provider: string, model?: string): Promise<FaceTestResult> => {
+      return testFaceProvider({ provider, ...(model ? { model } : {}) });
     },
     [],
   );

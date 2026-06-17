@@ -55,7 +55,7 @@ export async function deleteFaceCredentials(provider: string): Promise<void> {
 
 export async function testFaceProvider(body: {
   provider: string;
-  model: string;
+  model?: string;
 }): Promise<FaceTestResult> {
   return api.post<FaceTestResult>('/face/test', body);
 }
