@@ -196,9 +196,9 @@ describe('Sidebar', () => {
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
       // Only items with visible: true should be rendered
-      // Non-admin: Home, Media Library, Map, Circles, Search, User Settings
+      // Non-admin: Home, Media Library, Map, Circles, Search, People, User Settings
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(menuButtons).toHaveLength(6);
+      expect(menuButtons).toHaveLength(7);
     });
 
     it('should show all menu items when user is admin', () => {
@@ -217,10 +217,11 @@ describe('Sidebar', () => {
         wrapperOptions: { user: mockAdminUser },
       });
 
-      // Admin: Home, Media Library, Map, Circles, Search, User Settings,
-      //        User Management, System Settings, Admin Circles, Backup, AI Settings
+      // Admin: Home, Media Library, Map, Circles, Search, People, User Settings,
+      //        User Management, System Settings, Admin Circles, Backup, AI Settings,
+      //        Face Settings
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(menuButtons).toHaveLength(11);
+      expect(menuButtons).toHaveLength(13);
     });
 
     it('should dynamically update menu items when isAdmin changes', () => {
@@ -578,10 +579,11 @@ describe('Sidebar', () => {
       });
 
       // Each menu item should have an icon
-      // Admin sees: Home, Media Library, Map, Circles, Search, User Settings,
-      //             User Management, System Settings, Admin Circles, Backup, AI Settings
+      // Admin sees: Home, Media Library, Map, Circles, Search, People, User Settings,
+      //             User Management, System Settings, Admin Circles, Backup, AI Settings,
+      //             Face Settings
       const icons = container.querySelectorAll('.MuiListItemIcon-root');
-      expect(icons).toHaveLength(11);
+      expect(icons).toHaveLength(13);
     });
 
     it('should highlight icon for selected menu item', () => {

@@ -34,6 +34,7 @@ export const mediaQuerySchema = z.object({
   sourceDeviceId: z.string().optional(),
   sourceDeviceName: z.string().optional(),
   missingGeo: z.string().optional().transform(v => v === 'true' ? true : v === 'false' ? false : undefined),
+  personId: z.string().uuid().optional(),
 });
 
 export class MediaQueryDto extends createZodDto(mediaQuerySchema) {}

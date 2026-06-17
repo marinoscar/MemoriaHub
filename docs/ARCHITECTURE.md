@@ -2157,8 +2157,78 @@ Implementation specs in `docs/specs/`:
 
 ---
 
+## 16. Face Detection and Recognition Pipeline
+
+Face enrichment runs as a **separate asynchronous path** that is deliberately decoupled from the synchronous upload chain. The synchronous chain (`OBJECT_UPLOADED_EVENT` → metadata extraction) must reply quickly; face detection against an external sidecar or cloud API can take seconds per photo and must be re-runnable and backfillable.
+
+### Components
+
+| Component | File | Role |
+|-----------|------|------|
+| `FaceEnqueueListener` | `apps/api/src/face/processing/face-enqueue.listener.ts` | Listens for `OBJECT_PROCESSED_EVENT`; inserts `FaceJob(reason:upload)` if circle has `faceRecognitionEnabled=true` and `FACE_AUTO_DETECT` is not `false` |
+| `FaceJobWorker` | `apps/api/src/face/processing/face-job.worker.ts` | Poll loop (configurable `FACE_JOB_POLL_MS`); claims jobs via `UPDATE … RETURNING`; max 3 attempts; disabled via `FACE_WORKER_ENABLED=false` |
+| `FaceDetectionService` | `apps/api/src/face/face-detection.service.ts` | Streams image from S3, calls active provider, persists Face rows, updates `MediaFaceStatus` |
+| `FaceMatchingService` | `apps/api/src/face/face-matching.service.ts` | L2-normalizes embeddings; cosine similarity vs per-person centroids; assigns `personId` when ≥ `FACE_MATCH_THRESHOLD` |
+| `FaceClusteringService` | `apps/api/src/face/face-clustering.service.ts` | Greedy union-find over unknown faces; creates provisional Person records for clusters ≥ `FACE_CLUSTER_MIN_SIZE` |
+| `PeopleService` | `apps/api/src/face/people.service.ts` | CRUD + merge + delete for Person records; centroid recomputation on assign/merge |
+| `FaceSettingsController` | `apps/api/src/face/face-settings.controller.ts` | Admin-only: provider credentials, active detection feature, backfill, biometric erase |
+| `FaceDetectionController` | `apps/api/src/face/face-detection.controller.ts` | Media-scoped: list faces, status, rerun, backfill, biometric erase |
+| `PeopleController` | `apps/api/src/face/people.controller.ts` | People CRUD, face assignment, clustering, merge |
+
+### Async Detection Flow
+
+```
+OBJECT_PROCESSED_EVENT
+        │
+        ▼
+FaceEnqueueListener
+  (circle.faceRecognitionEnabled?)
+        │ yes
+        ▼
+INSERT face_jobs (reason=upload)
+UPSERT media_face_status (pending)
+        │
+        │ (poll interval)
+        ▼
+FaceJobWorker.tick()
+  UPDATE face_jobs SET status=running WHERE ... RETURNING
+        │
+        ▼
+FaceDetectionService.processMediaItem()
+  ├── stream image from S3
+  ├── provider.detect() → DetectedFace[]
+  ├── DELETE old non-manuallyAssigned Face rows
+  ├── INSERT new Face rows (box, confidence, embedding, providerKey, modelVersion)
+  ├── FaceMatchingService.matchFaces() → assign personId or leave unknown
+  └── UPDATE media_face_status (processed | no_faces | failed)
+```
+
+### Embedding Storage and Matching
+
+- **Default backend (`FACE_VECTOR_BACKEND=app`):** Embeddings stored in a `Float[]` column. Cosine similarity computed in-process as `1 - (A·B)` where A and B are L2-normalized 512-d vectors.
+- **pgvector backend (`FACE_VECTOR_BACKEND=pgvector`):** Requires the `vector` PostgreSQL extension. An optional follow-up migration converts the column to `vector(512)` and adds an `hnsw vector_cosine_ops` index. Matching uses the `<=>` operator for native accelerated similarity search.
+- **Provider embedding space isolation:** CompreFace (ArcFace) and Rekognition embeddings are not cross-compatible. A circle must use one provider consistently. Switching providers requires re-processing all photos.
+
+### Rekognition Delegated Path
+
+When the active provider is `rekognition`, the app stores only an `externalFaceId` per face (from `IndexFaces`). Matching is delegated to the AWS collection via `SearchFacesByImage`; the app maps the returned external ID back to a `Person` record. No embedding vectors are stored in-app on this path.
+
+### Biometric Privacy
+
+- `faceRecognitionEnabled` on the `circles` table defaults to `false`. Detection, backfill, and clustering all check this flag before operating.
+- `DELETE /api/face/biometrics?circleId=` permanently erases all Face, Person, MediaFaceStatus, and FaceJob rows for a circle in a single transaction, then sets `faceRecognitionEnabled=false`.
+- All sensitive operations emit audit events (`person:merge`, `person:delete`, `face:biometrics_delete`, `circle:face_settings_update`).
+
+### Infrastructure
+
+- CompreFace runs as a Docker service in `infra/compose/base.compose.yml` with its own bundled Postgres container (not the app's Postgres). Default endpoint: `http://compreface:8000` (overridable via `FACE_COMPREFACE_URL`).
+- VPS tuning (x86/AVX2, CPU-only): Mobilenet build, `uwsgi_processes=1`, JVM heap `≤2 GB`. Swap recommended.
+
+---
+
 ## Document History
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | January 2026 | AI Assistant | Initial comprehensive architecture document |
+| 1.1 | June 2026 | AI Assistant | Add face detection and recognition pipeline (Section 16) |

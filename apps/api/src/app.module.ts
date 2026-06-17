@@ -19,6 +19,7 @@ import { MediaModule } from './media/media.module';
 import { CirclesModule } from './circles/circles.module';
 import { BackupModule } from './jobs/backup/backup.module';
 import { AiModule } from './ai/ai.module';
+import { FaceModule } from './face/face.module';
 import { SearchModule } from './search/search.module';
 import { LoggerModule } from './common/logger/logger.module';
 import { TestAuthModule } from './test-auth/test-auth.module';
@@ -64,6 +65,7 @@ import configuration from './config/configuration';
     CirclesModule,
     BackupModule,
     AiModule,
+    FaceModule,
     SearchModule,
 
     // Test modules (non-production only)

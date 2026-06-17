@@ -1871,6 +1871,59 @@ No automated rotation tooling is included; this is a manual migration step.
 
 ---
 
+## Biometric Data: Face Embeddings
+
+### Overview
+
+Face embeddings (512-dimensional ArcFace vectors produced by CompreFace) are biometric data. The following controls are in place to meet privacy regulations (GDPR, CCPA, and similar):
+
+### Per-Circle Opt-In (Default Off)
+
+The `circles` table has a `face_recognition_enabled` column that defaults to `false`. Face detection (auto-enqueue on upload, backfill, and clustering) does not operate on a circle unless this flag is explicitly set to `true` by a `circle_admin`. This means biometric data is only collected where operators have made a deliberate choice.
+
+### Delete-All-Biometrics Erase
+
+`DELETE /api/face/biometrics?circleId=` permanently and irreversibly deletes all biometric data for a circle:
+- All `Face` rows (including embeddings)
+- All `Person` rows
+- All `MediaFaceStatus` rows
+- All pending `FaceJob` rows
+- Resets `faceRecognitionEnabled=false` on the circle
+
+This operation runs in a single database transaction. It is the designated GDPR right-to-erasure action for face data. Operators must document this capability in their privacy policies and make it accessible to data subjects upon request.
+
+### Audit Logging
+
+All sensitive face operations produce `audit_events` records:
+
+| Audit event | Operation |
+|-------------|-----------|
+| `person:merge` | `POST /people/merge` |
+| `person:delete` | `DELETE /people/:id` |
+| `face:biometrics_delete` | `DELETE /face/biometrics` |
+| `circle:face_settings_update` | `PUT /circles/:id/face-settings` |
+
+### Access Control
+
+| Operation | System permission | Per-circle role |
+|-----------|------------------|-----------------|
+| Configure provider credentials | `face_settings:write` (Admin) | — |
+| Run backfill | `face_settings:write` (Admin) | — |
+| Delete all biometrics | `face_settings:write` OR circle membership | `circle_admin` |
+| Read faces and people | `media:read` | viewer |
+| Label/assign people | `media:write` | collaborator |
+| Cluster unknowns / manage opt-in | `media:write` | circle_admin |
+
+### Model Version Pinning
+
+Each `Face` row records `providerKey` and `modelVersion`. Embeddings from different model versions or different providers are not cross-comparable. The system prevents matching across providers. Switching providers or model versions requires re-processing all affected media items from the original S3 blobs — the only source of truth for the raw image data.
+
+### Provider Key Encryption
+
+Face provider credentials (CompreFace API keys, Rekognition AWS credentials) use the same AES-256-GCM encryption path as AI provider credentials, keyed by `SECRETS_ENCRYPTION_KEY`. See [AI Provider Key Encryption at Rest](#ai-provider-key-encryption-at-rest) for the encryption scheme and key rotation procedure.
+
+---
+
 ## Agent Circle-Scoped Authorization
 
 When a user sends a message to the conversational search agent, the agent calls the `search_media` tool. The `circleId` used for authorization is always taken from the `SearchConversation` database row — **not** from the model's tool call arguments.

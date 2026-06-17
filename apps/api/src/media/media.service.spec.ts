@@ -2221,4 +2221,35 @@ describe('MediaService', () => {
       expect(favoritesCall).toBeDefined();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // listMedia — personId filter
+  // -------------------------------------------------------------------------
+
+  describe('listMedia — personId filter', () => {
+    beforeEach(() => {
+      mockPrisma.mediaItem.findMany.mockResolvedValue([]);
+      mockPrisma.mediaItem.count.mockResolvedValue(0);
+    });
+
+    it('includes faces.some.personId in the where clause when personId is provided', async () => {
+      await service.listMedia(
+        { ...defaultMediaQuery, personId: 'person-uuid-123' } as any,
+        'user-1',
+        ownPerms,
+      );
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({
+        faces: { some: { personId: 'person-uuid-123' } },
+      });
+    });
+
+    it('omits the faces filter when personId is not provided', async () => {
+      await service.listMedia({ ...defaultMediaQuery } as any, 'user-1', ownPerms);
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where.faces).toBeUndefined();
+    });
+  });
 });

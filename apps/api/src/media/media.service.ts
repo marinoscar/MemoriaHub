@@ -282,32 +282,36 @@ export class MediaService {
       sourceDeviceId,
       sourceDeviceName,
       missingGeo,
+      personId,
     } = query;
 
     const skip = (page - 1) * pageSize;
 
     await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
 
-    const where = buildMediaWhere(circleId, {
-      type,
-      capturedAtFrom,
-      capturedAtTo,
-      classification,
-      albumId,
-      favorite,
-      tag,
-      country,
-      region,
-      locality,
-      place,
-      location,
-      contentHash,
-      cameraMake,
-      cameraModel,
-      sourceDeviceId,
-      sourceDeviceName,
-      missingGeo,
-    });
+    const where = {
+      ...buildMediaWhere(circleId, {
+        type,
+        capturedAtFrom,
+        capturedAtTo,
+        classification,
+        albumId,
+        favorite,
+        tag,
+        country,
+        region,
+        locality,
+        place,
+        location,
+        contentHash,
+        cameraMake,
+        cameraModel,
+        sourceDeviceId,
+        sourceDeviceName,
+        missingGeo,
+      }),
+      ...(personId ? { faces: { some: { personId } } } : {}),
+    };
 
     const orderBy: Prisma.MediaItemOrderByWithRelationInput = {
       [sortBy]: sortOrder,

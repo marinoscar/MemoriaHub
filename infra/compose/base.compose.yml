@@ -90,6 +90,44 @@ services:
     networks:
       - app-network
 
+  # ---------------------------------------------------------------------------
+  # CompreFace - Self-hosted face recognition sidecar (default face provider)
+  # NOTE: Uses its own bundled Postgres (compreface-db) — NOT the app database.
+  # Image tag: confirm 'exadel/compreface:latest' is the Mobilenet CPU build
+  # on https://hub.docker.com/r/exadel/compreface. If a specific tag like
+  # '1.2.0-mobilenet' is available, prefer it for reproducibility.
+  # ---------------------------------------------------------------------------
+  compreface:
+    image: exadel/compreface:latest  # TODO: pin to specific Mobilenet tag
+    environment:
+      - POSTGRES_USER=compreface
+      - POSTGRES_PASSWORD=${COMPREFACE_DB_PASSWORD:-compreface_secret}
+      - POSTGRES_DB=compreface
+      - POSTGRES_URL=jdbc:postgresql://compreface-db:5432/compreface
+      - SPRING_PROFILES_ACTIVE=dev
+    ports:
+      - "8000:8000"
+    depends_on:
+      - compreface-db
+    networks:
+      - app-network
+    # VPS tuning: limit open file descriptors for a shared CPU server
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  compreface-db:
+    image: postgres:14-alpine
+    environment:
+      - POSTGRES_USER=compreface
+      - POSTGRES_PASSWORD=${COMPREFACE_DB_PASSWORD:-compreface_secret}
+      - POSTGRES_DB=compreface
+    volumes:
+      - compreface-db-data:/var/lib/postgresql/data
+    networks:
+      - app-network
+
 # =============================================================================
 # Networks
 # =============================================================================
@@ -102,3 +140,8 @@ networks:
     external: true
     name: devnet
 
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  compreface-db-data:

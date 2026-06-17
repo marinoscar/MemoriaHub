@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Delete,
   Body,
   Param,
@@ -31,6 +32,7 @@ import { AddMemberDto } from './dto/add-member.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { CreateInviteDto } from './dto/create-invite.dto';
 import { CirclesQueryDto } from './dto/circles-query.dto';
+import { UpdateFaceSettingsDto } from './dto/update-face-settings.dto';
 
 @ApiTags('Circles')
 @ApiBearerAuth('JWT-auth')
@@ -188,6 +190,42 @@ export class CirclesController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.circlesService.createInvite(user, id, dto);
+  }
+
+  // ----- Face Settings -----
+
+  /**
+   * GET /api/circles/:id/face-settings
+   * Returns per-circle face recognition opt-in flag.
+   */
+  @Get(':id/face-settings')
+  @Auth({ permissions: [PERMISSIONS.CIRCLES_READ] })
+  @ApiOperation({ summary: 'Get face recognition settings for a circle' })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Face settings returned' })
+  async getFaceSettings(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.circlesService.getFaceSettings(id, user);
+  }
+
+  /**
+   * PUT /api/circles/:id/face-settings
+   * Toggle per-circle face recognition opt-in. Requires circle_admin.
+   */
+  @Put(':id/face-settings')
+  @Auth({ permissions: [PERMISSIONS.CIRCLES_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update face recognition opt-in for a circle (circle_admin)' })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Face settings updated' })
+  async updateFaceSettings(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateFaceSettingsDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.circlesService.updateFaceSettings(id, dto.enabled, user);
   }
 
   @Delete(':id/invites/:inviteId')

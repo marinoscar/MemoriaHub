@@ -50,6 +50,7 @@ import {
   CheckBox as CheckBoxIcon,
   CheckBoxOutlineBlank as CheckBoxOutlineBlankIcon,
   Checklist as ChecklistIcon,
+  Person as PersonIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { useSearchParams } from 'react-router-dom';
@@ -381,6 +382,10 @@ export default function MediaLibraryPage() {
 
   const [searchParams, setSearchParams] = useSearchParams();
 
+  // Person filter — set when navigating from PeoplePage
+  const personId = searchParams.get('personId');
+  const personName = searchParams.get('personName');
+
   const {
     items,
     meta,
@@ -466,6 +471,7 @@ export default function MediaLibraryPage() {
     if (filterCameraModel) params.cameraModel = filterCameraModel;
     if (filterDeviceName) params.sourceDeviceName = filterDeviceName;
     if (filterMissingGeo) params.missingGeo = true;
+    if (personId) params.personId = personId;
     return params;
   }, [
     page,
@@ -487,6 +493,7 @@ export default function MediaLibraryPage() {
     filterCameraModel,
     filterDeviceName,
     filterMissingGeo,
+    personId,
   ]);
 
   // Load data on mount and when filters change.
@@ -519,6 +526,7 @@ export default function MediaLibraryPage() {
     filterCameraMake,
     filterCameraModel,
     filterDeviceName,
+    personId,
   ]);
 
   // Reflect filter changes to URL params
@@ -1073,6 +1081,23 @@ export default function MediaLibraryPage() {
           </Grid>
         </Paper>
       </Collapse>
+
+      {/* Person filter chip — shown when navigating from People page */}
+      {personId && (
+        <Box sx={{ mb: 2 }}>
+          <Chip
+            icon={<PersonIcon />}
+            label={`Showing photos of ${personName ?? 'a person'}`}
+            color="primary"
+            onDelete={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete('personId');
+              next.delete('personName');
+              setSearchParams(next, { replace: true });
+            }}
+          />
+        </Box>
+      )}
 
       {/* Tag chips */}
       {tags.length > 0 && (

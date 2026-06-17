@@ -69,6 +69,10 @@ const PERMISSIONS = [
   { name: 'ai_settings:read', description: 'Read AI provider settings and status' },
   { name: 'ai_settings:write', description: 'Configure AI provider credentials and settings' },
 
+  // Face Recognition Settings (Admin only)
+  { name: 'face_settings:read', description: 'Read face recognition provider settings and status' },
+  { name: 'face_settings:write', description: 'Configure face recognition provider credentials and settings' },
+
   // Search feature usage
   { name: 'search:use', description: 'Use the AI-powered search feature' },
 ] as const;
@@ -104,6 +108,9 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     // AI: admin-only credential management
     'ai_settings:read',
     'ai_settings:write',
+    // Face Recognition: admin-only credential management
+    'face_settings:read',
+    'face_settings:write',
     // Search: all authenticated users
     'search:use',
   ],
