@@ -241,3 +241,61 @@ export async function unassignFace(personId: string, faceId: string): Promise<vo
 export async function clusterUnknownFaces(circleId: string): Promise<ClusterResult> {
   return api.post<ClusterResult>('/people/cluster', { circleId });
 }
+
+// ---------------------------------------------------------------------------
+// Phase 4 Types — merge, delete, circle face settings, biometrics
+// ---------------------------------------------------------------------------
+
+export interface MergePeopleResult {
+  id: string;
+  name: string | null;
+  circleId: string;
+  faceCount: number;
+  updatedAt: string;
+}
+
+export interface CircleFaceSettings {
+  faceRecognitionEnabled: boolean;
+}
+
+export interface DeleteBiometricsResult {
+  deletedFaces: number;
+  deletedPeople: number;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 API functions
+// ---------------------------------------------------------------------------
+
+export async function mergePeople(
+  sourceId: string,
+  targetId: string,
+): Promise<MergePeopleResult> {
+  return api.post<MergePeopleResult>('/people/merge', { sourceId, targetId });
+}
+
+export async function deletePerson(personId: string): Promise<void> {
+  await api.delete<void>(`/people/${personId}`);
+}
+
+export async function getCircleFaceSettings(circleId: string): Promise<CircleFaceSettings> {
+  return api.get<CircleFaceSettings>(`/circles/${circleId}/face-settings`);
+}
+
+export async function updateCircleFaceSettings(
+  circleId: string,
+  enabled: boolean,
+): Promise<CircleFaceSettings> {
+  return api.put<CircleFaceSettings>(`/circles/${circleId}/face-settings`, { enabled });
+}
+
+export async function deleteCircleBiometrics(circleId: string): Promise<DeleteBiometricsResult> {
+  const result = await api.delete<{ data: DeleteBiometricsResult } | DeleteBiometricsResult>(
+    `/face/biometrics?circleId=${encodeURIComponent(circleId)}`,
+  );
+  // Unwrap { data: {...} } envelope if present
+  if (result && typeof result === 'object' && 'data' in result) {
+    return (result as { data: DeleteBiometricsResult }).data;
+  }
+  return result as DeleteBiometricsResult;
+}
