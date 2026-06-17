@@ -138,37 +138,41 @@ describe('PeoplePage', () => {
 
   // -------------------------------------------------------------------------
   describe('with active circle', () => {
-    it('renders "Named People" section heading', () => {
+    it('renders "Named People" section heading', async () => {
       render(<PeoplePage />);
 
-      // Use heading role to uniquely identify the h6 heading (not the empty-state text)
-      expect(screen.getByRole('heading', { name: /named people/i })).toBeInTheDocument();
+      // Use heading role to uniquely identify the h6 heading (not the empty-state text).
+      // Wait for face settings to load (async) before asserting.
+      expect(await screen.findByRole('heading', { name: /named people/i })).toBeInTheDocument();
     });
 
-    it('renders "Unknown People" section from UnknownFacesReview', () => {
+    it('renders "Unknown People" section from UnknownFacesReview', async () => {
       render(<PeoplePage />);
 
       // The "Unknown People" h6 heading rendered by UnknownFacesReview
-      expect(screen.getByRole('heading', { name: /unknown people/i })).toBeInTheDocument();
+      expect(await screen.findByRole('heading', { name: /unknown people/i })).toBeInTheDocument();
     });
 
-    it('renders labeled people names', () => {
-      mockUsePeople
-        .mockReturnValueOnce(
-          makeUsePeopleDefaults([makePerson('p1', 'Alice'), makePerson('p2', 'Bob')]) as any,
-        )
-        .mockReturnValueOnce(makeUsePeopleDefaults([]) as any);
+    it('renders labeled people names', async () => {
+      // Use persistent mockReturnValue so every usePeople call returns the same data,
+      // including the re-renders triggered by async face settings loading.
+      mockUsePeople.mockImplementation((_, opts?: { includeUnlabeled?: boolean }) => {
+        if (opts?.includeUnlabeled) return makeUsePeopleDefaults([]) as any;
+        return makeUsePeopleDefaults([makePerson('p1', 'Alice'), makePerson('p2', 'Bob')]) as any;
+      });
 
       render(<PeoplePage />);
 
-      expect(screen.getByText('Alice')).toBeInTheDocument();
+      // Wait for face settings to load before people grid appears
+      expect(await screen.findByText('Alice')).toBeInTheDocument();
       expect(screen.getByText('Bob')).toBeInTheDocument();
     });
 
     it('opens drawer when a labeled person card is clicked', async () => {
-      mockUsePeople
-        .mockReturnValueOnce(makeUsePeopleDefaults([makePerson('p1', 'Alice')]) as any)
-        .mockReturnValueOnce(makeUsePeopleDefaults([]) as any);
+      mockUsePeople.mockImplementation((_, opts?: { includeUnlabeled?: boolean }) => {
+        if (opts?.includeUnlabeled) return makeUsePeopleDefaults([]) as any;
+        return makeUsePeopleDefaults([makePerson('p1', 'Alice')]) as any;
+      });
 
       // usePerson is called when drawer opens
       mockUsePerson.mockReturnValue(makeUsePersonDefaults(makePersonDetail('p1')) as any);
@@ -177,6 +181,8 @@ describe('PeoplePage', () => {
 
       render(<PeoplePage />);
 
+      // Wait for face settings to load before clicking
+      await screen.findByText('Alice');
       await user.click(screen.getByText('Alice'));
 
       // The drawer renders PersonDetailDrawer which shows the person name
@@ -186,19 +192,24 @@ describe('PeoplePage', () => {
       });
     });
 
-    it('shows "Find People" button when user has collaborator role', () => {
+    it('shows "Find People" button when user has collaborator role', async () => {
       render(<PeoplePage />, {
         wrapperOptions: { activeCircleRole: 'collaborator' },
       });
 
-      expect(screen.getByRole('button', { name: /find people/i })).toBeInTheDocument();
+      // Wait for face settings to load
+      expect(await screen.findByRole('button', { name: /find people/i })).toBeInTheDocument();
     });
 
-    it('hides "Find People" button when user has viewer role', () => {
+    it('hides "Find People" button when user has viewer role', async () => {
       render(<PeoplePage />, {
         wrapperOptions: { activeCircleRole: 'viewer' },
       });
 
+      // Wait for face settings to load, then confirm button is absent
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
       expect(screen.queryByRole('button', { name: /find people/i })).not.toBeInTheDocument();
     });
   });
