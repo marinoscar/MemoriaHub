@@ -10,6 +10,7 @@ import { PeopleService } from './people.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { FaceClusteringService } from './face-clustering.service';
+import { FaceMatchingService } from './face-matching.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 // ---------------------------------------------------------------------------
@@ -62,6 +63,7 @@ describe('PeopleService', () => {
   let mockPrisma: MockPrismaService;
   let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
   let mockClusteringService: { clusterUnknownFaces: jest.Mock };
+  let mockMatchingService: { computePersonCentroid: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -71,6 +73,9 @@ describe('PeopleService', () => {
     mockClusteringService = {
       clusterUnknownFaces: jest.fn().mockResolvedValue({ clustersCreated: 2, facesAssigned: 5 }),
     };
+    mockMatchingService = {
+      computePersonCentroid: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -78,6 +83,7 @@ describe('PeopleService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CircleMembershipService, useValue: mockCircleMembershipService },
         { provide: FaceClusteringService, useValue: mockClusteringService },
+        { provide: FaceMatchingService, useValue: mockMatchingService },
       ],
     }).compile();
 
@@ -483,6 +489,7 @@ describe('PeopleService', () => {
 
   describe('clusterUnknowns', () => {
     it('calls assertCircleAccess with circle_admin role', async () => {
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: true });
       await service.clusterUnknowns(CIRCLE_ID, USER_ID, PERMS);
 
       expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
@@ -494,12 +501,14 @@ describe('PeopleService', () => {
     });
 
     it('delegates to clusteringService.clusterUnknownFaces', async () => {
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: true });
       await service.clusterUnknowns(CIRCLE_ID, USER_ID, PERMS);
 
       expect(mockClusteringService.clusterUnknownFaces).toHaveBeenCalledWith(CIRCLE_ID, USER_ID);
     });
 
     it('returns the result from clusteringService', async () => {
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: true });
       mockClusteringService.clusterUnknownFaces.mockResolvedValue({
         clustersCreated: 3,
         facesAssigned: 7,
@@ -508,6 +517,341 @@ describe('PeopleService', () => {
       const result = await service.clusterUnknowns(CIRCLE_ID, USER_ID, PERMS);
 
       expect(result).toEqual({ clustersCreated: 3, facesAssigned: 7 });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // clusterUnknowns — Phase 4 opt-in gate
+  // -------------------------------------------------------------------------
+
+  describe('clusterUnknowns — Phase 4 opt-in gate', () => {
+    it('throws BadRequestException when circle faceRecognitionEnabled is false', async () => {
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: false });
+      await expect(service.clusterUnknowns(CIRCLE_ID, USER_ID, PERMS)).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when circle is null (not found)', async () => {
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(null);
+      await expect(service.clusterUnknowns(CIRCLE_ID, USER_ID, PERMS)).rejects.toThrow(BadRequestException);
+    });
+
+    it('calls clusteringService when circle faceRecognitionEnabled is true', async () => {
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: true });
+      await service.clusterUnknowns(CIRCLE_ID, USER_ID, PERMS);
+      expect(mockClusteringService.clusterUnknownFaces).toHaveBeenCalledWith(CIRCLE_ID, USER_ID);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // mergePeople
+  // -------------------------------------------------------------------------
+
+  describe('mergePeople', () => {
+    const SOURCE_ID = 'source-uuid-0001';
+    const TARGET_ID = 'target-uuid-0002';
+
+    function makeSource(overrides: Partial<any> = {}) {
+      return {
+        id: SOURCE_ID,
+        circleId: CIRCLE_ID,
+        name: 'Alice (source)',
+        coverFaceId: null,
+        mergedIntoId: null,
+        deletedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...overrides,
+      };
+    }
+
+    function makeTarget(overrides: Partial<any> = {}) {
+      return {
+        id: TARGET_ID,
+        circleId: CIRCLE_ID,
+        name: 'Alice',
+        coverFaceId: null,
+        mergedIntoId: null,
+        deletedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...overrides,
+      };
+    }
+
+    it('throws NotFoundException when source not found', async () => {
+      (mockPrisma.person.findUnique as jest.Mock)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(makeTarget());
+      await expect(
+        service.mergePeople({ sourceId: SOURCE_ID, targetId: TARGET_ID }, USER_ID, PERMS)
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws NotFoundException when target not found', async () => {
+      (mockPrisma.person.findUnique as jest.Mock)
+        .mockResolvedValueOnce(makeSource())
+        .mockResolvedValueOnce(null);
+      await expect(
+        service.mergePeople({ sourceId: SOURCE_ID, targetId: TARGET_ID }, USER_ID, PERMS)
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws NotFoundException when source is soft-deleted', async () => {
+      (mockPrisma.person.findUnique as jest.Mock)
+        .mockResolvedValueOnce(makeSource({ deletedAt: new Date() }))
+        .mockResolvedValueOnce(makeTarget());
+      await expect(
+        service.mergePeople({ sourceId: SOURCE_ID, targetId: TARGET_ID }, USER_ID, PERMS)
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws BadRequestException when source and target are in different circles', async () => {
+      (mockPrisma.person.findUnique as jest.Mock)
+        .mockResolvedValueOnce(makeSource({ circleId: 'circle-A' }))
+        .mockResolvedValueOnce(makeTarget({ circleId: 'circle-B' }));
+      await expect(
+        service.mergePeople({ sourceId: SOURCE_ID, targetId: TARGET_ID }, USER_ID, PERMS)
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when source is already merged (mergedIntoId set)', async () => {
+      (mockPrisma.person.findUnique as jest.Mock)
+        .mockResolvedValueOnce(makeSource({ mergedIntoId: 'some-other-person' }))
+        .mockResolvedValueOnce(makeTarget());
+      await expect(
+        service.mergePeople({ sourceId: SOURCE_ID, targetId: TARGET_ID }, USER_ID, PERMS)
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('calls assertCircleAccess with collaborator role', async () => {
+      (mockPrisma.person.findUnique as jest.Mock)
+        .mockResolvedValueOnce(makeSource())
+        .mockResolvedValueOnce(makeTarget());
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.person.update as jest.Mock)
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({ id: TARGET_ID, name: 'Alice', circleId: CIRCLE_ID, coverFaceId: null, _count: { faces: 0 }, createdAt: new Date(), updatedAt: new Date() });
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+      await service.mergePeople({ sourceId: SOURCE_ID, targetId: TARGET_ID }, USER_ID, PERMS);
+      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+        USER_ID, CIRCLE_ID, PERMS, 'collaborator'
+      );
+    });
+
+    it('reassigns all source faces to target inside the transaction', async () => {
+      (mockPrisma.person.findUnique as jest.Mock)
+        .mockResolvedValueOnce(makeSource())
+        .mockResolvedValueOnce(makeTarget());
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 3 });
+        (mockPrisma.person.update as jest.Mock)
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({ id: TARGET_ID, name: 'Alice', circleId: CIRCLE_ID, coverFaceId: null, _count: { faces: 3 }, createdAt: new Date(), updatedAt: new Date() });
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+      await service.mergePeople({ sourceId: SOURCE_ID, targetId: TARGET_ID }, USER_ID, PERMS);
+      expect(mockPrisma.face.updateMany).toHaveBeenCalledWith({
+        where: { personId: SOURCE_ID },
+        data: { personId: TARGET_ID },
+      });
+    });
+
+    it('soft-deletes the source with mergedIntoId=targetId and deletedAt set', async () => {
+      (mockPrisma.person.findUnique as jest.Mock)
+        .mockResolvedValueOnce(makeSource())
+        .mockResolvedValueOnce(makeTarget());
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.person.update as jest.Mock)
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({ id: TARGET_ID, name: 'Alice', circleId: CIRCLE_ID, coverFaceId: null, _count: { faces: 0 }, createdAt: new Date(), updatedAt: new Date() });
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+      await service.mergePeople({ sourceId: SOURCE_ID, targetId: TARGET_ID }, USER_ID, PERMS);
+      const firstPersonUpdateCall = (mockPrisma.person.update as jest.Mock).mock.calls[0][0];
+      expect(firstPersonUpdateCall.where).toEqual({ id: SOURCE_ID });
+      expect(firstPersonUpdateCall.data).toMatchObject({
+        mergedIntoId: TARGET_ID,
+        coverFaceId: null,
+      });
+      expect(firstPersonUpdateCall.data.deletedAt).toBeInstanceOf(Date);
+    });
+
+    it('writes a person:merge audit event', async () => {
+      (mockPrisma.person.findUnique as jest.Mock)
+        .mockResolvedValueOnce(makeSource())
+        .mockResolvedValueOnce(makeTarget());
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.person.update as jest.Mock)
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({ id: TARGET_ID, name: 'Alice', circleId: CIRCLE_ID, coverFaceId: null, _count: { faces: 0 }, createdAt: new Date(), updatedAt: new Date() });
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+      await service.mergePeople({ sourceId: SOURCE_ID, targetId: TARGET_ID }, USER_ID, PERMS);
+      expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ action: 'person:merge', targetId: TARGET_ID }),
+        }),
+      );
+    });
+
+    it('carries source coverFaceId to target when target has none', async () => {
+      (mockPrisma.person.findUnique as jest.Mock)
+        .mockResolvedValueOnce(makeSource({ coverFaceId: 'face-cover-src' }))
+        .mockResolvedValueOnce(makeTarget({ coverFaceId: null }));
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.person.update as jest.Mock)
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({ id: TARGET_ID, name: 'Alice', circleId: CIRCLE_ID, coverFaceId: 'face-cover-src', _count: { faces: 0 }, createdAt: new Date(), updatedAt: new Date() });
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+      const result = await service.mergePeople({ sourceId: SOURCE_ID, targetId: TARGET_ID }, USER_ID, PERMS);
+      const secondPersonUpdateCall = (mockPrisma.person.update as jest.Mock).mock.calls[1][0];
+      expect(secondPersonUpdateCall.data).toMatchObject({ coverFaceId: 'face-cover-src' });
+      expect(result.coverFaceId).toBe('face-cover-src');
+    });
+
+    it('does NOT override target coverFaceId when target already has one', async () => {
+      (mockPrisma.person.findUnique as jest.Mock)
+        .mockResolvedValueOnce(makeSource({ coverFaceId: 'face-cover-src' }))
+        .mockResolvedValueOnce(makeTarget({ coverFaceId: 'face-cover-tgt' }));
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.person.update as jest.Mock)
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({ id: TARGET_ID, name: 'Alice', circleId: CIRCLE_ID, coverFaceId: 'face-cover-tgt', _count: { faces: 0 }, createdAt: new Date(), updatedAt: new Date() });
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+      await service.mergePeople({ sourceId: SOURCE_ID, targetId: TARGET_ID }, USER_ID, PERMS);
+      const secondPersonUpdateCall = (mockPrisma.person.update as jest.Mock).mock.calls[1][0];
+      expect(secondPersonUpdateCall.data.coverFaceId).toBeUndefined();
+    });
+
+    it('calls matchingService.computePersonCentroid for target after merge', async () => {
+      (mockPrisma.person.findUnique as jest.Mock)
+        .mockResolvedValueOnce(makeSource())
+        .mockResolvedValueOnce(makeTarget());
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.person.update as jest.Mock)
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({ id: TARGET_ID, name: 'Alice', circleId: CIRCLE_ID, coverFaceId: null, _count: { faces: 0 }, createdAt: new Date(), updatedAt: new Date() });
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+      await service.mergePeople({ sourceId: SOURCE_ID, targetId: TARGET_ID }, USER_ID, PERMS);
+      expect(mockMatchingService.computePersonCentroid).toHaveBeenCalledWith(TARGET_ID);
+    });
+
+    it('returns merged result shape with mergedSourceId', async () => {
+      (mockPrisma.person.findUnique as jest.Mock)
+        .mockResolvedValueOnce(makeSource())
+        .mockResolvedValueOnce(makeTarget());
+      const now = new Date();
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+        (mockPrisma.person.update as jest.Mock)
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({ id: TARGET_ID, name: 'Alice', circleId: CIRCLE_ID, coverFaceId: null, _count: { faces: 2 }, createdAt: now, updatedAt: now });
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+      const result = await service.mergePeople({ sourceId: SOURCE_ID, targetId: TARGET_ID }, USER_ID, PERMS);
+      expect(result).toMatchObject({
+        id: TARGET_ID,
+        name: 'Alice',
+        circleId: CIRCLE_ID,
+        faceCount: 2,
+        mergedSourceId: SOURCE_ID,
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // deletePerson
+  // -------------------------------------------------------------------------
+
+  describe('deletePerson', () => {
+    it('throws NotFoundException when person not found', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(null);
+      await expect(service.deletePerson(PERSON_ID, USER_ID, PERMS)).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws NotFoundException when person is soft-deleted', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson({ deletedAt: new Date() }));
+      await expect(service.deletePerson(PERSON_ID, USER_ID, PERMS)).rejects.toThrow(NotFoundException);
+    });
+
+    it('calls assertCircleAccess with collaborator role', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.person.update as jest.Mock).mockResolvedValue({});
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+      await service.deletePerson(PERSON_ID, USER_ID, PERMS);
+      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+        USER_ID, CIRCLE_ID, PERMS, 'collaborator'
+      );
+    });
+
+    it('nulls faces\' personId and sets manuallyAssigned=false', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+        (mockPrisma.person.update as jest.Mock).mockResolvedValue({});
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+      await service.deletePerson(PERSON_ID, USER_ID, PERMS);
+      expect(mockPrisma.face.updateMany).toHaveBeenCalledWith({
+        where: { personId: PERSON_ID },
+        data: { personId: null, manuallyAssigned: false },
+      });
+    });
+
+    it('soft-deletes the person and clears coverFaceId', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.person.update as jest.Mock).mockResolvedValue({});
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+      await service.deletePerson(PERSON_ID, USER_ID, PERMS);
+      expect(mockPrisma.person.update).toHaveBeenCalledWith({
+        where: { id: PERSON_ID },
+        data: expect.objectContaining({ coverFaceId: null }),
+      });
+      const updateCall = (mockPrisma.person.update as jest.Mock).mock.calls[0][0];
+      expect(updateCall.data.deletedAt).toBeInstanceOf(Date);
+    });
+
+    it('writes a person:delete audit event', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.person.update as jest.Mock).mockResolvedValue({});
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+      await service.deletePerson(PERSON_ID, USER_ID, PERMS);
+      expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ action: 'person:delete', targetId: PERSON_ID }),
+        }),
+      );
     });
   });
 });

@@ -63,6 +63,8 @@ describe('FaceEnqueueListener', () => {
     });
     // Default: status upsert succeeds
     (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
+    // Default: circle has faceRecognitionEnabled=true
+    (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: true });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -228,6 +230,35 @@ describe('FaceEnqueueListener', () => {
 
       // Should not throw — listener swallows errors to avoid blocking event emission
       await expect(listener.handleObjectProcessed(makeEvent())).resolves.toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // per-circle faceRecognitionEnabled gate
+  // -------------------------------------------------------------------------
+
+  describe('per-circle faceRecognitionEnabled gate', () => {
+    it('does NOT enqueue when circle faceRecognitionEnabled is false', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: false });
+      await listener.handleObjectProcessed(makeEvent());
+      expect(mockPrisma.faceJob.create).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaFaceStatus.upsert).not.toHaveBeenCalled();
+    });
+
+    it('does NOT enqueue when circle is null', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(null);
+      await listener.handleObjectProcessed(makeEvent());
+      expect(mockPrisma.faceJob.create).not.toHaveBeenCalled();
+    });
+
+    it('DOES enqueue when circle faceRecognitionEnabled is true and FACE_AUTO_DETECT is true', async () => {
+      process.env['FACE_AUTO_DETECT'] = 'true';
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: true });
+      await listener.handleObjectProcessed(makeEvent());
+      expect(mockPrisma.faceJob.create).toHaveBeenCalledTimes(1);
     });
   });
 });
