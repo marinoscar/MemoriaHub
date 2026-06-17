@@ -34,11 +34,19 @@ const tf: any = require('@tensorflow/tfjs');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 require('@tensorflow/tfjs-backend-wasm');
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const HumanLib = require('@vladmandic/human');
-// The package may export the class as .default or as the module itself
+// Load Human from the WASM build by requiring the explicit file path.
+// `require('@vladmandic/human')` resolves via the package's exports-map
+// "require" entry to dist/human.node.js, which hard-requires
+// @tensorflow/tfjs-node — a native glibc binary unavailable on Alpine (musl).
+// Bypassing the exports map by requiring the file path directly loads the
+// pure-JS + WASM build that runs on any libc.
+// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+const humanWasmModule: any = require('@vladmandic/human/dist/human.node-wasm.js');
+// node-wasm exports Human as a named export; fall back through .default chain
+// for forward compatibility.
 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-const HumanClass: new (config: unknown) => HumanInstance = HumanLib.default?.Human ?? HumanLib.Human ?? HumanLib.default ?? HumanLib;
+const HumanClass: new (config: unknown) => HumanInstance =
+  humanWasmModule.Human ?? humanWasmModule.default?.Human ?? humanWasmModule.default ?? humanWasmModule;
 
 interface FaceResult {
   box: [number, number, number, number];

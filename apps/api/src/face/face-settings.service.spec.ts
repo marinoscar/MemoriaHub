@@ -17,14 +17,13 @@ jest.mock('@tensorflow/tfjs', () => ({
   tensor3d: jest.fn().mockReturnValue({ dispose: jest.fn() }),
 }), { virtual: true });
 jest.mock('@tensorflow/tfjs-backend-wasm', () => ({}), { virtual: true });
-jest.mock('@vladmandic/human', () => ({
-  default: {
-    Human: jest.fn().mockImplementation(() => ({
-      load: jest.fn().mockResolvedValue(undefined),
-      warmup: jest.fn().mockResolvedValue(undefined),
-      detect: jest.fn().mockResolvedValue({ face: [] }),
-    })),
-  },
+jest.mock('@vladmandic/human/dist/human.node-wasm.js', () => ({
+  Human: jest.fn().mockImplementation(() => ({
+    load: jest.fn().mockResolvedValue(undefined),
+    warmup: jest.fn().mockResolvedValue(undefined),
+    detect: jest.fn().mockResolvedValue({ face: [] }),
+  })),
+  default: jest.fn(),
 }), { virtual: true });
 jest.mock('sharp', () =>
   jest.fn().mockReturnValue({

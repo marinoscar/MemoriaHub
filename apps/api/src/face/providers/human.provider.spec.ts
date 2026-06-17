@@ -31,8 +31,9 @@ const MockHumanClass = jest.fn().mockImplementation(() => ({
   detect: mockHumanDetect,
 }));
 
-jest.mock('@vladmandic/human', () => ({
-  default: { Human: MockHumanClass },
+jest.mock('@vladmandic/human/dist/human.node-wasm.js', () => ({
+  Human: MockHumanClass,
+  default: MockHumanClass,
 }), { virtual: true });
 
 const mockSharpInstance = {
@@ -127,14 +128,13 @@ describe('HumanProvider', () => {
         tensor3d: jest.fn().mockReturnValue({ dispose: jest.fn() }),
       }), { virtual: true });
       jest.doMock('@tensorflow/tfjs-backend-wasm', () => ({}), { virtual: true });
-      jest.doMock('@vladmandic/human', () => ({
-        default: {
-          Human: jest.fn().mockImplementation(() => ({
-            load: jest.fn().mockResolvedValue(undefined),
-            warmup: jest.fn().mockResolvedValue(undefined),
-            detect: jest.fn(),
-          })),
-        },
+      jest.doMock('@vladmandic/human/dist/human.node-wasm.js', () => ({
+        Human: jest.fn().mockImplementation(() => ({
+          load: jest.fn().mockResolvedValue(undefined),
+          warmup: jest.fn().mockResolvedValue(undefined),
+          detect: jest.fn(),
+        })),
+        default: jest.fn(),
       }), { virtual: true });
       jest.doMock('sharp', () =>
         jest.fn().mockReturnValue({
