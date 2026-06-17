@@ -69,3 +69,71 @@ export async function putFaceDetectionFeature(body: {
 }): Promise<void> {
   await api.put<void>('/face/features/detection', body);
 }
+
+// ---------------------------------------------------------------------------
+// Phase 2 Types — per-media face detection
+// ---------------------------------------------------------------------------
+
+export interface BoundingBox {
+  x: number; // normalized 0–1
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface DetectedFaceDto {
+  id: string;
+  boundingBox: BoundingBox;
+  confidence: number | null;
+  personId: string | null;
+  providerKey: string;
+  modelVersion: string;
+  manuallyAssigned: boolean;
+  createdAt: string;
+}
+
+export type MediaFaceStatusType =
+  | 'not_processed'
+  | 'pending'
+  | 'processing'
+  | 'processed'
+  | 'failed'
+  | 'no_faces';
+
+export interface MediaFaceStatusDto {
+  status: MediaFaceStatusType;
+  faceCount: number;
+  providerKey: string | null;
+  modelVersion: string | null;
+  processedAt: string | null;
+  lastError: string | null;
+}
+
+export interface RerunResult {
+  jobId: string;
+  status: string;
+}
+
+export interface BackfillResult {
+  queued: number;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 API functions
+// ---------------------------------------------------------------------------
+
+export async function getMediaFaces(mediaId: string): Promise<DetectedFaceDto[]> {
+  return api.get<DetectedFaceDto[]>(`/media/${mediaId}/faces`);
+}
+
+export async function getMediaFaceStatus(mediaId: string): Promise<MediaFaceStatusDto> {
+  return api.get<MediaFaceStatusDto>(`/media/${mediaId}/faces/status`);
+}
+
+export async function rerunMediaFaces(mediaId: string): Promise<RerunResult> {
+  return api.post<RerunResult>(`/media/${mediaId}/faces/rerun`);
+}
+
+export async function runFaceBackfill(circleId: string, force?: boolean): Promise<BackfillResult> {
+  return api.post<BackfillResult>('/face/backfill', { circleId, force });
+}
