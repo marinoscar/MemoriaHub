@@ -9,6 +9,7 @@ import {
   StorageProvider,
 } from '../storage/providers/storage-provider.interface';
 import { DetectedFace } from './providers/face-provider.interface';
+import { FaceMatchingService } from './face-matching.service';
 
 @Injectable()
 export class FaceDetectionService {
@@ -19,6 +20,7 @@ export class FaceDetectionService {
     private readonly faceSettingsService: FaceSettingsService,
     private readonly registry: FaceProviderRegistry,
     @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
+    private readonly matchingService: FaceMatchingService,
   ) {}
 
   async processMediaItem(job: FaceJob): Promise<void> {
@@ -131,25 +133,74 @@ export class FaceDetectionService {
         return { ...face, boundingBox: normalizedBb, embedding };
       });
 
-      // 10. createMany Face rows
-      await this.prisma.face.createMany({
-        data: normalized.map((face) => ({
-          mediaItemId: job.mediaItemId,
-          circleId: mediaItem.circleId,
-          boundingBox: face.boundingBox,
-          confidence: face.confidence ?? null,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          landmarks: (face.landmarks ?? null) as any,
-          embedding: face.embedding ?? [],
-          externalFaceId: face.externalFaceId ?? null,
-          providerKey,
-          modelVersion,
-          manuallyAssigned: false,
-        })),
-      });
+      // 10. Create Face rows individually (loop instead of createMany) so we
+      //     have the returned IDs for matching in step 11.
+      //     Typical face count per photo is 1–10, so the loop is acceptable.
+      const createdFaces: Array<{
+        id: string;
+        embedding: number[];
+        externalFaceId: string | null;
+      }> = [];
+
+      for (const face of normalized) {
+        const created = await this.prisma.face.create({
+          data: {
+            mediaItemId: job.mediaItemId,
+            circleId: mediaItem.circleId,
+            boundingBox: face.boundingBox,
+            confidence: face.confidence ?? null,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            landmarks: (face.landmarks ?? null) as any,
+            embedding: face.embedding ?? [],
+            externalFaceId: face.externalFaceId ?? null,
+            providerKey,
+            modelVersion,
+            manuallyAssigned: false,
+          },
+          select: { id: true, embedding: true, externalFaceId: true },
+        });
+        createdFaces.push(created);
+      }
+
+      // 11. Match each new face to a Person (or leave unknown)
+      for (const face of createdFaces) {
+        try {
+          let matchResult: { personId: string } | null = null;
+
+          if (face.externalFaceId && provider.capabilities.delegatedRecognize) {
+            // Delegated path: look up by external face ID
+            matchResult = await this.matchingService.matchFaceByExternalId(
+              mediaItem.circleId,
+              face.externalFaceId,
+            );
+          } else if (face.embedding.length > 0) {
+            // In-app cosine path
+            matchResult = await this.matchingService.matchFaceToPerson(
+              mediaItem.circleId,
+              face.embedding,
+            );
+          }
+
+          if (matchResult) {
+            await this.prisma.face.update({
+              where: { id: face.id },
+              data: { personId: matchResult.personId },
+            });
+            this.logger.debug(
+              `FaceJob ${job.id}: face ${face.id} matched to person ${matchResult.personId}`,
+            );
+          }
+        } catch (err) {
+          // Non-fatal: matching failure should not abort the detection job
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `FaceJob ${job.id}: face matching failed for face ${face.id}: ${msg}`,
+          );
+        }
+      }
     }
 
-    // 11. Upsert MediaFaceStatus
+    // 12. Upsert MediaFaceStatus
     const finalStatus =
       detectedFaces.length > 0
         ? MediaFaceStatusType.processed
