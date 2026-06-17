@@ -2205,9 +2205,9 @@ FaceDetectionService.processMediaItem()
 
 ### Embedding Storage and Matching
 
-- **Default backend (`FACE_VECTOR_BACKEND=app`):** Embeddings stored in a `Float[]` column. Cosine similarity computed in-process as `1 - (A·B)` where A and B are L2-normalized 512-d vectors.
-- **pgvector backend (`FACE_VECTOR_BACKEND=pgvector`):** Requires the `vector` PostgreSQL extension. An optional follow-up migration converts the column to `vector(512)` and adds an `hnsw vector_cosine_ops` index. Matching uses the `<=>` operator for native accelerated similarity search.
-- **Provider embedding space isolation:** CompreFace (ArcFace) and Rekognition embeddings are not cross-compatible. A circle must use one provider consistently. Switching providers requires re-processing all photos.
+- **Default backend (`FACE_VECTOR_BACKEND=app`):** Embeddings stored in a `Float[]` column. Cosine similarity computed in-process as `1 - (A·B)` where A and B are L2-normalized vectors. Dimension depends on provider: 128-d for `compreface` (mobilenet build), 1024-d for `human` WASM.
+- **pgvector backend (`FACE_VECTOR_BACKEND=pgvector`):** Requires the `vector` PostgreSQL extension. An optional follow-up migration converts the column to a native pgvector type and adds an `hnsw vector_cosine_ops` index. The declared dimension must match the active provider. Matching uses the `<=>` operator for native accelerated similarity search.
+- **Provider embedding space isolation:** CompreFace (128-d ArcFace mobilenet), `human` (1024-d WASM), and Rekognition embeddings are not cross-compatible. A circle must use one provider consistently. Switching providers requires re-processing all photos.
 
 ### Rekognition Delegated Path
 
@@ -2221,8 +2221,8 @@ When the active provider is `rekognition`, the app stores only an `externalFaceI
 
 ### Infrastructure
 
-- CompreFace runs as a Docker service in `infra/compose/base.compose.yml` with its own bundled Postgres container (not the app's Postgres). Default endpoint: `http://compreface:8000` (overridable via `FACE_COMPREFACE_URL`).
-- VPS tuning (x86/AVX2, CPU-only): Mobilenet build, `uwsgi_processes=1`, JVM heap `≤2 GB`. Swap recommended.
+- CompreFace runs as a keyless `compreface-core` sidecar (`exadel/compreface-core:1.2.0-mobilenet`) in `infra/compose/base.compose.yml`. No DB, no API key, no admin UI. Default endpoint: `http://compreface-core:3000` (overridable via `FACE_COMPREFACE_URL`).
+- VPS tuning (x86/AVX2, CPU-only): `UWSGI_PROCESSES=1`, `UWSGI_THREADS=1`. Swap recommended.
 
 ---
 
