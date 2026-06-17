@@ -40,16 +40,26 @@
 
 ## 2. Provider Model
 
-The face domain uses a `FaceProvider` interface that abstracts detection, embedding generation, and (for cloud providers) delegated recognition. Two providers ship with Phase 1:
+The face domain uses a `FaceProvider` interface that abstracts detection, embedding generation, and (for cloud providers) delegated recognition. Three providers ship with the implementation:
 
-### CompreFace (default — self-hosted sidecar)
+### Human (keyless — in-process WASM)
 
-- **Type:** Self-hosted Docker sidecar running on the same compose network.
-- **Capabilities:** `{ detect: true, embed: true, delegatedRecognize: false }`
-- **Embeddings:** Returns 512-dimensional ArcFace embeddings (`arcface-r100-v1`). The app stores these vectors in its own PostgreSQL database and owns them entirely.
+- **Type:** In-process WASM face detector and embedder. No external container required.
+- **Capabilities:** `{ detect: true, embed: true, delegatedRecognize: false, requiresCredentials: false }`
+- **Embeddings:** Returns 1024-dimensional embeddings. Stored in the app's own PostgreSQL database.
+- **Privacy:** No data leaves the server. Runs entirely in-process.
+- **Cost:** Free.
+- **Default:** No credentials or configuration needed.
+
+### CompreFace (default — keyless core sidecar)
+
+- **Type:** Self-hosted `compreface-core` sidecar running on the same compose network. No API key required.
+- **Capabilities:** `{ detect: true, embed: true, delegatedRecognize: false, requiresCredentials: false }`
+- **Embeddings:** Returns 128-dimensional ArcFace mobilefacenet embeddings (`compreface-arcface-mobilefacenet-128`). The app stores these vectors in its own PostgreSQL database and owns them entirely.
 - **Privacy:** No data leaves the server. GPS coordinates, photos, and biometric vectors stay on-premise.
 - **Cost:** Free.
-- **Default:** Yes. The sidecar's base URL defaults to `http://compreface:8000` and can be overridden via `FACE_COMPREFACE_URL`.
+- **Default:** Yes. The sidecar's base URL defaults to `http://compreface-core:3000` and can be overridden via `FACE_COMPREFACE_URL`. An optional credential row stores only the `baseUrl` override — no API key field.
+- **API calls:** `GET /status` (health/test), `POST /find_faces?face_plugins=calculator` (detect + embed).
 
 ### AWS Rekognition (opt-in — delegated)
 
@@ -62,7 +72,7 @@ The face domain uses a `FaceProvider` interface that abstracts detection, embedd
 
 ### Adding a New Provider
 
-Implement the `FaceProvider` interface (under `apps/api/src/face/providers/`) and add one entry to `FaceProviderRegistry`. CompreFace-compatible self-hosted models can reuse the `compreface` provider key with a custom `baseUrl`.
+Implement the `FaceProvider` interface (under `apps/api/src/face/providers/`) and add one entry to `FaceProviderRegistry`. CompreFace-compatible self-hosted models can reuse the `compreface` provider key with a custom `baseUrl` stored as a credential row.
 
 **Important:** Do not mix providers across the same library. Face embeddings are model-specific and cannot be compared across providers or model versions. Switching providers requires re-processing all photos from the original S3 blobs.
 
@@ -78,13 +88,15 @@ Mirror of `ai_provider_credentials`. One row per provider.
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `provider` | String (unique) | Provider key: `compreface` or `rekognition` |
-| `encryptedKey` | String | AES-256-GCM encrypted API key |
-| `baseUrl` | String? | Override URL (CompreFace only) |
+| `provider` | String (unique) | Provider key: `human`, `compreface`, or `rekognition` |
+| `encryptedKey` | String | AES-256-GCM encrypted API key. For keyless providers (`human`, `compreface`), the key field is empty/absent — only `baseUrl` is relevant. |
+| `baseUrl` | String? | Override URL (CompreFace only; not applicable to `human` or `rekognition`) |
 | `region` | String? | AWS region (Rekognition only) |
-| `last4` | String | Last 4 chars of plaintext key (display only) |
+| `last4` | String | Last 4 chars of plaintext key (display only; not applicable for keyless providers) |
 | `enabled` | Boolean | Whether this provider is active |
 | `updatedByUserId` | String? | FK to `users` |
+
+**Note:** `human` and `compreface` are keyless providers (`requiresCredentials: false`). A credential row for these providers, if present, stores only a `baseUrl` override. No API key is set or required.
 
 ### `people` (scaffolded; Phase 3)
 
@@ -111,13 +123,13 @@ One row per detected face in a media item.
 | `boundingBox` | Json | `{ x, y, width, height }` as fractions of image dimensions |
 | `confidence` | Float? | Detection confidence score |
 | `landmarks` | Json? | Facial landmark coordinates |
-| `embedding` | Float[] | 512-d ArcFace embedding (CompreFace path); empty for Rekognition |
+| `embedding` | Float[] | Embedding vector; size depends on provider: 1024-d for `human`, 128-d for `compreface` (mobilenet build), empty for Rekognition |
 | `externalFaceId` | String? | AWS Rekognition face ID (Rekognition path only) |
 | `providerKey` | String | Which provider produced this face |
 | `modelVersion` | String | Which model version produced this face |
 | `manuallyAssigned` | Boolean | `true` = user assigned; protected from re-clustering |
 
-**Vector backend:** The `embedding Float[]` column is the default. When `FACE_VECTOR_BACKEND=pgvector` and the pgvector extension is available, an optional follow-up migration converts it to a `vector(512)` column with an `hnsw vector_cosine_ops` index for accelerated similarity search.
+**Vector backend:** The `embedding Float[]` column is the default. When `FACE_VECTOR_BACKEND=pgvector` and the pgvector extension is available, an optional follow-up migration converts it to a native pgvector column with an `hnsw vector_cosine_ops` index for accelerated similarity search. The vector dimension must match the active provider: 1024 for `human`, 128 for `compreface`.
 
 ### `face_jobs` (scaffolded; Phase 2)
 
@@ -172,7 +184,8 @@ All four phases are fully implemented on the `feat/face-recognition` branch.
 - **Settings API** (`FaceSettingsController` under `apps/api/src/face/`): six endpoints mirroring the AI Settings API.
 - **Provider abstraction:** `FaceProvider` interface, `FaceProviderRegistry`, `ComprefaceProvider`, `RekognitionProvider`.
 - **Admin UI:** `FaceSettingsPage` at `/admin/face-settings` with per-provider credential form, test button, model selector, and active-detection selector. Gated by `face_settings:read`.
-- **CompreFace sidecar:** Added to `infra/compose/base.compose.yml` with its own bundled Postgres container.
+- **Three providers:** `human` (keyless WASM, in-process), `compreface` (keyless `compreface-core` sidecar, no DB, no API key), `rekognition` (delegated, requires AWS credentials).
+- **CompreFace sidecar:** Runs as a keyless `compreface-core` sidecar (`exadel/compreface-core:1.2.0-mobilenet`) in `infra/compose/base.compose.yml`. No bundled Postgres, no API key.
 
 ### Phase 2 — Background Detection
 
@@ -188,7 +201,7 @@ New endpoints: `GET /media/:id/faces`, `GET /media/:id/faces/status`, `POST /med
 
 After detection, `FaceDetectionService` attempts to assign each face to a known `Person` in the circle:
 
-- Embeddings are L2-normalized 512-d vectors (CompreFace/ArcFace path).
+- Embeddings are L2-normalized vectors (128-d for CompreFace mobilenet, 1024-d for the human WASM provider).
 - In-app cosine similarity is computed against per-person centroids (`FACE_VECTOR_BACKEND=app`, the default). When `FACE_VECTOR_BACKEND=pgvector` and the pgvector extension is installed, the `<=>` cosine distance operator and an `hnsw` index are used instead.
 - If the best similarity is ≥ `FACE_MATCH_THRESHOLD` (default 0.38), the face is assigned to that person and the centroid is recomputed as the mean of all normalized member embeddings.
 - Faces below threshold remain unknown (`personId=null`).
@@ -253,18 +266,23 @@ All sensitive face operations emit records to the `audit_events` table:
 
 ## 7. Infrastructure: CompreFace Sidecar
 
-CompreFace runs as a Docker service in `infra/compose/base.compose.yml`. Key decisions:
+The `compreface-core` container runs as a lightweight ML engine sidecar in `infra/compose/base.compose.yml`. Key decisions:
 
-- **Own Postgres:** CompreFace is configured with its own bundled Postgres container (`COMPREFACE_DB_PASSWORD`). The app's Postgres is not shared with the sidecar — this avoids schema pollution, version coupling, and credential exposure.
-- **Embedding mode:** The app calls CompreFace for detection and embedding only. The 512-d vectors are stored in the app's own database. CompreFace's internal face collection/recognition features are not used.
-- **VPS tuning (x86/AVX2, CPU-only):** The Mobilenet build is used (fastest CPU model, ~99.5% accuracy). Recommended settings: `uwsgi_processes=1`, JVM heap capped at `-Xmx2g`. Swap is recommended to handle peak load.
-- **Image tag:** The operator must pin the CompreFace image tag. The current default is `exadel/compreface:latest` — pin to a specific version before production deployment.
+- **No database, no API key:** The sidecar is a bare engine (`exadel/compreface-core:1.2.0-mobilenet`) — RetinaFace detector + ArcFace mobilefacenet calculator. There is no bundled Postgres, no admin UI, and no API key. The app connects directly to `http://compreface-core:3000` without credentials.
+- **Keyless provider:** `compreface` has `requiresCredentials: false`. An optional credential row stores only a `baseUrl` override (useful when the sidecar is deployed at a custom address). No key field is set or required.
+- **Embedding mode:** The app calls the sidecar for detection and embedding only via `POST /find_faces?face_plugins=calculator`. The returned 128-d mobilenet ArcFace vectors are stored in the app's own database. The sidecar has no internal collection or matching state.
+- **128-d embeddings:** The `1.2.0-mobilenet` image build produces 128-dimensional embeddings (`compreface-arcface-mobilefacenet-128`). This differs from the `r100` build which produces 512-d embeddings; do not switch builds without re-processing all photos.
+- **Stateless container:** No volume is required for the sidecar. It holds no persistent state.
+- **VPS tuning (x86/AVX2, CPU-only):** `UWSGI_PROCESSES=1` and `UWSGI_THREADS=1` are set to limit memory and CPU usage on a shared VPS. Swap is recommended to handle peak load.
+- **Image tag:** Pinned to `exadel/compreface-core:1.2.0-mobilenet`. Do not change the tag without also verifying the embedding dimension and API contract.
+
+**Human provider (keyless WASM):** The `human` provider runs entirely in-process; no external container or configuration is required. It is available as soon as the API starts.
 
 **New environment variables (add to `infra/compose/.env`):**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `FACE_COMPREFACE_URL` | `http://compreface:8000` | CompreFace sidecar base URL |
+| `FACE_COMPREFACE_URL` | `http://compreface-core:3000` | CompreFace core sidecar base URL (keyless; no API key) |
 | `FACE_AUTO_DETECT` | `true` | Global kill-switch for auto-enqueue on upload; per-circle opt-in still applies |
 | `FACE_JOB_POLL_MS` | `5000` | Face worker poll interval in ms |
 | `FACE_WORKER_ENABLED` | `true` | Set to `false` to disable the background worker (useful in test/CI) |
@@ -272,7 +290,6 @@ CompreFace runs as a Docker service in `infra/compose/base.compose.yml`. Key dec
 | `FACE_CLUSTER_THRESHOLD` | `0.45` | Cosine similarity threshold for grouping unknown faces during clustering |
 | `FACE_CLUSTER_MIN_SIZE` | `2` | Minimum faces in a cluster to create a provisional Person; singletons stay unknown |
 | `FACE_VECTOR_BACKEND` | `app` | `app` (Float[] + in-process cosine) or `pgvector` (native index via pgvector extension) |
-| `COMPREFACE_DB_PASSWORD` | — | Password for CompreFace bundled Postgres |
 
 ---
 

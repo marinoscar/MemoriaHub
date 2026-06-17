@@ -2244,11 +2244,12 @@ For future versions, the API may adopt URL-based versioning: `/api/v2/...`
 
 All endpoints in this group require the Admin system role plus the listed permission. This group mirrors the [AI Settings](#ai-settings) group in structure and credential-handling approach. Only the settings API is active in Phase 1; detection, people management, and recognition endpoints ship in later phases.
 
-**Provider abstraction:** The face domain supports pluggable providers via a `FaceProvider` interface. Two providers are shipped:
+**Provider abstraction:** The face domain supports pluggable providers via a `FaceProvider` interface. Three providers are shipped:
 
 | Provider key | Type | Embeddings | Notes |
 |---|---|---|---|
-| `compreface` | Self-hosted sidecar (default) | 512-d ArcFace, owned by app | CompreFace runs as a Docker sidecar with its own bundled Postgres. The app calls it, stores the returned embeddings in its own database, and owns the vectors. |
+| `human` | Keyless in-process WASM (no external container) | 1024-d, owned by app | Runs in-process; no credentials needed. |
+| `compreface` | Keyless core sidecar (default) | 128-d ArcFace mobilefacenet, owned by app | `compreface-core` container (no DB, no API key); API calls directly to `http://compreface-core:3000`. |
 | `rekognition` | AWS managed (opt-in) | None returned | Delegated recognition — AWS performs matching against a gallery indexed by the app; only `externalFaceId` is stored. |
 
 Adding a new provider requires implementing the `FaceProvider` interface and adding one registry entry.
@@ -2271,8 +2272,8 @@ Returns configured and known (unconfigured) face providers, per-provider capabil
       "provider": "compreface",
       "configured": true,
       "enabled": true,
-      "last4": "Xk9Z",
-      "baseUrl": "http://compreface:8000",
+      "last4": null,
+      "baseUrl": "http://compreface-core:3000",
       "updatedAt": "2026-06-17T10:00:00.000Z"
     }
   ],
@@ -2287,11 +2288,12 @@ Returns configured and known (unconfigured) face providers, per-provider capabil
     }
   ],
   "capabilities": {
-    "compreface": { "detect": true, "embed": true, "delegatedRecognize": false },
+    "human": { "detect": true, "embed": true, "delegatedRecognize": false, "requiresCredentials": false },
+    "compreface": { "detect": true, "embed": true, "delegatedRecognize": false, "requiresCredentials": false },
     "rekognition": { "detect": true, "embed": false, "delegatedRecognize": true }
   },
   "features": {
-    "detection": { "provider": "compreface", "model": "arcface-r100-v1" }
+    "detection": { "provider": "compreface", "model": "compreface-arcface-mobilefacenet-128" }
   }
 }
 ```
@@ -2304,13 +2306,13 @@ Returns configured and known (unconfigured) face providers, per-provider capabil
 
 Upsert credentials for the given provider key. The API key (and region for Rekognition) is encrypted at rest with AES-256-GCM; the plaintext is never stored or returned.
 
-**Path Parameter:** `provider` — `compreface` | `rekognition`
+**Path Parameter:** `provider` — `human` | `compreface` | `rekognition`
 
 **Request Body:**
 ```json
 {
   "apiKey": "...",
-  "baseUrl": "http://compreface:8000",
+  "baseUrl": "http://compreface-core:3000",
   "region": "us-east-1",
   "enabled": true
 }
@@ -2318,8 +2320,8 @@ Upsert credentials for the given provider key. The API key (and region for Rekog
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `apiKey` | string | Yes | Provider API key or secret |
-| `baseUrl` | string | No | Override default base URL (CompreFace only) |
+| `apiKey` | string | No | Provider API key or secret. Not applicable for keyless providers (`human`, `compreface`). |
+| `baseUrl` | string | No | Override default base URL. For `compreface` this is the only meaningful field; for `human` and `rekognition` it is not used. |
 | `region` | string | No | AWS region (Rekognition only) |
 | `enabled` | boolean | No | Enable or disable this provider (default: `true`) |
 
@@ -2329,8 +2331,8 @@ Upsert credentials for the given provider key. The API key (and region for Rekog
   "provider": "compreface",
   "configured": true,
   "enabled": true,
-  "last4": "Xk9Z",
-  "baseUrl": "http://compreface:8000"
+  "last4": null,
+  "baseUrl": "http://compreface-core:3000"
 }
 ```
 
@@ -2369,7 +2371,7 @@ Test provider connectivity by issuing a minimal API call to the provider's endpo
 
 On failure:
 ```json
-{ "ok": false, "error": "Connection refused at http://compreface:8000" }
+{ "ok": false, "error": "Connection refused at http://compreface-core:3000" }
 ```
 
 ---
@@ -2386,7 +2388,7 @@ List available models for a configured provider using its stored credentials.
 ```json
 {
   "provider": "compreface",
-  "models": ["arcface-r100-v1"]
+  "models": ["compreface-arcface-mobilefacenet-128"]
 }
 ```
 
@@ -2402,7 +2404,7 @@ Set the active face provider and model used for background face detection. Store
 ```json
 {
   "provider": "compreface",
-  "model": "arcface-r100-v1"
+  "model": "compreface-arcface-mobilefacenet-128"
 }
 ```
 
@@ -2410,7 +2412,7 @@ Set the active face provider and model used for background face detection. Store
 ```json
 {
   "provider": "compreface",
-  "model": "arcface-r100-v1"
+  "model": "compreface-arcface-mobilefacenet-128"
 }
 ```
 
@@ -2441,7 +2443,7 @@ List all detected faces for a media item. The embedding vector is omitted from t
       "landmarks": null,
       "externalFaceId": null,
       "providerKey": "compreface",
-      "modelVersion": "arcface-r100-v1",
+      "modelVersion": "compreface-arcface-mobilefacenet-128",
       "manuallyAssigned": false,
       "personId": "uuid-or-null",
       "createdAt": "2026-06-17T10:00:00.000Z"
@@ -2469,7 +2471,7 @@ Get the detection status for a specific media item. Returns a sentinel `not_proc
     "status": "processed",
     "faceCount": 2,
     "providerKey": "compreface",
-    "modelVersion": "arcface-r100-v1",
+    "modelVersion": "compreface-arcface-mobilefacenet-128",
     "processedAt": "2026-06-17T10:05:00.000Z",
     "lastError": null,
     "updatedAt": "2026-06-17T10:05:00.000Z"

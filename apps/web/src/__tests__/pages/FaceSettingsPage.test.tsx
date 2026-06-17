@@ -51,8 +51,9 @@ function defaultSettingsMock() {
           provider: 'compreface',
           configured: true,
           enabled: true,
-          last4: 'abcd',
-          baseUrl: 'http://cf:8000',
+          requiresCredentials: false,
+          last4: null,
+          baseUrl: 'http://compreface-core:3000',
           region: null,
           capabilities: { detect: true, embed: true, delegatedRecognize: false },
         },
@@ -175,13 +176,6 @@ describe('FaceSettingsPage', () => {
 
   // -------------------------------------------------------------------------
   describe('Configured provider display', () => {
-    it('renders the masked API key (••••••••abcd) for a configured provider', () => {
-      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // The masked field value is ••••••••abcd (8 bullets + last4)
-      expect(screen.getByDisplayValue(/••••.*abcd/)).toBeInTheDocument();
-    });
-
     it('shows "CompreFace" provider name', () => {
       render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
 
@@ -241,8 +235,9 @@ describe('FaceSettingsPage', () => {
       render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
 
       // Wait for models to load (useEffect fires on mount)
+      // Use exact name to avoid matching "Test connection" on provider cards
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: /test/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^test$/i })).toBeInTheDocument();
       });
     });
 
@@ -265,7 +260,8 @@ describe('FaceSettingsPage', () => {
       });
 
       // The settings have features.detection.model = 'arcface-r100-v1' — pre-populated
-      const testButton = await screen.findByRole('button', { name: /test/i });
+      // Use exact name to avoid matching "Test connection" on provider cards
+      const testButton = await screen.findByRole('button', { name: /^test$/i });
 
       await user.click(testButton);
 
@@ -293,7 +289,8 @@ describe('FaceSettingsPage', () => {
 
       await waitFor(() => expect(mockGetModels).toHaveBeenCalled());
 
-      const testButton = await screen.findByRole('button', { name: /test/i });
+      // Use exact name to avoid matching "Test connection" on provider cards
+      const testButton = await screen.findByRole('button', { name: /^test$/i });
       await user.click(testButton);
 
       await waitFor(() => {
@@ -311,10 +308,43 @@ describe('FaceSettingsPage', () => {
       expect(saveButtons.length).toBeGreaterThan(0);
     });
 
-    it('renders a Remove button for configured providers', () => {
+    it('renders a Remove button for configured credentialed providers', () => {
+      mockUseFaceSettings.mockReturnValue({
+        ...defaultSettingsMock(),
+        settings: {
+          ...defaultSettingsMock().settings,
+          providers: [
+            {
+              provider: 'rekognition',
+              configured: true,
+              enabled: true,
+              requiresCredentials: true,
+              last4: 'zxcv',
+              baseUrl: null,
+              region: 'us-east-1',
+              capabilities: { detect: true, embed: false, delegatedRecognize: true },
+            },
+          ],
+          knownProviders: [],
+        },
+      } as any);
+
       render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
 
       expect(screen.getByRole('button', { name: /remove/i })).toBeInTheDocument();
+    });
+
+    it('shows Service URL field for the compreface keyless provider', () => {
+      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByLabelText(/service url/i)).toBeInTheDocument();
+    });
+
+    it('shows Test connection button on the compreface card', () => {
+      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const testConnectionButtons = screen.getAllByRole('button', { name: /test connection/i });
+      expect(testConnectionButtons.length).toBeGreaterThan(0);
     });
   });
 
@@ -412,8 +442,8 @@ describe('FaceSettingsPage', () => {
       expect(screen.getByText('Human (in-process)')).toBeInTheDocument();
     });
 
-    it('credentialed providers (compreface) still show their API key input', () => {
-      // Both human (keyless) and compreface (credentialed) visible simultaneously
+    it('credentialed providers (rekognition) still show their API key input', () => {
+      // Both human (keyless) and rekognition (credentialed) visible simultaneously
       mockUseFaceSettings.mockReturnValue({
         ...defaultSettingsMock(),
         settings: {
@@ -421,14 +451,14 @@ describe('FaceSettingsPage', () => {
           providers: [
             humanProvider,
             {
-              provider: 'compreface',
+              provider: 'rekognition',
               configured: true,
               enabled: true,
               requiresCredentials: true,
-              last4: 'abcd',
-              baseUrl: 'http://cf:8000',
-              region: null,
-              capabilities: { detect: true, embed: true, delegatedRecognize: false },
+              last4: 'zxcv',
+              baseUrl: null,
+              region: 'us-east-1',
+              capabilities: { detect: true, embed: false, delegatedRecognize: true },
             },
           ],
           knownProviders: [],
@@ -437,7 +467,7 @@ describe('FaceSettingsPage', () => {
 
       render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      // CompreFace section still shows API key input
+      // Rekognition section still shows API key input
       expect(screen.getByLabelText(/new api key/i)).toBeInTheDocument();
       // Human section shows "no configuration required"
       expect(screen.getByText(/no configuration required/i)).toBeInTheDocument();

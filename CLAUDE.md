@@ -348,6 +348,7 @@ Face recognition is per-circle opt-in (default off); see Circle Face Settings en
 - `PUT /api/ai/features/search` - Set active provider and model for AI search (ai_settings:write)
 
 ### Face Recognition / Face Settings (Admin only — face_settings:read / face_settings:write)
+Three providers: `human` (keyless WASM, in-process, 1024-d), `compreface` (keyless `compreface-core` sidecar, 128-d mobilenet, `requiresCredentials:false`), `rekognition` (delegated AWS, requires credentials). The Face Settings UI has a "Test connection" button for all providers including keyless ones.
 - `GET /api/face/settings` - Get configured providers (masked), known providers, capabilities, and active detection feature (face_settings:read)
 - `PUT /api/face/credentials/:provider` - Upsert provider credentials, encrypted at rest (face_settings:write)
 - `DELETE /api/face/credentials/:provider` - Remove provider credentials (face_settings:write)
@@ -450,9 +451,9 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `ai_provider_credentials` - AI provider API keys (AES-256-GCM encrypted); one row per provider; `last4` exposed for display; plaintext never stored or returned
 - `search_conversations` - Agentic search conversation sessions; scoped to one circle and one user; includes `favorite`, `archived_at`, `deleted_at` for lifecycle management
 - `search_messages` - Individual messages within a conversation; `role` is `user` or `assistant`; `tool_calls` and `tool_results` are JSON columns for search tool invocations
-- `face_provider_credentials` - Face provider API keys/config (AES-256-GCM encrypted via same key as AI); one row per provider; `last4` exposed; plaintext never stored or returned
+- `face_provider_credentials` - Face provider API keys/config (AES-256-GCM encrypted via same key as AI); one row per provider; `last4` exposed; plaintext never stored or returned. For keyless providers (`human`, `compreface`), the credential row (if present) stores only a `baseUrl` override — no API key is set or required.
 - `people` - Per-circle identity records for recognized individuals; supports `mergedIntoId` self-FK for cluster merge audit; `deletedAt` soft-delete
-- `faces` - Individual detected face records with bounding box, confidence, optional 512-d ArcFace embedding (`Float[]` fallback or pgvector column), and `externalFaceId` for Rekognition delegated path; keyed to `mediaItemId` + `circleId`; `manuallyAssigned` flag protects user-labeled faces from re-clustering
+- `faces` - Individual detected face records with bounding box, confidence, variable-dimension embedding (`Float[]` fallback or pgvector column; 128-d for `compreface` mobilenet, 1024-d for `human` WASM), and `externalFaceId` for Rekognition delegated path; keyed to `mediaItemId` + `circleId`; `manuallyAssigned` flag protects user-labeled faces from re-clustering
 - `face_jobs` - Async face-detection job queue (no BullMQ); statuses: `pending`, `running`, `succeeded`, `failed`; reasons: `upload`, `rerun`, `backfill`
 - `media_face_status` - Per-media-item detection status tracking (one row per item); records which provider/model processed the item and when; statuses: `not_processed`, `pending`, `processing`, `processed`, `failed`, `no_faces`
 
@@ -541,7 +542,7 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 - `GEO_FORWARD_SEARCH_ENABLED` - Enable `GET /api/media/geo/search` forward geocoding (default: `false`; only typed query leaves server, never GPS)
 
 **Face Recognition:**
-- `FACE_COMPREFACE_URL` - Base URL of the CompreFace sidecar (default: `http://compreface:8000`); used as the default `baseUrl` for the CompreFace provider
+- `FACE_COMPREFACE_URL` - Base URL of the CompreFace core sidecar (default: `http://compreface-core:3000`); used as the default `baseUrl` for the CompreFace provider. The provider is keyless — no API key is required.
 - `FACE_AUTO_DETECT` - Global kill-switch for auto-enqueue on upload; set to `false` to disable globally (per-circle opt-in still applies when `true`; default: `true`)
 - `FACE_JOB_POLL_MS` - Polling interval for the face-job worker in milliseconds (default: `5000`)
 - `FACE_WORKER_ENABLED` - Set to `false` to disable the FaceJobWorker (useful in test/CI environments; default: `true`)
@@ -549,7 +550,6 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 - `FACE_CLUSTER_THRESHOLD` - Cosine-similarity threshold for grouping unknown faces during clustering (default: `0.45`; stricter than match threshold)
 - `FACE_CLUSTER_MIN_SIZE` - Minimum cluster size to create a provisional Person; singletons remain unknown (default: `2`)
 - `FACE_VECTOR_BACKEND` - Vector storage and matching backend: `app` (default; `Float[]` column + in-process cosine) or `pgvector` (requires the pgvector extension)
-- `COMPREFACE_DB_PASSWORD` - Password for the CompreFace bundled Postgres container (set in `infra/compose/.env`; keep separate from the app DB credentials)
 
 ## Common Patterns
 

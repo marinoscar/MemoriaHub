@@ -200,6 +200,35 @@ describe('FaceSettingsService', () => {
       expect(upsertCall.create.region).toBe('us-west-2');
     });
 
+    it('works with baseUrl only and no apiKey (compreface keyless case)', async () => {
+      mockPrisma.faceProviderCredential.upsert.mockResolvedValue({
+        id: 'cred-1',
+        provider: 'compreface',
+        encryptedKey: 'cipher',
+        last4: '',
+        baseUrl: 'http://compreface-core:3000',
+        region: null,
+        enabled: true,
+        updatedByUserId: 'user-1',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
+
+      const result = await service.upsertCredential(
+        'compreface',
+        { baseUrl: 'http://compreface-core:3000' },
+        'user-1',
+      );
+
+      const upsertCall = mockPrisma.faceProviderCredential.upsert.mock.calls[0][0];
+      // No apiKey → last4 empty, encryptedKey is encrypted empty string
+      expect(upsertCall.create.last4).toBe('');
+      expect(upsertCall.create.baseUrl).toBe('http://compreface-core:3000');
+      expect(result.provider).toBe('compreface');
+      expect(result.configured).toBe(true);
+      expect(result.baseUrl).toBe('http://compreface-core:3000');
+    });
+
     it('works with no apiKey (Rekognition case): rawKey empty, last4 empty', async () => {
       mockPrisma.faceProviderCredential.upsert.mockResolvedValue({
         id: 'cred-1',
@@ -402,6 +431,71 @@ describe('FaceSettingsService', () => {
 
       expect(result.knownProviders.map((p) => p.provider)).toContain('compreface');
       expect(result.knownProviders.map((p) => p.provider)).toContain('rekognition');
+    });
+
+    // ---- compreface (keyless) provider tests --------------------------------
+
+    it('includes compreface in providers (not knownProviders) with configured:true, requiresCredentials:false when keyless', async () => {
+      mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
+      mockSystemSettings.getSettings.mockResolvedValue({ face: null });
+      mockRegistry.keys.mockReturnValue(['compreface', 'rekognition', 'human']);
+      mockRegistry.get.mockImplementation((key: string) => {
+        if (key === 'rekognition') {
+          return { capabilities: { detect: true, embed: true, delegatedRecognize: true }, requiresCredentials: true };
+        }
+        // compreface and human are both keyless
+        return { capabilities: { detect: true, embed: true, delegatedRecognize: false }, requiresCredentials: false };
+      });
+
+      const result = await service.getSettings();
+
+      const cfProvider = result.providers.find((p) => p.provider === 'compreface');
+      expect(cfProvider).toBeDefined();
+      expect(cfProvider!.configured).toBe(true);
+      expect(cfProvider!.enabled).toBe(true);
+      expect(cfProvider!.requiresCredentials).toBe(false);
+    });
+
+    it('does NOT include compreface in knownProviders when it is keyless', async () => {
+      mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
+      mockSystemSettings.getSettings.mockResolvedValue({ face: null });
+      mockRegistry.keys.mockReturnValue(['compreface', 'rekognition', 'human']);
+      mockRegistry.get.mockImplementation((key: string) => {
+        if (key === 'rekognition') {
+          return { capabilities: { detect: true, embed: true, delegatedRecognize: true }, requiresCredentials: true };
+        }
+        return { capabilities: { detect: true, embed: true, delegatedRecognize: false }, requiresCredentials: false };
+      });
+
+      const result = await service.getSettings();
+
+      const cfInKnown = result.knownProviders.find((p) => p.provider === 'compreface');
+      expect(cfInKnown).toBeUndefined();
+    });
+
+    it('exposes effective baseUrl for compreface from env when keyless and no DB row', async () => {
+      const savedEnv = process.env.FACE_COMPREFACE_URL;
+      process.env.FACE_COMPREFACE_URL = 'http://env-compreface:9090';
+
+      mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
+      mockSystemSettings.getSettings.mockResolvedValue({ face: null });
+      mockRegistry.keys.mockReturnValue(['compreface']);
+      mockRegistry.get.mockReturnValue({
+        capabilities: { detect: true, embed: true, delegatedRecognize: false },
+        requiresCredentials: false,
+      });
+
+      const result = await service.getSettings();
+
+      const cfProvider = result.providers.find((p) => p.provider === 'compreface');
+      expect(cfProvider!.baseUrl).toBe('http://env-compreface:9090');
+
+      // Restore
+      if (savedEnv === undefined) {
+        delete process.env.FACE_COMPREFACE_URL;
+      } else {
+        process.env.FACE_COMPREFACE_URL = savedEnv;
+      }
     });
   });
 
@@ -689,13 +783,55 @@ describe('FaceSettingsService', () => {
       await expect(service.resolveCredentials('compreface')).rejects.toThrow(/disabled/i);
     });
 
-    it('returns {} for human provider without touching prisma', async () => {
+    it('returns {} for keyless provider (human) when no DB row exists', async () => {
       mockRegistry.get.mockReturnValue({ requiresCredentials: false });
+      // The service checks for an optional baseUrl override row even for keyless providers.
+      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue(null);
 
       const result = await service.resolveCredentials('human');
 
       expect(result).toEqual({});
-      expect(mockPrisma.faceProviderCredential.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('returns {baseUrl} for keyless provider (compreface) when DB row has a custom baseUrl', async () => {
+      mockRegistry.get.mockReturnValue({ requiresCredentials: false });
+      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
+        id: 'cred-1',
+        provider: 'compreface',
+        encryptedKey: '',
+        last4: '',
+        baseUrl: 'http://custom-compreface:9999',
+        region: null,
+        enabled: true,
+        updatedByUserId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
+
+      const result = await service.resolveCredentials('compreface');
+
+      expect(result).toEqual({ baseUrl: 'http://custom-compreface:9999' });
+    });
+
+    it('returns {} for compreface when DB row exists but has no baseUrl (uses provider env/default)', async () => {
+      mockRegistry.get.mockReturnValue({ requiresCredentials: false });
+      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
+        id: 'cred-1',
+        provider: 'compreface',
+        encryptedKey: '',
+        last4: '',
+        baseUrl: null,
+        region: null,
+        enabled: true,
+        updatedByUserId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
+
+      const result = await service.resolveCredentials('compreface');
+
+      // No custom baseUrl stored — provider falls back to env/default
+      expect(result).toEqual({});
     });
   });
 
@@ -703,14 +839,52 @@ describe('FaceSettingsService', () => {
   // testProvider (human)
   // ---------------------------------------------------------------------------
   describe('testProvider — human provider', () => {
-    it('calls testConnection with {} for human provider (no prisma lookup)', async () => {
+    it('calls testConnection with {} for human provider when no DB row', async () => {
       const mockTestConnection = jest.fn().mockResolvedValue({ ok: true });
       mockRegistry.get.mockReturnValue({ requiresCredentials: false, testConnection: mockTestConnection });
+      // The service looks up an optional baseUrl override row even for keyless providers.
+      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue(null);
 
       await service.testProvider({ provider: 'human' });
 
       expect(mockTestConnection).toHaveBeenCalledWith({});
-      expect(mockPrisma.faceProviderCredential.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // testProvider (compreface — keyless)
+  // ---------------------------------------------------------------------------
+  describe('testProvider — compreface (keyless)', () => {
+    it('calls testConnection with {} when no credential row exists', async () => {
+      const mockTestConnection = jest.fn().mockResolvedValue({ ok: true });
+      mockRegistry.get.mockReturnValue({ requiresCredentials: false, testConnection: mockTestConnection });
+      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue(null);
+
+      const result = await service.testProvider({ provider: 'compreface' });
+
+      expect(mockTestConnection).toHaveBeenCalledWith({});
+      expect(result).toEqual({ ok: true });
+    });
+
+    it('calls testConnection with {baseUrl} when credential row has a custom baseUrl', async () => {
+      const mockTestConnection = jest.fn().mockResolvedValue({ ok: true });
+      mockRegistry.get.mockReturnValue({ requiresCredentials: false, testConnection: mockTestConnection });
+      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
+        id: 'cred-1',
+        provider: 'compreface',
+        encryptedKey: '',
+        last4: '',
+        baseUrl: 'http://compreface-custom:3000',
+        region: null,
+        enabled: true,
+        updatedByUserId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
+
+      await service.testProvider({ provider: 'compreface' });
+
+      expect(mockTestConnection).toHaveBeenCalledWith({ baseUrl: 'http://compreface-custom:3000' });
     });
   });
 

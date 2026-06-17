@@ -91,42 +91,26 @@ services:
       - app-network
 
   # ---------------------------------------------------------------------------
-  # CompreFace - Self-hosted face recognition sidecar (default face provider)
-  # NOTE: Uses its own bundled Postgres (compreface-db) — NOT the app database.
-  # Image tag: confirm 'exadel/compreface:latest' is the Mobilenet CPU build
-  # on https://hub.docker.com/r/exadel/compreface. If a specific tag like
-  # '1.2.0-mobilenet' is available, prefer it for reproducibility.
+  # CompreFace Core — Keyless ML engine sidecar (default face provider)
+  #
+  # Runs the bare CompreFace core ML container: RetinaFace detector +
+  # ArcFace MobileFaceNet calculator. No gateway, no admin UI, no Postgres,
+  # no API key. The API reaches it directly at http://compreface-core:3000
+  # on the shared app-network.
+  #
+  # Key endpoints used by the face provider:
+  #   GET  /status                                         → health check
+  #   POST /find_faces?face_plugins=calculator&det_prob_threshold=0.8
+  #        multipart field: file=<image>                  → bounding box + 128-d embedding
   # ---------------------------------------------------------------------------
-  compreface:
-    image: exadel/compreface:latest  # TODO: pin to specific Mobilenet tag
+  compreface-core:
+    image: exadel/compreface-core:1.2.0-mobilenet
     environment:
-      - POSTGRES_USER=compreface
-      - POSTGRES_PASSWORD=${COMPREFACE_DB_PASSWORD:-compreface_secret}
-      - POSTGRES_DB=compreface
-      - POSTGRES_URL=jdbc:postgresql://compreface-db:5432/compreface
-      - SPRING_PROFILES_ACTIVE=dev
-    ports:
-      - "8000:8000"
-    depends_on:
-      - compreface-db
+      - UWSGI_PROCESSES=1        # VPS tuning: single worker for shared CPU server
+      - UWSGI_THREADS=1
     networks:
       - app-network
-    # VPS tuning: limit open file descriptors for a shared CPU server
-    ulimits:
-      nofile:
-        soft: 65536
-        hard: 65536
-
-  compreface-db:
-    image: postgres:14-alpine
-    environment:
-      - POSTGRES_USER=compreface
-      - POSTGRES_PASSWORD=${COMPREFACE_DB_PASSWORD:-compreface_secret}
-      - POSTGRES_DB=compreface
-    volumes:
-      - compreface-db-data:/var/lib/postgresql/data
-    networks:
-      - app-network
+    # No ports exposed externally — the API reaches it via the docker network
 
 # =============================================================================
 # Networks
@@ -143,5 +127,4 @@ networks:
 # =============================================================================
 # Volumes
 # =============================================================================
-volumes:
-  compreface-db-data:
+# (No application-specific volumes in base config; compreface-core is stateless)

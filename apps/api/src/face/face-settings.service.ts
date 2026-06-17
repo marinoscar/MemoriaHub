@@ -90,13 +90,20 @@ export class FaceSettingsService {
       .filter(k => !this.registry.get(k).requiresCredentials)
       .map(k => {
         const reg = this.registry.get(k);
+        // For keyless providers with no DB row, expose the effective baseUrl
+        // so the UI can display/edit it. compreface resolves via
+        // FACE_COMPREFACE_URL env or its hard-coded docker-network default.
+        const effectiveBaseUrl =
+          k === 'compreface'
+            ? (process.env.FACE_COMPREFACE_URL ?? 'http://compreface-core:3000')
+            : null;
         return {
           provider: k,
           configured: true,
           enabled: true,
           requiresCredentials: false,
           last4: null,
-          baseUrl: null,
+          baseUrl: effectiveBaseUrl,
           region: null,
           capabilities: reg.capabilities,
         };
@@ -264,14 +271,29 @@ export class FaceSettingsService {
    * Resolve decrypted credentials for a face provider.
    * For internal use only — never returns keys to HTTP callers.
    *
-   * For providers with requiresCredentials === false (e.g. HumanProvider),
-   * returns an empty credential object without touching the DB.
+   * For providers with requiresCredentials === false (e.g. compreface, human):
+   *   - Check DB for an optional credential row that stores a custom baseUrl.
+   *   - If a row exists and is enabled, return its baseUrl (no apiKey needed).
+   *   - If no row exists, return an empty object — the provider will fall back
+   *     to FACE_COMPREFACE_URL or its hard-coded docker-network default.
+   *   - Never throw "not configured" for keyless providers.
+   *
+   * For providers with requiresCredentials === true (e.g. rekognition):
+   *   - A DB credential row MUST exist and be enabled.
    */
   async resolveCredentials(providerKey: string): Promise<FaceProviderCredentials> {
     // Validate that the provider key is known — registry.get throws for unknown keys.
     const provider = this.registry.get(providerKey);
 
     if (!provider.requiresCredentials) {
+      // Keyless provider: optionally read a stored baseUrl override from DB.
+      const cred = await this.prisma.faceProviderCredential.findUnique({
+        where: { provider: providerKey },
+      });
+      if (cred && cred.enabled && cred.baseUrl) {
+        return { baseUrl: cred.baseUrl };
+      }
+      // No row or no custom baseUrl — provider uses env/default fallback.
       return {};
     }
 

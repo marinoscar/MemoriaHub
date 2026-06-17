@@ -68,6 +68,10 @@ function FaceSettingsContent() {
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
   const [testLoading, setTestLoading] = useState(false);
 
+  // Per-provider card test state
+  const [perProviderTestResult, setPerProviderTestResult] = useState<Record<string, { ok: boolean; error?: string } | null>>({});
+  const [perProviderTestLoading, setPerProviderTestLoading] = useState<Record<string, boolean>>({});
+
   useEffect(() => {
     void fetchSettings();
   }, [fetchSettings]);
@@ -148,6 +152,22 @@ function FaceSettingsContent() {
       await fetchSettings();
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : 'Failed to remove credentials');
+    }
+  };
+
+  const handleTestProviderCard = async (provider: string) => {
+    setPerProviderTestLoading((prev) => ({ ...prev, [provider]: true }));
+    setPerProviderTestResult((prev) => ({ ...prev, [provider]: null }));
+    try {
+      const result = await testProvider(provider);
+      setPerProviderTestResult((prev) => ({ ...prev, [provider]: result }));
+    } catch (err) {
+      setPerProviderTestResult((prev) => ({
+        ...prev,
+        [provider]: { ok: false, error: err instanceof Error ? err.message : 'Test failed' },
+      }));
+    } finally {
+      setPerProviderTestLoading((prev) => ({ ...prev, [provider]: false }));
     }
   };
 
@@ -258,10 +278,123 @@ function FaceSettingsContent() {
             </Box>
 
             {providerConfig.requiresCredentials === false ? (
-              /* Keyless provider — no credentials to store */
-              <Alert severity="info" icon={false} sx={{ py: 0.5 }}>
-                No configuration required — runs in-process
-              </Alert>
+              /* Keyless provider */
+              providerConfig.provider === 'compreface' ? (
+                /* CompreFace: keyless but has an editable Service URL */
+                <Box>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Runs in the compreface-core container — no API key required.
+                  </Typography>
+                  <TextField
+                    label="Service URL"
+                    size="small"
+                    fullWidth
+                    value={providerBaseUrls[providerConfig.provider] ?? ''}
+                    onChange={(e) =>
+                      setProviderBaseUrls((prev) => ({
+                        ...prev,
+                        [providerConfig.provider]: e.target.value,
+                      }))
+                    }
+                    placeholder="http://compreface-core:3000"
+                    helperText="Override the default service URL. Leave as-is if using the bundled container."
+                    sx={{ mb: 2 }}
+                  />
+                  <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: 'center' }}>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={() => void handleSaveCredentials(providerConfig.provider)}
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={() => void handleRemoveCredentials(providerConfig.provider)}
+                    >
+                      Reset to default
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      disabled={perProviderTestLoading[providerConfig.provider]}
+                      startIcon={
+                        perProviderTestLoading[providerConfig.provider] ? (
+                          <CircularProgress size={14} />
+                        ) : undefined
+                      }
+                      onClick={() => void handleTestProviderCard(providerConfig.provider)}
+                    >
+                      Test connection
+                    </Button>
+                  </Stack>
+                  {perProviderTestResult[providerConfig.provider] != null && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 1 }}>
+                      {perProviderTestResult[providerConfig.provider]!.ok ? (
+                        <CheckCircleIcon color="success" fontSize="small" />
+                      ) : (
+                        <ErrorIcon color="error" fontSize="small" />
+                      )}
+                      <Typography
+                        variant="body2"
+                        color={
+                          perProviderTestResult[providerConfig.provider]!.ok
+                            ? 'success.main'
+                            : 'error.main'
+                        }
+                      >
+                        {perProviderTestResult[providerConfig.provider]!.ok
+                          ? 'Running'
+                          : (perProviderTestResult[providerConfig.provider]!.error ?? 'Test failed')}
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+              ) : (
+                /* Other keyless providers (human): no config at all */
+                <Box>
+                  <Alert severity="info" icon={false} sx={{ py: 0.5, mb: 1 }}>
+                    No configuration required — runs in-process
+                  </Alert>
+                  <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: 'center' }}>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      disabled={perProviderTestLoading[providerConfig.provider]}
+                      startIcon={
+                        perProviderTestLoading[providerConfig.provider] ? (
+                          <CircularProgress size={14} />
+                        ) : undefined
+                      }
+                      onClick={() => void handleTestProviderCard(providerConfig.provider)}
+                    >
+                      Test connection
+                    </Button>
+                  </Stack>
+                  {perProviderTestResult[providerConfig.provider] != null && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 1 }}>
+                      {perProviderTestResult[providerConfig.provider]!.ok ? (
+                        <CheckCircleIcon color="success" fontSize="small" />
+                      ) : (
+                        <ErrorIcon color="error" fontSize="small" />
+                      )}
+                      <Typography
+                        variant="body2"
+                        color={
+                          perProviderTestResult[providerConfig.provider]!.ok
+                            ? 'success.main'
+                            : 'error.main'
+                        }
+                      >
+                        {perProviderTestResult[providerConfig.provider]!.ok
+                          ? 'Running'
+                          : (perProviderTestResult[providerConfig.provider]!.error ?? 'Test failed')}
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+              )
             ) : (
               <>
                 {/* Current key (masked) */}
