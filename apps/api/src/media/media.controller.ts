@@ -442,6 +442,7 @@ export class MediaController {
   @ApiQuery({ name: 'sourceDeviceId', required: false, type: String, description: 'Exact source device ID' })
   @ApiQuery({ name: 'sourceDeviceName', required: false, type: String, description: 'Source device name (contains, case-insensitive)' })
   @ApiQuery({ name: 'missingGeo', required: false, type: Boolean, description: 'true = missing GPS, false = has GPS' })
+  @ApiQuery({ name: 'personId', required: false, type: String, format: 'uuid', description: 'Filter media to items containing faces assigned to this person' })
   @ApiResponse({ status: 200, description: 'Paginated media list' })
   async listMedia(
     @Query() query: MediaQueryDto,
