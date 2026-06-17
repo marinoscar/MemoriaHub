@@ -297,6 +297,93 @@ export class FaceDetectionController {
   }
 
   // --------------------------------------------------------------------------
+  // DELETE /api/face/biometrics?circleId=
+  // --------------------------------------------------------------------------
+
+  @Delete('face/biometrics')
+  @Auth({ permissions: [PERMISSIONS.FACE_SETTINGS_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Delete ALL biometric data for a circle (GDPR right to erase)',
+    description:
+      'Permanently deletes all Face rows, Person rows, MediaFaceStatus rows, and pending FaceJob rows ' +
+      'for the specified circle. Also sets faceRecognitionEnabled=false. ' +
+      'Requires system Admin OR circle_admin role. THIS ACTION IS IRREVERSIBLE.',
+  })
+  @ApiQuery({ name: 'circleId', required: true, type: String, description: 'Circle ID' })
+  @ApiResponse({ status: 200, description: 'Biometric data deleted' })
+  @ApiResponse({ status: 400, description: 'Missing circleId parameter' })
+  @ApiResponse({ status: 403, description: 'Access denied (Admin or circle_admin required)' })
+  @ApiResponse({ status: 404, description: 'Circle not found' })
+  async deleteAllBiometrics(
+    @Query('circleId') circleId: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    if (!circleId) {
+      throw new BadRequestException('circleId query parameter is required');
+    }
+
+    // Require circle_admin (super-admin bypasses via isSuperAdmin)
+    await this.circleMembershipService.assertCircleAccess(
+      user.id,
+      circleId,
+      user.permissions,
+      'circle_admin' as CircleRole,
+    );
+
+    // Execute in a transaction
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Count before deletion for the response
+      const [faceCount, personCount] = await Promise.all([
+        tx.face.count({ where: { circleId } }),
+        tx.person.count({ where: { circleId } }),
+      ]);
+
+      // 1. Delete all Face rows first (before Person to avoid FK violations on face.personId)
+      await tx.face.deleteMany({ where: { circleId } });
+
+      // 2. Delete all Person rows (hard delete — faces already removed)
+      await tx.person.deleteMany({ where: { circleId } });
+
+      // 3. Delete all FaceJob rows for the circle
+      await tx.faceJob.deleteMany({ where: { circleId } });
+
+      // 4. Delete all MediaFaceStatus rows (via mediaItem.circleId join)
+      await tx.mediaFaceStatus.deleteMany({
+        where: {
+          mediaItem: { circleId },
+        },
+      });
+
+      // 5. Set faceRecognitionEnabled = false
+      await tx.circle.update({
+        where: { id: circleId },
+        data: { faceRecognitionEnabled: false },
+      });
+
+      // 6. Audit
+      await tx.auditEvent.create({
+        data: {
+          actorUserId: user.id,
+          action: 'face:biometrics_delete',
+          targetType: 'circle',
+          targetId: circleId,
+          meta: { deletedFaces: faceCount, deletedPeople: personCount } as any,
+        },
+      });
+
+      return { deletedFaces: faceCount, deletedPeople: personCount };
+    });
+
+    this.logger.log(
+      `Biometrics deleted for circle ${circleId} by user ${user.id}: ` +
+        `${result.deletedFaces} face(s), ${result.deletedPeople} person(s)`,
+    );
+
+    return { data: result };
+  }
+
+  // --------------------------------------------------------------------------
   // Private helpers
   // --------------------------------------------------------------------------
 
