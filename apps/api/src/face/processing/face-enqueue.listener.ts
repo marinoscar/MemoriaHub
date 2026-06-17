@@ -51,17 +51,26 @@ export class FaceEnqueueListener {
       return;
     }
 
-    // 2. Check FACE_AUTO_DETECT env (default: true)
-    // TODO Phase 4: replace with per-circle opt-in flag
+    // 2. Check global kill-switch (FACE_AUTO_DETECT=false disables all auto-enqueue)
     const autoDetect = process.env['FACE_AUTO_DETECT'] ?? 'true';
     if (autoDetect === 'false') {
+      this.logger.debug(`FACE_AUTO_DETECT=false; skipping face enqueue for MediaItem ${mediaItem.id}`);
+      return;
+    }
+
+    // 3. Check per-circle opt-in flag (default: false — biometric data requires explicit consent)
+    const circle = await this.prisma.circle.findUnique({
+      where: { id: mediaItem.circleId },
+      select: { faceRecognitionEnabled: true },
+    });
+    if (!circle?.faceRecognitionEnabled) {
       this.logger.debug(
-        `FACE_AUTO_DETECT=false; skipping face enqueue for MediaItem ${mediaItem.id}`,
+        `Circle ${mediaItem.circleId} has faceRecognitionEnabled=false; skipping face enqueue for MediaItem ${mediaItem.id}`,
       );
       return;
     }
 
-    // 3. Idempotency: skip if a pending/running job already exists
+    // 4. Idempotency: skip if a pending/running job already exists
     const existingJob = await this.prisma.faceJob.findFirst({
       where: {
         mediaItemId: mediaItem.id,
@@ -77,7 +86,7 @@ export class FaceEnqueueListener {
       return;
     }
 
-    // 4. Create FaceJob
+    // 5. Create FaceJob
     const job = await this.prisma.faceJob.create({
       data: {
         mediaItemId: mediaItem.id,
@@ -88,7 +97,7 @@ export class FaceEnqueueListener {
       },
     });
 
-    // 5. Upsert MediaFaceStatus to pending
+    // 6. Upsert MediaFaceStatus to pending
     await this.prisma.mediaFaceStatus.upsert({
       where: { mediaItemId: mediaItem.id },
       create: {
