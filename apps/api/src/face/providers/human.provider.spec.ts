@@ -7,20 +7,34 @@
  * Singleton note: humanInstance is module-level. After the first successful
  * getHuman() call the cached instance is re-used for the lifetime of the test
  * file. Tests that need a *fresh* module (e.g. simulating init failure) use
- * jest.isolateModules + jest.doMock.
+ * jest.isolateModules / jest.doMock.
+ *
+ * Mock strategy: the provider loads @vladmandic/human's WASM build via an
+ * ABSOLUTE path (require.resolve('@vladmandic/human') → dirname → node-wasm.js)
+ * to bypass the package's exports map. A virtual mock keyed to the bare specifier
+ * string is never invoked for that absolute require. We therefore compute the
+ * same absolute path here and use jest.doMock (not hoisted) so it intercepts
+ * the exact path the provider uses.
  */
 
 // ---------------------------------------------------------------------------
-// Top-level mocks (hoisted by Jest before any import)
+// Compute the absolute path the provider will require at module load time.
+// We derive it the same way human.provider.ts does:
+//   require.resolve('@vladmandic/human') → .../dist/human.node.js
+//   dirname(^) + '/human.node-wasm.js'  → .../dist/human.node-wasm.js
 // ---------------------------------------------------------------------------
 
-jest.mock('@tensorflow/tfjs', () => ({
-  setBackend: jest.fn().mockResolvedValue(undefined),
-  ready: jest.fn().mockResolvedValue(undefined),
-  tensor3d: jest.fn().mockReturnValue({ dispose: jest.fn() }),
-}), { virtual: true });
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const nodePath = require('path') as typeof import('path');
+const humanWasmAbsPath = nodePath.join(
+  nodePath.dirname(require.resolve('@vladmandic/human')),
+  'human.node-wasm.js',
+);
 
-jest.mock('@tensorflow/tfjs-backend-wasm', () => ({}), { virtual: true });
+// ---------------------------------------------------------------------------
+// Mock instances — declared before doMock calls so the factory closures
+// can reference them. (jest.doMock is NOT hoisted so normal closure rules apply.)
+// ---------------------------------------------------------------------------
 
 const mockHumanDetect = jest.fn();
 const mockHumanLoad = jest.fn().mockResolvedValue(undefined);
@@ -31,28 +45,51 @@ const MockHumanClass = jest.fn().mockImplementation(() => ({
   detect: mockHumanDetect,
 }));
 
-jest.mock('@vladmandic/human/dist/human.node-wasm.js', () => ({
-  Human: MockHumanClass,
-  default: MockHumanClass,
-}), { virtual: true });
-
 const mockSharpInstance = {
   ensureAlpha: jest.fn().mockReturnThis(),
   raw: jest.fn().mockReturnThis(),
   toBuffer: jest.fn(),
 };
-jest.mock('sharp', () => jest.fn().mockReturnValue(mockSharpInstance));
 
 // ---------------------------------------------------------------------------
-// Import after mocks
+// Register mocks via jest.doMock (not hoisted; fires before the first require
+// of the module under test, which happens in beforeAll below).
 // ---------------------------------------------------------------------------
 
-import { HumanProvider } from './human.provider';
+jest.doMock('@tensorflow/tfjs', () => ({
+  setBackend: jest.fn().mockResolvedValue(undefined),
+  ready: jest.fn().mockResolvedValue(undefined),
+  tensor3d: jest.fn().mockReturnValue({ dispose: jest.fn() }),
+}), { virtual: true });
+
+jest.doMock('@tensorflow/tfjs-backend-wasm', () => ({}), { virtual: true });
+
+// Mock the WASM build at its resolved absolute path — this is what the provider
+// actually requires at module load time.
+jest.doMock(humanWasmAbsPath, () => ({
+  Human: MockHumanClass,
+  default: MockHumanClass,
+}));
+
+jest.doMock('sharp', () => jest.fn().mockReturnValue(mockSharpInstance));
+
+// ---------------------------------------------------------------------------
+// Import provider AFTER mocks are registered (dynamic require; NOT a static
+// top-level import, because static imports are hoisted above jest.doMock calls).
+// ---------------------------------------------------------------------------
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+let HumanProvider: typeof import('./human.provider').HumanProvider;
+
+beforeAll(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  ({ HumanProvider } = require('./human.provider') as typeof import('./human.provider'));
+});
 
 // ---------------------------------------------------------------------------
 
 describe('HumanProvider', () => {
-  let provider: HumanProvider;
+  let provider: InstanceType<typeof HumanProvider>;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -128,14 +165,16 @@ describe('HumanProvider', () => {
         tensor3d: jest.fn().mockReturnValue({ dispose: jest.fn() }),
       }), { virtual: true });
       jest.doMock('@tensorflow/tfjs-backend-wasm', () => ({}), { virtual: true });
-      jest.doMock('@vladmandic/human/dist/human.node-wasm.js', () => ({
+
+      // Must use the absolute path here too — same reason as the outer mock.
+      jest.doMock(humanWasmAbsPath, () => ({
         Human: jest.fn().mockImplementation(() => ({
           load: jest.fn().mockResolvedValue(undefined),
           warmup: jest.fn().mockResolvedValue(undefined),
           detect: jest.fn(),
         })),
         default: jest.fn(),
-      }), { virtual: true });
+      }));
       jest.doMock('sharp', () =>
         jest.fn().mockReturnValue({
           ensureAlpha: jest.fn().mockReturnThis(),

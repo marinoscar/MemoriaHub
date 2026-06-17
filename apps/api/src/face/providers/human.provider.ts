@@ -54,14 +54,20 @@ const tf: any = require('@tensorflow/tfjs');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 require('@tensorflow/tfjs-backend-wasm');
 
-// Load Human from the WASM build by requiring the explicit file path.
-// `require('@vladmandic/human')` resolves via the package's exports-map
-// "require" entry to dist/human.node.js, which hard-requires
-// @tensorflow/tfjs-node — a native glibc binary unavailable on Alpine (musl).
-// Bypassing the exports map by requiring the file path directly loads the
-// pure-JS + WASM build that runs on any libc.
+// Load Human from the WASM build. The package's "node" export condition maps to
+// dist/human.node.js, which hard-requires @tensorflow/tfjs-node — a native glibc
+// binary unavailable on Alpine (musl). The package's dist/* subpath keys in
+// `exports` lack the required leading "./", so a bare
+// `require('@vladmandic/human/dist/human.node-wasm.js')` fails at module load
+// with ERR_PACKAGE_PATH_NOT_EXPORTED. We therefore resolve the package main to
+// its absolute dist dir and require the node-wasm build by ABSOLUTE path, which
+// bypasses the exports map and loads the pure-JS + WASM build (no tfjs-node;
+// runs on any libc).
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const humanPkgMain: string = require.resolve('@vladmandic/human');
+const humanWasmPath = path.join(path.dirname(humanPkgMain), 'human.node-wasm.js');
 // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
-const humanWasmModule: any = require('@vladmandic/human/dist/human.node-wasm.js');
+const humanWasmModule: any = require(humanWasmPath);
 // node-wasm exports Human as a named export; fall back through .default chain
 // for forward compatibility.
 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
@@ -75,6 +81,7 @@ const HumanClass: new (config: unknown) => HumanInstance =
 interface FaceResult {
   box: [number, number, number, number];
   faceScore?: number;
+  boxScore?: number;
   score?: number;
   embedding?: Float32Array | number[];
 }
@@ -363,7 +370,9 @@ export class HumanProvider implements FaceProvider {
           w: fw / width,
           h: fh / height,
         },
-        confidence: face.faceScore ?? face.score ?? undefined,
+        // Human keeps the detector confidence in boxScore; faceScore is 0 in
+        // the description-only pipeline. Take the first non-zero score.
+        confidence: face.score || face.boxScore || face.faceScore || undefined,
         embedding,
       };
     });
