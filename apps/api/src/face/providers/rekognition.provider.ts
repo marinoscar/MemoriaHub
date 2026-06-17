@@ -37,6 +37,7 @@ export class RekognitionProvider implements FaceProvider {
   };
 
   readonly modelVersion = 'rekognition-2023';
+  readonly requiresCredentials = true;
 
   // -------------------------------------------------------------------------
   // detect

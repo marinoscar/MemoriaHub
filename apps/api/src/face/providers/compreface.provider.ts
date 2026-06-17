@@ -70,6 +70,7 @@ export class ComprefaceProvider implements FaceProvider {
   };
 
   readonly modelVersion = 'arcface-r100-v1';
+  readonly requiresCredentials = true;
 
   // -------------------------------------------------------------------------
   // detect

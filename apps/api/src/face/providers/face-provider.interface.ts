@@ -42,6 +42,8 @@ export interface FaceProvider {
   readonly capabilities: FaceCapabilities;
   /** Model/algorithm version string, used for staleness detection */
   readonly modelVersion: string;
+  /** Whether this provider requires stored encrypted credentials to operate */
+  readonly requiresCredentials: boolean;
 
   /** Detect all faces in an image and return bounding boxes + optional embeddings */
   detect(
