@@ -48,6 +48,9 @@ model User {
   // AI Search relations
   aiCredentialsUpdated      AiProviderCredential[] @relation("AiCredentialUpdater")
   searchConversations       SearchConversation[]   @relation("ConversationUser")
+  // Face Recognition relations
+  faceCredentialsUpdated    FaceProviderCredential[] @relation("FaceCredentialUpdater")
+  peopleAdded               Person[]               @relation("PersonAddedBy")
 
   @@map("users")
 }
@@ -356,6 +359,10 @@ model Circle {
   albums              Album[]
   tags                Tag[]
   searchConversations SearchConversation[] @relation("ConversationCircle")
+  // Face Recognition relations
+  people              Person[]
+  faces               Face[]
+  faceJobs            FaceJob[]
 
   @@index([ownerId])
   @@map("circles")
@@ -486,6 +493,10 @@ model MediaItem {
   // --- Relations ---
   albumItems AlbumItem[]
   mediaTags  MediaTag[]
+  // Face Recognition relations
+  faces      Face[]
+  faceJobs   FaceJob[]
+  faceStatus MediaFaceStatus?
 
   @@index([circleId])
   @@index([addedById])
@@ -619,4 +630,140 @@ model SearchMessage {
 
   @@index([conversationId])
   @@map("search_messages")
+}
+
+// =============================================================================
+// Face Recognition
+// =============================================================================
+
+enum FaceJobStatus {
+  pending
+  running
+  succeeded
+  failed
+}
+
+enum FaceJobReason {
+  upload
+  rerun
+  backfill
+}
+
+enum MediaFaceStatusType {
+  not_processed
+  pending
+  processing
+  processed
+  failed
+  no_faces
+}
+
+model FaceProviderCredential {
+  id              String   @id @default(uuid()) @db.Uuid
+  provider        String   @unique
+  encryptedKey    String   @map("encrypted_key")
+  baseUrl         String?  @map("base_url")
+  region          String?
+  last4           String   @map("last4")
+  enabled         Boolean  @default(true)
+  updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  updatedByUser User? @relation("FaceCredentialUpdater", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@map("face_provider_credentials")
+}
+
+model Person {
+  id            String    @id @default(uuid()) @db.Uuid
+  circleId      String    @map("circle_id") @db.Uuid
+  name          String?
+  addedById     String    @map("added_by_id") @db.Uuid
+  coverFaceId   String?   @map("cover_face_id") @db.Uuid
+  mergedIntoId  String?   @map("merged_into_id") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz
+
+  // Relations
+  circle      Circle  @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  addedBy     User    @relation("PersonAddedBy", fields: [addedById], references: [id])
+  coverFace   Face?   @relation("PersonCoverFace", fields: [coverFaceId], references: [id], onDelete: SetNull)
+  mergedInto  Person? @relation("PersonMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedFrom  Person[] @relation("PersonMerge")
+  faces       Face[]  @relation("PersonFaces")
+
+  @@index([circleId])
+  @@index([mergedIntoId])
+  @@map("people")
+}
+
+model Face {
+  id               String   @id @default(uuid()) @db.Uuid
+  mediaItemId      String   @map("media_item_id") @db.Uuid
+  circleId         String   @map("circle_id") @db.Uuid
+  personId         String?  @map("person_id") @db.Uuid
+  boundingBox      Json     @map("bounding_box")
+  confidence       Float?
+  landmarks        Json?
+  embedding        Float[]
+  externalFaceId   String?  @map("external_face_id")
+  providerKey      String   @map("provider_key")
+  modelVersion     String   @map("model_version")
+  manuallyAssigned Boolean  @default(false) @map("manually_assigned")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  mediaItem    MediaItem  @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  circle       Circle     @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  person       Person?    @relation("PersonFaces", fields: [personId], references: [id], onDelete: SetNull)
+  coverForPeople Person[] @relation("PersonCoverFace")
+
+  @@index([circleId])
+  @@index([mediaItemId])
+  @@index([personId])
+  @@index([externalFaceId])
+  @@map("faces")
+}
+
+model FaceJob {
+  id           String        @id @default(uuid()) @db.Uuid
+  mediaItemId  String        @map("media_item_id") @db.Uuid
+  circleId     String        @map("circle_id") @db.Uuid
+  status       FaceJobStatus @default(pending)
+  reason       FaceJobReason
+  providerKey  String?       @map("provider_key")
+  modelVersion String?       @map("model_version")
+  attempts     Int           @default(0)
+  lastError    String?       @map("last_error")
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  startedAt    DateTime?     @map("started_at") @db.Timestamptz
+  finishedAt   DateTime?     @map("finished_at") @db.Timestamptz
+
+  // Relations
+  mediaItem MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  circle    Circle    @relation(fields: [circleId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([mediaItemId])
+  @@map("face_jobs")
+}
+
+model MediaFaceStatus {
+  id          String              @id @default(uuid()) @db.Uuid
+  mediaItemId String              @unique @map("media_item_id") @db.Uuid
+  status      MediaFaceStatusType @default(not_processed)
+  providerKey String?             @map("provider_key")
+  modelVersion String?            @map("model_version")
+  faceCount   Int                 @default(0) @map("face_count")
+  processedAt DateTime?           @map("processed_at") @db.Timestamptz
+  lastError   String?             @map("last_error")
+  updatedAt   DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  mediaItem MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+
+  @@map("media_face_status")
 }
