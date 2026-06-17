@@ -22,6 +22,7 @@ import {
   Backup as BackupIcon,
   Search as SearchIcon,
   SmartToy as AiIcon,
+  Face as FaceIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -104,6 +105,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       label: 'AI Settings',
       icon: <AiIcon />,
       path: '/admin/ai-settings',
+      visible: isAdmin,
+    },
+    {
+      label: 'Face Settings',
+      icon: <FaceIcon />,
+      path: '/admin/face-settings',
       visible: isAdmin,
     },
   ];
