@@ -10,12 +10,14 @@ import { Injectable } from '@nestjs/common';
 import type { FaceProvider } from './face-provider.interface';
 import { ComprefaceProvider } from './compreface.provider';
 import { RekognitionProvider } from './rekognition.provider';
+import { HumanProvider } from './human.provider';
 
 @Injectable()
 export class FaceProviderRegistry {
   private readonly providers = new Map<string, FaceProvider>([
     ['compreface', new ComprefaceProvider()],
     ['rekognition', new RekognitionProvider()],
+    ['human', new HumanProvider()],
   ]);
 
   get(key: string): FaceProvider {

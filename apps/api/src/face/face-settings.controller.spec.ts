@@ -4,6 +4,31 @@
  * Verifies that each handler delegates correctly to FaceSettingsService.
  * No real HTTP, no database — pure delegation tests.
  */
+
+// Stub Docker-only packages loaded transitively via face-provider.registry.
+// { virtual: true } is required for packages not installed locally.
+jest.mock('@tensorflow/tfjs', () => ({
+  setBackend: jest.fn().mockResolvedValue(undefined),
+  ready: jest.fn().mockResolvedValue(undefined),
+  tensor3d: jest.fn().mockReturnValue({ dispose: jest.fn() }),
+}), { virtual: true });
+jest.mock('@tensorflow/tfjs-backend-wasm', () => ({}), { virtual: true });
+jest.mock('@vladmandic/human/dist/human.node-wasm.js', () => ({
+  Human: jest.fn().mockImplementation(() => ({
+    load: jest.fn().mockResolvedValue(undefined),
+    warmup: jest.fn().mockResolvedValue(undefined),
+    detect: jest.fn().mockResolvedValue({ face: [] }),
+  })),
+  default: jest.fn(),
+}), { virtual: true });
+jest.mock('sharp', () =>
+  jest.fn().mockReturnValue({
+    ensureAlpha: jest.fn().mockReturnThis(),
+    raw: jest.fn().mockReturnThis(),
+    toBuffer: jest.fn().mockResolvedValue({ data: Buffer.alloc(0), info: { width: 1, height: 1 } }),
+  }),
+);
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { FaceSettingsController } from './face-settings.controller';
 import { FaceSettingsService } from './face-settings.service';

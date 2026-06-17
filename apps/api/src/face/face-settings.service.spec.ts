@@ -3,7 +3,36 @@
  *
  * IMPORTANT: SECRETS_ENCRYPTION_KEY must be set for encrypt/decrypt to work.
  * We set it in beforeAll and clean up in afterAll.
+ *
+ * The face provider registry imports optional Docker-only packages
+ * (@tensorflow/tfjs, @vladmandic/human). We stub them here so the test file
+ * compiles and runs without those packages being installed locally.
  */
+
+// Stub Docker-only optional packages before the registry module loads them.
+// { virtual: true } is required for packages not installed locally.
+jest.mock('@tensorflow/tfjs', () => ({
+  setBackend: jest.fn().mockResolvedValue(undefined),
+  ready: jest.fn().mockResolvedValue(undefined),
+  tensor3d: jest.fn().mockReturnValue({ dispose: jest.fn() }),
+}), { virtual: true });
+jest.mock('@tensorflow/tfjs-backend-wasm', () => ({}), { virtual: true });
+jest.mock('@vladmandic/human/dist/human.node-wasm.js', () => ({
+  Human: jest.fn().mockImplementation(() => ({
+    load: jest.fn().mockResolvedValue(undefined),
+    warmup: jest.fn().mockResolvedValue(undefined),
+    detect: jest.fn().mockResolvedValue({ face: [] }),
+  })),
+  default: jest.fn(),
+}), { virtual: true });
+jest.mock('sharp', () =>
+  jest.fn().mockReturnValue({
+    ensureAlpha: jest.fn().mockReturnThis(),
+    raw: jest.fn().mockReturnThis(),
+    toBuffer: jest.fn().mockResolvedValue({ data: Buffer.alloc(0), info: { width: 1, height: 1 } }),
+  }),
+);
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { FaceSettingsService } from './face-settings.service';
@@ -39,7 +68,7 @@ describe('FaceSettingsService', () => {
     mockPrisma = createMockPrismaService();
     mockRegistry = {
       get: jest.fn(),
-      keys: jest.fn().mockReturnValue(['compreface', 'rekognition']),
+      keys: jest.fn().mockReturnValue(['compreface', 'rekognition', 'human']),
     };
     mockSystemSettings = {
       getSettings: jest.fn(),
@@ -268,6 +297,7 @@ describe('FaceSettingsService', () => {
       mockRegistry.keys.mockReturnValue(['compreface', 'rekognition']);
       mockRegistry.get.mockReturnValue({
         capabilities: { detect: true, embed: true, delegatedRecognize: false },
+        requiresCredentials: true,
       });
 
       const result = await service.getSettings();
@@ -316,6 +346,62 @@ describe('FaceSettingsService', () => {
 
       const cf = result.providers.find((p) => p.provider === 'compreface');
       expect(cf?.capabilities).toEqual(expectedCaps);
+    });
+
+    // ---- human (keyless) provider tests ------------------------------------
+
+    it('includes human in providers (not knownProviders) with configured:true, requiresCredentials:false', async () => {
+      mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
+      mockSystemSettings.getSettings.mockResolvedValue({ face: null });
+      mockRegistry.keys.mockReturnValue(['compreface', 'rekognition', 'human']);
+      mockRegistry.get.mockImplementation((key: string) => {
+        if (key === 'human') {
+          return { capabilities: { detect: true, embed: true, delegatedRecognize: false }, requiresCredentials: false };
+        }
+        return { capabilities: { detect: true, embed: true, delegatedRecognize: false }, requiresCredentials: true };
+      });
+
+      const result = await service.getSettings();
+
+      const humanProvider = result.providers.find((p) => p.provider === 'human');
+      expect(humanProvider).toBeDefined();
+      expect(humanProvider!.configured).toBe(true);
+      expect(humanProvider!.enabled).toBe(true);
+      expect(humanProvider!.requiresCredentials).toBe(false);
+    });
+
+    it('does NOT include human in knownProviders', async () => {
+      mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
+      mockSystemSettings.getSettings.mockResolvedValue({ face: null });
+      mockRegistry.keys.mockReturnValue(['compreface', 'rekognition', 'human']);
+      mockRegistry.get.mockImplementation((key: string) => {
+        if (key === 'human') {
+          return { capabilities: { detect: true, embed: true, delegatedRecognize: false }, requiresCredentials: false };
+        }
+        return { capabilities: { detect: true, embed: true, delegatedRecognize: false }, requiresCredentials: true };
+      });
+
+      const result = await service.getSettings();
+
+      const humanInKnown = result.knownProviders.find((p) => p.provider === 'human');
+      expect(humanInKnown).toBeUndefined();
+    });
+
+    it('includes compreface and rekognition in knownProviders with requiresCredentials:true when not configured', async () => {
+      mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
+      mockSystemSettings.getSettings.mockResolvedValue({ face: null });
+      mockRegistry.keys.mockReturnValue(['compreface', 'rekognition', 'human']);
+      mockRegistry.get.mockImplementation((key: string) => {
+        if (key === 'human') {
+          return { capabilities: { detect: true, embed: true, delegatedRecognize: false }, requiresCredentials: false };
+        }
+        return { capabilities: { detect: true, embed: true, delegatedRecognize: false }, requiresCredentials: true };
+      });
+
+      const result = await service.getSettings();
+
+      expect(result.knownProviders.map((p) => p.provider)).toContain('compreface');
+      expect(result.knownProviders.map((p) => p.provider)).toContain('rekognition');
     });
   });
 
@@ -374,7 +460,7 @@ describe('FaceSettingsService', () => {
       } as any);
 
       const mockTestConnection = jest.fn().mockResolvedValue({ ok: true });
-      mockRegistry.get.mockReturnValue({ testConnection: mockTestConnection });
+      mockRegistry.get.mockReturnValue({ testConnection: mockTestConnection, requiresCredentials: true });
 
       const result = await service.testProvider({ provider: 'compreface' });
 
@@ -401,7 +487,7 @@ describe('FaceSettingsService', () => {
       } as any);
 
       const mockTestConnection = jest.fn().mockResolvedValue({ ok: true });
-      mockRegistry.get.mockReturnValue({ testConnection: mockTestConnection });
+      mockRegistry.get.mockReturnValue({ testConnection: mockTestConnection, requiresCredentials: true });
 
       const result = await service.testProvider({ provider: 'compreface' });
       expect(result).toEqual({ ok: true });
@@ -423,7 +509,7 @@ describe('FaceSettingsService', () => {
       } as any);
 
       const mockTestConnection = jest.fn().mockResolvedValue({ ok: false, error: 'Unauthorized' });
-      mockRegistry.get.mockReturnValue({ testConnection: mockTestConnection });
+      mockRegistry.get.mockReturnValue({ testConnection: mockTestConnection, requiresCredentials: true });
 
       const result = await service.testProvider({ provider: 'compreface' });
       expect(result).toEqual({ ok: false, error: 'Unauthorized' });
@@ -431,13 +517,11 @@ describe('FaceSettingsService', () => {
 
     it('throws when resolveCredentials throws (unconfigured provider)', async () => {
       mockPrisma.faceProviderCredential.findUnique.mockResolvedValue(null);
+      mockRegistry.get.mockReturnValue({ requiresCredentials: true, testConnection: jest.fn() });
 
       await expect(
         service.testProvider({ provider: 'compreface' }),
       ).rejects.toThrow(BadRequestException);
-
-      // testConnection should never be called
-      expect(mockRegistry.get).not.toHaveBeenCalled();
     });
   });
 
@@ -489,6 +573,12 @@ describe('FaceSettingsService', () => {
   // resolveCredentials
   // ---------------------------------------------------------------------------
   describe('resolveCredentials', () => {
+    beforeEach(() => {
+      // All credentialed-provider tests need requiresCredentials:true so the
+      // service proceeds to the DB lookup path instead of returning {} immediately.
+      mockRegistry.get.mockReturnValue({ requiresCredentials: true });
+    });
+
     it('decrypts the stored key correctly (round-trip)', async () => {
       const realPlaintext = 'real-face-api-key-for-test';
       const encryptedValue = encryptSecret(realPlaintext);
@@ -597,6 +687,56 @@ describe('FaceSettingsService', () => {
       } as any);
 
       await expect(service.resolveCredentials('compreface')).rejects.toThrow(/disabled/i);
+    });
+
+    it('returns {} for human provider without touching prisma', async () => {
+      mockRegistry.get.mockReturnValue({ requiresCredentials: false });
+
+      const result = await service.resolveCredentials('human');
+
+      expect(result).toEqual({});
+      expect(mockPrisma.faceProviderCredential.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // testProvider (human)
+  // ---------------------------------------------------------------------------
+  describe('testProvider — human provider', () => {
+    it('calls testConnection with {} for human provider (no prisma lookup)', async () => {
+      const mockTestConnection = jest.fn().mockResolvedValue({ ok: true });
+      mockRegistry.get.mockReturnValue({ requiresCredentials: false, testConnection: mockTestConnection });
+
+      await service.testProvider({ provider: 'human' });
+
+      expect(mockTestConnection).toHaveBeenCalledWith({});
+      expect(mockPrisma.faceProviderCredential.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // setDetectionFeature (human)
+  // ---------------------------------------------------------------------------
+  describe('setDetectionFeature — human provider', () => {
+    it('succeeds for human provider (no credential row needed)', async () => {
+      mockSystemSettings.patchSettings.mockResolvedValue(undefined);
+
+      const result = await service.setDetectionFeature(
+        { provider: 'human', model: 'human-faceres-1024' },
+        'user-1',
+      );
+
+      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          face: {
+            features: {
+              detection: { provider: 'human', model: 'human-faceres-1024' },
+            },
+          },
+        }),
+        'user-1',
+      );
+      expect(result).toEqual({ provider: 'human', model: 'human-faceres-1024' });
     });
   });
 

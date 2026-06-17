@@ -345,4 +345,102 @@ describe('FaceSettingsPage', () => {
       expect(screen.getByRole('heading', { name: /face settings/i })).toBeInTheDocument();
     });
   });
+
+  // -------------------------------------------------------------------------
+  describe('Keyless provider (human)', () => {
+    const humanProvider = {
+      provider: 'human',
+      configured: true,
+      enabled: true,
+      requiresCredentials: false,
+      last4: null,
+      baseUrl: null,
+      region: null,
+      capabilities: { detect: true, embed: true, delegatedRecognize: false },
+    };
+
+    it('shows "No configuration required" alert and no API key input for keyless provider', () => {
+      mockUseFaceSettings.mockReturnValue({
+        ...defaultSettingsMock(),
+        settings: {
+          ...defaultSettingsMock().settings,
+          providers: [humanProvider],
+          knownProviders: [],
+        },
+      } as any);
+
+      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByText(/no configuration required/i)).toBeInTheDocument();
+      // The "New API Key" text field should NOT be rendered for a keyless provider
+      expect(screen.queryByLabelText(/new api key/i)).not.toBeInTheDocument();
+    });
+
+    it('does not render Remove credential button for keyless provider', () => {
+      mockUseFaceSettings.mockReturnValue({
+        ...defaultSettingsMock(),
+        settings: {
+          ...defaultSettingsMock().settings,
+          providers: [humanProvider],
+          knownProviders: [],
+          features: { detection: { provider: null, model: null } },
+        },
+      } as any);
+
+      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      // The "Remove" button only appears for credentialed configured providers — not for keyless ones
+      expect(screen.queryByRole('button', { name: /remove/i })).not.toBeInTheDocument();
+      // The credential-section "New API Key" input should not exist
+      expect(screen.queryByLabelText(/new api key/i)).not.toBeInTheDocument();
+    });
+
+    it('shows "Human (in-process)" label for human provider in detection feature Select', async () => {
+      mockUseFaceSettings.mockReturnValue({
+        ...defaultSettingsMock(),
+        settings: {
+          ...defaultSettingsMock().settings,
+          providers: [humanProvider],
+          knownProviders: [],
+          features: { detection: { provider: null, model: null } },
+        },
+        getModels: vi.fn().mockResolvedValue(['human-faceres-1024']),
+      } as any);
+
+      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByText('Human (in-process)')).toBeInTheDocument();
+    });
+
+    it('credentialed providers (compreface) still show their API key input', () => {
+      // Both human (keyless) and compreface (credentialed) visible simultaneously
+      mockUseFaceSettings.mockReturnValue({
+        ...defaultSettingsMock(),
+        settings: {
+          ...defaultSettingsMock().settings,
+          providers: [
+            humanProvider,
+            {
+              provider: 'compreface',
+              configured: true,
+              enabled: true,
+              requiresCredentials: true,
+              last4: 'abcd',
+              baseUrl: 'http://cf:8000',
+              region: null,
+              capabilities: { detect: true, embed: true, delegatedRecognize: false },
+            },
+          ],
+          knownProviders: [],
+        },
+      } as any);
+
+      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      // CompreFace section still shows API key input
+      expect(screen.getByLabelText(/new api key/i)).toBeInTheDocument();
+      // Human section shows "no configuration required"
+      expect(screen.getByText(/no configuration required/i)).toBeInTheDocument();
+    });
+  });
 });
