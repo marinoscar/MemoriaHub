@@ -286,6 +286,58 @@ export class CirclesService {
     });
   }
 
+  // ----- Face Settings -----
+
+  async getFaceSettings(circleId: string, user: RequestUser) {
+    await this.membership.assertCircleAccess(
+      user.id,
+      circleId,
+      user.permissions,
+      CircleRole.viewer,
+    );
+
+    const circle = await this.prisma.circle.findUnique({
+      where: { id: circleId },
+      select: { faceRecognitionEnabled: true },
+    });
+    if (!circle) throw new NotFoundException(`Circle ${circleId} not found`);
+
+    return { faceRecognitionEnabled: circle.faceRecognitionEnabled };
+  }
+
+  async updateFaceSettings(circleId: string, enabled: boolean, user: RequestUser) {
+    // circle_admin OR system super-admin can toggle this
+    await this.membership.assertCircleAccess(
+      user.id,
+      circleId,
+      user.permissions,
+      CircleRole.circle_admin,
+    );
+
+    const updated = await this.prisma.circle.update({
+      where: { id: circleId },
+      data: { faceRecognitionEnabled: enabled },
+      select: { faceRecognitionEnabled: true },
+    });
+
+    // Audit log
+    await this.prisma.auditEvent.create({
+      data: {
+        actorUserId: user.id,
+        action: 'circle:face_settings_update',
+        targetType: 'circle',
+        targetId: circleId,
+        meta: { faceRecognitionEnabled: enabled } as any,
+      },
+    });
+
+    this.logger.log(
+      `Circle ${circleId} faceRecognitionEnabled=${enabled} set by user ${user.id}`,
+    );
+
+    return { faceRecognitionEnabled: updated.faceRecognitionEnabled };
+  }
+
   async revokeInvite(user: RequestUser, circleId: string, inviteId: string) {
     await this.membership.assertCircleAccess(user.id, circleId, user.permissions, CircleRole.circle_admin);
 
