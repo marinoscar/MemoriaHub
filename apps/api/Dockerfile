@@ -22,14 +22,15 @@ COPY scripts ./scripts/
 RUN npm install --ignore-scripts && \
     DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npx prisma generate
 
-# Download @vladmandic/human model files (blazeface-back + faceres for detect+embed)
+# Download @vladmandic/human model files (blazeface-back detector + faceres
+# descriptor) for offline in-process face detection. The build FAILS if any
+# file is missing so we never ship an incomplete model set silently.
+ENV HUMAN_MODELS_BASE=https://vladmandic.github.io/human-models/models
 RUN mkdir -p /app/models/human && \
-    (wget -q -P /app/models/human \
-      https://vladmandic.github.io/human-models/models/blazeface-back.json \
-      https://vladmandic.github.io/human-models/models/blazeface-back.bin \
-      https://vladmandic.github.io/human-models/models/faceres.json \
-      https://vladmandic.github.io/human-models/models/faceres-shard1 \
-      || echo "Model download failed - models will be fetched at runtime")
+    for f in blazeface-back.json blazeface-back.bin faceres.json faceres.bin; do \
+      wget -q -O "/app/models/human/$f" "$HUMAN_MODELS_BASE/$f" || { echo "FATAL: failed to download Human model $f"; exit 1; }; \
+    done && \
+    echo "Human models bundled:" && ls -la /app/models/human
 
 # -----------------------------------------------------------------------------
 # Development stage
