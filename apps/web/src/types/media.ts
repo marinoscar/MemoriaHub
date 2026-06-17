@@ -111,6 +111,8 @@ export interface MediaQueryParams {
   sourceDeviceId?: string;
   sourceDeviceName?: string;
   missingGeo?: boolean;
+  /** Filter media items by person ID (returns items containing faces assigned to this person). */
+  personId?: string;
 }
 
 // ---------------------------------------------------------------------------
