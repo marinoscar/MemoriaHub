@@ -33,6 +33,11 @@ vi.mock('../../services/face', () => ({
   assignFaces: vi.fn(),
   unassignFace: vi.fn(),
   clusterUnknownFaces: vi.fn(),
+  getCircleFaceSettings: vi.fn().mockResolvedValue({ faceRecognitionEnabled: true }),
+  updateCircleFaceSettings: vi.fn().mockResolvedValue({ faceRecognitionEnabled: true }),
+  deleteCircleBiometrics: vi.fn().mockResolvedValue({ deletedFaces: 0, deletedPeople: 0 }),
+  mergePeople: vi.fn().mockResolvedValue({}),
+  deletePerson: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('react-router-dom', async (importOriginal) => {
