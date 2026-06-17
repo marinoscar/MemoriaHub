@@ -26,6 +26,8 @@ import {
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useFaceSettings } from '../../hooks/useFaceSettings';
+import { useCircles } from '../../hooks/useCircles';
+import { runFaceBackfill } from '../../services/face';
 
 function FaceSettingsContent() {
   const {
@@ -40,8 +42,15 @@ function FaceSettingsContent() {
     saveDetectionFeature,
   } = useFaceSettings();
 
+  const { circles, fetchCircles } = useCircles();
+
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+
+  // Backfill state
+  const [backfillCircleId, setBackfillCircleId] = useState('');
+  const [backfillForce, setBackfillForce] = useState(false);
+  const [backfillLoading, setBackfillLoading] = useState(false);
 
   // Per-provider form state
   const [providerKeys, setProviderKeys] = useState<Record<string, string>>({});
@@ -62,6 +71,10 @@ function FaceSettingsContent() {
   useEffect(() => {
     void fetchSettings();
   }, [fetchSettings]);
+
+  useEffect(() => {
+    void fetchCircles();
+  }, [fetchCircles]);
 
   // Sync enabled toggles and URLs from settings
   useEffect(() => {
@@ -159,6 +172,25 @@ function FaceSettingsContent() {
       setTestResult({ ok: false, error: err instanceof Error ? err.message : 'Test failed' });
     } finally {
       setTestLoading(false);
+    }
+  };
+
+  const handleRunBackfill = async () => {
+    if (!backfillCircleId) return;
+    if (
+      !window.confirm(
+        `Queue face detection for all unprocessed photos in the selected circle${backfillForce ? ' (force reprocess all)' : ''}? This may take a while.`,
+      )
+    )
+      return;
+    setBackfillLoading(true);
+    try {
+      const result = await runFaceBackfill(backfillCircleId, backfillForce || undefined);
+      setSuccessMessage(`Backfill queued: ${result.queued} item(s) scheduled`);
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to queue backfill');
+    } finally {
+      setBackfillLoading(false);
     }
   };
 
@@ -406,6 +438,53 @@ function FaceSettingsContent() {
               Test
             </Button>
           </Stack>
+        </Paper>
+
+        {/* Backfill section */}
+        <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>
+            Run Backfill
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Queue face detection for existing photos that have not yet been processed (or all photos
+            if Force is enabled). Admin only.
+          </Typography>
+
+          <FormControl size="small" fullWidth sx={{ mb: 2 }}>
+            <InputLabel>Circle</InputLabel>
+            <Select
+              label="Circle"
+              value={backfillCircleId}
+              onChange={(e) => setBackfillCircleId(e.target.value)}
+            >
+              <MenuItem value="">Select circle</MenuItem>
+              {circles.map((c) => (
+                <MenuItem key={c.id} value={c.id}>
+                  {c.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={backfillForce}
+                onChange={(e) => setBackfillForce(e.target.checked)}
+              />
+            }
+            label="Force (reprocess already-processed photos)"
+            sx={{ mb: 2, display: 'block' }}
+          />
+
+          <Button
+            variant="contained"
+            disabled={!backfillCircleId || backfillLoading}
+            startIcon={backfillLoading ? <CircularProgress size={16} /> : undefined}
+            onClick={() => void handleRunBackfill()}
+          >
+            Run Backfill
+          </Button>
         </Paper>
       </Box>
 
