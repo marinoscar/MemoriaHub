@@ -54,9 +54,12 @@ vi.mock('react-router-dom', async (importOriginal) => {
 
 import PeoplePage from '../../pages/People/PeoplePage';
 import { usePeople, usePerson } from '../../hooks/usePeople';
+import * as faceService from '../../services/face';
 
 const mockUsePeople = vi.mocked(usePeople);
 const mockUsePerson = vi.mocked(usePerson);
+const mockGetCircleFaceSettings = vi.mocked(faceService.getCircleFaceSettings);
+const mockDeleteCircleBiometrics = vi.mocked(faceService.deleteCircleBiometrics);
 
 // ---------------------------------------------------------------------------
 // Default mock return values
@@ -211,6 +214,123 @@ describe('PeoplePage', () => {
         expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
       });
       expect(screen.queryByRole('button', { name: /find people/i })).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('opt-in gate — face recognition disabled', () => {
+    beforeEach(() => {
+      mockGetCircleFaceSettings.mockResolvedValue({ faceRecognitionEnabled: false });
+      mockUsePeople.mockReturnValue(makeUsePeopleDefaults() as any);
+      mockUsePerson.mockReturnValue(makeUsePersonDefaults() as any);
+    });
+
+    it('shows "Face Recognition is not enabled" heading for circle_admin', async () => {
+      render(<PeoplePage />, { wrapperOptions: { activeCircleRole: 'circle_admin' } });
+      expect(await screen.findByText(/face recognition is not enabled for this circle/i)).toBeInTheDocument();
+    });
+
+    it('shows "Enable face recognition" label for circle_admin', async () => {
+      render(<PeoplePage />, { wrapperOptions: { activeCircleRole: 'circle_admin' } });
+      expect(await screen.findByText(/enable face recognition/i)).toBeInTheDocument();
+    });
+
+    it('shows an info alert for non-admin (viewer) when disabled', async () => {
+      render(<PeoplePage />, { wrapperOptions: { activeCircleRole: 'viewer' } });
+      expect(await screen.findByRole('alert')).toBeInTheDocument();
+      expect(await screen.findByText(/ask a circle admin to enable it/i)).toBeInTheDocument();
+    });
+
+    it('does NOT show "Named People" section when disabled', async () => {
+      render(<PeoplePage />);
+      await screen.findByText(/face recognition is not enabled/i);
+      expect(screen.queryByRole('heading', { name: /named people/i })).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('settings menu (face recognition enabled, circle_admin)', () => {
+    beforeEach(() => {
+      mockGetCircleFaceSettings.mockResolvedValue({ faceRecognitionEnabled: true });
+      mockUsePeople.mockReturnValue(makeUsePeopleDefaults() as any);
+      mockUsePerson.mockReturnValue(makeUsePersonDefaults() as any);
+    });
+
+    it('shows the settings (gear) icon button for circle_admin when enabled', async () => {
+      render(<PeoplePage />, { wrapperOptions: { activeCircleRole: 'circle_admin' } });
+      expect(await screen.findByRole('button', { name: /face recognition settings/i })).toBeInTheDocument();
+    });
+
+    it('does NOT show the settings icon for viewer role', async () => {
+      render(<PeoplePage />, { wrapperOptions: { activeCircleRole: 'viewer' } });
+      await screen.findByRole('heading', { name: /named people/i });
+      expect(screen.queryByRole('button', { name: /face recognition settings/i })).not.toBeInTheDocument();
+    });
+
+    it('opens menu with "Disable face recognition" and "Delete all biometrics" items', async () => {
+      const user = userEvent.setup();
+      render(<PeoplePage />, { wrapperOptions: { activeCircleRole: 'circle_admin' } });
+      const gearBtn = await screen.findByRole('button', { name: /face recognition settings/i });
+      await user.click(gearBtn);
+      expect(await screen.findByText(/disable face recognition/i)).toBeInTheDocument();
+      expect(screen.getByText(/delete all biometrics/i)).toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('delete-biometrics dialog', () => {
+    beforeEach(() => {
+      mockGetCircleFaceSettings.mockResolvedValue({ faceRecognitionEnabled: true });
+      mockUsePeople.mockReturnValue(makeUsePeopleDefaults() as any);
+      mockUsePerson.mockReturnValue(makeUsePersonDefaults() as any);
+    });
+
+    async function openDeleteBiometricsDialog(user: ReturnType<typeof userEvent.setup>) {
+      const gearBtn = await screen.findByRole('button', { name: /face recognition settings/i });
+      await user.click(gearBtn);
+      const deleteItem = await screen.findByText(/delete all biometrics/i);
+      await user.click(deleteItem);
+    }
+
+    it('opens the "Delete All Biometric Data" dialog when menu item clicked', async () => {
+      const user = userEvent.setup();
+      render(<PeoplePage />, { wrapperOptions: { activeCircleRole: 'circle_admin' } });
+      await openDeleteBiometricsDialog(user);
+      // The dialog title is an h2 heading; use heading role to avoid ambiguity with the button
+      expect(await screen.findByRole('heading', { name: /delete all biometric data/i })).toBeInTheDocument();
+    });
+
+    it('Delete button is disabled until "DELETE" is typed', async () => {
+      const user = userEvent.setup();
+      render(<PeoplePage />, { wrapperOptions: { activeCircleRole: 'circle_admin' } });
+      await openDeleteBiometricsDialog(user);
+      const deleteBtn = await screen.findByRole('button', { name: /delete all biometric data/i });
+      expect(deleteBtn).toBeDisabled();
+    });
+
+    it('Delete button becomes enabled after typing "DELETE"', async () => {
+      const user = userEvent.setup();
+      render(<PeoplePage />, { wrapperOptions: { activeCircleRole: 'circle_admin' } });
+      await openDeleteBiometricsDialog(user);
+      const input = await screen.findByPlaceholderText(/DELETE/);
+      await user.type(input, 'DELETE');
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /delete all biometric data/i })).not.toBeDisabled();
+      });
+    });
+
+    it('calls deleteCircleBiometrics when DELETE typed and button clicked', async () => {
+      mockDeleteCircleBiometrics.mockResolvedValue({ deletedFaces: 10, deletedPeople: 3 });
+      const user = userEvent.setup();
+      render(<PeoplePage />, { wrapperOptions: { activeCircleRole: 'circle_admin' } });
+      await openDeleteBiometricsDialog(user);
+      const input = await screen.findByPlaceholderText(/DELETE/);
+      await user.type(input, 'DELETE');
+      const deleteBtn = screen.getByRole('button', { name: /delete all biometric data/i });
+      await user.click(deleteBtn);
+      await waitFor(() => {
+        expect(mockDeleteCircleBiometrics).toHaveBeenCalledWith('circle-1');
+      });
     });
   });
 });
