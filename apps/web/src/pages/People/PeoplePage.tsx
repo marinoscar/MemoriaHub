@@ -97,7 +97,7 @@ function PersonDetailDrawer({
   return (
     <Box sx={{ width: { xs: 320, sm: 400 }, p: 2 }}>
       {/* Header */}
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+      <Stack direction="row" spacing={1} sx={{ mb: 2, alignItems: 'center' }}>
         {editing ? (
           <>
             <TextField
@@ -152,7 +152,7 @@ function PersonDetailDrawer({
         {person.faces.slice(0, 12).map((face) => {
           const imgUrl = mediaMap[face.mediaItemId];
           return (
-            <Grid item key={face.faceId}>
+            <Grid key={face.faceId}>
               {imgUrl ? (
                 <FaceCrop imageUrl={imgUrl} boundingBox={face.boundingBox} size={72} />
               ) : (
@@ -221,7 +221,7 @@ export default function PeoplePage() {
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
       {/* Header */}
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 3 }}>
+      <Stack direction="row" sx={{ mb: 3, alignItems: 'center', justifyContent: 'space-between' }}>
         <Typography variant="h4">People</Typography>
       </Stack>
 

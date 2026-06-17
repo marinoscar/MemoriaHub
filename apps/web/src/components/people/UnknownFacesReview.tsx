@@ -50,7 +50,7 @@ export function UnknownFacesReview({
 
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
+      <Stack direction="row" spacing={1} sx={{ mb: 2, alignItems: 'center' }}>
         <GroupsIcon color="action" />
         <Typography variant="h6">Unknown People</Typography>
         <Chip label={unlabeledPeople.length} size="small" />

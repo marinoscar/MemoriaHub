@@ -57,7 +57,7 @@ export function PersonGrid({ people, onPersonClick, loading, emptyMessage }: Per
   return (
     <Grid container spacing={2}>
       {people.map((person) => (
-        <Grid item key={person.id} xs={6} sm={4} md={3} lg={2}>
+        <Grid key={person.id} size={{ xs: 6, sm: 4, md: 3, lg: 2 }}>
           <PersonCardContainer person={person} onClick={onPersonClick} />
         </Grid>
       ))}
