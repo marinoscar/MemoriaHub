@@ -137,3 +137,107 @@ export async function rerunMediaFaces(mediaId: string): Promise<RerunResult> {
 export async function runFaceBackfill(circleId: string, force?: boolean): Promise<BackfillResult> {
   return api.post<BackfillResult>('/face/backfill', { circleId, force });
 }
+
+// ---------------------------------------------------------------------------
+// Phase 3 Types — people management
+// ---------------------------------------------------------------------------
+
+export interface PersonCoverFace {
+  faceId: string;
+  mediaItemId: string;
+  boundingBox: BoundingBox;
+}
+
+export interface PersonListItem {
+  id: string;
+  name: string | null;
+  isUnlabeled: boolean;
+  faceCount: number;
+  coverFace: PersonCoverFace | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PersonListResponse {
+  items: PersonListItem[];
+  meta: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
+}
+
+export interface PersonFace {
+  faceId: string;
+  mediaItemId: string;
+  boundingBox: BoundingBox;
+  confidence: number | null;
+  manuallyAssigned: boolean;
+  createdAt: string;
+}
+
+export interface PersonDetail {
+  id: string;
+  name: string | null;
+  isUnlabeled: boolean;
+  circleId: string;
+  coverFace: PersonCoverFace | null;
+  faces: PersonFace[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ClusterResult {
+  clustersCreated: number;
+  facesAssigned: number;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 API functions
+// ---------------------------------------------------------------------------
+
+export async function listPeople(
+  circleId: string,
+  opts?: { includeUnlabeled?: boolean; page?: number; pageSize?: number },
+): Promise<PersonListResponse> {
+  const p = new URLSearchParams({ circleId });
+  if (opts?.includeUnlabeled) p.set('includeUnlabeled', 'true');
+  if (opts?.page) p.set('page', String(opts.page));
+  if (opts?.pageSize) p.set('pageSize', String(opts.pageSize));
+  return api.get<PersonListResponse>(`/people?${p.toString()}`);
+}
+
+export async function getPerson(id: string): Promise<PersonDetail> {
+  return api.get<PersonDetail>(`/people/${id}`);
+}
+
+export async function createPerson(body: {
+  circleId: string;
+  name?: string;
+  faceIds?: string[];
+}): Promise<{ id: string; name: string | null; circleId: string }> {
+  return api.post<{ id: string; name: string | null; circleId: string }>('/people', body);
+}
+
+export async function updatePerson(
+  id: string,
+  body: { name?: string; coverFaceId?: string | null },
+): Promise<{ id: string; name: string | null; coverFaceId: string | null; updatedAt: string }> {
+  return api.patch<{ id: string; name: string | null; coverFaceId: string | null; updatedAt: string }>(`/people/${id}`, body);
+}
+
+export async function assignFaces(
+  personId: string,
+  faceIds: string[],
+): Promise<{ personId: string; assignedCount: number }> {
+  return api.post<{ personId: string; assignedCount: number }>(`/people/${personId}/faces`, { faceIds });
+}
+
+export async function unassignFace(personId: string, faceId: string): Promise<void> {
+  await api.delete<void>(`/people/${personId}/faces/${faceId}`);
+}
+
+export async function clusterUnknownFaces(circleId: string): Promise<ClusterResult> {
+  return api.post<ClusterResult>('/people/cluster', { circleId });
+}
