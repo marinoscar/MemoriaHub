@@ -43,6 +43,26 @@ const mockPatchMedia = vi.mocked(patchMedia);
 const mockGetMedia = vi.mocked(getMedia);
 
 // ---------------------------------------------------------------------------
+// Mock the face service — FaceThumbnails (mounted inside the drawer) calls
+// getMediaFaces and getMediaFaceStatus on mount via useMediaFaces. Without
+// this mock the hook issues real fetches that fail in jsdom and pollute the
+// test output with "fetch failed" errors.
+// ---------------------------------------------------------------------------
+
+vi.mock('../../../services/face', () => ({
+  getMediaFaces: vi.fn().mockResolvedValue([]),
+  getMediaFaceStatus: vi.fn().mockResolvedValue({
+    status: 'not_processed',
+    faceCount: 0,
+    providerKey: null,
+    modelVersion: null,
+    processedAt: null,
+    lastError: null,
+  }),
+  rerunMediaFaces: vi.fn().mockResolvedValue({ jobId: 'job-1', status: 'pending' }),
+}));
+
+// ---------------------------------------------------------------------------
 // Mock VideoPlayer — avoids @vidstack/react dependency in tests
 // ---------------------------------------------------------------------------
 

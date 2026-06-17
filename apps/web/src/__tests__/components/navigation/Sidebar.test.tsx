@@ -218,9 +218,10 @@ describe('Sidebar', () => {
       });
 
       // Admin: Home, Media Library, Map, Circles, Search, User Settings,
-      //        User Management, System Settings, Admin Circles, Backup, AI Settings
+      //        User Management, System Settings, Admin Circles, Backup, AI Settings,
+      //        Face Settings
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(menuButtons).toHaveLength(11);
+      expect(menuButtons).toHaveLength(12);
     });
 
     it('should dynamically update menu items when isAdmin changes', () => {
@@ -579,9 +580,10 @@ describe('Sidebar', () => {
 
       // Each menu item should have an icon
       // Admin sees: Home, Media Library, Map, Circles, Search, User Settings,
-      //             User Management, System Settings, Admin Circles, Backup, AI Settings
+      //             User Management, System Settings, Admin Circles, Backup, AI Settings,
+      //             Face Settings
       const icons = container.querySelectorAll('.MuiListItemIcon-root');
-      expect(icons).toHaveLength(11);
+      expect(icons).toHaveLength(12);
     });
 
     it('should highlight icon for selected menu item', () => {
