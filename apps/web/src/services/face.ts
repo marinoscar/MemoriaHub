@@ -11,9 +11,10 @@ export interface FaceCapabilities {
 }
 
 export interface FaceProvider {
-  provider: string; // 'compreface' | 'rekognition'
+  provider: string; // 'compreface' | 'rekognition' | 'human'
   configured: boolean;
   enabled: boolean;
+  requiresCredentials?: boolean;
   last4: string | null;
   baseUrl: string | null;
   region: string | null;

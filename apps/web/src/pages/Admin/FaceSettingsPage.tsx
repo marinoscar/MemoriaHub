@@ -232,6 +232,8 @@ function FaceSettingsContent() {
                   ? 'CompreFace'
                   : providerConfig.provider === 'rekognition'
                   ? 'AWS Rekognition'
+                  : providerConfig.provider === 'human'
+                  ? 'Human (in-process)'
                   : providerConfig.provider.toUpperCase()}
               </Typography>
               <Chip
@@ -255,105 +257,114 @@ function FaceSettingsContent() {
               )}
             </Box>
 
-            {/* Current key (masked) */}
-            {providerConfig.configured && providerConfig.last4 && (
-              <TextField
-                label="Current API Key"
-                value={`••••••••${providerConfig.last4}`}
-                size="small"
-                fullWidth
-                disabled
-                sx={{ mb: 2 }}
-              />
-            )}
+            {providerConfig.requiresCredentials === false ? (
+              /* Keyless provider — no credentials to store */
+              <Alert severity="info" icon={false} sx={{ py: 0.5 }}>
+                No configuration required — runs in-process
+              </Alert>
+            ) : (
+              <>
+                {/* Current key (masked) */}
+                {providerConfig.configured && providerConfig.last4 && (
+                  <TextField
+                    label="Current API Key"
+                    value={`••••••••${providerConfig.last4}`}
+                    size="small"
+                    fullWidth
+                    disabled
+                    sx={{ mb: 2 }}
+                  />
+                )}
 
-            {/* New API key input */}
-            <TextField
-              label="New API Key"
-              type="password"
-              size="small"
-              fullWidth
-              value={providerKeys[providerConfig.provider] ?? ''}
-              onChange={(e) =>
-                setProviderKeys((prev) => ({
-                  ...prev,
-                  [providerConfig.provider]: e.target.value,
-                }))
-              }
-              placeholder={providerConfig.configured ? 'Leave blank to keep current key' : 'Enter API key'}
-              sx={{ mb: 2 }}
-            />
-
-            {/* Base URL (CompreFace only) */}
-            {providerConfig.provider === 'compreface' && (
-              <TextField
-                label="Base URL"
-                size="small"
-                fullWidth
-                value={providerBaseUrls[providerConfig.provider] ?? ''}
-                onChange={(e) =>
-                  setProviderBaseUrls((prev) => ({
-                    ...prev,
-                    [providerConfig.provider]: e.target.value,
-                  }))
-                }
-                placeholder="http://compreface:8000"
-                sx={{ mb: 2 }}
-              />
-            )}
-
-            {/* Region (Rekognition only) */}
-            {providerConfig.provider === 'rekognition' && (
-              <TextField
-                label="AWS Region"
-                size="small"
-                fullWidth
-                value={providerRegions[providerConfig.provider] ?? ''}
-                onChange={(e) =>
-                  setProviderRegions((prev) => ({
-                    ...prev,
-                    [providerConfig.provider]: e.target.value,
-                  }))
-                }
-                placeholder="us-east-1"
-                sx={{ mb: 2 }}
-              />
-            )}
-
-            {/* Enabled toggle */}
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={providerEnabled[providerConfig.provider] ?? providerConfig.enabled}
+                {/* New API key input */}
+                <TextField
+                  label="New API Key"
+                  type="password"
+                  size="small"
+                  fullWidth
+                  value={providerKeys[providerConfig.provider] ?? ''}
                   onChange={(e) =>
-                    setProviderEnabled((prev) => ({
+                    setProviderKeys((prev) => ({
                       ...prev,
-                      [providerConfig.provider]: e.target.checked,
+                      [providerConfig.provider]: e.target.value,
                     }))
                   }
+                  placeholder={providerConfig.configured ? 'Leave blank to keep current key' : 'Enter API key'}
+                  sx={{ mb: 2 }}
                 />
-              }
-              label="Enabled"
-              sx={{ mb: 2, display: 'block' }}
-            />
 
-            <Stack direction="row" spacing={1}>
-              <Button
-                variant="contained"
-                onClick={() => void handleSaveCredentials(providerConfig.provider)}
-              >
-                Save
-              </Button>
-              {providerConfig.configured && (
-                <Button
-                  variant="outlined"
-                  color="error"
-                  onClick={() => void handleRemoveCredentials(providerConfig.provider)}
-                >
-                  Remove
-                </Button>
-              )}
-            </Stack>
+                {/* Base URL (CompreFace only) */}
+                {providerConfig.provider === 'compreface' && (
+                  <TextField
+                    label="Base URL"
+                    size="small"
+                    fullWidth
+                    value={providerBaseUrls[providerConfig.provider] ?? ''}
+                    onChange={(e) =>
+                      setProviderBaseUrls((prev) => ({
+                        ...prev,
+                        [providerConfig.provider]: e.target.value,
+                      }))
+                    }
+                    placeholder="http://compreface:8000"
+                    sx={{ mb: 2 }}
+                  />
+                )}
+
+                {/* Region (Rekognition only) */}
+                {providerConfig.provider === 'rekognition' && (
+                  <TextField
+                    label="AWS Region"
+                    size="small"
+                    fullWidth
+                    value={providerRegions[providerConfig.provider] ?? ''}
+                    onChange={(e) =>
+                      setProviderRegions((prev) => ({
+                        ...prev,
+                        [providerConfig.provider]: e.target.value,
+                      }))
+                    }
+                    placeholder="us-east-1"
+                    sx={{ mb: 2 }}
+                  />
+                )}
+
+                {/* Enabled toggle */}
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={providerEnabled[providerConfig.provider] ?? providerConfig.enabled}
+                      onChange={(e) =>
+                        setProviderEnabled((prev) => ({
+                          ...prev,
+                          [providerConfig.provider]: e.target.checked,
+                        }))
+                      }
+                    />
+                  }
+                  label="Enabled"
+                  sx={{ mb: 2, display: 'block' }}
+                />
+
+                <Stack direction="row" spacing={1}>
+                  <Button
+                    variant="contained"
+                    onClick={() => void handleSaveCredentials(providerConfig.provider)}
+                  >
+                    Save
+                  </Button>
+                  {providerConfig.configured && (
+                    <Button
+                      variant="outlined"
+                      color="error"
+                      onClick={() => void handleRemoveCredentials(providerConfig.provider)}
+                    >
+                      Remove
+                    </Button>
+                  )}
+                </Stack>
+              </>
+            )}
           </Paper>
         ))}
 
@@ -375,8 +386,17 @@ function FaceSettingsContent() {
               }}
             >
               <MenuItem value="">Select provider</MenuItem>
-              <MenuItem value="compreface">CompreFace</MenuItem>
-              <MenuItem value="rekognition">AWS Rekognition</MenuItem>
+              {[...(settings?.providers ?? []), ...(settings?.knownProviders ?? [])].map((p) => (
+                <MenuItem key={p.provider} value={p.provider}>
+                  {p.provider === 'compreface'
+                    ? 'CompreFace'
+                    : p.provider === 'rekognition'
+                    ? 'AWS Rekognition'
+                    : p.provider === 'human'
+                    ? 'Human (in-process)'
+                    : p.provider.toUpperCase()}
+                </MenuItem>
+              ))}
             </Select>
           </FormControl>
 
