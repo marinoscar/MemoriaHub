@@ -366,6 +366,17 @@ export class PeopleService {
       'circle_admin' as CircleRole,
     );
 
+    // Require circle to have faceRecognitionEnabled
+    const circle = await this.prisma.circle.findUnique({
+      where: { id: circleId },
+      select: { faceRecognitionEnabled: true },
+    });
+    if (!circle?.faceRecognitionEnabled) {
+      throw new BadRequestException(
+        'Face recognition is not enabled for this circle. Enable it via PUT /api/circles/:id/face-settings.',
+      );
+    }
+
     const result = await this.clusteringService.clusterUnknownFaces(
       circleId,
       userId,

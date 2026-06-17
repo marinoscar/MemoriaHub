@@ -2,15 +2,21 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Param,
   Body,
+  Query,
   NotFoundException,
+  BadRequestException,
+  HttpCode,
+  HttpStatus,
   Logger,
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiResponse,
   ApiProperty,
   ApiBearerAuth,
@@ -210,6 +216,20 @@ export class FaceDetectionController {
     @CurrentUser() user: RequestUser,
   ) {
     const { circleId, force = false } = dto;
+
+    // Require circle to have faceRecognitionEnabled before accepting a backfill
+    const circle = await this.prisma.circle.findUnique({
+      where: { id: circleId },
+      select: { faceRecognitionEnabled: true },
+    });
+    if (!circle) {
+      throw new NotFoundException(`Circle ${circleId} not found`);
+    }
+    if (!circle.faceRecognitionEnabled) {
+      throw new BadRequestException(
+        'Face recognition is not enabled for this circle. Enable it via PUT /api/circles/:id/face-settings before running backfill.',
+      );
+    }
 
     // Find media items that need (re-)processing
     const mediaItems = await this.prisma.mediaItem.findMany({
