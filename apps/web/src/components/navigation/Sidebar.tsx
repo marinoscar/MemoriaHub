@@ -19,6 +19,7 @@ import {
   PhotoLibrary as PhotoLibraryIcon,
   Map as MapIcon,
   GroupWork as GroupWorkIcon,
+  Groups as GroupsIcon,
   Backup as BackupIcon,
   Search as SearchIcon,
   SmartToy as AiIcon,
@@ -69,6 +70,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       label: 'Search',
       icon: <SearchIcon />,
       path: '/search',
+      visible: true,
+    },
+    {
+      label: 'People',
+      icon: <GroupsIcon />,
+      path: '/people',
       visible: true,
     },
     {
