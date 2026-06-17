@@ -36,6 +36,7 @@ import { VideoPlayer } from './VideoPlayer';
 import { LocationMiniMap } from './LocationMiniMap';
 import { LocationPickerMap } from './LocationPickerMap';
 import { TagAutocomplete } from './TagAutocomplete';
+import { FaceThumbnails } from './FaceThumbnails';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -668,6 +669,17 @@ export function MediaDetailDrawer({
             />
           </Box>
         )}
+
+        {/* People / Faces */}
+        <Divider sx={{ my: 1.5 }} />
+        <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+          People / Faces
+        </Typography>
+        <FaceThumbnails
+          mediaId={displayItem.id}
+          mediaType={displayItem.type}
+          thumbnailUrl={displayItem.thumbnailUrl ?? undefined}
+        />
 
         {/* Tags */}
         <Divider sx={{ my: 1.5 }} />
