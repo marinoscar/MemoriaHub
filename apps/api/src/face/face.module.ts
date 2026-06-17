@@ -9,17 +9,24 @@ import { FaceEnqueueListener } from './processing/face-enqueue.listener';
 import { FaceJobWorker } from './processing/face-job.worker';
 import { FaceDetectionService } from './face-detection.service';
 import { FaceDetectionController } from './face-detection.controller';
+import { FaceMatchingService } from './face-matching.service';
+import { FaceClusteringService } from './face-clustering.service';
+import { PeopleService } from './people.service';
+import { PeopleController } from './people.controller';
 
 @Module({
   imports: [SettingsModule, StorageProvidersModule, CirclesModule],
-  controllers: [FaceSettingsController, FaceDetectionController],
+  controllers: [FaceSettingsController, FaceDetectionController, PeopleController],
   providers: [
     FaceSettingsService,
     FaceProviderRegistry,
     FaceEnqueueListener,
     FaceJobWorker,
     FaceDetectionService,
+    FaceMatchingService,
+    FaceClusteringService,
+    PeopleService,
   ],
-  exports: [FaceSettingsService, FaceProviderRegistry],
+  exports: [FaceSettingsService, FaceProviderRegistry, FaceMatchingService, FaceClusteringService],
 })
 export class FaceModule {}
