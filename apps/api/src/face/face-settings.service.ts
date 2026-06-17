@@ -55,38 +55,69 @@ export class FaceSettingsService {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const face = (sysSettings as any).face;
 
-    return {
-      providers: creds.map(c => {
-        let capabilities: object | undefined;
-        try {
-          capabilities = this.registry.get(c.provider).capabilities;
-        } catch {
-          // Provider not in registry — skip capabilities
-        }
+    const configuredProviderKeys = new Set(creds.map(c => c.provider));
+
+    // Providers with a DB credential row
+    const dbProviders = creds.map(c => {
+      let capabilities: object | undefined;
+      let requiresCredentials: boolean | undefined;
+      try {
+        const reg = this.registry.get(c.provider);
+        capabilities = reg.capabilities;
+        requiresCredentials = reg.requiresCredentials;
+      } catch {
+        // Provider not in registry — skip capabilities
+      }
+      return {
+        provider: c.provider,
+        configured: true,
+        enabled: c.enabled,
+        requiresCredentials: requiresCredentials ?? true,
+        last4: c.last4 || null,
+        baseUrl: c.baseUrl ?? null,
+        region: c.region ?? null,
+        updatedAt: c.updatedAt,
+        ...(capabilities !== undefined && { capabilities }),
+      };
+    });
+
+    // Registry providers with no DB row — split by requiresCredentials
+    const unconfiguredKeys = this.registry
+      .keys()
+      .filter(k => !configuredProviderKeys.has(k));
+
+    const keylessProviders = unconfiguredKeys
+      .filter(k => !this.registry.get(k).requiresCredentials)
+      .map(k => {
+        const reg = this.registry.get(k);
         return {
-          provider: c.provider,
-          configured: true,
-          enabled: c.enabled,
-          last4: c.last4 || null,
-          baseUrl: c.baseUrl ?? null,
-          region: c.region ?? null,
-          updatedAt: c.updatedAt,
-          ...(capabilities !== undefined && { capabilities }),
-        };
-      }),
-      // Surface known providers that have no credential row yet
-      knownProviders: this.registry
-        .keys()
-        .filter(k => !creds.find(c => c.provider === k))
-        .map(k => ({
           provider: k,
-          configured: false,
-          enabled: false,
+          configured: true,
+          enabled: true,
+          requiresCredentials: false,
           last4: null,
           baseUrl: null,
           region: null,
-          capabilities: this.registry.get(k).capabilities,
-        })),
+          capabilities: reg.capabilities,
+        };
+      });
+
+    const knownProviders = unconfiguredKeys
+      .filter(k => this.registry.get(k).requiresCredentials)
+      .map(k => ({
+        provider: k,
+        configured: false,
+        enabled: false,
+        requiresCredentials: true,
+        last4: null,
+        baseUrl: null,
+        region: null,
+        capabilities: this.registry.get(k).capabilities,
+      }));
+
+    return {
+      providers: [...dbProviders, ...keylessProviders],
+      knownProviders,
       features: face?.features ?? {
         detection: { provider: null, model: null },
       },
@@ -232,8 +263,18 @@ export class FaceSettingsService {
   /**
    * Resolve decrypted credentials for a face provider.
    * For internal use only — never returns keys to HTTP callers.
+   *
+   * For providers with requiresCredentials === false (e.g. HumanProvider),
+   * returns an empty credential object without touching the DB.
    */
   async resolveCredentials(providerKey: string): Promise<FaceProviderCredentials> {
+    // Validate that the provider key is known — registry.get throws for unknown keys.
+    const provider = this.registry.get(providerKey);
+
+    if (!provider.requiresCredentials) {
+      return {};
+    }
+
     const cred = await this.prisma.faceProviderCredential.findUnique({
       where: { provider: providerKey },
     });
