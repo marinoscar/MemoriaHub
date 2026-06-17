@@ -13,13 +13,16 @@ import {
   ApiParam,
   ApiResponse,
   ApiProperty,
+  ApiBearerAuth,
 } from '@nestjs/swagger';
 import { IsString, IsOptional, IsBoolean } from 'class-validator';
+import { CircleRole } from '@prisma/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
+import { CircleMembershipService } from '../circles/circle-membership.service';
 import {
   FaceJobStatus,
   FaceJobReason,
@@ -51,11 +54,15 @@ class BackfillFaceDetectionDto {
 // ---------------------------------------------------------------------------
 
 @ApiTags('Face Detection')
+@ApiBearerAuth('JWT-auth')
 @Controller()
 export class FaceDetectionController {
   private readonly logger = new Logger(FaceDetectionController.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly circleMembershipService: CircleMembershipService,
+  ) {}
 
   // --------------------------------------------------------------------------
   // GET /api/media/:id/faces
@@ -150,7 +157,12 @@ export class FaceDetectionController {
     @Param('id') mediaItemId: string,
     @CurrentUser() user: RequestUser,
   ) {
-    const mediaItem = await this.assertMediaItemAccess(mediaItemId, user);
+    // rerun requires collaborator role or higher
+    const mediaItem = await this.assertMediaItemAccess(
+      mediaItemId,
+      user,
+      'collaborator' as CircleRole,
+    );
 
     // Always create a new job on rerun — user intentionally requested it
     const job = await this.prisma.faceJob.create({
@@ -268,9 +280,21 @@ export class FaceDetectionController {
   // Private helpers
   // --------------------------------------------------------------------------
 
+  /**
+   * Load a MediaItem and assert the caller has the required circle role.
+   *
+   * Delegates to CircleMembershipService which handles:
+   *   - super-admin bypass (circles:manage_any, media:write_any, media:read_any)
+   *   - circle existence check
+   *   - membership check
+   *   - role-rank enforcement
+   *
+   * Returns a minimal projection sufficient for subsequent operations.
+   */
   private async assertMediaItemAccess(
     mediaItemId: string,
     user: RequestUser,
+    requiredRole: CircleRole = 'viewer' as CircleRole,
   ): Promise<{ id: string; circleId: string }> {
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },
@@ -281,23 +305,13 @@ export class FaceDetectionController {
       throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
     }
 
-    // Check circle membership (super-admin bypass via media:read_any permission)
-    const hasSuperAdmin = user.permissions.includes(PERMISSIONS.MEDIA_READ_ANY);
-    if (!hasSuperAdmin) {
-      const member = await this.prisma.circleMember.findUnique({
-        where: {
-          circleId_userId: {
-            circleId: mediaItem.circleId,
-            userId: user.id,
-          },
-        },
-        select: { id: true },
-      });
-
-      if (!member) {
-        throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
-      }
-    }
+    // Delegates role-rank + super-admin bypass to CircleMembershipService
+    await this.circleMembershipService.assertCircleAccess(
+      user.id,
+      mediaItem.circleId,
+      user.permissions,
+      requiredRole,
+    );
 
     return { id: mediaItem.id, circleId: mediaItem.circleId };
   }
