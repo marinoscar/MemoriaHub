@@ -24,13 +24,20 @@ jest.mock('@vladmandic/human/dist/human.node-wasm.js', () => ({
   })),
   default: jest.fn(),
 }), { virtual: true });
-jest.mock('sharp', () =>
-  jest.fn().mockReturnValue({
+jest.mock('sharp', () => {
+  const mockPipeline = {
     ensureAlpha: jest.fn().mockReturnThis(),
     raw: jest.fn().mockReturnThis(),
-    toBuffer: jest.fn().mockResolvedValue({ data: Buffer.alloc(0), info: { width: 1, height: 1 } }),
-  }),
-);
+    rotate: jest.fn().mockReturnThis(),
+    resize: jest.fn().mockReturnThis(),
+    jpeg: jest.fn().mockReturnThis(),
+    toBuffer: jest.fn().mockResolvedValue({
+      data: Buffer.from('upright'),
+      info: { width: 800, height: 600 },
+    }),
+  };
+  return jest.fn().mockReturnValue(mockPipeline);
+});
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { Readable } from 'stream';
@@ -108,6 +115,9 @@ describe('FaceDetectionService', () => {
   };
 
   beforeEach(async () => {
+    // Reset sharp mock call counts between tests (implementations set in the factory are retained)
+    (jest.requireMock('sharp') as jest.Mock).mockClear();
+
     mockPrisma = createMockPrismaService();
     mockProvider = {
       detect: jest.fn(),
@@ -186,10 +196,11 @@ describe('FaceDetectionService', () => {
 
   describe('bounding box normalization', () => {
     it('converts pixel coords to fractions when any coord > 1.0', async () => {
-      // width=500, height=400 → x:100/500=0.2, y:200/400=0.5, w:50/500=0.1, h:80/400=0.2
+      // Sharp mock returns upright dims: 800x600
+      // Box: x=160/800=0.2, y=120/600=0.2, w=80/800=0.1, h=60/600=0.1
       mockProvider.detect.mockResolvedValue([
         {
-          boundingBox: { x: 100, y: 200, w: 50, h: 80 },
+          boundingBox: { x: 160, y: 120, w: 80, h: 60 },
           confidence: 0.95,
           embedding: [],
           landmarks: null,
@@ -202,9 +213,9 @@ describe('FaceDetectionService', () => {
       const createCall = (mockPrisma.face.create as jest.Mock).mock.calls[0][0];
       const storedBb = createCall.data.boundingBox;
       expect(storedBb.x).toBeCloseTo(0.2, 5);
-      expect(storedBb.y).toBeCloseTo(0.5, 5);
+      expect(storedBb.y).toBeCloseTo(0.2, 5);
       expect(storedBb.w).toBeCloseTo(0.1, 5);
-      expect(storedBb.h).toBeCloseTo(0.2, 5);
+      expect(storedBb.h).toBeCloseTo(0.1, 5);
     });
 
     it('passes through fractional coords unchanged when all coords <= 1.0', async () => {
@@ -226,6 +237,99 @@ describe('FaceDetectionService', () => {
       expect(storedBb.y).toBeCloseTo(0.2, 5);
       expect(storedBb.w).toBeCloseTo(0.3, 5);
       expect(storedBb.h).toBeCloseTo(0.4, 5);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // EXIF preprocessing: upright buffer and box normalization
+  // -------------------------------------------------------------------------
+
+  describe('EXIF preprocessing: upright buffer and box normalization', () => {
+    it('passes the sharp-processed (upright) buffer to provider.detect, not the raw storage buffer', async () => {
+      const rawBuffer = Buffer.from('raw-storage-bytes');
+      mockStorageProvider.download.mockResolvedValue(makeReadable(rawBuffer));
+      mockProvider.detect.mockResolvedValue([]);
+
+      await service.processMediaItem(makeJob());
+
+      // sharp must have been invoked with the raw downloaded buffer
+      const sharpMock = jest.requireMock('sharp') as jest.Mock;
+      expect(sharpMock).toHaveBeenCalledWith(rawBuffer);
+
+      // provider.detect must NOT have received the raw storage buffer
+      expect(mockProvider.detect).toHaveBeenCalledTimes(1);
+      const detectArg = (mockProvider.detect as jest.Mock).mock.calls[0][1] as Buffer;
+      expect(detectArg).not.toBe(rawBuffer);
+      expect(Buffer.isBuffer(detectArg)).toBe(true);
+    });
+
+    it('normalizes pixel bounding boxes by upright dims from sharp (not raw MediaItem dims)', async () => {
+      // MediaItem raw dims: 500x400 (set in makeMediaItem)
+      // Sharp mock upright dims: 800x600 (from jest.mock above)
+      // Provider returns pixel box: x=160, y=120, w=80, h=60
+      // Expected normalized by upright: x=160/800=0.2, y=120/600=0.2, w=80/800=0.1, h=60/600=0.1
+      // If incorrectly using raw MediaItem dims: x=160/500=0.32 (wrong)
+      mockProvider.detect.mockResolvedValue([
+        {
+          boundingBox: { x: 160, y: 120, w: 80, h: 60 },
+          confidence: 0.95,
+          embedding: [],
+          landmarks: null,
+          externalFaceId: null,
+        },
+      ]);
+
+      await service.processMediaItem(makeJob());
+
+      const createCall = (mockPrisma.face.create as jest.Mock).mock.calls[0][0];
+      const storedBb = createCall.data.boundingBox;
+      // Normalized by sharp upright dims (800x600), not MediaItem dims (500x400)
+      expect(storedBb.x).toBeCloseTo(0.2, 5);   // 160/800
+      expect(storedBb.y).toBeCloseTo(0.2, 5);   // 120/600
+      expect(storedBb.w).toBeCloseTo(0.1, 5);   // 80/800
+      expect(storedBb.h).toBeCloseTo(0.1, 5);   // 60/600
+    });
+
+    it('falls back to raw buffer and MediaItem dims when sharp preprocessing throws', async () => {
+      // Override sharp to throw for this test only
+      const sharpMock = jest.requireMock('sharp') as jest.Mock;
+      sharpMock.mockReturnValueOnce({
+        rotate: jest.fn().mockReturnThis(),
+        resize: jest.fn().mockReturnThis(),
+        jpeg: jest.fn().mockReturnThis(),
+        toBuffer: jest.fn().mockRejectedValueOnce(new Error('sharp corrupt image')),
+      });
+
+      const rawBuffer = Buffer.from('raw-fallback');
+      mockStorageProvider.download.mockResolvedValue(makeReadable(rawBuffer));
+
+      // Provider returns a pixel box; will be normalized by MediaItem dims (500x400) as fallback
+      mockProvider.detect.mockResolvedValue([
+        {
+          boundingBox: { x: 100, y: 200, w: 50, h: 80 },
+          confidence: 0.9,
+          embedding: [],
+          landmarks: null,
+          externalFaceId: null,
+        },
+      ]);
+
+      // Should not throw — sharp failure is non-fatal
+      await expect(service.processMediaItem(makeJob())).resolves.toBeUndefined();
+
+      // detect should have been called with the raw buffer (fallback)
+      expect(mockProvider.detect).toHaveBeenCalledWith(
+        expect.anything(),
+        rawBuffer,
+      );
+
+      // Box normalized by MediaItem dims (500x400), not sharp upright dims
+      const createCall = (mockPrisma.face.create as jest.Mock).mock.calls[0][0];
+      const storedBb = createCall.data.boundingBox;
+      expect(storedBb.x).toBeCloseTo(0.2, 5);  // 100/500
+      expect(storedBb.y).toBeCloseTo(0.5, 5);  // 200/400
+      expect(storedBb.w).toBeCloseTo(0.1, 5);  // 50/500
+      expect(storedBb.h).toBeCloseTo(0.2, 5);  // 80/400
     });
   });
 
