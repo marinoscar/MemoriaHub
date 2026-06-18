@@ -320,3 +320,21 @@ The `compreface-core` container runs as a lightweight ML engine sidecar in `infr
 | `GET` | `/api/circles/:id/face-settings` | `circles:read` | viewer | 4 | Get per-circle face recognition opt-in |
 | `PUT` | `/api/circles/:id/face-settings` | `circles:write` | circle_admin | 4 | Enable/disable face recognition for circle |
 | `DELETE` | `/api/face/biometrics` | `face_settings:write` | circle_admin | 4 | Permanently erase all biometric data for a circle |
+
+---
+
+## 9. Job Queue Admin Dashboard
+
+Face detection jobs are written to the generic `enrichment_jobs` table (managed by `EnrichmentJobService` / `EnrichmentJobWorker`). Admins can monitor and control the queue through the **Job Queue** dashboard at `/admin/jobs`.
+
+The dashboard provides:
+
+- **Stats panel** — total jobs, per-status counts (`pending`, `running`, `succeeded`, `failed`), per-type breakdown, and a stuck-running badge (jobs in `running` state for more than 10 minutes).
+- **Filtered job list** — paginated table filterable by `status` and job `type`, with `lastError` visible for failed rows.
+- **Per-row actions** — Retry (reset a single failed/succeeded job to `pending`) and Delete (permanently remove the row; blocked if `running`).
+- **Bulk actions** — Retry all failed (optionally scoped by type) and Reset stuck (move stale `running` jobs back to `pending`).
+- **Auto-refresh** — the page polls every 5 seconds so operators can watch live progress.
+
+The dashboard covers all `enrichment_jobs` regardless of job type. As new enrichment handlers are added beyond face detection they will appear automatically in the stats breakdown and job list.
+
+**API endpoints:** `GET /api/admin/jobs/stats`, `GET /api/admin/jobs`, `POST /api/admin/jobs/:id/retry`, `POST /api/admin/jobs/retry-failed`, `POST /api/admin/jobs/reset-stuck`, `DELETE /api/admin/jobs/:id` — all require Admin role + `jobs:read` or `jobs:write`. See [API.md — Admin: Job Queue](../API.md#admin-job-queue) for full request/response shapes.

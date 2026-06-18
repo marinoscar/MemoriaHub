@@ -24,6 +24,7 @@ import {
   Search as SearchIcon,
   SmartToy as AiIcon,
   Face as FaceIcon,
+  WorkHistory as WorkHistoryIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -118,6 +119,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       label: 'Face Settings',
       icon: <FaceIcon />,
       path: '/admin/face-settings',
+      visible: isAdmin,
+    },
+    {
+      label: 'Job Queue',
+      icon: <WorkHistoryIcon />,
+      path: '/admin/jobs',
       visible: isAdmin,
     },
   ];

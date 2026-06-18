@@ -327,6 +327,15 @@ Face recognition is per-circle opt-in (default off); see Circle Face Settings en
 - `GET /api/admin/backup/runs/:runId` - Get single run detail
 - `GET /api/admin/backup/objects` - List objects in the backup destination
 
+### Admin: Job Queue (Admin role + jobs:read / jobs:write)
+An admin dashboard at `/admin/jobs` provides monitoring and control over the generic `enrichment_jobs` queue (used by face detection and all future enrichment handlers).
+- `GET /api/admin/jobs/stats` (jobs:read) - Queue stats: total, byStatus, byType breakdown, stuckRunning count
+- `GET /api/admin/jobs?status=&type=&page=&pageSize=` (jobs:read) - Paginated job list with optional status/type filters
+- `POST /api/admin/jobs/:id/retry` (jobs:write) - Reset a single failed/succeeded job to pending (400 if running, 404 if not found)
+- `POST /api/admin/jobs/retry-failed` (jobs:write) - Bulk-retry all failed jobs; optional `{type}` body to scope by job type
+- `POST /api/admin/jobs/reset-stuck` (jobs:write) - Reset jobs stuck in `running` past a threshold; optional `{olderThanMinutes}` body (default 10)
+- `DELETE /api/admin/jobs/:id` (jobs:write) - Delete a job row (400 if running, 404 if not found)
+
 ### Media — Bulk Operations (circle-scoped, collaborator role required)
 - `PATCH /api/media/bulk` - Bulk update location / classification / favorite on 1–500 items
 - `POST /api/media/bulk/tags` - Bulk add/remove tags on 1–500 items
@@ -416,6 +425,8 @@ Three providers: `human` (keyless WASM, in-process, 1024-d), `compreface` (keyle
 - `search:use` - Use deterministic search and conversational (agentic) search (all roles)
 - `face_settings:read` - View face provider config, test connectivity, list models (Admin only)
 - `face_settings:write` - Configure face provider credentials and set active detection provider/model (Admin only)
+- `jobs:read` - View enrichment job queue stats and list jobs (Admin only)
+- `jobs:write` - Retry, reset, and delete enrichment jobs (Admin only)
 
 ### Per-Circle Roles
 Each circle has its own role for each member, independent of the system role:
