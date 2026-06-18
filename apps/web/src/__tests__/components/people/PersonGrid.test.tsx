@@ -1,7 +1,9 @@
 /**
  * Unit tests for PersonGrid component.
  *
- * PersonCardContainer calls listMedia internally — mock services/media.
+ * PersonCardContainer calls getMedia internally to resolve the cover image URL
+ * (preferring downloadUrl over thumbnailUrl for full-res face crops).
+ * Mock services/media to avoid real API calls.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -14,6 +16,11 @@ import type { PersonListItem } from '../../../services/face';
 
 vi.mock('../../../services/media', () => ({
   listMedia: vi.fn().mockResolvedValue({ items: [], meta: {} }),
+  getMedia: vi.fn().mockResolvedValue({
+    id: 'media-1',
+    thumbnailUrl: 'https://example.com/thumb.jpg',
+    downloadUrl: 'https://example.com/full.jpg',
+  }),
 }));
 
 vi.mock('../../../services/face', () => ({
