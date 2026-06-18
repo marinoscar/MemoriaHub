@@ -18,6 +18,7 @@ import {
   CreatePersonDto,
   UpdatePersonDto,
   AssignFacesDto,
+  ListUnassignedFacesQueryDto,
 } from './dto/people.dto';
 import { MergePeopleDto } from './dto/merge-people.dto';
 
@@ -93,6 +94,68 @@ export class PeopleService {
         : null,
       createdAt: p.createdAt,
       updatedAt: p.updatedAt,
+    }));
+
+    return {
+      items,
+      meta: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.ceil(totalItems / pageSize),
+      },
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // listUnassignedFaces
+  // ---------------------------------------------------------------------------
+
+  async listUnassignedFaces(
+    userId: string,
+    userPermissions: string[],
+    query: ListUnassignedFacesQueryDto,
+  ) {
+    const { circleId, page, pageSize } = query;
+
+    await this.circleMembershipService.assertCircleAccess(
+      userId,
+      circleId,
+      userPermissions,
+      'viewer' as CircleRole,
+    );
+
+    const skip = (page - 1) * pageSize;
+
+    const where = {
+      personId: null,
+      circleId,
+      mediaItem: { deletedAt: null },
+    };
+
+    const [faces, totalItems] = await Promise.all([
+      this.prisma.face.findMany({
+        where,
+        skip,
+        take: pageSize,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          mediaItemId: true,
+          boundingBox: true,
+          confidence: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.face.count({ where }),
+    ]);
+
+    const items = faces.map((f) => ({
+      faceId: f.id,
+      mediaItemId: f.mediaItemId,
+      boundingBox: f.boundingBox,
+      confidence: f.confidence,
+      createdAt: f.createdAt,
     }));
 
     return {

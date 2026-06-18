@@ -59,3 +59,15 @@ export const clusterSchema = z.object({
 });
 
 export class ClusterDto extends createZodDto(clusterSchema) {}
+
+// ---------------------------------------------------------------------------
+// ListUnassignedFacesQueryDto
+// ---------------------------------------------------------------------------
+
+export const listUnassignedFacesQuerySchema = z.object({
+  circleId: z.string().uuid(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+export class ListUnassignedFacesQueryDto extends createZodDto(listUnassignedFacesQuerySchema) {}
