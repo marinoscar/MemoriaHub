@@ -27,6 +27,9 @@ import {
   FormControl,
   InputLabel,
   Avatar,
+  Switch,
+  FormControlLabel,
+  Snackbar,
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
@@ -38,6 +41,7 @@ import { useCircleInvites } from '../../hooks/useCircleInvites';
 import { useCircleContext } from '../../contexts/CircleContext';
 import { usePermissions } from '../../hooks/usePermissions';
 import { getCircle } from '../../services/circles';
+import { getCircleFaceSettings, updateCircleFaceSettings } from '../../services/face';
 import type { Circle, CircleRole } from '../../types/circles';
 
 interface TabPanelProps {
@@ -81,6 +85,13 @@ export default function CircleDetailPage() {
   const { invites, loading: invitesLoading, error: invitesError, fetchInvites, sendInvite, cancelInvite } =
     useCircleInvites(circleId);
 
+  // Face settings state
+  const [faceSettings, setFaceSettings] = useState<{ faceRecognitionEnabled: boolean } | null>(null);
+  const [faceSettingsLoading, setFaceSettingsLoading] = useState(false);
+  const [faceSettingsError, setFaceSettingsError] = useState<string | null>(null);
+  const [faceTogglingLoading, setFaceTogglingLoading] = useState(false);
+  const [faceSuccessMsg, setFaceSuccessMsg] = useState<string | null>(null);
+
   // Invite dialog
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -112,6 +123,32 @@ export default function CircleDetailPage() {
   useEffect(() => {
     void fetchInvites();
   }, [fetchInvites]);
+
+  useEffect(() => {
+    if (!circleId) return;
+    setFaceSettingsLoading(true);
+    setFaceSettingsError(null);
+    getCircleFaceSettings(circleId)
+      .then(setFaceSettings)
+      .catch((err: unknown) => {
+        setFaceSettingsError(err instanceof Error ? err.message : 'Failed to load face settings');
+      })
+      .finally(() => setFaceSettingsLoading(false));
+  }, [circleId]);
+
+  const handleFaceToggle = async (enabled: boolean) => {
+    setFaceTogglingLoading(true);
+    setFaceSettingsError(null);
+    try {
+      const updated = await updateCircleFaceSettings(circleId, enabled);
+      setFaceSettings(updated);
+      setFaceSuccessMsg(enabled ? 'Face recognition enabled.' : 'Face recognition disabled.');
+    } catch (err: unknown) {
+      setFaceSettingsError(err instanceof Error ? err.message : 'Failed to update face recognition setting');
+    } finally {
+      setFaceTogglingLoading(false);
+    }
+  };
 
   const handleSendInvite = useCallback(async () => {
     if (!inviteEmail.trim()) return;
@@ -169,6 +206,7 @@ export default function CircleDetailPage() {
         <Tabs value={tab} onChange={(_, v: number) => setTab(v)} sx={{ px: 2, borderBottom: 1, borderColor: 'divider' }}>
           <Tab label="Members" />
           <Tab label="Invites" />
+          <Tab label="Settings" />
         </Tabs>
 
         {/* Members tab */}
@@ -343,7 +381,67 @@ export default function CircleDetailPage() {
             )}
           </Box>
         </TabPanel>
+
+        {/* Settings tab */}
+        <TabPanel value={tab} index={2}>
+          <Box sx={{ px: 2, pb: 2 }}>
+            <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'medium' }}>
+              Face Recognition
+            </Typography>
+            {faceSettingsLoading ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                <CircularProgress />
+              </Box>
+            ) : (
+              <>
+                {faceSettingsError && (
+                  <Alert severity="error" sx={{ mb: 2 }}>
+                    {faceSettingsError}
+                  </Alert>
+                )}
+                <Paper variant="outlined" sx={{ p: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Face recognition uses biometric data (face embeddings) to identify people across
+                    photos. It is opt-in per circle. Disabling stops new processing; existing face data
+                    remains unless you delete biometrics on the People page.
+                  </Typography>
+                  {canManage ? (
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={faceSettings?.faceRecognitionEnabled ?? false}
+                          onChange={(e) => void handleFaceToggle(e.target.checked)}
+                          disabled={faceTogglingLoading || !faceSettings}
+                          color="primary"
+                        />
+                      }
+                      label={faceTogglingLoading ? 'Updating…' : 'Enable face recognition'}
+                    />
+                  ) : (
+                    <Typography variant="body2">
+                      Face recognition is currently{' '}
+                      <strong>
+                        {faceSettings?.faceRecognitionEnabled ? 'Enabled' : 'Disabled'}
+                      </strong>
+                    </Typography>
+                  )}
+                </Paper>
+              </>
+            )}
+          </Box>
+        </TabPanel>
       </Paper>
+
+      <Snackbar
+        open={Boolean(faceSuccessMsg)}
+        autoHideDuration={3000}
+        onClose={() => setFaceSuccessMsg(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={() => setFaceSuccessMsg(null)} severity="success" sx={{ width: '100%' }}>
+          {faceSuccessMsg}
+        </Alert>
+      </Snackbar>
 
       {/* Invite dialog */}
       <Dialog open={inviteOpen} onClose={() => !inviting && setInviteOpen(false)} maxWidth="sm" fullWidth>
