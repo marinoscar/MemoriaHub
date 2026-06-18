@@ -217,6 +217,21 @@ describe('FaceThumbnails', () => {
       expect(img).toBeInTheDocument();
       expect(img).toHaveAttribute('src', 'https://example.com/thumb.jpg');
     });
+
+    it('prefers downloadUrl over thumbnailUrl for the overlay image when both are provided', () => {
+      mockUseMediaFaces.mockReturnValue(defaultHookReturn({ faces: [makeFace()] }));
+
+      render(
+        <FaceThumbnails
+          mediaId="media-1"
+          thumbnailUrl="https://example.com/thumb.jpg"
+          downloadUrl="https://example.com/full.jpg"
+        />,
+      );
+
+      const img = screen.getByRole('img', { name: /media thumbnail/i });
+      expect(img).toHaveAttribute('src', 'https://example.com/full.jpg');
+    });
   });
 
   // -------------------------------------------------------------------------

@@ -1,7 +1,8 @@
 /**
  * Unit tests for FaceCrop component.
  *
- * Verifies role/aria attributes and background-image CSS calculation.
+ * Verifies role/aria attributes, img-based rendering with lazy loading, and
+ * the crop math (percentage-based position/size derived from the bounding box).
  */
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -40,6 +41,21 @@ describe('FaceCrop', () => {
 
     const el = screen.getByRole('img');
     expect(el).toBeInTheDocument();
+  });
+
+  describe('img element and lazy loading', () => {
+    it('renders an <img> element with the provided imageUrl as src', () => {
+      const { container } = render(<FaceCrop imageUrl={TEST_URL} boundingBox={bb} />);
+      const img = container.querySelector('img');
+      expect(img).toBeTruthy();
+      expect(img?.getAttribute('src')).toBe(TEST_URL);
+    });
+
+    it('sets loading="lazy" on the img element', () => {
+      const { container } = render(<FaceCrop imageUrl={TEST_URL} boundingBox={bb} />);
+      const img = container.querySelector('img');
+      expect(img?.getAttribute('loading')).toBe('lazy');
+    });
   });
 
   describe('CSS calculation verification', () => {

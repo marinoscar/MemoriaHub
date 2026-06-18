@@ -55,6 +55,9 @@ interface FaceThumbnailsProps {
   mediaId: string;
   mediaType?: string;
   thumbnailUrl?: string;
+  /** Full-resolution download URL. When provided it is preferred over thumbnailUrl
+   *  for face crops and the overlay image so crops are sharp. */
+  downloadUrl?: string;
   circleId?: string;
 }
 
@@ -65,7 +68,8 @@ interface FaceThumbnailsProps {
 interface AssignFaceDialogProps {
   open: boolean;
   face: DetectedFaceDto | null;
-  thumbnailUrl: string | undefined;
+  /** Full-resolution URL preferred; falls back to thumbnailUrl for sharp crop preview. */
+  imageUrl: string | undefined;
   circleId: string;
   onClose: () => void;
   onSuccess: () => void;
@@ -74,7 +78,7 @@ interface AssignFaceDialogProps {
 function AssignFaceDialog({
   open,
   face,
-  thumbnailUrl,
+  imageUrl,
   circleId,
   onClose,
   onSuccess,
@@ -163,10 +167,10 @@ function AssignFaceDialog({
         {isAssigned ? 'Reassign or Unassign Face' : 'Assign Face to Person'}
       </DialogTitle>
       <DialogContent>
-        {/* Face crop preview */}
-        {thumbnailUrl && face && (
+        {/* Face crop preview — use full-res imageUrl for a sharp crop */}
+        {imageUrl && face && (
           <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
-            <FaceCrop imageUrl={thumbnailUrl} boundingBox={face.boundingBox} size={96} />
+            <FaceCrop imageUrl={imageUrl} boundingBox={face.boundingBox} size={96} />
           </Box>
         )}
 
@@ -275,6 +279,7 @@ export function FaceThumbnails({
   mediaId,
   mediaType,
   thumbnailUrl,
+  downloadUrl,
   circleId,
 }: FaceThumbnailsProps) {
   const theme = useTheme();
@@ -318,12 +323,12 @@ export function FaceThumbnails({
         </Alert>
       )}
 
-      {/* Image with face box overlays */}
+      {/* Image with face box overlays — prefer downloadUrl (full-res) when available */}
       {thumbnailUrl && (
         <Box sx={{ position: 'relative', display: 'inline-block', width: '100%', mb: 1 }}>
           <Box
             component="img"
-            src={thumbnailUrl}
+            src={downloadUrl ?? thumbnailUrl}
             alt="Media thumbnail"
             sx={{ width: '100%', display: 'block', borderRadius: 1 }}
           />
@@ -363,7 +368,7 @@ export function FaceThumbnails({
         <AssignFaceDialog
           open={assignDialogFace !== null}
           face={assignDialogFace}
-          thumbnailUrl={thumbnailUrl}
+          imageUrl={downloadUrl ?? thumbnailUrl}
           circleId={circleId}
           onClose={() => setAssignDialogFace(null)}
           onSuccess={() => void refresh()}
