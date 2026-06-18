@@ -36,6 +36,14 @@ export interface SystemSettingsValue {
       deleteAfterArchiveDays: number;
     };
   };
+  face?: {
+    features: {
+      detection: {
+        provider: string | null;
+        model: string | null;
+      };
+    };
+  };
 }
 
 /**
@@ -63,6 +71,11 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     conversations: {
       archiveAfterDays: 30,
       deleteAfterArchiveDays: 30,
+    },
+  },
+  face: {
+    features: {
+      detection: { provider: null, model: null },
     },
   },
 };
