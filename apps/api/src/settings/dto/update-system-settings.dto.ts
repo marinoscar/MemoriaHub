@@ -19,6 +19,14 @@ export const updateSystemSettingsSchema = z.object({
       deleteAfterArchiveDays: z.number().int().min(1),
     }),
   }),
+  face: z.object({
+    features: z.object({
+      detection: z.object({
+        provider: z.string().nullable(),
+        model: z.string().nullable(),
+      }),
+    }),
+  }).optional(),
 });
 
 export class UpdateSystemSettingsDto extends createZodDto(
@@ -49,6 +57,20 @@ export const patchSystemSettingsSchema = z.object({
         .object({
           archiveAfterDays: z.number().int().min(1).optional(),
           deleteAfterArchiveDays: z.number().int().min(1).optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+  face: z
+    .object({
+      features: z
+        .object({
+          detection: z
+            .object({
+              provider: z.string().nullable().optional(),
+              model: z.string().nullable().optional(),
+            })
+            .optional(),
         })
         .optional(),
     })

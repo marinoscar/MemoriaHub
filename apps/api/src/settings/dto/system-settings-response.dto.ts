@@ -11,6 +11,16 @@ export const systemSettingsResponseSchema = z.object({
     refreshTtlDays: z.number(),
   }),
   features: z.record(z.string(), z.boolean()),
+  face: z
+    .object({
+      features: z.object({
+        detection: z.object({
+          provider: z.string().nullable(),
+          model: z.string().nullable(),
+        }),
+      }),
+    })
+    .optional(),
   updatedAt: isoDateTime,
   updatedBy: z
     .object({
