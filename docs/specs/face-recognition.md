@@ -1,340 +1,754 @@
-# Face Detection and Recognition Specification
+# Face Detection and Recognition — End-to-End Reference
 
 | Field | Value |
 |-------|-------|
-| **Version** | 2.0 |
+| **Version** | 3.0 |
 | **Last Updated** | June 2026 |
-| **Status** | All 4 phases implemented |
-| **Branch** | `feat/face-recognition` |
+| **Status** | All phases implemented |
 
 ---
 
 ## Table of Contents
 
-1. [Motivation and Vision Alignment](#1-motivation-and-vision-alignment)
-2. [Provider Model](#2-provider-model)
-3. [Data Model](#3-data-model)
-4. [Four-Phase Roadmap](#4-four-phase-roadmap)
-5. [Phase 1: Settings — What Is Implemented Now](#5-phase-1-settings--what-is-implemented-now)
-6. [Security and Privacy](#6-security-and-privacy)
-7. [Infrastructure: CompreFace Sidecar](#7-infrastructure-compreface-sidecar)
-8. [Endpoint and Permission Reference](#8-endpoint-and-permission-reference)
+1. [Overview and Product Goal](#1-overview-and-product-goal)
+2. [Architecture at a Glance](#2-architecture-at-a-glance)
+3. [Providers and Abstraction](#3-providers-and-abstraction)
+4. [Settings and Credentials](#4-settings-and-credentials)
+5. [Detection Pipeline Step by Step](#5-detection-pipeline-step-by-step)
+6. [Recognition: Embeddings, Matching, and Clustering](#6-recognition-embeddings-matching-and-clustering)
+7. [People, Labeling, and Merge](#7-people-labeling-and-merge)
+8. [Image Quality and Resolution](#8-image-quality-and-resolution)
+9. [EXIF Orientation](#9-exif-orientation)
+10. [Per-Circle Opt-In and Biometric Privacy](#10-per-circle-opt-in-and-biometric-privacy)
+11. [Data Model](#11-data-model)
+12. [API Endpoints](#12-api-endpoints)
+13. [Configuration and Environment Variables](#13-configuration-and-environment-variables)
+14. [Operations](#14-operations)
+15. [Gotchas and Known Issues](#15-gotchas-and-known-issues)
+16. [Infrastructure](#16-infrastructure)
 
 ---
 
-## 1. Motivation and Vision Alignment
+## 1. Overview and Product Goal
 
-[VISION.MD](../../VISION.MD) identifies face recognition and family-member identification as core enrichment goals: users should be able to find "photos of Lucia" or confirm "the whole family is in this photo." This feature delivers that capability through a background enrichment pipeline with a pluggable provider architecture.
+Face detection and recognition enables users to organize their photo library by the people in it. A user can ask "find all photos of Lucia" or confirm that every family member appears in a given photo. The feature delivers this through a background enrichment pipeline with pluggable provider support and per-circle biometric opt-in.
 
-**Core requirements (confirmed with product owner):**
+**Core capabilities:**
 
-- Detect faces in photos and recognize the same person across photos.
-- Label people (Oscar, Pamela, Joe…).
-- Merge two clusters when a model splits one real person into two — future photos are then treated as a single person.
-- Pluggable providers (cloud + on-prem), switchable in the UI, to manage cost.
-- Provider credentials configured in the Admin UI, encrypted at rest, mirroring the existing AI Settings feature.
-- Runs in the background; track which media items have been processed and by which provider/model.
-- Ability to re-run detection on a given photo.
+- Detect faces in photos automatically on upload (when enabled per circle).
+- Generate embedding vectors that encode each face's identity.
+- Recognize the same person across many photos by comparing embeddings.
+- Allow users to label people by name.
+- Cluster unknown faces into provisional person groups.
+- Merge two clusters when a model incorrectly splits one person into two.
+- Re-run detection on demand for any photo.
+- Backfill an entire circle's existing photos.
+- Erase all biometric data for a circle in a single irreversible operation.
 
----
-
-## 2. Provider Model
-
-The face domain uses a `FaceProvider` interface that abstracts detection, embedding generation, and (for cloud providers) delegated recognition. Three providers ship with the implementation:
-
-### Human (keyless — in-process WASM)
-
-- **Type:** In-process WASM face detector and embedder. No external container required.
-- **Capabilities:** `{ detect: true, embed: true, delegatedRecognize: false, requiresCredentials: false }`
-- **Embeddings:** Returns 1024-dimensional embeddings. Stored in the app's own PostgreSQL database.
-- **Privacy:** No data leaves the server. Runs entirely in-process.
-- **Cost:** Free.
-- **Default:** No credentials or configuration needed.
-
-### CompreFace (default — keyless core sidecar)
-
-- **Type:** Self-hosted `compreface-core` sidecar running on the same compose network. No API key required.
-- **Capabilities:** `{ detect: true, embed: true, delegatedRecognize: false, requiresCredentials: false }`
-- **Embeddings:** Returns 128-dimensional ArcFace mobilefacenet embeddings (`compreface-arcface-mobilefacenet-128`). The app stores these vectors in its own PostgreSQL database and owns them entirely.
-- **Privacy:** No data leaves the server. GPS coordinates, photos, and biometric vectors stay on-premise.
-- **Cost:** Free.
-- **Default:** Yes. The sidecar's base URL defaults to `http://compreface-core:3000` and can be overridden via `FACE_COMPREFACE_URL`. An optional credential row stores only the `baseUrl` override — no API key field.
-- **API calls:** `GET /status` (health/test), `POST /find_faces?face_plugins=calculator` (detect + embed).
-
-### AWS Rekognition (opt-in — delegated)
-
-- **Type:** AWS managed cloud API.
-- **Capabilities:** `{ detect: true, embed: false, delegatedRecognize: true }`
-- **Embeddings:** None returned. AWS performs matching against a collection indexed by the app; the app stores only an `externalFaceId` per face.
-- **Privacy:** Photos are sent to AWS for processing. Operators must comply with applicable biometric data regulations.
-- **Cost:** Per-image pricing applies.
-- **Default:** No. Requires explicit credential configuration.
-
-### Adding a New Provider
-
-Implement the `FaceProvider` interface (under `apps/api/src/face/providers/`) and add one entry to `FaceProviderRegistry`. CompreFace-compatible self-hosted models can reuse the `compreface` provider key with a custom `baseUrl` stored as a credential row.
-
-**Important:** Do not mix providers across the same library. Face embeddings are model-specific and cannot be compared across providers or model versions. Switching providers requires re-processing all photos from the original S3 blobs.
+Face enrichment is deliberately decoupled from the synchronous upload path. Uploads must complete quickly; face detection against an external sidecar or cloud API can take seconds per photo and must be re-runnable and backfillable. The generic `enrichment_jobs` table and its worker manage this asynchronous execution. See **[docs/specs/enrichment-queue.md](enrichment-queue.md)** for the full queue architecture.
 
 ---
 
-## 3. Data Model
+## 2. Architecture at a Glance
 
-Five new Prisma models were added in Phase 1. The tables are created by migration in all phases; only `face_provider_credentials` is actively used in Phase 1 — the others are scaffolded for upcoming phases.
+```mermaid
+flowchart TD
+    A[File uploaded and processed] -->|OBJECT_PROCESSED_EVENT| B[FaceEnqueueListener]
+    B -->|circle.faceRecognitionEnabled AND FACE_AUTO_DETECT != false| C[EnrichmentJobService.enqueue]
+    C -->|INSERT enrichment_jobs type=face_detection| D[(enrichment_jobs table)]
+    C --> E[Upsert MediaFaceStatus → pending]
+    D -->|poll every ENRICHMENT_JOB_POLL_MS| F[EnrichmentJobWorker]
+    F -->|atomic claim: UPDATE status=running| G[FaceDetectionHandler]
+    G --> H[FaceDetectionService.processMediaItem]
+    H --> I[Stream image from S3]
+    I --> J[prepareImageForProcessing — EXIF rotate + downscale]
+    J --> K[provider.detect → DetectedFace array]
+    K --> L[Delete old non-manuallyAssigned Face rows]
+    L --> M[Normalize bounding boxes]
+    M --> N[INSERT new Face rows]
+    N --> O[FaceMatchingService.matchFaceToPerson]
+    O -->|similarity >= threshold| P[Set Face.personId]
+    O -->|below threshold| Q[Face remains unknown]
+    N --> R[Update MediaFaceStatus → processed or no_faces]
+    H -->|on error| S[MediaFaceStatus → failed]
+```
 
-### `face_provider_credentials` (Phase 1 active)
+The synchronous base enrichment chain (EXIF extraction, dimensions, geolocation) completes first and emits `OBJECT_PROCESSED_EVENT`. `FaceEnqueueListener` receives this event and inserts a job into the generic queue. From that point the flow is entirely asynchronous.
 
-Mirror of `ai_provider_credentials`. One row per provider.
+See **[docs/specs/enrichment-queue.md](enrichment-queue.md)** for the worker lifecycle, retry logic, priority ordering, and how to add new enrichment handlers.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `provider` | String (unique) | Provider key: `human`, `compreface`, or `rekognition` |
-| `encryptedKey` | String | AES-256-GCM encrypted API key. For keyless providers (`human`, `compreface`), the key field is empty/absent — only `baseUrl` is relevant. |
-| `baseUrl` | String? | Override URL (CompreFace only; not applicable to `human` or `rekognition`) |
-| `region` | String? | AWS region (Rekognition only) |
-| `last4` | String | Last 4 chars of plaintext key (display only; not applicable for keyless providers) |
-| `enabled` | Boolean | Whether this provider is active |
-| `updatedByUserId` | String? | FK to `users` |
+---
 
-**Note:** `human` and `compreface` are keyless providers (`requiresCredentials: false`). A credential row for these providers, if present, stores only a `baseUrl` override. No API key is set or required.
+## 3. Providers and Abstraction
 
-### `people` (scaffolded; Phase 3)
+### FaceProvider Interface
 
-Per-circle identity records for recognized individuals.
+All providers implement the `FaceProvider` interface defined in `apps/api/src/face/providers/face-provider.interface.ts`.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `circleId` | String | Circle this person belongs to |
-| `name` | String? | Display name (null until labeled) |
-| `addedById` | String | User who created this record |
-| `coverFaceId` | String? | FK to `faces` used as the cover thumbnail |
-| `mergedIntoId` | String? | Self-FK — audit breadcrumb when two clusters are merged |
+**Properties:**
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `key` | `string` | Registry identifier (e.g. `'compreface'`) |
+| `capabilities` | `FaceCapabilities` | What this provider can do |
+| `modelVersion` | `string` | Human-readable model descriptor |
+| `requiresCredentials` | `boolean` | Whether an API key is required |
+
+**FaceCapabilities:**
+
+```typescript
+interface FaceCapabilities {
+  detect: boolean;            // Can detect face bounding boxes
+  embed: boolean;             // Can generate embedding vectors
+  delegatedRecognize: boolean; // Uses external collection for matching (Rekognition)
+}
+```
+
+**DetectedFace:**
+
+```typescript
+interface DetectedFace {
+  boundingBox: { x: number; y: number; w: number; h: number };
+  confidence?: number;
+  landmarks?: unknown;
+  embedding?: number[];
+  externalFaceId?: string;
+}
+```
+
+**Methods:**
+
+| Method | Required | Description |
+|--------|----------|-------------|
+| `detect(creds, imageBuffer)` | Yes | Returns array of DetectedFace |
+| `embed(creds, imageBuffer)` | No | Returns embedding for first face |
+| `enroll(creds, imageBuffer, faceId)` | No | Adds face to external collection |
+| `recognize(creds, imageBuffer, circleId)` | No | Searches external collection |
+| `listModels(creds)` | No | Returns available models |
+| `testConnection(creds)` | No | Validates connectivity |
+
+### Provider Comparison
+
+| Property | `human` | `compreface` | `rekognition` |
+|----------|---------|--------------|---------------|
+| `key` | `human` | `compreface` | `rekognition` |
+| `modelVersion` | `human-faceres-1024` | `compreface-arcface-mobilefacenet-128` | `rekognition-2023` |
+| Embedding dimensions | 1024 | 128 | None (delegated) |
+| `requiresCredentials` | `false` | `false` | `true` |
+| `detect` | Yes | Yes | Yes |
+| `embed` | Yes | Yes | No |
+| `delegatedRecognize` | No | No | Yes |
+| Infrastructure | In-process WASM | `compreface-core` sidecar | AWS cloud API |
+| Data leaves server | No | No | Yes |
+| Cost | Free | Free | Per-image (AWS pricing) |
+| When to use | Privacy-first, no containers | Recommended default, balanced accuracy | Highest accuracy, cloud, cost |
+
+**Recommended default:** `compreface`. It requires no API key, runs as a stateless sidecar on the same Docker network, produces 128-d ArcFace MobileFaceNet embeddings stored in the application's own database, and keeps all photo data and biometric vectors on-premise.
+
+### Provider Registry
+
+`apps/api/src/face/providers/face-provider.registry.ts` maintains a simple Map:
+
+```typescript
+new Map([
+  ['compreface', new ComprefaceProvider()],
+  ['rekognition', new RekognitionProvider()],
+  ['human', new HumanProvider()],
+])
+```
+
+**To add a new provider:**
+
+1. Implement the `FaceProvider` interface under `apps/api/src/face/providers/`.
+2. Add one entry to the registry Map: `['your-key', new YourProvider()]`.
+
+No further wiring is required. The provider will appear in the admin UI and settings endpoints automatically.
+
+---
+
+## 4. Settings and Credentials
+
+### Admin-Only Access
+
+All face settings endpoints require the Admin system role. Two permissions gate access:
+
+- `face_settings:read` — view configuration, test connectivity, list models.
+- `face_settings:write` — configure credentials, set active detection provider, run backfill, erase biometrics.
+
+### Credential Encryption
+
+API keys are encrypted with AES-256-GCM using `SECRETS_ENCRYPTION_KEY` (a base64-encoded 32-byte key). The plaintext key is never stored or returned from any endpoint. Only the `last4` characters are exposed for display purposes. The API fails to start if `SECRETS_ENCRYPTION_KEY` is absent or incorrectly sized.
+
+Generate a key: `openssl rand -base64 32`
+
+### Keyless Providers
+
+`human` and `compreface` have `requiresCredentials: false`. No API key is needed. A credential row for these providers, if present, stores only an optional `baseUrl` override — useful when the CompreFace sidecar runs at a non-default address. No key is set or required.
+
+### Active Detection Feature
+
+The active provider and model are persisted in the `system_settings` table under the key `'global'`, at JSON path `.face.features.detection.{ provider, model }`. This record is created automatically when `PUT /api/face/features/detection` is first called. The `system_settings` row for key `'global'` must exist before this path can be written.
+
+### Endpoints
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `GET` | `/api/face/settings` | `face_settings:read` | Get all providers, known providers (credential-required, unconfigured), capabilities, and active detection feature |
+| `PUT` | `/api/face/credentials/:provider` | `face_settings:write` | Upsert provider credentials encrypted at rest |
+| `DELETE` | `/api/face/credentials/:provider` | `face_settings:write` | Remove provider credentials |
+| `POST` | `/api/face/test` | `face_settings:read` | Test provider connectivity |
+| `GET` | `/api/face/models` | `face_settings:read` | List available models for a provider |
+| `PUT` | `/api/face/features/detection` | `face_settings:write` | Set active face-detection provider and model |
+
+---
+
+## 5. Detection Pipeline Step by Step
+
+### Triggers
+
+| Trigger | How | Priority |
+|---------|-----|----------|
+| Upload (automatic) | `FaceEnqueueListener` on `OBJECT_PROCESSED_EVENT` | 10 |
+| Per-photo rerun (user) | `POST /api/media/:id/faces/rerun` | 0 (highest) |
+| Backfill (admin) | `POST /api/face/backfill { circleId, force? }` | 100 (lowest) |
+
+The listener only enqueues when `MediaType` is `photo` (not video), `mediaItem.deletedAt` is null, `FACE_AUTO_DETECT` is not `'false'`, and `circle.faceRecognitionEnabled` is `true`.
+
+Backfill skips items already in `processed` or `no_faces` status unless `force: true` is passed.
+
+For queue mechanics (worker polling, atomic claim, retry, concurrency), see **[docs/specs/enrichment-queue.md](enrichment-queue.md)**.
+
+### processMediaItem — 12 Steps
+
+`FaceDetectionService.processMediaItem` in `apps/api/src/face/face-detection.service.ts`:
+
+**Step 1.** Upsert `MediaFaceStatus` to `processing`.
+
+**Step 2.** Read active provider key and model from `system_settings['global'].face.features.detection`.
+
+**Step 3.** Call `FaceSettingsService.resolveCredentials(providerKey)`. For keyless providers, returns optional `baseUrl` override from the credential row if one exists. For credential-required providers, the credential row must exist and be enabled; otherwise throws.
+
+**Step 4.** Load `MediaItem` including the associated `storageObject.storageKey`.
+
+**Step 5.** Stream the S3 object into a buffer.
+
+**Step 5.5.** Call `prepareImageForProcessing(buffer, { maxDim: parseInt(FACE_MAX_IMAGE_DIM ?? '2000') })`. This applies EXIF rotation via `sharp().rotate()`, optionally downscales to `maxDim` on the longest side, and returns `{ buffer (upright JPEG), width, height }`. If `sharp` fails, falls back to the raw buffer with `width=0, height=0` and logs a warning. Processing continues with the raw buffer.
+
+**Step 6.** Call `provider.detect(credentials, uprightBuffer)` and receive `DetectedFace[]`.
+
+**Step 7.** Delete all existing `Face` rows for this `mediaItemId` where `manuallyAssigned=false`. This makes reruns idempotent without disturbing faces the user has manually assigned.
+
+**Step 8.** Normalize bounding boxes. If any of `x`, `y`, `w`, or `h` in the returned bounding box is greater than 1.0, the box is in absolute pixel coordinates — divide by `uprightWidth` and `uprightHeight` to get fractions in 0–1. If all values are already ≤ 1.0, use them as-is. Note: the CompreFace provider returns absolute pixel coordinates from the sidecar; the Human provider returns normalized fractions directly. Normalization is always applied in the service, not the provider.
+
+**Step 9.** L2-normalize embeddings (belt-and-suspenders pass; providers already normalize internally).
+
+**Step 10.** Create `Face` rows one by one in a loop to obtain their generated IDs for the matching step.
+
+**Step 11.** Attempt matching for each face:
+- If the provider uses `delegatedRecognize` and the face has an `externalFaceId`: call `FaceMatchingService.matchFaceByExternalId(circleId, externalFaceId)`.
+- Else if the face has an embedding: call `FaceMatchingService.matchFaceToPerson(circleId, embedding)`.
+- If a match is found: update `Face.personId`.
+
+**Step 12.** Upsert `MediaFaceStatus` to `processed` if at least one face was detected, or `no_faces` if the detected array was empty.
+
+**On error at any step:** call `markFailed()` which upserts `MediaFaceStatus.status = failed` and stores the error message in `lastError`.
+
+---
+
+## 6. Recognition: Embeddings, Matching, and Clustering
+
+### Embeddings
+
+All embedding vectors are L2-normalized to unit length before storage. Normalization is applied in the provider and again in the detection service. For L2-normalized unit vectors, cosine similarity reduces to the dot product: `similarity = A · B`.
+
+Embedding dimensions are provider-specific and not cross-compatible:
+
+| Provider | Dimensions | Algorithm |
+|----------|-----------|-----------|
+| `compreface` | 128 | ArcFace MobileFaceNet |
+| `human` | 1024 | FaceRes (WASM) |
+| `rekognition` | None stored | Delegated to AWS collection |
+
+Never compare embeddings from different providers or different model versions. Switching providers requires re-processing all photos from the original S3 blobs.
+
+### Per-Person Centroids
+
+Matching uses a centroid computed per `Person`:
+
+1. Load all `Face.embedding` values for the person.
+2. Compute the element-wise sum.
+3. Divide by the count to get the mean vector.
+4. L2-normalize the mean to get the centroid.
+
+Centroids are computed on demand inside `FaceMatchingService.computePersonCentroid(personId)`. They are recomputed after face assignment or merge operations.
+
+### Face-to-Person Matching
+
+`FaceMatchingService.matchFaceToPerson(circleId, embedding)`:
+
+1. Load all active `Person` records for the circle (where `deletedAt=null` and `mergedIntoId=null`).
+2. For each person, compute the centroid.
+3. Compute cosine similarity between the candidate embedding and each centroid (dot product of unit vectors).
+4. Find the person with the highest similarity.
+5. If that similarity is ≥ `FACE_MATCH_THRESHOLD` (default `0.38`): return that person.
+6. Otherwise: return `null` (face remains unassigned).
+
+When `FACE_VECTOR_BACKEND=pgvector`, the service currently logs a debug message and falls through to the same in-process cosine computation. Native pgvector `<=>` operator matching is a future TODO and is not yet active.
+
+### Delegated Matching (Rekognition)
+
+When the active provider is `rekognition`, embeddings are not stored in the application database. Instead:
+
+- `provider.detect()` calls `DetectFacesCommand` for bounding boxes.
+- `provider.enroll()` calls `IndexFacesCommand` and returns an AWS FaceId stored as `Face.externalFaceId`.
+- `FaceMatchingService.matchFaceByExternalId(circleId, externalFaceId)` finds an existing `Face` row in the circle sharing that `externalFaceId` and returns the associated `Person`.
+
+### Clustering Unknown Faces
+
+`POST /api/people/cluster { circleId }` triggers `FaceClusteringService` (requires `circle_admin` role and `faceRecognitionEnabled=true`).
+
+**Algorithm: greedy union-find**
+
+1. Load all `Face` rows in the circle where `personId=null` and `embedding` is non-empty.
+2. Compute cosine similarity for every pair — O(n²) operation.
+3. For any pair with similarity ≥ `FACE_CLUSTER_THRESHOLD` (default `0.45`), union their sets using path-compressed union-find.
+4. Group faces by root of their union-find set.
+5. For each group with size ≥ `FACE_CLUSTER_MIN_SIZE` (default `2`), create a new `Person` with `name=null` (unlabeled) and assign the faces with `manuallyAssigned=false`.
+6. Singletons below `FACE_CLUSTER_MIN_SIZE` remain with `personId=null`.
+
+The cluster threshold (`0.45`) is intentionally stricter than the match threshold (`0.38`) to avoid false groupings during initial clustering. Individual photo matching uses a more lenient threshold once a person's centroid is established.
+
+---
+
+## 7. People, Labeling, and Merge
+
+### Person Model
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Primary key |
+| `circleId` | UUID | Scoped to one circle |
+| `name` | String? | Display name; null until labeled by a user |
+| `addedById` | UUID | User who created this record |
+| `coverFaceId` | UUID? | FK to `faces` — used as the profile thumbnail |
+| `mergedIntoId` | UUID? | Self-FK — audit breadcrumb when two clusters are merged; never resolves further |
 | `deletedAt` | DateTime? | Soft-delete timestamp |
 
-### `faces` (scaffolded; Phase 2)
+Active persons are those with `deletedAt=null` and `mergedIntoId=null`.
+
+### Labeling Workflow
+
+Users label people from the People page (`/people`). The page shows:
+- A grid of named persons.
+- An Unknown Faces review section listing faces with `personId=null`.
+- `GET /api/people?circleId=&includeUnlabeled=&page=&pageSize=` — filtered person list.
+- `PATCH /api/people/:id { name?, coverFaceId? }` — rename or set cover face.
+- `POST /api/people/:id/faces { faceIds[] }` — manually assign faces; sets `manuallyAssigned=true`.
+
+Manually assigned faces (`manuallyAssigned=true`) are not overwritten by subsequent auto-detection reruns or clustering.
+
+### Unassigned Faces
+
+`GET /api/people/unassigned?circleId=&page=&pageSize=` returns faces where `personId=null` and the associated `mediaItem.deletedAt=null`.
+
+### Merge
+
+`POST /api/people/merge { sourceId, targetId }` (requires `collaborator` role):
+
+Inside a single database transaction:
+1. Reassign all `Face.personId` from `source` to `target`.
+2. If `target` has no `coverFaceId` and `source` does, carry `source.coverFaceId` to `target`.
+3. Set `source.mergedIntoId = targetId` (audit breadcrumb for history).
+4. Soft-delete `source` with `deletedAt = now()`.
+5. Update `target` metadata.
+6. Recompute the target person centroid.
+7. Emit audit event `person:merge`.
+
+The eager face reassignment means a query `WHERE personId = targetId` always returns the complete merged set without chain resolution.
+
+### Delete Person
+
+`DELETE /api/people/:id` (requires `collaborator` role):
+
+Inside a transaction:
+1. Set `personId=null` and `manuallyAssigned=false` on all faces belonging to this person.
+2. Soft-delete the person with `deletedAt = now()`.
+3. Emit audit event `person:delete`.
+
+Face rows and their embeddings are retained. The faces re-enter the unknown pool and can be reassigned or reclustered.
+
+---
+
+## 8. Image Quality and Resolution
+
+### Detection Uses the Original
+
+Face detection always runs against the original uploaded file (streaming from S3), not a thumbnail. Before sending to the provider, the image is downscaled to at most `FACE_MAX_IMAGE_DIM` pixels on the longest side (default `2000`). This preserves face detail while capping memory usage.
+
+### Face-Crop Previews
+
+The frontend renders face crop previews by drawing the stored bounding box over the original image obtained via `GET /api/media/:id/download` (signed download URL). Thumbnails (800px) are too small for accurate face crops and are never used for this purpose.
+
+### Recognition Never From Thumbnail
+
+Embedding generation uses the same upright, downscaled buffer that detection used. Thumbnails are display-only and are never passed to any face provider.
+
+---
+
+## 9. EXIF Orientation
+
+Mobile cameras frequently embed EXIF orientation metadata in JPEG files rather than rotating the pixels. Without correction, a portrait photo may be processed as landscape, causing face detectors to see rotated or sideways faces.
+
+### prepareImageForProcessing
+
+`apps/api/src/storage/processing/image-orientation.util.ts` exports:
+
+```typescript
+prepareImageForProcessing(buffer: Buffer, options?: { maxDim?: number })
+  : Promise<{ buffer: Buffer; width: number; height: number }>
+```
+
+Steps:
+1. `sharp(buffer).rotate()` — applies the EXIF orientation flag, physically rotating pixels.
+2. Resize `{ fit: 'inside', withoutEnlargement: true }` to `maxDim` on the longest side.
+3. Re-encode as JPEG at quality 90.
+4. Returns `{ buffer (upright JPEG), width (display width), height (display height) }`.
+
+On `sharp` failure: returns `{ buffer (original), width: 0, height: 0 }`. Never throws.
+
+### getOrientedDimensions
+
+```typescript
+getOrientedDimensions(buffer: Buffer): Promise<{ width: number; height: number }>
+```
+
+Reads EXIF metadata and swaps `width` and `height` for EXIF orientations 5–8 (rotated 90° or 270°). Used to store display-correct dimensions in `MediaItem.width` and `MediaItem.height`.
+
+### Convention
+
+Every enrichment handler that reads image pixels MUST call `prepareImageForProcessing`, never decode raw bytes directly. `MediaItem.width` and `MediaItem.height` are always display-oriented (after EXIF correction). Original uploaded files are not modified on disk; only the processing path is normalized.
+
+---
+
+## 10. Per-Circle Opt-In and Biometric Privacy
+
+### Default Off
+
+`circles.face_recognition_enabled` defaults to `false`. Auto-enqueue on upload, backfill, and clustering all check this flag before operating. A circle must explicitly opt in before any biometric data is collected or processed.
+
+### Three Ways to Enable
+
+1. **Circle Settings via API:** `PUT /api/circles/:id/face-settings { faceRecognitionEnabled: true }` — requires `circles:write` and `circle_admin` per-circle role. Emits audit event `circle:face_settings_update`.
+2. **People Page toggle:** The UI people page shows an enable button when the feature is off for the active circle.
+3. **Backfill panel:** The admin backfill panel in Face Settings requires the circle to already have `faceRecognitionEnabled=true`; it does not enable it automatically.
+
+### Biometric Erase
+
+`DELETE /api/face/biometrics?circleId=` (requires `face_settings:write` and `circle_admin` per-circle role):
+
+Inside a single database transaction:
+1. Delete all `Face` rows for the circle.
+2. Delete all `Person` rows for the circle.
+3. Delete all `MediaFaceStatus` rows for media items in the circle.
+4. Delete all `enrichment_jobs` rows of type `face_detection` for the circle.
+5. Set `circle.faceRecognitionEnabled = false`.
+6. Emit audit event `face:biometrics_delete`.
+
+This action is irreversible. Face embeddings are biometric data; operators should document this erasure capability in their privacy policies as the designated GDPR right-to-erasure action.
+
+### Audit Events
+
+| Event | Trigger |
+|-------|---------|
+| `person:merge` | `POST /api/people/merge` |
+| `person:delete` | `DELETE /api/people/:id` |
+| `face:biometrics_delete` | `DELETE /api/face/biometrics` |
+| `circle:face_settings_update` | `PUT /api/circles/:id/face-settings` |
+
+All events are written to the `audit_events` table with `actorUserId`, `action`, `targetType`, `targetId`, and `meta` (JSONB).
+
+---
+
+## 11. Data Model
+
+### faces
 
 One row per detected face in a media item.
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `mediaItemId` | String | FK to `media_items` (cascade delete) |
-| `circleId` | String | Denormalized for RBAC and fast queries |
-| `personId` | String? | FK to `people` (null = unknown face) |
-| `boundingBox` | Json | `{ x, y, width, height }` as fractions of image dimensions |
+| `id` | UUID | Primary key |
+| `mediaItemId` | UUID | FK to `media_items` (cascade delete) |
+| `circleId` | UUID | Denormalized for RBAC and fast queries |
+| `personId` | UUID? | FK to `people` (null = unknown face) |
+| `boundingBox` | Json | `{ x, y, w, h }` as fractions of image dimensions (0–1) |
 | `confidence` | Float? | Detection confidence score |
 | `landmarks` | Json? | Facial landmark coordinates |
-| `embedding` | Float[] | Embedding vector; size depends on provider: 1024-d for `human`, 128-d for `compreface` (mobilenet build), empty for Rekognition |
-| `externalFaceId` | String? | AWS Rekognition face ID (Rekognition path only) |
-| `providerKey` | String | Which provider produced this face |
-| `modelVersion` | String | Which model version produced this face |
-| `manuallyAssigned` | Boolean | `true` = user assigned; protected from re-clustering |
+| `embedding` | Float[] | L2-normalized embedding vector (128-d for compreface, 1024-d for human, empty for rekognition) |
+| `externalFaceId` | String? | AWS Rekognition FaceId (rekognition path only) |
+| `providerKey` | String | Provider that produced this face |
+| `modelVersion` | String | Model version that produced this face |
+| `manuallyAssigned` | Boolean | `true` = user-assigned; protected from re-clustering and reruns |
+| `createdAt` | DateTime | |
 
-**Vector backend:** The `embedding Float[]` column is the default. When `FACE_VECTOR_BACKEND=pgvector` and the pgvector extension is available, an optional follow-up migration converts it to a native pgvector column with an `hnsw vector_cosine_ops` index for accelerated similarity search. The vector dimension must match the active provider: 1024 for `human`, 128 for `compreface`.
+Indices: `circleId`, `mediaItemId`, `personId`, `externalFaceId`.
 
-### `face_jobs` (scaffolded; Phase 2)
+### people
 
-Async job queue for face detection. No external queue dependency (BullMQ not required in Phase 1).
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `mediaItemId` | String | Target media item (cascade delete) |
-| `circleId` | String | Scoping for RBAC |
-| `status` | Enum | `pending`, `running`, `succeeded`, `failed` |
-| `reason` | Enum | `upload`, `rerun`, `backfill` |
-| `providerKey` | String | Provider to use for this job |
-| `modelVersion` | String? | Model to use |
-| `attempts` | Int | Retry counter |
-| `lastError` | String? | Last error message |
-
-### `media_face_status` (scaffolded; Phase 2)
-
-One row per media item — answers "has this item been processed, by whom, and when?"
+Per-circle identity records.
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `mediaItemId` | String (unique) | FK to `media_items` (cascade delete) |
-| `status` | Enum | `not_processed`, `pending`, `processing`, `processed`, `failed`, `no_faces` |
-| `providerKey` | String? | Provider that processed the item |
-| `modelVersion` | String? | Model that processed the item |
-| `faceCount` | Int | Number of faces detected (0 = no faces found) |
+| `id` | UUID | Primary key |
+| `circleId` | UUID | FK to `circles` (cascade delete) |
+| `name` | String? | Display name; null until labeled |
+| `addedById` | UUID | FK to `users` |
+| `coverFaceId` | UUID? | FK to `faces` (SetNull on face delete) |
+| `mergedIntoId` | UUID? | Self-FK to `people` (SetNull); audit breadcrumb only |
+| `createdAt` | DateTime | |
+| `updatedAt` | DateTime | |
+| `deletedAt` | DateTime? | Soft-delete timestamp |
+
+### face_provider_credentials
+
+One row per configured provider.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID | Primary key |
+| `provider` | String (unique) | Provider key: `human`, `compreface`, or `rekognition` |
+| `encryptedKey` | String | AES-256-GCM encrypted API key (empty for keyless providers) |
+| `baseUrl` | String? | URL override (CompreFace only) |
+| `region` | String? | AWS region (Rekognition only) |
+| `last4` | String | Last 4 chars of plaintext key (display only; not applicable for keyless providers) |
+| `enabled` | Boolean (default true) | Whether this provider row is active |
+| `updatedByUserId` | UUID? | FK to `users` |
+| `createdAt` | DateTime | |
+| `updatedAt` | DateTime | |
+
+### media_face_status
+
+One row per media item — tracks detection status.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID | Primary key |
+| `mediaItemId` | UUID (unique) | FK to `media_items` (cascade delete) |
+| `status` | MediaFaceStatusType | See enum below |
+| `providerKey` | String? | Provider that last processed the item |
+| `modelVersion` | String? | Model that last processed the item |
+| `faceCount` | Int (default 0) | Number of faces detected |
 | `processedAt` | DateTime? | When processing completed |
 | `lastError` | String? | Error message on failure |
+| `updatedAt` | DateTime | |
+
+`MediaFaceStatusType` enum: `not_processed`, `pending`, `processing`, `processed`, `failed`, `no_faces`.
+
+### enrichment_jobs (face_detection type)
+
+The generic job queue. Face detection uses `type = 'face_detection'`. Full schema in [enrichment-queue.md](enrichment-queue.md#2-data-model).
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID | Primary key |
+| `type` | String | `'face_detection'` for face jobs |
+| `mediaItemId` | UUID | Target media item |
+| `circleId` | UUID | Scoping for RBAC |
+| `status` | JobStatus | `pending`, `running`, `succeeded`, `failed` |
+| `reason` | JobReason | `upload`, `rerun`, `backfill` |
+| `priority` | Int (default 0) | Lower = claimed sooner |
+| `providerKey` | String? | Provider hint |
+| `modelVersion` | String? | Model hint |
+| `payload` | JsonB? | Additional handler-specific data |
+| `attempts` | Int (default 0) | Retry counter |
+| `lastError` | String? | Last error message |
+| `createdAt` | DateTime | |
+| `startedAt` | DateTime? | When last claimed |
+| `finishedAt` | DateTime? | When succeeded or failed permanently |
+
+Indices: `[status, priority, createdAt]`, `[mediaItemId]`, `[type, status]`.
+
+### circles.faceRecognitionEnabled
+
+```
+faceRecognitionEnabled  Boolean  @default(false)  @map("face_recognition_enabled")
+```
+
+Added to the `circles` table. All face operations check this column before proceeding.
 
 ---
 
-## 4. Four-Phase Roadmap
+## 12. API Endpoints
 
-| Phase | Shippable outcome | Status |
-|-------|-------------------|--------|
-| **Phase 1** | Admins configure and test face providers in the Admin UI | Implemented |
-| **Phase 2** | Faces detected in background; boxes visible on photos; re-runnable | Implemented |
-| **Phase 3** | Same person recognized across photos; unknown clusters surfaced | Implemented |
-| **Phase 4** | Full label/merge/search + biometric safeguards | Implemented |
+### Face Settings (Admin only)
 
----
+| Method | Path | Permission | Per-circle Role | Description |
+|--------|------|------------|-----------------|-------------|
+| `GET` | `/api/face/settings` | `face_settings:read` | — | Providers, capabilities, active detection feature |
+| `PUT` | `/api/face/credentials/:provider` | `face_settings:write` | — | Upsert encrypted credentials |
+| `DELETE` | `/api/face/credentials/:provider` | `face_settings:write` | — | Remove credentials |
+| `POST` | `/api/face/test` | `face_settings:read` | — | Test provider connectivity |
+| `GET` | `/api/face/models` | `face_settings:read` | — | List models for a provider |
+| `PUT` | `/api/face/features/detection` | `face_settings:write` | — | Set active detection provider/model |
+| `POST` | `/api/face/backfill` | `face_settings:write` | — | Bulk-enqueue circle photos; requires circle opt-in |
+| `DELETE` | `/api/face/biometrics` | `face_settings:write` | `circle_admin` | Permanently erase all biometric data for a circle |
 
-## 5. What Is Implemented
+### Face Detection (media:read / media:write)
 
-All four phases are fully implemented on the `feat/face-recognition` branch.
+| Method | Path | Permission | Per-circle Role | Description |
+|--------|------|------------|-----------------|-------------|
+| `GET` | `/api/media/:id/faces` | `media:read` | viewer | List faces on a media item (embedding excluded) |
+| `GET` | `/api/media/:id/faces/status` | `media:read` | viewer | Detection status, faceCount, providerKey, lastError |
+| `POST` | `/api/media/:id/faces/rerun` | `media:write` | collaborator | Re-enqueue face detection; priority=0 |
 
-### Phase 1 — Settings and Provider Abstraction
+### People
 
-- **Database tables:** All five tables created by migration and active.
-- **Permissions:** `face_settings:read` and `face_settings:write` seeded to the Admin role.
-- **Settings API** (`FaceSettingsController` under `apps/api/src/face/`): six endpoints mirroring the AI Settings API.
-- **Provider abstraction:** `FaceProvider` interface, `FaceProviderRegistry`, `ComprefaceProvider`, `RekognitionProvider`.
-- **Admin UI:** `FaceSettingsPage` at `/admin/face-settings` with per-provider credential form, test button, model selector, and active-detection selector. Gated by `face_settings:read`.
-- **Three providers:** `human` (keyless WASM, in-process), `compreface` (keyless `compreface-core` sidecar, no DB, no API key), `rekognition` (delegated, requires AWS credentials).
-- **CompreFace sidecar:** Runs as a keyless `compreface-core` sidecar (`exadel/compreface-core:1.2.0-mobilenet`) in `infra/compose/base.compose.yml`. No bundled Postgres, no API key.
+| Method | Path | Permission | Per-circle Role | Description |
+|--------|------|------------|-----------------|-------------|
+| `GET` | `/api/people` | `media:read` | viewer | List people; `?circleId=&includeUnlabeled=&page=&pageSize=` |
+| `GET` | `/api/people/unassigned` | `media:read` | viewer | Faces with no person assigned |
+| `GET` | `/api/people/:id` | `media:read` | viewer | Person with associated faces |
+| `POST` | `/api/people` | `media:write` | collaborator | Create person; optional initial `faceIds[]` |
+| `PATCH` | `/api/people/:id` | `media:write` | collaborator | Rename or set cover face |
+| `POST` | `/api/people/:id/faces` | `media:write` | collaborator | Assign faces (sets manuallyAssigned=true) |
+| `DELETE` | `/api/people/:id/faces/:faceId` | `media:write` | collaborator | Unassign face; returns to unknown pool |
+| `POST` | `/api/people/cluster` | `media:write` | circle_admin | Cluster unknown faces; requires opt-in |
+| `POST` | `/api/people/merge` | `media:write` | collaborator | Merge source into target person |
+| `DELETE` | `/api/people/:id` | `media:write` | collaborator | Soft-delete person; faces return to unknown pool |
 
-### Phase 2 — Background Detection
+### Circle Face Settings
 
-The detection pipeline runs entirely outside the synchronous upload path via a polling worker:
+| Method | Path | Permission | Per-circle Role | Description |
+|--------|------|------------|-----------------|-------------|
+| `GET` | `/api/circles/:id/face-settings` | `circles:read` | viewer | Get faceRecognitionEnabled for circle |
+| `PUT` | `/api/circles/:id/face-settings` | `circles:write` | circle_admin | Enable/disable face recognition; emits audit event |
 
-1. **`FaceEnqueueListener`** (`apps/api/src/face/processing/`) listens for `OBJECT_PROCESSED_EVENT`. If the media item's circle has `faceRecognitionEnabled=true` and `FACE_AUTO_DETECT` is not `false`, it inserts a `FaceJob(reason:upload)` and upserts `MediaFaceStatus(pending)`.
-2. **`FaceJobWorker`** polls the `face_jobs` table on a configurable interval (`FACE_JOB_POLL_MS`, default 5 s). It claims the oldest `pending` job via `UPDATE … RETURNING`, runs `FaceDetectionService.processMediaItem`, and updates job status. Claims are atomic (no concurrent double-processing). Max 3 attempts before marking `failed`. Disabled via `FACE_WORKER_ENABLED=false`.
-3. **`FaceDetectionService.processMediaItem`**: resolves the active provider/credentials from system settings → streams the image bytes from S3 → calls `provider.detect()` → deletes prior non-`manuallyAssigned` Face rows (re-run idempotency) → persists new Face rows (box, confidence, embedding/externalFaceId, providerKey, modelVersion) → updates `MediaFaceStatus`.
+### Media Filter
 
-New endpoints: `GET /media/:id/faces`, `GET /media/:id/faces/status`, `POST /media/:id/faces/rerun`, `POST /face/backfill`.
+| Method | Path | Permission | Per-circle Role | Description |
+|--------|------|------------|-----------------|-------------|
+| `GET` | `/api/media` | `media:read` | viewer | Add `?personId=<uuid>` to filter by person |
 
-### Phase 3 — Embedding Matching and People
+### Admin Job Queue (covers all enrichment types including face)
 
-After detection, `FaceDetectionService` attempts to assign each face to a known `Person` in the circle:
-
-- Embeddings are L2-normalized vectors (128-d for CompreFace mobilenet, 1024-d for the human WASM provider).
-- In-app cosine similarity is computed against per-person centroids (`FACE_VECTOR_BACKEND=app`, the default). When `FACE_VECTOR_BACKEND=pgvector` and the pgvector extension is installed, the `<=>` cosine distance operator and an `hnsw` index are used instead.
-- If the best similarity is ≥ `FACE_MATCH_THRESHOLD` (default 0.38), the face is assigned to that person and the centroid is recomputed as the mean of all normalized member embeddings.
-- Faces below threshold remain unknown (`personId=null`).
-
-**Rekognition path (delegated):** `provider.recognize()` calls `SearchFacesByImage` against the AWS collection. Matched faces receive the corresponding `personId`; unmatched faces get `externalFaceId` only.
-
-**Unknown clustering** (`POST /people/cluster`): greedy union-find over all unassigned faces using `FACE_CLUSTER_THRESHOLD` (default 0.45). Clusters with ≥ `FACE_CLUSTER_MIN_SIZE` (default 2) faces create unlabeled `Person` records. Singletons remain unassigned. Requires circle_admin role and circle opt-in.
-
-New endpoints: `GET /people`, `GET /people/:id`, `POST /people`, `PATCH /people/:id`, `POST /people/:id/faces`, `DELETE /people/:id/faces/:faceId`, `POST /people/cluster`. Also extends `GET /media` with `?personId=` filter.
-
-### Phase 4 — Merge, Lifecycle, and Biometric Safeguards
-
-- **Merge** (`POST /people/merge`): In a single database transaction, reassigns all `Face.personId` from source to target, sets `source.mergedIntoId=targetId` (audit breadcrumb), soft-deletes source, recomputes the target centroid. Eager face reassignment means `WHERE personId=target` always returns the full merged person without chain resolution. Emits `person:merge` audit event.
-- **Delete person** (`DELETE /people/:id`): Soft-deletes the person; sets `personId=null` and `manuallyAssigned=false` on all associated faces. Face rows and embeddings are retained. Emits `person:delete` audit event.
-- **Per-circle opt-in** (`GET/PUT /circles/:id/face-settings`): `faceRecognitionEnabled` column on `circles` (default `false`). Auto-enqueue, backfill, and clustering all check this flag. Emits `circle:face_settings_update` audit event.
-- **Biometric erase** (`DELETE /face/biometrics?circleId=`): Permanently deletes all Face, Person, MediaFaceStatus, and FaceJob rows for a circle in a single transaction; sets `faceRecognitionEnabled=false`. Requires system Admin or circle_admin. Emits `face:biometrics_delete` audit event. This action is irreversible.
-
-New endpoints: `POST /people/merge`, `DELETE /people/:id`, `GET /circles/:id/face-settings`, `PUT /circles/:id/face-settings`, `DELETE /face/biometrics`.
-
----
-
-## 6. Security and Privacy
-
-### Credential security
-
-Face provider credentials use the same encryption path as AI provider credentials: AES-256-GCM with the `SECRETS_ENCRYPTION_KEY` (base64-encoded 32-byte key). The API fails to start if the variable is missing or incorrectly sized. The plaintext key is never stored, logged, or returned from any endpoint — only `last4` is exposed for display purposes.
-
-### Biometric data
-
-Face embeddings are biometric data and require careful handling:
-
-- **Per-circle opt-in (default off):** The `faceRecognitionEnabled` flag on the `circles` table defaults to `false`. Auto-enqueue (on upload), backfill, and clustering all check this flag. Operators must explicitly enable face recognition per circle.
-- **Delete all biometrics:** `DELETE /api/face/biometrics?circleId=` permanently deletes all `Face`, `Person`, `MediaFaceStatus`, and `FaceJob` rows for a circle and resets `faceRecognitionEnabled=false`. This is the designated GDPR right-to-erasure action for biometric data. Operators should document this capability in their privacy policies.
-- **Model version pinning:** Each `Face` row records `providerKey` and `modelVersion`. Embeddings from different model versions are not cross-comparable. Switching providers or model versions requires re-processing all photos from the original S3 blobs.
-- **No cross-provider matching:** The CompreFace embedding space and the Rekognition collection are independent. A library must use one provider consistently.
-- **`manuallyAssigned` protection:** Faces explicitly labeled by users (`manuallyAssigned=true`) are not overwritten by subsequent auto-detection runs or re-clustering.
-
-### Audit events
-
-All sensitive face operations emit records to the `audit_events` table:
-
-| Event | Trigger |
-|-------|---------|
-| `person:merge` | `POST /people/merge` |
-| `person:delete` | `DELETE /people/:id` |
-| `face:biometrics_delete` | `DELETE /face/biometrics` |
-| `circle:face_settings_update` | `PUT /circles/:id/face-settings` |
-
-### Access control
-
-| Operation | System permission | Per-circle role |
-|-----------|-------------------|-----------------|
-| View face settings / test / list models | `face_settings:read` (Admin) | — |
-| Configure credentials / set active provider | `face_settings:write` (Admin) | — |
-| Backfill / biometric erase | `face_settings:write` (Admin) | `circle_admin` (biometric erase only) |
-| Read faces, status, list people | `media:read` | viewer |
-| Rerun detection, create/update/assign people | `media:write` | collaborator |
-| Cluster unknowns, manage circle face settings | `media:write` | circle_admin |
-| Filter media by personId | `media:read` | viewer |
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `GET` | `/api/admin/jobs/stats` | `jobs:read` | Total, byStatus, byType, stuckRunning |
+| `GET` | `/api/admin/jobs` | `jobs:read` | Paginated list; filter by status and type |
+| `POST` | `/api/admin/jobs/:id/retry` | `jobs:write` | Reset single job to pending |
+| `POST` | `/api/admin/jobs/retry-failed` | `jobs:write` | Bulk-retry failed jobs; optional type filter |
+| `POST` | `/api/admin/jobs/reset-stuck` | `jobs:write` | Reset stuck running jobs (default: > 10 min) |
+| `DELETE` | `/api/admin/jobs/:id` | `jobs:write` | Delete job row (blocked if running) |
 
 ---
 
-## 7. Infrastructure: CompreFace Sidecar
-
-The `compreface-core` container runs as a lightweight ML engine sidecar in `infra/compose/base.compose.yml`. Key decisions:
-
-- **No database, no API key:** The sidecar is a bare engine (`exadel/compreface-core:1.2.0-mobilenet`) — RetinaFace detector + ArcFace mobilefacenet calculator. There is no bundled Postgres, no admin UI, and no API key. The app connects directly to `http://compreface-core:3000` without credentials.
-- **Keyless provider:** `compreface` has `requiresCredentials: false`. An optional credential row stores only a `baseUrl` override (useful when the sidecar is deployed at a custom address). No key field is set or required.
-- **Embedding mode:** The app calls the sidecar for detection and embedding only via `POST /find_faces?face_plugins=calculator`. The returned 128-d mobilenet ArcFace vectors are stored in the app's own database. The sidecar has no internal collection or matching state.
-- **128-d embeddings:** The `1.2.0-mobilenet` image build produces 128-dimensional embeddings (`compreface-arcface-mobilefacenet-128`). This differs from the `r100` build which produces 512-d embeddings; do not switch builds without re-processing all photos.
-- **Stateless container:** No volume is required for the sidecar. It holds no persistent state.
-- **VPS tuning (x86/AVX2, CPU-only):** `UWSGI_PROCESSES=1` and `UWSGI_THREADS=1` are set to limit memory and CPU usage on a shared VPS. Swap is recommended to handle peak load.
-- **Image tag:** Pinned to `exadel/compreface-core:1.2.0-mobilenet`. Do not change the tag without also verifying the embedding dimension and API contract.
-
-**Human provider (keyless WASM):** The `human` provider runs entirely in-process; no external container or configuration is required. It is available as soon as the API starts.
-
-**New environment variables (add to `infra/compose/.env`):**
+## 13. Configuration and Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `FACE_COMPREFACE_URL` | `http://compreface-core:3000` | CompreFace core sidecar base URL (keyless; no API key) |
-| `FACE_AUTO_DETECT` | `true` | Global kill-switch for auto-enqueue on upload; per-circle opt-in still applies |
-| `FACE_JOB_POLL_MS` | `5000` | Face worker poll interval in ms |
-| `FACE_WORKER_ENABLED` | `true` | Set to `false` to disable the background worker (useful in test/CI) |
-| `FACE_MATCH_THRESHOLD` | `0.38` | Cosine similarity threshold for assigning a face to a known person |
-| `FACE_CLUSTER_THRESHOLD` | `0.45` | Cosine similarity threshold for grouping unknown faces during clustering |
-| `FACE_CLUSTER_MIN_SIZE` | `2` | Minimum faces in a cluster to create a provisional Person; singletons stay unknown |
-| `FACE_VECTOR_BACKEND` | `app` | `app` (Float[] + in-process cosine) or `pgvector` (native index via pgvector extension) |
+| `SECRETS_ENCRYPTION_KEY` | (required) | Base64-encoded 32-byte AES key for credential encryption. Generate: `openssl rand -base64 32`. API fails to start if absent or wrong size. |
+| `FACE_COMPREFACE_URL` | `http://compreface-core:3000` | Base URL for the CompreFace core sidecar. Keyless — no API key. |
+| `FACE_AUTO_DETECT` | `'true'` | Global kill-switch. Set to `'false'` to disable auto-enqueue on upload for all circles. Per-circle opt-in still applies when `'true'`. |
+| `FACE_MAX_IMAGE_DIM` | `'2000'` | Maximum pixel dimension (longest side) before sending to the provider. Parsed as integer. |
+| `FACE_MATCH_THRESHOLD` | `0.38` | Cosine similarity threshold for assigning a detected face to a known person. |
+| `FACE_CLUSTER_THRESHOLD` | `0.45` | Cosine similarity threshold for grouping unknown faces during clustering (stricter than match threshold). |
+| `FACE_CLUSTER_MIN_SIZE` | `2` | Minimum faces in a cluster to create a provisional Person. Singletons remain unknown. |
+| `FACE_VECTOR_BACKEND` | `'app'` | `'app'` = Float[] column + in-process cosine. `'pgvector'` = future native index (currently falls through to in-app cosine). |
+| `FACE_HUMAN_MODEL_PATH` | `'/app/models/human'` | Directory containing `blazeface-back.json` and `faceres.json` model files for the Human provider. |
+| `ENRICHMENT_WORKER_ENABLED` | `'true'` | Set to `'false'` to disable the enrichment worker. Takes precedence over `FACE_WORKER_ENABLED`. |
+| `FACE_WORKER_ENABLED` | `'true'` | Legacy alias. Either this or `ENRICHMENT_WORKER_ENABLED` set to `'false'` disables the worker. |
+| `ENRICHMENT_JOB_POLL_MS` | `'5000'` | Worker poll interval in milliseconds. |
+| `FACE_JOB_POLL_MS` | `'5000'` | Legacy alias for `ENRICHMENT_JOB_POLL_MS`. |
+| `ENRICHMENT_WORKER_CONCURRENCY` | `'1'` | Number of jobs to process concurrently per worker tick. |
+| `FACE_WORKER_CONCURRENCY` | `'1'` | Legacy alias for `ENRICHMENT_WORKER_CONCURRENCY`. |
 
 ---
 
-## 8. Endpoint and Permission Reference
+## 14. Operations
 
-| Method | Path | Permission | Per-circle role | Phase | Description |
-|--------|------|------------|-----------------|-------|-------------|
-| `GET` | `/api/face/settings` | `face_settings:read` | — | 1 | Get providers, capabilities, active detection feature |
-| `PUT` | `/api/face/credentials/:provider` | `face_settings:write` | — | 1 | Upsert encrypted credentials |
-| `DELETE` | `/api/face/credentials/:provider` | `face_settings:write` | — | 1 | Remove credentials |
-| `POST` | `/api/face/test` | `face_settings:read` | — | 1 | Test provider connectivity |
-| `GET` | `/api/face/models` | `face_settings:read` | — | 1 | List models for a provider |
-| `PUT` | `/api/face/features/detection` | `face_settings:write` | — | 1 | Set active detection provider/model |
-| `GET` | `/api/media/:id/faces` | `media:read` | viewer | 2 | List faces on a media item |
-| `GET` | `/api/media/:id/faces/status` | `media:read` | viewer | 2 | Get face detection status |
-| `POST` | `/api/media/:id/faces/rerun` | `media:write` | collaborator | 2 | Re-enqueue face detection |
-| `POST` | `/api/face/backfill` | `face_settings:write` | — | 2 | Bulk-enqueue a circle for detection (requires opt-in) |
-| `GET` | `/api/people` | `media:read` | viewer | 3 | List people in a circle |
-| `GET` | `/api/people/:id` | `media:read` | viewer | 3 | Get a person with their faces |
-| `POST` | `/api/people` | `media:write` | collaborator | 3 | Create a person |
-| `PATCH` | `/api/people/:id` | `media:write` | collaborator | 3 | Rename person or set cover face |
-| `POST` | `/api/people/:id/faces` | `media:write` | collaborator | 3 | Assign faces to a person |
-| `DELETE` | `/api/people/:id/faces/:faceId` | `media:write` | collaborator | 3 | Unassign a face |
-| `POST` | `/api/people/cluster` | `media:write` | circle_admin | 3 | Cluster unknown faces (requires opt-in) |
-| `GET` | `/api/media` (`?personId=`) | `media:read` | viewer | 3 | Filter media by person |
-| `POST` | `/api/people/merge` | `media:write` | collaborator | 4 | Merge two person clusters |
-| `DELETE` | `/api/people/:id` | `media:write` | collaborator | 4 | Delete person (faces become unknown) |
-| `GET` | `/api/circles/:id/face-settings` | `circles:read` | viewer | 4 | Get per-circle face recognition opt-in |
-| `PUT` | `/api/circles/:id/face-settings` | `circles:write` | circle_admin | 4 | Enable/disable face recognition for circle |
-| `DELETE` | `/api/face/biometrics` | `face_settings:write` | circle_admin | 4 | Permanently erase all biometric data for a circle |
+### Backfill Workflow
+
+Use when face recognition was enabled for a circle after photos were already imported, or when switching to a different provider.
+
+1. Ensure the circle has `faceRecognitionEnabled=true` (via People page or `PUT /circles/:id/face-settings`).
+2. Navigate to Admin → Face Settings → Backfill panel, select the circle, optionally check "Force re-process already processed items".
+3. `POST /api/face/backfill { circleId, force? }` enqueues all eligible photos at priority 100.
+4. Monitor progress at Admin → Jobs (`/admin/jobs`), filtering by `type = face_detection`.
+
+The backfill endpoint skips items already in `processed` or `no_faces` status unless `force=true`. It also skips items where `MediaType` is not photo or `deletedAt` is set.
+
+### Per-Photo Rerun
+
+`POST /api/media/:id/faces/rerun` — available to circle collaborators. Enqueues a single job at priority 0 (highest), ensuring it runs ahead of any pending upload or backfill jobs. Returns `{ jobId, status }`.
+
+### Observing via Admin Jobs
+
+The `/admin/jobs` page provides:
+- Stats panel: total, per-status counts, per-type breakdown, stuck-running badge (jobs in `running` for > 10 minutes).
+- Filterable paginated table: set `type = face_detection` to see only face jobs.
+- Per-row actions: Retry (reset to pending), Delete.
+- Bulk actions: Retry all failed (with optional type filter), Reset stuck.
+- Auto-refresh every 5 seconds.
+
+### Stuck Job Recovery
+
+A job stuck in `running` status indicates the worker crashed or the container restarted mid-job. Use `POST /api/admin/jobs/reset-stuck { olderThanMinutes: 10 }` to return stale running jobs to `pending` so the worker picks them up again. The default threshold is 10 minutes.
 
 ---
 
-## 9. Job Queue Admin Dashboard
+## 15. Gotchas and Known Issues
 
-Face detection jobs are written to the generic `enrichment_jobs` table (managed by `EnrichmentJobService` / `EnrichmentJobWorker`). Admins can monitor and control the queue through the **Job Queue** dashboard at `/admin/jobs`.
+**EXIF orientation must be applied before pixel access.** Any code that reads image pixels — in a provider `detect()` call or any other image processor — must obtain the buffer via `prepareImageForProcessing`, never by decoding raw bytes directly. Skipping this step causes face detectors to see rotated images and produce incorrect bounding boxes.
 
-The dashboard provides:
+**CompreFace HTTP 400 = no face found, not an error.** When the CompreFace sidecar receives an image with no detectable faces, it responds with HTTP 400 and a body matching `/no face/i`. The provider catches this and returns `{ result: [] }` (empty detections). The detection service then sets `MediaFaceStatus` to `no_faces`. This is expected behavior, not a configuration error.
 
-- **Stats panel** — total jobs, per-status counts (`pending`, `running`, `succeeded`, `failed`), per-type breakdown, and a stuck-running badge (jobs in `running` state for more than 10 minutes).
-- **Filtered job list** — paginated table filterable by `status` and job `type`, with `lastError` visible for failed rows.
-- **Per-row actions** — Retry (reset a single failed/succeeded job to `pending`) and Delete (permanently remove the row; blocked if `running`).
-- **Bulk actions** — Retry all failed (optionally scoped by type) and Reset stuck (move stale `running` jobs back to `pending`).
-- **Auto-refresh** — the page polls every 5 seconds so operators can watch live progress.
+**Human provider: Alpine/musl and WASM backend.** The `human` provider uses `@vladmandic/human` with the WASM backend rather than `tfjs-node`. The tfjs-node package requires glibc bindings unavailable on Alpine Linux (musl libc). Two additional quirks:
+- Node's built-in `fetch` (undici) does not support `file://` URLs. The Human provider registers a custom filesystem-backed IOHandler on `h.tf.io` (Human's own bundled TensorFlow instance, not the umbrella `@tensorflow/tfjs`) to load model files from disk.
+- `faceres.json` only declares two outputs (gender, age) in its manifest. The 1024-dimensional face embedding lives at the internal `global_pooling/Mean` node. After `h.load()`, the provider patches `executor._outputs` to include that node before calling `h.detect()`.
 
-The dashboard covers all `enrichment_jobs` regardless of job type. As new enrichment handlers are added beyond face detection they will appear automatically in the stats breakdown and job list.
+**system_settings 'face' block must exist.** The active detection feature is persisted at `system_settings['global'].face.features.detection`. If no `system_settings` row with key `'global'` exists, or if the `face` block has never been written, `PUT /api/face/features/detection` creates the path via a JSONB patch. However, `GET /api/face/settings` will return null for the active feature until the first write occurs.
 
-**API endpoints:** `GET /api/admin/jobs/stats`, `GET /api/admin/jobs`, `POST /api/admin/jobs/:id/retry`, `POST /api/admin/jobs/retry-failed`, `POST /api/admin/jobs/reset-stuck`, `DELETE /api/admin/jobs/:id` — all require Admin role + `jobs:read` or `jobs:write`. See [API.md — Admin: Job Queue](../API.md#admin-job-queue) for full request/response shapes.
+**Bounding box normalization is in FaceDetectionService, not the provider.** The CompreFace provider returns absolute pixel coordinates from the sidecar API (`x_min, y_min, x_max, y_max`). The `human` provider returns normalized fractions. The detection service inspects the values and normalizes whichever format it receives. Provider authors do not need to normalize; they should return what the underlying API gives them.
+
+**`FACE_VECTOR_BACKEND=pgvector` is a future TODO.** Setting this variable currently logs a debug message and falls through to in-process cosine similarity. Native pgvector `<=>` operator matching is not yet active. The Float[] column and in-app cosine remain the only active path.
+
+**Model-specific embeddings are not cross-comparable.** CompreFace 128-d and Human 1024-d embeddings live in entirely different vector spaces. Rekognition embeddings are not stored at all. A circle must use one provider consistently. Switching providers requires erasing existing face data (`DELETE /api/face/biometrics`) and re-running detection.
+
+---
+
+## 16. Infrastructure
+
+### CompreFace Sidecar
+
+- **Image:** `exadel/compreface-core:1.2.0-mobilenet`
+- **Model:** RetinaFace detector + ArcFace MobileFaceNet calculator
+- **Configuration:** No database, no API key, no admin UI, no persistent volume. Stateless.
+- **Default endpoint:** `http://compreface-core:3000` (overridable via `FACE_COMPREFACE_URL`)
+- **Health check:** `GET {baseUrl}/status` returns `{ status: 'OK', ... }`
+- **Detection API:** `POST {baseUrl}/find_faces?face_plugins=calculator&det_prob_threshold=0.8` — multipart/form-data, field `file`, returns 128-d ArcFace embeddings
+- **VPS tuning (x86/AVX2, CPU-only):** `UWSGI_PROCESSES=1`, `UWSGI_THREADS=1` to limit memory and CPU on a shared VPS. Swap is recommended to handle peak inference load.
+- **Image tag pinning:** Do not change the image tag without verifying the embedding dimension and API contract. The `1.2.0-mobilenet` build produces 128-d embeddings. The `r100` build produces 512-d embeddings and is not compatible with stored data from the mobilenet build.
+
+### Human Provider (in-process)
+
+- The `human` provider runs entirely inside the API process. No external container or network call is required.
+- Model files (`blazeface-back.json`, `faceres.json`) must be present at `FACE_HUMAN_MODEL_PATH` (default `/app/models/human`) at API startup.
+- The provider is available immediately when the API starts.
+
+### AWS Rekognition
+
+- Cloud API. No local infrastructure.
+- Credentials via the standard AWS credential chain (environment variables, instance role, etc.).
+- Uses collection ID `'default'` for `IndexFaces` and `SearchFacesByImage` operations.
+- Region defaults to `'us-east-1'` if not specified in the credential row.
+- Photos are sent to AWS for processing. Operators must comply with applicable biometric data regulations.
+
+---
+
+## Document History
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 1.0 | June 2026 | AI Assistant | Initial phase-roadmap spec |
+| 2.0 | June 2026 | AI Assistant | Updated to reflect all phases implemented |
+| 3.0 | June 2026 | AI Assistant | Complete rewrite as end-to-end reference; replaces phase-based structure |
