@@ -498,6 +498,7 @@ model MediaItem {
   faces          Face[]
   enrichmentJobs EnrichmentJob[]
   faceStatus     MediaFaceStatus?
+  profileForPeople Person[] @relation("PersonProfileMedia")
 
   @@index([circleId])
   @@index([addedById])
@@ -678,26 +679,30 @@ model FaceProviderCredential {
 }
 
 model Person {
-  id            String    @id @default(uuid()) @db.Uuid
-  circleId      String    @map("circle_id") @db.Uuid
-  name          String?
-  addedById     String    @map("added_by_id") @db.Uuid
-  coverFaceId   String?   @map("cover_face_id") @db.Uuid
-  mergedIntoId  String?   @map("merged_into_id") @db.Uuid
-  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
-  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz
+  id                 String    @id @default(uuid()) @db.Uuid
+  circleId           String    @map("circle_id") @db.Uuid
+  name               String?
+  addedById          String    @map("added_by_id") @db.Uuid
+  coverFaceId        String?   @map("cover_face_id") @db.Uuid
+  profileMediaItemId String?   @map("profile_media_item_id") @db.Uuid
+  profileCrop        Json?     @map("profile_crop")
+  mergedIntoId       String?   @map("merged_into_id") @db.Uuid
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt          DateTime? @map("deleted_at") @db.Timestamptz
 
   // Relations
-  circle      Circle  @relation(fields: [circleId], references: [id], onDelete: Cascade)
-  addedBy     User    @relation("PersonAddedBy", fields: [addedById], references: [id])
-  coverFace   Face?   @relation("PersonCoverFace", fields: [coverFaceId], references: [id], onDelete: SetNull)
-  mergedInto  Person? @relation("PersonMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
-  mergedFrom  Person[] @relation("PersonMerge")
-  faces       Face[]  @relation("PersonFaces")
+  circle            Circle     @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  addedBy           User       @relation("PersonAddedBy", fields: [addedById], references: [id])
+  coverFace         Face?      @relation("PersonCoverFace", fields: [coverFaceId], references: [id], onDelete: SetNull)
+  profileMediaItem  MediaItem? @relation("PersonProfileMedia", fields: [profileMediaItemId], references: [id], onDelete: SetNull)
+  mergedInto        Person?    @relation("PersonMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedFrom        Person[]   @relation("PersonMerge")
+  faces             Face[]     @relation("PersonFaces")
 
   @@index([circleId])
   @@index([mergedIntoId])
+  @@index([profileMediaItemId])
   @@map("people")
 }
 
