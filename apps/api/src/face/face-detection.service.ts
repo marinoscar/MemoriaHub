@@ -87,8 +87,30 @@ export class FaceDetectionService {
       const stream = await this.storageProvider.download(mediaItem.storageObject.storageKey);
       const buffer = await streamToBuffer(stream);
 
-      // 6. Detect faces
-      const detectedFaces: DetectedFace[] = await provider.detect(creds, buffer);
+      // 5.5. Apply EXIF orientation + downscale before detection
+      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-explicit-any
+      const sharpFn = require('sharp') as (input: Buffer) => any;
+      const MAX = parseInt(process.env.FACE_MAX_IMAGE_DIM ?? '2000', 10);
+      let uprightBuffer = buffer;
+      let uprightWidth = mediaItem.width ?? 0;
+      let uprightHeight = mediaItem.height ?? 0;
+      try {
+        const pipeline = sharpFn(buffer)
+          .rotate() // bake EXIF orientation → upright, strips the EXIF tag
+          .resize({ width: MAX, height: MAX, fit: 'inside', withoutEnlargement: true });
+        const result = await pipeline.jpeg({ quality: 90 }).toBuffer({ resolveWithObject: true });
+        uprightBuffer = result.data;
+        uprightWidth = result.info.width;
+        uprightHeight = result.info.height;
+      } catch (sharpErr) {
+        const msg = sharpErr instanceof Error ? sharpErr.message : String(sharpErr);
+        this.logger.warn(
+          `FaceJob ${job.id}: sharp preprocessing failed (${msg}); falling back to raw buffer for MediaItem ${job.mediaItemId}`,
+        );
+      }
+
+      // 6. Detect faces (using upright buffer)
+      const detectedFaces: DetectedFace[] = await provider.detect(creds, uprightBuffer);
 
       // 7. Delete existing non-manual Face rows (idempotency)
       await this.prisma.face.deleteMany({
@@ -106,20 +128,17 @@ export class FaceDetectionService {
 
           // Detect absolute pixel coords: if any coordinate > 1.0
           if (bb.x > 1.0 || bb.y > 1.0 || bb.w > 1.0 || bb.h > 1.0) {
-            const w = mediaItem.width;
-            const h = mediaItem.height;
-
-            if (!w || !h) {
+            if (!uprightWidth || !uprightHeight) {
               this.logger.warn(
                 `MediaItem ${mediaItem.id} has no dimensions; storing raw bounding box for FaceJob ${job.id}`,
               );
               normalizedBb = bb; // store raw, best effort
             } else {
               normalizedBb = {
-                x: bb.x / w,
-                y: bb.y / h,
-                w: bb.w / w,
-                h: bb.h / h,
+                x: bb.x / uprightWidth,
+                y: bb.y / uprightHeight,
+                w: bb.w / uprightWidth,
+                h: bb.h / uprightHeight,
               };
             }
           }
