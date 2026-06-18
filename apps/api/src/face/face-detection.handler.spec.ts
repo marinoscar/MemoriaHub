@@ -1,11 +1,13 @@
 /**
  * Unit tests for FaceDetectionHandler.
  *
- * Tests: type property, delegation to FaceDetectionService.processMediaItem,
- * and error propagation when the service throws.
+ * Tests: type property, onModuleInit() self-registration with the registry,
+ * delegation to FaceDetectionService.processMediaItem, and error propagation
+ * when the service throws.
  *
- * FaceDetectionService is intentionally not imported — it is replaced with a
- * plain mock object so this unit test has no transitive dependencies.
+ * Neither FaceDetectionService nor EnrichmentHandlerRegistry is imported —
+ * both are replaced with plain mock objects so this unit test has no
+ * transitive dependencies.
  */
 
 import { FaceDetectionHandler } from './face-detection.handler';
@@ -41,13 +43,18 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
 // ---------------------------------------------------------------------------
 
 describe('FaceDetectionHandler', () => {
+  let mockRegistry: { register: jest.Mock };
   let mockFaceDetectionService: { processMediaItem: jest.Mock };
   let handler: FaceDetectionHandler;
 
   beforeEach(() => {
+    mockRegistry = { register: jest.fn() };
     mockFaceDetectionService = { processMediaItem: jest.fn() };
     // Instantiate directly — no NestJS testing module needed for this pure unit test
-    handler = new FaceDetectionHandler(mockFaceDetectionService as any);
+    handler = new FaceDetectionHandler(
+      mockRegistry as any,
+      mockFaceDetectionService as any,
+    );
   });
 
   // -------------------------------------------------------------------------
@@ -57,6 +64,19 @@ describe('FaceDetectionHandler', () => {
   describe('type', () => {
     it('has type === "face_detection"', () => {
       expect(handler.type).toBe('face_detection');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // onModuleInit() — self-registration
+  // -------------------------------------------------------------------------
+
+  describe('onModuleInit()', () => {
+    it('calls registry.register() with itself when the module initializes', () => {
+      handler.onModuleInit();
+
+      expect(mockRegistry.register).toHaveBeenCalledTimes(1);
+      expect(mockRegistry.register).toHaveBeenCalledWith(handler);
     });
   });
 

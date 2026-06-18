@@ -1,11 +1,11 @@
 /**
  * Unit tests for EnrichmentHandlerRegistry.
  *
- * Tests: handler registration, get() lookup, types() enumeration,
- * single vs multi-handler injection, null (no handlers), duplicate
- * type overwrite.
+ * Tests: handler registration via register(), get() lookup, types()
+ * enumeration, empty registry, unknown-type lookup, duplicate-type
+ * overwrite (last registered wins, warn emitted).
  *
- * The registry constructor is simple enough to be instantiated directly
+ * The registry has no constructor arguments so it is instantiated directly
  * without the NestJS testing module — keeping tests fast.
  */
 
@@ -28,26 +28,43 @@ function makeHandler(type: string): EnrichmentHandler {
 // ---------------------------------------------------------------------------
 
 describe('EnrichmentHandlerRegistry', () => {
+  let registry: EnrichmentHandlerRegistry;
+
+  beforeEach(() => {
+    registry = new EnrichmentHandlerRegistry();
+  });
+
+  // -------------------------------------------------------------------------
+  // Empty registry
+  // -------------------------------------------------------------------------
+
+  describe('empty registry (no registrations)', () => {
+    it('types() returns an empty array when nothing has been registered', () => {
+      expect(registry.types()).toEqual([]);
+    });
+
+    it('get() returns undefined for any type when no handlers are registered', () => {
+      expect(registry.get('face_detection')).toBeUndefined();
+    });
+  });
+
   // -------------------------------------------------------------------------
   // Single handler
   // -------------------------------------------------------------------------
 
-  describe('single handler (non-array)', () => {
-    it('registers the handler when a single (non-array) handler is provided', () => {
+  describe('single handler registration', () => {
+    it('get() returns the handler after register() is called', () => {
       const handler = makeHandler('face_detection');
 
-      // Arrange: pass a single handler (not wrapped in an array) — mirrors
-      // what the NestJS injector does when only one multi-provider is registered.
-      const registry = new EnrichmentHandlerRegistry(handler);
+      registry.register(handler);
 
-      // Act / Assert
       expect(registry.get('face_detection')).toBe(handler);
     });
 
     it('types() returns the single registered type', () => {
       const handler = makeHandler('face_detection');
 
-      const registry = new EnrichmentHandlerRegistry(handler);
+      registry.register(handler);
 
       expect(registry.types()).toEqual(['face_detection']);
     });
@@ -57,56 +74,31 @@ describe('EnrichmentHandlerRegistry', () => {
   // Multiple handlers
   // -------------------------------------------------------------------------
 
-  describe('multiple handlers (array)', () => {
-    it('registers all handlers from an array', () => {
-      const faceHandler = makeHandler('face_detection');
-      const ocrHandler = makeHandler('ocr');
-
-      const registry = new EnrichmentHandlerRegistry([faceHandler, ocrHandler]);
-
-      expect(registry.get('face_detection')).toBe(faceHandler);
-      expect(registry.get('ocr')).toBe(ocrHandler);
-    });
-
-    it('types() returns all registered type strings', () => {
-      const faceHandler = makeHandler('face_detection');
-      const ocrHandler = makeHandler('ocr');
-
-      const registry = new EnrichmentHandlerRegistry([faceHandler, ocrHandler]);
-
-      expect(registry.types()).toHaveLength(2);
-      expect(registry.types()).toContain('face_detection');
-      expect(registry.types()).toContain('ocr');
-    });
-
-    it('get() returns the correct handler for each type when multiple are registered', () => {
+  describe('multiple handler registrations', () => {
+    it('get() returns the correct handler for each type', () => {
       const faceHandler = makeHandler('face_detection');
       const ocrHandler = makeHandler('ocr');
       const tagHandler = makeHandler('auto_tag');
 
-      const registry = new EnrichmentHandlerRegistry([faceHandler, ocrHandler, tagHandler]);
+      registry.register(faceHandler);
+      registry.register(ocrHandler);
+      registry.register(tagHandler);
 
       expect(registry.get('face_detection')).toBe(faceHandler);
       expect(registry.get('ocr')).toBe(ocrHandler);
       expect(registry.get('auto_tag')).toBe(tagHandler);
     });
-  });
 
-  // -------------------------------------------------------------------------
-  // Null / empty (Optional injection returns null)
-  // -------------------------------------------------------------------------
+    it('types() lists all registered type strings', () => {
+      const faceHandler = makeHandler('face_detection');
+      const ocrHandler = makeHandler('ocr');
 
-  describe('null handlers (@Optional injection)', () => {
-    it('starts empty when null is provided', () => {
-      const registry = new EnrichmentHandlerRegistry(null);
+      registry.register(faceHandler);
+      registry.register(ocrHandler);
 
-      expect(registry.types()).toEqual([]);
-    });
-
-    it('get() returns undefined for any type when no handlers are registered', () => {
-      const registry = new EnrichmentHandlerRegistry(null);
-
-      expect(registry.get('face_detection')).toBeUndefined();
+      expect(registry.types()).toHaveLength(2);
+      expect(registry.types()).toContain('face_detection');
+      expect(registry.types()).toContain('ocr');
     });
   });
 
@@ -117,24 +109,24 @@ describe('EnrichmentHandlerRegistry', () => {
   describe('get() for unknown type', () => {
     it('returns undefined when the type has not been registered', () => {
       const handler = makeHandler('face_detection');
-      const registry = new EnrichmentHandlerRegistry([handler]);
+      registry.register(handler);
 
       expect(registry.get('nonexistent_type')).toBeUndefined();
     });
   });
 
   // -------------------------------------------------------------------------
-  // Duplicate type — last one wins
+  // Duplicate type — last one wins, warn emitted
   // -------------------------------------------------------------------------
 
   describe('duplicate type registration', () => {
-    it('overwrites the first handler when two handlers share the same type', () => {
+    it('last registered handler overwrites the first for the same type', () => {
       const first = makeHandler('face_detection');
       const second = makeHandler('face_detection');
 
-      const registry = new EnrichmentHandlerRegistry([first, second]);
+      registry.register(first);
+      registry.register(second);
 
-      // Arrange: the second handler should have overwritten the first
       expect(registry.get('face_detection')).toBe(second);
     });
 
@@ -142,10 +134,29 @@ describe('EnrichmentHandlerRegistry', () => {
       const first = makeHandler('face_detection');
       const second = makeHandler('face_detection');
 
-      const registry = new EnrichmentHandlerRegistry([first, second]);
+      registry.register(first);
+      registry.register(second);
 
       const types = registry.types();
       expect(types.filter((t) => t === 'face_detection')).toHaveLength(1);
+    });
+
+    it('emits a logger warn when a duplicate type is registered', () => {
+      const first = makeHandler('face_detection');
+      const second = makeHandler('face_detection');
+
+      // Spy on the private logger through the prototype chain
+      const warnSpy = jest
+        .spyOn((registry as any).logger, 'warn')
+        .mockImplementation(() => undefined);
+
+      registry.register(first);
+      registry.register(second); // should trigger warn
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('face_detection'),
+      );
     });
   });
 });

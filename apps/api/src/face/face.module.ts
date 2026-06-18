@@ -14,7 +14,6 @@ import { PeopleService } from './people.service';
 import { PeopleController } from './people.controller';
 import { FaceDetectionHandler } from './face-detection.handler';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { ENRICHMENT_HANDLER } from '../enrichment/enrichment-handler.interface';
 
 @Module({
   imports: [SettingsModule, StorageProvidersModule, CirclesModule, EnrichmentModule],
@@ -28,7 +27,6 @@ import { ENRICHMENT_HANDLER } from '../enrichment/enrichment-handler.interface';
     FaceClusteringService,
     PeopleService,
     FaceDetectionHandler,
-    { provide: ENRICHMENT_HANDLER, useExisting: FaceDetectionHandler },
   ],
   exports: [FaceSettingsService, FaceProviderRegistry, FaceMatchingService, FaceClusteringService],
 })
