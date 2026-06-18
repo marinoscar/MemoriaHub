@@ -144,18 +144,27 @@ describe('DatabaseHealthIndicator', () => {
     });
 
     it('should measure response time accurately', async () => {
-      // Simulate a slow query
-      mockPrismaService.$queryRaw.mockImplementation(
-        (() =>
-          new Promise((resolve) => {
-            setTimeout(() => resolve([{ '?column?': 1 }]), 50);
-          })) as any,
-      );
+      // Use fake timers so Date.now() advances deterministically with the timer,
+      // eliminating wall-clock jitter that caused intermittent >= 50 failures.
+      jest.useFakeTimers();
+      try {
+        mockPrismaService.$queryRaw.mockImplementation(
+          (() =>
+            new Promise((resolve) => {
+              setTimeout(() => resolve([{ '?column?': 1 }]), 50);
+            })) as any,
+        );
 
-      const result = await indicator.isHealthy('database');
+        const promise = indicator.isHealthy('database');
+        // Advance fake clock by exactly 50ms — fires the timer and advances Date.now() by 50.
+        await jest.advanceTimersByTimeAsync(50);
+        const result = await promise;
 
-      const ms = parseInt(result.database.responseTime.replace('ms', ''));
-      expect(ms).toBeGreaterThanOrEqual(50);
+        const ms = parseInt(result.database.responseTime.replace('ms', ''), 10);
+        expect(ms).toBe(50);
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 });
