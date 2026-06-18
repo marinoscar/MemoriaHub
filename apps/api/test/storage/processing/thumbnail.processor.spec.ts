@@ -424,6 +424,97 @@ describe('ThumbnailProcessor', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Configurable dimensions and quality (env vars read at construction time)
+  // -------------------------------------------------------------------------
+
+  describe('configurable dimensions and quality', () => {
+    afterEach(() => {
+      delete process.env.THUMBNAIL_MAX_DIM;
+      delete process.env.THUMBNAIL_QUALITY;
+    });
+
+    it('should default maxDim to 800 when THUMBNAIL_MAX_DIM is not set', async () => {
+      // Env var is NOT set — the module was compiled in beforeEach without it
+      expect((processor as any).maxDim).toBe(800);
+    });
+
+    it('should default quality to 85 when THUMBNAIL_QUALITY is not set', () => {
+      expect((processor as any).quality).toBe(85);
+    });
+
+    it('should pick up custom THUMBNAIL_MAX_DIM when set before module compile', async () => {
+      process.env.THUMBNAIL_MAX_DIM = '200';
+      process.env.THUMBNAIL_QUALITY = '70';
+
+      const customModule: TestingModule = await Test.createTestingModule({
+        providers: [
+          ThumbnailProcessor,
+          {
+            provide: STORAGE_PROVIDER,
+            useValue: {
+              upload: jest.fn().mockResolvedValue(undefined),
+              getBucket: jest.fn().mockReturnValue(BUCKET_NAME),
+            },
+          },
+          {
+            provide: PrismaService,
+            useValue: {
+              storageObject: {
+                create: jest.fn().mockResolvedValue({ id: THUMB_ID }),
+              },
+            },
+          },
+        ],
+      }).compile();
+
+      const customProcessor = customModule.get<ThumbnailProcessor>(ThumbnailProcessor);
+      expect((customProcessor as any).maxDim).toBe(200);
+      expect((customProcessor as any).quality).toBe(70);
+    });
+
+    it('should succeed with default settings (800/85) on a real jpeg buffer', async () => {
+      const buf = await getPlainJpegBuffer();
+      const result = await processor.process(makeObject(), makeGetStream(buf));
+      expect(result.success).toBe(true);
+    });
+
+    it('should succeed with custom env settings (200/70) on a real jpeg buffer', async () => {
+      process.env.THUMBNAIL_MAX_DIM = '200';
+      process.env.THUMBNAIL_QUALITY = '70';
+
+      const customUpload = jest.fn().mockResolvedValue(undefined);
+      const customCreate = jest.fn().mockResolvedValue({ id: THUMB_ID });
+
+      const customModule: TestingModule = await Test.createTestingModule({
+        providers: [
+          ThumbnailProcessor,
+          {
+            provide: STORAGE_PROVIDER,
+            useValue: {
+              upload: customUpload,
+              getBucket: jest.fn().mockReturnValue(BUCKET_NAME),
+            },
+          },
+          {
+            provide: PrismaService,
+            useValue: {
+              storageObject: { create: customCreate },
+            },
+          },
+        ],
+      }).compile();
+
+      const customProcessor = customModule.get<ThumbnailProcessor>(ThumbnailProcessor);
+      const buf = await getPlainJpegBuffer();
+      const result = await customProcessor.process(makeObject(), makeGetStream(buf));
+
+      expect(result.success).toBe(true);
+      expect(customUpload).toHaveBeenCalledTimes(1);
+      expect(customCreate).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Video path — poster-frame extraction
   // -------------------------------------------------------------------------
 
