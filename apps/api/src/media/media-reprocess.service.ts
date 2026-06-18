@@ -2,7 +2,6 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../prisma/prisma.service';
 import { STORAGE_PROVIDER, StorageProvider } from '../storage/providers/storage-provider.interface';
-import { ObjectProcessingService } from '../storage/processing/object-processing.service';
 import { OBJECT_PROCESSED_EVENT, ObjectProcessedEvent } from '../storage/processing/events/object-processed.event';
 import { ThumbnailProcessor } from '../storage/processing/processors/thumbnail.processor';
 import { ImageDimensionsProcessor } from '../storage/processing/processors/image-dimensions.processor';
