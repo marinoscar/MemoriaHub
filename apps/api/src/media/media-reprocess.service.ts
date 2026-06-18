@@ -1,7 +1,6 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../prisma/prisma.service';
-import { STORAGE_PROVIDER, StorageProvider } from '../storage/providers/storage-provider.interface';
 import { OBJECT_PROCESSED_EVENT, ObjectProcessedEvent } from '../storage/processing/events/object-processed.event';
 import { ThumbnailProcessor } from '../storage/processing/processors/thumbnail.processor';
 import { ImageDimensionsProcessor } from '../storage/processing/processors/image-dimensions.processor';
@@ -12,7 +11,6 @@ export class MediaReprocessService {
 
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
     private readonly eventEmitter: EventEmitter2,
     private readonly thumbnailProcessor: ThumbnailProcessor,
     private readonly dimensionsProcessor: ImageDimensionsProcessor,
@@ -21,10 +19,12 @@ export class MediaReprocessService {
   /**
    * Reprocess a single image StorageObject:
    * 1. Skip if not a ready image or is itself a thumbnail
-   * 2. Capture old thumbnailObjectId + thumbnailStorageKey
-   * 3. Re-run ImageDimensionsProcessor + ThumbnailProcessor in priority order
-   * 4. Merge results into metadata._processing, persist as 'ready', emit OBJECT_PROCESSED_EVENT
-   * 5. Delete old thumbnail StorageObject row + S3 blob (if differs from new)
+   * 2. Re-run ImageDimensionsProcessor + ThumbnailProcessor in priority order
+   * 3. Merge results into metadata._processing, persist as 'ready', emit OBJECT_PROCESSED_EVENT
+   *
+   * No thumbnail deletion is needed: ThumbnailProcessor uses a deterministic
+   * storageKey (`thumbnails/<objectId>.jpg`) and upserts, so the same row is
+   * reused on every reprocess run — there is nothing to orphan.
    */
   async reprocessImageObject(objectId: string): Promise<void> {
     const object = await this.prisma.storageObject.findUnique({ where: { id: objectId } });
@@ -40,13 +40,10 @@ export class MediaReprocessService {
       return;
     }
 
-    // Capture the OLD thumbnail refs BEFORE running processors
     const existingMeta = (object.metadata as Record<string, any>) ?? {};
     const existingProcessing = (existingMeta._processing ?? {}) as Record<string, any>;
-    const oldThumbnailObjectId: string | undefined = existingProcessing.thumbnail?.thumbnailObjectId;
-    const oldThumbnailStorageKey: string | undefined = existingProcessing.thumbnail?.thumbnailStorageKey;
 
-    this.logger.log(`reprocessImageObject: reprocessing object ${objectId} (oldThumb=${oldThumbnailObjectId ?? 'none'})`);
+    this.logger.log(`reprocessImageObject: reprocessing object ${objectId}`);
 
     // Run processors in priority order: dimensions (25), thumbnail (40)
     const processors = [this.dimensionsProcessor, this.thumbnailProcessor];
@@ -57,7 +54,7 @@ export class MediaReprocessService {
       try {
         const result = await processor.process(
           object,
-          () => this.storageProvider.download(object.storageKey),
+          () => this.thumbnailProcessor.download(object.storageKey),
         );
         if (result.success && result.metadata) {
           allMetadata[processor.name] = result.metadata;
@@ -89,32 +86,6 @@ export class MediaReprocessService {
 
     // Emit so MediaMetadataSyncService picks up new dims + thumbnail
     this.eventEmitter.emit(OBJECT_PROCESSED_EVENT, new ObjectProcessedEvent(objectId));
-
-    // Determine the new thumbnail id from the result
-    const newThumbnailObjectId = (allMetadata.thumbnail as any)?.thumbnailObjectId as string | undefined;
-
-    // Delete old thumbnail only if it exists and differs from the new one
-    if (oldThumbnailObjectId && oldThumbnailObjectId !== newThumbnailObjectId) {
-      await this.deleteOldThumbnail(oldThumbnailObjectId, oldThumbnailStorageKey);
-    }
-  }
-
-  private async deleteOldThumbnail(thumbObjectId: string, thumbStorageKey: string | undefined): Promise<void> {
-    try {
-      // Delete S3 blob first; if the StorageObject row is already gone, that's OK
-      if (thumbStorageKey) {
-        await this.storageProvider.delete(thumbStorageKey).catch((err: Error) => {
-          this.logger.warn(`deleteOldThumbnail: S3 delete failed for key ${thumbStorageKey}: ${err.message}`);
-        });
-      }
-      await this.prisma.storageObject.delete({ where: { id: thumbObjectId } }).catch((err: Error) => {
-        this.logger.warn(`deleteOldThumbnail: DB delete failed for object ${thumbObjectId}: ${err.message}`);
-      });
-      this.logger.log(`deleteOldThumbnail: deleted old thumbnail object ${thumbObjectId}`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`deleteOldThumbnail: unexpected error for ${thumbObjectId}: ${msg}`);
-    }
   }
 
   /**

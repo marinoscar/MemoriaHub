@@ -75,6 +75,15 @@ export class ThumbnailProcessor implements ObjectProcessor {
     return object.mimeType.startsWith('image/') || object.mimeType.startsWith('video/');
   }
 
+  /**
+   * Download a storage object by key.  Exposed so callers that already inject
+   * ThumbnailProcessor (which holds the StorageProvider) can retrieve streams
+   * without needing to inject StorageProvider themselves.
+   */
+  download(storageKey: string): Promise<Readable> {
+    return this.storageProvider.download(storageKey);
+  }
+
   async process(
     object: StorageObject,
     getStream: () => Promise<Readable>,
@@ -219,11 +228,22 @@ export class ThumbnailProcessor implements ObjectProcessor {
       contentLength: thumbBuffer.length,
     });
 
-    // Create a StorageObject row directly via Prisma (NOT emitting
+    // Upsert a StorageObject row directly via Prisma (NOT emitting
     // OBJECT_UPLOADED_EVENT) so the pipeline never recurses.  status='ready'
     // means it will never be queued for processing even without the guard.
-    const thumbObject = await this.prisma.storageObject.create({
-      data: {
+    // Using upsert (keyed on the deterministic storageKey) makes reprocessing
+    // idempotent — no unique-constraint violation on repeated runs.
+    const thumbObject = await this.prisma.storageObject.upsert({
+      where: { storageKey: thumbKey },
+      update: {
+        name: `thumb-${object.name}`,
+        size: BigInt(thumbBuffer.length),
+        mimeType: 'image/jpeg',
+        status: 'ready',
+        metadata: { thumbnailOf: object.id },
+        updatedAt: new Date(),
+      },
+      create: {
         name: `thumb-${object.name}`,
         size: BigInt(thumbBuffer.length),
         mimeType: 'image/jpeg',
@@ -237,7 +257,7 @@ export class ThumbnailProcessor implements ObjectProcessor {
     });
 
     this.logger.log(
-      `Thumbnail created for StorageObject ${object.id}: ` +
+      `Thumbnail upserted for StorageObject ${object.id}: ` +
         `thumb id=${thumbObject.id}, key=${thumbKey}, size=${thumbBuffer.length}B`,
     );
 
