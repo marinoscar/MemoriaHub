@@ -87,7 +87,7 @@ export class ThumbnailProcessor implements ObjectProcessor {
       const stream = await getStream();
       const buffer = await streamToBuffer(stream);
 
-      // .rotate() auto-applies EXIF orientation before resize
+      // Intentionally rotates inline like the shared prepareImageForProcessing utility — thumbnail processor predates the util.
       const sharp = (await import('sharp')).default;
       const thumbBuffer = await sharp(buffer)
         .rotate()

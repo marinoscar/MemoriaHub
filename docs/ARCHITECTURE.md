@@ -433,6 +433,17 @@ Status updated: ready | failed
 - Results stored in object metadata JSONB field
 - Extensible for future processing needs (virus scanning, image resizing, etc.)
 
+#### Image Orientation Convention
+
+All server-side image processing uses a shared utility (`apps/api/src/storage/processing/image-orientation.util.ts`) to normalize EXIF orientation before touching pixels:
+
+- `prepareImageForProcessing(buffer, { maxDim? })` — applies EXIF rotation via sharp `.rotate()`, optionally downscales, and returns `{ buffer (upright JPEG), width, height }`. Never throws; falls back to the original buffer with zero dims on error.
+- `getOrientedDimensions(buffer)` — returns display dimensions, swapping width and height for EXIF orientations 5–8.
+
+**Convention:** Every processor or enrichment handler that reads image pixels MUST obtain them via `prepareImageForProcessing`, never from raw bytes. This ensures thumbnails, face detection, dimension extraction, and all future processors see correctly-rotated images. `MediaItem.width` and `MediaItem.height` store display (orientation-corrected) dimensions.
+
+Original uploaded files are NOT modified — only the processing and derivative path is normalized. Browsers apply EXIF orientation when displaying the original.
+
 #### Database Schema
 
 **storage_objects**:

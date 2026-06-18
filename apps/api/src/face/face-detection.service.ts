@@ -10,6 +10,7 @@ import {
 } from '../storage/providers/storage-provider.interface';
 import { DetectedFace } from './providers/face-provider.interface';
 import { FaceMatchingService } from './face-matching.service';
+import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 
 @Injectable()
 export class FaceDetectionService {
@@ -88,24 +89,18 @@ export class FaceDetectionService {
       const buffer = await streamToBuffer(stream);
 
       // 5.5. Apply EXIF orientation + downscale before detection
-      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-explicit-any
-      const sharpFn = require('sharp') as (input: Buffer) => any;
       const MAX = parseInt(process.env.FACE_MAX_IMAGE_DIM ?? '2000', 10);
       let uprightBuffer = buffer;
       let uprightWidth = mediaItem.width ?? 0;
       let uprightHeight = mediaItem.height ?? 0;
-      try {
-        const pipeline = sharpFn(buffer)
-          .rotate() // bake EXIF orientation → upright, strips the EXIF tag
-          .resize({ width: MAX, height: MAX, fit: 'inside', withoutEnlargement: true });
-        const result = await pipeline.jpeg({ quality: 90 }).toBuffer({ resolveWithObject: true });
-        uprightBuffer = result.data;
-        uprightWidth = result.info.width;
-        uprightHeight = result.info.height;
-      } catch (sharpErr) {
-        const msg = sharpErr instanceof Error ? sharpErr.message : String(sharpErr);
+      const prepared = await prepareImageForProcessing(buffer, { maxDim: MAX });
+      if (prepared.width > 0 && prepared.height > 0) {
+        uprightBuffer = prepared.buffer;
+        uprightWidth = prepared.width;
+        uprightHeight = prepared.height;
+      } else {
         this.logger.warn(
-          `FaceJob ${job.id}: sharp preprocessing failed (${msg}); falling back to raw buffer for MediaItem ${job.mediaItemId}`,
+          `FaceJob ${job.id}: image preprocessing failed; falling back to raw buffer for MediaItem ${job.mediaItemId}`,
         );
       }
 

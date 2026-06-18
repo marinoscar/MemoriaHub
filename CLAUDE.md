@@ -577,6 +577,9 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 3. Update TypeScript types
 4. Add frontend UI if user-facing
 
+### Writing an Image Enrichment Handler
+- Always obtain pixels via `prepareImageForProcessing` (`apps/api/src/storage/processing/image-orientation.util.ts`) — never decode raw bytes directly — so EXIF orientation is applied before processing.
+
 ## Specialized Subagents (MANDATORY)
 
 **CRITICAL REQUIREMENT**: This project uses specialized subagents for all development work. You MUST delegate tasks to the appropriate subagent. Do NOT attempt to perform development tasks directly without using the designated agent.

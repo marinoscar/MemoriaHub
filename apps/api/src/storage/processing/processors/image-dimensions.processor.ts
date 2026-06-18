@@ -3,6 +3,7 @@ import { StorageObject } from '@prisma/client';
 import { Readable } from 'stream';
 import { ObjectProcessor, ObjectProcessorResult } from '../object-processor.interface';
 import { streamToBuffer } from './stream-utils';
+import { getOrientedDimensions } from '../image-orientation.util';
 
 /**
  * ImageDimensionsProcessor — extracts pixel width and height from image files.
@@ -35,18 +36,15 @@ export class ImageDimensionsProcessor implements ObjectProcessor {
       const stream = await getStream();
       const buffer = await streamToBuffer(stream);
 
-      const sharp = (await import('sharp')).default;
-      const meta = await sharp(buffer).metadata();
+      const dims = await getOrientedDimensions(buffer);
 
-      const width = meta.width;
-      const height = meta.height;
-
-      if (width === undefined || height === undefined) {
-        this.logger.warn(`sharp could not determine dimensions for object ${object.id}`);
+      if (!dims) {
+        this.logger.warn(`Could not determine dimensions for object ${object.id}`);
         return { success: true, metadata: {} };
       }
 
-      this.logger.debug(`Dimensions for object ${object.id}: ${width}x${height}`);
+      const { width, height } = dims;
+      this.logger.debug(`Dimensions for object ${object.id}: ${width}x${height} (orientation-corrected)`);
 
       return { success: true, metadata: { width, height } };
     } catch (error) {
