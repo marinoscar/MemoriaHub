@@ -99,12 +99,29 @@ export class FaceDetectionController {
         manuallyAssigned: true,
         personId: true,
         createdAt: true,
+        person: {
+          select: { name: true },
+        },
         // Omit embedding — large vector, not needed for display
       },
       orderBy: { createdAt: 'asc' },
     });
 
-    return { data: faces };
+    return {
+      data: faces.map((f) => ({
+        id: f.id,
+        boundingBox: f.boundingBox,
+        confidence: f.confidence,
+        landmarks: f.landmarks,
+        externalFaceId: f.externalFaceId,
+        providerKey: f.providerKey,
+        modelVersion: f.modelVersion,
+        manuallyAssigned: f.manuallyAssigned,
+        personId: f.personId,
+        personName: f.person?.name ?? null,
+        createdAt: f.createdAt,
+      })),
+    };
   }
 
   // --------------------------------------------------------------------------
