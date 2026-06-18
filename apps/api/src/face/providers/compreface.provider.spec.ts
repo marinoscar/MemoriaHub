@@ -317,6 +317,36 @@ describe('ComprefaceProvider', () => {
       await expect(provider.detect(credsWithBaseUrl, testImage)).rejects.toThrow(/500/);
     });
 
+    it('returns [] when CompreFace 400 indicates no face found', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 400,
+        text: async () => '{"message":"400 Bad Request: No face is found in the given image"}',
+      });
+
+      await expect(provider.detect(credsWithBaseUrl, testImage)).resolves.toEqual([]);
+    });
+
+    it('throws when CompreFace 400 has a different error message', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 400,
+        text: async () => '{"message":"Bad image format or unsupported file type"}',
+      });
+
+      await expect(provider.detect(credsWithBaseUrl, testImage)).rejects.toThrow();
+    });
+
+    it('throws when fetch returns 500', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: async () => 'Internal Server Error',
+      });
+
+      await expect(provider.detect(credsWithBaseUrl, testImage)).rejects.toThrow(/500/);
+    });
+
     it('does NOT require an apiKey — detect succeeds with empty creds (uses default baseUrl)', async () => {
       mockFetch.mockResolvedValue({
         ok: true,
