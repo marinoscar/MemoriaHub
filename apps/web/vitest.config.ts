@@ -1,6 +1,42 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
-import { resolve } from 'path';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
+
+// Use createRequire anchored to THIS config file's location so that Node's
+// normal upward node_modules walk finds each package regardless of whether
+// vitest is run from the main checkout (apps/web) or from a git worktree
+// (worktrees/<name>/apps/web). The old approach used hardcoded ../../../../
+// paths that only worked at worktree depth (4 levels up = repo root) but
+// broke from the main checkout (4 levels up = home directory). This approach
+// is depth-independent: Node walks up until it finds node_modules/<pkg> and
+// always lands on the single canonical monorepo root copy, preventing the
+// dual-instance React/MUI errors that occur when a worktree has its own
+// local node_modules alongside the monorepo root node_modules.
+const _require = createRequire(import.meta.url);
+
+/**
+ * Resolve a package's installed directory from this config's location.
+ * Returns null if the package is not installed, so optional packages don't
+ * crash the config — Node falls back to normal resolution for missing entries.
+ */
+const pkgDir = (pkg: string): string | null => {
+  try {
+    return dirname(_require.resolve(`${pkg}/package.json`));
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Build an alias entry only when the package resolves successfully.
+ * Returns an empty object for missing packages (spread-safe).
+ */
+const alias = (name: string, dir: string | null): Record<string, string> =>
+  dir ? { [name]: dir } : {};
+
+const reactDir = pkgDir('react');
 
 export default defineConfig({
   plugins: [react()],
@@ -35,35 +71,33 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': resolve(__dirname, './src'),
-      // Pin React and RTL to the monorepo root copy to prevent dual-instance errors.
-      // In a git worktree at worktrees/jobs-dashboard/, npm installs a sibling
-      // node_modules/ at the worktree root, while the monorepo root also has
-      // node_modules/. Vitest/vite would resolve react from the worktree and
-      // react-dom from the monorepo root, causing two React instances.
-      // @testing-library/react must also be pinned because it resolves react
-      // at CJS runtime, bypassing Vite's module graph aliases.
-      'react': resolve(__dirname, '../../../../node_modules/react'),
-      'react-dom': resolve(__dirname, '../../../../node_modules/react-dom'),
-      'react/jsx-runtime': resolve(__dirname, '../../../../node_modules/react/jsx-runtime'),
-      'react/jsx-dev-runtime': resolve(__dirname, '../../../../node_modules/react/jsx-dev-runtime'),
-      '@testing-library/react': resolve(__dirname, '../../../../node_modules/@testing-library/react'),
-      '@testing-library/user-event': resolve(__dirname, '../../../../node_modules/@testing-library/user-event'),
-      '@testing-library/dom': resolve(__dirname, '../../../../node_modules/@testing-library/dom'),
-      '@testing-library/jest-dom': resolve(__dirname, '../../../../node_modules/@testing-library/jest-dom'),
-      // Also pin react-router/react-router-dom to avoid dual-instance issues
-      'react-router': resolve(__dirname, '../../../../node_modules/react-router'),
-      'react-router-dom': resolve(__dirname, '../../../../node_modules/react-router-dom'),
-      // Pin MUI packages — they use require('react') at CJS runtime which must
-      // resolve to the same instance as the test renderer.
-      '@mui/material': resolve(__dirname, '../../../../node_modules/@mui/material'),
-      '@mui/system': resolve(__dirname, '../../../../node_modules/@mui/system'),
-      '@mui/icons-material': resolve(__dirname, '../../../../node_modules/@mui/icons-material'),
-      '@mui/utils': resolve(__dirname, '../../../../node_modules/@mui/utils'),
-      '@mui/styled-engine': resolve(__dirname, '../../../../node_modules/@mui/styled-engine'),
-      '@mui/private-theming': resolve(__dirname, '../../../../node_modules/@mui/private-theming'),
-      '@emotion/react': resolve(__dirname, '../../../../node_modules/@emotion/react'),
-      '@emotion/styled': resolve(__dirname, '../../../../node_modules/@emotion/styled'),
+      '@': resolve(dirname(fileURLToPath(import.meta.url)), './src'),
+      // Pin React, RTL, react-router, MUI, and Emotion to the single copy
+      // resolved by Node's upward walk from this config file. This prevents
+      // dual-instance errors (two React runtimes) when a worktree has its
+      // own local node_modules alongside the monorepo root node_modules.
+      // Works from both the main checkout and any worktree depth.
+      ...alias('react', reactDir),
+      ...alias('react-dom', pkgDir('react-dom')),
+      // Subpath aliases derived from the resolved react dir (not a separate
+      // require.resolve of the subpath, since some packages don't export
+      // package.json for subpaths).
+      ...(reactDir ? { 'react/jsx-runtime': resolve(reactDir, 'jsx-runtime') } : {}),
+      ...(reactDir ? { 'react/jsx-dev-runtime': resolve(reactDir, 'jsx-dev-runtime') } : {}),
+      ...alias('@testing-library/react', pkgDir('@testing-library/react')),
+      ...alias('@testing-library/user-event', pkgDir('@testing-library/user-event')),
+      ...alias('@testing-library/dom', pkgDir('@testing-library/dom')),
+      ...alias('@testing-library/jest-dom', pkgDir('@testing-library/jest-dom')),
+      ...alias('react-router', pkgDir('react-router')),
+      ...alias('react-router-dom', pkgDir('react-router-dom')),
+      ...alias('@mui/material', pkgDir('@mui/material')),
+      ...alias('@mui/system', pkgDir('@mui/system')),
+      ...alias('@mui/icons-material', pkgDir('@mui/icons-material')),
+      ...alias('@mui/utils', pkgDir('@mui/utils')),
+      ...alias('@mui/styled-engine', pkgDir('@mui/styled-engine')),
+      ...alias('@mui/private-theming', pkgDir('@mui/private-theming')),
+      ...alias('@emotion/react', pkgDir('@emotion/react')),
+      ...alias('@emotion/styled', pkgDir('@emotion/styled')),
     },
     dedupe: [
       'react', 'react-dom',
