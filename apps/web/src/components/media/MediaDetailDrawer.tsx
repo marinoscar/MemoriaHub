@@ -679,6 +679,7 @@ export function MediaDetailDrawer({
           mediaId={displayItem.id}
           mediaType={displayItem.type}
           thumbnailUrl={displayItem.thumbnailUrl ?? undefined}
+          circleId={displayItem.circleId}
         />
 
         {/* Tags */}
