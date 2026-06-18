@@ -57,6 +57,7 @@ function makeFace(id = 'face-1', overrides: Partial<DetectedFaceDto> = {}): Dete
     boundingBox: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
     confidence: 0.9,
     personId: null,
+    personName: null,
     providerKey: 'compreface',
     modelVersion: 'arcface-r100-v1',
     manuallyAssigned: false,
@@ -73,6 +74,7 @@ function defaultHookReturn(overrides: Partial<ReturnType<typeof useMediaFaces>> 
     error: null,
     rerun: vi.fn(),
     rerunLoading: false,
+    refresh: vi.fn(),
     ...overrides,
   };
 }
