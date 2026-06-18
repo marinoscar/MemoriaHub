@@ -778,6 +778,115 @@ describe('PeopleService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // listUnassignedFaces
+  // -------------------------------------------------------------------------
+
+  describe('listUnassignedFaces', () => {
+    function makeUnassignedFace(overrides: Partial<any> = {}) {
+      return {
+        id: 'face-uuid-unassigned',
+        mediaItemId: 'media-uuid-0001',
+        boundingBox: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
+        confidence: 0.85,
+        createdAt: new Date(),
+        ...overrides,
+      };
+    }
+
+    it('calls assertCircleAccess with viewer role', async () => {
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.face.count as jest.Mock).mockResolvedValue(0);
+
+      await service.listUnassignedFaces(USER_ID, PERMS, {
+        circleId: CIRCLE_ID,
+        page: 1,
+        pageSize: 20,
+      } as any);
+
+      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+        USER_ID,
+        CIRCLE_ID,
+        PERMS,
+        'viewer',
+      );
+    });
+
+    it('returns only personId=null faces for the circle', async () => {
+      const face = makeUnassignedFace();
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([face]);
+      (mockPrisma.face.count as jest.Mock).mockResolvedValue(1);
+
+      await service.listUnassignedFaces(USER_ID, PERMS, {
+        circleId: CIRCLE_ID,
+        page: 1,
+        pageSize: 20,
+      } as any);
+
+      const findManyCall = (mockPrisma.face.findMany as jest.Mock).mock.calls[0][0];
+      expect(findManyCall.where).toMatchObject({
+        personId: null,
+        circleId: CIRCLE_ID,
+      });
+    });
+
+    it('excludes soft-deleted media items (mediaItem.deletedAt: null in where)', async () => {
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.face.count as jest.Mock).mockResolvedValue(0);
+
+      await service.listUnassignedFaces(USER_ID, PERMS, {
+        circleId: CIRCLE_ID,
+        page: 1,
+        pageSize: 20,
+      } as any);
+
+      const findManyCall = (mockPrisma.face.findMany as jest.Mock).mock.calls[0][0];
+      expect(findManyCall.where).toMatchObject({
+        mediaItem: { deletedAt: null },
+      });
+    });
+
+    it('paginates correctly (skip/take)', async () => {
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.face.count as jest.Mock).mockResolvedValue(0);
+
+      await service.listUnassignedFaces(USER_ID, PERMS, {
+        circleId: CIRCLE_ID,
+        page: 2,
+        pageSize: 10,
+      } as any);
+
+      const findManyCall = (mockPrisma.face.findMany as jest.Mock).mock.calls[0][0];
+      expect(findManyCall.skip).toBe(10);
+      expect(findManyCall.take).toBe(10);
+    });
+
+    it('returns items with correct shape and meta', async () => {
+      const face = makeUnassignedFace();
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([face]);
+      (mockPrisma.face.count as jest.Mock).mockResolvedValue(1);
+
+      const result = await service.listUnassignedFaces(USER_ID, PERMS, {
+        circleId: CIRCLE_ID,
+        page: 1,
+        pageSize: 20,
+      } as any);
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]).toMatchObject({
+        faceId: face.id,
+        mediaItemId: face.mediaItemId,
+        boundingBox: face.boundingBox,
+        confidence: face.confidence,
+        createdAt: face.createdAt,
+      });
+      expect(result.meta.totalItems).toBe(1);
+      expect(result.meta.page).toBe(1);
+      expect(result.meta.pageSize).toBe(20);
+      expect(result.meta.totalPages).toBe(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // deletePerson
   // -------------------------------------------------------------------------
 
