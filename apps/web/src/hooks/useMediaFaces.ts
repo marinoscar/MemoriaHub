@@ -90,5 +90,5 @@ export function useMediaFaces(mediaId: string) {
     }
   }, [mediaId, stopPolling]);
 
-  return { faces, status, loading, error, rerun, rerunLoading };
+  return { faces, status, loading, error, rerun, rerunLoading, refresh: loadData };
 }
