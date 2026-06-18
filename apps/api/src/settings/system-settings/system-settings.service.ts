@@ -57,6 +57,7 @@ export class SystemSettingsService {
       ui: value.ui,
       features: value.features,
       ai: value.ai,
+      face: value.face,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -102,6 +103,7 @@ export class SystemSettingsService {
       ui: value.ui,
       features: value.features,
       ai: value.ai,
+      face: value.face,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -148,6 +150,14 @@ export class SystemSettingsService {
           deleteAfterArchiveDays: (dto as any).ai?.conversations?.deleteAfterArchiveDays ?? current.ai?.conversations?.deleteAfterArchiveDays ?? 30,
         },
       },
+      face: {
+        features: {
+          detection: {
+            provider: (dto as any).face?.features?.detection?.provider ?? current.face?.features?.detection?.provider ?? null,
+            model: (dto as any).face?.features?.detection?.model ?? current.face?.features?.detection?.model ?? null,
+          },
+        },
+      },
     };
 
     // Validate merged result
@@ -181,6 +191,7 @@ export class SystemSettingsService {
       ui: value.ui,
       features: value.features,
       ai: value.ai,
+      face: value.face,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
