@@ -590,7 +590,7 @@ function UnassignedFacesSection({
           <Stack
             direction={{ xs: 'column', sm: 'row' }}
             spacing={2}
-            alignItems={{ sm: 'center' }}
+            sx={{ alignItems: { sm: 'center' } }}
           >
             <Typography variant="body2">
               {selectedIds.size} face{selectedIds.size !== 1 ? 's' : ''} selected
