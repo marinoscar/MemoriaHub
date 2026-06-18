@@ -4,10 +4,11 @@
  * All heavy deps (@tensorflow/tfjs, @tensorflow/tfjs-backend-wasm,
  * @vladmandic/human, sharp) are mocked so no WASM or GPU code runs.
  *
- * Singleton note: humanInstance is module-level. After the first successful
- * getHuman() call the cached instance is re-used for the lifetime of the test
- * file. Tests that need a *fresh* module (e.g. simulating init failure) use
- * jest.isolateModules / jest.doMock.
+ * Isolation strategy: every test starts with a fresh module registry.
+ * beforeEach calls jest.resetModules(), re-registers ALL doMocks, and THEN
+ * requires + instantiates HumanProvider. This guarantees the provider's
+ * top-level require() calls always hit the mocks — even when Jest runs
+ * multiple spec files in the same worker.
  *
  * Mock strategy: the provider loads @vladmandic/human's WASM build via an
  * ABSOLUTE path (require.resolve('@vladmandic/human') → dirname → node-wasm.js)
@@ -32,13 +33,13 @@ const humanWasmAbsPath = nodePath.join(
 );
 
 // ---------------------------------------------------------------------------
-// Mock instances — declared before doMock calls so the factory closures
-// can reference them. (jest.doMock is NOT hoisted so normal closure rules apply.)
+// Mock fn references — declared at top level so factory closures can reference
+// them across beforeEach re-registrations.
 // ---------------------------------------------------------------------------
 
 const mockHumanDetect = jest.fn();
-const mockHumanLoad = jest.fn().mockResolvedValue(undefined);
-const mockHumanWarmup = jest.fn().mockResolvedValue(undefined);
+const mockHumanLoad = jest.fn();
+const mockHumanWarmup = jest.fn();
 const MockHumanClass = jest.fn().mockImplementation(() => ({
   load: mockHumanLoad,
   warmup: mockHumanWarmup,
@@ -52,53 +53,73 @@ const mockSharpInstance = {
 };
 
 // ---------------------------------------------------------------------------
-// Register mocks via jest.doMock (not hoisted; fires before the first require
-// of the module under test, which happens in beforeAll below).
+// Helper: register all mocks into the current (freshly reset) module registry.
+// Called from beforeEach after jest.resetModules() so every test gets a clean
+// provider module with every dep mocked before the first require().
 // ---------------------------------------------------------------------------
 
-jest.doMock('@tensorflow/tfjs', () => ({
-  setBackend: jest.fn().mockResolvedValue(undefined),
-  ready: jest.fn().mockResolvedValue(undefined),
-  tensor3d: jest.fn().mockReturnValue({ dispose: jest.fn() }),
-}), { virtual: true });
+function registerAllMocks(): void {
+  jest.doMock('@tensorflow/tfjs', () => ({
+    setBackend: jest.fn().mockResolvedValue(undefined),
+    ready: jest.fn().mockResolvedValue(undefined),
+    tensor3d: jest.fn().mockReturnValue({ dispose: jest.fn() }),
+  }), { virtual: true });
 
-jest.doMock('@tensorflow/tfjs-backend-wasm', () => ({}), { virtual: true });
+  jest.doMock('@tensorflow/tfjs-backend-wasm', () => ({}), { virtual: true });
 
-// Mock the WASM build at its resolved absolute path — this is what the provider
-// actually requires at module load time.
-jest.doMock(humanWasmAbsPath, () => ({
-  Human: MockHumanClass,
-  default: MockHumanClass,
-}));
+  // Mock the WASM build at its resolved absolute path — this is what the provider
+  // actually requires at module load time.
+  jest.doMock(humanWasmAbsPath, () => ({
+    Human: MockHumanClass,
+    default: MockHumanClass,
+  }));
 
-jest.doMock('sharp', () => jest.fn().mockReturnValue(mockSharpInstance));
+  // Belt-and-suspenders: also mock the bare specifier in case any indirect
+  // require uses it.
+  jest.doMock('@vladmandic/human', () => ({
+    Human: MockHumanClass,
+    default: MockHumanClass,
+  }));
+
+  jest.doMock('sharp', () => jest.fn().mockReturnValue(mockSharpInstance));
+}
 
 // ---------------------------------------------------------------------------
-// Import provider AFTER mocks are registered (dynamic require; NOT a static
-// top-level import, because static imports are hoisted above jest.doMock calls).
+// Provider instance — populated fresh in every beforeEach.
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-let HumanProvider: typeof import('./human.provider').HumanProvider;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let provider: any;
 
-beforeAll(() => {
+beforeEach(() => {
+  // 1. Wipe the module registry so no cached real modules survive.
+  jest.resetModules();
+
+  // 2. Reset all mock fn state.
+  jest.clearAllMocks();
+
+  // 3. Re-apply default resolved values (clearAllMocks removed them).
+  mockHumanLoad.mockResolvedValue(undefined);
+  mockHumanWarmup.mockResolvedValue(undefined);
+  mockHumanDetect.mockResolvedValue({ face: [] });
+
+  // 4. Register every mock into the fresh registry BEFORE the provider is loaded.
+  registerAllMocks();
+
+  // 5. Now require and instantiate — provider's top-level requires hit the mocks.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  ({ HumanProvider } = require('./human.provider') as typeof import('./human.provider'));
+  const { HumanProvider } = require('./human.provider') as typeof import('./human.provider');
+  provider = new HumanProvider();
+});
+
+afterEach(() => {
+  jest.resetModules();
+  jest.clearAllMocks();
 });
 
 // ---------------------------------------------------------------------------
 
 describe('HumanProvider', () => {
-  let provider: InstanceType<typeof HumanProvider>;
-
-  beforeEach(() => {
-    jest.clearAllMocks();
-    // Re-apply default resolved values after clearAllMocks resets them
-    mockHumanLoad.mockResolvedValue(undefined);
-    mockHumanWarmup.mockResolvedValue(undefined);
-    provider = new HumanProvider();
-  });
-
   // -------------------------------------------------------------------------
   // Static properties
   // -------------------------------------------------------------------------
@@ -142,9 +163,8 @@ describe('HumanProvider', () => {
 
   describe('testConnection', () => {
     it('returns {ok:true} when Human initialises successfully', async () => {
-      // humanInstance may already be cached from prior test runs — that is fine;
-      // the cached instance's load/warmup won't be called again but testConnection
-      // still awaits getHuman() and returns ok:true.
+      // mockHumanLoad already resolves (set in beforeEach); just ensure detect
+      // also resolves so getHuman() completes and testConnection returns ok:true.
       mockHumanDetect.mockResolvedValue({ face: [] });
 
       const result = await provider.testConnection({});
@@ -153,45 +173,13 @@ describe('HumanProvider', () => {
     });
 
     it('returns {ok:false, error:...} when Human init throws', async () => {
-      // Use jest.resetModules() + jest.doMock() to get a fresh module where
-      // humanInstance is null and tf.setBackend rejects.
-      // We restore the original mocks at the end so subsequent tests are not
-      // affected.
-      jest.resetModules();
+      // The provider uses a lazy singleton (getHuman). Because beforeEach already
+      // created a fresh provider (no calls made yet), humanInstance is still null
+      // in this module copy. We override mockHumanLoad to reject BEFORE the first
+      // call to testConnection(), which internally calls getHuman() → h.load().
+      mockHumanLoad.mockRejectedValueOnce(new Error('WASM load failed'));
 
-      jest.doMock('@tensorflow/tfjs', () => ({
-        setBackend: jest.fn().mockRejectedValue(new Error('WASM load failed')),
-        ready: jest.fn().mockResolvedValue(undefined),
-        tensor3d: jest.fn().mockReturnValue({ dispose: jest.fn() }),
-      }), { virtual: true });
-      jest.doMock('@tensorflow/tfjs-backend-wasm', () => ({}), { virtual: true });
-
-      // Must use the absolute path here too — same reason as the outer mock.
-      jest.doMock(humanWasmAbsPath, () => ({
-        Human: jest.fn().mockImplementation(() => ({
-          load: jest.fn().mockResolvedValue(undefined),
-          warmup: jest.fn().mockResolvedValue(undefined),
-          detect: jest.fn(),
-        })),
-        default: jest.fn(),
-      }));
-      jest.doMock('sharp', () =>
-        jest.fn().mockReturnValue({
-          ensureAlpha: jest.fn().mockReturnThis(),
-          raw: jest.fn().mockReturnThis(),
-          toBuffer: jest.fn().mockResolvedValue({ data: Buffer.alloc(0), info: { width: 1, height: 1 } }),
-        }),
-      );
-
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { HumanProvider: HumanProviderFresh } = require('./human.provider') as typeof import('./human.provider');
-
-      const freshProvider = new HumanProviderFresh();
-      const result = await freshProvider.testConnection({});
-
-      // Restore original mocks so subsequent test groups are unaffected
-      jest.resetModules();
-      jest.restoreAllMocks();
+      const result = await provider.testConnection({});
 
       expect(result.ok).toBe(false);
       expect(result.error).toMatch(/WASM load failed/);
@@ -235,7 +223,7 @@ describe('HumanProvider', () => {
 
       // Embedding must be L2-unit length
       const emb0 = results[0].embedding!;
-      const norm0 = Math.sqrt(emb0.reduce((s, v) => s + v * v, 0));
+      const norm0 = Math.sqrt(emb0.reduce((s: number, v: number) => s + v * v, 0));
       expect(norm0).toBeCloseTo(1, 5);
       // [3,4] / 5 = [0.6, 0.8]
       expect(emb0[0]).toBeCloseTo(0.6, 5);
@@ -249,7 +237,7 @@ describe('HumanProvider', () => {
         h: 30 / 100,
       });
       const emb1 = results[1].embedding!;
-      const norm1 = Math.sqrt(emb1.reduce((s, v) => s + v * v, 0));
+      const norm1 = Math.sqrt(emb1.reduce((s: number, v: number) => s + v * v, 0));
       expect(norm1).toBeCloseTo(1, 5);
     });
 
