@@ -113,9 +113,15 @@ describe('SystemSettingsService', () => {
         },
       };
 
+      // systemSettingsSchema.parse adds face with defaults when omitted
+      const expectedParsed = {
+        ...newSettings,
+        face: { features: { detection: { provider: null, model: null } } },
+      };
+
       mockPrisma.systemSettings.upsert.mockResolvedValue({
         ...mockSystemSettings,
-        value: newSettings as any,
+        value: expectedParsed as any,
         version: 2,
       } as any);
 
@@ -131,13 +137,13 @@ describe('SystemSettingsService', () => {
       expect(mockPrisma.systemSettings.upsert).toHaveBeenCalledWith({
         where: { key: 'global' },
         update: {
-          value: newSettings as any,
+          value: expectedParsed as any,
           updatedByUserId: mockUserId,
           version: { increment: 1 },
         },
         create: {
           key: 'global',
-          value: newSettings as any,
+          value: expectedParsed as any,
           updatedByUserId: mockUserId,
         },
         include: {
@@ -188,9 +194,16 @@ describe('SystemSettingsService', () => {
         },
       };
 
+      // systemSettingsSchema.parse adds face with defaults — the validated
+      // object (not the original DTO) is stored in the audit event.
+      const expectedValidated = {
+        ...newSettings,
+        face: { features: { detection: { provider: null, model: null } } },
+      };
+
       mockPrisma.systemSettings.upsert.mockResolvedValue({
         ...mockSystemSettings,
-        value: newSettings as any,
+        value: expectedValidated as any,
       } as any);
 
       mockPrisma.auditEvent.create.mockResolvedValue({} as any);
@@ -204,7 +217,7 @@ describe('SystemSettingsService', () => {
           targetType: 'system_settings',
           targetId: mockSystemSettings.id,
           meta: {
-            newValue: newSettings,
+            newValue: expectedValidated,
           } as any,
         },
       });
@@ -380,6 +393,128 @@ describe('SystemSettingsService', () => {
             changes: partialUpdate,
             resultingValue: expect.any(Object),
           }) as any,
+        },
+      });
+    });
+
+    it('should persist face detection provider and model (round-trip)', async () => {
+      const detectionPatch = {
+        face: {
+          features: {
+            detection: {
+              provider: 'compreface',
+              model: 'compreface-arcface-mobilefacenet-128',
+            },
+          },
+        },
+      };
+
+      const savedValue = {
+        ...DEFAULT_SYSTEM_SETTINGS,
+        face: {
+          features: {
+            detection: {
+              provider: 'compreface',
+              model: 'compreface-arcface-mobilefacenet-128',
+            },
+          },
+        },
+      };
+
+      mockPrisma.systemSettings.update.mockResolvedValue({
+        ...mockSystemSettings,
+        value: savedValue as any,
+        version: 2,
+      } as any);
+
+      mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+      const result = await service.patchSettings(detectionPatch as any, mockUserId);
+
+      // Verify the merged object passed to Prisma contains face
+      const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+      expect(updateCall.data.value).toMatchObject({
+        face: {
+          features: {
+            detection: {
+              provider: 'compreface',
+              model: 'compreface-arcface-mobilefacenet-128',
+            },
+          },
+        },
+      });
+
+      // Verify face is present in the returned value (not silently dropped)
+      expect((result as any).face).toBeDefined();
+      expect((result as any).face.features.detection.provider).toBe('compreface');
+      expect((result as any).face.features.detection.model).toBe('compreface-arcface-mobilefacenet-128');
+    });
+
+    it('should preserve existing face detection settings when patching unrelated fields', async () => {
+      // Existing settings have face configured
+      const existingWithFace = {
+        ...mockSystemSettings,
+        value: {
+          ...DEFAULT_SYSTEM_SETTINGS,
+          face: {
+            features: {
+              detection: { provider: 'compreface', model: 'compreface-arcface-mobilefacenet-128' },
+            },
+          },
+        } as any,
+      };
+
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(existingWithFace as any);
+
+      const savedValue = {
+        ...existingWithFace.value,
+        ui: { allowUserThemeOverride: false },
+      };
+
+      mockPrisma.systemSettings.update.mockResolvedValue({
+        ...mockSystemSettings,
+        value: savedValue as any,
+        version: 2,
+      } as any);
+
+      mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+      // Patch only ui — face should be preserved in the merged object
+      await service.patchSettings({ ui: { allowUserThemeOverride: false } }, mockUserId);
+
+      const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+      expect(updateCall.data.value).toMatchObject({
+        face: {
+          features: {
+            detection: {
+              provider: 'compreface',
+              model: 'compreface-arcface-mobilefacenet-128',
+            },
+          },
+        },
+      });
+    });
+
+    it('should carry face null values when no face settings exist yet', async () => {
+      mockPrisma.systemSettings.update.mockResolvedValue({
+        ...mockSystemSettings,
+        value: {
+          ...DEFAULT_SYSTEM_SETTINGS,
+          face: { features: { detection: { provider: null, model: null } } },
+        } as any,
+        version: 2,
+      } as any);
+
+      mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+      await service.patchSettings({ ui: { allowUserThemeOverride: true } }, mockUserId);
+
+      const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+      expect(updateCall.data.value).toMatchObject({
+        face: {
+          features: {
+            detection: { provider: null, model: null },
+          },
         },
       });
     });
