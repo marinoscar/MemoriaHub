@@ -6,26 +6,29 @@ import { SettingsModule } from '../settings/settings.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 import { CirclesModule } from '../circles/circles.module';
 import { FaceEnqueueListener } from './processing/face-enqueue.listener';
-import { FaceJobWorker } from './processing/face-job.worker';
 import { FaceDetectionService } from './face-detection.service';
 import { FaceDetectionController } from './face-detection.controller';
 import { FaceMatchingService } from './face-matching.service';
 import { FaceClusteringService } from './face-clustering.service';
 import { PeopleService } from './people.service';
 import { PeopleController } from './people.controller';
+import { FaceDetectionHandler } from './face-detection.handler';
+import { EnrichmentModule } from '../enrichment/enrichment.module';
+import { ENRICHMENT_HANDLER } from '../enrichment/enrichment-handler.interface';
 
 @Module({
-  imports: [SettingsModule, StorageProvidersModule, CirclesModule],
+  imports: [SettingsModule, StorageProvidersModule, CirclesModule, EnrichmentModule],
   controllers: [FaceSettingsController, FaceDetectionController, PeopleController],
   providers: [
     FaceSettingsService,
     FaceProviderRegistry,
     FaceEnqueueListener,
-    FaceJobWorker,
     FaceDetectionService,
     FaceMatchingService,
     FaceClusteringService,
     PeopleService,
+    FaceDetectionHandler,
+    { provide: ENRICHMENT_HANDLER, useExisting: FaceDetectionHandler },
   ],
   exports: [FaceSettingsService, FaceProviderRegistry, FaceMatchingService, FaceClusteringService],
 })
