@@ -2164,6 +2164,8 @@ cd apps/web && npm test
 | [TESTING.md](TESTING.md) | Testing framework guide |
 | [DEVICE-AUTH.md](DEVICE-AUTH.md) | Device authorization guide |
 | [CLAUDE.md](../CLAUDE.md) | AI assistant guidance |
+| [Face Detection and Recognition](specs/face-recognition.md) | End-to-end face detection, provider abstraction, matching, people labeling |
+| [Enrichment Queue](specs/enrichment-queue.md) | Generic background enrichment queue; how to add new AI capabilities |
 
 ### 15.3 Specification Index
 
@@ -2182,6 +2184,8 @@ Implementation specs in `docs/specs/`:
 ## 16. Face Detection and Recognition Pipeline
 
 Face enrichment runs as a **separate asynchronous path** that is deliberately decoupled from the synchronous upload chain. The synchronous chain (`OBJECT_UPLOADED_EVENT` → metadata extraction) must reply quickly; face detection against an external sidecar or cloud API can take seconds per photo and must be re-runnable and backfillable.
+
+For the complete specification, see **[docs/specs/face-recognition.md](specs/face-recognition.md)**.
 
 ### Components
 
