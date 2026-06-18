@@ -30,11 +30,11 @@ import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import {
-  FaceJobStatus,
-  FaceJobReason,
+  JobReason,
   MediaFaceStatusType,
   MediaType,
 } from '@prisma/client';
+import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 
 // ---------------------------------------------------------------------------
 // DTOs
@@ -68,6 +68,7 @@ export class FaceDetectionController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly circleMembershipService: CircleMembershipService,
+    private readonly enrichmentJobService: EnrichmentJobService,
   ) {}
 
   // --------------------------------------------------------------------------
@@ -171,14 +172,13 @@ export class FaceDetectionController {
     );
 
     // Always create a new job on rerun — user intentionally requested it
-    const job = await this.prisma.faceJob.create({
-      data: {
-        mediaItemId,
-        circleId: mediaItem.circleId,
-        status: FaceJobStatus.pending,
-        reason: FaceJobReason.rerun,
-        attempts: 0,
-      },
+    // Use priority 0 (highest) so user-triggered reruns are processed first
+    const job = await this.enrichmentJobService.enqueue({
+      type: 'face_detection',
+      mediaItemId,
+      circleId: mediaItem.circleId,
+      reason: JobReason.rerun,
+      priority: 0,
     });
 
     // Upsert MediaFaceStatus to pending
@@ -262,20 +262,18 @@ export class FaceDetectionController {
       return { data: { queued: 0 } };
     }
 
-    // Create FaceJob rows in bulk
-    await this.prisma.faceJob.createMany({
-      data: mediaItems.map((item) => ({
+    // Enqueue via EnrichmentJobService (priority 100 = low priority, processed last)
+    let queued = 0;
+    for (const item of mediaItems) {
+      await this.enrichmentJobService.enqueue({
+        type: 'face_detection',
         mediaItemId: item.id,
         circleId: item.circleId,
-        status: FaceJobStatus.pending,
-        reason: FaceJobReason.backfill,
-        attempts: 0,
-      })),
-      skipDuplicates: false,
-    });
+        reason: JobReason.backfill,
+        priority: 100,
+      });
 
-    // Upsert MediaFaceStatus rows to pending
-    for (const item of mediaItems) {
+      // Upsert MediaFaceStatus rows to pending
       await this.prisma.mediaFaceStatus.upsert({
         where: { mediaItemId: item.id },
         create: {
@@ -287,13 +285,15 @@ export class FaceDetectionController {
           status: MediaFaceStatusType.pending,
         },
       });
+
+      queued++;
     }
 
     this.logger.log(
-      `Backfill: queued ${mediaItems.length} face detection job(s) for circle ${circleId} by user ${user.id}`,
+      `Backfill: queued ${queued} face detection job(s) for circle ${circleId} by user ${user.id}`,
     );
 
-    return { data: { queued: mediaItems.length } };
+    return { data: { queued } };
   }
 
   // --------------------------------------------------------------------------
@@ -306,7 +306,7 @@ export class FaceDetectionController {
   @ApiOperation({
     summary: 'Delete ALL biometric data for a circle (GDPR right to erase)',
     description:
-      'Permanently deletes all Face rows, Person rows, MediaFaceStatus rows, and pending FaceJob rows ' +
+      'Permanently deletes all Face rows, Person rows, MediaFaceStatus rows, and EnrichmentJob rows ' +
       'for the specified circle. Also sets faceRecognitionEnabled=false. ' +
       'Requires system Admin OR circle_admin role. THIS ACTION IS IRREVERSIBLE.',
   })
@@ -345,8 +345,10 @@ export class FaceDetectionController {
       // 2. Delete all Person rows (hard delete — faces already removed)
       await tx.person.deleteMany({ where: { circleId } });
 
-      // 3. Delete all FaceJob rows for the circle
-      await tx.faceJob.deleteMany({ where: { circleId } });
+      // 3. Delete EnrichmentJob rows for face_detection type in this circle
+      await tx.enrichmentJob.deleteMany({
+        where: { circleId, type: 'face_detection' },
+      });
 
       // 4. Delete all MediaFaceStatus rows (via mediaItem.circleId join)
       await tx.mediaFaceStatus.deleteMany({
@@ -387,17 +389,6 @@ export class FaceDetectionController {
   // Private helpers
   // --------------------------------------------------------------------------
 
-  /**
-   * Load a MediaItem and assert the caller has the required circle role.
-   *
-   * Delegates to CircleMembershipService which handles:
-   *   - super-admin bypass (circles:manage_any, media:write_any, media:read_any)
-   *   - circle existence check
-   *   - membership check
-   *   - role-rank enforcement
-   *
-   * Returns a minimal projection sufficient for subsequent operations.
-   */
   private async assertMediaItemAccess(
     mediaItemId: string,
     user: RequestUser,
@@ -412,7 +403,6 @@ export class FaceDetectionController {
       throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
     }
 
-    // Delegates role-rank + super-admin bypass to CircleMembershipService
     await this.circleMembershipService.assertCircleAccess(
       user.id,
       mediaItem.circleId,

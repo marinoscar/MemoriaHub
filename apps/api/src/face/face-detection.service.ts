@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { FaceJob, MediaFaceStatusType } from '@prisma/client';
+import { EnrichmentJob, MediaFaceStatusType } from '@prisma/client';
 import { Readable } from 'stream';
 import { PrismaService } from '../prisma/prisma.service';
 import { FaceSettingsService } from './face-settings.service';
@@ -23,7 +23,7 @@ export class FaceDetectionService {
     private readonly matchingService: FaceMatchingService,
   ) {}
 
-  async processMediaItem(job: FaceJob): Promise<void> {
+  async processMediaItem(job: EnrichmentJob): Promise<void> {
     // 1. Set MediaFaceStatus → processing
     await this.prisma.mediaFaceStatus.upsert({
       where: { mediaItemId: job.mediaItemId },

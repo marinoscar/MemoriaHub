@@ -1,17 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
-import { MediaType, FaceJobStatus, FaceJobReason, MediaFaceStatusType } from '@prisma/client';
+import { MediaType, JobReason, MediaFaceStatusType } from '@prisma/client';
 import {
   OBJECT_PROCESSED_EVENT,
   ObjectProcessedEvent,
 } from '../../storage/processing/events/object-processed.event';
+import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 
 @Injectable()
 export class FaceEnqueueListener {
   private readonly logger = new Logger(FaceEnqueueListener.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly enrichmentJobService: EnrichmentJobService,
+  ) {}
 
   @OnEvent(OBJECT_PROCESSED_EVENT, { async: true })
   async handleObjectProcessed(event: ObjectProcessedEvent): Promise<void> {
@@ -70,34 +74,16 @@ export class FaceEnqueueListener {
       return;
     }
 
-    // 4. Idempotency: skip if a pending/running job already exists
-    const existingJob = await this.prisma.faceJob.findFirst({
-      where: {
-        mediaItemId: mediaItem.id,
-        status: { in: [FaceJobStatus.pending, FaceJobStatus.running] },
-      },
-      select: { id: true },
+    // 4. Enqueue via EnrichmentJobService (idempotency handled by service)
+    const job = await this.enrichmentJobService.enqueue({
+      type: 'face_detection',
+      mediaItemId: mediaItem.id,
+      circleId: mediaItem.circleId,
+      reason: JobReason.upload,
+      priority: 10,
     });
 
-    if (existingJob) {
-      this.logger.debug(
-        `Active face job ${existingJob.id} already exists for MediaItem ${mediaItem.id}; skipping`,
-      );
-      return;
-    }
-
-    // 5. Create FaceJob
-    const job = await this.prisma.faceJob.create({
-      data: {
-        mediaItemId: mediaItem.id,
-        circleId: mediaItem.circleId,
-        status: FaceJobStatus.pending,
-        reason: FaceJobReason.upload,
-        attempts: 0,
-      },
-    });
-
-    // 6. Upsert MediaFaceStatus to pending
+    // 5. Upsert MediaFaceStatus to pending (face domain status — kept here)
     await this.prisma.mediaFaceStatus.upsert({
       where: { mediaItemId: mediaItem.id },
       create: {
