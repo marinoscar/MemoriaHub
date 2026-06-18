@@ -511,8 +511,9 @@ function UnassignedFacesSection({
     missing.forEach((mediaId) => {
       getMedia(mediaId)
         .then((item) => {
-          if (item.thumbnailUrl) {
-            setMediaUrls((prev) => ({ ...prev, [mediaId]: item.thumbnailUrl! }));
+          const url = item.downloadUrl ?? item.thumbnailUrl;
+          if (url) {
+            setMediaUrls((prev) => ({ ...prev, [mediaId]: url }));
           }
         })
         .catch(() => undefined);
