@@ -228,6 +228,13 @@ export class ComprefaceProvider implements FaceProvider {
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
+
+      // CompreFace returns 400 when no face is detected — treat as zero detections.
+      // This mirrors how testConnection() handles non-2xx responses gracefully.
+      if (res.status === 400 && /no face/i.test(body)) {
+        return { result: [] };
+      }
+
       throw new Error(
         `CompreFace core /find_faces failed with HTTP ${res.status}: ${body}`,
       );
