@@ -66,6 +66,10 @@ export const PERMISSIONS = {
 
   // Search feature usage
   SEARCH_USE: 'search:use',
+
+  // Job queue dashboard (Admin only)
+  JOBS_READ: 'jobs:read',
+  JOBS_WRITE: 'jobs:write',
 } as const;
 
 export type PermissionName = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

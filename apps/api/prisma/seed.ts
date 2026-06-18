@@ -75,6 +75,10 @@ const PERMISSIONS = [
 
   // Search feature usage
   { name: 'search:use', description: 'Use the AI-powered search feature' },
+
+  // Job queue dashboard (Admin only)
+  { name: 'jobs:read', description: 'Admin: read enrichment job queue stats and list' },
+  { name: 'jobs:write', description: 'Admin: retry, reset, or delete enrichment jobs' },
 ] as const;
 
 // Role to permissions mapping
@@ -113,6 +117,9 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'face_settings:write',
     // Search: all authenticated users
     'search:use',
+    // Job queue dashboard: admin-only
+    'jobs:read',
+    'jobs:write',
   ],
   contributor: [
     'user_settings:read',
