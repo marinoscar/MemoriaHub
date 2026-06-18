@@ -21,6 +21,8 @@ import {
   DialogActions,
   Switch,
   FormControlLabel,
+  Checkbox,
+  Autocomplete,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -45,10 +47,13 @@ import {
   deleteCircleBiometrics,
   mergePeople,
   deletePerson,
+  assignFaces as assignFacesService,
+  createPerson as createPersonService,
 } from '../../services/face';
 import type { CircleFaceSettings } from '../../services/face';
-import { listMedia } from '../../services/media';
+import { listMedia, getMedia } from '../../services/media';
 import type { MediaItem } from '../../types/media';
+import { useUnassignedFaces } from '../../hooks/useUnassignedFaces';
 
 // ---------------------------------------------------------------------------
 // Delete Biometrics Dialog
@@ -475,6 +480,262 @@ function FaceOptInGate({ circleRole, onEnable, enabling }: FaceOptInGateProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Unassigned Faces Section (lone faces not yet in any Person)
+// ---------------------------------------------------------------------------
+
+function UnassignedFacesSection({
+  circleId,
+  allPeople,
+  onAssigned,
+}: {
+  circleId: string;
+  allPeople: PersonListItem[];
+  onAssigned: () => void;
+}) {
+  const { faces, loading, error, refresh } = useUnassignedFaces(circleId);
+  const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [nameDialogOpen, setNameDialogOpen] = useState(false);
+  const [newPersonName, setNewPersonName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [assignTarget, setAssignTarget] = useState<PersonListItem | null>(null);
+  const [assigning, setAssigning] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Resolve thumbnail URLs for each unique mediaItemId
+  useEffect(() => {
+    if (faces.length === 0) return;
+    const uniqueIds = [...new Set(faces.map((f) => f.mediaItemId))];
+    const missing = uniqueIds.filter((id) => !mediaUrls[id]);
+    if (missing.length === 0) return;
+    missing.forEach((mediaId) => {
+      getMedia(mediaId)
+        .then((item) => {
+          if (item.thumbnailUrl) {
+            setMediaUrls((prev) => ({ ...prev, [mediaId]: item.thumbnailUrl! }));
+          }
+        })
+        .catch(() => undefined);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [faces]);
+
+  const toggleSelect = (faceId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(faceId)) next.delete(faceId);
+      else next.add(faceId);
+      return next;
+    });
+  };
+
+  const handleCreatePerson = async () => {
+    if (!newPersonName.trim() || selectedIds.size === 0) return;
+    setCreating(true);
+    setActionError(null);
+    try {
+      await createPersonService({
+        circleId,
+        name: newPersonName.trim(),
+        faceIds: [...selectedIds],
+      });
+      setSelectedIds(new Set());
+      setNewPersonName('');
+      setNameDialogOpen(false);
+      await refresh();
+      onAssigned();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to create person');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleAssignToExisting = async () => {
+    if (!assignTarget || selectedIds.size === 0) return;
+    setAssigning(true);
+    setActionError(null);
+    try {
+      await assignFacesService(assignTarget.id, [...selectedIds]);
+      setSelectedIds(new Set());
+      setAssignTarget(null);
+      await refresh();
+      onAssigned();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to assign faces');
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  if (loading) return <CircularProgress size={24} />;
+  if (error) return <Alert severity="error">{error}</Alert>;
+  if (faces.length === 0) return null; // hide section entirely if no unassigned faces
+
+  const getPersonLabel = (p: PersonListItem) =>
+    p.name ?? `Unlabeled (${p.id.slice(0, 6)})`;
+
+  return (
+    <Box>
+      <Typography variant="h6" sx={{ mb: 1 }}>
+        Unassigned Faces ({faces.length})
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        Individual detected faces not yet linked to a person. Select one or more to name or assign.
+      </Typography>
+
+      {/* Action bar — visible when faces are selected */}
+      {selectedIds.size > 0 && (
+        <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={2}
+            sx={{ alignItems: { sm: 'center' } }}
+          >
+            <Typography variant="body2">
+              {selectedIds.size} face{selectedIds.size !== 1 ? 's' : ''} selected
+            </Typography>
+
+            <Button
+              size="small"
+              variant="contained"
+              onClick={() => setNameDialogOpen(true)}
+              disabled={creating || assigning}
+            >
+              Name as new person
+            </Button>
+
+            <Autocomplete
+              size="small"
+              options={allPeople}
+              getOptionLabel={getPersonLabel}
+              value={assignTarget}
+              onChange={(_, val) => setAssignTarget(val)}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Assign to existing person"
+                  sx={{ minWidth: 200 }}
+                />
+              )}
+              sx={{ minWidth: 200 }}
+            />
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => void handleAssignToExisting()}
+              disabled={!assignTarget || assigning || creating}
+              startIcon={assigning ? <CircularProgress size={14} /> : undefined}
+            >
+              {assigning ? 'Assigning…' : 'Assign'}
+            </Button>
+
+            <Button size="small" onClick={() => setSelectedIds(new Set())}>
+              Clear
+            </Button>
+          </Stack>
+          {actionError && (
+            <Alert severity="error" sx={{ mt: 1 }}>
+              {actionError}
+            </Alert>
+          )}
+        </Paper>
+      )}
+
+      {/* Face grid */}
+      <Grid container spacing={1}>
+        {faces.map((face) => {
+          const imgUrl = mediaUrls[face.mediaItemId];
+          const selected = selectedIds.has(face.faceId);
+          return (
+            <Grid key={face.faceId}>
+              <Box
+                onClick={() => toggleSelect(face.faceId)}
+                sx={{
+                  position: 'relative',
+                  cursor: 'pointer',
+                  borderRadius: 1,
+                  border: selected ? '2px solid' : '2px solid transparent',
+                  borderColor: selected ? 'primary.main' : 'transparent',
+                  '&:hover': { borderColor: 'primary.light' },
+                }}
+              >
+                {imgUrl ? (
+                  <FaceCrop imageUrl={imgUrl} boundingBox={face.boundingBox} size={72} />
+                ) : (
+                  <Box
+                    sx={{ width: 72, height: 72, bgcolor: 'grey.200', borderRadius: 1 }}
+                  />
+                )}
+                <Checkbox
+                  size="small"
+                  checked={selected}
+                  sx={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    p: 0.25,
+                    color: 'white',
+                    '&.Mui-checked': { color: 'primary.main' },
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={() => toggleSelect(face.faceId)}
+                />
+              </Box>
+            </Grid>
+          );
+        })}
+      </Grid>
+
+      {/* Name as new person dialog */}
+      <Dialog
+        open={nameDialogOpen}
+        onClose={() => setNameDialogOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Name as New Person</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Creating a person from {selectedIds.size} selected face
+            {selectedIds.size !== 1 ? 's' : ''}.
+          </Typography>
+          <TextField
+            fullWidth
+            size="small"
+            label="Person name"
+            value={newPersonName}
+            onChange={(e) => setNewPersonName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void handleCreatePerson();
+            }}
+            autoFocus
+          />
+          {actionError && (
+            <Alert severity="error" sx={{ mt: 1 }}>
+              {actionError}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setNameDialogOpen(false)} disabled={creating}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => void handleCreatePerson()}
+            disabled={!newPersonName.trim() || creating}
+            startIcon={creating ? <CircularProgress size={14} /> : undefined}
+          >
+            {creating ? 'Creating…' : 'Create'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -720,8 +981,11 @@ export default function PeoplePage() {
 
       {/* Labeled people section */}
       <Box sx={{ mb: 4 }}>
-        <Typography variant="h6" sx={{ mb: 2 }}>
+        <Typography variant="h6" sx={{ mb: 1 }}>
           Named People ({labeledPeople.length})
+        </Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+          Tip: open a person and use the Merge button to combine duplicates.
         </Typography>
         <PersonGrid
           people={labeledPeople}
@@ -730,6 +994,19 @@ export default function PeoplePage() {
           emptyMessage="No named people yet. Use 'Find People' then name the clusters below."
         />
       </Box>
+
+      <Divider sx={{ mb: 3 }} />
+
+      {/* Unassigned faces section — lone detected faces */}
+      {activeCircleId && (
+        <Box sx={{ mb: 4 }}>
+          <UnassignedFacesSection
+            circleId={activeCircleId}
+            allPeople={allPeople}
+            onAssigned={() => void Promise.all([refreshLabeled(), refreshUnlabeled()])}
+          />
+        </Box>
+      )}
 
       <Divider sx={{ mb: 3 }} />
 

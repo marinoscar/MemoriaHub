@@ -33,6 +33,7 @@ import {
   UpdatePersonDto,
   AssignFacesDto,
   ClusterDto,
+  ListUnassignedFacesQueryDto,
 } from './dto/people.dto';
 import { MergePeopleDto } from './dto/merge-people.dto';
 
@@ -115,6 +116,26 @@ export class PeopleController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.peopleService.listPeople(query, user.id, user.permissions);
+  }
+
+  /**
+   * GET /api/people/unassigned
+   * List unassigned (personId=null) faces for a circle (paginated).
+   * NOTE: Must be declared BEFORE GET :id to prevent Fastify treating "unassigned" as a param.
+   */
+  @Get('unassigned')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({ summary: 'List unassigned (personId=null) faces in a circle (paginated)' })
+  @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number })
+  @ApiResponse({ status: 200, description: 'Paginated list of unassigned faces' })
+  @ApiResponse({ status: 403, description: 'Access denied' })
+  async listUnassignedFaces(
+    @Query() query: ListUnassignedFacesQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.peopleService.listUnassignedFaces(user.id, user.permissions, query);
   }
 
   /**

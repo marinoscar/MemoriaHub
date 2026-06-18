@@ -87,6 +87,7 @@ export interface DetectedFaceDto {
   boundingBox: BoundingBox;
   confidence: number | null;
   personId: string | null;
+  personName: string | null;
   providerKey: string;
   modelVersion: string;
   manuallyAssigned: boolean;
@@ -299,4 +300,35 @@ export async function deleteCircleBiometrics(circleId: string): Promise<DeleteBi
     return (result as { data: DeleteBiometricsResult }).data;
   }
   return result as DeleteBiometricsResult;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 Types — unassigned faces (lone detected faces not yet in any Person)
+// ---------------------------------------------------------------------------
+
+export interface UnassignedFaceDto {
+  faceId: string;
+  mediaItemId: string;
+  boundingBox: BoundingBox;
+  confidence: number | null;
+  createdAt: string;
+}
+
+export interface UnassignedFacesResponse {
+  items: UnassignedFaceDto[];
+  meta: { page: number; pageSize: number; totalItems: number; totalPages: number };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 API functions
+// ---------------------------------------------------------------------------
+
+export async function listUnassignedFaces(
+  circleId: string,
+  opts?: { page?: number; pageSize?: number },
+): Promise<UnassignedFacesResponse> {
+  const p = new URLSearchParams({ circleId });
+  if (opts?.page) p.set('page', String(opts.page));
+  if (opts?.pageSize) p.set('pageSize', String(opts.pageSize));
+  return api.get<UnassignedFacesResponse>(`/people/unassigned?${p.toString()}`);
 }

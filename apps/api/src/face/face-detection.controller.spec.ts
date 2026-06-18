@@ -113,6 +113,7 @@ describe('FaceDetectionController', () => {
           manuallyAssigned: false,
           personId: null,
           createdAt: new Date(),
+          person: null,
         },
       ];
 
@@ -121,7 +122,19 @@ describe('FaceDetectionController', () => {
 
       const result = await controller.listFaces('media-1', makeUser());
 
-      expect(result).toEqual({ data: mockFaces });
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0]).toMatchObject({
+        id: 'face-1',
+        boundingBox: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
+        confidence: 0.9,
+        landmarks: null,
+        externalFaceId: null,
+        providerKey: 'compreface',
+        modelVersion: 'arcface-r100-v1',
+        manuallyAssigned: false,
+        personId: null,
+        personName: null,
+      });
     });
 
     it('calls circleMembershipService.assertCircleAccess with viewer role', async () => {
@@ -151,6 +164,56 @@ describe('FaceDetectionController', () => {
       );
 
       await expect(controller.listFaces('media-1', makeUser())).rejects.toThrow(NotFoundException);
+    });
+
+    it('includes personName from assigned person', async () => {
+      const mockFaces = [
+        {
+          id: 'face-1',
+          boundingBox: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
+          confidence: 0.9,
+          landmarks: null,
+          externalFaceId: null,
+          providerKey: 'compreface',
+          modelVersion: 'arcface-r100-v1',
+          manuallyAssigned: true,
+          personId: 'person-1',
+          createdAt: new Date(),
+          person: { name: 'Alice' },
+        },
+      ];
+
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue(mockFaces);
+
+      const result = await controller.listFaces('media-1', makeUser());
+
+      expect(result.data[0].personName).toBe('Alice');
+    });
+
+    it('returns personName: null when face is unassigned', async () => {
+      const mockFaces = [
+        {
+          id: 'face-2',
+          boundingBox: { x: 0.3, y: 0.3, w: 0.1, h: 0.1 },
+          confidence: 0.75,
+          landmarks: null,
+          externalFaceId: null,
+          providerKey: 'compreface',
+          modelVersion: 'arcface-r100-v1',
+          manuallyAssigned: false,
+          personId: null,
+          createdAt: new Date(),
+          person: null,
+        },
+      ];
+
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue(mockFaces);
+
+      const result = await controller.listFaces('media-1', makeUser());
+
+      expect(result.data[0].personName).toBeNull();
     });
   });
 
