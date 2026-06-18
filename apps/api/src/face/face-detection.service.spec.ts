@@ -41,21 +41,24 @@ import { FaceProviderRegistry } from './providers/face-provider.registry';
 import { FaceMatchingService } from './face-matching.service';
 import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { FaceJob, FaceJobReason, FaceJobStatus, MediaFaceStatusType } from '@prisma/client';
+import { EnrichmentJob, JobReason, JobStatus, MediaFaceStatusType } from '@prisma/client';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeJob(overrides: Partial<FaceJob> = {}): FaceJob {
+function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
   return {
     id: 'job-1',
+    type: 'face_detection',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: FaceJobStatus.running,
-    reason: FaceJobReason.upload,
+    status: JobStatus.running,
+    reason: JobReason.upload,
+    priority: 0,
     providerKey: null,
     modelVersion: null,
+    payload: null,
     attempts: 0,
     lastError: null,
     startedAt: null,

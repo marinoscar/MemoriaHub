@@ -1,14 +1,15 @@
 /**
  * Unit tests for FaceEnqueueListener.
  *
- * Tests: enqueue on photo upload, idempotency, type guard (video skip),
- * null mediaItem, soft-deleted mediaItem, FACE_AUTO_DETECT=false.
+ * Tests: enqueue on photo upload, idempotency (delegated to EnrichmentJobService),
+ * type guard (video skip), null mediaItem, soft-deleted mediaItem, FACE_AUTO_DETECT=false.
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { FaceEnqueueListener } from './face-enqueue.listener';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
-import { FaceJobReason, FaceJobStatus, MediaFaceStatusType, MediaType } from '@prisma/client';
+import { JobReason, JobStatus, MediaFaceStatusType, MediaType } from '@prisma/client';
 import { ObjectProcessedEvent } from '../../storage/processing/events/object-processed.event';
 
 // ---------------------------------------------------------------------------
@@ -41,6 +42,7 @@ function makeEvent(storageObjectId = 'storage-obj-1'): ObjectProcessedEvent {
 describe('FaceEnqueueListener', () => {
   let listener: FaceEnqueueListener;
   let mockPrisma: MockPrismaService;
+  let mockEnrichmentJobService: { enqueue: jest.Mock };
   let originalAutoDetect: string | undefined;
 
   beforeEach(async () => {
@@ -49,16 +51,15 @@ describe('FaceEnqueueListener', () => {
     delete process.env['FACE_AUTO_DETECT'];
 
     mockPrisma = createMockPrismaService();
+    mockEnrichmentJobService = { enqueue: jest.fn() };
 
-    // Default: no existing jobs
-    (mockPrisma.faceJob.findFirst as jest.Mock).mockResolvedValue(null);
-    // Default: job creation succeeds
-    (mockPrisma.faceJob.create as jest.Mock).mockResolvedValue({
+    // Default: enqueue returns a pending job
+    mockEnrichmentJobService.enqueue.mockResolvedValue({
       id: 'job-1',
       mediaItemId: 'media-1',
       circleId: 'circle-1',
-      status: FaceJobStatus.pending,
-      reason: FaceJobReason.upload,
+      status: JobStatus.pending,
+      reason: JobReason.upload,
       attempts: 0,
     });
     // Default: status upsert succeeds
@@ -70,6 +71,7 @@ describe('FaceEnqueueListener', () => {
       providers: [
         FaceEnqueueListener,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
       ],
     }).compile();
 
@@ -89,20 +91,17 @@ describe('FaceEnqueueListener', () => {
   // -------------------------------------------------------------------------
 
   describe('photo media item', () => {
-    it('creates a FaceJob and upserts MediaFaceStatus to pending', async () => {
+    it('calls enrichmentJobService.enqueue and upserts MediaFaceStatus to pending', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
 
       await listener.handleObjectProcessed(makeEvent());
 
-      expect(mockPrisma.faceJob.create).toHaveBeenCalledWith(
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            mediaItemId: 'media-1',
-            circleId: 'circle-1',
-            status: FaceJobStatus.pending,
-            reason: FaceJobReason.upload,
-            attempts: 0,
-          }),
+          type: 'face_detection',
+          mediaItemId: 'media-1',
+          circleId: 'circle-1',
+          reason: JobReason.upload,
         }),
       );
 
@@ -117,32 +116,22 @@ describe('FaceEnqueueListener', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Idempotency: existing pending/running job
+  // Idempotency: handled by EnrichmentJobService internally
   // -------------------------------------------------------------------------
 
   describe('idempotency', () => {
-    it('does NOT create a new FaceJob when a pending job already exists', async () => {
+    it('still calls enrichmentJobService.enqueue (service handles dedup internally)', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
-      (mockPrisma.faceJob.findFirst as jest.Mock).mockResolvedValue({
+      // Service returns existing job when one already exists
+      mockEnrichmentJobService.enqueue.mockResolvedValue({
         id: 'existing-job',
-        status: FaceJobStatus.pending,
+        status: JobStatus.pending,
       });
 
       await listener.handleObjectProcessed(makeEvent());
 
-      expect(mockPrisma.faceJob.create).not.toHaveBeenCalled();
-    });
-
-    it('does NOT create a new FaceJob when a running job already exists', async () => {
-      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
-      (mockPrisma.faceJob.findFirst as jest.Mock).mockResolvedValue({
-        id: 'existing-job',
-        status: FaceJobStatus.running,
-      });
-
-      await listener.handleObjectProcessed(makeEvent());
-
-      expect(mockPrisma.faceJob.create).not.toHaveBeenCalled();
+      // Listener always delegates to the service; service decides to skip or create
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -151,14 +140,14 @@ describe('FaceEnqueueListener', () => {
   // -------------------------------------------------------------------------
 
   describe('non-photo media type', () => {
-    it('does NOT create a FaceJob for video media items', async () => {
+    it('does NOT call enrichmentJobService.enqueue for video media items', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
         makeMediaItem({ type: MediaType.video }),
       );
 
       await listener.handleObjectProcessed(makeEvent());
 
-      expect(mockPrisma.faceJob.create).not.toHaveBeenCalled();
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
       expect(mockPrisma.mediaFaceStatus.upsert).not.toHaveBeenCalled();
     });
   });
@@ -168,12 +157,12 @@ describe('FaceEnqueueListener', () => {
   // -------------------------------------------------------------------------
 
   describe('mediaItem not found', () => {
-    it('does NOT create a FaceJob when no mediaItem exists for the storageObject', async () => {
+    it('does NOT call enrichmentJobService.enqueue when no mediaItem exists for the storageObject', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(null);
 
       await listener.handleObjectProcessed(makeEvent());
 
-      expect(mockPrisma.faceJob.create).not.toHaveBeenCalled();
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
       expect(mockPrisma.mediaFaceStatus.upsert).not.toHaveBeenCalled();
     });
   });
@@ -183,14 +172,14 @@ describe('FaceEnqueueListener', () => {
   // -------------------------------------------------------------------------
 
   describe('soft-deleted mediaItem', () => {
-    it('does NOT create a FaceJob when mediaItem has deletedAt set', async () => {
+    it('does NOT call enrichmentJobService.enqueue when mediaItem has deletedAt set', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
         makeMediaItem({ deletedAt: new Date() }),
       );
 
       await listener.handleObjectProcessed(makeEvent());
 
-      expect(mockPrisma.faceJob.create).not.toHaveBeenCalled();
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
       expect(mockPrisma.mediaFaceStatus.upsert).not.toHaveBeenCalled();
     });
   });
@@ -200,23 +189,23 @@ describe('FaceEnqueueListener', () => {
   // -------------------------------------------------------------------------
 
   describe('FACE_AUTO_DETECT=false', () => {
-    it('does NOT create a FaceJob when FACE_AUTO_DETECT is explicitly false', async () => {
+    it('does NOT call enrichmentJobService.enqueue when FACE_AUTO_DETECT is explicitly false', async () => {
       process.env['FACE_AUTO_DETECT'] = 'false';
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
 
       await listener.handleObjectProcessed(makeEvent());
 
-      expect(mockPrisma.faceJob.create).not.toHaveBeenCalled();
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
       expect(mockPrisma.mediaFaceStatus.upsert).not.toHaveBeenCalled();
     });
 
-    it('DOES create a FaceJob when FACE_AUTO_DETECT=true (default)', async () => {
+    it('DOES call enrichmentJobService.enqueue when FACE_AUTO_DETECT=true (default)', async () => {
       process.env['FACE_AUTO_DETECT'] = 'true';
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
 
       await listener.handleObjectProcessed(makeEvent());
 
-      expect(mockPrisma.faceJob.create).toHaveBeenCalledTimes(1);
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -242,7 +231,7 @@ describe('FaceEnqueueListener', () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
       (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: false });
       await listener.handleObjectProcessed(makeEvent());
-      expect(mockPrisma.faceJob.create).not.toHaveBeenCalled();
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
       expect(mockPrisma.mediaFaceStatus.upsert).not.toHaveBeenCalled();
     });
 
@@ -250,7 +239,7 @@ describe('FaceEnqueueListener', () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
       (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(null);
       await listener.handleObjectProcessed(makeEvent());
-      expect(mockPrisma.faceJob.create).not.toHaveBeenCalled();
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
     });
 
     it('DOES enqueue when circle faceRecognitionEnabled is true and FACE_AUTO_DETECT is true', async () => {
@@ -258,7 +247,7 @@ describe('FaceEnqueueListener', () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
       (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: true });
       await listener.handleObjectProcessed(makeEvent());
-      expect(mockPrisma.faceJob.create).toHaveBeenCalledTimes(1);
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledTimes(1);
     });
   });
 });
