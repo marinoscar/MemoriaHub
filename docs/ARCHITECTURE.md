@@ -1303,6 +1303,17 @@ Before OAuth authentication completes:
 | `GET` | `/api/admin/backup/runs/:runId` | `backup:read` (Admin) | Get specific run status |
 | `GET` | `/api/admin/backup/objects` | `backup:read` (Admin) | List objects with signed URLs |
 
+#### Admin Job Queue
+
+| Method | Path | Permission | Purpose |
+|--------|------|------------|---------|
+| `GET` | `/api/admin/jobs/stats` | `jobs:read` (Admin) | Queue stats: total, byStatus, byType, stuckRunning |
+| `GET` | `/api/admin/jobs` | `jobs:read` (Admin) | Paginated job list; filterable by `status` and `type` |
+| `POST` | `/api/admin/jobs/:id/retry` | `jobs:write` (Admin) | Reset a single failed/succeeded job to pending |
+| `POST` | `/api/admin/jobs/retry-failed` | `jobs:write` (Admin) | Bulk-retry all failed jobs (optional `type` filter) |
+| `POST` | `/api/admin/jobs/reset-stuck` | `jobs:write` (Admin) | Reset stuck running jobs (default threshold: 10 min) |
+| `DELETE` | `/api/admin/jobs/:id` | `jobs:write` (Admin) | Delete a job row (blocked if running) |
+
 ### 8.3 Response Format
 
 #### Success Response

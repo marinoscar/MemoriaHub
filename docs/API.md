@@ -2142,6 +2142,222 @@ List media objects available for backup, each with a signed download URL.
 
 ---
 
+## Admin: Job Queue
+
+All job queue endpoints require the global `admin` role. Read endpoints additionally require `jobs:read`; mutating endpoints require `jobs:write`. Both permissions are seeded to the Admin role in `prisma/seed.ts` (no migration required).
+
+The queue backs `enrichment_jobs` — the generic async job table used by face detection and all future enrichment handlers. The frontend admin page at `/admin/jobs` provides a live view of the same data with auto-refresh every 5 seconds.
+
+---
+
+### GET /admin/jobs/stats
+
+**Requires:** Admin role + `jobs:read` permission
+
+Return aggregate counts for the entire enrichment queue.
+
+**Response:**
+```json
+{
+  "total": 1042,
+  "byStatus": {
+    "pending": 18,
+    "running": 2,
+    "succeeded": 1014,
+    "failed": 8
+  },
+  "byType": [
+    {
+      "type": "face_detection",
+      "pending": 18,
+      "running": 2,
+      "succeeded": 1014,
+      "failed": 8,
+      "total": 1042
+    }
+  ],
+  "stuckRunning": 1
+}
+```
+
+**Response fields:**
+
+| Field | Description |
+|-------|-------------|
+| `total` | Total enrichment job rows across all statuses |
+| `byStatus` | Counts keyed by `pending` / `running` / `succeeded` / `failed` |
+| `byType` | Per-job-type breakdown with the same four status counts plus a `total`; sorted alphabetically by type |
+| `stuckRunning` | Count of jobs with `status=running` and `startedAt` older than 10 minutes |
+
+---
+
+### GET /admin/jobs
+
+**Requires:** Admin role + `jobs:read` permission
+
+Paginated, filterable list of enrichment job rows. Ordered by `createdAt DESC`.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `status` | enum | No | — | Filter by status: `pending` \| `running` \| `succeeded` \| `failed` |
+| `type` | string | No | — | Filter by job type string (exact match) |
+| `page` | number | No | 1 | Page number (1-indexed) |
+| `pageSize` | number | No | 20 | Items per page (1–100) |
+
+**Response:**
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "type": "face_detection",
+      "status": "failed",
+      "reason": "upload",
+      "priority": 0,
+      "mediaItemId": "uuid",
+      "circleId": "uuid",
+      "attempts": 3,
+      "lastError": "Connection refused at http://compreface-core:3000",
+      "providerKey": "compreface",
+      "modelVersion": "compreface-arcface-mobilefacenet-128",
+      "createdAt": "2026-06-17T10:00:00.000Z",
+      "startedAt": "2026-06-17T10:01:00.000Z",
+      "finishedAt": "2026-06-17T10:01:05.000Z"
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 8,
+    "totalPages": 1
+  }
+}
+```
+
+**Item fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Job identifier |
+| `type` | string | Job type string (e.g. `face_detection`) |
+| `status` | enum | `pending` \| `running` \| `succeeded` \| `failed` |
+| `reason` | enum | Why the job was created: `upload` \| `rerun` \| `backfill` |
+| `priority` | number | Scheduling priority (higher = picked sooner) |
+| `mediaItemId` | UUID | Target media item |
+| `circleId` | UUID | Circle the media item belongs to |
+| `attempts` | number | Number of processing attempts made |
+| `lastError` | string \| null | Error message from the most recent failure |
+| `providerKey` | string \| null | Provider that processed or will process the job |
+| `modelVersion` | string \| null | Model version used |
+| `createdAt` | ISO 8601 | When the job was enqueued |
+| `startedAt` | ISO 8601 \| null | When the most recent attempt started |
+| `finishedAt` | ISO 8601 \| null | When the job last completed (success or failure) |
+
+---
+
+### POST /admin/jobs/:id/retry
+
+**Requires:** Admin role + `jobs:write` permission
+
+Reset a single failed or succeeded job to `pending` so the worker will re-process it. Resets `attempts` to 0 and clears `lastError`, `startedAt`, and `finishedAt`.
+
+**Path Parameter:** `id` — enrichment job UUID
+
+**Response 201:**
+```json
+{
+  "id": "uuid",
+  "type": "face_detection",
+  "status": "pending",
+  "attempts": 0,
+  "lastError": null,
+  "startedAt": null,
+  "finishedAt": null,
+  "..."
+}
+```
+
+Returns the full updated job object (same shape as a list item).
+
+**Error Cases:**
+- 400 Bad Request — Job is currently `running` and cannot be retried
+- 404 Not Found — Job does not exist
+
+---
+
+### POST /admin/jobs/retry-failed
+
+**Requires:** Admin role + `jobs:write` permission
+
+Bulk-reset all `failed` jobs to `pending`. Optionally scope to a specific job type. Resets `attempts` to 0 and clears `lastError`, `startedAt`, and `finishedAt` on all matched rows.
+
+**Request Body (optional):**
+```json
+{
+  "type": "face_detection"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | string | No | Limit the retry to failed jobs of this type. Omit to retry all failed jobs regardless of type. |
+
+**Response 201:**
+```json
+{ "retried": 8 }
+```
+
+`retried` is the count of jobs reset to `pending`.
+
+---
+
+### POST /admin/jobs/reset-stuck
+
+**Requires:** Admin role + `jobs:write` permission
+
+Reset `running` jobs whose `startedAt` is older than the specified threshold back to `pending`. This recovers jobs that crashed or were interrupted without updating their status. Does not reset `attempts`.
+
+**Request Body (optional):**
+```json
+{
+  "olderThanMinutes": 10
+}
+```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `olderThanMinutes` | number (int ≥ 1) | No | 10 | Reset jobs stuck in `running` for longer than this many minutes |
+
+**Response 201:**
+```json
+{ "reset": 1 }
+```
+
+`reset` is the count of jobs moved from `running` back to `pending`.
+
+---
+
+### DELETE /admin/jobs/:id
+
+**Requires:** Admin role + `jobs:write` permission
+
+Permanently delete an enrichment job row. Cannot delete a job that is currently `running`.
+
+**Path Parameter:** `id` — enrichment job UUID
+
+**Response 200:**
+```json
+{ "deleted": true }
+```
+
+**Error Cases:**
+- 400 Bad Request — Job is currently `running`
+- 404 Not Found — Job does not exist
+
+---
+
 ## HTTP Status Codes
 
 | Code | Description |
