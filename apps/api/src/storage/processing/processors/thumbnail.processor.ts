@@ -75,6 +75,15 @@ export class ThumbnailProcessor implements ObjectProcessor {
     return object.mimeType.startsWith('image/') || object.mimeType.startsWith('video/');
   }
 
+  /**
+   * Download a storage object by key.  Exposed so callers that already inject
+   * ThumbnailProcessor (which holds the StorageProvider) can retrieve streams
+   * without needing to inject StorageProvider themselves.
+   */
+  download(storageKey: string): Promise<Readable> {
+    return this.storageProvider.download(storageKey);
+  }
+
   async process(
     object: StorageObject,
     getStream: () => Promise<Readable>,

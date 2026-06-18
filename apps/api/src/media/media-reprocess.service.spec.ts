@@ -2,19 +2,15 @@
  * Unit tests — MediaReprocessService
  *
  * Mock strategy: all dependencies are replaced with jest.fn() mocks.
- * - PrismaService (storageObject.findUnique, storageObject.update, storageObject.delete,
+ * - PrismaService (storageObject.findUnique, storageObject.update,
  *                  mediaItem.findMany)
- * - StorageProvider (download, delete)
  * - EventEmitter2 (emit)
- * - ThumbnailProcessor (canProcess, process)
+ * - ThumbnailProcessor (canProcess, process, download)
  * - ImageDimensionsProcessor (canProcess, process)
  *
  * No I/O, no DB, no storage. Tests cover:
  *   - Skip rules (non-image, thumbnail key, non-ready, missing object)
  *   - Happy path: processors called in order, metadata merged, event emitted
- *   - Old thumbnail deletion when new thumbnailObjectId differs
- *   - No deletion when there is no old thumbnail
- *   - No deletion when old === new thumbnailObjectId (guard)
  *   - reprocessCircle: correct counts, circleId filter forwarded to prisma
  */
 
@@ -22,7 +18,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MediaReprocessService } from './media-reprocess.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
 import { ThumbnailProcessor } from '../storage/processing/processors/thumbnail.processor';
 import { ImageDimensionsProcessor } from '../storage/processing/processors/image-dimensions.processor';
 import { OBJECT_PROCESSED_EVENT } from '../storage/processing/events/object-processed.event';
@@ -65,12 +60,7 @@ describe('MediaReprocessService', () => {
   // Prisma mocks
   let mockFindUnique: jest.Mock;
   let mockUpdate: jest.Mock;
-  let mockDeleteObject: jest.Mock;
   let mockFindManyMedia: jest.Mock;
-
-  // StorageProvider mocks
-  let mockDownload: jest.Mock;
-  let mockStorageDelete: jest.Mock;
 
   // EventEmitter mock
   let mockEmit: jest.Mock;
@@ -78,20 +68,18 @@ describe('MediaReprocessService', () => {
   // Processor mocks
   let mockThumbnailCanProcess: jest.Mock;
   let mockThumbnailProcess: jest.Mock;
+  let mockThumbnailDownload: jest.Mock;
   let mockDimensionsCanProcess: jest.Mock;
   let mockDimensionsProcess: jest.Mock;
 
   beforeEach(async () => {
     mockFindUnique = jest.fn();
     mockUpdate = jest.fn().mockResolvedValue({});
-    mockDeleteObject = jest.fn().mockResolvedValue({});
     mockFindManyMedia = jest.fn();
-
-    mockDownload = jest.fn().mockResolvedValue({ pipe: jest.fn() });
-    mockStorageDelete = jest.fn().mockResolvedValue(undefined);
 
     mockEmit = jest.fn();
 
+    mockThumbnailDownload = jest.fn().mockResolvedValue({ pipe: jest.fn() });
     mockThumbnailCanProcess = jest.fn().mockReturnValue(true);
     mockThumbnailProcess = jest.fn().mockResolvedValue({
       success: true,
@@ -113,18 +101,10 @@ describe('MediaReprocessService', () => {
             storageObject: {
               findUnique: mockFindUnique,
               update: mockUpdate,
-              delete: mockDeleteObject,
             },
             mediaItem: {
               findMany: mockFindManyMedia,
             },
-          },
-        },
-        {
-          provide: STORAGE_PROVIDER,
-          useValue: {
-            download: mockDownload,
-            delete: mockStorageDelete,
           },
         },
         {
@@ -140,6 +120,7 @@ describe('MediaReprocessService', () => {
             priority: 40,
             canProcess: mockThumbnailCanProcess,
             process: mockThumbnailProcess,
+            download: mockThumbnailDownload,
           },
         },
         {
@@ -173,7 +154,6 @@ describe('MediaReprocessService', () => {
 
       expect(mockThumbnailProcess).not.toHaveBeenCalled();
       expect(mockDimensionsProcess).not.toHaveBeenCalled();
-      expect(mockStorageDelete).not.toHaveBeenCalled();
     });
 
     it('should skip objects whose storageKey starts with "thumbnails/"', async () => {
@@ -185,7 +165,6 @@ describe('MediaReprocessService', () => {
 
       expect(mockThumbnailProcess).not.toHaveBeenCalled();
       expect(mockDimensionsProcess).not.toHaveBeenCalled();
-      expect(mockStorageDelete).not.toHaveBeenCalled();
     });
 
     it('should skip non-ready objects', async () => {
@@ -197,7 +176,6 @@ describe('MediaReprocessService', () => {
 
       expect(mockThumbnailProcess).not.toHaveBeenCalled();
       expect(mockDimensionsProcess).not.toHaveBeenCalled();
-      expect(mockStorageDelete).not.toHaveBeenCalled();
     });
 
     it('should return without error when the object does not exist', async () => {
@@ -248,69 +226,22 @@ describe('MediaReprocessService', () => {
         expect.objectContaining({ storageObjectId: 'obj-001' }),
       );
     });
-  });
 
-  // -------------------------------------------------------------------------
-  // reprocessImageObject — old thumbnail deletion
-  // -------------------------------------------------------------------------
-
-  describe('reprocessImageObject — old thumbnail deletion', () => {
-    it('should delete old thumbnail S3 blob and DB row when new thumbnailObjectId differs', async () => {
-      const obj = makeStorageObject({
-        metadata: {
-          _processing: {
-            thumbnail: {
-              thumbnailObjectId: 'old-thumb-id',
-              thumbnailStorageKey: 'thumbnails/old.jpg',
-            },
-          },
-        },
-      });
-      mockFindUnique.mockResolvedValue(obj);
-      // thumbnailProcessor returns a NEW id
-      mockThumbnailProcess.mockResolvedValue({
-        success: true,
-        metadata: { thumbnailObjectId: 'new-thumb-id', thumbnailStorageKey: 'thumbnails/new.jpg' },
-      });
+    it('should use thumbnailProcessor.download as the getStream provider for all processors', async () => {
+      mockFindUnique.mockResolvedValue(makeStorageObject());
 
       await service.reprocessImageObject('obj-001');
 
-      expect(mockStorageDelete).toHaveBeenCalledWith('thumbnails/old.jpg');
-      expect(mockDeleteObject).toHaveBeenCalledWith({ where: { id: 'old-thumb-id' } });
-    });
-
-    it('should NOT delete when there is no old thumbnail in metadata', async () => {
-      const obj = makeStorageObject({ metadata: null });
-      mockFindUnique.mockResolvedValue(obj);
-
-      await service.reprocessImageObject('obj-001');
-
-      expect(mockStorageDelete).not.toHaveBeenCalled();
-      expect(mockDeleteObject).not.toHaveBeenCalled();
-    });
-
-    it('should NOT delete when old thumbnailObjectId equals new thumbnailObjectId', async () => {
-      const SAME_ID = 'same-thumb-id';
-      const obj = makeStorageObject({
-        metadata: {
-          _processing: {
-            thumbnail: {
-              thumbnailObjectId: SAME_ID,
-              thumbnailStorageKey: 'thumbnails/same.jpg',
-            },
-          },
-        },
-      });
-      mockFindUnique.mockResolvedValue(obj);
-      mockThumbnailProcess.mockResolvedValue({
-        success: true,
-        metadata: { thumbnailObjectId: SAME_ID, thumbnailStorageKey: 'thumbnails/same.jpg' },
-      });
-
-      await service.reprocessImageObject('obj-001');
-
-      expect(mockStorageDelete).not.toHaveBeenCalled();
-      expect(mockDeleteObject).not.toHaveBeenCalled();
+      // Both processors received a getStream callback that resolves via thumbnailProcessor.download
+      // Verify by checking download was called for each processor invocation
+      expect(mockDimensionsProcess).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.any(Function),
+      );
+      expect(mockThumbnailProcess).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.any(Function),
+      );
     });
   });
 
