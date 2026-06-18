@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react';
 import { Grid, Typography, Box, CircularProgress } from '@mui/material';
 import { PersonCard } from './PersonCard';
 import type { PersonListItem } from '../../services/face';
-import { listMedia } from '../../services/media';
-import type { MediaItem } from '../../types/media';
+import { getMedia } from '../../services/media';
 
 interface PersonCardContainerProps {
   person: PersonListItem;
@@ -15,15 +14,14 @@ function PersonCardContainer({ person, onClick }: PersonCardContainerProps) {
 
   useEffect(() => {
     if (!person.coverFace) return;
-    // Fetch the cover media item to get its thumbnailUrl
-    listMedia({ personId: person.id, pageSize: 1 })
-      .then((resp) => {
-        const item = resp.items.find((m: MediaItem) => m.id === person.coverFace!.mediaItemId)
-          ?? resp.items[0];
-        if (item?.thumbnailUrl) setImageUrl(item.thumbnailUrl);
+    // Fetch the full media item to get downloadUrl (full-res) with thumbnailUrl fallback
+    getMedia(person.coverFace.mediaItemId)
+      .then((item) => {
+        const url = item.downloadUrl ?? item.thumbnailUrl;
+        if (url) setImageUrl(url);
       })
       .catch(() => undefined);
-  }, [person.id, person.coverFace]);
+  }, [person.coverFace]);
 
   return <PersonCard person={person} imageUrl={imageUrl} onClick={onClick} />;
 }
