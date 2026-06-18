@@ -3,7 +3,7 @@
  *
  * Mock strategy:
  *   - STORAGE_PROVIDER (upload, getBucket) → jest.fn()
- *   - PrismaService (storageObject.create)  → jest.fn()
+ *   - PrismaService (storageObject.upsert)  → jest.fn()
  *   - sharp is NOT mocked; we use a real sharp-generated 4×4 JPEG buffer so the
  *     full resize path is exercised end-to-end.  See image-fixtures.ts for the
  *     pattern this follows (identical to exif.processor.spec.ts).
@@ -179,12 +179,12 @@ describe('ThumbnailProcessor', () => {
   let processor: ThumbnailProcessor;
   let mockUpload: jest.Mock;
   let mockGetBucket: jest.Mock;
-  let mockStorageObjectCreate: jest.Mock;
+  let mockStorageObjectUpsert: jest.Mock;
 
   beforeEach(async () => {
     mockUpload = jest.fn().mockResolvedValue(undefined);
     mockGetBucket = jest.fn().mockReturnValue(BUCKET_NAME);
-    mockStorageObjectCreate = jest.fn().mockResolvedValue({ id: THUMB_ID });
+    mockStorageObjectUpsert = jest.fn().mockResolvedValue({ id: THUMB_ID });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -200,7 +200,7 @@ describe('ThumbnailProcessor', () => {
           provide: PrismaService,
           useValue: {
             storageObject: {
-              create: mockStorageObjectCreate,
+              upsert: mockStorageObjectUpsert,
             },
           },
         },
@@ -337,39 +337,46 @@ describe('ThumbnailProcessor', () => {
       expect(uploadedKey).toMatch(/^thumbnails\//);
     });
 
-    it('should call prisma.storageObject.create exactly once', async () => {
+    it('should call prisma.storageObject.upsert exactly once', async () => {
       const buf = await getPlainJpegBuffer();
       await processor.process(makeObject(), makeGetStream(buf));
-      expect(mockStorageObjectCreate).toHaveBeenCalledTimes(1);
+      expect(mockStorageObjectUpsert).toHaveBeenCalledTimes(1);
+    });
+
+    it('should upsert with where: { storageKey: thumbnails/<id>.jpg }', async () => {
+      const buf = await getPlainJpegBuffer();
+      await processor.process(makeObject(), makeGetStream(buf));
+      const upsertArg = mockStorageObjectUpsert.mock.calls[0][0];
+      expect(upsertArg.where).toEqual({ storageKey: `thumbnails/${OBJECT_ID}.jpg` });
     });
 
     it('should create StorageObject with status "ready"', async () => {
       const buf = await getPlainJpegBuffer();
       await processor.process(makeObject(), makeGetStream(buf));
-      const createArg = mockStorageObjectCreate.mock.calls[0][0];
-      expect(createArg.data.status).toBe('ready');
+      const createArg = mockStorageObjectUpsert.mock.calls[0][0];
+      expect(createArg.create.status).toBe('ready');
     });
 
     it('should create StorageObject with mimeType "image/jpeg"', async () => {
       const buf = await getPlainJpegBuffer();
       await processor.process(makeObject(), makeGetStream(buf));
-      const createArg = mockStorageObjectCreate.mock.calls[0][0];
-      expect(createArg.data.mimeType).toBe('image/jpeg');
+      const createArg = mockStorageObjectUpsert.mock.calls[0][0];
+      expect(createArg.create.mimeType).toBe('image/jpeg');
     });
 
     it('should create StorageObject with metadata.thumbnailOf = original id', async () => {
       const buf = await getPlainJpegBuffer();
       await processor.process(makeObject(), makeGetStream(buf));
-      const createArg = mockStorageObjectCreate.mock.calls[0][0];
-      expect(createArg.data.metadata).toMatchObject({ thumbnailOf: OBJECT_ID });
+      const createArg = mockStorageObjectUpsert.mock.calls[0][0];
+      expect(createArg.create.metadata).toMatchObject({ thumbnailOf: OBJECT_ID });
     });
 
     it('should call storageProvider.getBucket() to fill bucket', async () => {
       const buf = await getPlainJpegBuffer();
       await processor.process(makeObject(), makeGetStream(buf));
       expect(mockGetBucket).toHaveBeenCalled();
-      const createArg = mockStorageObjectCreate.mock.calls[0][0];
-      expect(createArg.data.bucket).toBe(BUCKET_NAME);
+      const createArg = mockStorageObjectUpsert.mock.calls[0][0];
+      expect(createArg.create.bucket).toBe(BUCKET_NAME);
     });
 
     it('should upload the processed buffer as a Readable stream', async () => {
@@ -393,8 +400,8 @@ describe('ThumbnailProcessor', () => {
       expect(result.error).toContain('S3 connection error');
     });
 
-    it('should return success:false when prisma.storageObject.create rejects', async () => {
-      mockStorageObjectCreate.mockRejectedValueOnce(new Error('DB constraint violation'));
+    it('should return success:false when prisma.storageObject.upsert rejects', async () => {
+      mockStorageObjectUpsert.mockRejectedValueOnce(new Error('DB constraint violation'));
       const buf = await getPlainJpegBuffer();
       const result = await processor.process(makeObject(), makeGetStream(buf));
       expect(result.success).toBe(false);
@@ -460,7 +467,7 @@ describe('ThumbnailProcessor', () => {
             provide: PrismaService,
             useValue: {
               storageObject: {
-                create: jest.fn().mockResolvedValue({ id: THUMB_ID }),
+                upsert: jest.fn().mockResolvedValue({ id: THUMB_ID }),
               },
             },
           },
@@ -483,7 +490,7 @@ describe('ThumbnailProcessor', () => {
       process.env.THUMBNAIL_QUALITY = '70';
 
       const customUpload = jest.fn().mockResolvedValue(undefined);
-      const customCreate = jest.fn().mockResolvedValue({ id: THUMB_ID });
+      const customUpsert = jest.fn().mockResolvedValue({ id: THUMB_ID });
 
       const customModule: TestingModule = await Test.createTestingModule({
         providers: [
@@ -498,7 +505,7 @@ describe('ThumbnailProcessor', () => {
           {
             provide: PrismaService,
             useValue: {
-              storageObject: { create: customCreate },
+              storageObject: { upsert: customUpsert },
             },
           },
         ],
@@ -510,7 +517,7 @@ describe('ThumbnailProcessor', () => {
 
       expect(result.success).toBe(true);
       expect(customUpload).toHaveBeenCalledTimes(1);
-      expect(customCreate).toHaveBeenCalledTimes(1);
+      expect(customUpsert).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -580,8 +587,8 @@ describe('ThumbnailProcessor', () => {
         makeObject({ mimeType: 'video/mp4' }),
         makeGetStream(jpegBuf),
       );
-      const createArg = mockStorageObjectCreate.mock.calls[0][0];
-      expect(createArg.data.status).toBe('ready');
+      const createArg = mockStorageObjectUpsert.mock.calls[0][0];
+      expect(createArg.create.status).toBe('ready');
     });
 
     it('should create a StorageObject with mimeType "image/jpeg"', async () => {
@@ -589,8 +596,8 @@ describe('ThumbnailProcessor', () => {
         makeObject({ mimeType: 'video/mp4' }),
         makeGetStream(jpegBuf),
       );
-      const createArg = mockStorageObjectCreate.mock.calls[0][0];
-      expect(createArg.data.mimeType).toBe('image/jpeg');
+      const createArg = mockStorageObjectUpsert.mock.calls[0][0];
+      expect(createArg.create.mimeType).toBe('image/jpeg');
     });
 
     it('should succeed when 1s-seek fails but 0s-seek (fallback) succeeds', async () => {
