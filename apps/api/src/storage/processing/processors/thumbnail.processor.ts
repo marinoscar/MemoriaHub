@@ -12,8 +12,8 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { streamToBuffer } from './stream-utils';
 
 /**
- * ThumbnailProcessor — generates a JPEG thumbnail (≤400 px on each side) for
- * every image and video StorageObject.
+ * ThumbnailProcessor — generates a JPEG thumbnail (≤800 px on each side, by
+ * default) for every image and video StorageObject.
  *
  * Name:     thumbnail
  * Priority: 40  (after exif/20, dimensions/25, video-probe/20, geocode/30)
@@ -26,7 +26,7 @@ import { streamToBuffer } from './stream-utils';
  *   creation time, so they would never be queued even if the guard were absent.
  *
  * Image path:
- *   Buffers the stream → sharp resize to ≤400px JPEG → upload → StorageObject.
+ *   Buffers the stream → sharp resize to ≤THUMBNAIL_MAX_DIM px JPEG → upload → StorageObject.
  *
  * Video path:
  *   1. Buffers the stream to a temp file.
@@ -38,6 +38,10 @@ import { streamToBuffer } from './stream-utils';
  *
  * Shared upload/StorageObject-creation code is factored into
  * uploadThumbnail() to avoid duplication between the two paths.
+ *
+ * Env vars (read at construction time):
+ *   THUMBNAIL_MAX_DIM  — max width and height in px (default: 800, fit: inside, no enlargement)
+ *   THUMBNAIL_QUALITY  — JPEG quality 1–100 (default: 85)
  *
  * Writes (into returned metadata, stored in StorageObject._processing.thumbnail):
  *   { thumbnailObjectId: string, thumbnailStorageKey: string }
@@ -51,11 +55,17 @@ export class ThumbnailProcessor implements ObjectProcessor {
   readonly name = 'thumbnail';
   readonly priority = 40;
 
+  private readonly maxDim: number;
+  private readonly quality: number;
+
   constructor(
     @Inject(STORAGE_PROVIDER)
     private readonly storageProvider: StorageProvider,
     private readonly prisma: PrismaService,
-  ) {}
+  ) {
+    this.maxDim = parseInt(process.env.THUMBNAIL_MAX_DIM ?? '800', 10);
+    this.quality = parseInt(process.env.THUMBNAIL_QUALITY ?? '85', 10);
+  }
 
   canProcess(object: StorageObject): boolean {
     // Recursion guard: thumbnail objects live under 'thumbnails/' prefix
@@ -92,12 +102,12 @@ export class ThumbnailProcessor implements ObjectProcessor {
       const thumbBuffer = await sharp(buffer)
         .rotate()
         .resize({
-          width: 400,
-          height: 400,
+          width: this.maxDim,
+          height: this.maxDim,
           fit: 'inside',
           withoutEnlargement: true,
         })
-        .jpeg({ quality: 80 })
+        .jpeg({ quality: this.quality })
         .toBuffer();
 
       return await this.uploadThumbnail(object, thumbBuffer);
@@ -151,12 +161,12 @@ export class ThumbnailProcessor implements ObjectProcessor {
       const sharp = (await import('sharp')).default;
       const thumbBuffer = await sharp(frameBuffer)
         .resize({
-          width: 400,
-          height: 400,
+          width: this.maxDim,
+          height: this.maxDim,
           fit: 'inside',
           withoutEnlargement: true,
         })
-        .jpeg({ quality: 80 })
+        .jpeg({ quality: this.quality })
         .toBuffer();
 
       return await this.uploadThumbnail(object, thumbBuffer);
