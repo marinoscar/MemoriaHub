@@ -450,6 +450,19 @@ describe('FaceDetectionService', () => {
 
       await expect(service.processMediaItem(makeJob())).rejects.toThrow('CompreFace unreachable');
     });
+
+    it('upserts MediaFaceStatus to failed when provider.detect throws', async () => {
+      mockProvider.detect.mockRejectedValue(new Error('CompreFace unreachable'));
+
+      await expect(service.processMediaItem(makeJob())).rejects.toThrow('CompreFace unreachable');
+
+      expect(mockPrisma.mediaFaceStatus.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ status: MediaFaceStatusType.failed }),
+          update: expect.objectContaining({ status: MediaFaceStatusType.failed }),
+        }),
+      );
+    });
   });
 
   // -------------------------------------------------------------------------

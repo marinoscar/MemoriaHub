@@ -18,6 +18,7 @@ import {
   CircularProgress,
   Alert,
   Snackbar,
+  Tooltip,
 } from '@mui/material';
 import {
   CheckCircle as CheckCircleIcon,
@@ -27,7 +28,8 @@ import {
 import { usePermissions } from '../../hooks/usePermissions';
 import { useFaceSettings } from '../../hooks/useFaceSettings';
 import { useCircles } from '../../hooks/useCircles';
-import { runFaceBackfill } from '../../services/face';
+import { runFaceBackfill, getCircleFaceSettings, updateCircleFaceSettings } from '../../services/face';
+import type { CircleFaceSettings } from '../../services/face';
 
 function FaceSettingsContent() {
   const {
@@ -51,6 +53,11 @@ function FaceSettingsContent() {
   const [backfillCircleId, setBackfillCircleId] = useState('');
   const [backfillForce, setBackfillForce] = useState(false);
   const [backfillLoading, setBackfillLoading] = useState(false);
+
+  // Per-circle face settings for the backfill panel
+  const [circleFaceSettings, setCircleFaceSettings] = useState<CircleFaceSettings | null>(null);
+  const [circleFaceSettingsLoading, setCircleFaceSettingsLoading] = useState(false);
+  const [enablingFaceForCircle, setEnablingFaceForCircle] = useState(false);
 
   // Per-provider form state
   const [providerKeys, setProviderKeys] = useState<Record<string, string>>({});
@@ -124,6 +131,19 @@ function FaceSettingsContent() {
       .finally(() => setModelsLoading(false));
   }, [detectionProvider, getModels]);
 
+  // Fetch per-circle face settings when circle selection changes
+  useEffect(() => {
+    if (!backfillCircleId) {
+      setCircleFaceSettings(null);
+      return;
+    }
+    setCircleFaceSettingsLoading(true);
+    getCircleFaceSettings(backfillCircleId)
+      .then(setCircleFaceSettings)
+      .catch(() => setCircleFaceSettings(null))
+      .finally(() => setCircleFaceSettingsLoading(false));
+  }, [backfillCircleId]);
+
   const handleSaveCredentials = async (provider: string) => {
     try {
       const apiKey = providerKeys[provider] ?? undefined;
@@ -195,6 +215,20 @@ function FaceSettingsContent() {
     }
   };
 
+  const handleEnableCircleFaceRecognition = async () => {
+    if (!backfillCircleId) return;
+    setEnablingFaceForCircle(true);
+    try {
+      const updated = await updateCircleFaceSettings(backfillCircleId, true);
+      setCircleFaceSettings(updated);
+      setSuccessMessage('Face recognition enabled for this circle');
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to enable face recognition');
+    } finally {
+      setEnablingFaceForCircle(false);
+    }
+  };
+
   const handleRunBackfill = async () => {
     if (!backfillCircleId) return;
     if (
@@ -208,7 +242,12 @@ function FaceSettingsContent() {
       const result = await runFaceBackfill(backfillCircleId, backfillForce || undefined);
       setSuccessMessage(`Backfill queued: ${result.queued} item(s) scheduled`);
     } catch (err) {
-      setLocalError(err instanceof Error ? err.message : 'Failed to queue backfill');
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.toLowerCase().includes('not enabled') || msg.toLowerCase().includes('face recognition is not enabled')) {
+        setLocalError("Face recognition isn't enabled for this circle — enable it above.");
+      } else {
+        setLocalError(msg || 'Failed to queue backfill');
+      }
     } finally {
       setBackfillLoading(false);
     }
@@ -608,7 +647,10 @@ function FaceSettingsContent() {
             <Select
               label="Circle"
               value={backfillCircleId}
-              onChange={(e) => setBackfillCircleId(e.target.value)}
+              onChange={(e) => {
+                setBackfillCircleId(e.target.value);
+                setCircleFaceSettings(null);
+              }}
             >
               <MenuItem value="">Select circle</MenuItem>
               {circles.map((c) => (
@@ -618,6 +660,37 @@ function FaceSettingsContent() {
               ))}
             </Select>
           </FormControl>
+
+          {/* Per-circle face recognition opt-in */}
+          {backfillCircleId && (
+            circleFaceSettingsLoading ? (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                <CircularProgress size={16} />
+                <Typography variant="body2" color="text.secondary">Checking face recognition status…</Typography>
+              </Box>
+            ) : circleFaceSettings && !circleFaceSettings.faceRecognitionEnabled ? (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  Face recognition is a per-circle opt-in (biometric data). Enable it for this circle before running backfill.
+                </Typography>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={false}
+                      onChange={() => void handleEnableCircleFaceRecognition()}
+                      disabled={enablingFaceForCircle}
+                      color="primary"
+                    />
+                  }
+                  label={enablingFaceForCircle ? 'Enabling…' : 'Enable face recognition for this circle'}
+                />
+              </Alert>
+            ) : circleFaceSettings?.faceRecognitionEnabled ? (
+              <Box sx={{ mb: 2 }}>
+                <Chip label="Face recognition enabled" color="success" size="small" />
+              </Box>
+            ) : null
+          )}
 
           <FormControlLabel
             control={
@@ -630,14 +703,28 @@ function FaceSettingsContent() {
             sx={{ mb: 2, display: 'block' }}
           />
 
-          <Button
-            variant="contained"
-            disabled={!backfillCircleId || backfillLoading}
-            startIcon={backfillLoading ? <CircularProgress size={16} /> : undefined}
-            onClick={() => void handleRunBackfill()}
+          <Tooltip
+            title={
+              backfillCircleId && circleFaceSettings && !circleFaceSettings.faceRecognitionEnabled
+                ? 'Enable face recognition first'
+                : ''
+            }
           >
-            Run Backfill
-          </Button>
+            <span>
+              <Button
+                variant="contained"
+                disabled={
+                  !backfillCircleId ||
+                  backfillLoading ||
+                  (circleFaceSettings !== null && !circleFaceSettings.faceRecognitionEnabled)
+                }
+                startIcon={backfillLoading ? <CircularProgress size={16} /> : undefined}
+                onClick={() => void handleRunBackfill()}
+              >
+                Run Backfill
+              </Button>
+            </span>
+          </Tooltip>
         </Paper>
       </Box>
 

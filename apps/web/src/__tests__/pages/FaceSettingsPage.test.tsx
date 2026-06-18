@@ -15,6 +15,20 @@ vi.mock('../../hooks/useFaceSettings', () => ({
   useFaceSettings: vi.fn(),
 }));
 
+vi.mock('../../hooks/useCircles', () => ({
+  useCircles: vi.fn(),
+}));
+
+vi.mock('../../services/face', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../services/face')>();
+  return {
+    ...actual,
+    runFaceBackfill: vi.fn(),
+    getCircleFaceSettings: vi.fn(),
+    updateCircleFaceSettings: vi.fn(),
+  };
+});
+
 // ---------------------------------------------------------------------------
 // Import after mocks
 // ---------------------------------------------------------------------------
@@ -22,9 +36,14 @@ vi.mock('../../hooks/useFaceSettings', () => ({
 import FaceSettingsPage from '../../pages/Admin/FaceSettingsPage';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useFaceSettings } from '../../hooks/useFaceSettings';
+import { useCircles } from '../../hooks/useCircles';
+import { getCircleFaceSettings, updateCircleFaceSettings } from '../../services/face';
 
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseFaceSettings = vi.mocked(useFaceSettings);
+const mockUseCircles = vi.mocked(useCircles);
+const mockGetCircleFaceSettings = vi.mocked(getCircleFaceSettings);
+const mockUpdateCircleFaceSettings = vi.mocked(updateCircleFaceSettings);
 
 // ---------------------------------------------------------------------------
 // Default mock values
@@ -40,6 +59,18 @@ function defaultPermissionsMock() {
     hasAllPermissions: vi.fn().mockReturnValue(true),
     hasRole: vi.fn().mockReturnValue(true),
     hasAnyRole: vi.fn().mockReturnValue(true),
+  };
+}
+
+function defaultCirclesMock() {
+  return {
+    circles: [{ id: 'circle-1', name: 'Family Circle' }],
+    loading: false,
+    error: null,
+    fetchCircles: vi.fn().mockResolvedValue(undefined),
+    addCircle: vi.fn(),
+    editCircle: vi.fn(),
+    removeCircle: vi.fn(),
   };
 }
 
@@ -91,6 +122,9 @@ describe('FaceSettingsPage', () => {
     vi.clearAllMocks();
     mockUsePermissions.mockReturnValue(defaultPermissionsMock() as any);
     mockUseFaceSettings.mockReturnValue(defaultSettingsMock() as any);
+    mockUseCircles.mockReturnValue(defaultCirclesMock() as any);
+    mockGetCircleFaceSettings.mockResolvedValue({ faceRecognitionEnabled: false });
+    mockUpdateCircleFaceSettings.mockResolvedValue({ faceRecognitionEnabled: true });
   });
 
   // -------------------------------------------------------------------------
@@ -345,6 +379,79 @@ describe('FaceSettingsPage', () => {
 
       const testConnectionButtons = screen.getAllByRole('button', { name: /test connection/i });
       expect(testConnectionButtons.length).toBeGreaterThan(0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('Backfill panel — per-circle face recognition opt-in', () => {
+    it('Run Backfill button is disabled when no circle is selected', async () => {
+      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await waitFor(() => {
+        const btn = screen.getByRole('button', { name: /run backfill/i });
+        expect(btn).toBeDisabled();
+      });
+    });
+
+    it('shows enable switch and disables Run Backfill button when circle is not opted in', async () => {
+      mockGetCircleFaceSettings.mockResolvedValue({ faceRecognitionEnabled: false });
+
+      const user = userEvent.setup();
+      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      // MUI Select comboboxes do not expose their label as accessible name in jsdom.
+      // The page renders: [0] Provider, [1] Model (disabled), [2] Circle.
+      // Pick the last combobox which is the Circle select.
+      const comboboxes = screen.getAllByRole('combobox');
+      const circleSelect = comboboxes[comboboxes.length - 1];
+      await user.click(circleSelect);
+      const option = await screen.findByRole('option', { name: /family circle/i });
+      await user.click(option);
+
+      // Wait for face settings to be fetched
+      await waitFor(() => {
+        expect(mockGetCircleFaceSettings).toHaveBeenCalledWith('circle-1');
+      });
+
+      // Enable switch should appear
+      await waitFor(() => {
+        expect(screen.getByText(/enable face recognition for this circle/i)).toBeInTheDocument();
+      });
+
+      // Run Backfill button should be disabled
+      const backfillBtn = screen.getByRole('button', { name: /run backfill/i });
+      expect(backfillBtn).toBeDisabled();
+    });
+
+    it('calls updateCircleFaceSettings when enable switch is toggled', async () => {
+      mockGetCircleFaceSettings.mockResolvedValue({ faceRecognitionEnabled: false });
+      mockUpdateCircleFaceSettings.mockResolvedValue({ faceRecognitionEnabled: true });
+
+      const user = userEvent.setup();
+      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      // Select circle — last combobox on page is the Circle select
+      const comboboxes = screen.getAllByRole('combobox');
+      const circleSelect = comboboxes[comboboxes.length - 1];
+      await user.click(circleSelect);
+      const option = await screen.findByRole('option', { name: /family circle/i });
+      await user.click(option);
+
+      // Wait for face settings to be fetched and switch to appear
+      await waitFor(() => {
+        expect(screen.getByText(/enable face recognition for this circle/i)).toBeInTheDocument();
+      });
+
+      // Click the enable switch — find the FormControlLabel whose text contains the
+      // enable label, then click it to trigger the onChange handler.
+      // MUI Switch renders an input[type=checkbox] that may be visually hidden;
+      // clicking the label text itself reliably triggers the switch.
+      const enableLabel = screen.getByText(/enable face recognition for this circle/i);
+      await user.click(enableLabel);
+
+      await waitFor(() => {
+        expect(mockUpdateCircleFaceSettings).toHaveBeenCalledWith('circle-1', true);
+      });
     });
   });
 
