@@ -75,6 +75,18 @@ export class PeopleService {
               boundingBox: true,
             },
           },
+          // Fetch a small set of faces for cover-fallback resolution
+          faces: {
+            where: { mediaItem: { deletedAt: null } },
+            orderBy: [{ confidence: 'desc' }, { createdAt: 'desc' }],
+            take: 1,
+            select: {
+              id: true,
+              mediaItemId: true,
+              boundingBox: true,
+              confidence: true,
+            },
+          },
         },
       }),
       this.prisma.person.count({ where }),
@@ -85,13 +97,9 @@ export class PeopleService {
       name: p.name,
       isUnlabeled: p.name === null,
       faceCount: p._count.faces,
-      coverFace: p.coverFace
-        ? {
-            faceId: p.coverFace.id,
-            mediaItemId: p.coverFace.mediaItemId,
-            boundingBox: p.coverFace.boundingBox,
-          }
-        : null,
+      coverFace: this.resolveCoverFace(p.coverFace, p.faces ?? []),
+      profileMediaItemId: p.profileMediaItemId ?? null,
+      profileCrop: p.profileCrop ?? null,
       createdAt: p.createdAt,
       updatedAt: p.updatedAt,
     }));
@@ -190,6 +198,7 @@ export class PeopleService {
             manuallyAssigned: true,
             createdAt: true,
           },
+          orderBy: [{ confidence: 'desc' }, { createdAt: 'desc' }],
         },
         coverFace: {
           select: {
@@ -217,13 +226,9 @@ export class PeopleService {
       name: person.name,
       isUnlabeled: person.name === null,
       circleId: person.circleId,
-      coverFace: person.coverFace
-        ? {
-            faceId: person.coverFace.id,
-            mediaItemId: person.coverFace.mediaItemId,
-            boundingBox: person.coverFace.boundingBox,
-          }
-        : null,
+      coverFace: this.resolveCoverFace(person.coverFace, person.faces),
+      profileMediaItemId: person.profileMediaItemId ?? null,
+      profileCrop: person.profileCrop ?? null,
       faces: person.faces.map((f) => ({
         faceId: f.id,
         mediaItemId: f.mediaItemId,
@@ -269,6 +274,14 @@ export class PeopleService {
         where: { id: { in: dto.faceIds }, circleId: dto.circleId },
         data: { personId: person.id, manuallyAssigned: true },
       });
+
+      // Auto-set coverFaceId to the first assigned face when none was set
+      if (!person.coverFaceId) {
+        await this.prisma.person.update({
+          where: { id: person.id },
+          data: { coverFaceId: dto.faceIds[0] },
+        });
+      }
     }
 
     this.logger.log(
@@ -315,12 +328,50 @@ export class PeopleService {
       }
     }
 
+    // Validate profileMediaItemId when being set (non-null)
+    if (dto.profileMediaItemId != null) {
+      const mediaItem = await this.prisma.mediaItem.findUnique({
+        where: { id: dto.profileMediaItemId },
+        select: { id: true, circleId: true, deletedAt: true },
+      });
+
+      if (!mediaItem || mediaItem.deletedAt) {
+        throw new BadRequestException(
+          `MediaItem ${dto.profileMediaItemId} not found`,
+        );
+      }
+
+      if (mediaItem.circleId !== person.circleId) {
+        throw new BadRequestException(
+          `MediaItem ${dto.profileMediaItemId} does not belong to the same circle as this person`,
+        );
+      }
+
+      // Assert the person actually appears in this media item (a face with this personId)
+      const faceInMedia = await this.prisma.face.findFirst({
+        where: { mediaItemId: dto.profileMediaItemId, personId },
+        select: { id: true },
+      });
+      if (!faceInMedia) {
+        throw new BadRequestException(
+          `Person ${personId} has no detected face in MediaItem ${dto.profileMediaItemId}`,
+        );
+      }
+    }
+
+    // Build update data carefully to avoid Prisma relation/scalar type conflicts
+    const updateData: Record<string, unknown> = {};
+    if (dto.name !== undefined) updateData['name'] = dto.name;
+    if (dto.coverFaceId !== undefined) updateData['coverFaceId'] = dto.coverFaceId;
+    if (dto.profileMediaItemId !== undefined) {
+      updateData['profileMediaItemId'] = dto.profileMediaItemId;
+      updateData['profileCrop'] =
+        dto.profileMediaItemId === null ? null : (dto.profileCrop ?? null);
+    }
+
     const updated = await this.prisma.person.update({
       where: { id: personId },
-      data: {
-        ...(dto.name !== undefined && { name: dto.name }),
-        ...(dto.coverFaceId !== undefined && { coverFaceId: dto.coverFaceId }),
-      },
+      data: updateData as any,
     });
 
     this.logger.log(`Person updated: ${personId} by user ${userId}`);
@@ -329,6 +380,8 @@ export class PeopleService {
       id: updated.id,
       name: updated.name,
       coverFaceId: updated.coverFaceId,
+      profileMediaItemId: updated.profileMediaItemId ?? null,
+      profileCrop: updated.profileCrop ?? null,
       updatedAt: updated.updatedAt,
     };
   }
@@ -365,6 +418,14 @@ export class PeopleService {
       where: { id: { in: dto.faceIds }, circleId: person.circleId },
       data: { personId, manuallyAssigned: true },
     });
+
+    // Auto-set coverFaceId to the first assigned face when person has none
+    if (!person.coverFaceId) {
+      await this.prisma.person.update({
+        where: { id: personId },
+        data: { coverFaceId: dto.faceIds[0] },
+      });
+    }
 
     this.logger.log(
       `Assigned ${dto.faceIds.length} face(s) to person ${personId} by user ${userId}`,
@@ -633,6 +694,34 @@ export class PeopleService {
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * Resolve a cover face for display.
+   * If the person has a persisted coverFaceId (and it was eagerly loaded), use it.
+   * Otherwise fall back to the most relevant face from the provided list
+   * (already sorted by confidence DESC, createdAt DESC by the caller).
+   * The fallback is NOT persisted — it is purely for the response payload.
+   */
+  private resolveCoverFace(
+    coverFace: { id: string; mediaItemId: string; boundingBox: unknown } | null,
+    faces: Array<{ id: string; mediaItemId: string; boundingBox: unknown; confidence?: number | null }>,
+  ): { faceId: string; mediaItemId: string; boundingBox: unknown } | null {
+    if (coverFace) {
+      return {
+        faceId: coverFace.id,
+        mediaItemId: coverFace.mediaItemId,
+        boundingBox: coverFace.boundingBox,
+      };
+    }
+    // Fallback: pick the first face (caller must provide them sorted by relevance)
+    const fallback = faces[0];
+    if (!fallback) return null;
+    return {
+      faceId: fallback.id,
+      mediaItemId: fallback.mediaItemId,
+      boundingBox: fallback.boundingBox,
+    };
+  }
 
   private async assertFacesInCircle(
     faceIds: string[],
