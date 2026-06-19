@@ -234,6 +234,136 @@ describe('UserSettingsService', () => {
     });
   });
 
+  describe('patchSettings (PATCH) — search.visibleFields', () => {
+    beforeEach(() => {
+      mockPrisma.userSettings.findUnique.mockResolvedValue(
+        mockUserSettings as any,
+      );
+    });
+
+    it('should persist search.visibleFields when patched', async () => {
+      const partialUpdate = {
+        search: { visibleFields: ['type', 'favorite'] },
+      };
+
+      const expectedValue: UserSettingsValue = {
+        ...DEFAULT_USER_SETTINGS,
+        search: { visibleFields: ['type', 'favorite'] },
+      };
+
+      mockPrisma.userSettings.update.mockResolvedValue({
+        ...mockUserSettings,
+        value: expectedValue as any,
+        version: 2,
+      } as any);
+
+      mockPrisma.user.update.mockResolvedValue({} as any);
+
+      const result = await service.patchSettings(mockUserId, partialUpdate);
+
+      expect(result.search).toEqual({ visibleFields: ['type', 'favorite'] });
+      expect(mockPrisma.userSettings.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            value: expect.objectContaining({
+              search: { visibleFields: ['type', 'favorite'] },
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('should preserve search.visibleFields when patching an unrelated field', async () => {
+      const settingsWithSearch: UserSettingsValue = {
+        ...DEFAULT_USER_SETTINGS,
+        search: { visibleFields: ['date', 'location'] },
+      };
+
+      mockPrisma.userSettings.findUnique.mockResolvedValue({
+        ...mockUserSettings,
+        value: settingsWithSearch as any,
+      } as any);
+
+      // Patch only theme — search.visibleFields must survive
+      const partialUpdate = { theme: 'dark' as const };
+
+      const expectedValue: UserSettingsValue = {
+        ...settingsWithSearch,
+        theme: 'dark',
+      };
+
+      mockPrisma.userSettings.update.mockResolvedValue({
+        ...mockUserSettings,
+        value: expectedValue as any,
+        version: 2,
+      } as any);
+
+      mockPrisma.user.update.mockResolvedValue({} as any);
+
+      const result = await service.patchSettings(mockUserId, partialUpdate);
+
+      expect(result.theme).toBe('dark');
+      expect(result.search).toEqual({ visibleFields: ['date', 'location'] });
+    });
+
+    it('should replace visibleFields wholesale (not merge arrays)', async () => {
+      const settingsWithSearch: UserSettingsValue = {
+        ...DEFAULT_USER_SETTINGS,
+        search: { visibleFields: ['type', 'favorite'] },
+      };
+
+      mockPrisma.userSettings.findUnique.mockResolvedValue({
+        ...mockUserSettings,
+        value: settingsWithSearch as any,
+      } as any);
+
+      const partialUpdate = {
+        search: { visibleFields: ['date'] },
+      };
+
+      const expectedValue: UserSettingsValue = {
+        ...settingsWithSearch,
+        search: { visibleFields: ['date'] },
+      };
+
+      mockPrisma.userSettings.update.mockResolvedValue({
+        ...mockUserSettings,
+        value: expectedValue as any,
+        version: 2,
+      } as any);
+
+      mockPrisma.user.update.mockResolvedValue({} as any);
+
+      const result = await service.patchSettings(mockUserId, partialUpdate);
+
+      // Must be the new array only, not merged with old
+      expect(result.search).toEqual({ visibleFields: ['date'] });
+    });
+
+    it('should accept empty visibleFields array (show all fields)', async () => {
+      const partialUpdate = {
+        search: { visibleFields: [] },
+      };
+
+      const expectedValue: UserSettingsValue = {
+        ...DEFAULT_USER_SETTINGS,
+        search: { visibleFields: [] },
+      };
+
+      mockPrisma.userSettings.update.mockResolvedValue({
+        ...mockUserSettings,
+        value: expectedValue as any,
+        version: 2,
+      } as any);
+
+      mockPrisma.user.update.mockResolvedValue({} as any);
+
+      const result = await service.patchSettings(mockUserId, partialUpdate);
+
+      expect(result.search).toEqual({ visibleFields: [] });
+    });
+  });
+
   describe('patchSettings (PATCH)', () => {
     beforeEach(() => {
       mockPrisma.userSettings.findUnique.mockResolvedValue(
