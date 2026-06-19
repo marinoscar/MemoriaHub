@@ -28,6 +28,7 @@ const BackupPage = lazy(() => import('./pages/Admin/BackupPage'));
 const AiSettingsPage = lazy(() => import('./pages/Admin/AiSettingsPage'));
 const FaceSettingsPage = lazy(() => import('./pages/Admin/FaceSettingsPage'));
 const JobsPage = lazy(() => import('./pages/Admin/JobsPage'));
+const TagsPage = lazy(() => import('./pages/Admin/TagsPage'));
 const SearchPage = lazy(() => import('./pages/SearchPage'));
 const PeoplePage = lazy(() => import('./pages/People/PeoplePage'));
 
@@ -73,6 +74,7 @@ function AppRoutes() {
                 <Route path="/admin/ai-settings" element={<AiSettingsPage />} />
                 <Route path="/admin/face-settings" element={<FaceSettingsPage />} />
                 <Route path="/admin/jobs" element={<JobsPage />} />
+                <Route path="/admin/tags" element={<TagsPage />} />
                 <Route path="/search" element={<SearchPage />} />
                 <Route path="/people" element={<PeoplePage />} />
               </Route>

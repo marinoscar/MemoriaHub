@@ -25,6 +25,7 @@ import {
   SmartToy as AiIcon,
   Face as FaceIcon,
   WorkHistory as WorkHistoryIcon,
+  LocalOffer as LocalOfferIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -125,6 +126,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       label: 'Job Queue',
       icon: <WorkHistoryIcon />,
       path: '/admin/jobs',
+      visible: isAdmin,
+    },
+    {
+      label: 'Tags',
+      icon: <LocalOfferIcon />,
+      path: '/admin/tags',
       visible: isAdmin,
     },
   ];
