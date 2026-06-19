@@ -355,6 +355,21 @@ An admin dashboard at `/admin/jobs` provides monitoring and control over the gen
 - `POST /api/ai/test` - Test provider connectivity (ai_settings:read)
 - `GET /api/ai/models?provider=` - List available models for a provider (ai_settings:read)
 - `PUT /api/ai/features/search` - Set active provider and model for AI search (ai_settings:write)
+- `PUT /api/ai/features/tagging` - Set active provider and model for AI auto-tagging (ai_settings:write)
+
+### AI Auto-Tagging (ai_settings:read / ai_settings:write + media:read / media:write)
+Auto-tagging is per-circle opt-in (default off); see Tag Vocabulary endpoints below and the [auto-tagging spec](docs/specs/auto-tagging.md). The global vocabulary is admin-managed; the vision model assigns labels only from enabled entries.
+- `GET /api/tag-labels` - List all tag labels (ai_settings:read)
+- `POST /api/tag-labels` body `{name, description?}` - Create a tag label (ai_settings:write); 409 if name exists
+- `PATCH /api/tag-labels/:id` body `{name?, description?, enabled?}` - Update a tag label (ai_settings:write)
+- `DELETE /api/tag-labels/:id` - Delete a tag label (ai_settings:write) — 204 No Content; does not remove already-assigned tags
+- `GET /api/media/:id/tags/status` - Get per-item tagging status: status, tagCount, providerKey, modelVersion, processedAt, lastError (media:read + viewer)
+- `POST /api/media/:id/tags/rerun` - Re-enqueue auto-tagging for a media item at priority 0; returns `{jobId, status}` (media:write + collaborator)
+- `POST /api/tagging/backfill` body `{circleId, from?, to?, force?}` - Bulk-enqueue unprocessed photos in a circle; requires circle opt-in; returns `{enqueued}` (media:write + collaborator)
+
+### Circle Auto-Tagging Settings (circles:read / circles:write + per-circle viewer/circle_admin role)
+- `GET /api/circles/:id/tagging-settings` - Get auto-tagging opt-in flag for a circle (circles:read + viewer)
+- `PUT /api/circles/:id/tagging-settings` body `{enabled}` - Enable/disable auto-tagging for a circle; writes audit event (circles:write + circle_admin)
 
 ### Face Recognition / Face Settings (Admin only — face_settings:read / face_settings:write)
 Three providers: `human` (keyless WASM, in-process, 1024-d), `compreface` (keyless `compreface-core` sidecar, 128-d mobilenet, `requiresCredentials:false`), `rekognition` (delegated AWS, requires credentials). The Face Settings UI has a "Test connection" button for all providers including keyless ones.
@@ -456,7 +471,7 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `storage_objects` - File metadata, status, storage references (no circle_id; auth resolves via media_item)
 - `storage_object_chunks` - Multipart upload chunk tracking
 - `personal_access_tokens` - User-created long-lived API tokens (hashed)
-- `circles` - Family circles; `is_personal=true` circles cannot be deleted; `face_recognition_enabled` column (default false) controls per-circle opt-in
+- `circles` - Family circles; `is_personal=true` circles cannot be deleted; `face_recognition_enabled` column (default false) controls face recognition per-circle opt-in; `auto_tagging_enabled` column (default false) controls auto-tagging per-circle opt-in
 - `circle_members` - Per-circle memberships with `CircleRole` enum (`circle_admin` | `collaborator` | `viewer`)
 - `circle_invites` - Email invites for circles; claimed on invited user's first login
 - `ai_provider_credentials` - AI provider API keys (AES-256-GCM encrypted); one row per provider; `last4` exposed for display; plaintext never stored or returned
@@ -467,6 +482,8 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `faces` - Individual detected face records with bounding box, confidence, variable-dimension embedding (`Float[]` fallback or pgvector column; 128-d for `compreface` mobilenet, 1024-d for `human` WASM), and `externalFaceId` for Rekognition delegated path; keyed to `mediaItemId` + `circleId`; `manuallyAssigned` flag protects user-labeled faces from re-clustering
 - `face_jobs` - Async face-detection job queue (no BullMQ); statuses: `pending`, `running`, `succeeded`, `failed`; reasons: `upload`, `rerun`, `backfill`
 - `media_face_status` - Per-media-item detection status tracking (one row per item); records which provider/model processed the item and when; statuses: `not_processed`, `pending`, `processing`, `processed`, `failed`, `no_faces`
+- `tag_labels` - Global AI tag vocabulary managed by admins; unique `name`; `enabled` flag controls whether a label is included in vision model prompts; labels are not circle-scoped
+- `media_tag_status` - Per-media-item auto-tagging status (one row per item); statuses: `not_processed`, `pending`, `processing`, `processed`, `failed`; records `provider_key`, `model_version`, `tag_count`, `processed_at`, `last_error`
 
 **Note:** `media_items`, `albums`, and `tags` use `added_by_id` (not `owner_id`) to track the uploading user. Dedup uniqueness for `media_items` is `(circle_id, content_hash)`. Tag names are unique per `(circle_id, name)`.
 
@@ -562,6 +579,12 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 - `FACE_CLUSTER_MIN_SIZE` - Minimum cluster size to create a provisional Person; singletons remain unknown (default: `2`)
 - `FACE_VECTOR_BACKEND` - Vector storage and matching backend: `app` (default; `Float[]` column + in-process cosine) or `pgvector` (requires the pgvector extension)
 
+**Auto-Tagging:**
+- `AUTO_TAG_ENABLED` - Global kill-switch for auto-enqueue on upload; set to `false` to disable for all circles (per-circle opt-in still applies when `true`; default: `true`)
+- `TAG_MAX_IMAGE_DIM` - Maximum image dimension in pixels before downscaling prior to the vision model call (default: `2000`)
+
+Note: The enrichment worker shared by both face detection and auto-tagging is controlled by `ENRICHMENT_WORKER_ENABLED` (default: `true`), `ENRICHMENT_JOB_POLL_MS` (default: `5000`), and `ENRICHMENT_WORKER_CONCURRENCY` (default: `1`). The legacy `FACE_WORKER_ENABLED` and `FACE_JOB_POLL_MS` aliases are still respected for backward compatibility.
+
 ## Common Patterns
 
 ### Adding a New API Endpoint
@@ -579,6 +602,14 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 
 ### Writing an Image Enrichment Handler
 - Always obtain pixels via `prepareImageForProcessing` (`apps/api/src/storage/processing/image-orientation.util.ts`) — never decode raw bytes directly — so EXIF orientation is applied before processing.
+
+## Feature Specifications
+
+Detailed specs live under `docs/specs/`:
+- [Enrichment Queue](docs/specs/enrichment-queue.md) — worker lifecycle, retry, priority, adding new handlers
+- [Face Recognition](docs/specs/face-recognition.md) — face detection, recognition, clustering, people management
+- [AI Auto-Tagging](docs/specs/auto-tagging.md) — vocabulary-driven vision model tagging, per-circle opt-in, backfill
+- [Agentic Search](docs/specs/agentic-search.md) — conversational search, SSE streaming, tool-call protocol
 
 ## Specialized Subagents (MANDATORY)
 
