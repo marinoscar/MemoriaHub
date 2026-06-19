@@ -70,7 +70,7 @@ describe('OpenAiProvider.testModel', () => {
   const provider = new OpenAiProvider();
   const creds = { apiKey: 'sk-test', baseUrl: undefined };
 
-  it('sends reasoning_effort:minimal and max_completion_tokens:256 for a healthy model', async () => {
+  it('sends reasoning_effort:low and max_completion_tokens:1024 for a healthy model', async () => {
     mockCreate.mockResolvedValueOnce({
       choices: [{ message: { content: 'ok' } }],
     });
@@ -80,8 +80,8 @@ describe('OpenAiProvider.testModel', () => {
     expect(result).toEqual({ ok: true });
     expect(mockCreate).toHaveBeenCalledTimes(1);
     const callArgs = mockCreate.mock.calls[0][0];
-    expect(callArgs).toHaveProperty('reasoning_effort', 'minimal');
-    expect(callArgs).toHaveProperty('max_completion_tokens', 256);
+    expect(callArgs).toHaveProperty('reasoning_effort', 'low');
+    expect(callArgs).toHaveProperty('max_completion_tokens', 1024);
     expect(callArgs).not.toHaveProperty('max_tokens');
   });
 
@@ -116,7 +116,7 @@ describe('OpenAiProvider.analyzeImage', () => {
     system: undefined as string | undefined,
   };
 
-  it('sends reasoning_effort:minimal and max_completion_tokens:2048 (not max_tokens)', async () => {
+  it('sends reasoning_effort:low and max_completion_tokens:4096 (not max_tokens)', async () => {
     mockCreate.mockResolvedValueOnce({
       choices: [{ message: { content: 'A sunny beach.' } }],
     });
@@ -126,8 +126,8 @@ describe('OpenAiProvider.analyzeImage', () => {
     expect(result).toBe('A sunny beach.');
     expect(mockCreate).toHaveBeenCalledTimes(1);
     const callArgs = mockCreate.mock.calls[0][0];
-    expect(callArgs).toHaveProperty('reasoning_effort', 'minimal');
-    expect(callArgs).toHaveProperty('max_completion_tokens', 2048);
+    expect(callArgs).toHaveProperty('reasoning_effort', 'low');
+    expect(callArgs).toHaveProperty('max_completion_tokens', 4096);
     expect(callArgs).not.toHaveProperty('max_tokens');
   });
 
