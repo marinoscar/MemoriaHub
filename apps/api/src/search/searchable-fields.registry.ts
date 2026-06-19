@@ -30,15 +30,18 @@ import {
   whereSourceDeviceId,
   whereSourceDeviceName,
   whereMissingGeo,
+  wherePeople,
 } from './media-where.builder';
 
-export type SearchFieldType = 'string' | 'enum' | 'date-range' | 'boolean' | 'geo';
+export type SearchFieldType = 'string' | 'enum' | 'date-range' | 'boolean' | 'geo' | 'person-set';
 
 export interface SearchableField {
   key: string;
   label: string;
   type: SearchFieldType;
   enumValues?: string[];
+  /** Optional hint for the frontend to know where to fetch option values from. */
+  optionsSource?: string;
   description: string;
   buildWhere(value: unknown): Prisma.MediaItemWhereInput;
 }
@@ -176,6 +179,23 @@ export const SEARCHABLE_FIELDS: SearchableField[] = [
     description:
       'When true, returns only items without GPS coordinates. When false, returns only items that have GPS coordinates.',
     buildWhere: (v) => whereMissingGeo(Boolean(v)),
+  },
+  {
+    key: 'people',
+    label: 'People',
+    type: 'person-set',
+    optionsSource: 'people',
+    description:
+      'Filter by people who appear in the photo. Provide person IDs and a match mode.',
+    buildWhere: (value) => {
+      const v = value as { ids?: unknown; mode?: unknown } | undefined;
+      if (!v || !Array.isArray(v.ids) || v.ids.length === 0) return {};
+      const ids = (v.ids as unknown[]).filter(
+        (id): id is string => typeof id === 'string' && id.trim().length > 0,
+      );
+      const mode = v.mode === 'any' ? 'any' : 'all';
+      return wherePeople(ids, mode);
+    },
   },
 ];
 

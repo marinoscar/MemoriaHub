@@ -107,6 +107,23 @@ export function whereMissingGeo(value: boolean): Prisma.MediaItemWhereInput {
   return { takenLat: { not: null }, takenLng: { not: null } };
 }
 
+/**
+ * Filter media items by people who appear in them (via face recognition).
+ *
+ * @param ids    Array of Person UUIDs to filter by.
+ * @param mode   'all' = every person must appear in the same photo (AND);
+ *               'any' = at least one person appears (OR).
+ */
+export function wherePeople(ids: string[], mode: 'all' | 'any' = 'all'): Prisma.MediaItemWhereInput {
+  const validIds = ids.filter((id) => typeof id === 'string' && id.trim().length > 0);
+  if (validIds.length === 0) return {};
+  if (mode === 'any') {
+    return { faces: { some: { personId: { in: validIds } } } };
+  }
+  // 'all' mode: AND-compose one faces.some clause per person id
+  return { AND: validIds.map((id) => ({ faces: { some: { personId: id } } })) };
+}
+
 export function buildMediaWhere(
   circleId: string,
   filters: MediaFilters,
