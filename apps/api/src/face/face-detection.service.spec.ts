@@ -49,6 +49,7 @@ import { FaceMatchingService } from './face-matching.service';
 import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { EnrichmentJob, JobReason, JobStatus, MediaFaceStatusType } from '@prisma/client';
+import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -113,6 +114,7 @@ describe('FaceDetectionService', () => {
     matchFaceToPerson: jest.Mock;
     matchFaceByExternalId: jest.Mock;
   };
+  let mockEnrichmentJobService: { recordModel: jest.Mock };
 
   beforeEach(async () => {
     // Reset sharp mock call counts between tests (implementations set in the factory are retained)
@@ -130,6 +132,7 @@ describe('FaceDetectionService', () => {
       matchFaceToPerson: jest.fn().mockResolvedValue(null),
       matchFaceByExternalId: jest.fn().mockResolvedValue(null),
     };
+    mockEnrichmentJobService = { recordModel: jest.fn().mockResolvedValue(undefined) };
 
     // Default system settings: face detection configured
     (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue({
@@ -168,6 +171,7 @@ describe('FaceDetectionService', () => {
         { provide: FaceProviderRegistry, useValue: mockRegistry },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: FaceMatchingService, useValue: mockMatchingService },
+        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
       ],
     }).compile();
 
@@ -720,6 +724,35 @@ describe('FaceDetectionService', () => {
       const calls = (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mock.calls;
       const finalUpsert = calls[calls.length - 1][0];
       expect(finalUpsert.create.status).toBe(MediaFaceStatusType.processed);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // recordModel call
+  // -------------------------------------------------------------------------
+
+  describe('recordModel integration', () => {
+    it('calls enrichmentJobService.recordModel with job.id, providerKey, and modelVersion on the processing path', async () => {
+      mockProvider.detect.mockResolvedValue([]);
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockEnrichmentJobService.recordModel).toHaveBeenCalledWith(
+        'job-1',
+        'compreface',
+        'arcface-r100-v1',
+      );
+    });
+
+    it('does NOT call recordModel when provider is not configured', async () => {
+      (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue({
+        key: 'global',
+        value: { face: { features: { detection: { model: 'arcface-r100-v1' } } } },
+      });
+
+      await expect(service.processMediaItem(makeJob())).rejects.toThrow();
+
+      expect(mockEnrichmentJobService.recordModel).not.toHaveBeenCalled();
     });
   });
 });

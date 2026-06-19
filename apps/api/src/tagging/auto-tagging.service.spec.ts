@@ -44,6 +44,7 @@ import {
   MediaType,
 } from '@prisma/client';
 import { detectImageMime } from './image-mime.util';
+import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -118,6 +119,7 @@ describe('AutoTaggingService', () => {
   let mockProvider: { analyzeImage: jest.Mock };
   let mockStorageProvider: { download: jest.Mock };
   let mockDetectImageMime: jest.Mock;
+  let mockEnrichmentJobService: { recordModel: jest.Mock };
 
   beforeEach(async () => {
     (jest.requireMock('sharp') as jest.Mock).mockClear();
@@ -146,6 +148,7 @@ describe('AutoTaggingService', () => {
     mockStorageProvider = {
       download: jest.fn().mockResolvedValue(makeReadable()),
     };
+    mockEnrichmentJobService = { recordModel: jest.fn().mockResolvedValue(undefined) };
 
     // Default system settings: tagging configured
     (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue(
@@ -176,6 +179,7 @@ describe('AutoTaggingService', () => {
         { provide: AiSettingsService, useValue: mockAiSettingsService },
         { provide: AiProviderRegistry, useValue: mockRegistry },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
+        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
       ],
     }).compile();
 
@@ -633,6 +637,34 @@ describe('AutoTaggingService', () => {
       );
       expect(failedUpsert).toBeDefined();
       expect(failedUpsert![0].create.lastError).toMatch(/exceeds maximum size/i);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // recordModel call
+  // -------------------------------------------------------------------------
+
+  describe('recordModel integration', () => {
+    it('calls enrichmentJobService.recordModel with job.id, provider, and model on the happy path', async () => {
+      mockProvider.analyzeImage.mockResolvedValue('["Beach"]');
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockEnrichmentJobService.recordModel).toHaveBeenCalledWith(
+        'job-1',
+        'openai',
+        'gpt-4o',
+      );
+    });
+
+    it('does NOT call recordModel when provider is not configured', async () => {
+      (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue(
+        makeSystemSettings(null, 'gpt-4o'),
+      );
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockEnrichmentJobService.recordModel).not.toHaveBeenCalled();
     });
   });
 });
