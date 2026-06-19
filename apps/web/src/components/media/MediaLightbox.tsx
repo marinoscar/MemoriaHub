@@ -80,10 +80,6 @@ export function MediaLightbox({
     swiping: boolean;
   }>({ startX: 0, startY: 0, deltaX: 0, deltaY: 0, swiping: false });
 
-  // Suppress unused-variable warnings — filled in later
-  void zoomed;
-  void setZoomed;
-
   // --- Mobile auto-hide controls ---
   const resetHideTimer = useCallback(() => {
     if (!isMobile) return;
@@ -185,6 +181,7 @@ export function MediaLightbox({
 
     // Reset per-item state
     setFullResLoaded(false);
+    setZoomed(false);
 
     // Check cache first
     const cached = fullItemCache.get(item.id);
@@ -369,6 +366,10 @@ export function MediaLightbox({
                   position: 'relative',
                   width: '100%',
                   height: '100%',
+                  transform: zoomed ? 'scale(2)' : 'scale(1)',
+                  transformOrigin: '50% 50%',
+                  transition: 'transform 0.2s ease',
+                  cursor: zoomed ? 'zoom-out' : 'zoom-in',
                 }}
               >
                 {/* Thumbnail (blurred placeholder) */}
