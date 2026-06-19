@@ -54,4 +54,20 @@ export class EnrichmentJobService {
     this.logger.log(`Enqueued enrichment job type="${type}" mediaItemId="${mediaItemId}" reason="${reason}" priority=${priority} id=${job.id}`);
     return job;
   }
+
+  /**
+   * Record which provider/model processed a job, so the admin jobs dashboard and
+   * historical job rows show the model used (unlike per-item status tables, which
+   * get overwritten on re-runs). Best-effort — never throws.
+   */
+  async recordModel(jobId: string, providerKey: string | null, modelVersion: string | null): Promise<void> {
+    try {
+      await this.prisma.enrichmentJob.update({
+        where: { id: jobId },
+        data: { providerKey, modelVersion },
+      });
+    } catch (err) {
+      this.logger.warn(`recordModel failed for job ${jobId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 }

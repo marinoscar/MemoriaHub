@@ -11,6 +11,7 @@ import {
 import { DetectedFace } from './providers/face-provider.interface';
 import { FaceMatchingService } from './face-matching.service';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
+import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 
 @Injectable()
 export class FaceDetectionService {
@@ -22,6 +23,7 @@ export class FaceDetectionService {
     private readonly registry: FaceProviderRegistry,
     @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
     private readonly matchingService: FaceMatchingService,
+    private readonly enrichmentJobService: EnrichmentJobService,
   ) {}
 
   async processMediaItem(job: EnrichmentJob): Promise<void> {
@@ -57,6 +59,8 @@ export class FaceDetectionService {
       await this.markFailed(job.mediaItemId, null, modelVersion, errMsg);
       throw new Error(errMsg);
     }
+
+    await this.enrichmentJobService.recordModel(job.id, providerKey, modelVersion);
 
     // 3. Resolve credentials
     const creds = await this.faceSettingsService.resolveCredentials(providerKey);
@@ -242,7 +246,7 @@ export class FaceDetectionService {
       });
 
       this.logger.log(
-        `FaceJob ${job.id}: detected ${detectedFaces.length} face(s) in MediaItem ${job.mediaItemId}`,
+        `FaceJob ${job.id}: detected ${detectedFaces.length} face(s) in MediaItem ${job.mediaItemId} using ${providerKey}/${modelVersion}`,
       );
     } catch (err) {
       // On any unexpected error after the initial status→processing upsert,
