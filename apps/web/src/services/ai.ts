@@ -17,6 +17,7 @@ export interface AiSettingsResponse {
   knownProviders: AiProvider[];
   features: {
     search: { provider: string | null; model: string | null } | null;
+    tagging: { provider: string | null; model: string | null } | null;
   };
   conversations: {
     archiveAfterDays: number;
@@ -64,4 +65,11 @@ export async function putAiSearchFeature(body: {
   model: string;
 }): Promise<void> {
   await api.put<void>('/ai/features/search', body);
+}
+
+export async function putAiTaggingFeature(body: {
+  provider: string;
+  model: string;
+}): Promise<void> {
+  await api.put<void>('/ai/features/tagging', body);
 }
