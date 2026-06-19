@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Link as RouterLink } from 'react-router-dom';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -27,9 +27,11 @@ import {
   StarBorder as StarBorderIcon,
   Delete as DeleteIcon,
   Send as SendIcon,
+  Tune as TuneIcon,
 } from '@mui/icons-material';
 import { useCircle } from '../hooks/useCircle';
 import { useSearch } from '../hooks/useSearch';
+import { useUserSettings } from '../hooks/useUserSettings';
 import { useConversations } from '../hooks/useConversations';
 import { usePeople } from '../hooks/usePeople';
 import { streamMessage } from '../services/searchStream';
@@ -42,11 +44,21 @@ import type { MediaItem, MediaListMeta } from '../types/media';
 // ---------------------------------------------------------------------------
 
 function AdvancedSearchTab() {
+  const navigate = useNavigate();
   const { activeCircle } = useCircle();
+  const { settings } = useUserSettings();
   const { fields, searchResults, meta, isLoadingFields, isSearching, error, fetchFields, search } =
     useSearch();
   const [filterValues, setFilterValues] = useState<Record<string, unknown>>({});
   const [page, setPage] = useState(1);
+
+  // Apply user's visible-fields preference.
+  // Empty/absent visibleFields means "show all" (default).
+  const visibleFields = settings?.search?.visibleFields ?? [];
+  const fieldsToRender =
+    visibleFields.length > 0
+      ? fields.filter((f) => visibleFields.includes(f.key))
+      : fields;
 
   useEffect(() => {
     void fetchFields();
@@ -89,8 +101,19 @@ function AdvancedSearchTab() {
           <CircularProgress />
         </Box>
       ) : (
+        <>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+            <Button
+              size="small"
+              startIcon={<TuneIcon />}
+              onClick={() => navigate('/settings#search-fields')}
+              sx={{ minHeight: 44 }}
+            >
+              Customize fields
+            </Button>
+          </Box>
         <Grid container spacing={2} sx={{ mb: 2 }}>
-          {fields.map((field) => {
+          {fieldsToRender.map((field) => {
             if (field.type === 'date-range') {
               return (
                 <Grid key={field.key} size={{ xs: 12 }}>
@@ -190,6 +213,7 @@ function AdvancedSearchTab() {
             );
           })}
         </Grid>
+        </>
       )}
 
       <Button
