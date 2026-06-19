@@ -1,6 +1,6 @@
 # MemoriaHub Implementation Roadmap
 
-**Version:** 1.0
+**Version:** 1.1
 **Last Updated:** June 2026
 
 MemoriaHub is a personal media ownership platform that gives families full control over their photos and videos — independent of any single cloud provider. The product vision (see [`../../VISION.MD`](../../VISION.MD)) defines fourteen MVP capabilities spanning upload, metadata extraction, web browsing, CLI import, Android sync, multi-provider storage, replication, export, and long-term enrichment. This roadmap translates that vision into sequenced phases built on top of the already-implemented resumable-upload and event-driven processing backbone, so that every phase adds media-domain value rather than rebuilding infrastructure.
@@ -8,6 +8,8 @@ MemoriaHub is a personal media ownership platform that gives families full contr
 **Phase 01 (Media Domain Foundation) is implemented and deployed at https://memoriahub.dev.marin.cr.**
 
 **Family Circles (Collaboration Foundation) is implemented on branch `feat/family-circles`.** This is a cross-cutting feature that touches the data model, API, web, CLI, and admin backup — it is tracked separately from the numbered phases because it is an architectural foundation rather than an enrichment layer.
+
+**Several enrichment capabilities have since shipped as cross-cutting features ahead of the numbered Phase 09 sequence:** the generic enrichment queue, face recognition and people management, and AI auto-tagging are all deployed. Agentic search (conversational AI with tool-calling) is also live. These realize the core of Phase 09 §4.1 and §4.2. See the Status Tracking table and the Phase 09 Sub-Project Status breakdown below.
 
 **Backbone already in place (satisfies vision item #3 — AWS storage):**
 The `S3StorageProvider`, resumable multipart upload flow (`StorageObject` / `StorageObjectChunk`), JSONB `metadata` field, `ObjectProcessor` plugin interface, and `OBJECT_UPLOADED_EVENT` pipeline all exist today. Every enrichment processor described in phases 02 through 09 is a new implementation of that existing interface — no pipeline changes are needed.
@@ -28,6 +30,8 @@ The `S3StorageProvider`, resumable multipart upload flow (`StorageObject` / `Sto
 | [07](phase-07-memory-prioritization.md) | Memory Prioritization | API, Web | #14, #11 | FC, 02, 03 |
 | [08](phase-08-android-sync.md) | Android Sync | Android, API | #7 | FC, 02, 03 |
 | [09](phase-09-longterm-enrichment.md) | Long-Term Enrichment | API, Web, Infra | #11, #13 | 05, 08 |
+
+> Several cross-cutting enrichment features (Enrichment Queue, Face Recognition, AI Auto-Tagging) have shipped independently of the numbered sequence. See the [Status Tracking](#status-tracking) table and [Phase 09 Sub-Project Status](#phase-09-sub-project-status) below for the per-sub-project breakdown.
 
 ---
 
@@ -87,12 +91,30 @@ The following principles are restated directly from [`../../VISION.MD`](../../VI
 | 03 | Web Media Library | Done |
 | 04 | Metadata Export | Done |
 | 05 | CLI Importer | Done — upgraded in 05.1 with SQLite-backed multi-folder sync and interactive Ink TUI |
-| 06 | Storage Providers and Replication | Not Started |
+| 06 | Storage Providers and Replication | Partial — `LocalDiskStorageProvider` shipped (`apps/api/src/storage/providers/local/`) with runtime `STORAGE_PROVIDER=s3\|local` selection; S3 was already done. The `StorageLocation`/`StorageObjectLocation` registry models, `ReplicationService` cron, admin `/api/storage/locations` endpoints, and `AzureStorageProvider` are not started. |
 | FC | Family Circles | Done — circle data model, per-circle RBAC, shared library, invite flow, web CircleSwitcher + admin pages, CLI circles/backup commands, LocalDiskStorageProvider, admin backup job |
-| AI | **Agentic Search + AI Settings** | Done — deterministic `POST /api/search`, conversational SSE search with tool-calling loop, AI provider registry (Anthropic / OpenAI), admin credential management with AES-256-GCM encryption at rest, conversation lifecycle cron. See [docs/specs/agentic-search.md](../specs/agentic-search.md). |
-| 07 | Memory Prioritization | Not Started |
-| 08 | Android Sync | Not Started |
-| 09 | Long-Term Enrichment | Not Started |
+| EQ | **Enrichment Queue** (cross-cutting) | Done — generic `enrichment_jobs` table + `EnrichmentJobWorker` + handler registry (`apps/api/src/enrichment/`); admin job-queue dashboard at `/admin/jobs` with stats, list, retry, reset-stuck, and delete. Shared infrastructure for all future Phase 09 processors. See [docs/specs/enrichment-queue.md](../specs/enrichment-queue.md). |
+| FR | **Face Recognition & People** (cross-cutting — realizes Phase 09 §4.1) | Done — `Person`/`Face`/`MediaFaceStatus` models, three providers (human WASM 1024-d, CompreFace 128-d, Rekognition), face detection handler in enrichment queue, clustering/merge, `/api/people` + `/api/media/:id/faces` endpoints, PeoplePage + UnknownFacesReview web UI, per-circle opt-in. See [docs/specs/face-recognition.md](../specs/face-recognition.md). |
+| AT | **AI Auto-Tagging** (cross-cutting — realizes Phase 09 §4.2) | Done — vocabulary-driven vision-model tagging: `TagLabel` global vocabulary + `MediaTagStatus`, `source` column (manual\|ai) on media_tags, auto-tagging handler in enrichment queue, `/api/tag-labels` CRUD + `/api/tagging/backfill`, per-circle opt-in, admin TagsPage UI. See [docs/specs/auto-tagging.md](../specs/auto-tagging.md). |
+| AI | **Agentic Search + AI Settings** (cross-cutting) | Done — deterministic `POST /api/search`, conversational SSE search with tool-calling loop, AI provider registry (Anthropic / OpenAI), admin credential management with AES-256-GCM encryption at rest, conversation lifecycle cron. See [docs/specs/agentic-search.md](../specs/agentic-search.md). |
+| 07 | Memory Prioritization | Partial — `MediaClassification` enum column shipped on `MediaItem`, bulk classification via `PATCH /api/media/bulk`, review-queue UI surfaces (`ReviewQueueCard`, classification filters, classification select in `MediaDetailDrawer` and `BulkActionToolbar`). Automatic heuristic processors (`ScreenshotProcessor`, `LowValueProcessor`), dedicated `POST /api/media/review` endpoint, and `BulkReviewPanel` / dedicated review mode are not started. |
+| 08 | Android Sync | Not Started — server-side `MediaSource` enum reserves the `android` value; no `apps/android/` client exists. |
+| 09 | Long-Term Enrichment | Partial — §4.1 (Face Recognition) and §4.2 (AI Auto-Tagging) are done as cross-cutting features; §4.3 Tier-1 (exact dedup) is done; §4.6 (video thumbnails) is done. §4.3 Tier-2, §4.4, §4.5, §4.7, and §4.8 are not started. See Phase 09 Sub-Project Status below. |
+
+### Phase 09 Sub-Project Status
+
+Phase 09 (Long-Term Enrichment) is a collection of independent sub-projects. Several have shipped ahead of schedule as cross-cutting features.
+
+| Sub-Project | Vision / Spec | Status | Notes |
+|-------------|---------------|--------|-------|
+| §4.1 Face Recognition | [docs/specs/face-recognition.md](../specs/face-recognition.md) | Done | Three providers (human WASM, CompreFace, Rekognition); circle-scoped; people clustering/merge; full web UI. Implemented beyond the original sketch — circle-scoped, real provider integrations (not face-api.js). |
+| §4.2 Object & Scene Detection | [docs/specs/auto-tagging.md](../specs/auto-tagging.md) | Done (reframed as AI Auto-Tagging) | Vocabulary-driven vision-model tagging replaces the original object/scene detection sketch; per-circle opt-in; admin tag vocabulary management. |
+| §4.3 Duplicate Detection | — | Partial | Tier-1 exact/byte-identical dedup done (content_hash unique constraint, idempotent upload, CLI hash cache, web pre-check). Tier-2 perceptual-hash processor + `DuplicateReviewPage` not started. |
+| §4.4 Platform Import Paths | — | Not Started | Google Photos Takeout, OneDrive, Dropbox, Apple Photos imports not started. Generic local-folder CLI sync exists (Phase 05). |
+| §4.5 Azure Storage Provider | — | Not Started | S3 and LocalDisk only; Azure provider not started. |
+| §4.6 Video Thumbnail Generation | — | Done | `ThumbnailProcessor` extracts poster frame via fluent-ffmpeg for video MIME types; `video-probe.processor.ts` reads ffprobe metadata. |
+| §4.7 Landmark / POI Refinement | — | Not Started | Reverse geocoding to country/region/city/place exists (Phase 02); no dedicated POI-refinement processor. |
+| §4.8 Trip & Event Grouping | — | Not Started | No `TripGroupingService`, no `autoGenerated` Album flag. |
 
 ---
 
