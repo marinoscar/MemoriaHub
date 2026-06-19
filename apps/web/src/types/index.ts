@@ -20,6 +20,9 @@ export interface UserSettings {
     useProviderImage: boolean;
     customImageUrl?: string | null;
   };
+  search?: {
+    visibleFields: string[];
+  };
   activeCircleId?: string | null;
   updatedAt: string;
   version: number;
