@@ -625,6 +625,68 @@ describe('JobsPage', () => {
   });
 
   // =========================================================================
+  // Model column
+  // =========================================================================
+
+  describe('Model column', () => {
+    it('renders modelVersion and providerKey when both are set', async () => {
+      const jobs = [
+        makeJob({
+          id: 'job-1',
+          modelVersion: 'claude-3-haiku-20240307',
+          providerKey: 'anthropic',
+        }),
+      ];
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
+
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await waitFor(() => {
+        expect(screen.getByText('claude-3-haiku-20240307')).toBeInTheDocument();
+        expect(screen.getByText('anthropic')).toBeInTheDocument();
+      });
+    });
+
+    it('renders only modelVersion when providerKey is null', async () => {
+      const jobs = [
+        makeJob({
+          id: 'job-1',
+          modelVersion: 'mobilenet-v2',
+          providerKey: null,
+        }),
+      ];
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
+
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await waitFor(() => {
+        expect(screen.getByText('mobilenet-v2')).toBeInTheDocument();
+      });
+    });
+
+    it('renders an em dash when both modelVersion and providerKey are null', async () => {
+      const jobs = [
+        makeJob({
+          id: 'job-1',
+          modelVersion: null,
+          providerKey: null,
+        }),
+      ];
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
+
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await waitFor(() => {
+        expect(screen.getByText('face_detection')).toBeInTheDocument();
+      });
+
+      // The muted em dash placeholder — may appear in multiple cells (e.g. lastError, Model).
+      const dashes = screen.getAllByText('—');
+      expect(dashes.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  // =========================================================================
   // Error states
   // =========================================================================
 

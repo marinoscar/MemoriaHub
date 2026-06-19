@@ -10,6 +10,7 @@ import {
 } from '../storage/providers/storage-provider.interface';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import { detectImageMime } from './image-mime.util';
+import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 
 /**
  * Maximum image dimension (long edge) before downscaling.
@@ -35,6 +36,7 @@ export class AutoTaggingService {
     private readonly aiSettingsService: AiSettingsService,
     private readonly aiProviderRegistry: AiProviderRegistry,
     @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
+    private readonly enrichmentJobService: EnrichmentJobService,
   ) {}
 
   async processMediaItem(job: EnrichmentJob): Promise<void> {
@@ -101,6 +103,8 @@ export class AutoTaggingService {
       await this.markFailed(job.mediaItemId, mediaItem.circleId, null, 'unknown', errMsg);
       return;
     }
+
+    await this.enrichmentJobService.recordModel(job.id, provider, model);
 
     // e. Resolve credentials — non-throwing gate
     let creds: { apiKey: string; baseUrl?: string };
@@ -255,7 +259,7 @@ export class AutoTaggingService {
       });
 
       this.logger.log(
-        `AutoTagJob ${job.id}: assigned ${normalizedLabels.length} tag(s) to MediaItem ${job.mediaItemId}`,
+        `AutoTagJob ${job.id}: assigned ${normalizedLabels.length} tag(s) to MediaItem ${job.mediaItemId} using ${provider}/${model}`,
       );
     } catch (err) {
       // o. On unexpected error from step i onwards: mark failed and rethrow (let worker retry)

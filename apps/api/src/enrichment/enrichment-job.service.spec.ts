@@ -228,4 +228,43 @@ describe('EnrichmentJobService', () => {
       });
     });
   });
+
+  // -------------------------------------------------------------------------
+  // recordModel
+  // -------------------------------------------------------------------------
+
+  describe('recordModel', () => {
+    it('calls prisma.enrichmentJob.update with jobId, providerKey, and modelVersion', async () => {
+      (mockPrisma.enrichmentJob.update as jest.Mock).mockResolvedValue({});
+
+      await service.recordModel('job-1', 'compreface', 'arcface-r100-v1');
+
+      expect(mockPrisma.enrichmentJob.update).toHaveBeenCalledWith({
+        where: { id: 'job-1' },
+        data: { providerKey: 'compreface', modelVersion: 'arcface-r100-v1' },
+      });
+    });
+
+    it('swallows errors from prisma.enrichmentJob.update without throwing', async () => {
+      (mockPrisma.enrichmentJob.update as jest.Mock).mockRejectedValue(
+        new Error('DB connection lost'),
+      );
+
+      // Must resolve (not reject) even when update fails
+      await expect(
+        service.recordModel('job-1', 'compreface', 'arcface-r100-v1'),
+      ).resolves.toBeUndefined();
+    });
+
+    it('passes null providerKey and modelVersion through to update', async () => {
+      (mockPrisma.enrichmentJob.update as jest.Mock).mockResolvedValue({});
+
+      await service.recordModel('job-1', null, null);
+
+      expect(mockPrisma.enrichmentJob.update).toHaveBeenCalledWith({
+        where: { id: 'job-1' },
+        data: { providerKey: null, modelVersion: null },
+      });
+    });
+  });
 });
