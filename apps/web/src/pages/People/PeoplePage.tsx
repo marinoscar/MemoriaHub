@@ -40,7 +40,8 @@ import { PersonGrid } from '../../components/people/PersonGrid';
 import { UnknownFacesReview } from '../../components/people/UnknownFacesReview';
 import { MergePeopleDialog } from '../../components/people/MergePeopleDialog';
 import { FaceCrop } from '../../components/people/FaceCrop';
-import type { PersonListItem } from '../../services/face';
+import { PersonAvatar } from '../../components/people/PersonAvatar';
+import type { PersonListItem, PersonDetail } from '../../services/face';
 import {
   getCircleFaceSettings,
   updateCircleFaceSettings,
@@ -49,6 +50,7 @@ import {
   deletePerson,
   assignFaces as assignFacesService,
   createPerson as createPersonService,
+  updatePerson,
 } from '../../services/face';
 import type { CircleFaceSettings } from '../../services/face';
 import { listMedia, getMedia } from '../../services/media';
@@ -223,6 +225,7 @@ function PersonDetailDrawer({
   allPeople,
   onPersonDeleted,
   onPersonMerged,
+  onProfileUpdated,
 }: {
   personId: string;
   onClose: () => void;
@@ -232,6 +235,7 @@ function PersonDetailDrawer({
   allPeople: PersonListItem[];
   onPersonDeleted: () => void;
   onPersonMerged: () => void;
+  onProfileUpdated?: () => void;
 }) {
   const navigate = useNavigate();
   const { person, loading, error } = usePerson(personId);
@@ -315,8 +319,22 @@ function PersonDetailDrawer({
     updatedAt: person.updatedAt,
   };
 
+  // Cast person to the PersonAvatarPerson shape (includes new optional fields)
+  const avatarPerson = {
+    id: person.id,
+    name: person.name,
+    coverFace: person.coverFace,
+    profileMediaItemId: (person as PersonDetail & { profileMediaItemId?: string | null }).profileMediaItemId,
+    profileCrop: (person as PersonDetail & { profileCrop?: { x: number; y: number; w: number; h: number } | null }).profileCrop,
+  };
+
   return (
     <Box sx={{ width: { xs: 320, sm: 400 }, p: 2 }}>
+      {/* Person avatar — centered at top */}
+      <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
+        <PersonAvatar person={avatarPerson} size={72} />
+      </Box>
+
       {/* Header */}
       <Stack direction="row" spacing={1} sx={{ mb: 2, alignItems: 'center' }}>
         {editing ? (

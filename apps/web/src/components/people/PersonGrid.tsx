@@ -1,30 +1,6 @@
-import { useEffect, useState } from 'react';
 import { Grid, Typography, Box, CircularProgress } from '@mui/material';
 import { PersonCard } from './PersonCard';
 import type { PersonListItem } from '../../services/face';
-import { getMedia } from '../../services/media';
-
-interface PersonCardContainerProps {
-  person: PersonListItem;
-  onClick: (person: PersonListItem) => void;
-}
-
-function PersonCardContainer({ person, onClick }: PersonCardContainerProps) {
-  const [imageUrl, setImageUrl] = useState<string | undefined>(undefined);
-
-  useEffect(() => {
-    if (!person.coverFace) return;
-    // Fetch the full media item to get downloadUrl (full-res) with thumbnailUrl fallback
-    getMedia(person.coverFace.mediaItemId)
-      .then((item) => {
-        const url = item.downloadUrl ?? item.thumbnailUrl;
-        if (url) setImageUrl(url);
-      })
-      .catch(() => undefined);
-  }, [person.coverFace]);
-
-  return <PersonCard person={person} imageUrl={imageUrl} onClick={onClick} />;
-}
 
 interface PersonGridProps {
   people: PersonListItem[];
@@ -56,7 +32,7 @@ export function PersonGrid({ people, onPersonClick, loading, emptyMessage }: Per
     <Grid container spacing={2}>
       {people.map((person) => (
         <Grid key={person.id} size={{ xs: 6, sm: 4, md: 3, lg: 2 }}>
-          <PersonCardContainer person={person} onClick={onPersonClick} />
+          <PersonCard person={person} onClick={onPersonClick} />
         </Grid>
       ))}
     </Grid>
