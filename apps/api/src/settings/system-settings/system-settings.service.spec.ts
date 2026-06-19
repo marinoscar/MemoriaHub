@@ -527,6 +527,98 @@ describe('SystemSettingsService', () => {
         },
       });
     });
+
+    it('should persist ai.features.tagging provider and model (round-trip)', async () => {
+      const taggingPatch = {
+        ai: {
+          features: {
+            tagging: {
+              provider: 'openai',
+              model: 'gpt-4o',
+            },
+          },
+        },
+      };
+
+      const savedValue = {
+        ...DEFAULT_SYSTEM_SETTINGS,
+        ai: {
+          ...DEFAULT_SYSTEM_SETTINGS.ai,
+          features: {
+            ...DEFAULT_SYSTEM_SETTINGS.ai.features,
+            tagging: { provider: 'openai', model: 'gpt-4o' },
+          },
+        },
+      };
+
+      mockPrisma.systemSettings.update.mockResolvedValue({
+        ...mockSystemSettings,
+        value: savedValue as any,
+        version: 2,
+      } as any);
+
+      mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+      const result = await service.patchSettings(taggingPatch as any, mockUserId);
+
+      // Verify the merged value passed to Prisma contains the tagging config
+      const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+      expect(updateCall.data.value).toMatchObject({
+        ai: {
+          features: {
+            tagging: { provider: 'openai', model: 'gpt-4o' },
+          },
+        },
+      });
+
+      // Verify the returned value reflects the tagging config (not silently dropped)
+      expect((result as any).ai.features.tagging.provider).toBe('openai');
+      expect((result as any).ai.features.tagging.model).toBe('gpt-4o');
+    });
+
+    it('should preserve existing ai.features.tagging when patching unrelated fields', async () => {
+      // Existing settings have tagging configured
+      const existingWithTagging = {
+        ...mockSystemSettings,
+        value: {
+          ...DEFAULT_SYSTEM_SETTINGS,
+          ai: {
+            ...DEFAULT_SYSTEM_SETTINGS.ai,
+            features: {
+              ...DEFAULT_SYSTEM_SETTINGS.ai.features,
+              tagging: { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+            },
+          },
+        } as any,
+      };
+
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(existingWithTagging as any);
+
+      const savedValue = {
+        ...existingWithTagging.value,
+        ui: { allowUserThemeOverride: false },
+      };
+
+      mockPrisma.systemSettings.update.mockResolvedValue({
+        ...mockSystemSettings,
+        value: savedValue as any,
+        version: 2,
+      } as any);
+
+      mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+      // Patch only ui — tagging should be preserved in the merged object
+      await service.patchSettings({ ui: { allowUserThemeOverride: false } }, mockUserId);
+
+      const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+      expect(updateCall.data.value).toMatchObject({
+        ai: {
+          features: {
+            tagging: { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+          },
+        },
+      });
+    });
   });
 
   describe('getSettingValue', () => {
