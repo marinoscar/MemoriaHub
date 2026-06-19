@@ -49,6 +49,7 @@ export const updatePersonSchema = z
     coverFaceId: z.string().uuid().optional().nullable(),
     profileMediaItemId: z.string().uuid().optional().nullable(),
     profileCrop: profileCropSchema,
+    favorite: z.boolean().optional(),
   })
   .refine(
     (v) => {

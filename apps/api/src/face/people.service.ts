@@ -65,7 +65,7 @@ export class PeopleService {
         where,
         skip,
         take: pageSize,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ favorite: 'desc' }, { name: 'asc' }],
         include: {
           _count: { select: { faces: true } },
           coverFace: {
@@ -96,6 +96,7 @@ export class PeopleService {
       id: p.id,
       name: p.name,
       isUnlabeled: p.name === null,
+      favorite: p.favorite,
       faceCount: p._count.faces,
       coverFace: this.resolveCoverFace(p.coverFace, p.faces ?? []),
       profileMediaItemId: p.profileMediaItemId ?? null,
@@ -225,6 +226,7 @@ export class PeopleService {
       id: person.id,
       name: person.name,
       isUnlabeled: person.name === null,
+      favorite: person.favorite,
       circleId: person.circleId,
       coverFace: this.resolveCoverFace(person.coverFace, person.faces),
       profileMediaItemId: person.profileMediaItemId ?? null,
@@ -363,6 +365,7 @@ export class PeopleService {
     const updateData: Record<string, unknown> = {};
     if (dto.name !== undefined) updateData['name'] = dto.name;
     if (dto.coverFaceId !== undefined) updateData['coverFaceId'] = dto.coverFaceId;
+    if (dto.favorite !== undefined) updateData['favorite'] = dto.favorite;
     if (dto.profileMediaItemId !== undefined) {
       updateData['profileMediaItemId'] = dto.profileMediaItemId;
       updateData['profileCrop'] =
@@ -379,6 +382,7 @@ export class PeopleService {
     return {
       id: updated.id,
       name: updated.name,
+      favorite: updated.favorite,
       coverFaceId: updated.coverFaceId,
       profileMediaItemId: updated.profileMediaItemId ?? null,
       profileCrop: updated.profileCrop ?? null,

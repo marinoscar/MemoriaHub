@@ -178,7 +178,7 @@ export class PeopleController {
    */
   @Patch(':id')
   @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
-  @ApiOperation({ summary: 'Update person name or cover face (collaborator+)' })
+  @ApiOperation({ summary: 'Update person name, cover face, or favorite flag (collaborator+)' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Person updated' })
   @ApiResponse({ status: 404, description: 'Person not found' })
