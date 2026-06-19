@@ -58,7 +58,6 @@ export function MediaLightbox({
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   // Suppress "unused variable" warnings for parameters wired in later commits
-  void onIndexChange;
   void onOpenProperties;
   void onItemUpdated;
   void isMobile;
@@ -88,9 +87,59 @@ export function MediaLightbox({
   void zoomed;
   void controlsVisible;
   void hideTimerRef;
-  void swipeRef;
   void setZoomed;
   void setControlsVisible;
+
+  // --- Keyboard navigation ---
+  useEffect(() => {
+    if (index === null) return;
+
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft' && index > 0) {
+        onIndexChange(index - 1);
+      } else if (e.key === 'ArrowRight' && index < items.length - 1) {
+        onIndexChange(index + 1);
+      } else if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [index, items.length, onIndexChange, onClose]);
+
+  // --- Swipe handlers ---
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    swipeRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      deltaX: 0,
+      deltaY: 0,
+      swiping: true,
+    };
+  }, []);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!swipeRef.current.swiping) return;
+    swipeRef.current.deltaX = e.clientX - swipeRef.current.startX;
+    swipeRef.current.deltaY = e.clientY - swipeRef.current.startY;
+    // Cancel if more vertical than horizontal
+    if (Math.abs(swipeRef.current.deltaY) > Math.abs(swipeRef.current.deltaX)) {
+      swipeRef.current.swiping = false;
+    }
+  }, []);
+
+  const handlePointerUp = useCallback(() => {
+    const { swiping, deltaX, deltaY } = swipeRef.current;
+    swipeRef.current.swiping = false;
+    if (swiping && Math.abs(deltaX) > 50 && Math.abs(deltaX) > Math.abs(deltaY)) {
+      if (deltaX > 0 && index !== null && index > 0) {
+        onIndexChange(index - 1);
+      } else if (deltaX < 0 && index !== null && index < items.length - 1) {
+        onIndexChange(index + 1);
+      }
+    }
+  }, [index, items.length, onIndexChange]);
 
   // --- Fetch full item & prefetch neighbors ---
   useEffect(() => {
@@ -185,6 +234,10 @@ export function MediaLightbox({
               alignItems: 'center',
               justifyContent: 'center',
             }}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
           >
             {item.type === 'video' ? (
               /* Video branch — expanded in commit 5 */
@@ -250,7 +303,51 @@ export function MediaLightbox({
             )}
           </Box>
 
-          {/* Placeholder for chevrons — added in commit 3 */}
+          {/* Left chevron */}
+          <IconButton
+            aria-label="Previous photo"
+            disabled={index === 0}
+            onClick={() => onIndexChange(index - 1)}
+            sx={{
+              position: 'absolute',
+              left: 8,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              zIndex: 10,
+              color: 'white',
+              backgroundColor: 'rgba(0,0,0,0.4)',
+              '&:hover': { backgroundColor: 'rgba(0,0,0,0.7)' },
+              '&.Mui-disabled': {
+                color: 'rgba(255,255,255,0.3)',
+                backgroundColor: 'rgba(0,0,0,0.2)',
+              },
+            }}
+          >
+            <ChevronLeft />
+          </IconButton>
+
+          {/* Right chevron */}
+          <IconButton
+            aria-label="Next photo"
+            disabled={index === items.length - 1}
+            onClick={() => onIndexChange(index + 1)}
+            sx={{
+              position: 'absolute',
+              right: 8,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              zIndex: 10,
+              color: 'white',
+              backgroundColor: 'rgba(0,0,0,0.4)',
+              '&:hover': { backgroundColor: 'rgba(0,0,0,0.7)' },
+              '&.Mui-disabled': {
+                color: 'rgba(255,255,255,0.3)',
+                backgroundColor: 'rgba(0,0,0,0.2)',
+              },
+            }}
+          >
+            <ChevronRight />
+          </IconButton>
         </Box>
       </Box>
     </Dialog>
