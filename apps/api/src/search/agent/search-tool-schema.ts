@@ -11,17 +11,27 @@ type JsonSchemaProperty =
         from: { type: 'string'; description: string };
         to: { type: 'string'; description: string };
       };
+    }
+  | {
+      type: 'array';
+      description: string;
+      items: { type: 'string' };
     };
 
 /**
  * Build the `search_media` tool definition from the SEARCHABLE_FIELDS registry.
  *
  * Each field type maps to a JSON Schema property:
- *   - 'string' → { type: 'string' }
- *   - 'enum'   → { type: 'string', enum: field.enumValues }
- *   - 'boolean'→ { type: 'boolean' }
+ *   - 'string'     → { type: 'string' }
+ *   - 'enum'       → { type: 'string', enum: field.enumValues }
+ *   - 'boolean'    → { type: 'boolean' }
  *   - 'date-range' → { type: 'object', properties: { from, to } }
- *   - 'geo'    → { type: 'string' }
+ *   - 'geo'        → { type: 'string' }
+ *   - 'person-set' → two sibling params: `people` (array of names) + `peopleMatch` (enum)
+ *
+ * The 'person-set' type is handled specially: instead of a generic property for the field key,
+ * it emits two separate tool parameters (`people` and `peopleMatch`) so the AI can pass
+ * human-readable names. The agent service resolves names to IDs before executing the search.
  *
  * Adding a new SearchableField to the registry automatically extends this tool schema.
  */
@@ -30,6 +40,25 @@ export function buildSearchMediaToolDef(): AiToolDef {
 
   for (const field of SEARCHABLE_FIELDS) {
     switch (field.type) {
+      case 'person-set':
+        // Emit two parameters instead of a generic one for the field key.
+        // The agent service resolves person names → IDs before calling runSearch.
+        properties['people'] = {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Names of people who must appear in the photo, e.g. ["Oscar","Pamela"]. ' +
+            'The search will resolve names to IDs automatically.',
+        };
+        properties['peopleMatch'] = {
+          type: 'string',
+          enum: ['all', 'any'],
+          description:
+            'all = every named person must appear together in the photo; ' +
+            'any = at least one of the named people appears. Default: all.',
+        };
+        break;
+
       case 'enum':
         properties[field.key] = {
           type: 'string',
