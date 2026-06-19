@@ -1,9 +1,8 @@
 /**
  * Unit tests for PersonGrid component.
  *
- * PersonCardContainer calls getMedia internally to resolve the cover image URL
- * (preferring downloadUrl over thumbnailUrl for full-res face crops).
- * Mock services/media to avoid real API calls.
+ * PersonGrid renders PersonCard for each person, and PersonCard renders
+ * PersonAvatar internally. We mock PersonAvatar to avoid async media fetching.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -13,6 +12,11 @@ import type { PersonListItem } from '../../../services/face';
 // ---------------------------------------------------------------------------
 // Module mocks
 // ---------------------------------------------------------------------------
+
+// Stub PersonAvatar so PersonGrid tests don't depend on async getMedia calls
+vi.mock('../../../components/people/PersonAvatar', () => ({
+  PersonAvatar: () => <div data-testid="person-avatar" />,
+}));
 
 vi.mock('../../../services/media', () => ({
   listMedia: vi.fn().mockResolvedValue({ items: [], meta: {} }),
@@ -46,6 +50,8 @@ function makePerson(id: string, name: string | null = 'Alice'): PersonListItem {
     coverFace: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    profileMediaItemId: null,
+    profileCrop: null,
   };
 }
 
@@ -101,6 +107,16 @@ describe('PersonGrid', () => {
     expect(screen.getByText('Alice')).toBeInTheDocument();
     expect(screen.getByText('Bob')).toBeInTheDocument();
     expect(screen.getByText('Carol')).toBeInTheDocument();
+  });
+
+  it('renders a PersonAvatar for each person card', () => {
+    const people = [makePerson('p1', 'Alice'), makePerson('p2', 'Bob')];
+
+    render(
+      <PersonGrid people={people} onPersonClick={vi.fn()} loading={false} />,
+    );
+
+    expect(screen.getAllByTestId('person-avatar')).toHaveLength(2);
   });
 
   it('does not show loading spinner when loading=false', () => {

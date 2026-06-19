@@ -4,20 +4,17 @@ import {
   CardContent,
   Typography,
   Box,
-  Avatar,
   Chip,
 } from '@mui/material';
-import { Person as PersonIcon } from '@mui/icons-material';
-import { FaceCrop } from './FaceCrop';
+import { PersonAvatar } from './PersonAvatar';
 import type { PersonListItem } from '../../services/face';
 
 interface PersonCardProps {
   person: PersonListItem;
-  imageUrl?: string;      // resolved thumbnail URL for the cover face's media item
   onClick: (person: PersonListItem) => void;
 }
 
-export function PersonCard({ person, imageUrl, onClick }: PersonCardProps) {
+export function PersonCard({ person, onClick }: PersonCardProps) {
   const displayName = person.name ?? 'Unlabeled';
 
   return (
@@ -27,18 +24,7 @@ export function PersonCard({ person, imageUrl, onClick }: PersonCardProps) {
     >
       <CardActionArea onClick={() => onClick(person)} sx={{ flexGrow: 1 }}>
         <Box sx={{ display: 'flex', justifyContent: 'center', pt: 2 }}>
-          {imageUrl && person.coverFace ? (
-            <FaceCrop
-              imageUrl={imageUrl}
-              boundingBox={person.coverFace.boundingBox}
-              size={96}
-              sx={{ borderRadius: '50%' }}
-            />
-          ) : (
-            <Avatar sx={{ width: 96, height: 96, bgcolor: 'primary.light' }}>
-              <PersonIcon sx={{ fontSize: 48 }} />
-            </Avatar>
-          )}
+          <PersonAvatar person={person} size={96} />
         </Box>
         <CardContent sx={{ textAlign: 'center', pt: 1 }}>
           <Typography variant="subtitle2" noWrap title={displayName}>

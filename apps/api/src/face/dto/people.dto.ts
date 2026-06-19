@@ -33,10 +33,36 @@ export class CreatePersonDto extends createZodDto(createPersonSchema) {}
 // UpdatePersonDto
 // ---------------------------------------------------------------------------
 
-export const updatePersonSchema = z.object({
-  name: z.string().min(1).max(100).optional(),
-  coverFaceId: z.string().uuid().optional().nullable(),
-});
+const profileCropSchema = z
+  .object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    w: z.number().min(0).max(1),
+    h: z.number().min(0).max(1),
+  })
+  .nullable()
+  .optional();
+
+export const updatePersonSchema = z
+  .object({
+    name: z.string().min(1).max(100).optional(),
+    coverFaceId: z.string().uuid().optional().nullable(),
+    profileMediaItemId: z.string().uuid().optional().nullable(),
+    profileCrop: profileCropSchema,
+  })
+  .refine(
+    (v) => {
+      // Both must be present (non-null) together, or both must be null/absent.
+      const hasId = v.profileMediaItemId != null;
+      const hasCrop = v.profileCrop != null;
+      return hasId === hasCrop;
+    },
+    {
+      message:
+        'profileMediaItemId and profileCrop must both be provided or both be null',
+      path: ['profileMediaItemId'],
+    },
+  );
 
 export class UpdatePersonDto extends createZodDto(updatePersonSchema) {}
 

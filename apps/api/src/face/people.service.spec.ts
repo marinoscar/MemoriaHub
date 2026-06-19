@@ -2,7 +2,7 @@
  * Unit tests for PeopleService.
  *
  * Covers: listPeople, getPerson, createPerson, updatePerson,
- * assignFaces, unassignFace, and clusterUnknowns.
+ * assignFaces, unassignFace, clusterUnknowns, and profile picture.
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
@@ -21,6 +21,7 @@ const CIRCLE_ID = 'circle-uuid-0001';
 const USER_ID = 'user-uuid-0001';
 const PERSON_ID = 'person-uuid-0001';
 const FACE_ID = 'face-uuid-0001';
+const MEDIA_ID = 'media-uuid-0001';
 const PERMS: string[] = ['circles:read'];
 
 function makePerson(overrides: Partial<any> = {}) {
@@ -961,6 +962,397 @@ describe('PeopleService', () => {
           data: expect.objectContaining({ action: 'person:delete', targetId: PERSON_ID }),
         }),
       );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Auto cover face — createPerson
+  // -------------------------------------------------------------------------
+
+  describe('createPerson — auto coverFaceId', () => {
+    it('sets coverFaceId to the first faceId when coverFaceId is null after create', async () => {
+      const person = makePerson({ coverFaceId: null });
+      (mockPrisma.person.create as jest.Mock).mockResolvedValue(person);
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([makeFace()]);
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.person.update as jest.Mock).mockResolvedValue({
+        ...person,
+        coverFaceId: FACE_ID,
+      });
+
+      await service.createPerson(
+        { circleId: CIRCLE_ID, name: 'Alice', faceIds: [FACE_ID] } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      expect(mockPrisma.person.update).toHaveBeenCalledWith({
+        where: { id: PERSON_ID },
+        data: { coverFaceId: FACE_ID },
+      });
+    });
+
+    it('does NOT call person.update for coverFaceId when no faceIds provided', async () => {
+      (mockPrisma.person.create as jest.Mock).mockResolvedValue(makePerson({ coverFaceId: null }));
+
+      await service.createPerson(
+        { circleId: CIRCLE_ID, name: 'Bob' } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      expect(mockPrisma.person.update).not.toHaveBeenCalled();
+    });
+
+    it('does NOT override coverFaceId when person already has one', async () => {
+      const person = makePerson({ coverFaceId: 'existing-cover-face' });
+      (mockPrisma.person.create as jest.Mock).mockResolvedValue(person);
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([makeFace()]);
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+      await service.createPerson(
+        { circleId: CIRCLE_ID, name: 'Carol', faceIds: [FACE_ID] } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      // person.update should NOT be called because coverFaceId was already set
+      expect(mockPrisma.person.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Auto cover face — assignFaces
+  // -------------------------------------------------------------------------
+
+  describe('assignFaces — auto coverFaceId', () => {
+    it('sets coverFaceId to the first faceId when person coverFaceId is null', async () => {
+      const person = makePerson({ coverFaceId: null });
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(person);
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([makeFace()]);
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.person.update as jest.Mock).mockResolvedValue({
+        ...person,
+        coverFaceId: FACE_ID,
+      });
+
+      await service.assignFaces(PERSON_ID, { faceIds: [FACE_ID] } as any, USER_ID, PERMS);
+
+      expect(mockPrisma.person.update).toHaveBeenCalledWith({
+        where: { id: PERSON_ID },
+        data: { coverFaceId: FACE_ID },
+      });
+    });
+
+    it('does NOT call person.update for coverFaceId when person already has one', async () => {
+      const person = makePerson({ coverFaceId: 'already-set' });
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(person);
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([makeFace()]);
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+      await service.assignFaces(PERSON_ID, { faceIds: [FACE_ID] } as any, USER_ID, PERMS);
+
+      expect(mockPrisma.person.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Cover fallback — listPeople
+  // -------------------------------------------------------------------------
+
+  describe('listPeople — cover fallback', () => {
+    it('returns coverFace from persisted coverFace relation when set', async () => {
+      const coverFace = { id: 'cover-face-id', mediaItemId: MEDIA_ID, boundingBox: { x: 0, y: 0, w: 0.5, h: 0.5 } };
+      const person = makePerson({
+        coverFaceId: 'cover-face-id',
+        coverFace,
+        faces: [],
+        _count: { faces: 1 },
+        profileMediaItemId: null,
+        profileCrop: null,
+      });
+      (mockPrisma.person.findMany as jest.Mock).mockResolvedValue([person]);
+      (mockPrisma.person.count as jest.Mock).mockResolvedValue(1);
+
+      const result = await service.listPeople(
+        { circleId: CIRCLE_ID, includeUnlabeled: false, page: 1, pageSize: 20 } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      expect(result.items[0].coverFace).toEqual({
+        faceId: 'cover-face-id',
+        mediaItemId: MEDIA_ID,
+        boundingBox: coverFace.boundingBox,
+      });
+    });
+
+    it('falls back to first face when coverFace relation is null', async () => {
+      const fallbackFace = { id: 'fallback-face', mediaItemId: MEDIA_ID, boundingBox: { x: 0.2, y: 0.2, w: 0.3, h: 0.3 }, confidence: 0.8 };
+      const person = makePerson({
+        coverFaceId: null,
+        coverFace: null,
+        faces: [fallbackFace],
+        _count: { faces: 1 },
+        profileMediaItemId: null,
+        profileCrop: null,
+      });
+      (mockPrisma.person.findMany as jest.Mock).mockResolvedValue([person]);
+      (mockPrisma.person.count as jest.Mock).mockResolvedValue(1);
+
+      const result = await service.listPeople(
+        { circleId: CIRCLE_ID, includeUnlabeled: false, page: 1, pageSize: 20 } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      expect(result.items[0].coverFace).toEqual({
+        faceId: 'fallback-face',
+        mediaItemId: MEDIA_ID,
+        boundingBox: fallbackFace.boundingBox,
+      });
+    });
+
+    it('returns null coverFace when coverFace relation is null and no faces', async () => {
+      const person = makePerson({
+        coverFaceId: null,
+        coverFace: null,
+        faces: [],
+        _count: { faces: 0 },
+        profileMediaItemId: null,
+        profileCrop: null,
+      });
+      (mockPrisma.person.findMany as jest.Mock).mockResolvedValue([person]);
+      (mockPrisma.person.count as jest.Mock).mockResolvedValue(1);
+
+      const result = await service.listPeople(
+        { circleId: CIRCLE_ID, includeUnlabeled: false, page: 1, pageSize: 20 } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      expect(result.items[0].coverFace).toBeNull();
+    });
+
+    it('includes profileMediaItemId and profileCrop in list response', async () => {
+      const crop = { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
+      const person = makePerson({
+        coverFace: null,
+        faces: [],
+        _count: { faces: 0 },
+        profileMediaItemId: MEDIA_ID,
+        profileCrop: crop,
+      });
+      (mockPrisma.person.findMany as jest.Mock).mockResolvedValue([person]);
+      (mockPrisma.person.count as jest.Mock).mockResolvedValue(1);
+
+      const result = await service.listPeople(
+        { circleId: CIRCLE_ID, includeUnlabeled: false, page: 1, pageSize: 20 } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      expect(result.items[0].profileMediaItemId).toBe(MEDIA_ID);
+      expect(result.items[0].profileCrop).toEqual(crop);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Cover fallback — getPerson
+  // -------------------------------------------------------------------------
+
+  describe('getPerson — cover fallback', () => {
+    it('returns coverFace from persisted coverFace relation when set', async () => {
+      const coverFace = { id: 'cover-face-id', mediaItemId: MEDIA_ID, boundingBox: { x: 0, y: 0, w: 0.5, h: 0.5 } };
+      const person = makePerson({
+        coverFace,
+        faces: [],
+        profileMediaItemId: null,
+        profileCrop: null,
+      });
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(person);
+
+      const result = await service.getPerson(PERSON_ID, USER_ID, PERMS);
+
+      expect(result.coverFace).toEqual({
+        faceId: 'cover-face-id',
+        mediaItemId: MEDIA_ID,
+        boundingBox: coverFace.boundingBox,
+      });
+    });
+
+    it('falls back to first face (sorted by confidence) when coverFace is null', async () => {
+      const highConfFace = { id: 'high-conf', mediaItemId: MEDIA_ID, boundingBox: { x: 0, y: 0, w: 0.5, h: 0.5 }, confidence: 0.95, manuallyAssigned: false, createdAt: new Date() };
+      const lowConfFace = { id: 'low-conf', mediaItemId: 'media-other', boundingBox: { x: 0.5, y: 0.5, w: 0.2, h: 0.2 }, confidence: 0.4, manuallyAssigned: false, createdAt: new Date() };
+      const person = makePerson({
+        coverFace: null,
+        // Faces come pre-sorted by confidence DESC from the DB query
+        faces: [highConfFace, lowConfFace],
+        profileMediaItemId: null,
+        profileCrop: null,
+      });
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(person);
+
+      const result = await service.getPerson(PERSON_ID, USER_ID, PERMS);
+
+      // Should pick the first (highest confidence) face
+      expect(result.coverFace?.faceId).toBe('high-conf');
+    });
+
+    it('returns null coverFace when no coverFace and no faces', async () => {
+      const person = makePerson({
+        coverFace: null,
+        faces: [],
+        profileMediaItemId: null,
+        profileCrop: null,
+      });
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(person);
+
+      const result = await service.getPerson(PERSON_ID, USER_ID, PERMS);
+
+      expect(result.coverFace).toBeNull();
+    });
+
+    it('includes profileMediaItemId and profileCrop in detail response', async () => {
+      const crop = { x: 0.0, y: 0.1, w: 0.9, h: 0.85 };
+      const person = makePerson({
+        coverFace: null,
+        faces: [],
+        profileMediaItemId: MEDIA_ID,
+        profileCrop: crop,
+      });
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(person);
+
+      const result = await service.getPerson(PERSON_ID, USER_ID, PERMS);
+
+      expect(result.profileMediaItemId).toBe(MEDIA_ID);
+      expect(result.profileCrop).toEqual(crop);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // updatePerson — profile picture handling
+  // -------------------------------------------------------------------------
+
+  describe('updatePerson — profile picture', () => {
+    function makeMediaItem(overrides: Partial<any> = {}) {
+      return {
+        id: MEDIA_ID,
+        circleId: CIRCLE_ID,
+        deletedAt: null,
+        ...overrides,
+      };
+    }
+
+    it('sets profileMediaItemId and profileCrop when mediaItem is valid and person appears in it', async () => {
+      const crop = { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+      (mockPrisma.face.findFirst as jest.Mock).mockResolvedValue(makeFace({ mediaItemId: MEDIA_ID, personId: PERSON_ID }));
+      (mockPrisma.person.update as jest.Mock).mockResolvedValue({
+        ...makePerson(),
+        profileMediaItemId: MEDIA_ID,
+        profileCrop: crop,
+      });
+
+      const result = await service.updatePerson(
+        PERSON_ID,
+        { profileMediaItemId: MEDIA_ID, profileCrop: crop } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      expect(result.profileMediaItemId).toBe(MEDIA_ID);
+      expect(result.profileCrop).toEqual(crop);
+    });
+
+    it('clears profileMediaItemId and profileCrop when set to null', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.person.update as jest.Mock).mockResolvedValue({
+        ...makePerson(),
+        profileMediaItemId: null,
+        profileCrop: null,
+      });
+
+      const result = await service.updatePerson(
+        PERSON_ID,
+        { profileMediaItemId: null, profileCrop: null } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      expect(result.profileMediaItemId).toBeNull();
+      expect(result.profileCrop).toBeNull();
+    });
+
+    it('throws BadRequestException when mediaItem not found', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.updatePerson(
+          PERSON_ID,
+          { profileMediaItemId: MEDIA_ID, profileCrop: { x: 0, y: 0, w: 1, h: 1 } } as any,
+          USER_ID,
+          PERMS,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when mediaItem belongs to a different circle', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ circleId: 'other-circle' }),
+      );
+
+      await expect(
+        service.updatePerson(
+          PERSON_ID,
+          { profileMediaItemId: MEDIA_ID, profileCrop: { x: 0, y: 0, w: 1, h: 1 } } as any,
+          USER_ID,
+          PERMS,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when person has no face in that media item', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+      (mockPrisma.face.findFirst as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.updatePerson(
+          PERSON_ID,
+          { profileMediaItemId: MEDIA_ID, profileCrop: { x: 0, y: 0, w: 1, h: 1 } } as any,
+          USER_ID,
+          PERMS,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('returns profileMediaItemId and profileCrop in update response', async () => {
+      const crop = { x: 0.2, y: 0.2, w: 0.6, h: 0.6 };
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+      (mockPrisma.face.findFirst as jest.Mock).mockResolvedValue(makeFace({ mediaItemId: MEDIA_ID }));
+      (mockPrisma.person.update as jest.Mock).mockResolvedValue({
+        ...makePerson(),
+        profileMediaItemId: MEDIA_ID,
+        profileCrop: crop,
+      });
+
+      const result = await service.updatePerson(
+        PERSON_ID,
+        { profileMediaItemId: MEDIA_ID, profileCrop: crop } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      expect(result).toMatchObject({
+        id: PERSON_ID,
+        profileMediaItemId: MEDIA_ID,
+        profileCrop: crop,
+      });
     });
   });
 });
