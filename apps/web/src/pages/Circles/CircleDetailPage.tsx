@@ -42,6 +42,8 @@ import { useCircleContext } from '../../contexts/CircleContext';
 import { usePermissions } from '../../hooks/usePermissions';
 import { getCircle } from '../../services/circles';
 import { getCircleFaceSettings, updateCircleFaceSettings } from '../../services/face';
+import { getCircleTaggingSettings, updateCircleTaggingSettings } from '../../services/tagging';
+import type { CircleTaggingSettings } from '../../services/tagging';
 import type { Circle, CircleRole } from '../../types/circles';
 
 interface TabPanelProps {
@@ -92,6 +94,12 @@ export default function CircleDetailPage() {
   const [faceTogglingLoading, setFaceTogglingLoading] = useState(false);
   const [faceSuccessMsg, setFaceSuccessMsg] = useState<string | null>(null);
 
+  // Tagging settings state
+  const [taggingSettings, setTaggingSettings] = useState<CircleTaggingSettings | null>(null);
+  const [taggingSettingsLoading, setTaggingSettingsLoading] = useState(false);
+  const [taggingSettingsError, setTaggingSettingsError] = useState<string | null>(null);
+  const [taggingTogglingLoading, setTaggingTogglingLoading] = useState(false);
+
   // Invite dialog
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -136,6 +144,18 @@ export default function CircleDetailPage() {
       .finally(() => setFaceSettingsLoading(false));
   }, [circleId]);
 
+  useEffect(() => {
+    if (!circleId) return;
+    setTaggingSettingsLoading(true);
+    setTaggingSettingsError(null);
+    getCircleTaggingSettings(circleId)
+      .then(setTaggingSettings)
+      .catch((err: unknown) => {
+        setTaggingSettingsError(err instanceof Error ? err.message : 'Failed to load tagging settings');
+      })
+      .finally(() => setTaggingSettingsLoading(false));
+  }, [circleId]);
+
   const handleFaceToggle = async (enabled: boolean) => {
     setFaceTogglingLoading(true);
     setFaceSettingsError(null);
@@ -147,6 +167,20 @@ export default function CircleDetailPage() {
       setFaceSettingsError(err instanceof Error ? err.message : 'Failed to update face recognition setting');
     } finally {
       setFaceTogglingLoading(false);
+    }
+  };
+
+  const handleTaggingToggle = async (enabled: boolean) => {
+    setTaggingTogglingLoading(true);
+    setTaggingSettingsError(null);
+    try {
+      const updated = await updateCircleTaggingSettings(circleId, enabled);
+      setTaggingSettings(updated);
+      setFaceSuccessMsg(enabled ? 'Auto-tagging enabled.' : 'Auto-tagging disabled.');
+    } catch (err: unknown) {
+      setTaggingSettingsError(err instanceof Error ? err.message : 'Failed to update auto-tagging setting');
+    } finally {
+      setTaggingTogglingLoading(false);
     }
   };
 
@@ -422,6 +456,39 @@ export default function CircleDetailPage() {
                       Face recognition is currently{' '}
                       <strong>
                         {faceSettings?.faceRecognitionEnabled ? 'Enabled' : 'Disabled'}
+                      </strong>
+                    </Typography>
+                  )}
+                </Paper>
+
+                <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Auto-tagging uses AI to automatically add tags to photos in this circle. It is opt-in per circle.
+                  </Typography>
+                  {taggingSettingsError && (
+                    <Alert severity="error" sx={{ mb: 1 }}>
+                      {taggingSettingsError}
+                    </Alert>
+                  )}
+                  {taggingSettingsLoading ? (
+                    <CircularProgress size={20} />
+                  ) : canManage ? (
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={taggingSettings?.autoTaggingEnabled ?? false}
+                          onChange={(e) => void handleTaggingToggle(e.target.checked)}
+                          disabled={taggingTogglingLoading || !taggingSettings}
+                          color="primary"
+                        />
+                      }
+                      label={taggingTogglingLoading ? 'Updating…' : 'Enable auto-tagging'}
+                    />
+                  ) : (
+                    <Typography variant="body2">
+                      Auto-tagging is currently{' '}
+                      <strong>
+                        {taggingSettings?.autoTaggingEnabled ? 'Enabled' : 'Disabled'}
                       </strong>
                     </Typography>
                   )}
