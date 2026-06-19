@@ -551,7 +551,7 @@ function PersonDetailDrawer({
   };
 
   return (
-    <Box sx={{ width: { xs: 320, sm: 400 }, p: 2 }}>
+    <Box sx={{ width: { xs: '100vw', sm: 400 }, maxWidth: '100vw', p: 2 }}>
       {/* Person avatar — centered at top */}
       <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
         <PersonAvatar person={avatarPerson} size={72} />
@@ -582,7 +582,7 @@ function PersonDetailDrawer({
             <Typography variant="h6" sx={{ flexGrow: 1 }}>
               {person.name ?? 'Unlabeled'}
             </Typography>
-            <IconButton size="small" onClick={() => setEditing(true)} aria-label="Edit name">
+            <IconButton onClick={() => setEditing(true)} aria-label="Edit name">
               <EditIcon fontSize="small" />
             </IconButton>
           </>
@@ -591,7 +591,6 @@ function PersonDetailDrawer({
         {/* Merge action — admin/collaborator only */}
         {canManage && (
           <IconButton
-            size="small"
             onClick={() => setMergeDialogOpen(true)}
             aria-label="Merge into another person"
             title="Merge into another person"
@@ -603,7 +602,6 @@ function PersonDetailDrawer({
         {/* Delete action — admin/collaborator only */}
         {canManage && (
           <IconButton
-            size="small"
             color="error"
             onClick={() => setDeleteDialogOpen(true)}
             aria-label="Delete person"
@@ -616,7 +614,6 @@ function PersonDetailDrawer({
         {/* Favorite toggle */}
         <Tooltip title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}>
           <IconButton
-            size="small"
             disabled={toggling}
             onClick={() => {
               setToggling(true);
@@ -629,7 +626,7 @@ function PersonDetailDrawer({
           </IconButton>
         </Tooltip>
 
-        <IconButton size="small" onClick={onClose} aria-label="Close">
+        <IconButton onClick={onClose} aria-label="Close">
           <CloseIcon />
         </IconButton>
       </Stack>
@@ -921,6 +918,7 @@ function UnassignedFacesSection({
               variant="contained"
               onClick={() => setNameDialogOpen(true)}
               disabled={creating || assigning}
+              sx={{ minHeight: 44 }}
             >
               Name as new person
             </Button>
@@ -935,10 +933,11 @@ function UnassignedFacesSection({
                 <TextField
                   {...params}
                   label="Assign to existing person"
+                  fullWidth
                   sx={{ minWidth: 200 }}
                 />
               )}
-              sx={{ minWidth: 200 }}
+              sx={{ minWidth: 200, width: { xs: '100%', sm: 'auto' } }}
             />
             <Button
               size="small"
@@ -946,11 +945,12 @@ function UnassignedFacesSection({
               onClick={() => void handleAssignToExisting()}
               disabled={!assignTarget || assigning || creating}
               startIcon={assigning ? <CircularProgress size={14} /> : undefined}
+              sx={{ minHeight: 44 }}
             >
               {assigning ? 'Assigning…' : 'Assign'}
             </Button>
 
-            <Button size="small" onClick={() => setSelectedIds(new Set())}>
+            <Button size="small" onClick={() => setSelectedIds(new Set())} sx={{ minHeight: 44 }}>
               Clear
             </Button>
           </Stack>
@@ -1385,6 +1385,12 @@ export default function PeoplePage() {
         open={selectedPerson !== null}
         onClose={() => setSelectedPerson(null)}
         ModalProps={{ keepMounted: false }}
+        sx={{
+          '& .MuiDrawer-paper': {
+            width: { xs: '100%', sm: 400 },
+            maxWidth: '100%',
+          },
+        }}
       >
         {selectedPerson && activeCircleId && (
           <PersonDetailDrawer
