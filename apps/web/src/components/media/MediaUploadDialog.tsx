@@ -229,8 +229,11 @@ export function MediaUploadDialog({ open, onClose, onSuccess, circleId }: MediaU
         }
 
         // --- Pre-check: does the library already contain this hash?
-        if (contentHash !== null) {
-          const existing = await listMedia({ contentHash, pageSize: 1 });
+        // circleId is required by the API (dedup is per-circle); skip the
+        // pre-check if it is absent — the server-side register step still
+        // deduplicates via its `deduplicated` flag.
+        if (contentHash !== null && circleId) {
+          const existing = await listMedia({ circleId, contentHash, pageSize: 1 });
           if (existing.items.length > 0) {
             // Already in the library — skip the upload entirely.
             updateFileState(i, { status: 'duplicate', progress: 100 });
