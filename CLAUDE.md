@@ -581,7 +581,7 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 
 **Auto-Tagging:**
 - `AUTO_TAG_ENABLED` - Global kill-switch for auto-enqueue on upload; set to `false` to disable for all circles (per-circle opt-in still applies when `true`; default: `true`)
-- `TAG_MAX_IMAGE_DIM` - Maximum image dimension in pixels before downscaling prior to the vision model call (default: `2000`)
+- `TAG_MAX_IMAGE_DIM` - Maximum image long-edge in pixels before downscaling prior to the vision model call; 1568 matches Anthropic's auto-downscale threshold (default: `1568`)
 
 Note: The enrichment worker shared by both face detection and auto-tagging is controlled by `ENRICHMENT_WORKER_ENABLED` (default: `true`), `ENRICHMENT_JOB_POLL_MS` (default: `5000`), and `ENRICHMENT_WORKER_CONCURRENCY` (default: `1`). The legacy `FACE_WORKER_ENABLED` and `FACE_JOB_POLL_MS` aliases are still respected for backward compatibility.
 
