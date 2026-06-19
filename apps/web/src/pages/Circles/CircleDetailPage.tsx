@@ -35,12 +35,13 @@ import {
   Delete as DeleteIcon,
   ArrowBack as BackIcon,
   PersonAdd as InviteIcon,
+  Edit as EditIcon,
 } from '@mui/icons-material';
 import { useCircleMembers } from '../../hooks/useCircleMembers';
 import { useCircleInvites } from '../../hooks/useCircleInvites';
 import { useCircleContext } from '../../contexts/CircleContext';
 import { usePermissions } from '../../hooks/usePermissions';
-import { getCircle } from '../../services/circles';
+import { getCircle, updateCircle } from '../../services/circles';
 import { getCircleFaceSettings, updateCircleFaceSettings } from '../../services/face';
 import { getCircleTaggingSettings, updateCircleTaggingSettings } from '../../services/tagging';
 import type { CircleTaggingSettings } from '../../services/tagging';
@@ -107,6 +108,13 @@ export default function CircleDetailPage() {
   const [inviteNotes, setInviteNotes] = useState('');
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
+
+  // Edit circle dialog
+  const [editOpen, setEditOpen] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const canManage = isAdmin || activeCircleRole === 'circle_admin';
 
@@ -184,6 +192,32 @@ export default function CircleDetailPage() {
     }
   };
 
+  const handleEditOpen = () => {
+    setEditName(circle?.name ?? '');
+    setEditDescription(circle?.description ?? '');
+    setEditError(null);
+    setEditOpen(true);
+  };
+
+  const handleEditSave = async () => {
+    if (!circle || !editName.trim()) return;
+    setSaving(true);
+    setEditError(null);
+    try {
+      const updated = await updateCircle(circle.id, {
+        name: editName.trim(),
+        description: editDescription.trim() || undefined,
+      });
+      setCircle(updated);
+      setEditOpen(false);
+      setFaceSuccessMsg('Circle updated.');
+    } catch (err: unknown) {
+      setEditError(err instanceof Error ? err.message : 'Failed to update circle');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleSendInvite = useCallback(async () => {
     if (!inviteEmail.trim()) return;
     setInviting(true);
@@ -224,7 +258,7 @@ export default function CircleDetailPage() {
         <IconButton onClick={() => navigate('/circles')} aria-label="Back to circles">
           <BackIcon />
         </IconButton>
-        <Box>
+        <Box sx={{ flex: 1 }}>
           <Typography variant="h5" component="h1">
             {circle?.name}
           </Typography>
@@ -234,6 +268,11 @@ export default function CircleDetailPage() {
             </Typography>
           )}
         </Box>
+        {canManage && (
+          <IconButton onClick={handleEditOpen} aria-label="Edit circle">
+            <EditIcon />
+          </IconButton>
+        )}
       </Box>
 
       <Paper variant="outlined">
@@ -561,6 +600,53 @@ export default function CircleDetailPage() {
             startIcon={inviting ? <CircularProgress size={16} /> : undefined}
           >
             {inviting ? 'Sending...' : 'Send Invite'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit circle dialog */}
+      <Dialog open={editOpen} onClose={() => !saving && setEditOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Edit circle</DialogTitle>
+        <DialogContent>
+          {editError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {editError}
+            </Alert>
+          )}
+          <TextField
+            autoFocus
+            label="Name"
+            fullWidth
+            required
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            sx={{ mt: 1, mb: 2 }}
+          />
+          <TextField
+            label="Description"
+            fullWidth
+            multiline
+            rows={3}
+            value={editDescription}
+            onChange={(e) => setEditDescription(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditOpen(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => void handleEditSave()}
+            disabled={
+              saving ||
+              !editName.trim() ||
+              (editName.trim() === (circle?.name ?? '') &&
+                editDescription.trim() === (circle?.description ?? ''))
+            }
+            startIcon={saving ? <CircularProgress size={16} /> : undefined}
+          >
+            {saving ? 'Saving...' : 'Save'}
           </Button>
         </DialogActions>
       </Dialog>
