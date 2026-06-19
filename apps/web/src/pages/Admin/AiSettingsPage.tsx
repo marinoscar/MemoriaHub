@@ -34,6 +34,7 @@ function AiSettingsContent() {
     testProvider,
     getModels,
     saveSearchFeature,
+    saveTaggingFeature,
   } = useAiSettings();
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -53,6 +54,14 @@ function AiSettingsContent() {
   // Test result state
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
   const [testLoading, setTestLoading] = useState(false);
+
+  // Tagging feature state
+  const [taggingProvider, setTaggingProvider] = useState('');
+  const [taggingModel, setTaggingModel] = useState('');
+  const [taggingModels, setTaggingModels] = useState<string[]>([]);
+  const [taggingModelsLoading, setTaggingModelsLoading] = useState(false);
+  const [taggingTestResult, setTaggingTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
+  const [taggingTestLoading, setTaggingTestLoading] = useState(false);
 
   useEffect(() => {
     void fetchSettings();
@@ -84,6 +93,12 @@ function AiSettingsContent() {
       setSearchProvider(settings.features.search.provider ?? '');
       setSearchModel(settings.features.search.model ?? '');
     }
+
+    // Pre-populate tagging feature selections
+    if (settings.features.tagging) {
+      setTaggingProvider(settings.features.tagging.provider ?? '');
+      setTaggingModel(settings.features.tagging.model ?? '');
+    }
   }, [settings]);
 
   // Load models when search provider changes
@@ -96,6 +111,17 @@ function AiSettingsContent() {
       .catch(() => setAvailableModels([]))
       .finally(() => setModelsLoading(false));
   }, [searchProvider, getModels]);
+
+  // Load models when tagging provider changes
+  useEffect(() => {
+    if (!taggingProvider) return;
+    setTaggingModelsLoading(true);
+    setTaggingModels([]);
+    getModels(taggingProvider)
+      .then((models) => setTaggingModels(models))
+      .catch(() => setTaggingModels([]))
+      .finally(() => setTaggingModelsLoading(false));
+  }, [taggingProvider, getModels]);
 
   const handleSaveCredentials = async (provider: string) => {
     try {
@@ -147,6 +173,30 @@ function AiSettingsContent() {
       setTestResult({ ok: false, error: err instanceof Error ? err.message : 'Test failed' });
     } finally {
       setTestLoading(false);
+    }
+  };
+
+  const handleSaveTaggingFeature = async () => {
+    if (!taggingProvider || !taggingModel) return;
+    try {
+      await saveTaggingFeature(taggingProvider, taggingModel);
+      setSuccessMessage('Tagging feature settings saved');
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to save tagging feature');
+    }
+  };
+
+  const handleTestTaggingProvider = async () => {
+    if (!taggingProvider || !taggingModel) return;
+    setTaggingTestLoading(true);
+    setTaggingTestResult(null);
+    try {
+      const result = await testProvider(taggingProvider, taggingModel);
+      setTaggingTestResult(result);
+    } catch (err) {
+      setTaggingTestResult({ ok: false, error: err instanceof Error ? err.message : 'Test failed' });
+    } finally {
+      setTaggingTestLoading(false);
     }
   };
 
@@ -355,6 +405,89 @@ function AiSettingsContent() {
               disabled={!searchProvider || !searchModel || testLoading}
               startIcon={testLoading ? <CircularProgress size={16} /> : undefined}
               onClick={() => void handleTestProvider()}
+            >
+              Test
+            </Button>
+          </Stack>
+        </Paper>
+
+        {/* Tagging feature section */}
+        <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
+          <Typography variant="h6" sx={{ mb: 2 }}>
+            Tagging Feature
+          </Typography>
+
+          <FormControl size="small" fullWidth sx={{ mb: 2 }}>
+            <InputLabel>Provider</InputLabel>
+            <Select
+              label="Provider"
+              value={taggingProvider}
+              onChange={(e) => {
+                setTaggingProvider(e.target.value);
+                setTaggingModel('');
+                setTaggingTestResult(null);
+              }}
+            >
+              <MenuItem value="">Select provider</MenuItem>
+              <MenuItem value="openai">OpenAI</MenuItem>
+              <MenuItem value="anthropic">Anthropic</MenuItem>
+            </Select>
+          </FormControl>
+
+          <FormControl size="small" fullWidth sx={{ mb: 2 }} disabled={!taggingProvider || taggingModelsLoading}>
+            <InputLabel>Model</InputLabel>
+            <Select
+              label="Model"
+              value={taggingModel}
+              onChange={(e) => {
+                setTaggingModel(e.target.value);
+                setTaggingTestResult(null);
+              }}
+            >
+              {taggingModelsLoading ? (
+                <MenuItem disabled>Loading models…</MenuItem>
+              ) : taggingModels.length === 0 ? (
+                <MenuItem disabled>No models available</MenuItem>
+              ) : (
+                taggingModels.map((m) => (
+                  <MenuItem key={m} value={m}>
+                    {m}
+                  </MenuItem>
+                ))
+              )}
+            </Select>
+          </FormControl>
+
+          {/* Test result */}
+          {taggingTestResult !== null && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+              {taggingTestResult.ok ? (
+                <CheckCircleIcon color="success" />
+              ) : (
+                <ErrorIcon color="error" />
+              )}
+              <Typography
+                variant="body2"
+                color={taggingTestResult.ok ? 'success.main' : 'error.main'}
+              >
+                {taggingTestResult.ok ? 'Connection successful' : (taggingTestResult.error ?? 'Test failed')}
+              </Typography>
+            </Box>
+          )}
+
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant="contained"
+              disabled={!taggingProvider || !taggingModel}
+              onClick={() => void handleSaveTaggingFeature()}
+            >
+              Save
+            </Button>
+            <Button
+              variant="outlined"
+              disabled={!taggingProvider || !taggingModel || taggingTestLoading}
+              startIcon={taggingTestLoading ? <CircularProgress size={16} /> : undefined}
+              onClick={() => void handleTestTaggingProvider()}
             >
               Test
             </Button>
