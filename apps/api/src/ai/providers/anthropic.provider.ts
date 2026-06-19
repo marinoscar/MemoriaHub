@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type {
   AiProvider,
   AiProviderCredentials,
+  AnalyzeImageRequest,
   ChatMessage,
   ChatRequest,
   ChatStreamEvent,
@@ -198,5 +199,45 @@ export class AnthropicProvider implements AiProvider {
       const message = err instanceof Error ? err.message : 'Unknown error';
       return { ok: false, error: message };
     }
+  }
+
+  async analyzeImage(
+    creds: AiProviderCredentials,
+    req: AnalyzeImageRequest,
+  ): Promise<string> {
+    const client = new Anthropic({
+      apiKey: creds.apiKey,
+      ...(creds.baseUrl && { baseURL: creds.baseUrl }),
+    });
+
+    const response = await client.messages.create({
+      model: req.model,
+      max_tokens: 1024,
+      ...(req.system && { system: req.system }),
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: req.mimeType as Anthropic.Base64ImageSource['media_type'],
+                data: req.imageBase64,
+              },
+            },
+            {
+              type: 'text',
+              text: req.prompt,
+            },
+          ],
+        },
+      ],
+    });
+
+    return response.content
+      .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+      .map(block => block.text)
+      .join('');
   }
 }

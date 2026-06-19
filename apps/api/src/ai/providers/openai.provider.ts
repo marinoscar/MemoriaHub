@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import type {
   AiProvider,
   AiProviderCredentials,
+  AnalyzeImageRequest,
   ChatMessage,
   ChatRequest,
   ChatStreamEvent,
@@ -224,5 +225,45 @@ export class OpenAiProvider implements AiProvider {
       }
       return { ok: false, error: e?.message ?? 'Unknown error' };
     }
+  }
+
+  async analyzeImage(
+    creds: AiProviderCredentials,
+    req: AnalyzeImageRequest,
+  ): Promise<string> {
+    const client = new OpenAI({
+      apiKey: creds.apiKey,
+      ...(creds.baseUrl && { baseURL: creds.baseUrl }),
+    });
+
+    const messages: OpenAI.ChatCompletionMessageParam[] = [];
+
+    if (req.system) {
+      messages.push({ role: 'system', content: req.system });
+    }
+
+    messages.push({
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: req.prompt,
+        },
+        {
+          type: 'image_url',
+          image_url: {
+            url: `data:${req.mimeType};base64,${req.imageBase64}`,
+          },
+        },
+      ],
+    });
+
+    const response = await client.chat.completions.create({
+      model: req.model,
+      max_tokens: 1024,
+      messages,
+    });
+
+    return response.choices[0]?.message?.content ?? '';
   }
 }
