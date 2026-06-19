@@ -121,7 +121,7 @@ export function BulkActionToolbar({
         <Button
           size="small"
           variant="text"
-          sx={{ color: 'inherit' }}
+          sx={{ color: 'inherit', minHeight: 44 }}
           startIcon={<CloseIcon />}
           onClick={onClear}
         >
@@ -133,7 +133,7 @@ export function BulkActionToolbar({
             <Button
               size="small"
               variant="outlined"
-              sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)' }}
+              sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)', minHeight: 44 }}
               startIcon={<LocationOnIcon />}
               onClick={onOpenLocation}
               disabled={loading}
@@ -144,7 +144,7 @@ export function BulkActionToolbar({
             <Button
               size="small"
               variant="outlined"
-              sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)' }}
+              sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)', minHeight: 44 }}
               startIcon={<LabelIcon />}
               onClick={onOpenTags}
               disabled={loading}
@@ -155,7 +155,7 @@ export function BulkActionToolbar({
             <Button
               size="small"
               variant="outlined"
-              sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)' }}
+              sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)', minHeight: 44 }}
               startIcon={loading ? <CircularProgress size={14} sx={{ color: 'inherit' }} /> : <CategoryIcon />}
               onClick={(e) => setClassifyAnchor(e.currentTarget)}
               disabled={loading}
@@ -166,7 +166,7 @@ export function BulkActionToolbar({
             <Button
               size="small"
               variant="outlined"
-              sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)' }}
+              sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)', minHeight: 44 }}
               startIcon={<StarIcon />}
               onClick={(e) => setFavoriteAnchor(e.currentTarget)}
               disabled={loading}
@@ -177,7 +177,7 @@ export function BulkActionToolbar({
             <Button
               size="small"
               variant="outlined"
-              sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)' }}
+              sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)', minHeight: 44 }}
               startIcon={<DeleteIcon />}
               onClick={() => setDeleteConfirmOpen(true)}
               disabled={loading}

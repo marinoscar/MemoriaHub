@@ -26,6 +26,7 @@ import {
   CircularProgress,
   Skeleton,
   Alert,
+  Badge,
   Button,
   Collapse,
   Pagination,
@@ -174,6 +175,7 @@ interface MediaTileProps {
 
 function MediaTile({ item, onSelect, onToggleFavorite, isSelected, anySelected, onToggleSelect, selectionMode }: MediaTileProps) {
   const theme = useTheme();
+  const isMobileDevice = useMediaQuery(theme.breakpoints.down('sm'));
   const [imgError, setImgError] = useState(false);
 
   const thumbUrl = item.thumbnailUrl;
@@ -298,7 +300,7 @@ function MediaTile({ item, onSelect, onToggleFavorite, isSelected, anySelected, 
         </Box>
       )}
 
-      {/* Selection checkbox — shown on hover or when any item is selected */}
+      {/* Selection checkbox — shown on hover or when any item is selected; always visible on mobile */}
       <Box
         className="select-overlay"
         sx={{
@@ -306,7 +308,7 @@ function MediaTile({ item, onSelect, onToggleFavorite, isSelected, anySelected, 
           top: 4,
           left: 4,
           zIndex: 2,
-          opacity: selectionMode || anySelected || isSelected ? 1 : 0,
+          opacity: isMobileDevice || selectionMode || anySelected || isSelected ? 1 : 0,
           transition: 'opacity 0.15s',
           '.MuiImageListItem-root:hover &': { opacity: 1 },
         }}
@@ -319,7 +321,7 @@ function MediaTile({ item, onSelect, onToggleFavorite, isSelected, anySelected, 
             color: isSelected ? 'primary.main' : 'white',
             backgroundColor: 'rgba(0,0,0,0.4)',
             '&:hover': { backgroundColor: 'rgba(0,0,0,0.6)' },
-            p: 0.25,
+            p: { xs: 0.5, sm: 0.25 },
           }}
         >
           {isSelected ? <CheckBoxIcon fontSize="small" /> : <CheckBoxOutlineBlankIcon fontSize="small" />}
@@ -356,7 +358,7 @@ function MediaTile({ item, onSelect, onToggleFavorite, isSelected, anySelected, 
                 onToggleFavorite(item);
               }}
               aria-label={item.favorite ? 'Remove from favorites' : 'Add to favorites'}
-              sx={{ color: item.favorite ? theme.palette.warning.main : 'white' }}
+              sx={{ color: item.favorite ? theme.palette.warning.main : 'white', p: { xs: 1, sm: 0.5 } }}
             >
               {item.favorite ? <StarIcon /> : <StarBorderIcon />}
             </IconButton>
@@ -461,6 +463,44 @@ export default function MediaLibraryPage() {
   const [exportError, setExportError] = useState<string | null>(null);
 
   const geoFacets = useMemo(() => deriveGeoFacets(items), [items]);
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (filterType) count++;
+    if (filterClassification) count++;
+    if (filterFavorite) count++;
+    if (filterAlbum) count++;
+    if (filterDateFrom) count++;
+    if (filterDateTo) count++;
+    if (selectedTags.length > 0) count++;
+    if (filterCountry) count++;
+    if (filterRegion) count++;
+    if (filterLocality) count++;
+    if (locationSearch) count++;
+    if (filterCameraMake) count++;
+    if (filterCameraModel) count++;
+    if (filterDeviceName) count++;
+    if (filterMissingGeo) count++;
+    if (peopleFilter.ids.length > 0) count++;
+    return count;
+  }, [
+    filterType,
+    filterClassification,
+    filterFavorite,
+    filterAlbum,
+    filterDateFrom,
+    filterDateTo,
+    selectedTags,
+    filterCountry,
+    filterRegion,
+    filterLocality,
+    locationSearch,
+    filterCameraMake,
+    filterCameraModel,
+    filterDeviceName,
+    filterMissingGeo,
+    peopleFilter,
+  ]);
 
   const buildParams = useCallback((): MediaQueryParams => {
     const params: MediaQueryParams = {
@@ -764,7 +804,7 @@ export default function MediaLibraryPage() {
           Media Library
         </Typography>
 
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
           {/* Select toggle button — touch-friendly multi-select */}
           {activeCircleRole !== 'viewer' && (
             <Button
@@ -780,6 +820,7 @@ export default function MediaLibraryPage() {
               }}
               aria-pressed={selectionMode}
               aria-label={selectionMode ? 'Exit selection mode' : 'Enter selection mode'}
+              sx={{ minHeight: 44 }}
             >
               {selectionMode ? 'Done' : 'Select'}
             </Button>
@@ -797,6 +838,7 @@ export default function MediaLibraryPage() {
                 aria-expanded={exportMenuOpen ? 'true' : undefined}
                 aria-controls={exportMenuOpen ? 'export-format-menu' : undefined}
                 onClick={(e) => setExportAnchorEl(e.currentTarget)}
+                sx={{ minHeight: 44 }}
               >
                 Export
               </Button>
@@ -819,8 +861,13 @@ export default function MediaLibraryPage() {
 
           <Button
             variant={showFilters ? 'contained' : 'outlined'}
-            startIcon={<FilterIcon />}
+            startIcon={
+              <Badge badgeContent={activeFilterCount} color="error">
+                <FilterIcon />
+              </Badge>
+            }
             onClick={() => setShowFilters((prev) => !prev)}
+            sx={{ minHeight: 44 }}
           >
             Filters
           </Button>
@@ -957,6 +1004,7 @@ export default function MediaLibraryPage() {
                   setFilterFavorite(val === 'favorites');
                   setPage(1);
                 }}
+                sx={{ flexWrap: 'wrap' }}
               >
                 <ToggleButton value="all">All</ToggleButton>
                 <ToggleButton value="favorites">
@@ -1125,7 +1173,7 @@ export default function MediaLibraryPage() {
               {peopleFilter.ids.length > 0 && (
                 <Button
                   size="small"
-                  sx={{ mt: 1 }}
+                  sx={{ mt: 1, minHeight: 44 }}
                   onClick={() => { setPeopleFilter({ ids: [], mode: 'any' }); setPage(1); }}
                 >
                   Clear people filter
@@ -1297,7 +1345,7 @@ export default function MediaLibraryPage() {
 
           {/* Pagination */}
           {meta && meta.totalPages > 1 && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3, pb: 2 }}>
               <Pagination
                 count={meta.totalPages}
                 page={page}
@@ -1314,7 +1362,7 @@ export default function MediaLibraryPage() {
         color="primary"
         aria-label="Upload media"
         onClick={() => setUploadOpen(true)}
-        sx={{ position: 'fixed', bottom: 24, right: 24 }}
+        sx={{ position: 'fixed', bottom: { xs: 16, sm: 24 }, right: 24 }}
       >
         <UploadIcon />
       </Fab>
