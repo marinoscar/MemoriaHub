@@ -170,7 +170,16 @@ describe('AutoTaggingService', () => {
     // Default tag upsert
     (mockPrisma.tag.upsert as jest.Mock).mockResolvedValue({ id: 'tag-1' });
     (mockPrisma.mediaTag.upsert as jest.Mock).mockResolvedValue({});
+    (mockPrisma.mediaTag.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
     (mockPrisma.mediaTagStatus.upsert as jest.Mock).mockResolvedValue({});
+
+    // $transaction executes the callback with mockPrisma as the tx
+    (mockPrisma.$transaction as jest.Mock).mockImplementation(async (arg: any) => {
+      if (typeof arg === 'function') {
+        return arg(mockPrisma);
+      }
+      return arg;
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -637,6 +646,67 @@ describe('AutoTaggingService', () => {
       );
       expect(failedUpsert).toBeDefined();
       expect(failedUpsert![0].create.lastError).toMatch(/exceeds maximum size/i);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // AI tag reconciliation: deleteMany stale + upsert current with source=ai
+  // -------------------------------------------------------------------------
+
+  describe('AI tag reconciliation', () => {
+    it('calls tx.mediaTag.deleteMany with notIn: normalizedLabels to remove stale AI tags', async () => {
+      mockProvider.analyzeImage.mockResolvedValue('["Mountains","Outdoors"]');
+      (mockPrisma.tagLabel.findMany as jest.Mock).mockResolvedValue([
+        { name: 'Backyard' },
+        { name: 'Mountains' },
+        { name: 'Outdoors' },
+        { name: 'Vacation' },
+      ]);
+      (mockPrisma.tag.upsert as jest.Mock).mockResolvedValue({ id: 'tag-1' });
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockPrisma.mediaTag.deleteMany).toHaveBeenCalledWith({
+        where: {
+          mediaItemId: 'media-1',
+          source: 'ai',
+          tag: { name: { notIn: ['Mountains', 'Outdoors'] } },
+        },
+      });
+    });
+
+    it('upserts current labels with source=ai in create and empty update (no manual downgrade)', async () => {
+      mockProvider.analyzeImage.mockResolvedValue('["Mountains"]');
+      (mockPrisma.tagLabel.findMany as jest.Mock).mockResolvedValue([{ name: 'Mountains' }]);
+      (mockPrisma.tag.upsert as jest.Mock).mockResolvedValue({ id: 'tag-mountains' });
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockPrisma.mediaTag.upsert).toHaveBeenCalledWith({
+        where: { tagId_mediaItemId: { tagId: 'tag-mountains', mediaItemId: 'media-1' } },
+        create: { tagId: 'tag-mountains', mediaItemId: 'media-1', source: 'ai' },
+        update: {},
+      });
+    });
+
+    it('calls deleteMany with notIn: [] when model returns empty array (all AI tags removed)', async () => {
+      mockProvider.analyzeImage.mockResolvedValue('[]');
+      (mockPrisma.tagLabel.findMany as jest.Mock).mockResolvedValue([
+        { name: 'Beach' },
+        { name: 'Sunset' },
+      ]);
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockPrisma.mediaTag.deleteMany).toHaveBeenCalledWith({
+        where: {
+          mediaItemId: 'media-1',
+          source: 'ai',
+          tag: { name: { notIn: [] } },
+        },
+      });
+      // No upsert calls since no labels produced
+      expect(mockPrisma.mediaTag.upsert).not.toHaveBeenCalled();
     });
   });
 

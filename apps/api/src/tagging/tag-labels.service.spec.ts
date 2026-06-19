@@ -221,33 +221,80 @@ describe('TagLabelsService', () => {
   // -------------------------------------------------------------------------
 
   describe('remove', () => {
-    it('deletes the tag label without returning a value', async () => {
-      (mockPrisma.tagLabel.delete as jest.Mock).mockResolvedValue(
-        makeTagLabel(),
-      );
+    const label = makeTagLabel({ id: 'label-1', name: 'Beach' });
 
+    beforeEach(() => {
+      // Default: label found
+      (mockPrisma.tagLabel.findUnique as jest.Mock).mockResolvedValue(label);
+      (mockPrisma.tagLabel.delete as jest.Mock).mockResolvedValue(label);
+      (mockPrisma.mediaTag.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.tag.findMany as jest.Mock).mockResolvedValue([]);
+      // $transaction executes callback
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (fn: any) => fn(mockPrisma));
+    });
+
+    it('resolves without returning a value on success', async () => {
       await expect(service.remove('label-1')).resolves.toBeUndefined();
+    });
 
-      expect(mockPrisma.tagLabel.delete).toHaveBeenCalledWith({
-        where: { id: 'label-1' },
+    it('deletes the tag label inside the transaction', async () => {
+      await service.remove('label-1');
+      expect(mockPrisma.tagLabel.delete).toHaveBeenCalledWith({ where: { id: 'label-1' } });
+    });
+
+    it('calls tx.mediaTag.deleteMany for AI-sourced instances of the label (case-insensitive)', async () => {
+      await service.remove('label-1');
+      expect(mockPrisma.mediaTag.deleteMany).toHaveBeenCalledWith({
+        where: {
+          source: 'ai',
+          tag: { name: { equals: 'Beach', mode: 'insensitive' } },
+        },
       });
     });
 
-    it('throws NotFoundException on P2025 (record not found)', async () => {
-      (mockPrisma.tagLabel.delete as jest.Mock).mockRejectedValue(
-        makePrismaError('P2025'),
-      );
+    it('deletes now-empty Tag rows after removing AI MediaTags', async () => {
+      (mockPrisma.tag.findMany as jest.Mock).mockResolvedValue([{ id: 'tag-beach' }]);
 
-      await expect(service.remove('missing-id')).rejects.toThrow(
-        NotFoundException,
-      );
+      await service.remove('label-1');
+
+      expect(mockPrisma.tag.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: ['tag-beach'] } },
+      });
     });
 
-    it('rethrows non-Prisma errors as-is', async () => {
-      const genericError = new Error('FK violation');
-      (mockPrisma.tagLabel.delete as jest.Mock).mockRejectedValue(genericError);
+    it('does NOT call tag.deleteMany when no empty tags remain', async () => {
+      (mockPrisma.tag.findMany as jest.Mock).mockResolvedValue([]);
 
-      await expect(service.remove('label-1')).rejects.toThrow('FK violation');
+      await service.remove('label-1');
+
+      expect(mockPrisma.tag.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException when label does not exist', async () => {
+      (mockPrisma.tagLabel.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(service.remove('missing-id')).rejects.toThrow(NotFoundException);
+    });
+
+    it('does not call $transaction when label is not found (early 404)', async () => {
+      (mockPrisma.tagLabel.findUnique as jest.Mock).mockResolvedValue(null);
+
+      try { await service.remove('missing-id'); } catch {}
+
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('preserves manual MediaTag instances (only AI source is deleted)', async () => {
+      await service.remove('label-1');
+      const deleteManyCalls = (mockPrisma.mediaTag.deleteMany as jest.Mock).mock.calls;
+      expect(deleteManyCalls).toHaveLength(1);
+      expect(deleteManyCalls[0][0].where.source).toBe('ai');
+    });
+
+    it('rethrows non-404 errors from the transaction', async () => {
+      (mockPrisma.$transaction as jest.Mock).mockRejectedValue(new Error('DB error'));
+
+      await expect(service.remove('label-1')).rejects.toThrow('DB error');
     });
   });
 });
