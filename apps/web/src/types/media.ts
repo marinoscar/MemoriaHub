@@ -113,6 +113,10 @@ export interface MediaQueryParams {
   missingGeo?: boolean;
   /** Filter media items by person ID (returns items containing faces assigned to this person). */
   personId?: string;
+  /** Filter by multiple person IDs. Backend accepts comma-separated param. */
+  personIds?: string[];
+  /** Match mode for multi-person filter. Default: 'any' (OR). */
+  peopleMatch?: 'any' | 'all';
 }
 
 // ---------------------------------------------------------------------------
