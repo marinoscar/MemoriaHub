@@ -757,6 +757,16 @@ function UnassignedFacesSection({
   const [assigning, setAssigning] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Refresh on mount and whenever the window regains focus (handles stale IDs
+  // after detection re-runs in another tab)
+  useEffect(() => {
+    void refresh();
+    const onFocus = () => void refresh();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [circleId]);
+
   // Resolve thumbnail URLs for each unique mediaItemId
   useEffect(() => {
     if (faces.length === 0) return;
@@ -801,7 +811,22 @@ function UnassignedFacesSection({
       await refresh();
       onAssigned();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to create person');
+      const msg = err instanceof Error ? err.message : '';
+      const isStale =
+        msg.toLowerCase().includes('not found') ||
+        (err as { status?: number }).status === 404 ||
+        (err as { status?: number }).status === 400;
+      if (isStale) {
+        await refresh();
+        setSelectedIds(new Set());
+        setNewPersonName('');
+        setNameDialogOpen(false);
+        setActionError(
+          'The face list changed (detection re-ran). Please reselect and try again.',
+        );
+      } else {
+        setActionError(msg || 'Failed to create person');
+      }
     } finally {
       setCreating(false);
     }
@@ -818,7 +843,21 @@ function UnassignedFacesSection({
       await refresh();
       onAssigned();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to assign faces');
+      const msg = err instanceof Error ? err.message : '';
+      const isStale =
+        msg.toLowerCase().includes('not found') ||
+        (err as { status?: number }).status === 404 ||
+        (err as { status?: number }).status === 400;
+      if (isStale) {
+        await refresh();
+        setSelectedIds(new Set());
+        setAssignTarget(null);
+        setActionError(
+          'The face list changed (detection re-ran). Please reselect and try again.',
+        );
+      } else {
+        setActionError(msg || 'Failed to assign faces');
+      }
     } finally {
       setAssigning(false);
     }
