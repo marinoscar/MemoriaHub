@@ -108,7 +108,10 @@ describe('SystemSettingsService', () => {
         ui: { allowUserThemeOverride: false },
         features: { newFeature: true },
         ai: {
-          features: { search: { provider: null, model: null } },
+          features: {
+            search: { provider: null, model: null },
+            tagging: { provider: null, model: null },
+          },
           conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 30 },
         },
       };
@@ -159,7 +162,10 @@ describe('SystemSettingsService', () => {
         ui: { allowUserThemeOverride: true },
         features: {},
         ai: {
-          features: { search: { provider: null, model: null } },
+          features: {
+            search: { provider: null, model: null },
+            tagging: { provider: null, model: null },
+          },
           conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 30 },
         },
       };
@@ -189,7 +195,10 @@ describe('SystemSettingsService', () => {
         ui: { allowUserThemeOverride: false },
         features: {},
         ai: {
-          features: { search: { provider: null, model: null } },
+          features: {
+            search: { provider: null, model: null },
+            tagging: { provider: null, model: null },
+          },
           conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 30 },
         },
       };

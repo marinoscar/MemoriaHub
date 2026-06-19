@@ -12,6 +12,7 @@ import {
   UpsertAiCredentialsDto,
   TestAiProviderDto,
   SetSearchFeatureDto,
+  SetTaggingFeatureDto,
 } from './dto/ai-credentials.dto';
 
 @Injectable()
@@ -60,7 +61,10 @@ export class AiSettingsService {
           last4: null,
           baseUrl: null,
         })),
-      features: ai?.features ?? { search: { provider: null, model: null } },
+      features: ai?.features ?? {
+        search: { provider: null, model: null },
+        tagging: { provider: null, model: null },
+      },
       conversations: ai?.conversations ?? {
         archiveAfterDays: 30,
         deleteAfterArchiveDays: 30,
@@ -164,6 +168,21 @@ export class AiSettingsService {
         ai: {
           features: {
             search: { provider: dto.provider, model: dto.model },
+          },
+        },
+      } as any,
+      userId,
+    );
+    return { provider: dto.provider, model: dto.model };
+  }
+
+  /** Update tagging feature settings in system settings */
+  async setTaggingFeature(dto: SetTaggingFeatureDto, userId: string) {
+    await this.systemSettings.patchSettings(
+      {
+        ai: {
+          features: {
+            tagging: { provider: dto.provider, model: dto.model },
           },
         },
       } as any,

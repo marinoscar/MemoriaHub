@@ -19,3 +19,9 @@ export const setSearchFeatureSchema = z.object({
   model: z.string().min(1).nullable(),
 });
 export class SetSearchFeatureDto extends createZodDto(setSearchFeatureSchema) {}
+
+export const setTaggingFeatureSchema = z.object({
+  provider: z.string().min(1).nullable(),
+  model: z.string().min(1).nullable(),
+});
+export class SetTaggingFeatureDto extends createZodDto(setTaggingFeatureSchema) {}

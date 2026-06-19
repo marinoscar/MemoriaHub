@@ -144,6 +144,10 @@ export class SystemSettingsService {
             provider: (dto as any).ai?.features?.search?.provider ?? current.ai?.features?.search?.provider ?? null,
             model: (dto as any).ai?.features?.search?.model ?? current.ai?.features?.search?.model ?? null,
           },
+          tagging: {
+            provider: (dto as any).ai?.features?.tagging?.provider ?? current.ai?.features?.tagging?.provider ?? null,
+            model: (dto as any).ai?.features?.tagging?.model ?? current.ai?.features?.tagging?.model ?? null,
+          },
         },
         conversations: {
           archiveAfterDays: (dto as any).ai?.conversations?.archiveAfterDays ?? current.ai?.conversations?.archiveAfterDays ?? 30,
