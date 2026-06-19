@@ -1,5 +1,31 @@
-import { isEligibleOpenAiModel } from './openai.provider';
+import OpenAI from 'openai';
+import { isEligibleOpenAiModel, OpenAiProvider } from './openai.provider';
 
+// ---------------------------------------------------------------------------
+// Mock the OpenAI SDK so no real HTTP calls are made
+// ---------------------------------------------------------------------------
+jest.mock('openai');
+
+const mockCreate = jest.fn();
+const MockOpenAI = OpenAI as jest.MockedClass<typeof OpenAI>;
+
+beforeEach(() => {
+  mockCreate.mockReset();
+  MockOpenAI.mockImplementation(
+    () =>
+      ({
+        chat: {
+          completions: {
+            create: mockCreate,
+          },
+        },
+      }) as unknown as OpenAI,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// isEligibleOpenAiModel — model filter
+// ---------------------------------------------------------------------------
 describe('isEligibleOpenAiModel', () => {
   // ---- models that SHOULD be included ----
   it.each([
@@ -34,5 +60,91 @@ describe('isEligibleOpenAiModel', () => {
     ['dall-e-3', false],
   ])('returns false for %s', (id, expected) => {
     expect(isEligibleOpenAiModel(id)).toBe(expected);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OpenAiProvider.testModel — must use max_completion_tokens (not max_tokens)
+// ---------------------------------------------------------------------------
+describe('OpenAiProvider.testModel', () => {
+  const provider = new OpenAiProvider();
+  const creds = { apiKey: 'sk-test', baseUrl: undefined };
+
+  it('sends max_completion_tokens: 1 (not max_tokens) for a healthy model', async () => {
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: 'ok' } }],
+    });
+
+    const result = await provider.testModel(creds, 'gpt-5.4');
+
+    expect(result).toEqual({ ok: true });
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs).toHaveProperty('max_completion_tokens', 1);
+    expect(callArgs).not.toHaveProperty('max_tokens');
+  });
+
+  it('returns ok:false with "Invalid API key" on 401', async () => {
+    mockCreate.mockRejectedValueOnce({ status: 401, message: 'Unauthorized' });
+
+    const result = await provider.testModel(creds, 'gpt-5.4');
+
+    expect(result).toEqual({ ok: false, error: 'Invalid API key' });
+  });
+
+  it('returns ok:false with model-not-found message on 404', async () => {
+    mockCreate.mockRejectedValueOnce({ status: 404, message: 'Not found' });
+
+    const result = await provider.testModel(creds, 'gpt-5.4');
+
+    expect(result).toEqual({ ok: false, error: 'Model not found: gpt-5.4' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OpenAiProvider.analyzeImage — must use max_completion_tokens (not max_tokens)
+// ---------------------------------------------------------------------------
+describe('OpenAiProvider.analyzeImage', () => {
+  const provider = new OpenAiProvider();
+  const creds = { apiKey: 'sk-test', baseUrl: undefined };
+  const baseReq = {
+    model: 'gpt-5.4',
+    prompt: 'Describe this image',
+    imageBase64: 'abc123',
+    mimeType: 'image/jpeg',
+    system: undefined as string | undefined,
+  };
+
+  it('sends max_completion_tokens: 1024 (not max_tokens)', async () => {
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: 'A sunny beach.' } }],
+    });
+
+    const result = await provider.analyzeImage(creds, baseReq);
+
+    expect(result).toBe('A sunny beach.');
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs).toHaveProperty('max_completion_tokens', 1024);
+    expect(callArgs).not.toHaveProperty('max_tokens');
+  });
+
+  it('includes system message when provided', async () => {
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: 'Tagged.' } }],
+    });
+
+    await provider.analyzeImage(creds, { ...baseReq, system: 'You are a tagger.' });
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.messages[0]).toMatchObject({ role: 'system', content: 'You are a tagger.' });
+  });
+
+  it('returns empty string when choices array is empty', async () => {
+    mockCreate.mockResolvedValueOnce({ choices: [] });
+
+    const result = await provider.analyzeImage(creds, baseReq);
+
+    expect(result).toBe('');
   });
 });
