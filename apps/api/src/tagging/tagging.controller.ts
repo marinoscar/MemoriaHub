@@ -31,10 +31,14 @@ import { whereDateRange } from '../search/media-where.builder';
 // DTOs
 // ---------------------------------------------------------------------------
 
+const flexibleDate = z
+  .string()
+  .refine((v) => !Number.isNaN(Date.parse(v)), { message: 'Invalid date' });
+
 const backfillTaggingSchema = z.object({
   circleId: z.string().uuid(),
-  from: z.string().datetime().optional(),
-  to: z.string().datetime().optional(),
+  from: flexibleDate.optional(),
+  to: flexibleDate.optional(),
   force: z.boolean().optional().default(false),
 });
 
