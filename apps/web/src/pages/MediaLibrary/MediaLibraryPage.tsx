@@ -66,6 +66,7 @@ import { BulkActionToolbar } from '../../components/media/BulkActionToolbar';
 import { BulkLocationDialog } from '../../components/media/BulkLocationDialog';
 import { BulkTagsDialog } from '../../components/media/BulkTagsDialog';
 import type { MediaItem, MediaQueryParams, TagItem, MediaType, MediaClassification } from '../../types/media';
+import { PersonMultiSelect } from '../../components/search/PersonMultiSelect';
 
 // ---------------------------------------------------------------------------
 // Post-upload enrichment polling constants
@@ -387,6 +388,14 @@ export default function MediaLibraryPage() {
   const personId = searchParams.get('personId');
   const personName = searchParams.get('personName');
 
+  // Seed people filter from URL deep-link (personId from PeoplePage) — mount only
+  useEffect(() => {
+    if (personId) {
+      setPeopleFilter({ ids: [personId], mode: 'any' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const {
     items,
     meta,
@@ -429,6 +438,9 @@ export default function MediaLibraryPage() {
   const [bulkLocationOpen, setBulkLocationOpen] = useState(false);
   const [bulkTagsOpen, setBulkTagsOpen] = useState(false);
   const [snackbar, setSnackbar] = useState<{ message: string; severity: 'success' | 'error' } | null>(null);
+
+  // Multi-person filter
+  const [peopleFilter, setPeopleFilter] = useState<{ ids: string[]; mode: 'any' | 'all' }>({ ids: [], mode: 'any' });
 
   // Location drill-down
   const [filterCountry, setFilterCountry] = useState('');
@@ -473,7 +485,12 @@ export default function MediaLibraryPage() {
     if (filterCameraModel) params.cameraModel = filterCameraModel;
     if (filterDeviceName) params.sourceDeviceName = filterDeviceName;
     if (filterMissingGeo) params.missingGeo = true;
-    if (personId) params.personId = personId;
+    if (peopleFilter.ids.length > 0) {
+      params.personIds = peopleFilter.ids;
+      params.peopleMatch = peopleFilter.mode;
+    } else if (personId) {
+      params.personId = personId;
+    }
     return params;
   }, [
     page,
@@ -496,6 +513,7 @@ export default function MediaLibraryPage() {
     filterDeviceName,
     filterMissingGeo,
     personId,
+    peopleFilter,
   ]);
 
   // Load data on mount and when filters change.
@@ -529,6 +547,7 @@ export default function MediaLibraryPage() {
     filterCameraModel,
     filterDeviceName,
     personId,
+    peopleFilter,
   ]);
 
   // Reflect filter changes to URL params
@@ -1080,12 +1099,45 @@ export default function MediaLibraryPage() {
                 )}
               </Stack>
             </Grid>
+
+            {/* People filter */}
+            <Grid size={{ xs: 12 }}>
+              <Divider sx={{ my: 0.5 }} />
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                Filter by People
+              </Typography>
+              <PersonMultiSelect
+                circleId={activeCircle?.id ?? ''}
+                value={peopleFilter}
+                onChange={(next) => {
+                  setPeopleFilter(next);
+                  setPage(1);
+                  // Clear URL personId deep-link when user changes the people filter
+                  if (personId) {
+                    const nextParams = new URLSearchParams(searchParams);
+                    nextParams.delete('personId');
+                    nextParams.delete('personName');
+                    setSearchParams(nextParams, { replace: true });
+                  }
+                }}
+                label="People"
+              />
+              {peopleFilter.ids.length > 0 && (
+                <Button
+                  size="small"
+                  sx={{ mt: 1 }}
+                  onClick={() => { setPeopleFilter({ ids: [], mode: 'any' }); setPage(1); }}
+                >
+                  Clear people filter
+                </Button>
+              )}
+            </Grid>
           </Grid>
         </Paper>
       </Collapse>
 
-      {/* Person filter chip — shown when navigating from People page */}
-      {personId && (
+      {/* Person filter chip — shown when navigating from People page and no multiselect override */}
+      {personId && peopleFilter.ids.length === 0 && (
         <Box sx={{ mb: 2 }}>
           <Chip
             icon={<PersonIcon />}

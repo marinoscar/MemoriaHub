@@ -160,6 +160,7 @@ export interface PersonListItem {
   profileCrop?: { x: number; y: number; w: number; h: number } | null;
   createdAt: string;
   updatedAt: string;
+  favorite: boolean;
 }
 
 export interface PersonListResponse {
@@ -192,6 +193,7 @@ export interface PersonDetail {
   faces: PersonFace[];
   createdAt: string;
   updatedAt: string;
+  favorite?: boolean;
 }
 
 export interface ClusterResult {
@@ -233,9 +235,14 @@ export async function updatePerson(
     coverFaceId?: string | null;
     profileMediaItemId?: string | null;
     profileCrop?: { x: number; y: number; w: number; h: number } | null;
+    favorite?: boolean;
   },
 ): Promise<{ id: string; name: string | null; coverFaceId: string | null; updatedAt: string }> {
   return api.patch<{ id: string; name: string | null; coverFaceId: string | null; updatedAt: string }>(`/people/${id}`, body);
+}
+
+export async function setPersonFavorite(id: string, favorite: boolean): Promise<void> {
+  await updatePerson(id, { favorite });
 }
 
 export async function assignFaces(

@@ -55,6 +55,10 @@ export async function listMedia(params?: MediaQueryParams): Promise<MediaListRes
   if (params?.sourceDeviceName) searchParams.set('sourceDeviceName', params.sourceDeviceName);
   if (params?.missingGeo !== undefined) searchParams.set('missingGeo', params.missingGeo ? '1' : '0');
   if (params?.personId) searchParams.set('personId', params.personId);
+  if (params?.personIds && params.personIds.length > 0) {
+    searchParams.set('personIds', params.personIds.join(','));
+  }
+  if (params?.peopleMatch) searchParams.set('peopleMatch', params.peopleMatch);
 
   const qs = searchParams.toString();
   return api.get<MediaListResponse>(`/media${qs ? `?${qs}` : ''}`);

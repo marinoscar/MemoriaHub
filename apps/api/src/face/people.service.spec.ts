@@ -1231,6 +1231,145 @@ describe('PeopleService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // updatePerson — favorite field
+  // -------------------------------------------------------------------------
+
+  describe('updatePerson — favorite', () => {
+    it('persists favorite:true when provided', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.person.update as jest.Mock).mockResolvedValue(
+        makePerson({ favorite: true }),
+      );
+
+      const result = await service.updatePerson(
+        PERSON_ID,
+        { favorite: true } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      expect(mockPrisma.person.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ favorite: true }),
+        }),
+      );
+      expect(result.favorite).toBe(true);
+    });
+
+    it('persists favorite:false when provided', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.person.update as jest.Mock).mockResolvedValue(
+        makePerson({ favorite: false }),
+      );
+
+      await service.updatePerson(
+        PERSON_ID,
+        { favorite: false } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      expect(mockPrisma.person.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ favorite: false }),
+        }),
+      );
+    });
+
+    it('does NOT include favorite in updateData when not provided', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.person.update as jest.Mock).mockResolvedValue(makePerson({ name: 'Bob' }));
+
+      await service.updatePerson(
+        PERSON_ID,
+        { name: 'Bob' } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      const updateCall = (mockPrisma.person.update as jest.Mock).mock.calls[0][0];
+      expect(updateCall.data.favorite).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // listPeople — ordering and favorite in response
+  // -------------------------------------------------------------------------
+
+  describe('listPeople — orderBy and favorite field', () => {
+    it('orders by favorite desc then name asc', async () => {
+      (mockPrisma.person.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.person.count as jest.Mock).mockResolvedValue(0);
+
+      await service.listPeople(
+        { circleId: CIRCLE_ID, includeUnlabeled: false, page: 1, pageSize: 20 } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      const findManyCall = (mockPrisma.person.findMany as jest.Mock).mock.calls[0][0];
+      expect(findManyCall.orderBy).toEqual([{ favorite: 'desc' }, { name: 'asc' }]);
+    });
+
+    it('includes favorite in list item response', async () => {
+      const person = makePerson({
+        favorite: true,
+        coverFace: null,
+        faces: [],
+        _count: { faces: 0 },
+        profileMediaItemId: null,
+        profileCrop: null,
+      });
+      (mockPrisma.person.findMany as jest.Mock).mockResolvedValue([person]);
+      (mockPrisma.person.count as jest.Mock).mockResolvedValue(1);
+
+      const result = await service.listPeople(
+        { circleId: CIRCLE_ID, includeUnlabeled: false, page: 1, pageSize: 20 } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      expect(result.items[0].favorite).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getPerson — favorite in response
+  // -------------------------------------------------------------------------
+
+  describe('getPerson — favorite field', () => {
+    it('includes favorite in single-person response', async () => {
+      const person = makePerson({
+        favorite: true,
+        coverFace: null,
+        faces: [],
+        profileMediaItemId: null,
+        profileCrop: null,
+      });
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(person);
+
+      const result = await service.getPerson(PERSON_ID, USER_ID, PERMS);
+
+      expect(result.favorite).toBe(true);
+    });
+
+    it('returns favorite:false when person is not favorited', async () => {
+      const person = makePerson({
+        favorite: false,
+        coverFace: null,
+        faces: [],
+        profileMediaItemId: null,
+        profileCrop: null,
+      });
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(person);
+
+      const result = await service.getPerson(PERSON_ID, USER_ID, PERMS);
+
+      expect(result.favorite).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // updatePerson — profile picture handling
   // -------------------------------------------------------------------------
 

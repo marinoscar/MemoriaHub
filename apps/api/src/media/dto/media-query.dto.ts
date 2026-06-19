@@ -35,6 +35,19 @@ export const mediaQuerySchema = z.object({
   sourceDeviceName: z.string().optional(),
   missingGeo: z.string().optional().transform(v => v === 'true' ? true : v === 'false' ? false : undefined),
   personId: z.string().uuid().optional(),
+  // Multi-person filter: accepts comma-separated string or repeated query params
+  personIds: z
+    .preprocess(
+      (v) => {
+        if (v === undefined || v === null) return undefined;
+        if (Array.isArray(v)) return v.flatMap((s) => (typeof s === 'string' ? s.split(',').map((x) => x.trim()).filter(Boolean) : []));
+        if (typeof v === 'string') return v.split(',').map((x) => x.trim()).filter(Boolean);
+        return undefined;
+      },
+      z.array(z.string().uuid()).optional(),
+    )
+    .optional(),
+  peopleMatch: z.enum(['any', 'all']).optional().default('any'),
 });
 
 export class MediaQueryDto extends createZodDto(mediaQuerySchema) {}

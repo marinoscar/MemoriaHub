@@ -23,6 +23,7 @@ import {
   FormControlLabel,
   Checkbox,
   Autocomplete,
+  Tooltip,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -33,6 +34,8 @@ import {
   Delete as DeleteIcon,
   CallMerge as CallMergeIcon,
   PhotoCamera as PhotoCameraIcon,
+  Star as StarIcon,
+  StarBorder as StarBorderIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import Cropper from 'react-easy-crop';
@@ -54,6 +57,7 @@ import {
   assignFaces as assignFacesService,
   createPerson as createPersonService,
   updatePerson,
+  setPersonFavorite,
 } from '../../services/face';
 import type { CircleFaceSettings } from '../../services/face';
 import { listMedia, getMedia } from '../../services/media';
@@ -438,6 +442,8 @@ function PersonDetailDrawer({
   onPersonDeleted,
   onPersonMerged,
   onProfileUpdated,
+  onToggleFavorite,
+  isFavorite,
 }: {
   personId: string;
   onClose: () => void;
@@ -448,12 +454,15 @@ function PersonDetailDrawer({
   onPersonDeleted: () => void;
   onPersonMerged: () => void;
   onProfileUpdated?: () => void;
+  onToggleFavorite: (personId: string, favorite: boolean) => Promise<void>;
+  isFavorite: boolean;
 }) {
   const navigate = useNavigate();
   const { person, loading, error } = usePerson(personId);
   const [editing, setEditing] = useState(false);
   const [nameValue, setNameValue] = useState('');
   const [saving, setSaving] = useState(false);
+  const [toggling, setToggling] = useState(false);
   const [mediaMap, setMediaMap] = useState<Record<string, string>>({});
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
@@ -603,6 +612,22 @@ function PersonDetailDrawer({
             <DeleteIcon fontSize="small" />
           </IconButton>
         )}
+
+        {/* Favorite toggle */}
+        <Tooltip title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}>
+          <IconButton
+            size="small"
+            disabled={toggling}
+            onClick={() => {
+              setToggling(true);
+              onToggleFavorite(person.id, !isFavorite).finally(() => setToggling(false));
+            }}
+            aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+            sx={{ color: isFavorite ? 'warning.main' : 'text.secondary' }}
+          >
+            {isFavorite ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}
+          </IconButton>
+        </Tooltip>
 
         <IconButton size="small" onClick={onClose} aria-label="Close">
           <CloseIcon />
@@ -1038,6 +1063,9 @@ export default function PeoplePage() {
   const { activeCircleId, activeCircleRole } = useCircleContext();
   const [selectedPerson, setSelectedPerson] = useState<PersonListItem | null>(null);
 
+  // Optimistic favorite overrides: maps personId -> boolean
+  const [pendingFavorites, setPendingFavorites] = useState<Record<string, boolean>>({});
+
   // Face settings state
   const [faceSettings, setFaceSettings] = useState<CircleFaceSettings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(false);
@@ -1080,7 +1108,12 @@ export default function PeoplePage() {
 
   // Filter unlabeled from the unlabeled fetch
   const unlabeledPeople = (unlabeledData?.items ?? []).filter((p) => p.isUnlabeled);
-  const labeledPeople = labeledData?.items ?? [];
+  // Apply optimistic favorite overrides so UI reflects the toggle immediately
+  const labeledPeople = (labeledData?.items ?? []).map((p) =>
+    Object.prototype.hasOwnProperty.call(pendingFavorites, p.id)
+      ? { ...p, favorite: pendingFavorites[p.id] }
+      : p,
+  );
   const allPeople = [...labeledPeople, ...unlabeledPeople];
 
   // Load face settings when circle changes
@@ -1163,6 +1196,31 @@ export default function PeoplePage() {
 
   const handlePersonMerged = async () => {
     await Promise.all([refreshLabeled(), refreshUnlabeled()]);
+  };
+
+  const handleToggleFavorite = async (personId: string, favorite: boolean) => {
+    // Optimistic update
+    setPendingFavorites((prev) => ({ ...prev, [personId]: favorite }));
+    try {
+      await setPersonFavorite(personId, favorite);
+      // Refetch so favorites-first ordering from backend is applied
+      await refreshLabeled();
+    } catch {
+      // Revert optimistic update on error
+      setPendingFavorites((prev) => {
+        const next = { ...prev };
+        delete next[personId];
+        return next;
+      });
+      await refreshLabeled();
+    } finally {
+      // Remove the pending override after the refetch has applied
+      setPendingFavorites((prev) => {
+        const next = { ...prev };
+        delete next[personId];
+        return next;
+      });
+    }
   };
 
   if (!activeCircleId) {
@@ -1287,6 +1345,12 @@ export default function PeoplePage() {
           onPersonClick={handlePersonClick}
           loading={labeledLoading}
           emptyMessage="No named people yet. Use 'Find People' then name the clusters below."
+          onToggleFavorite={(person) =>
+            void handleToggleFavorite(
+              person.id,
+              !(pendingFavorites[person.id] ?? person.favorite),
+            )
+          }
         />
       </Box>
 
@@ -1333,6 +1397,10 @@ export default function PeoplePage() {
             onPersonDeleted={() => void handlePersonDeleted()}
             onPersonMerged={() => void handlePersonMerged()}
             onProfileUpdated={() => void Promise.all([refreshLabeled(), refreshUnlabeled()])}
+            onToggleFavorite={handleToggleFavorite}
+            isFavorite={
+              pendingFavorites[selectedPerson.id] ?? selectedPerson.favorite ?? false
+            }
           />
         )}
       </Drawer>

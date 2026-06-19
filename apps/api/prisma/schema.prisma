@@ -697,6 +697,7 @@ model Person {
   coverFaceId        String?   @map("cover_face_id") @db.Uuid
   profileMediaItemId String?   @map("profile_media_item_id") @db.Uuid
   profileCrop        Json?     @map("profile_crop")
+  favorite           Boolean   @default(false) @map("favorite")
   mergedIntoId       String?   @map("merged_into_id") @db.Uuid
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
@@ -712,6 +713,7 @@ model Person {
   faces             Face[]     @relation("PersonFaces")
 
   @@index([circleId])
+  @@index([circleId, favorite])
   @@index([mergedIntoId])
   @@index([profileMediaItemId])
   @@map("people")
