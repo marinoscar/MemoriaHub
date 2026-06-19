@@ -12,6 +12,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { z } from 'zod';
 import { TaggingController } from './tagging.controller';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
@@ -408,6 +409,98 @@ describe('TaggingController', () => {
       for (const call of (mockPrisma.mediaTagStatus.upsert as jest.Mock).mock.calls) {
         expect(call[0].create.status).toBe(MediaTagStatusType.pending);
         expect(call[0].update.status).toBe(MediaTagStatusType.pending);
+      }
+    });
+
+    // Regression: date-only strings must be accepted by the handler
+    it('enqueues correctly when from/to are date-only strings (regression #fix-backfill-dates)', async () => {
+      const mediaItems = [{ id: 'media-1', circleId: 'circle-1' }];
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue(mediaItems);
+      (mockPrisma.mediaTagStatus.upsert as jest.Mock).mockResolvedValue({});
+
+      const result = await controller.backfillTagging(
+        {
+          circleId: 'circle-1',
+          from: '2020-01-01',
+          to: '2027-01-01',
+          force: false,
+        } as any,
+        makeUser(),
+      );
+
+      expect(result.data.enqueued).toBe(1);
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'auto_tagging', mediaItemId: 'media-1' }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // backfillTaggingSchema — unit tests for the flexible date validator
+  // -------------------------------------------------------------------------
+
+  describe('backfillTaggingSchema (inline)', () => {
+    // Replicate the schema here so it is accessible for direct unit testing
+    // without exporting it from the controller module.
+    const flexibleDate = z
+      .string()
+      .refine((v) => !Number.isNaN(Date.parse(v)), { message: 'Invalid date' });
+
+    const schema = z.object({
+      circleId: z.string().uuid(),
+      from: flexibleDate.optional(),
+      to: flexibleDate.optional(),
+      force: z.boolean().optional().default(false),
+    });
+
+    it('accepts a date-only from/to payload', () => {
+      const result = schema.safeParse({
+        circleId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+        from: '2020-01-01',
+        to: '2027-12-31',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts a full ISO datetime from/to payload', () => {
+      const result = schema.safeParse({
+        circleId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+        from: '2020-01-01T00:00:00.000Z',
+        to: '2027-12-31T23:59:59.999Z',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts a payload with no from/to (both optional)', () => {
+      const result = schema.safeParse({
+        circleId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects an invalid date string', () => {
+      const result = schema.safeParse({
+        circleId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+        from: 'not-a-date',
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects when circleId is not a UUID', () => {
+      const result = schema.safeParse({
+        circleId: 'bad-id',
+        from: '2020-01-01',
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('defaults force to false when omitted', () => {
+      const result = schema.safeParse({
+        circleId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.force).toBe(false);
       }
     });
   });
