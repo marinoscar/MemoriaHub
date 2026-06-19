@@ -348,8 +348,12 @@ An admin dashboard at `/admin/jobs` provides monitoring and control over the gen
 ### Media — Circle Dashboard
 - `GET /api/media/dashboard?circleId=` - On This Day + recent/favorites + review-queue counts
 
+### Media — Explore
+- `GET /api/media/explore/places?circleId=` - List distinct places with item counts and cover thumbnails; returns `Array<{ name: string; count: number; coverThumbnailUrl: string | null }>` (media:read + viewer)
+- `GET /api/media/explore/tags?circleId=` - List tags with item counts and cover thumbnails; same response shape (media:read + viewer)
+
 ### AI Settings (Admin only — ai_settings:read / ai_settings:write)
-- `GET /api/ai/settings` - Get configured providers, search feature config, and conversation lifecycle settings (ai_settings:read)
+- `GET /api/ai/settings` - Get configured providers and search feature config (ai_settings:read)
 - `PUT /api/ai/credentials/:provider` - Upsert provider credentials, encrypted at rest (ai_settings:write)
 - `DELETE /api/ai/credentials/:provider` - Remove provider credentials (ai_settings:write)
 - `POST /api/ai/test` - Test provider connectivity (ai_settings:read)
@@ -405,13 +409,9 @@ Three providers: `human` (keyless WASM, in-process, 1024-d), `compreface` (keyle
 - `POST /api/search` - Execute deterministic media search with explicit filters (media:read + search:use)
 - `GET /api/search/fields` - List all searchable field descriptors from the registry (search:use)
 
-### Search Conversations — Agentic Search (search:use)
-- `POST /api/search/conversations` - Create a search conversation for a circle
-- `GET /api/search/conversations?circleId=&favorite=&archived=&page=&pageSize=` - List caller's conversations
-- `GET /api/search/conversations/:id` - Get conversation with full message history
-- `PATCH /api/search/conversations/:id` - Update title or favorite flag
-- `DELETE /api/search/conversations/:id` - Soft-delete conversation
-- `POST /api/search/conversations/:id/messages` - Send message; stream AI response via SSE (text/event-stream)
+### Agentic Search (search:use)
+Agentic search is **stateless** — no conversation rows are stored server-side. The client holds the full message history in memory and sends it with every request.
+- `POST /api/search/agent` - Send a message history and stream the AI response via SSE (text/event-stream). Body: `{ circleId: string; messages: Array<{ role: 'user'|'assistant'; content: string }> }` (last message must be `role: 'user'`). Verifies circle viewer membership. Stream events: `token`, `tool_call`, `results`, `done`, `error`. (search:use)
 
 ### Health
 - `GET /api/health/live` - Liveness check
@@ -477,8 +477,6 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `circle_members` - Per-circle memberships with `CircleRole` enum (`circle_admin` | `collaborator` | `viewer`)
 - `circle_invites` - Email invites for circles; claimed on invited user's first login
 - `ai_provider_credentials` - AI provider API keys (AES-256-GCM encrypted); one row per provider; `last4` exposed for display; plaintext never stored or returned
-- `search_conversations` - Agentic search conversation sessions; scoped to one circle and one user; includes `favorite`, `archived_at`, `deleted_at` for lifecycle management
-- `search_messages` - Individual messages within a conversation; `role` is `user` or `assistant`; `tool_calls` and `tool_results` are JSON columns for search tool invocations
 - `face_provider_credentials` - Face provider API keys/config (AES-256-GCM encrypted via same key as AI); one row per provider; `last4` exposed; plaintext never stored or returned. For keyless providers (`human`, `compreface`), the credential row (if present) stores only a `baseUrl` override — no API key is set or required.
 - `people` - Per-circle identity records for recognized individuals; supports `mergedIntoId` self-FK for cluster merge audit; `deletedAt` soft-delete
 - `faces` - Individual detected face records with bounding box, confidence, variable-dimension embedding (`Float[]` fallback or pgvector column; 128-d for `compreface` mobilenet, 1024-d for `human` WASM), and `externalFaceId` for Rekognition delegated path; keyed to `mediaItemId` + `circleId`; `manuallyAssigned` flag protects user-labeled faces from re-clustering
@@ -611,7 +609,7 @@ Detailed specs live under `docs/specs/`:
 - [Enrichment Queue](docs/specs/enrichment-queue.md) — worker lifecycle, retry, priority, adding new handlers
 - [Face Recognition](docs/specs/face-recognition.md) — face detection, recognition, clustering, people management
 - [AI Auto-Tagging](docs/specs/auto-tagging.md) — vocabulary-driven vision model tagging, per-circle opt-in, backfill
-- [Agentic Search](docs/specs/agentic-search.md) — conversational search, SSE streaming, tool-call protocol
+- [Agentic Search](docs/specs/agentic-search.md) — stateless agentic search, SSE streaming, tool-call protocol
 
 ## Specialized Subagents (MANDATORY)
 
