@@ -9,6 +9,22 @@ import {
   StorageProvider,
 } from '../storage/providers/storage-provider.interface';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
+import { detectImageMime } from './image-mime.util';
+
+/**
+ * Maximum image dimension (long edge) before downscaling.
+ * 1568px matches Anthropic's auto-downscale threshold — anything larger
+ * is rescaled server-side anyway, so we pay the token cost without
+ * benefiting from higher resolution. OpenAI is also fine at this size.
+ * Overridable via TAG_MAX_IMAGE_DIM env var.
+ */
+const TAG_MAX_DIM = parseInt(process.env['TAG_MAX_IMAGE_DIM'] ?? '1568', 10);
+
+/**
+ * Hard cap on base64-encoded image bytes sent to vision providers.
+ * Anthropic enforces a ~5MB limit on image data; 4.5MB gives headroom.
+ */
+const MAX_IMAGE_BYTES = 4_500_000;
 
 @Injectable()
 export class AutoTaggingService {
@@ -138,16 +154,36 @@ export class AutoTaggingService {
       const stream = await this.storageProvider.download(mediaItem.storageObject.storageKey);
       const buffer = await streamToBuffer(stream);
 
-      const MAX = parseInt(process.env['TAG_MAX_IMAGE_DIM'] ?? '2000', 10);
-      const prepared = await prepareImageForProcessing(buffer, { maxDim: MAX });
+      const prepared = await prepareImageForProcessing(buffer, { maxDim: TAG_MAX_DIM });
       let imageBuffer: Buffer;
+      let mimeType: string;
+
       if (prepared.width > 0) {
+        // Happy path: sharp re-encoded to JPEG with EXIF orientation applied
         imageBuffer = prepared.buffer;
+        mimeType = 'image/jpeg';
       } else {
         this.logger.warn(
           `AutoTagJob ${job.id}: image preprocessing failed; using raw buffer for MediaItem ${job.mediaItemId}`,
         );
+        // Fallback: detect real MIME from magic bytes to avoid mislabeling
+        const detected = detectImageMime(buffer);
+        if (!detected) {
+          const errMsg = 'Unsupported or undecodable image format (preprocessing failed)';
+          this.logger.warn(`AutoTagJob ${job.id}: ${errMsg} for MediaItem ${job.mediaItemId}`);
+          await this.markFailed(job.mediaItemId, mediaItem.circleId, provider, model, errMsg);
+          return;
+        }
         imageBuffer = buffer;
+        mimeType = detected;
+      }
+
+      // Byte-size guard: Anthropic rejects images > ~5 MB when base64-encoded
+      if (imageBuffer.length > MAX_IMAGE_BYTES) {
+        const errMsg = `Image exceeds maximum size for vision provider (${imageBuffer.length} bytes)`;
+        this.logger.warn(`AutoTagJob ${job.id}: ${errMsg} for MediaItem ${job.mediaItemId}`);
+        await this.markFailed(job.mediaItemId, mediaItem.circleId, provider, model, errMsg);
+        return;
       }
 
       // j. Convert to base64
@@ -164,7 +200,7 @@ export class AutoTaggingService {
         system: systemPrompt,
         prompt: userPrompt,
         imageBase64,
-        mimeType: 'image/jpeg',
+        mimeType,
       });
 
       // l. Parse and validate response

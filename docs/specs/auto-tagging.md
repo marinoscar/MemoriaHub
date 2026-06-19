@@ -216,9 +216,46 @@ Validation is **case-insensitive**: each returned label is matched against the a
 
 Duplicate labels in the model response are deduplicated before upsert.
 
-### Image Preparation
+### Image Preprocessing and Provider Limits
 
-Before calling the model, the image is downloaded from storage and passed through `prepareImageForProcessing` (the same utility used by face detection). This applies EXIF orientation correction and downscales to a configurable maximum dimension (`TAG_MAX_IMAGE_DIM`, default `2000` px). If preprocessing fails, the raw buffer is used as a fallback with a warning logged.
+#### Preprocessing pipeline
+
+Before calling the vision model, the downloaded image passes through three steps in order:
+
+1. **EXIF-orientation correction** — `prepareImageForProcessing` calls `sharp().rotate()` so portrait photos stored sideways are upright before analysis.
+2. **Downscale to fit `TAG_MAX_IMAGE_DIM`** — the long edge is constrained to `TAG_MAX_IMAGE_DIM` px (default **1568**) using `fit: 'inside'` with `withoutEnlargement: true`. Images already smaller than the limit are not upscaled.
+3. **Re-encode to JPEG at quality 90** — the output is always `image/jpeg`, regardless of the original format.
+
+This normalizes orientation, format, and dimensions before anything reaches the provider.
+
+#### Provider image limits
+
+The following are as-of-implementation provider constraints; verify against current provider documentation if exact numbers matter.
+
+**Anthropic (Claude):**
+- Supported formats: JPEG, PNG, GIF, WebP. HEIC and TIFF are not supported.
+- Per-image data limit: approximately 5 MB.
+- Images with a long edge exceeding 1568 px are auto-downscaled server-side, so 1568 px is the effective sweet spot — sending larger images costs more tokens without improving quality.
+- Token cost scales roughly with pixel area (~(w × h) / 750 tokens).
+
+**OpenAI (GPT vision models):**
+- Supported formats: JPEG, PNG, WebP, non-animated GIF.
+- Per-image byte cap is larger than Anthropic's; the 4.5 MB code constant provides a safe upper bound for both providers.
+- OpenAI applies internal resizing depending on the `detail` mode; vision token cost scales with image size.
+
+#### Hardening and failure handling
+
+The service implements three safeguards that produce a non-retryable `failed` status rather than letting an unprocessable image occupy retry slots:
+
+**Happy path:** `prepareImageForProcessing` succeeds (returns `width > 0`). The prepared JPEG buffer is sent as `image/jpeg`.
+
+**Fallback path (sharp could not decode):** `prepareImageForProcessing` returns `width: 0`, indicating a sharp failure (e.g. HEIC, corrupt file, unsupported format). The original bytes' MIME type is sniffed via `detectImageMime`, which checks magic bytes for JPEG, PNG, GIF, and WebP.
+- If the detected MIME is `null` (HEIC, TIFF, or unknown) → status is set to `failed` with a clear `lastError`; the job is **not** retried.
+- If the detected MIME is a supported type → the original bytes are sent with the **detected** MIME type. This fixes a previous bug where the fallback always set `image/jpeg` regardless of actual content.
+
+**Byte-size cap:** After selecting the buffer (prepared or fallback), if `buffer.length > MAX_IMAGE_BYTES` (4,500,000 bytes — roughly 4.5 MB, giving headroom under Anthropic's ~5 MB limit) → status is set to `failed` with a size error; the job is **not** retried. `MAX_IMAGE_BYTES` is a code constant and is not configurable via environment variables.
+
+All of the above non-retryable failures surface as `media_tag_status = failed` with a human-readable `lastError`, and they appear in the `/admin/jobs` dashboard under `type=auto_tagging`.
 
 ---
 
@@ -229,7 +266,9 @@ Before calling the model, the image is downloaded from storage and passed throug
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AUTO_TAG_ENABLED` | `true` | Global kill-switch. Set to `false` to disable auto-enqueue on upload for all circles. Per-circle opt-in still applies when `true`. |
-| `TAG_MAX_IMAGE_DIM` | `2000` | Maximum image dimension (px) before downscaling for the vision model call. |
+| `TAG_MAX_IMAGE_DIM` | `1568` | Maximum image long-edge in pixels before downscaling prior to the vision model call. 1568 matches Anthropic's auto-downscale threshold. |
+
+`MAX_IMAGE_BYTES` (4,500,000) is a code constant — not an environment variable. It caps the byte size of the image buffer sent to the provider; items exceeding it are marked `failed` without retry.
 
 ### Shared Enrichment Worker Variables
 
@@ -437,6 +476,9 @@ The `auto_tagging` job type appears automatically in `/admin/jobs` queue stats u
 | No enabled tag labels | Status → `processed` with `tagCount=0`; job succeeds |
 | Provider API error (transient) | Status → `failed`; job rethrows; worker retries up to 3 attempts total |
 | All labels returned by model fail vocabulary validation | Status → `processed` with `tagCount=0`; no tags assigned |
+| Image preprocessing failed + MIME unrecognized (e.g. HEIC, TIFF, corrupt) | Status → `failed`; job succeeds (no retry) |
+| Image preprocessing failed + MIME recognized (JPEG/PNG/GIF/WebP) | Original bytes sent with detected MIME; processing continues |
+| Image buffer exceeds `MAX_IMAGE_BYTES` (4.5 MB) after preprocessing | Status → `failed`; job succeeds (no retry) |
 
 ### Adding New AI Providers
 
