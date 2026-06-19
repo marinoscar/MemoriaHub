@@ -30,6 +30,7 @@ import {
   AddLocation as AddLocationIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
+import type { Theme } from '@mui/material/styles';
 import type { MediaItem, MediaClassification, PatchMediaDto } from '../../types/media';
 import { patchMedia as patchMediaApi, getMedia, bulkUpdateMedia, bulkTags } from '../../services/media';
 import { VideoPlayer } from './VideoPlayer';
@@ -309,6 +310,7 @@ export function MediaDetailDrawer({
       variant="temporary"
       ModalProps={{ keepMounted: false }}
       sx={{
+        zIndex: (theme: Theme) => theme.zIndex.modal + 1,
         '& .MuiDrawer-paper': {
           width: isSmall ? '100vw' : 440,
           maxWidth: '100vw',

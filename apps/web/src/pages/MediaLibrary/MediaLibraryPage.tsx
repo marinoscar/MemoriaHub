@@ -60,6 +60,7 @@ import { useCircle } from '../../hooks/useCircle';
 import { listTags, exportMedia } from '../../services/media';
 import type { ExportFilters } from '../../services/media';
 import { MediaDetailDrawer } from '../../components/media/MediaDetailDrawer';
+import { MediaLightbox } from '../../components/media/MediaLightbox';
 import { MediaUploadDialog } from '../../components/media/MediaUploadDialog';
 import { BulkActionToolbar } from '../../components/media/BulkActionToolbar';
 import { BulkLocationDialog } from '../../components/media/BulkLocationDialog';
@@ -438,6 +439,7 @@ export default function MediaLibraryPage() {
   // Drawer / dialog
   const [selectedItem, setSelectedItem] = useState<MediaItem | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
 
   // Export menu
@@ -570,9 +572,9 @@ export default function MediaLibraryPage() {
   }, []);
 
   const handleSelectItem = useCallback((item: MediaItem) => {
-    setSelectedItem(item);
-    setDrawerOpen(true);
-  }, []);
+    const idx = items.indexOf(item);
+    if (idx !== -1) setLightboxIndex(idx);
+  }, [items]);
 
   const handleItemUpdated = useCallback(
     (updated: MediaItem) => {
@@ -1270,6 +1272,22 @@ export default function MediaLibraryPage() {
         item={selectedItem}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
+        onItemUpdated={handleItemUpdated}
+      />
+
+      {/* Lightbox */}
+      <MediaLightbox
+        items={items}
+        index={lightboxIndex}
+        onIndexChange={(i) => {
+          setLightboxIndex(i);
+          setDrawerOpen(false);
+        }}
+        onClose={() => setLightboxIndex(null)}
+        onOpenProperties={(item) => {
+          setSelectedItem(item);
+          setDrawerOpen(true);
+        }}
         onItemUpdated={handleItemUpdated}
       />
 
