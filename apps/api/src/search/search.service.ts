@@ -12,7 +12,7 @@ import { SearchQueryDto } from './dto/search-query.dto';
 // Re-export for controller convenience
 export type SearchFieldDescriptor = Pick<
   SearchableField,
-  'key' | 'label' | 'type' | 'enumValues' | 'description'
+  'key' | 'label' | 'type' | 'enumValues' | 'optionsSource' | 'description'
 >;
 
 export interface SearchPaging {
@@ -97,11 +97,12 @@ export class SearchService {
   }
 
   getFields(): SearchFieldDescriptor[] {
-    return SEARCHABLE_FIELDS.map(({ key, label, type, enumValues, description }) => ({
+    return SEARCHABLE_FIELDS.map(({ key, label, type, enumValues, optionsSource, description }) => ({
       key,
       label,
       type,
       ...(enumValues ? { enumValues } : {}),
+      ...(optionsSource ? { optionsSource } : {}),
       description,
     }));
   }

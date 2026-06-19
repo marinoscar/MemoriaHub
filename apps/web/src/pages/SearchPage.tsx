@@ -31,8 +31,10 @@ import {
 import { useCircle } from '../hooks/useCircle';
 import { useSearch } from '../hooks/useSearch';
 import { useConversations } from '../hooks/useConversations';
+import { usePeople } from '../hooks/usePeople';
 import { streamMessage } from '../services/searchStream';
 import { MediaResultsGrid } from '../components/media/MediaResultsGrid';
+import { PersonMultiSelect } from '../components/search/PersonMultiSelect';
 import type { MediaItem, MediaListMeta } from '../types/media';
 
 // ---------------------------------------------------------------------------
@@ -53,9 +55,14 @@ function AdvancedSearchTab() {
   const handleApply = async (p = page) => {
     if (!activeCircle) return;
     try {
+      const filters: Record<string, unknown> = { ...filterValues };
+      const peopleVal = filterValues['people'] as { ids: string[]; mode: 'all' | 'any' } | undefined;
+      if (!peopleVal || peopleVal.ids.length === 0) {
+        delete filters['people'];
+      }
       await search({
         circleId: activeCircle.id,
-        filters: filterValues,
+        filters,
         page: p,
         pageSize: 20,
       });
@@ -148,6 +155,21 @@ function AdvancedSearchTab() {
                         size="small"
                       />
                     }
+                    label={field.label}
+                  />
+                </Grid>
+              );
+            }
+
+            if (field.type === 'person-set') {
+              const personValue = (filterValues[field.key] as { ids: string[]; mode: 'all' | 'any' } | undefined)
+                ?? { ids: [], mode: 'all' as const };
+              return (
+                <Grid key={field.key} size={{ xs: 12 }}>
+                  <PersonMultiSelect
+                    circleId={activeCircle?.id ?? ''}
+                    value={personValue}
+                    onChange={(next) => setFilter(field.key, next)}
                     label={field.label}
                   />
                 </Grid>
@@ -274,6 +296,9 @@ function ChatTab() {
     removeConversation,
   } = useConversations();
 
+  const [chatPeople, setChatPeople] = useState<{ ids: string[]; mode: 'all' | 'any' }>({ ids: [], mode: 'all' });
+  const { data: peopleData } = usePeople(activeCircle?.id ?? null);
+
   const [showArchived, setShowArchived] = useState(false);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -302,7 +327,14 @@ function ChatTab() {
 
   const handleSend = async () => {
     if (!input.trim() || isStreaming || !activeCircle) return;
-    const content = input.trim();
+    let content = input.trim();
+    if (chatPeople.ids.length > 0 && peopleData) {
+      const names = chatPeople.ids
+        .map((id) => peopleData.items.find((p) => p.id === id)?.name ?? id.slice(0, 8))
+        .join(', ');
+      const modeWord = chatPeople.mode === 'all' ? 'all of these people' : 'any of these people';
+      content = `${content}\n\n(Only include photos containing ${modeWord}: ${names})`;
+    }
     setInput('');
 
     let convId = activeConversation?.id;
@@ -520,6 +552,16 @@ function ChatTab() {
         </Box>
 
         {/* Composer */}
+        {activeCircle && (
+          <Box sx={{ mb: 1 }}>
+            <PersonMultiSelect
+              circleId={activeCircle.id}
+              value={chatPeople}
+              onChange={setChatPeople}
+              label="Filter by people (optional)"
+            />
+          </Box>
+        )}
         <Box sx={{ display: 'flex', gap: 1 }}>
           <TextField
             multiline

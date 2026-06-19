@@ -8,7 +8,7 @@ import type { MediaItem, MediaListMeta } from '../types/media';
 export interface SearchField {
   key: string;
   label: string;
-  type: 'string' | 'enum' | 'date-range' | 'boolean' | 'geo';
+  type: 'string' | 'enum' | 'date-range' | 'boolean' | 'geo' | 'person-set';
   enumValues?: string[];
   description?: string;
 }

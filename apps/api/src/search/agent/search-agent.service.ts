@@ -3,6 +3,7 @@ import { SearchConversation, SearchMessage } from '@prisma/client';
 import { AiSettingsService } from '../../ai/ai-settings.service';
 import { AiProviderRegistry } from '../../ai/providers/ai-provider.registry';
 import { ChatMessage } from '../../ai/providers/ai-provider.interface';
+import { PrismaService } from '../../prisma/prisma.service';
 import { SearchService } from '../search.service';
 import { buildSearchMediaToolDef } from './search-tool-schema';
 
@@ -26,7 +27,14 @@ Your behavior:
 - When NO results match, say so plainly and suggest 1-3 adjacent searches the user could try (e.g., nearby date range, broader location).
 - Across conversation turns, use the full conversation history to refine searches. If the user says "last year" and you already know the context, use that.
 - You operate STRICTLY within this circle. Do not reference, infer, or search any other circle.
-- After calling search_media, always provide a helpful natural-language summary of what you found.`;
+- After calling search_media, always provide a helpful natural-language summary of what you found.
+
+## Filtering by people
+You can filter photos by the people who appear in them using the \`people\` parameter (an array of person names) and \`peopleMatch\` parameter.
+- Use \`peopleMatch: "all"\` when the query asks for a photo containing ALL the listed people together (e.g. "Oscar and Pamela", "the whole family", "both of them", "with all of").
+- Use \`peopleMatch: "any"\` when the query asks for photos containing ANY of the listed people (e.g. "Oscar or Pamela", "either one", "any of these people").
+- When in doubt with multiple names, default to \`"all"\`.
+- If a person name you searched for is not found in the circle, the filter is silently skipped — mention to the user that no matching person was found.`;
 
 @Injectable()
 export class SearchAgentService {
@@ -36,7 +44,64 @@ export class SearchAgentService {
     private readonly aiSettings: AiSettingsService,
     private readonly registry: AiProviderRegistry,
     private readonly searchService: SearchService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  /**
+   * Resolve an array of person name strings to Person UUIDs within a circle.
+   * Names are matched case-insensitively. Unknown names are silently dropped.
+   * Returns an empty array if none match.
+   */
+  private async resolvePersonNames(names: string[], circleId: string): Promise<string[]> {
+    const trimmedNames = names
+      .filter((n): n is string => typeof n === 'string' && n.trim().length > 0)
+      .map((n) => n.trim());
+    if (trimmedNames.length === 0) return [];
+
+    const persons = await this.prisma.person.findMany({
+      where: {
+        circleId,
+        deletedAt: null,
+        name: { in: trimmedNames, mode: 'insensitive' },
+      },
+      select: { id: true, name: true },
+    });
+
+    return persons.map((p) => p.id);
+  }
+
+  /**
+   * If the tool input contains `people` (array of name strings) and/or `peopleMatch`,
+   * resolve names to IDs and rewrite the input to use `people: { ids, mode }`.
+   * Unknown names are silently ignored; if none resolve, the filter is omitted entirely.
+   */
+  private async resolvePeopleFilter(
+    toolInput: Record<string, unknown>,
+    circleId: string,
+  ): Promise<void> {
+    const rawPeople = toolInput['people'];
+    const rawMode = toolInput['peopleMatch'];
+
+    // Clean up agent-specific params regardless
+    delete toolInput['peopleMatch'];
+
+    if (!Array.isArray(rawPeople) || rawPeople.length === 0) {
+      delete toolInput['people'];
+      return;
+    }
+
+    const names = rawPeople.filter((n): n is string => typeof n === 'string');
+    const ids = await this.resolvePersonNames(names, circleId);
+
+    if (ids.length === 0) {
+      // No names resolved — omit filter to avoid returning zero results due to a typo
+      delete toolInput['people'];
+      return;
+    }
+
+    const mode: 'all' | 'any' = rawMode === 'any' ? 'any' : 'all';
+    toolInput['people'] = { ids, mode };
+  }
 
   async *streamTurn(params: {
     conversation: SearchConversation & { messages: SearchMessage[] };
@@ -105,6 +170,11 @@ export class SearchAgentService {
           yield { event: 'token', data: { text: event.text } };
         } else if (event.type === 'tool_call' && event.name === 'search_media') {
           const toolInput = event.input as Record<string, unknown>;
+
+          // Resolve people names → IDs before executing the search.
+          // This rewrites toolInput in place: `people` (array of names) + `peopleMatch`
+          // become `people: { ids, mode }` that the registry's buildWhere understands.
+          await this.resolvePeopleFilter(toolInput, conversation.circleId);
 
           // Emit tool_call SSE event
           yield { event: 'tool_call', data: { name: 'search_media', args: toolInput } };
