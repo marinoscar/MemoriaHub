@@ -58,9 +58,6 @@ export function MediaLightbox({
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   // Suppress "unused variable" warnings for parameters wired in later commits
-  void onOpenProperties;
-  void onItemUpdated;
-  void isMobile;
   void patchMediaApi;
 
   const item = index !== null ? items[index] ?? null : null;
@@ -85,10 +82,46 @@ export function MediaLightbox({
 
   // Suppress unused-variable warnings — filled in later
   void zoomed;
-  void controlsVisible;
-  void hideTimerRef;
   void setZoomed;
-  void setControlsVisible;
+
+  // --- Mobile auto-hide controls ---
+  const resetHideTimer = useCallback(() => {
+    if (!isMobile) return;
+    setControlsVisible(true);
+    if (hideTimerRef.current !== null) clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => setControlsVisible(false), 3000);
+  }, [isMobile]);
+
+  // Start auto-hide on mobile when lightbox opens
+  useEffect(() => {
+    if (isMobile && index !== null) {
+      resetHideTimer();
+    }
+    return () => {
+      if (hideTimerRef.current !== null) clearTimeout(hideTimerRef.current);
+    };
+  }, [isMobile, index, resetHideTimer]);
+
+  // --- Favorite toggle ---
+  const handleToggleFavorite = useCallback(async () => {
+    if (!item) return;
+    try {
+      const updated = await patchMediaApi(item.id, { favorite: !item.favorite });
+      // Update cache
+      if (fullItemCache.has(item.id)) {
+        fullItemCache.set(item.id, {
+          ...fullItemCache.get(item.id)!,
+          favorite: updated.favorite,
+        });
+      }
+      if (fullItem) {
+        setFullItem((prev) => (prev ? { ...prev, favorite: updated.favorite } : prev));
+      }
+      onItemUpdated?.(updated);
+    } catch {
+      // Silently fail
+    }
+  }, [item, fullItem, onItemUpdated]);
 
   // --- Keyboard navigation ---
   useEffect(() => {
@@ -127,7 +160,8 @@ export function MediaLightbox({
     if (Math.abs(swipeRef.current.deltaY) > Math.abs(swipeRef.current.deltaX)) {
       swipeRef.current.swiping = false;
     }
-  }, []);
+    if (isMobile) resetHideTimer();
+  }, [isMobile, resetHideTimer]);
 
   const handlePointerUp = useCallback(() => {
     const { swiping, deltaX, deltaY } = swipeRef.current;
@@ -214,13 +248,87 @@ export function MediaLightbox({
           flexDirection: 'column',
         }}
         onClick={onClose}
+        onPointerMove={isMobile ? resetHideTimer : undefined}
       >
         {/* Inner content — stop propagation so clicks on controls don't close */}
         <Box
           sx={{ position: 'relative', width: '100%', height: '100%' }}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Placeholder for control bar — added in commit 4 */}
+          {/* Control bar */}
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 0,
+              width: '100%',
+              background: 'rgba(0,0,0,0.5)',
+              backdropFilter: 'blur(4px)',
+              zIndex: 10,
+              display: 'flex',
+              alignItems: 'center',
+              px: 1,
+              py: 0.5,
+              opacity: controlsVisible ? 1 : 0,
+              transition: 'opacity 0.3s ease',
+              pointerEvents: controlsVisible ? 'auto' : 'none',
+            }}
+          >
+            <Tooltip title="Close">
+              <IconButton
+                aria-label="Close lightbox"
+                onClick={onClose}
+                sx={{ color: 'white' }}
+              >
+                <CloseIcon />
+              </IconButton>
+            </Tooltip>
+
+            <Typography
+              variant="body2"
+              noWrap
+              sx={{ color: 'white', flex: 1, textAlign: 'center', mx: 1 }}
+            >
+              {item.title ?? item.originalFilename}
+            </Typography>
+
+            <Stack direction="row" spacing={0.5} alignItems="center">
+              <Tooltip title={displayItem.favorite ? 'Remove from favorites' : 'Add to favorites'}>
+                <IconButton
+                  aria-label="Toggle favorite"
+                  onClick={() => void handleToggleFavorite()}
+                  sx={{
+                    color: displayItem.favorite ? theme.palette.warning.main : 'white',
+                  }}
+                >
+                  {displayItem.favorite ? <StarIcon /> : <StarBorderIcon />}
+                </IconButton>
+              </Tooltip>
+
+              {downloadUrl && (
+                <Tooltip title="Download original">
+                  <IconButton
+                    component="a"
+                    href={downloadUrl}
+                    download
+                    aria-label="Download original"
+                    sx={{ color: 'white' }}
+                  >
+                    <DownloadIcon />
+                  </IconButton>
+                </Tooltip>
+              )}
+
+              <Tooltip title="Open properties panel">
+                <IconButton
+                  aria-label="Open properties panel"
+                  onClick={() => onOpenProperties(displayItem)}
+                  sx={{ color: 'white' }}
+                >
+                  <InfoOutlined />
+                </IconButton>
+              </Tooltip>
+            </Stack>
+          </Box>
 
           {/* Media content */}
           <Box
@@ -238,6 +346,8 @@ export function MediaLightbox({
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
+            onClick={isMobile ? () => setControlsVisible((v) => !v) : undefined}
+            onDoubleClick={() => setZoomed((z) => !z)}
           >
             {item.type === 'video' ? (
               /* Video branch — expanded in commit 5 */
@@ -321,6 +431,9 @@ export function MediaLightbox({
                 color: 'rgba(255,255,255,0.3)',
                 backgroundColor: 'rgba(0,0,0,0.2)',
               },
+              opacity: controlsVisible ? 1 : 0,
+              transition: 'opacity 0.3s ease',
+              pointerEvents: controlsVisible ? 'auto' : 'none',
             }}
           >
             <ChevronLeft />
@@ -344,6 +457,9 @@ export function MediaLightbox({
                 color: 'rgba(255,255,255,0.3)',
                 backgroundColor: 'rgba(0,0,0,0.2)',
               },
+              opacity: controlsVisible ? 1 : 0,
+              transition: 'opacity 0.3s ease',
+              pointerEvents: controlsVisible ? 'auto' : 'none',
             }}
           >
             <ChevronRight />
