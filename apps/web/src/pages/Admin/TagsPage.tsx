@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Navigate } from 'react-router-dom';
 import {
   Container,
@@ -23,12 +23,17 @@ import {
   Switch,
   FormControlLabel,
   IconButton,
+  Collapse,
 } from '@mui/material';
 import {
   Edit as EditIcon,
   Save as SaveIcon,
   Cancel as CancelIcon,
   Delete as DeleteIcon,
+  Download as DownloadIcon,
+  Upload as UploadIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useCircles } from '../../hooks/useCircles';
@@ -37,8 +42,10 @@ import {
   createTagLabel,
   updateTagLabel,
   deleteTagLabel,
+  exportTagLabels,
+  importTagLabels,
 } from '../../services/tagLabels';
-import type { TagLabel } from '../../services/tagLabels';
+import type { TagLabel, ImportResult } from '../../services/tagLabels';
 import { runTaggingBackfill } from '../../services/tagging';
 
 // ---------------------------------------------------------------------------
@@ -53,17 +60,22 @@ function TagsContent() {
 
   // Add form
   const [addName, setAddName] = useState('');
-  const [addDescription, setAddDescription] = useState('');
   const [addSaving, setAddSaving] = useState(false);
 
   // Inline edit form
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
-  const [editDescription, setEditDescription] = useState('');
   const [editSaving, setEditSaving] = useState(false);
 
   // Delete
   const [deletingSaving, setDeletingSaving] = useState<string | null>(null);
+
+  // Export / import
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [importErrorsOpen, setImportErrorsOpen] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   // ---- Backfill state ----
   const { circles, fetchCircles } = useCircles();
@@ -76,7 +88,7 @@ function TagsContent() {
   const [backfillError, setBackfillError] = useState<string | null>(null);
 
   // ---- Load on mount ----
-  useEffect(() => {
+  const loadLabels = () => {
     setLabelsLoading(true);
     listTagLabels()
       .then(setLabels)
@@ -84,6 +96,10 @@ function TagsContent() {
         setLabelsError(err instanceof Error ? err.message : 'Failed to load tag labels');
       })
       .finally(() => setLabelsLoading(false));
+  };
+
+  useEffect(() => {
+    loadLabels();
   }, []);
 
   useEffect(() => {
@@ -96,13 +112,9 @@ function TagsContent() {
     if (!addName.trim()) return;
     setAddSaving(true);
     try {
-      const label = await createTagLabel({
-        name: addName.trim(),
-        description: addDescription.trim() || undefined,
-      });
+      const label = await createTagLabel({ name: addName.trim() });
       setLabels((prev) => [...prev, label]);
       setAddName('');
-      setAddDescription('');
     } catch (err) {
       setLabelsError(err instanceof Error ? err.message : 'Failed to add label');
     } finally {
@@ -113,17 +125,13 @@ function TagsContent() {
   const startEdit = (label: TagLabel) => {
     setEditId(label.id);
     setEditName(label.name);
-    setEditDescription(label.description ?? '');
   };
 
   const handleSaveEdit = async () => {
     if (!editId) return;
     setEditSaving(true);
     try {
-      const updated = await updateTagLabel(editId, {
-        name: editName,
-        description: editDescription || undefined,
-      });
+      const updated = await updateTagLabel(editId, { name: editName });
       setLabels((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
       setEditId(null);
     } catch (err) {
@@ -154,6 +162,59 @@ function TagsContent() {
       setDeletingSaving(null);
     }
   };
+
+  // ---- Export ----
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const blob = await exportTagLabels();
+      const objectUrl = URL.createObjectURL(blob);
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = `tag-labels-${dateStr}.csv`;
+      anchor.style.display = 'none';
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+    } catch (err) {
+      setLabelsError(err instanceof Error ? err.message : 'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // ---- Import ----
+
+  const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset input so the same file can be picked again
+    if (importInputRef.current) {
+      importInputRef.current.value = '';
+    }
+
+    setImporting(true);
+    setImportResult(null);
+    setImportErrorsOpen(false);
+    setLabelsError(null);
+
+    try {
+      const result = await importTagLabels(file);
+      setImportResult(result);
+      // Refresh the list to reflect changes
+      loadLabels();
+    } catch (err) {
+      setLabelsError(err instanceof Error ? err.message : 'Import failed');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  // ---- Backfill ----
 
   const handleRunBackfill = async () => {
     if (!backfillCircleId) return;
@@ -197,31 +258,106 @@ function TagsContent() {
             </Alert>
           )}
 
-          {/* Add form */}
-          <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+          {importResult && (
+            <Alert
+              severity={importResult.errors.length > 0 ? 'warning' : 'success'}
+              sx={{ mb: 2 }}
+              onClose={() => setImportResult(null)}
+              action={
+                importResult.errors.length > 0 ? (
+                  <IconButton
+                    size="small"
+                    onClick={() => setImportErrorsOpen((o) => !o)}
+                    aria-label={importErrorsOpen ? 'Collapse errors' : 'Expand errors'}
+                  >
+                    {importErrorsOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                  </IconButton>
+                ) : undefined
+              }
+            >
+              Imported: {importResult.created} created, {importResult.updated} updated,{' '}
+              {importResult.deleted} deleted
+              {importResult.errors.length > 0 && (
+                <> — {importResult.errors.length} error(s)</>
+              )}
+              <Collapse in={importErrorsOpen}>
+                <Box component="ul" sx={{ mt: 1, pl: 2 }}>
+                  {importResult.errors.map((e, i) => (
+                    <li key={i}>
+                      Row {e.row}: {e.message}
+                    </li>
+                  ))}
+                </Box>
+              </Collapse>
+            </Alert>
+          )}
+
+          {/* Toolbar: add + export/import */}
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={1}
+            sx={{ mb: 2, flexWrap: 'wrap' }}
+          >
+            {/* Add form */}
             <TextField
               label="Label name"
               size="small"
               value={addName}
               onChange={(e) => setAddName(e.target.value)}
-              sx={{ flex: 1 }}
-            />
-            <TextField
-              label="Description"
-              size="small"
-              value={addDescription}
-              onChange={(e) => setAddDescription(e.target.value)}
-              sx={{ flex: 2 }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void handleAddLabel();
+              }}
+              sx={{ flex: 1, minWidth: 180 }}
             />
             <Button
               variant="contained"
               disabled={!addName.trim() || addSaving}
               onClick={() => void handleAddLabel()}
               startIcon={addSaving ? <CircularProgress size={14} /> : undefined}
+              sx={{ minWidth: 80, minHeight: 44 }}
             >
               Add
             </Button>
+
+            {/* Spacer on larger screens */}
+            <Box sx={{ flex: 1, display: { xs: 'none', sm: 'block' } }} />
+
+            {/* Export */}
+            <Button
+              variant="outlined"
+              startIcon={exporting ? <CircularProgress size={14} /> : <DownloadIcon />}
+              disabled={exporting}
+              onClick={() => void handleExport()}
+              sx={{ minHeight: 44 }}
+            >
+              Export CSV
+            </Button>
+
+            {/* Import */}
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv"
+              style={{ display: 'none' }}
+              onChange={(e) => void handleImportFileChange(e)}
+              aria-label="Import CSV file"
+            />
+            <Button
+              variant="outlined"
+              startIcon={importing ? <CircularProgress size={14} /> : <UploadIcon />}
+              disabled={importing}
+              onClick={() => importInputRef.current?.click()}
+              sx={{ minHeight: 44 }}
+            >
+              Import CSV
+            </Button>
           </Stack>
+
+          {/* Import hint */}
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+            CSV columns: <code>id</code>, <code>name</code>, <code>delete</code> — leave{' '}
+            <code>id</code> empty to create a new tag; set <code>delete=true</code> to remove by id.
+          </Typography>
 
           {/* Table */}
           {labelsLoading ? (
@@ -234,7 +370,6 @@ function TagsContent() {
                 <TableHead>
                   <TableRow>
                     <TableCell>Name</TableCell>
-                    <TableCell>Description</TableCell>
                     <TableCell>Enabled</TableCell>
                     <TableCell align="right">Actions</TableCell>
                   </TableRow>
@@ -242,7 +377,7 @@ function TagsContent() {
                 <TableBody>
                   {labels.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={4} align="center">
+                      <TableCell colSpan={3} align="center">
                         <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
                           No tag labels defined yet.
                         </Typography>
@@ -258,13 +393,11 @@ function TagsContent() {
                             size="small"
                             value={editName}
                             onChange={(e) => setEditName(e.target.value)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <TextField
-                            size="small"
-                            value={editDescription}
-                            onChange={(e) => setEditDescription(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') void handleSaveEdit();
+                              if (e.key === 'Escape') setEditId(null);
+                            }}
+                            autoFocus
                           />
                         </TableCell>
                         <TableCell />
@@ -290,7 +423,6 @@ function TagsContent() {
                       // Read mode
                       <TableRow key={label.id}>
                         <TableCell>{label.name}</TableCell>
-                        <TableCell>{label.description ?? '—'}</TableCell>
                         <TableCell>
                           <Switch
                             size="small"
