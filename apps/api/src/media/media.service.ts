@@ -28,7 +28,7 @@ import { ExportQueryDto } from './dto/export-query.dto';
 import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
-import { buildMediaWhere } from '../search/media-where.builder';
+import { buildMediaWhere, wherePeople } from '../search/media-where.builder';
 import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
@@ -283,11 +283,22 @@ export class MediaService {
       sourceDeviceName,
       missingGeo,
       personId,
+      personIds,
+      peopleMatch,
     } = query;
 
     const skip = (page - 1) * pageSize;
 
     await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
+
+    // Resolve which person filter to apply (personIds takes precedence over personId)
+    const effectivePersonIds =
+      personIds && personIds.length > 0
+        ? personIds
+        : personId
+          ? [personId]
+          : [];
+    const effectiveMode = peopleMatch ?? 'any';
 
     const where = {
       ...buildMediaWhere(circleId, {
@@ -310,7 +321,7 @@ export class MediaService {
         sourceDeviceName,
         missingGeo,
       }),
-      ...(personId ? { faces: { some: { personId } } } : {}),
+      ...(effectivePersonIds.length > 0 ? wherePeople(effectivePersonIds, effectiveMode) : {}),
     };
 
     const orderBy: Prisma.MediaItemOrderByWithRelationInput = {
