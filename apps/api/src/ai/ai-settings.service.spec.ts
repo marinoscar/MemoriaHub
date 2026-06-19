@@ -204,7 +204,10 @@ describe('AiSettingsService', () => {
 
       const result = await service.getSettings();
 
-      expect(result.features).toEqual({ search: { provider: null, model: null } });
+      expect(result.features).toEqual({
+        search: { provider: null, model: null },
+        tagging: { provider: null, model: null },
+      });
       expect(result.conversations).toEqual({
         archiveAfterDays: 30,
         deleteAfterArchiveDays: 30,
