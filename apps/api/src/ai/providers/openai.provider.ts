@@ -12,6 +12,13 @@ import type {
 // OpenAI Provider — model constants (update here to add/remove curated models)
 // =============================================================================
 //
+// Token budget constants for non-streaming calls.
+// GPT-5.x reasoning models consume tokens on hidden reasoning before producing
+// visible output, so we cap reasoning effort and give extra headroom to ensure
+// the JSON/text response always fits.
+const TEST_MODEL_MAX_COMPLETION_TOKENS = 256;
+const ANALYZE_IMAGE_MAX_COMPLETION_TOKENS = 2048;
+//
 // NOTE: To add an OpenAI-compatible provider (e.g. Moonshot, Together, Ollama):
 //   no new code needed — store a credential record with the desired provider key
 //   and set baseUrl to the compatible endpoint (e.g. 'https://api.moonshot.cn/v1').
@@ -211,7 +218,10 @@ export class OpenAiProvider implements AiProvider {
       });
       await client.chat.completions.create({
         model,
-        max_completion_tokens: 1,
+        // reasoning_effort:'minimal' keeps GPT-5.x reasoning models from spending
+        // the token budget on hidden reasoning during the connectivity probe.
+        reasoning_effort: 'minimal',
+        max_completion_tokens: TEST_MODEL_MAX_COMPLETION_TOKENS,
         messages: [{ role: 'user', content: 'hi' }],
       });
       return { ok: true };
@@ -258,9 +268,14 @@ export class OpenAiProvider implements AiProvider {
       ],
     });
 
+    // Tagging is a short structured-classification task that needs no extended
+    // reasoning. reasoning_effort:'minimal' keeps GPT-5.x reasoning models from
+    // spending the token budget on hidden reasoning, so the JSON output reliably
+    // fits in the response — and it's faster/cheaper.
     const response = await client.chat.completions.create({
       model: req.model,
-      max_completion_tokens: 1024,
+      reasoning_effort: 'minimal',
+      max_completion_tokens: ANALYZE_IMAGE_MAX_COMPLETION_TOKENS,
       messages,
     });
 
