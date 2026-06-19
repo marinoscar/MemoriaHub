@@ -61,6 +61,7 @@ const mockSha256File = vi.mocked(sha256File);
 
 const OBJECT_ID = 'test-object-id';
 const FAKE_HASH = 'a'.repeat(64); // 64 lower-case hex chars
+const CIRCLE_ID = 'circle-uuid-0001';
 
 /** Returns an initUpload response for a single-part upload of a tiny file. */
 function makeInitUploadResponse() {
@@ -108,6 +109,7 @@ const defaultProps = {
   open: true,
   onClose: vi.fn(),
   onSuccess: vi.fn(),
+  circleId: CIRCLE_ID,
 };
 
 // ---------------------------------------------------------------------------
@@ -468,8 +470,29 @@ describe('MediaUploadDialog', () => {
 
       await waitFor(() => expect(mockListMedia).toHaveBeenCalledTimes(1));
       expect(mockListMedia).toHaveBeenCalledWith(
-        expect.objectContaining({ contentHash: FAKE_HASH, pageSize: 1 }),
+        expect.objectContaining({ circleId: CIRCLE_ID, contentHash: FAKE_HASH, pageSize: 1 }),
       );
+    });
+
+    it('should skip the dedup pre-check and still upload when circleId is absent', async () => {
+      // No circleId provided — the guard must short-circuit and never call listMedia.
+      const propsWithoutCircle = { open: true, onClose: vi.fn(), onSuccess: vi.fn() };
+
+      const user = userEvent.setup();
+      render(<MediaUploadDialog {...propsWithoutCircle} />);
+      const input = getFileInput();
+      fireEvent.change(input, { target: { files: [makeImageFile('no-circle.jpg')] } });
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /upload \d+ file/i })).toBeInTheDocument(),
+      );
+      await user.click(screen.getByRole('button', { name: /upload \d+ file/i }));
+
+      // Upload should still succeed (server path handles registration).
+      await waitFor(() => expect(mockRegisterMedia).toHaveBeenCalledTimes(1));
+
+      // listMedia must NOT have been called — no circleId means no pre-check.
+      expect(mockListMedia).not.toHaveBeenCalled();
     });
   });
 
