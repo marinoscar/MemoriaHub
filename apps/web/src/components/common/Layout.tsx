@@ -2,7 +2,8 @@ import { Box, useTheme } from '@mui/material';
 import { Outlet } from 'react-router-dom';
 import { useState, useCallback } from 'react';
 import { AppBar } from '../navigation/AppBar';
-import { Sidebar } from '../navigation/Sidebar';
+import { Sidebar, DRAWER_WIDTH } from '../navigation/Sidebar';
+import { BottomNav } from '../navigation/BottomNav';
 
 export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -33,11 +34,14 @@ export function Layout() {
           sx={{
             flexGrow: 1,
             p: 3,
+            pb: { xs: 10, md: 3 },
+            ml: { md: `${DRAWER_WIDTH}px` },
           }}
         >
           <Outlet />
         </Box>
       </Box>
+      <BottomNav onMore={() => setSidebarOpen(true)} />
     </Box>
   );
 }
