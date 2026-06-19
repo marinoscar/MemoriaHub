@@ -211,7 +211,7 @@ export class OpenAiProvider implements AiProvider {
       });
       await client.chat.completions.create({
         model,
-        max_tokens: 1,
+        max_completion_tokens: 1,
         messages: [{ role: 'user', content: 'hi' }],
       });
       return { ok: true };
@@ -260,7 +260,7 @@ export class OpenAiProvider implements AiProvider {
 
     const response = await client.chat.completions.create({
       model: req.model,
-      max_tokens: 1024,
+      max_completion_tokens: 1024,
       messages,
     });
 
