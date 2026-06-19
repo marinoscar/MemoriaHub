@@ -57,9 +57,6 @@ export function MediaLightbox({
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  // Suppress "unused variable" warnings for parameters wired in later commits
-  void patchMediaApi;
-
   const item = index !== null ? items[index] ?? null : null;
 
   // Full item (with downloadUrl) fetched from API
