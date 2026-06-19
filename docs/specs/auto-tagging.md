@@ -95,7 +95,6 @@ The admin-managed list of labels the AI may assign. Unique globally (not per-cir
 |--------|------|-------|
 | `id` | UUID PK | |
 | `name` | String UNIQUE | Case-sensitive canonical label |
-| `description` | String? | Optional human description |
 | `enabled` | Boolean | Default `true`; disabled labels are excluded from prompts |
 | `created_at` | Timestamptz | |
 | `updated_at` | Timestamptz | |
@@ -306,7 +305,7 @@ These are also used by face detection and any future enrichment handlers:
 
 1. Go to `/admin/ai-settings` and configure an AI provider credential (Anthropic or OpenAI API key).
 2. In the "Tagging Feature" section of the same page, select the provider and model, then save. This writes to `system_settings.ai.features.tagging`.
-3. Go to `/admin/tags` to manage the global tag vocabulary. Add labels, set descriptions, and toggle enabled/disabled state.
+3. Go to `/admin/tags` to manage the global tag vocabulary. Add labels and toggle enabled/disabled state. Use the CSV export/import endpoints for bulk edits.
 4. On the circle detail page, enable auto-tagging for the circles where it should run.
 5. Optionally, go to `/admin/tags` and run a backfill to tag existing photos in a circle.
 
@@ -346,7 +345,7 @@ List all tag labels (enabled and disabled).
   ```json
   {
     "data": [
-      { "id": "...", "name": "beach", "description": "Sand and water scenes", "enabled": true, "createdAt": "...", "updatedAt": "..." }
+      { "id": "...", "name": "beach", "enabled": true, "createdAt": "...", "updatedAt": "..." }
     ]
   }
   ```
@@ -358,7 +357,7 @@ Create a new tag label.
 - **Auth**: `ai_settings:write`
 - **Request body**:
   ```json
-  { "name": "beach", "description": "Optional description" }
+  { "name": "beach" }
   ```
 - **Response** `201`: `{ "data": { ...label } }`
 - **Response** `409`: Name already exists.
@@ -370,7 +369,7 @@ Update an existing tag label.
 - **Auth**: `ai_settings:write`
 - **Request body** (all fields optional):
   ```json
-  { "name": "beach", "description": "Updated description", "enabled": false }
+  { "name": "beach", "enabled": false }
   ```
 - **Response** `200`: `{ "data": { ...label } }`
 - **Response** `404`: Label not found.
@@ -383,6 +382,41 @@ Delete a tag label. Removes all AI-applied `MediaTag` instances for the label na
 - **Auth**: `ai_settings:write`
 - **Response** `204`: No content.
 - **Response** `404`: Label not found.
+
+#### `GET /api/tag-labels/export`
+
+Export all tag labels as a UTF-8 CSV file, ordered by name.
+
+- **Auth**: `ai_settings:read`
+- **Response** `200`: `Content-Type: text/csv; charset=utf-8` with `Content-Disposition: attachment; filename="tag-labels.csv"`.
+- **CSV columns**: `id,name` (header row always present).
+
+This endpoint is intended for bulk download before editing and re-importing.
+
+#### `POST /api/tag-labels/import`
+
+Import tag labels in bulk from a multipart CSV upload. All successful mutations in the batch commit atomically; per-row errors are collected without aborting the rest.
+
+- **Auth**: `ai_settings:write`
+- **Content-Type**: `multipart/form-data` with a `file` field containing the CSV.
+- **CSV columns** (header row required): `id`, `name`, `delete`.
+  - `id` blank / absent → **create** with `name` (name required).
+  - `id` present, `delete` falsy → **update** name by id (name required).
+  - `id` present, `delete` truthy (`true`, `1`, `yes`, case-insensitive) → **delete** by id.
+- **Response** `200`:
+  ```json
+  {
+    "data": {
+      "created": 3,
+      "updated": 5,
+      "deleted": 1,
+      "errors": [
+        { "row": 4, "message": "Tag label \"beach\" already exists" }
+      ]
+    }
+  }
+  ```
+- **Response** `400`: No file provided, file is empty, or CSV is unparseable.
 
 ---
 

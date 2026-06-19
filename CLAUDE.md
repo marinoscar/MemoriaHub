@@ -360,9 +360,11 @@ An admin dashboard at `/admin/jobs` provides monitoring and control over the gen
 ### AI Auto-Tagging (ai_settings:read / ai_settings:write + media:read / media:write)
 Auto-tagging is per-circle opt-in (default off); see Tag Vocabulary endpoints below and the [auto-tagging spec](docs/specs/auto-tagging.md). The global vocabulary is admin-managed; the vision model assigns labels only from enabled entries.
 - `GET /api/tag-labels` - List all tag labels (ai_settings:read)
-- `POST /api/tag-labels` body `{name, description?}` - Create a tag label (ai_settings:write); 409 if name exists
-- `PATCH /api/tag-labels/:id` body `{name?, description?, enabled?}` - Update a tag label (ai_settings:write)
+- `POST /api/tag-labels` body `{name}` - Create a tag label (ai_settings:write); 409 if name exists
+- `PATCH /api/tag-labels/:id` body `{name?, enabled?}` - Update a tag label (ai_settings:write)
 - `DELETE /api/tag-labels/:id` - Delete a tag label (ai_settings:write) — 204 No Content; removes AI-applied tag instances for that label name across all circles (manual instances preserved)
+- `GET /api/tag-labels/export` - Export all tag labels as CSV (`id,name`, ordered by name) (ai_settings:read)
+- `POST /api/tag-labels/import` - Import tag labels from a multipart CSV upload (ai_settings:write); CSV columns: `id,name,delete`; empty `id` = create, truthy `delete` = delete by id, else update by id; returns `{created, updated, deleted, errors[]}`
 - `GET /api/media/:id/tags/status` - Get per-item tagging status: status, tagCount, providerKey, modelVersion, processedAt, lastError (media:read + viewer)
 - `POST /api/media/:id/tags/rerun` - Re-enqueue auto-tagging for a media item at priority 0; returns `{jobId, status}` (media:write + collaborator)
 - `POST /api/tagging/backfill` body `{circleId, from?, to?, force?}` - Bulk-enqueue unprocessed photos in a circle; requires circle opt-in; returns `{enqueued}` (media:write + collaborator)
@@ -482,7 +484,7 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `faces` - Individual detected face records with bounding box, confidence, variable-dimension embedding (`Float[]` fallback or pgvector column; 128-d for `compreface` mobilenet, 1024-d for `human` WASM), and `externalFaceId` for Rekognition delegated path; keyed to `mediaItemId` + `circleId`; `manuallyAssigned` flag protects user-labeled faces from re-clustering
 - `face_jobs` - Async face-detection job queue (no BullMQ); statuses: `pending`, `running`, `succeeded`, `failed`; reasons: `upload`, `rerun`, `backfill`
 - `media_face_status` - Per-media-item detection status tracking (one row per item); records which provider/model processed the item and when; statuses: `not_processed`, `pending`, `processing`, `processed`, `failed`, `no_faces`
-- `tag_labels` - Global AI tag vocabulary managed by admins; unique `name`; `enabled` flag controls whether a label is included in vision model prompts; labels are not circle-scoped
+- `tag_labels` - Global AI tag vocabulary managed by admins; unique `name`; `enabled` flag controls whether a label is included in vision model prompts; labels are not circle-scoped; supports CSV export/import
 - `media_tag_status` - Per-media-item auto-tagging status (one row per item); statuses: `not_processed`, `pending`, `processing`, `processed`, `failed`; records `provider_key`, `model_version`, `tag_count`, `processed_at`, `last_error`
 
 **Note:** `media_items`, `albums`, and `tags` use `added_by_id` (not `owner_id`) to track the uploading user. Dedup uniqueness for `media_items` is `(circle_id, content_hash)`. Tag names are unique per `(circle_id, name)`. The `media_tags` join table has a `source` column (`manual` | `ai`, default `manual`) that tracks whether a tag was applied by the AI auto-tagging service or by a user manually; AI re-runs are authoritative over `source='ai'` rows only and never modify `source='manual'` rows.
