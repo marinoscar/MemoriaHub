@@ -1,3 +1,4 @@
+import type { SyntheticEvent } from 'react';
 import {
   Box,
   Typography,
@@ -7,6 +8,11 @@ import {
   ToggleButton,
   Chip,
 } from '@mui/material';
+import type {
+  AutocompleteRenderValueGetItemProps,
+  AutocompleteOwnerState,
+  AutocompleteRenderValue,
+} from '@mui/material/Autocomplete';
 import { usePeople } from '../../hooks/usePeople';
 import { PersonAvatar } from '../people/PersonAvatar';
 import type { PersonListItem } from '../../services/face';
@@ -37,8 +43,12 @@ export function PersonMultiSelect({ circleId, value, onChange, label }: PersonMu
     .map((id) => options.find((p) => p.id === id))
     .filter((p): p is PersonListItem => p != null);
 
-  const handleAutocompleteChange = (_: React.SyntheticEvent, newValue: PersonListItem[]) => {
-    onChange({ ids: newValue.map((p) => p.id), mode: value.mode });
+  const handleAutocompleteChange = (
+    _: SyntheticEvent,
+    newValue: (string | PersonListItem)[],
+  ) => {
+    const people = newValue.filter((v): v is PersonListItem => typeof v !== 'string');
+    onChange({ ids: people.map((p) => p.id), mode: value.mode });
   };
 
   const handleToggleChange = (_: React.MouseEvent<HTMLElement>, newMode: string | null) => {
@@ -46,6 +56,24 @@ export function PersonMultiSelect({ circleId, value, onChange, label }: PersonMu
       onChange({ ids: value.ids, mode: newMode as 'all' | 'any' });
     }
   };
+
+  const renderValue = (
+    tagValue: AutocompleteRenderValue<PersonListItem, true, true>,
+    getItemProps: AutocompleteRenderValueGetItemProps<true>,
+    _ownerState: AutocompleteOwnerState<PersonListItem, true, false, true>,
+  ) =>
+    (tagValue as PersonListItem[]).map((option: PersonListItem, index: number) => {
+      const { key, ...chipProps } = getItemProps({ index });
+      return (
+        <Chip
+          key={key}
+          {...chipProps}
+          label={option.name ?? option.id.slice(0, 8)}
+          size="small"
+          avatar={<PersonAvatar person={option} size={24} />}
+        />
+      );
+    });
 
   return (
     <Box
@@ -56,33 +84,30 @@ export function PersonMultiSelect({ circleId, value, onChange, label }: PersonMu
         alignItems: { xs: 'stretch', sm: 'flex-start' },
       }}
     >
-      <Autocomplete
+      <Autocomplete<PersonListItem, true, false, true>
         multiple
+        freeSolo
         options={options}
         value={selectedOptions}
         onChange={handleAutocompleteChange}
-        getOptionLabel={(option) => option.name ?? option.id.slice(0, 8)}
-        isOptionEqualToValue={(option, val) => option.id === val.id}
-        renderOption={(props, option) => (
-          <Box component="li" {...props} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <PersonAvatar person={option} size={28} />
-            <Typography variant="body2">{option.name ?? option.id.slice(0, 8)}</Typography>
-          </Box>
-        )}
-        renderTags={(tagValue, getTagProps) =>
-          tagValue.map((option, index) => {
-            const { key, ...tagProps } = getTagProps({ index });
-            return (
-              <Chip
-                key={key}
-                {...tagProps}
-                label={option.name ?? option.id.slice(0, 8)}
-                size="small"
-                avatar={<PersonAvatar person={option} size={24} />}
-              />
-            );
-          })
+        getOptionLabel={(option) =>
+          typeof option === 'string' ? option : (option.name ?? option.id.slice(0, 8))
         }
+        isOptionEqualToValue={(option, val) =>
+          typeof option === 'string' || typeof val === 'string'
+            ? option === val
+            : option.id === val.id
+        }
+        renderOption={(props, option) => {
+          if (typeof option === 'string') return null;
+          return (
+            <Box component="li" {...props} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <PersonAvatar person={option} size={28} />
+              <Typography variant="body2">{option.name ?? option.id.slice(0, 8)}</Typography>
+            </Box>
+          );
+        }}
+        renderValue={renderValue}
         renderInput={(params) => (
           <TextField {...params} label={label ?? 'People'} size="small" />
         )}
