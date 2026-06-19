@@ -296,5 +296,258 @@ describe('buildWhereFromFields', () => {
         expect(typeof field.buildWhere).toBe('function');
       }
     });
+
+    it('contains the people field with type person-set and optionsSource', () => {
+      const keys = SEARCHABLE_FIELDS.map((f) => f.key);
+      expect(keys).toContain('people');
+
+      const peopleField = SEARCHABLE_FIELDS.find((f) => f.key === 'people')!;
+      expect(peopleField.type).toBe('person-set');
+      expect(peopleField.optionsSource).toBe('people');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// wherePeople — standalone helper
+// ---------------------------------------------------------------------------
+import { wherePeople } from './media-where.builder';
+
+describe('wherePeople', () => {
+  const ID_A = '11111111-1111-1111-1111-111111111111';
+  const ID_B = '22222222-2222-2222-2222-222222222222';
+
+  it('returns {} for an empty ids array', () => {
+    expect(wherePeople([])).toEqual({});
+  });
+
+  it('returns {} for an empty ids array with explicit any mode', () => {
+    expect(wherePeople([], 'any')).toEqual({});
+  });
+
+  it('returns {} for an empty ids array with explicit all mode', () => {
+    expect(wherePeople([], 'all')).toEqual({});
+  });
+
+  it('defaults to all mode when mode is omitted', () => {
+    const result = wherePeople([ID_A]) as any;
+    // 'all' mode produces AND array
+    expect(Array.isArray(result.AND)).toBe(true);
+    expect(result.AND).toHaveLength(1);
+  });
+
+  it('produces faces.some.personId.in for any mode with multiple ids', () => {
+    const result = wherePeople([ID_A, ID_B], 'any') as any;
+    expect(result).toEqual({
+      faces: { some: { personId: { in: [ID_A, ID_B] } } },
+    });
+  });
+
+  it('produces faces.some.personId.in for any mode with a single id', () => {
+    const result = wherePeople([ID_A], 'any') as any;
+    expect(result).toEqual({
+      faces: { some: { personId: { in: [ID_A] } } },
+    });
+  });
+
+  it('produces AND array of faces.some for all mode with multiple ids', () => {
+    const result = wherePeople([ID_A, ID_B], 'all') as any;
+    expect(result).toEqual({
+      AND: [
+        { faces: { some: { personId: ID_A } } },
+        { faces: { some: { personId: ID_B } } },
+      ],
+    });
+  });
+
+  it('produces a single-element AND array for all mode with one id', () => {
+    const result = wherePeople([ID_A], 'all') as any;
+    expect(result).toEqual({
+      AND: [{ faces: { some: { personId: ID_A } } }],
+    });
+  });
+
+  it('filters out empty-string ids', () => {
+    const result = wherePeople(['', ID_A, '  '], 'any') as any;
+    expect(result).toEqual({
+      faces: { some: { personId: { in: [ID_A] } } },
+    });
+  });
+
+  it('filters out non-string ids (garbage input) and returns {} if none remain', () => {
+    const result = wherePeople([42 as any, null as any, undefined as any], 'any');
+    expect(result).toEqual({});
+  });
+
+  it('filters out non-string ids but keeps valid ones', () => {
+    const result = wherePeople([42 as any, ID_A], 'any') as any;
+    expect(result).toEqual({
+      faces: { some: { personId: { in: [ID_A] } } },
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// people field buildWhere via registry
+// ---------------------------------------------------------------------------
+describe('SEARCHABLE_FIELDS people field buildWhere', () => {
+  const ID_A = '11111111-1111-1111-1111-111111111111';
+  const ID_B = '22222222-2222-2222-2222-222222222222';
+
+  function getPeopleField() {
+    return SEARCHABLE_FIELDS.find((f) => f.key === 'people')!;
+  }
+
+  it('returns {} when value is undefined', () => {
+    const field = getPeopleField();
+    expect(field.buildWhere(undefined)).toEqual({});
+  });
+
+  it('returns {} when value is null', () => {
+    const field = getPeopleField();
+    expect(field.buildWhere(null)).toEqual({});
+  });
+
+  it('returns {} when ids is empty array', () => {
+    const field = getPeopleField();
+    expect(field.buildWhere({ ids: [] })).toEqual({});
+  });
+
+  it('returns {} when ids is not an array', () => {
+    const field = getPeopleField();
+    expect(field.buildWhere({ ids: 'not-an-array' })).toEqual({});
+  });
+
+  it('defaults mode to all when mode is omitted', () => {
+    const field = getPeopleField();
+    const result = field.buildWhere({ ids: [ID_A] }) as any;
+    // all mode → AND array
+    expect(Array.isArray(result.AND)).toBe(true);
+  });
+
+  it('uses all mode when mode is all', () => {
+    const field = getPeopleField();
+    const result = field.buildWhere({ ids: [ID_A, ID_B], mode: 'all' }) as any;
+    expect(result).toEqual({
+      AND: [
+        { faces: { some: { personId: ID_A } } },
+        { faces: { some: { personId: ID_B } } },
+      ],
+    });
+  });
+
+  it('uses any mode when mode is any', () => {
+    const field = getPeopleField();
+    const result = field.buildWhere({ ids: [ID_A, ID_B], mode: 'any' }) as any;
+    expect(result).toEqual({
+      faces: { some: { personId: { in: [ID_A, ID_B] } } },
+    });
+  });
+
+  it('falls back to all mode for an unrecognised mode value', () => {
+    const field = getPeopleField();
+    const result = field.buildWhere({ ids: [ID_A], mode: 'unknown' }) as any;
+    expect(Array.isArray(result.AND)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DTO validation — peopleFilterValueSchema and searchQuerySchema
+// ---------------------------------------------------------------------------
+import { peopleFilterValueSchema, searchQuerySchema } from './dto/search-query.dto';
+
+describe('peopleFilterValueSchema', () => {
+  const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000';
+  const VALID_UUID_2 = '550e8400-e29b-41d4-a716-446655440001';
+
+  it('accepts valid {ids:[uuid], mode:"all"}', () => {
+    const result = peopleFilterValueSchema.safeParse({ ids: [VALID_UUID], mode: 'all' });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts valid {ids:[uuid], mode:"any"}', () => {
+    const result = peopleFilterValueSchema.safeParse({ ids: [VALID_UUID], mode: 'any' });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts multiple valid UUIDs', () => {
+    const result = peopleFilterValueSchema.safeParse({
+      ids: [VALID_UUID, VALID_UUID_2],
+      mode: 'all',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('defaults mode to "all" when mode is omitted', () => {
+    const result = peopleFilterValueSchema.safeParse({ ids: [VALID_UUID] });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.mode).toBe('all');
+    }
+  });
+
+  it('rejects when ids is an empty array (min 1)', () => {
+    const result = peopleFilterValueSchema.safeParse({ ids: [], mode: 'all' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects when ids contains a non-UUID string', () => {
+    const result = peopleFilterValueSchema.safeParse({ ids: ['not-a-uuid'], mode: 'all' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects when mode is an invalid value', () => {
+    const result = peopleFilterValueSchema.safeParse({ ids: [VALID_UUID], mode: 'both' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects when ids is missing entirely', () => {
+    const result = peopleFilterValueSchema.safeParse({ mode: 'all' });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('searchQuerySchema — people filter validation', () => {
+  const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000';
+
+  function makeBaseQuery(overrides: Record<string, unknown> = {}) {
+    return {
+      circleId: '550e8400-e29b-41d4-a716-446655440099',
+      filters: {},
+      ...overrides,
+    };
+  }
+
+  it('accepts a valid people filter within filters', () => {
+    const result = searchQuerySchema.safeParse(
+      makeBaseQuery({ filters: { people: { ids: [VALID_UUID], mode: 'all' } } }),
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts omitted people filter (no people key in filters)', () => {
+    const result = searchQuerySchema.safeParse(makeBaseQuery({ filters: {} }));
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects people filter with empty ids array', () => {
+    const result = searchQuerySchema.safeParse(
+      makeBaseQuery({ filters: { people: { ids: [], mode: 'all' } } }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects people filter with an invalid UUID in ids', () => {
+    const result = searchQuerySchema.safeParse(
+      makeBaseQuery({ filters: { people: { ids: ['not-a-uuid'] } } }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects people filter with an invalid mode', () => {
+    const result = searchQuerySchema.safeParse(
+      makeBaseQuery({ filters: { people: { ids: [VALID_UUID], mode: 'wrong' } } }),
+    );
+    expect(result.success).toBe(false);
   });
 });
