@@ -432,6 +432,8 @@ export function MediaLightbox({
               opacity: controlsVisible ? 1 : 0,
               transition: 'opacity 0.3s ease',
               pointerEvents: controlsVisible ? 'auto' : 'none',
+              minWidth: 44,
+              minHeight: 44,
             }}
           >
             <ChevronLeft />
@@ -458,6 +460,8 @@ export function MediaLightbox({
               opacity: controlsVisible ? 1 : 0,
               transition: 'opacity 0.3s ease',
               pointerEvents: controlsVisible ? 'auto' : 'none',
+              minWidth: 44,
+              minHeight: 44,
             }}
           >
             <ChevronRight />
