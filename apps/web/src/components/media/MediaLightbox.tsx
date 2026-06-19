@@ -233,7 +233,7 @@ export function MediaLightbox({
       fullScreen
       open={index !== null}
       sx={{ zIndex: 1200 }}
-      PaperProps={{ sx: { backgroundColor: 'black', overflow: 'hidden' } }}
+      slotProps={{ paper: { sx: { backgroundColor: 'black', overflow: 'hidden' } } }}
     >
       {/* Backdrop click closes */}
       <Box
@@ -288,7 +288,7 @@ export function MediaLightbox({
               {item.title ?? item.originalFilename}
             </Typography>
 
-            <Stack direction="row" spacing={0.5} alignItems="center">
+            <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
               <Tooltip title={displayItem.favorite ? 'Remove from favorites' : 'Add to favorites'}>
                 <IconButton
                   aria-label="Toggle favorite"
