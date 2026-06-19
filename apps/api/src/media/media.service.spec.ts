@@ -2276,7 +2276,7 @@ describe('MediaService', () => {
       mockPrisma.mediaItem.count.mockResolvedValue(0);
     });
 
-    it('includes faces.some.personId in the where clause when personId is provided', async () => {
+    it('includes faces.some.personId.in in the where clause when personId is provided (via wherePeople)', async () => {
       await service.listMedia(
         { ...defaultMediaQuery, personId: 'person-uuid-123' } as any,
         'user-1',
@@ -2285,7 +2285,7 @@ describe('MediaService', () => {
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
       expect(call[0].where).toMatchObject({
-        faces: { some: { personId: 'person-uuid-123' } },
+        faces: { some: { personId: { in: ['person-uuid-123'] } } },
       });
     });
 
@@ -2296,4 +2296,102 @@ describe('MediaService', () => {
       expect(call[0].where.faces).toBeUndefined();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // listMedia — personIds multi-person filter
+  // -------------------------------------------------------------------------
+
+  describe('listMedia — personIds multi-person filter', () => {
+    const PERSON_A = '11111111-1111-1111-1111-111111111111';
+    const PERSON_B = '22222222-2222-2222-2222-222222222222';
+
+    beforeEach(() => {
+      mockPrisma.mediaItem.findMany.mockResolvedValue([]);
+      mockPrisma.mediaItem.count.mockResolvedValue(0);
+    });
+
+    it('uses OR (faces.some.personId.in) when peopleMatch is "any"', async () => {
+      await service.listMedia(
+        { ...defaultMediaQuery, personIds: [PERSON_A, PERSON_B], peopleMatch: 'any' } as any,
+        'user-1',
+        ownPerms,
+      );
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({
+        faces: { some: { personId: { in: [PERSON_A, PERSON_B] } } },
+      });
+    });
+
+    it('uses AND clause when peopleMatch is "all"', async () => {
+      await service.listMedia(
+        { ...defaultMediaQuery, personIds: [PERSON_A, PERSON_B], peopleMatch: 'all' } as any,
+        'user-1',
+        ownPerms,
+      );
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({
+        AND: [
+          { faces: { some: { personId: PERSON_A } } },
+          { faces: { some: { personId: PERSON_B } } },
+        ],
+      });
+    });
+
+    it('defaults to "any" mode when peopleMatch is omitted', async () => {
+      await service.listMedia(
+        { ...defaultMediaQuery, personIds: [PERSON_A, PERSON_B] } as any,
+        'user-1',
+        ownPerms,
+      );
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      // Default 'any' → OR via personId.in
+      expect(call[0].where).toMatchObject({
+        faces: { some: { personId: { in: [PERSON_A, PERSON_B] } } },
+      });
+    });
+
+    it('personIds takes precedence over single personId when both provided', async () => {
+      await service.listMedia(
+        {
+          ...defaultMediaQuery,
+          personId: PERSON_A,
+          personIds: [PERSON_A, PERSON_B],
+          peopleMatch: 'any',
+        } as any,
+        'user-1',
+        ownPerms,
+      );
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      // personIds wins: both persons in the IN clause
+      expect(call[0].where).toMatchObject({
+        faces: { some: { personId: { in: [PERSON_A, PERSON_B] } } },
+      });
+    });
+
+    it('falls back to single personId when personIds is empty', async () => {
+      await service.listMedia(
+        { ...defaultMediaQuery, personId: PERSON_A, personIds: [] } as any,
+        'user-1',
+        ownPerms,
+      );
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({
+        faces: { some: { personId: { in: [PERSON_A] } } },
+      });
+    });
+
+    it('omits faces filter when both personId and personIds are absent', async () => {
+      await service.listMedia({ ...defaultMediaQuery } as any, 'user-1', ownPerms);
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where.faces).toBeUndefined();
+      expect(call[0].where.AND).toBeUndefined();
+    });
+  });
 });
+
