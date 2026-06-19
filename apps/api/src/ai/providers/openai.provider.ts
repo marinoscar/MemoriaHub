@@ -16,8 +16,14 @@ import type {
 // GPT-5.x reasoning models consume tokens on hidden reasoning before producing
 // visible output, so we cap reasoning effort and give extra headroom to ensure
 // the JSON/text response always fits.
-const TEST_MODEL_MAX_COMPLETION_TOKENS = 256;
-const ANALYZE_IMAGE_MAX_COMPLETION_TOKENS = 2048;
+const TEST_MODEL_MAX_COMPLETION_TOKENS = 1024;
+const ANALYZE_IMAGE_MAX_COMPLETION_TOKENS = 4096;
+//
+// 'low' is the lowest reasoning tier supported by every GPT-5.x model the
+// picker allows (gpt-5.4 supports minimal/low/medium/high; gpt-5.5 supports
+// none/low/medium/high — 'low' is the common floor). Override per-deployment
+// if a model needs a different value.
+const OPENAI_REASONING_EFFORT = process.env['OPENAI_REASONING_EFFORT'] ?? 'low';
 //
 // NOTE: To add an OpenAI-compatible provider (e.g. Moonshot, Together, Ollama):
 //   no new code needed — store a credential record with the desired provider key
@@ -218,9 +224,11 @@ export class OpenAiProvider implements AiProvider {
       });
       await client.chat.completions.create({
         model,
-        // reasoning_effort:'minimal' keeps GPT-5.x reasoning models from spending
-        // the token budget on hidden reasoning during the connectivity probe.
-        reasoning_effort: 'minimal',
+        // reasoning_effort:'low' keeps GPT-5.x reasoning models from spending the
+        // full token budget on hidden reasoning during the connectivity probe.
+        // 'low' is accepted by every GPT-5.x model (gpt-5.4 and gpt-5.5);
+        // override via OPENAI_REASONING_EFFORT env var if needed.
+        reasoning_effort: OPENAI_REASONING_EFFORT as any,
         max_completion_tokens: TEST_MODEL_MAX_COMPLETION_TOKENS,
         messages: [{ role: 'user', content: 'hi' }],
       });
@@ -268,13 +276,14 @@ export class OpenAiProvider implements AiProvider {
       ],
     });
 
-    // Tagging is a short structured-classification task that needs no extended
-    // reasoning. reasoning_effort:'minimal' keeps GPT-5.x reasoning models from
-    // spending the token budget on hidden reasoning, so the JSON output reliably
-    // fits in the response — and it's faster/cheaper.
+    // Tagging is a short structured-classification task. reasoning_effort:'low'
+    // keeps GPT-5.x reasoning models from spending the full token budget on
+    // hidden reasoning, so the JSON output reliably fits in the response — and
+    // it's faster/cheaper. 'low' is accepted by all allowed GPT-5.x models;
+    // override via OPENAI_REASONING_EFFORT env var if needed.
     const response = await client.chat.completions.create({
       model: req.model,
-      reasoning_effort: 'minimal',
+      reasoning_effort: OPENAI_REASONING_EFFORT as any,
       max_completion_tokens: ANALYZE_IMAGE_MAX_COMPLETION_TOKENS,
       messages,
     });
