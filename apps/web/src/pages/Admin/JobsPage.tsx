@@ -410,6 +410,7 @@ function JobsPageContent() {
                     <TableCell>Type</TableCell>
                     <TableCell>Status</TableCell>
                     <TableCell>Reason</TableCell>
+                    <TableCell>Model</TableCell>
                     <TableCell align="center">Priority</TableCell>
                     <TableCell align="center">Attempts</TableCell>
                     <TableCell>Last Error</TableCell>
@@ -423,7 +424,7 @@ function JobsPageContent() {
                 <TableBody>
                   {jobs.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={11} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                      <TableCell colSpan={12} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                         No jobs found
                       </TableCell>
                     </TableRow>
@@ -442,6 +443,24 @@ function JobsPageContent() {
                           <Typography variant="body2" color="text.secondary">
                             {job.reason}
                           </Typography>
+                        </TableCell>
+                        <TableCell sx={{ maxWidth: 180 }}>
+                          {job.modelVersion ? (
+                            <>
+                              <Typography variant="body2" noWrap>
+                                {job.modelVersion}
+                              </Typography>
+                              {job.providerKey && (
+                                <Typography variant="caption" color="text.secondary" noWrap display="block">
+                                  {job.providerKey}
+                                </Typography>
+                              )}
+                            </>
+                          ) : (
+                            <Typography variant="body2" color="text.disabled">
+                              —
+                            </Typography>
+                          )}
                         </TableCell>
                         <TableCell align="center">
                           <Typography variant="body2">{job.priority}</Typography>
