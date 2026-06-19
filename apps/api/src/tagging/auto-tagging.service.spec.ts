@@ -20,6 +20,11 @@ jest.mock('sharp', () => {
   return jest.fn().mockReturnValue(mockPipeline);
 });
 
+// Stub image-mime.util so tests control what detectImageMime returns
+jest.mock('./image-mime.util', () => ({
+  detectImageMime: jest.fn(),
+}));
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { Readable } from 'stream';
 import { AutoTaggingService } from './auto-tagging.service';
@@ -38,6 +43,7 @@ import {
   MediaTagStatusType,
   MediaType,
 } from '@prisma/client';
+import { detectImageMime } from './image-mime.util';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -111,9 +117,25 @@ describe('AutoTaggingService', () => {
   let mockRegistry: { get: jest.Mock };
   let mockProvider: { analyzeImage: jest.Mock };
   let mockStorageProvider: { download: jest.Mock };
+  let mockDetectImageMime: jest.Mock;
 
   beforeEach(async () => {
     (jest.requireMock('sharp') as jest.Mock).mockClear();
+
+    // Reset sharp mock to the happy-path pipeline (width: 800)
+    const happyPipeline = {
+      rotate: jest.fn().mockReturnThis(),
+      resize: jest.fn().mockReturnThis(),
+      jpeg: jest.fn().mockReturnThis(),
+      toBuffer: jest.fn().mockResolvedValue({
+        data: Buffer.from('processed-image'),
+        info: { width: 800, height: 600 },
+      }),
+    };
+    (jest.requireMock('sharp') as jest.Mock).mockReturnValue(happyPipeline);
+
+    mockDetectImageMime = detectImageMime as jest.Mock;
+    mockDetectImageMime.mockReset();
 
     mockPrisma = createMockPrismaService();
     mockProvider = { analyzeImage: jest.fn() };
@@ -505,6 +527,112 @@ describe('AutoTaggingService', () => {
           update: expect.objectContaining({ status: MediaTagStatusType.failed }),
         }),
       );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Image selection hardening: mimeType propagation + byte-size guard
+  // -------------------------------------------------------------------------
+
+  describe('image selection hardening', () => {
+    // Helper to make sharp simulate preprocessing failure (width: 0)
+    function makeSharpFail() {
+      const failPipeline = {
+        rotate: jest.fn().mockReturnThis(),
+        resize: jest.fn().mockReturnThis(),
+        jpeg: jest.fn().mockReturnThis(),
+        toBuffer: jest.fn().mockResolvedValue({
+          data: Buffer.from(''),
+          info: { width: 0, height: 0 },
+        }),
+      };
+      (jest.requireMock('sharp') as jest.Mock).mockReturnValue(failPipeline);
+    }
+
+    beforeEach(() => {
+      // Default: analyzeImage returns valid tags
+      mockProvider.analyzeImage.mockResolvedValue('["Beach"]');
+    });
+
+    // -----------------------------------------------------------------------
+    // Happy path: prepared JPEG → mimeType image/jpeg
+    // -----------------------------------------------------------------------
+    it('calls analyzeImage with mimeType image/jpeg when preprocessing succeeds', async () => {
+      // Sharp mock returns width: 800 — preprocessing succeeds
+      mockDetectImageMime.mockReturnValue(null); // should not be called on happy path
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockProvider.analyzeImage).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ mimeType: 'image/jpeg' }),
+      );
+      // detectImageMime must NOT have been called (happy path skips it)
+      expect(mockDetectImageMime).not.toHaveBeenCalled();
+    });
+
+    // -----------------------------------------------------------------------
+    // Fallback path: preprocessing fails, PNG buffer → mimeType image/png
+    // -----------------------------------------------------------------------
+    it('calls analyzeImage with mimeType image/png when preprocessing fails and buffer is PNG', async () => {
+      makeSharpFail();
+      mockDetectImageMime.mockReturnValue('image/png');
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockProvider.analyzeImage).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ mimeType: 'image/png' }),
+      );
+    });
+
+    // -----------------------------------------------------------------------
+    // Fallback path: preprocessing fails, unsupported format → markFailed, no analyzeImage
+    // -----------------------------------------------------------------------
+    it('marks failed and does NOT call analyzeImage when format is unsupported (HEIC/unknown)', async () => {
+      makeSharpFail();
+      mockDetectImageMime.mockReturnValue(null); // HEIC/unknown → null
+
+      await expect(service.processMediaItem(makeJob())).resolves.toBeUndefined();
+
+      expect(mockProvider.analyzeImage).not.toHaveBeenCalled();
+
+      const failedUpsert = (mockPrisma.mediaTagStatus.upsert as jest.Mock).mock.calls.find(
+        (c: any[]) => c[0].create.status === MediaTagStatusType.failed,
+      );
+      expect(failedUpsert).toBeDefined();
+      expect(failedUpsert![0].create.lastError).toMatch(/unsupported|undecodable/i);
+    });
+
+    // -----------------------------------------------------------------------
+    // Byte-size guard: image over MAX_IMAGE_BYTES → markFailed, no analyzeImage
+    // -----------------------------------------------------------------------
+    it('marks failed and does NOT call analyzeImage when image exceeds MAX_IMAGE_BYTES', async () => {
+      // Override the storage download to return a 5MB buffer
+      const oversizedBuffer = Buffer.alloc(5_000_000, 0);
+      mockStorageProvider.download.mockResolvedValue(Readable.from([oversizedBuffer]));
+
+      // Sharp returns the oversized buffer but with a real width (happy path otherwise)
+      const bigPipeline = {
+        rotate: jest.fn().mockReturnThis(),
+        resize: jest.fn().mockReturnThis(),
+        jpeg: jest.fn().mockReturnThis(),
+        toBuffer: jest.fn().mockResolvedValue({
+          data: oversizedBuffer,
+          info: { width: 1568, height: 1000 },
+        }),
+      };
+      (jest.requireMock('sharp') as jest.Mock).mockReturnValue(bigPipeline);
+
+      await expect(service.processMediaItem(makeJob())).resolves.toBeUndefined();
+
+      expect(mockProvider.analyzeImage).not.toHaveBeenCalled();
+
+      const failedUpsert = (mockPrisma.mediaTagStatus.upsert as jest.Mock).mock.calls.find(
+        (c: any[]) => c[0].create.status === MediaTagStatusType.failed,
+      );
+      expect(failedUpsert).toBeDefined();
+      expect(failedUpsert![0].create.lastError).toMatch(/exceeds maximum size/i);
     });
   });
 });
