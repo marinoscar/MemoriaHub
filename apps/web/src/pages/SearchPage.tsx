@@ -33,6 +33,7 @@ import { useSearch } from '../hooks/useSearch';
 import { useConversations } from '../hooks/useConversations';
 import { streamMessage } from '../services/searchStream';
 import { MediaResultsGrid } from '../components/media/MediaResultsGrid';
+import { PersonMultiSelect } from '../components/search/PersonMultiSelect';
 import type { MediaItem, MediaListMeta } from '../types/media';
 
 // ---------------------------------------------------------------------------
@@ -53,9 +54,14 @@ function AdvancedSearchTab() {
   const handleApply = async (p = page) => {
     if (!activeCircle) return;
     try {
+      const filters: Record<string, unknown> = { ...filterValues };
+      const peopleVal = filterValues['people'] as { ids: string[]; mode: 'all' | 'any' } | undefined;
+      if (!peopleVal || peopleVal.ids.length === 0) {
+        delete filters['people'];
+      }
       await search({
         circleId: activeCircle.id,
-        filters: filterValues,
+        filters,
         page: p,
         pageSize: 20,
       });
@@ -148,6 +154,21 @@ function AdvancedSearchTab() {
                         size="small"
                       />
                     }
+                    label={field.label}
+                  />
+                </Grid>
+              );
+            }
+
+            if (field.type === 'person-set') {
+              const personValue = (filterValues[field.key] as { ids: string[]; mode: 'all' | 'any' } | undefined)
+                ?? { ids: [], mode: 'all' as const };
+              return (
+                <Grid key={field.key} size={{ xs: 12 }}>
+                  <PersonMultiSelect
+                    circleId={activeCircle?.id ?? ''}
+                    value={personValue}
+                    onChange={(next) => setFilter(field.key, next)}
                     label={field.label}
                   />
                 </Grid>
