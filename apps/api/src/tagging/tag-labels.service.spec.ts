@@ -6,6 +6,8 @@
  *   - getAll: returns ordered list
  *   - update: success, P2025 → NotFoundException, P2002 → ConflictException
  *   - remove: success, P2025 → NotFoundException
+ *   - exportToCsv: returns CSV string with header id,name
+ *   - importFromCsv: create / update / delete rows, error collection
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -279,6 +281,232 @@ describe('TagLabelsService', () => {
       (mockPrisma.$transaction as jest.Mock).mockRejectedValue(new Error('DB error'));
 
       await expect(service.remove('label-1')).rejects.toThrow('DB error');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // exportToCsv
+  // -------------------------------------------------------------------------
+
+  describe('exportToCsv', () => {
+    it('returns a CSV string with header id,name and one row per label', async () => {
+      (mockPrisma.tagLabel.findMany as jest.Mock).mockResolvedValue([
+        { id: 'label-1', name: 'Beach' },
+        { id: 'label-2', name: 'Sunset' },
+      ]);
+
+      const csv = await service.exportToCsv();
+
+      const lines = csv.trim().split('\n');
+      expect(lines[0]).toBe('id,name');
+      expect(lines[1]).toContain('label-1');
+      expect(lines[1]).toContain('Beach');
+      expect(lines[2]).toContain('label-2');
+      expect(lines[2]).toContain('Sunset');
+    });
+
+    it('returns only the header row when no labels exist', async () => {
+      (mockPrisma.tagLabel.findMany as jest.Mock).mockResolvedValue([]);
+
+      const csv = await service.exportToCsv();
+
+      const lines = csv.trim().split('\n');
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toBe('id,name');
+    });
+
+    it('queries with orderBy name ascending and selects only id and name', async () => {
+      (mockPrisma.tagLabel.findMany as jest.Mock).mockResolvedValue([]);
+
+      await service.exportToCsv();
+
+      expect(mockPrisma.tagLabel.findMany).toHaveBeenCalledWith({
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true },
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // importFromCsv
+  // -------------------------------------------------------------------------
+
+  describe('importFromCsv', () => {
+    beforeEach(() => {
+      // Default: transaction executes the callback immediately
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(
+        async (fn: any) => fn(mockPrisma),
+      );
+    });
+
+    it('creates a new label when id is absent', async () => {
+      (mockPrisma.tagLabel.create as jest.Mock).mockResolvedValue(
+        makeTagLabel({ name: 'Beach' }),
+      );
+
+      const summary = await service.importFromCsv([{ name: 'Beach' }]);
+
+      expect(summary.created).toBe(1);
+      expect(summary.updated).toBe(0);
+      expect(summary.deleted).toBe(0);
+      expect(summary.errors).toHaveLength(0);
+      expect(mockPrisma.tagLabel.create).toHaveBeenCalledWith({
+        data: { name: 'Beach' },
+      });
+    });
+
+    it('updates an existing label when id and name are present', async () => {
+      (mockPrisma.tagLabel.update as jest.Mock).mockResolvedValue(
+        makeTagLabel({ id: 'label-1', name: 'Sunrise' }),
+      );
+
+      const summary = await service.importFromCsv([
+        { id: 'label-1', name: 'Sunrise' },
+      ]);
+
+      expect(summary.updated).toBe(1);
+      expect(summary.created).toBe(0);
+      expect(summary.deleted).toBe(0);
+      expect(summary.errors).toHaveLength(0);
+      expect(mockPrisma.tagLabel.update).toHaveBeenCalledWith({
+        where: { id: 'label-1' },
+        data: { name: 'Sunrise' },
+      });
+    });
+
+    it('deletes a label when delete is truthy and id is present', async () => {
+      (mockPrisma.tagLabel.delete as jest.Mock).mockResolvedValue(
+        makeTagLabel({ id: 'label-1' }),
+      );
+
+      const summary = await service.importFromCsv([
+        { id: 'label-1', delete: 'true' },
+      ]);
+
+      expect(summary.deleted).toBe(1);
+      expect(summary.created).toBe(0);
+      expect(summary.updated).toBe(0);
+      expect(summary.errors).toHaveLength(0);
+      expect(mockPrisma.tagLabel.delete).toHaveBeenCalledWith({
+        where: { id: 'label-1' },
+      });
+    });
+
+    it.each([['true'], ['1'], ['yes'], ['TRUE'], ['YES'], ['1']])(
+      'recognises delete=%s as truthy',
+      async (deleteVal) => {
+        (mockPrisma.tagLabel.delete as jest.Mock).mockResolvedValue(
+          makeTagLabel({ id: 'label-1' }),
+        );
+
+        const summary = await service.importFromCsv([
+          { id: 'label-1', delete: deleteVal },
+        ]);
+
+        expect(summary.deleted).toBe(1);
+        expect(summary.errors).toHaveLength(0);
+      },
+    );
+
+    it('records an error and continues when delete=true but no id', async () => {
+      const summary = await service.importFromCsv([
+        { delete: 'true' },
+        { name: 'Valid' },
+      ]);
+
+      (mockPrisma.tagLabel.create as jest.Mock).mockResolvedValue(
+        makeTagLabel({ name: 'Valid' }),
+      );
+
+      expect(summary.errors).toHaveLength(1);
+      expect(summary.errors[0].message).toMatch(/no id/i);
+    });
+
+    it('records an error when create row has no name (empty string)', async () => {
+      // A row with a blank name but no id → CREATE branch; name required
+      const summary = await service.importFromCsv([{ name: '   ' }]);
+
+      expect(summary.created).toBe(0);
+      expect(summary.errors).toHaveLength(1);
+      expect(summary.errors[0].message).toMatch(/name is required/i);
+    });
+
+    it('records an error when update row has no name', async () => {
+      const summary = await service.importFromCsv([{ id: 'label-1' }]);
+
+      expect(summary.updated).toBe(0);
+      expect(summary.errors).toHaveLength(1);
+      expect(summary.errors[0].message).toMatch(/name is required/i);
+    });
+
+    it('records a conflict error on P2002 during create and continues', async () => {
+      (mockPrisma.tagLabel.create as jest.Mock)
+        .mockRejectedValueOnce(makePrismaError('P2002'))
+        .mockResolvedValue(makeTagLabel({ name: 'Other' }));
+
+      const summary = await service.importFromCsv([
+        { name: 'Beach' },
+        { name: 'Other' },
+      ]);
+
+      expect(summary.created).toBe(1);
+      expect(summary.errors).toHaveLength(1);
+      expect(summary.errors[0].message).toMatch(/already exists/i);
+    });
+
+    it('records a not-found error on P2025 during update and continues', async () => {
+      (mockPrisma.tagLabel.update as jest.Mock)
+        .mockRejectedValueOnce(makePrismaError('P2025'))
+        .mockResolvedValue(makeTagLabel({ name: 'Good' }));
+
+      const summary = await service.importFromCsv([
+        { id: 'missing', name: 'X' },
+        { id: 'label-1', name: 'Good' },
+      ]);
+
+      expect(summary.updated).toBe(1);
+      expect(summary.errors).toHaveLength(1);
+      expect(summary.errors[0].message).toMatch(/not found/i);
+    });
+
+    it('skips rows where all columns are undefined without recording an error', async () => {
+      // {} has no id/name/delete keys at all — treated as an empty row
+      const summary = await service.importFromCsv([{}]);
+
+      expect(summary.created).toBe(0);
+      expect(summary.errors).toHaveLength(0);
+    });
+
+    it('returns correct row numbers in errors (offset by header row)', async () => {
+      const summary = await service.importFromCsv([
+        { delete: 'true' }, // row 2 (header is row 1)
+      ]);
+
+      expect(summary.errors[0].row).toBe(2);
+    });
+
+    it('handles a mixed batch: create + update + delete + error', async () => {
+      (mockPrisma.tagLabel.create as jest.Mock).mockResolvedValue(
+        makeTagLabel({ name: 'New' }),
+      );
+      (mockPrisma.tagLabel.update as jest.Mock).mockResolvedValue(
+        makeTagLabel({ id: 'label-1', name: 'Renamed' }),
+      );
+      (mockPrisma.tagLabel.delete as jest.Mock).mockResolvedValue(
+        makeTagLabel({ id: 'label-2' }),
+      );
+
+      const summary = await service.importFromCsv([
+        { name: 'New' },                      // create
+        { id: 'label-1', name: 'Renamed' },   // update
+        { id: 'label-2', delete: '1' },       // delete
+        { delete: 'yes' },                    // error: no id
+      ]);
+
+      expect(summary.created).toBe(1);
+      expect(summary.updated).toBe(1);
+      expect(summary.deleted).toBe(1);
+      expect(summary.errors).toHaveLength(1);
     });
   });
 });
