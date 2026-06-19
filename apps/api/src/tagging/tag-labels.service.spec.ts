@@ -375,9 +375,11 @@ describe('TagLabelsService', () => {
     });
 
     it('deletes a label when delete is truthy and id is present', async () => {
-      (mockPrisma.tagLabel.delete as jest.Mock).mockResolvedValue(
-        makeTagLabel({ id: 'label-1' }),
-      );
+      const label = makeTagLabel({ id: 'label-1', name: 'Beach' });
+      (mockPrisma.tagLabel.findUnique as jest.Mock).mockResolvedValue(label);
+      (mockPrisma.tagLabel.delete as jest.Mock).mockResolvedValue(label);
+      (mockPrisma.mediaTag.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.tag.findMany as jest.Mock).mockResolvedValue([]);
 
       const summary = await service.importFromCsv([
         { id: 'label-1', delete: 'true' },
@@ -395,9 +397,11 @@ describe('TagLabelsService', () => {
     it.each([['true'], ['1'], ['yes'], ['TRUE'], ['YES'], ['1']])(
       'recognises delete=%s as truthy',
       async (deleteVal) => {
-        (mockPrisma.tagLabel.delete as jest.Mock).mockResolvedValue(
-          makeTagLabel({ id: 'label-1' }),
-        );
+        const label = makeTagLabel({ id: 'label-1', name: 'Beach' });
+        (mockPrisma.tagLabel.findUnique as jest.Mock).mockResolvedValue(label);
+        (mockPrisma.tagLabel.delete as jest.Mock).mockResolvedValue(label);
+        (mockPrisma.mediaTag.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.tag.findMany as jest.Mock).mockResolvedValue([]);
 
         const summary = await service.importFromCsv([
           { id: 'label-1', delete: deleteVal },
@@ -409,14 +413,14 @@ describe('TagLabelsService', () => {
     );
 
     it('records an error and continues when delete=true but no id', async () => {
-      const summary = await service.importFromCsv([
-        { delete: 'true' },
-        { name: 'Valid' },
-      ]);
-
       (mockPrisma.tagLabel.create as jest.Mock).mockResolvedValue(
         makeTagLabel({ name: 'Valid' }),
       );
+
+      const summary = await service.importFromCsv([
+        { delete: 'true' },     // error: no id
+        { name: 'Valid' },      // create: succeeds
+      ]);
 
       expect(summary.errors).toHaveLength(1);
       expect(summary.errors[0].message).toMatch(/no id/i);
@@ -486,15 +490,17 @@ describe('TagLabelsService', () => {
     });
 
     it('handles a mixed batch: create + update + delete + error', async () => {
+      const labelToDelete = makeTagLabel({ id: 'label-2', name: 'OldName' });
       (mockPrisma.tagLabel.create as jest.Mock).mockResolvedValue(
         makeTagLabel({ name: 'New' }),
       );
       (mockPrisma.tagLabel.update as jest.Mock).mockResolvedValue(
         makeTagLabel({ id: 'label-1', name: 'Renamed' }),
       );
-      (mockPrisma.tagLabel.delete as jest.Mock).mockResolvedValue(
-        makeTagLabel({ id: 'label-2' }),
-      );
+      (mockPrisma.tagLabel.findUnique as jest.Mock).mockResolvedValue(labelToDelete);
+      (mockPrisma.tagLabel.delete as jest.Mock).mockResolvedValue(labelToDelete);
+      (mockPrisma.mediaTag.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.tag.findMany as jest.Mock).mockResolvedValue([]);
 
       const summary = await service.importFromCsv([
         { name: 'New' },                      // create
@@ -507,6 +513,57 @@ describe('TagLabelsService', () => {
       expect(summary.updated).toBe(1);
       expect(summary.deleted).toBe(1);
       expect(summary.errors).toHaveLength(1);
+    });
+
+    it('CSV delete triggers cascade: calls mediaTag.deleteMany with source=ai and label name', async () => {
+      const label = makeTagLabel({ id: 'label-1', name: 'Beach' });
+      (mockPrisma.tagLabel.findUnique as jest.Mock).mockResolvedValue(label);
+      (mockPrisma.tagLabel.delete as jest.Mock).mockResolvedValue(label);
+      (mockPrisma.mediaTag.deleteMany as jest.Mock).mockResolvedValue({ count: 3 });
+      (mockPrisma.tag.findMany as jest.Mock).mockResolvedValue([]);
+
+      await service.importFromCsv([{ id: 'label-1', delete: 'true' }]);
+
+      expect(mockPrisma.mediaTag.deleteMany).toHaveBeenCalledWith({
+        where: {
+          source: 'ai',
+          tag: { name: { equals: 'Beach', mode: 'insensitive' } },
+        },
+      });
+    });
+
+    it('CSV delete cascade cleans up now-empty Tag rows', async () => {
+      const label = makeTagLabel({ id: 'label-1', name: 'Beach' });
+      (mockPrisma.tagLabel.findUnique as jest.Mock).mockResolvedValue(label);
+      (mockPrisma.tagLabel.delete as jest.Mock).mockResolvedValue(label);
+      (mockPrisma.mediaTag.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.tag.findMany as jest.Mock).mockResolvedValue([{ id: 'tag-beach' }]);
+      (mockPrisma.tag.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+      await service.importFromCsv([{ id: 'label-1', delete: 'true' }]);
+
+      expect(mockPrisma.tag.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: ['tag-beach'] } },
+      });
+    });
+
+    it('CSV delete records not-found error when label does not exist and continues', async () => {
+      (mockPrisma.tagLabel.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.tagLabel.create as jest.Mock).mockResolvedValue(
+        makeTagLabel({ name: 'Other' }),
+      );
+
+      const summary = await service.importFromCsv([
+        { id: 'missing-id', delete: 'true' },   // not found → error
+        { name: 'Other' },                       // create → succeeds
+      ]);
+
+      expect(summary.errors).toHaveLength(1);
+      expect(summary.errors[0].message).toMatch(/not found/i);
+      expect(summary.created).toBe(1);
+      // No cascade calls should have been made for the missing label
+      expect(mockPrisma.tagLabel.delete).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaTag.deleteMany).not.toHaveBeenCalled();
     });
   });
 });

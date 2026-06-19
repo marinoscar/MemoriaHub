@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 import { stringify as csvStringify } from 'csv-stringify/sync';
@@ -94,30 +95,38 @@ export class TagLabelsService {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.tagLabel.delete({ where: { id } });
-
-      // Delete all AI-sourced MediaTag instances for this label name (case-insensitive)
-      await tx.mediaTag.deleteMany({
-        where: {
-          source: 'ai',
-          tag: { name: { equals: label.name, mode: 'insensitive' } },
-        },
-      });
-
-      // Clean up now-empty Tag rows for this label name
-      const emptyTags = await tx.tag.findMany({
-        where: {
-          name: { equals: label.name, mode: 'insensitive' },
-          mediaTags: { none: {} },
-        },
-        select: { id: true },
-      });
-      if (emptyTags.length > 0) {
-        await tx.tag.deleteMany({
-          where: { id: { in: emptyTags.map((t) => t.id) } },
-        });
-      }
+      await this.cascadeDeleteLabel(tx, id, label.name);
     });
+  }
+
+  private async cascadeDeleteLabel(
+    tx: Prisma.TransactionClient,
+    labelId: string,
+    labelName: string,
+  ): Promise<void> {
+    await tx.tagLabel.delete({ where: { id: labelId } });
+
+    // Delete all AI-sourced MediaTag instances for this label name (case-insensitive)
+    await tx.mediaTag.deleteMany({
+      where: {
+        source: 'ai',
+        tag: { name: { equals: labelName, mode: 'insensitive' } },
+      },
+    });
+
+    // Clean up now-empty Tag rows for this label name
+    const emptyTags = await tx.tag.findMany({
+      where: {
+        name: { equals: labelName, mode: 'insensitive' },
+        mediaTags: { none: {} },
+      },
+      select: { id: true },
+    });
+    if (emptyTags.length > 0) {
+      await tx.tag.deleteMany({
+        where: { id: { in: emptyTags.map((t) => t.id) } },
+      });
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -197,15 +206,22 @@ export class TagLabelsService {
             });
             continue;
           }
+          // Fetch the label first to get its name for the cascade
+          const labelToDelete = await tx.tagLabel.findUnique({ where: { id } });
+          if (!labelToDelete) {
+            summary.errors.push({
+              row: rowNum,
+              message: `Tag label ${id} not found`,
+            });
+            continue;
+          }
           try {
-            await tx.tagLabel.delete({ where: { id } });
+            await this.cascadeDeleteLabel(tx, id, labelToDelete.name);
             summary.deleted++;
           } catch (e: any) {
             summary.errors.push({
               row: rowNum,
-              message: e.code === 'P2025'
-                ? `Tag label ${id} not found`
-                : `Delete failed: ${e.message}`,
+              message: `Delete failed: ${(e as Error).message}`,
             });
           }
         } else if (!id) {
