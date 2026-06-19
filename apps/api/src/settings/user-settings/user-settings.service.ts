@@ -44,6 +44,7 @@ export class UserSettingsService {
     return {
       theme: value.theme,
       profile: value.profile,
+      search: value.search,
       updatedAt: settings.updatedAt,
       version: settings.version,
     };
@@ -80,6 +81,7 @@ export class UserSettingsService {
     return {
       theme: value.theme,
       profile: value.profile,
+      search: value.search,
       updatedAt: settings.updatedAt,
       version: settings.version,
     };
@@ -121,6 +123,9 @@ export class UserSettingsService {
             ? dto.profile.customImageUrl
             : current.profile.customImageUrl,
       },
+      search: dto.search !== undefined
+        ? { visibleFields: dto.search.visibleFields }
+        : current.search,
     };
 
     // Validate merged result
@@ -146,6 +151,7 @@ export class UserSettingsService {
     return {
       theme: value.theme,
       profile: value.profile,
+      search: value.search,
       updatedAt: settings.updatedAt,
       version: settings.version,
     };

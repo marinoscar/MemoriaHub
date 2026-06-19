@@ -11,6 +11,9 @@ export const userSettingsSchema = z.object({
     useProviderImage: z.boolean(),
     customImageUrl: z.string().url().nullable().optional(),
   }),
+  search: z.object({
+    visibleFields: z.array(z.string()).default([]),
+  }).optional(),
 });
 
 export type UserSettingsDto = z.infer<typeof userSettingsSchema>;
@@ -22,6 +25,9 @@ export const userSettingsPatchSchema = z.object({
     displayName: z.string().max(100).optional(),
     useProviderImage: z.boolean().optional(),
     customImageUrl: z.string().url().nullable().optional(),
+  }).optional(),
+  search: z.object({
+    visibleFields: z.array(z.string()).default([]),
   }).optional(),
 });
 

@@ -8,6 +8,7 @@ import {
 import { useState } from 'react';
 import { ThemeSettings } from '../components/settings/ThemeSettings';
 import { ProfileSettings } from '../components/settings/ProfileSettings';
+import { SearchFieldsSettings } from '../components/settings/SearchFieldsSettings';
 import { PersonalAccessTokens } from '../components/settings/PersonalAccessTokens';
 import { useUserSettings } from '../hooks/useUserSettings';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
@@ -20,6 +21,7 @@ export default function UserSettingsPage() {
     isSaving,
     updateTheme,
     updateProfile,
+    updateSettings,
   } = useUserSettings();
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -80,6 +82,15 @@ export default function UserSettingsPage() {
               onSave={handleProfileSave}
               disabled={isSaving}
             />
+
+            {/* Search Field Preferences */}
+            <Box id="search-fields">
+              <SearchFieldsSettings
+                settings={settings}
+                updateSettings={updateSettings}
+                disabled={isSaving}
+              />
+            </Box>
 
             {/* Personal Access Tokens */}
             <PersonalAccessTokens />

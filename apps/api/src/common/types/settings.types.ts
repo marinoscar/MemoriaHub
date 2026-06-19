@@ -12,6 +12,9 @@ export interface UserSettingsValue {
     useProviderImage: boolean;
     customImageUrl?: string | null;
   };
+  search?: {
+    visibleFields: string[];
+  };
 }
 
 /**
@@ -57,6 +60,9 @@ export const DEFAULT_USER_SETTINGS: UserSettingsValue = {
   theme: 'system',
   profile: {
     useProviderImage: true,
+  },
+  search: {
+    visibleFields: [],
   },
 };
 
