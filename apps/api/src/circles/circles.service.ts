@@ -338,6 +338,58 @@ export class CirclesService {
     return { faceRecognitionEnabled: updated.faceRecognitionEnabled };
   }
 
+  // ----- Tagging Settings -----
+
+  async getTaggingSettings(circleId: string, user: RequestUser) {
+    await this.membership.assertCircleAccess(
+      user.id,
+      circleId,
+      user.permissions,
+      CircleRole.viewer,
+    );
+
+    const circle = await this.prisma.circle.findUnique({
+      where: { id: circleId },
+      select: { autoTaggingEnabled: true },
+    });
+    if (!circle) throw new NotFoundException(`Circle ${circleId} not found`);
+
+    return { autoTaggingEnabled: circle.autoTaggingEnabled };
+  }
+
+  async updateTaggingSettings(circleId: string, enabled: boolean, user: RequestUser) {
+    // circle_admin OR system super-admin can toggle this
+    await this.membership.assertCircleAccess(
+      user.id,
+      circleId,
+      user.permissions,
+      CircleRole.circle_admin,
+    );
+
+    const updated = await this.prisma.circle.update({
+      where: { id: circleId },
+      data: { autoTaggingEnabled: enabled },
+      select: { autoTaggingEnabled: true },
+    });
+
+    // Audit log
+    await this.prisma.auditEvent.create({
+      data: {
+        actorUserId: user.id,
+        action: 'circle:tagging_settings_update',
+        targetType: 'circle',
+        targetId: circleId,
+        meta: { autoTaggingEnabled: enabled } as any,
+      },
+    });
+
+    this.logger.log(
+      `Circle ${circleId} autoTaggingEnabled=${enabled} set by user ${user.id}`,
+    );
+
+    return { autoTaggingEnabled: updated.autoTaggingEnabled };
+  }
+
   async revokeInvite(user: RequestUser, circleId: string, inviteId: string) {
     await this.membership.assertCircleAccess(user.id, circleId, user.permissions, CircleRole.circle_admin);
 
