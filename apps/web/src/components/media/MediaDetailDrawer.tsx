@@ -100,15 +100,15 @@ function MetaRow({
 }) {
   if (value === null || value === undefined || value === '') return null;
   return (
-    <Box sx={{ display: 'flex', gap: 1, py: 0.25 }}>
+    <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: { xs: 0, sm: 1 }, py: 0.25 }}>
       <Typography
         variant="caption"
         color="text.secondary"
-        sx={{ minWidth: 120, fontWeight: 500 }}
+        sx={{ minWidth: { sm: 120 }, fontWeight: 500 }}
       >
         {label}
       </Typography>
-      <Typography variant="caption" sx={{ wordBreak: 'break-all' }}>
+      <Typography variant="caption" sx={{ wordBreak: 'break-word' }}>
         {String(value)}
       </Typography>
     </Box>
@@ -484,6 +484,7 @@ export function MediaDetailDrawer({
                 startIcon={<CancelIcon />}
                 onClick={handleCancelEdit}
                 disabled={saving}
+                sx={{ minHeight: 44 }}
               >
                 Cancel
               </Button>
@@ -493,6 +494,7 @@ export function MediaDetailDrawer({
                 startIcon={saving ? <CircularProgress size={14} /> : <SaveIcon />}
                 onClick={handleSave}
                 disabled={saving}
+                sx={{ minHeight: 44 }}
               >
                 Save
               </Button>
@@ -669,6 +671,7 @@ export function MediaDetailDrawer({
               );
               setLocationEditOpen(true);
             }}
+            sx={{ minHeight: 44, width: { xs: '100%', sm: 'auto' } }}
           >
             {displayItem.takenLat !== null ? 'Edit Location' : 'Set Location'}
           </Button>
@@ -684,7 +687,7 @@ export function MediaDetailDrawer({
             />
             {locationError && <Alert severity="error" sx={{ mt: 1 }}>{locationError}</Alert>}
             <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-              <Button size="small" onClick={() => setLocationEditOpen(false)} disabled={locationSaving}>
+              <Button size="small" onClick={() => setLocationEditOpen(false)} disabled={locationSaving} sx={{ minHeight: 44 }}>
                 Cancel
               </Button>
               <Button
@@ -693,6 +696,7 @@ export function MediaDetailDrawer({
                 onClick={() => void handleSaveLocation()}
                 disabled={!editPinLocation || locationSaving}
                 startIcon={locationSaving ? <CircularProgress size={12} /> : undefined}
+                sx={{ minHeight: 44 }}
               >
                 Save Location
               </Button>
@@ -734,7 +738,7 @@ export function MediaDetailDrawer({
         {(() => {
           const chipProps = tagStatusChipProps(tagStatus?.status);
           return (
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'flex-start', sm: 'center' }} sx={{ mb: 1 }}>
               <Chip
                 label={chipProps.label}
                 color={chipProps.color}
@@ -752,6 +756,7 @@ export function MediaDetailDrawer({
                 startIcon={rerunTagsLoading ? <CircularProgress size={14} /> : <RefreshIcon />}
                 onClick={() => void rerunTags()}
                 disabled={rerunTagsLoading}
+                sx={{ minHeight: 44 }}
               >
                 Re-run AI tagging
               </Button>
@@ -774,7 +779,7 @@ export function MediaDetailDrawer({
         )}
 
         {!tagEditOpen ? (
-          <Button size="small" variant="outlined" onClick={() => setTagEditOpen(true)}>
+          <Button size="small" variant="outlined" onClick={() => setTagEditOpen(true)} sx={{ minHeight: 44, width: { xs: '100%', sm: 'auto' } }}>
             Edit Tags
           </Button>
         ) : (
@@ -804,6 +809,7 @@ export function MediaDetailDrawer({
                   setTagError(null);
                 }}
                 disabled={tagSaving}
+                sx={{ minHeight: 44 }}
               >
                 Cancel
               </Button>
@@ -813,6 +819,7 @@ export function MediaDetailDrawer({
                 onClick={() => void handleSaveTags()}
                 disabled={(editTagsAdd.length === 0 && editTagsRemove.length === 0) || tagSaving}
                 startIcon={tagSaving ? <CircularProgress size={12} /> : undefined}
+                sx={{ minHeight: 44 }}
               >
                 Save Tags
               </Button>

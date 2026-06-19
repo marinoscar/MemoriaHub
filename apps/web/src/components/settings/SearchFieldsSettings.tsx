@@ -191,7 +191,7 @@ export function SearchFieldsSettings({
                     />
                   }
                   label={
-                    <Box>
+                    <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: { sm: 'center' } }}>
                       <Typography variant="body2" component="span">
                         {field.label}
                       </Typography>
@@ -199,7 +199,7 @@ export function SearchFieldsSettings({
                         <Typography
                           variant="caption"
                           color="text.secondary"
-                          sx={{ ml: 1 }}
+                          sx={{ ml: { sm: 1 } }}
                           component="span"
                         >
                           {field.description}
@@ -224,12 +224,12 @@ export function SearchFieldsSettings({
               </Alert>
             )}
 
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: { xs: 'stretch', sm: 'flex-end' }, mt: 2 }}>
               <Button
                 variant="contained"
                 onClick={() => void handleSave()}
                 disabled={disabled || !hasChanges || isSaving}
-                sx={{ minHeight: 44 }}
+                sx={{ minHeight: 44, width: { xs: '100%', sm: 'auto' } }}
               >
                 {isSaving ? 'Saving...' : 'Save Changes'}
               </Button>
