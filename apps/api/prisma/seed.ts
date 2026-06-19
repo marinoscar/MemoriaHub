@@ -250,6 +250,55 @@ async function seedSystemSettings() {
   console.log('✓ Seeded default system settings');
 }
 
+// Starter vocabulary for AI auto-tagging (global, no circleId)
+const TAG_LABELS = [
+  'Beach',
+  'Pool',
+  'Playground',
+  'Backyard',
+  'Restaurant',
+  'Airport',
+  'Road Trip',
+  'Mountains',
+  'Sports Field',
+  'Swimming',
+  'Eating Together',
+  'Cooking',
+  'Playing Sports',
+  'Opening Gifts',
+  'Playing Games',
+  'Dancing',
+  'Reading',
+  'Group Photo',
+  'Hugging',
+  'Laughing',
+  'Celebration',
+  'Sunset',
+  'Screenshot',
+  'Document',
+  'Receipt',
+  'Meme',
+  'Food Photo',
+  'Product Photo',
+  'Work Image',
+  'Blurry',
+  'No People',
+] as const;
+
+async function seedTagLabels() {
+  console.log('Seeding tag labels...');
+
+  for (const name of TAG_LABELS) {
+    await prisma.tagLabel.upsert({
+      where: { name },
+      create: { name, enabled: true },
+      update: {},
+    });
+  }
+
+  console.log(`✓ Seeded ${TAG_LABELS.length} tag labels`);
+}
+
 async function seedInitialAdminAllowlist() {
   console.log('Seeding initial admin allowlist...');
 
@@ -281,6 +330,7 @@ async function main() {
   await seedRolePermissions();
   await seedSystemSettings();
   await seedInitialAdminAllowlist();
+  await seedTagLabels();
 
   console.log('\n✓ Database seeding completed successfully');
 }

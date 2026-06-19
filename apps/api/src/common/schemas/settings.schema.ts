@@ -40,6 +40,10 @@ export const systemSettingsSchema = z.object({
         provider: z.string().nullable(),
         model: z.string().nullable(),
       }),
+      tagging: z.object({
+        provider: z.string().nullable(),
+        model: z.string().nullable(),
+      }),
     }),
     conversations: z.object({
       archiveAfterDays: z.number().int().min(1),
@@ -67,6 +71,10 @@ export const systemSettingsPatchSchema = z.object({
   ai: z.object({
     features: z.object({
       search: z.object({
+        provider: z.string().nullable().optional(),
+        model: z.string().nullable().optional(),
+      }).optional(),
+      tagging: z.object({
         provider: z.string().nullable().optional(),
         model: z.string().nullable().optional(),
       }).optional(),

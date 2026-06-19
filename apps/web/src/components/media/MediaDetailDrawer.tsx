@@ -28,6 +28,8 @@ import {
   Download as DownloadIcon,
   BrokenImage as BrokenImageIcon,
   AddLocation as AddLocationIcon,
+  LocalOffer as LocalOfferIcon,
+  Refresh as RefreshIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
@@ -38,6 +40,8 @@ import { LocationMiniMap } from './LocationMiniMap';
 import { LocationPickerMap } from './LocationPickerMap';
 import { TagAutocomplete } from './TagAutocomplete';
 import { FaceThumbnails } from './FaceThumbnails';
+import { useMediaTags } from '../../hooks/useMediaTags';
+import type { MediaTagStatusType } from '../../services/tagging';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -67,6 +71,24 @@ function formatDuration(ms: number | null): string {
   if (h > 0) return `${h}h ${m}m ${s}s`;
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
+}
+
+function tagStatusChipProps(status: MediaTagStatusType | undefined): {
+  label: string;
+  color: 'success' | 'warning' | 'info' | 'default' | 'error';
+} {
+  switch (status) {
+    case 'processed':
+      return { label: 'Tagged', color: 'success' };
+    case 'pending':
+      return { label: 'Pending', color: 'warning' };
+    case 'processing':
+      return { label: 'Processing', color: 'info' };
+    case 'failed':
+      return { label: 'Failed', color: 'error' };
+    default:
+      return { label: 'Not Tagged', color: 'default' };
+  }
 }
 
 function MetaRow({
@@ -294,6 +316,23 @@ export function MediaDetailDrawer({
       // Silently fail — the UI won't update since onItemUpdated won't be called
     }
   }, [item, onItemUpdated]);
+
+  // Callback that refreshes the full item after a tagging rerun completes
+  const onRefreshTags = useCallback(async () => {
+    if (!item) return;
+    try {
+      const refreshed = await getMedia(item.id);
+      setFullItem(refreshed);
+      onItemUpdated(refreshed);
+    } catch {
+      // Silently swallow — tags display will still update via status
+    }
+  }, [item?.id, onItemUpdated]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const { status: tagStatus, rerun: rerunTags, rerunLoading: rerunTagsLoading } = useMediaTags(
+    item?.id ?? '',
+    onRefreshTags,
+  );
 
   if (!item) return null;
 
@@ -690,6 +729,35 @@ export function MediaDetailDrawer({
         <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
           Tags
         </Typography>
+
+        {/* AI tagging status + rerun */}
+        {(() => {
+          const chipProps = tagStatusChipProps(tagStatus?.status);
+          return (
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+              <Chip
+                label={chipProps.label}
+                color={chipProps.color}
+                size="small"
+                icon={<LocalOfferIcon />}
+              />
+              {tagStatus?.providerKey && (
+                <Typography variant="caption" color="text.secondary">
+                  {tagStatus.providerKey}
+                </Typography>
+              )}
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={rerunTagsLoading ? <CircularProgress size={14} /> : <RefreshIcon />}
+                onClick={() => void rerunTags()}
+                disabled={rerunTagsLoading}
+              >
+                Re-run AI tagging
+              </Button>
+            </Stack>
+          );
+        })()}
 
         {displayItem.tags && displayItem.tags.length > 0 ? (
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>

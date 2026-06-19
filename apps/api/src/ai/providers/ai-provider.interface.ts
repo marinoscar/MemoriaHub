@@ -39,6 +39,16 @@ export type ChatStreamEvent =
   | { type: 'tool_call'; id: string; name: string; input: unknown }
   | { type: 'done'; stopReason?: string };
 
+export interface AnalyzeImageRequest {
+  model: string;
+  system?: string;
+  prompt: string;
+  /** Raw base64-encoded image data — no `data:` URI prefix. */
+  imageBase64: string;
+  /** MIME type, e.g. 'image/jpeg' */
+  mimeType: string;
+}
+
 export interface AiProvider {
   /** Unique key identifying this provider, e.g. 'openai' | 'anthropic' */
   readonly key: string;
@@ -48,4 +58,10 @@ export interface AiProvider {
   listModels(creds: AiProviderCredentials): Promise<string[]>;
   /** Ping the provider with a minimal call. Used for credential verification. */
   testModel(creds: AiProviderCredentials, model: string): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Non-streaming vision call. Sends an image + text prompt and returns the
+   * model's full text response. The caller is responsible for JSON-parsing if
+   * structured output is expected.
+   */
+  analyzeImage(creds: AiProviderCredentials, req: AnalyzeImageRequest): Promise<string>;
 }

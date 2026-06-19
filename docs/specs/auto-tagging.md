@@ -1,0 +1,443 @@
+# AI Auto-Tagging — End-to-End Reference
+
+| Field | Value |
+|-------|-------|
+| **Version** | 1.0 |
+| **Last Updated** | June 2026 |
+| **Status** | Implemented |
+
+---
+
+## Table of Contents
+
+1. [Overview and User-Facing Behavior](#1-overview-and-user-facing-behavior)
+2. [Architecture and Data Flow](#2-architecture-and-data-flow)
+3. [Data Model](#3-data-model)
+4. [Provider and Vision Integration](#4-provider-and-vision-integration)
+5. [Configuration and Environment Variables](#5-configuration-and-environment-variables)
+6. [API Endpoints](#6-api-endpoints)
+7. [Operations](#7-operations)
+
+---
+
+## 1. Overview and User-Facing Behavior
+
+AI auto-tagging automatically assigns descriptive tags to uploaded photos using a vision language model. The model evaluates each photo against a **global vocabulary** of tag labels managed by the admin, then adds matching labels as regular circle-scoped tags.
+
+**Core capabilities:**
+
+- Tag photos automatically on upload when opted in per circle (default off).
+- Use any configured AI provider (Anthropic, OpenAI) with admin-selected model.
+- Draw only from an admin-defined global vocabulary — the model cannot invent labels.
+- Allow circle collaborators to trigger a per-item re-run from the media drawer.
+- Allow admins to backfill existing photos in a circle, with optional date-range scoping and a force flag to reprocess already-tagged items.
+- Track per-item status (`not_processed`, `pending`, `processing`, `processed`, `failed`) for monitoring and UI display.
+
+Auto-tagging is deliberately decoupled from the synchronous upload path. Uploads complete immediately; image analysis runs in the background via the generic `enrichment_jobs` queue. See **[docs/specs/enrichment-queue.md](enrichment-queue.md)** for the full queue architecture.
+
+---
+
+## 2. Architecture and Data Flow
+
+### Upload Path
+
+```mermaid
+flowchart TD
+    A[File uploaded and processed] -->|OBJECT_PROCESSED_EVENT| B[TaggingEnqueueListener]
+    B -->|AUTO_TAG_ENABLED != false| C{circle.autoTaggingEnabled?}
+    C -->|No| D[Skip — log and return]
+    C -->|Yes| E[EnrichmentJobService.enqueue type=auto_tagging priority=20 reason=upload]
+    E --> F[(enrichment_jobs table)]
+    E --> G[Upsert MediaTagStatus → pending]
+    F -->|poll every ENRICHMENT_JOB_POLL_MS| H[EnrichmentJobWorker]
+    H -->|atomic claim| I[AutoTaggingHandler.process]
+    I --> J[AutoTaggingService.processMediaItem]
+    J --> K[Read system_settings ai.features.tagging]
+    K --> L[Load enabled TagLabels]
+    L --> M[Download + prepareImageForProcessing]
+    M --> N[AiProvider.analyzeImage — vision model call]
+    N --> O[Parse JSON array response]
+    O --> P[Case-insensitive vocabulary validation]
+    P --> Q[Upsert Tag + MediaTag rows per validated label]
+    Q --> R[Upsert MediaTagStatus → processed]
+    J -->|on error| S[Upsert MediaTagStatus → failed; rethrow for worker retry]
+```
+
+### Priority Ordering
+
+| Trigger | `reason` | `priority` |
+|---------|----------|------------|
+| Per-item re-run | `rerun` | 0 (highest) |
+| On upload | `upload` | 20 |
+| Backfill | `backfill` | 100 (lowest) |
+
+The worker claims jobs ordered by `priority ASC, createdAt ASC`, so re-runs process before fresh uploads, which process before backfill work.
+
+### Idempotent Enqueue
+
+`EnrichmentJobService.enqueue` checks for an existing `pending` or `running` job with the same `type` + `mediaItemId` before inserting. If one exists, it returns the existing job without creating a duplicate.
+
+### Worker Retry Logic
+
+The `EnrichmentJobWorker` retries failed jobs up to **3 attempts** total (`MAX_ATTEMPTS = 3`). If `AutoTaggingService.processMediaItem` throws (e.g. transient provider error), the worker resets the job to `pending` for the next tick. After the third failure the job is marked `failed` and will not auto-retry. Manual retry is available via `/admin/jobs`.
+
+Failures that are not retryable — missing media item, wrong media type, provider/model not configured, credential resolution error — are detected early in `processMediaItem`, the status row is set to `failed` with `lastError`, and the function returns normally without throwing (so the worker marks the job `succeeded` and does not retry).
+
+---
+
+## 3. Data Model
+
+### `tag_labels` — Global Vocabulary
+
+The admin-managed list of labels the AI may assign. Unique globally (not per-circle).
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | UUID PK | |
+| `name` | String UNIQUE | Case-sensitive canonical label |
+| `description` | String? | Optional human description |
+| `enabled` | Boolean | Default `true`; disabled labels are excluded from prompts |
+| `created_at` | Timestamptz | |
+| `updated_at` | Timestamptz | |
+
+### `media_tag_status` — Per-Item Processing Status
+
+One row per `media_item`, tracking where the item is in the pipeline.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | UUID PK | |
+| `media_item_id` | UUID UNIQUE | FK → `media_items` (cascade delete) |
+| `circle_id` | UUID | FK → `circles` (cascade delete) |
+| `status` | `MediaTagStatusType` | See enum below |
+| `provider_key` | String? | Provider that last processed this item |
+| `model_version` | String? | Model that last processed this item |
+| `tag_count` | Int | Number of tags assigned by the last successful run |
+| `processed_at` | Timestamptz? | Timestamp of last successful completion |
+| `last_error` | String? | Error message from the last failed attempt |
+| `created_at` | Timestamptz | |
+| `updated_at` | Timestamptz | |
+
+**`MediaTagStatusType` enum values:**
+
+| Value | Meaning |
+|-------|---------|
+| `not_processed` | No job has ever been enqueued (returned as a virtual default — no DB row exists) |
+| `pending` | Job is in the queue waiting to run |
+| `processing` | Worker has claimed the job and is actively running |
+| `processed` | Completed successfully; `tag_count` reflects the result |
+| `failed` | All attempts exhausted or non-retryable error; see `last_error` |
+
+### `Circle.auto_tagging_enabled`
+
+Boolean column on the `circles` table (default `false`). When `false`, `TaggingEnqueueListener` skips enqueueing for photos uploaded to that circle, and `POST /api/tagging/backfill` rejects the request with `400 Bad Request`.
+
+### AI Tagging Feature Setting
+
+Stored as a nested path in the `system_settings` JSONB column under the key `global`:
+
+```json
+{
+  "ai": {
+    "features": {
+      "tagging": {
+        "provider": "anthropic",
+        "model": "claude-opus-4-5"
+      }
+    }
+  }
+}
+```
+
+Set via `PUT /api/ai/features/tagging`. Read by `AutoTaggingService` at job-processing time.
+
+### Tag Storage
+
+AI-assigned tags are stored as ordinary `tags` and `media_tags` rows, identical to manually created tags. There is no `source` column distinguishing AI-assigned tags from human-assigned ones. The `tags.added_by_id` is set to the media item's `added_by_id` (the uploader), not a system account.
+
+Tag name uniqueness is enforced per `(circle_id, name)`. The upsert is idempotent — running auto-tagging twice does not duplicate tags.
+
+---
+
+## 4. Provider and Vision Integration
+
+### `AiProvider.analyzeImage`
+
+```typescript
+interface AnalyzeImageRequest {
+  model: string;
+  system?: string;
+  prompt: string;
+  /** Raw base64-encoded image data — no `data:` URI prefix. */
+  imageBase64: string;
+  /** MIME type, e.g. 'image/jpeg' */
+  mimeType: string;
+}
+
+interface AiProvider {
+  analyzeImage(creds: AiProviderCredentials, req: AnalyzeImageRequest): Promise<string>;
+}
+```
+
+`analyzeImage` is a non-streaming, single-turn vision call. It returns the model's full text response as a string. The caller is responsible for JSON-parsing the response.
+
+### Provider Implementations
+
+| Provider | Implementation |
+|----------|---------------|
+| `anthropic` | `client.messages.create` with `max_tokens: 1024`; image sent as `base64` source block; system prompt passed as top-level `system` field |
+| `openai` | `client.chat.completions.create` with `max_tokens: 1024`; image sent as `image_url` with `data:` URI in the user message; system prompt as a `system` role message |
+
+### Prompt Design
+
+**System prompt** (fixed):
+> You are an image analysis assistant. Your job is to identify which labels from a provided list apply to the given image. Respond with ONLY a JSON array of strings — no explanation, no code fences, no extra text. Each string must exactly match one of the labels in the provided list. Return an empty array if none apply.
+
+**User prompt** (constructed per job):
+```
+Analyze this image and return a JSON array of applicable labels from the following allowed list.
+Only choose labels that clearly apply. Return ONLY the JSON array.
+
+Allowed labels:
+<label1>
+<label2>
+...
+
+Example response: ["label1", "label2"]
+```
+
+Only `enabled` tag labels are included in the allowed list, sorted alphabetically by name.
+
+### Response Parsing and Validation
+
+The raw response string is cleaned of any Markdown code fences, then the first JSON array (`[...]`) is extracted with a regex. The parsed array is filtered to strings only.
+
+Validation is **case-insensitive**: each returned label is matched against the allowed set after lowercasing both sides. Unknown labels are silently dropped. Matching labels are then normalized back to their canonical casing as stored in `tag_labels.name`.
+
+Duplicate labels in the model response are deduplicated before upsert.
+
+### Image Preparation
+
+Before calling the model, the image is downloaded from storage and passed through `prepareImageForProcessing` (the same utility used by face detection). This applies EXIF orientation correction and downscales to a configurable maximum dimension (`TAG_MAX_IMAGE_DIM`, default `2000` px). If preprocessing fails, the raw buffer is used as a fallback with a warning logged.
+
+---
+
+## 5. Configuration and Environment Variables
+
+### Auto-Tagging Specific
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUTO_TAG_ENABLED` | `true` | Global kill-switch. Set to `false` to disable auto-enqueue on upload for all circles. Per-circle opt-in still applies when `true`. |
+| `TAG_MAX_IMAGE_DIM` | `2000` | Maximum image dimension (px) before downscaling for the vision model call. |
+
+### Shared Enrichment Worker Variables
+
+These are also used by face detection and any future enrichment handlers:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENRICHMENT_WORKER_ENABLED` | `true` | Set to `false` to disable the `EnrichmentJobWorker` entirely (useful in CI). Also respects legacy alias `FACE_WORKER_ENABLED`. |
+| `ENRICHMENT_JOB_POLL_MS` | `5000` | Worker polling interval in milliseconds. Also respects legacy alias `FACE_JOB_POLL_MS`. |
+| `ENRICHMENT_WORKER_CONCURRENCY` | `1` | Number of jobs to claim and process per tick. Also respects legacy alias `FACE_WORKER_CONCURRENCY`. |
+
+### Admin Configuration Steps
+
+1. Go to `/admin/ai-settings` and configure an AI provider credential (Anthropic or OpenAI API key).
+2. In the "Tagging Feature" section of the same page, select the provider and model, then save. This writes to `system_settings.ai.features.tagging`.
+3. Go to `/admin/tags` to manage the global tag vocabulary. Add labels, set descriptions, and toggle enabled/disabled state.
+4. On the circle detail page, enable auto-tagging for the circles where it should run.
+5. Optionally, go to `/admin/tags` and run a backfill to tag existing photos in a circle.
+
+---
+
+## 6. API Endpoints
+
+All endpoints require JWT Bearer authentication unless stated otherwise.
+
+### AI Settings — Tagging Feature (Admin only)
+
+#### `PUT /api/ai/features/tagging`
+
+Set the active AI provider and model for the tagging feature.
+
+- **Auth**: Admin role + `ai_settings:write`
+- **Request body**:
+  ```json
+  { "provider": "anthropic", "model": "claude-opus-4-5" }
+  ```
+  Both fields accept `null` to clear the setting.
+- **Response** `200`:
+  ```json
+  { "provider": "anthropic", "model": "claude-opus-4-5" }
+  ```
+
+---
+
+### Tag Label Vocabulary (Admin only)
+
+#### `GET /api/tag-labels`
+
+List all tag labels (enabled and disabled).
+
+- **Auth**: `ai_settings:read`
+- **Response** `200`:
+  ```json
+  {
+    "data": [
+      { "id": "...", "name": "beach", "description": "Sand and water scenes", "enabled": true, "createdAt": "...", "updatedAt": "..." }
+    ]
+  }
+  ```
+
+#### `POST /api/tag-labels`
+
+Create a new tag label.
+
+- **Auth**: `ai_settings:write`
+- **Request body**:
+  ```json
+  { "name": "beach", "description": "Optional description" }
+  ```
+- **Response** `201`: `{ "data": { ...label } }`
+- **Response** `409`: Name already exists.
+
+#### `PATCH /api/tag-labels/:id`
+
+Update an existing tag label.
+
+- **Auth**: `ai_settings:write`
+- **Request body** (all fields optional):
+  ```json
+  { "name": "beach", "description": "Updated description", "enabled": false }
+  ```
+- **Response** `200`: `{ "data": { ...label } }`
+- **Response** `404`: Label not found.
+- **Response** `409`: Name conflict.
+
+#### `DELETE /api/tag-labels/:id`
+
+Delete a tag label. Does not remove already-assigned tags from media items.
+
+- **Auth**: `ai_settings:write`
+- **Response** `204`: No content.
+- **Response** `404`: Label not found.
+
+---
+
+### Per-Item Tagging (Circle-scoped)
+
+#### `POST /api/media/:id/tags/rerun`
+
+Re-enqueue auto-tagging for a specific media item. Enqueues at priority 0 (highest). Sets `media_tag_status` to `pending`.
+
+- **Auth**: `media:write` + per-circle `collaborator` role
+- **Response** `201`:
+  ```json
+  { "data": { "jobId": "...", "status": "pending" } }
+  ```
+- **Response** `404`: Media item not found or soft-deleted.
+
+#### `GET /api/media/:id/tags/status`
+
+Get the current auto-tagging status for a media item.
+
+- **Auth**: `media:read` + per-circle `viewer` role
+- **Response** `200`:
+  ```json
+  {
+    "data": {
+      "status": "processed",
+      "tagCount": 3,
+      "providerKey": "anthropic",
+      "modelVersion": "claude-opus-4-5",
+      "processedAt": "2026-06-01T12:00:00Z",
+      "lastError": null
+    }
+  }
+  ```
+  If no status row exists, returns `status: "not_processed"` with all other fields `null`.
+
+---
+
+### Backfill
+
+#### `POST /api/tagging/backfill`
+
+Queue auto-tagging jobs for photos in a circle that have not yet been processed (or all photos when `force: true`).
+
+- **Auth**: `media:write` + per-circle `collaborator` role
+- **Requirement**: `circle.autoTaggingEnabled` must be `true`, otherwise returns `400 Bad Request`.
+- **Request body**:
+  ```json
+  {
+    "circleId": "uuid",
+    "from": "2025-01-01T00:00:00Z",
+    "to": "2026-01-01T00:00:00Z",
+    "force": false
+  }
+  ```
+  `from`, `to`, and `force` are optional. `from`/`to` filter by the photo's date. When `force` is `false` (default), only items without a `processed` status are enqueued.
+- **Response** `201`:
+  ```json
+  { "data": { "enqueued": 47 } }
+  ```
+
+---
+
+### Circle Tagging Settings
+
+#### `GET /api/circles/:id/tagging-settings`
+
+Get the per-circle auto-tagging opt-in flag.
+
+- **Auth**: `circles:read` + per-circle `viewer` role
+- **Response** `200`:
+  ```json
+  { "autoTaggingEnabled": false }
+  ```
+
+#### `PUT /api/circles/:id/tagging-settings`
+
+Enable or disable auto-tagging for a circle. Writes an audit event.
+
+- **Auth**: `circles:write` + per-circle `circle_admin` role (or `circles:manage_any` for super-admin bypass)
+- **Request body**:
+  ```json
+  { "enabled": true }
+  ```
+- **Response** `200`:
+  ```json
+  { "autoTaggingEnabled": true }
+  ```
+
+---
+
+## 7. Operations
+
+### Monitoring
+
+The `auto_tagging` job type appears automatically in `/admin/jobs` queue stats under `byType` once the first job is enqueued. Use the existing job dashboard to:
+
+- View counts by status (`pending`, `running`, `succeeded`, `failed`).
+- Filter the job list to `type=auto_tagging`.
+- Retry individual failed jobs or bulk-retry all failed `auto_tagging` jobs.
+- Reset jobs stuck in `running` state past a configurable threshold.
+
+### Failure Modes
+
+| Cause | Behavior |
+|-------|---------|
+| `AUTO_TAG_ENABLED=false` | Listener skips enqueue silently at startup; no status row created |
+| `circle.autoTaggingEnabled=false` | Listener skips enqueue silently; no status row created |
+| Media item not found or soft-deleted | Status → `failed`; job succeeds (no retry) |
+| Media item is not a photo | Status → `failed`; job succeeds (no retry) |
+| Provider or model not configured in system settings | Status → `failed`; job succeeds (no retry) |
+| Credential resolution error (provider not in DB or disabled) | Status → `failed`; job succeeds (no retry) |
+| No enabled tag labels | Status → `processed` with `tagCount=0`; job succeeds |
+| Provider API error (transient) | Status → `failed`; job rethrows; worker retries up to 3 attempts total |
+| All labels returned by model fail vocabulary validation | Status → `processed` with `tagCount=0`; no tags assigned |
+
+### Adding New AI Providers
+
+Any provider that implements `AiProvider` (including `analyzeImage`) is automatically available for selection in the tagging feature config. Register the provider in `AiProviderRegistry` following the same pattern as `anthropic` and `openai`.

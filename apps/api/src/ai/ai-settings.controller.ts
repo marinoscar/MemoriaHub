@@ -23,6 +23,7 @@ import {
   UpsertAiCredentialsDto,
   TestAiProviderDto,
   SetSearchFeatureDto,
+  SetTaggingFeatureDto,
 } from './dto/ai-credentials.dto';
 
 @ApiTags('AI Settings')
@@ -94,5 +95,18 @@ export class AiSettingsController {
     @CurrentUser('id') userId: string,
   ) {
     return this.aiSettingsService.setSearchFeature(dto, userId);
+  }
+
+  @Put('features/tagging')
+  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.AI_SETTINGS_WRITE] })
+  @ApiOperation({
+    summary: 'Set active provider and model for AI tagging feature (Admin)',
+  })
+  @ApiResponse({ status: 200, description: 'Tagging feature config updated' })
+  async setTaggingFeature(
+    @Body() dto: SetTaggingFeatureDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.aiSettingsService.setTaggingFeature(dto, userId);
   }
 }

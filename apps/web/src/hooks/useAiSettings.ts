@@ -6,6 +6,7 @@ import {
   testAiProvider,
   getAiModels,
   putAiSearchFeature,
+  putAiTaggingFeature,
 } from '../services/ai';
 import type { AiSettingsResponse, AiTestResult } from '../services/ai';
 
@@ -59,6 +60,13 @@ export function useAiSettings() {
     [],
   );
 
+  const saveTaggingFeature = useCallback(
+    async (provider: string, model: string) => {
+      await putAiTaggingFeature({ provider, model });
+    },
+    [],
+  );
+
   return {
     settings,
     loading,
@@ -69,5 +77,6 @@ export function useAiSettings() {
     testProvider,
     getModels,
     saveSearchFeature,
+    saveTaggingFeature,
   };
 }

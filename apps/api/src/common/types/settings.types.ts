@@ -30,6 +30,10 @@ export interface SystemSettingsValue {
         provider: string | null;
         model: string | null;
       };
+      tagging: {
+        provider: string | null;
+        model: string | null;
+      };
     };
     conversations: {
       archiveAfterDays: number;
@@ -67,6 +71,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
   ai: {
     features: {
       search: { provider: null, model: null },
+      tagging: { provider: null, model: null },
     },
     conversations: {
       archiveAfterDays: 30,

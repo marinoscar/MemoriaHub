@@ -33,6 +33,7 @@ import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { CreateInviteDto } from './dto/create-invite.dto';
 import { CirclesQueryDto } from './dto/circles-query.dto';
 import { UpdateFaceSettingsDto } from './dto/update-face-settings.dto';
+import { UpdateTaggingSettingsDto } from './dto/update-tagging-settings.dto';
 
 @ApiTags('Circles')
 @ApiBearerAuth('JWT-auth')
@@ -226,6 +227,42 @@ export class CirclesController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.circlesService.updateFaceSettings(id, dto.enabled, user);
+  }
+
+  // ----- Tagging Settings -----
+
+  /**
+   * GET /api/circles/:id/tagging-settings
+   * Returns per-circle auto-tagging opt-in flag.
+   */
+  @Get(':id/tagging-settings')
+  @Auth({ permissions: [PERMISSIONS.CIRCLES_READ] })
+  @ApiOperation({ summary: 'Get auto-tagging settings for a circle' })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Tagging settings returned' })
+  async getTaggingSettings(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.circlesService.getTaggingSettings(id, user);
+  }
+
+  /**
+   * PUT /api/circles/:id/tagging-settings
+   * Toggle per-circle auto-tagging opt-in. Requires circle_admin.
+   */
+  @Put(':id/tagging-settings')
+  @Auth({ permissions: [PERMISSIONS.CIRCLES_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update auto-tagging opt-in for a circle (circle_admin)' })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Tagging settings updated' })
+  async updateTaggingSettings(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateTaggingSettingsDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.circlesService.updateTaggingSettings(id, dto.enabled, user);
   }
 
   @Delete(':id/invites/:inviteId')
