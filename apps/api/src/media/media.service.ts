@@ -646,11 +646,11 @@ export class MediaService {
         update: {},
       });
 
-      // Upsert MediaTag join (idempotent)
+      // Upsert MediaTag join; create as manual, promote ai→manual on conflict
       await this.prisma.mediaTag.upsert({
         where: { tagId_mediaItemId: { tagId: tag.id, mediaItemId: item.id } },
-        create: { tagId: tag.id, mediaItemId: item.id },
-        update: {},
+        create: { tagId: tag.id, mediaItemId: item.id, source: 'manual' },
+        update: { source: 'manual' },
       });
 
       result.push({ tagId: tag.id, name: tag.name });
@@ -1332,10 +1332,20 @@ export class MediaService {
           tagIds.push(tag.id);
         }
 
-        const pairs = dto.ids.flatMap((mediaItemId) =>
-          tagIds.map((tagId) => ({ mediaItemId, tagId })),
+        // Add source=manual to each pair
+        const pairsWithSource = dto.ids.flatMap((mediaItemId) =>
+          tagIds.map((tagId) => ({ mediaItemId, tagId, source: 'manual' as const })),
         );
-        const result = await tx.mediaTag.createMany({ data: pairs, skipDuplicates: true });
+        const result = await tx.mediaTag.createMany({ data: pairsWithSource, skipDuplicates: true });
+        // Promote any existing ai-sourced tags to manual for these pairs
+        await tx.mediaTag.updateMany({
+          where: {
+            tagId: { in: tagIds },
+            mediaItemId: { in: dto.ids },
+            source: 'ai',
+          },
+          data: { source: 'manual' },
+        });
         added = result.count;
       }
 

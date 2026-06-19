@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { EnrichmentJob, MediaTagStatusType, MediaType } from '@prisma/client';
+import { EnrichmentJob, MediaTagSource, MediaTagStatusType, MediaType } from '@prisma/client';
 import { Readable } from 'stream';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiSettingsService } from '../ai/ai-settings.service';
@@ -222,19 +222,30 @@ export class AutoTaggingService {
         (item) => labelByLower.get(item.toLowerCase()) ?? item,
       );
 
-      // m. Upsert Tag and MediaTag for each validated label
-      for (const labelName of normalizedLabels) {
-        const tag = await this.prisma.tag.upsert({
-          where: { circleId_name: { circleId: mediaItem.circleId, name: labelName } },
-          create: { addedById: mediaItem.addedById, circleId: mediaItem.circleId, name: labelName },
-          update: {},
+      // m. Reconcile AI tags: remove stale AI tags, upsert current labels with source=ai
+      await this.prisma.$transaction(async (tx) => {
+        // Remove AI-sourced tags no longer produced by the model
+        await tx.mediaTag.deleteMany({
+          where: {
+            mediaItemId: mediaItem.id,
+            source: MediaTagSource.ai,
+            tag: { name: { notIn: normalizedLabels } },
+          },
         });
-        await this.prisma.mediaTag.upsert({
-          where: { tagId_mediaItemId: { tagId: tag.id, mediaItemId: mediaItem.id } },
-          create: { tagId: tag.id, mediaItemId: mediaItem.id },
-          update: {},
-        });
-      }
+        // Upsert current labels as AI tags (never downgrade manual to ai)
+        for (const labelName of normalizedLabels) {
+          const tag = await tx.tag.upsert({
+            where: { circleId_name: { circleId: mediaItem.circleId, name: labelName } },
+            create: { addedById: mediaItem.addedById, circleId: mediaItem.circleId, name: labelName },
+            update: {},
+          });
+          await tx.mediaTag.upsert({
+            where: { tagId_mediaItemId: { tagId: tag.id, mediaItemId: mediaItem.id } },
+            create: { tagId: tag.id, mediaItemId: mediaItem.id, source: MediaTagSource.ai },
+            update: {}, // do NOT downgrade manual tag to ai
+          });
+        }
+      });
 
       // n. Upsert mediaTagStatus → processed
       await this.prisma.mediaTagStatus.upsert({

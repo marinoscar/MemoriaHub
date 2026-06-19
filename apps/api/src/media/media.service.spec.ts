@@ -981,6 +981,24 @@ describe('MediaService', () => {
       expect(result).toHaveLength(2);
     });
 
+    it('creates MediaTag with source=manual and updates source to manual (manual source is set on both sides)', async () => {
+      const item = makeMediaItem({ addedById: 'user-1' });
+      const tag = makeTag({ name: 'nature' });
+
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+      mockPrisma.tag.upsert.mockResolvedValue(tag as any);
+      mockPrisma.mediaTag.upsert.mockResolvedValue({} as any);
+
+      await service.attachTags(item.id, { names: ['nature'] }, 'user-1', ownPerms);
+
+      expect(mockPrisma.mediaTag.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ source: 'manual' }),
+          update: expect.objectContaining({ source: 'manual' }),
+        }),
+      );
+    });
+
     it('should throw ForbiddenException for non-owner without _any permission', async () => {
       const item = makeMediaItem({ addedById: 'other-user' });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
@@ -1780,18 +1798,44 @@ describe('MediaService', () => {
         }),
       );
 
-      // createMany called with ids × tagIds cross-product
+      // createMany called with ids × tagIds cross-product, each pair with source=manual
       expect(mockPrisma.mediaTag.createMany).toHaveBeenCalledWith(
         expect.objectContaining({
           skipDuplicates: true,
           data: expect.arrayContaining([
-            expect.objectContaining({ mediaItemId: ids[0], tagId: tag1.id }),
-            expect.objectContaining({ mediaItemId: ids[1], tagId: tag1.id }),
-            expect.objectContaining({ mediaItemId: ids[0], tagId: tag2.id }),
-            expect.objectContaining({ mediaItemId: ids[1], tagId: tag2.id }),
+            expect.objectContaining({ mediaItemId: ids[0], tagId: tag1.id, source: 'manual' }),
+            expect.objectContaining({ mediaItemId: ids[1], tagId: tag1.id, source: 'manual' }),
+            expect.objectContaining({ mediaItemId: ids[0], tagId: tag2.id, source: 'manual' }),
+            expect.objectContaining({ mediaItemId: ids[1], tagId: tag2.id, source: 'manual' }),
           ]),
         }),
       );
+    });
+
+    it('promotes existing ai-sourced MediaTags to manual via updateMany after createMany', async () => {
+      const ids = [randomUUID(), randomUUID()];
+      const tag1 = makeTag({ id: randomUUID(), name: 'nature' });
+      const tag2 = makeTag({ id: randomUUID(), name: 'travel' });
+      const dto = makeBulkTagsDto({ ids, add: ['nature', 'travel'] });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+      mockPrisma.tag.upsert
+        .mockResolvedValueOnce(tag1 as any)
+        .mockResolvedValueOnce(tag2 as any);
+      mockPrisma.mediaTag.createMany.mockResolvedValue({ count: 0 });
+
+      await service.bulkTags(dto, 'user-1', ownPerms);
+
+      expect(mockPrisma.mediaTag.updateMany).toHaveBeenCalledWith({
+        where: {
+          tagId: { in: [tag1.id, tag2.id] },
+          mediaItemId: { in: ids },
+          source: 'ai',
+        },
+        data: { source: 'manual' },
+      });
     });
 
     it('remove operation resolves existing tag ids and calls deleteMany', async () => {

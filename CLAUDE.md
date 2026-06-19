@@ -362,7 +362,7 @@ Auto-tagging is per-circle opt-in (default off); see Tag Vocabulary endpoints be
 - `GET /api/tag-labels` - List all tag labels (ai_settings:read)
 - `POST /api/tag-labels` body `{name, description?}` - Create a tag label (ai_settings:write); 409 if name exists
 - `PATCH /api/tag-labels/:id` body `{name?, description?, enabled?}` - Update a tag label (ai_settings:write)
-- `DELETE /api/tag-labels/:id` - Delete a tag label (ai_settings:write) — 204 No Content; does not remove already-assigned tags
+- `DELETE /api/tag-labels/:id` - Delete a tag label (ai_settings:write) — 204 No Content; removes AI-applied tag instances for that label name across all circles (manual instances preserved)
 - `GET /api/media/:id/tags/status` - Get per-item tagging status: status, tagCount, providerKey, modelVersion, processedAt, lastError (media:read + viewer)
 - `POST /api/media/:id/tags/rerun` - Re-enqueue auto-tagging for a media item at priority 0; returns `{jobId, status}` (media:write + collaborator)
 - `POST /api/tagging/backfill` body `{circleId, from?, to?, force?}` - Bulk-enqueue unprocessed photos in a circle; requires circle opt-in; returns `{enqueued}` (media:write + collaborator)
@@ -485,7 +485,7 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `tag_labels` - Global AI tag vocabulary managed by admins; unique `name`; `enabled` flag controls whether a label is included in vision model prompts; labels are not circle-scoped
 - `media_tag_status` - Per-media-item auto-tagging status (one row per item); statuses: `not_processed`, `pending`, `processing`, `processed`, `failed`; records `provider_key`, `model_version`, `tag_count`, `processed_at`, `last_error`
 
-**Note:** `media_items`, `albums`, and `tags` use `added_by_id` (not `owner_id`) to track the uploading user. Dedup uniqueness for `media_items` is `(circle_id, content_hash)`. Tag names are unique per `(circle_id, name)`.
+**Note:** `media_items`, `albums`, and `tags` use `added_by_id` (not `owner_id`) to track the uploading user. Dedup uniqueness for `media_items` is `(circle_id, content_hash)`. Tag names are unique per `(circle_id, name)`. The `media_tags` join table has a `source` column (`manual` | `ai`, default `manual`) that tracks whether a tag was applied by the AI auto-tagging service or by a user manually; AI re-runs are authoritative over `source='ai'` rows only and never modify `source='manual'` rows.
 
 **AI provider key encryption:** `SECRETS_ENCRYPTION_KEY` (base64-encoded 32-byte AES key) must be set at startup. Generate with `openssl rand -base64 32`. The API fails to start if the variable is missing or incorrectly sized.
 

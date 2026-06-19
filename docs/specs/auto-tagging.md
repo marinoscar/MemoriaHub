@@ -153,9 +153,31 @@ Set via `PUT /api/ai/features/tagging`. Read by `AutoTaggingService` at job-proc
 
 ### Tag Storage
 
-AI-assigned tags are stored as ordinary `tags` and `media_tags` rows, identical to manually created tags. There is no `source` column distinguishing AI-assigned tags from human-assigned ones. The `tags.added_by_id` is set to the media item's `added_by_id` (the uploader), not a system account.
+AI-assigned tags are stored as `tags` and `media_tags` rows. The `media_tags.source` column (`MediaTagSource` enum: `manual` | `ai`, default `manual`) distinguishes who applied the tag. The `tags.added_by_id` is set to the media item's `added_by_id` (the uploader), not a system account.
 
-Tag name uniqueness is enforced per `(circle_id, name)`. The upsert is idempotent — running auto-tagging twice does not duplicate tags.
+Tag name uniqueness is enforced per `(circle_id, name)`.
+
+### Tag Sources and Reconciliation
+
+Every `MediaTag` row carries a `source` value:
+
+| Value | Set by | Protected from AI reconciliation? |
+|-------|--------|----------------------------------|
+| `ai` | Auto-tagging service | No — AI re-runs may remove it |
+| `manual` | User tag operations (`attachTags`, `bulkTags` add) | Yes — never touched by AI |
+
+**AI tagging is authoritative over its own tags.** Each auto-tagging run opens a transaction that:
+1. Deletes all `source='ai'` `MediaTag` rows for the item whose tag name is no longer in the model's current output.
+2. Upserts the current output labels with `source='ai'` — but never downgrades an existing `manual` tag to `ai` (the upsert `update` is a no-op on conflict).
+
+This means:
+- Re-running auto-tagging reflects the model's current judgment exactly: stale AI labels are removed, new ones are added.
+- An empty model response removes all AI tags from the item.
+- Vocabulary deletes/renames are reflected on the next re-run (AI tags for the old name are pruned when the name no longer appears in the output).
+
+**Manual operations promote AI tags.** When a user manually adds a tag that already exists as `source='ai'` on the same item, `attachTags` and `bulkTags` set `source='manual'` on the existing row. The tag is then permanently protected from future AI reconciliation, even if the model stops returning that label.
+
+**Deleting a vocabulary label strips its AI-applied instances immediately.** `TagLabelsService.remove` runs a transaction that deletes the `TagLabel` row, then deletes all `source='ai'` `MediaTag` rows matching the label name (case-insensitive) across all circles, then cleans up any now-empty `Tag` rows. Manual instances of that same name are preserved.
 
 ---
 
@@ -356,7 +378,7 @@ Update an existing tag label.
 
 #### `DELETE /api/tag-labels/:id`
 
-Delete a tag label. Does not remove already-assigned tags from media items.
+Delete a tag label. Removes all AI-applied `MediaTag` instances for the label name (case-insensitive) across all circles and cleans up now-empty `Tag` rows. Manual tag instances of the same name are preserved.
 
 - **Auth**: `ai_settings:write`
 - **Response** `204`: No content.

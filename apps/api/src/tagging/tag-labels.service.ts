@@ -70,12 +70,35 @@ export class TagLabelsService {
   }
 
   async remove(id: string) {
-    try {
-      await this.prisma.tagLabel.delete({ where: { id } });
-    } catch (e: any) {
-      if (e.code === 'P2025')
-        throw new NotFoundException(`Tag label ${id} not found`);
-      throw e;
+    const label = await this.prisma.tagLabel.findUnique({ where: { id } });
+    if (!label) {
+      throw new NotFoundException(`Tag label ${id} not found`);
     }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.tagLabel.delete({ where: { id } });
+
+      // Delete all AI-sourced MediaTag instances for this label name (case-insensitive)
+      await tx.mediaTag.deleteMany({
+        where: {
+          source: 'ai',
+          tag: { name: { equals: label.name, mode: 'insensitive' } },
+        },
+      });
+
+      // Clean up now-empty Tag rows for this label name
+      const emptyTags = await tx.tag.findMany({
+        where: {
+          name: { equals: label.name, mode: 'insensitive' },
+          mediaTags: { none: {} },
+        },
+        select: { id: true },
+      });
+      if (emptyTags.length > 0) {
+        await tx.tag.deleteMany({
+          where: { id: { in: emptyTags.map((t) => t.id) } },
+        });
+      }
+    });
   }
 }

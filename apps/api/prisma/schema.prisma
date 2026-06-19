@@ -563,13 +563,19 @@ model Tag {
   @@map("tags")
 }
 
+enum MediaTagSource {
+  manual
+  ai
+}
+
 model MediaTag {
-  id          String    @id @default(uuid()) @db.Uuid
-  tagId       String    @map("tag_id") @db.Uuid
-  tag         Tag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
-  mediaItemId String    @map("media_item_id") @db.Uuid
-  mediaItem   MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
-  addedAt     DateTime  @default(now()) @map("added_at") @db.Timestamptz
+  id          String         @id @default(uuid()) @db.Uuid
+  tagId       String         @map("tag_id") @db.Uuid
+  tag         Tag            @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  mediaItemId String         @map("media_item_id") @db.Uuid
+  mediaItem   MediaItem      @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  source      MediaTagSource @default(manual) @map("source")
+  addedAt     DateTime       @default(now()) @map("added_at") @db.Timestamptz
 
   @@unique([tagId, mediaItemId])
   @@index([mediaItemId])
