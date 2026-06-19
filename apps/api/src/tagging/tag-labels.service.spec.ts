@@ -24,14 +24,12 @@ import {
 function makeTagLabel(overrides: Partial<{
   id: string;
   name: string;
-  description: string | null;
   enabled: boolean;
   createdAt: Date;
 }> = {}) {
   return {
     id: 'label-1',
     name: 'Beach',
-    description: null,
     enabled: true,
     createdAt: new Date(),
     ...overrides,
@@ -102,28 +100,14 @@ describe('TagLabelsService', () => {
 
   describe('create', () => {
     it('creates and returns the new tag label', async () => {
-      const newLabel = makeTagLabel({ name: 'Beach', description: 'Sandy shores' });
+      const newLabel = makeTagLabel({ name: 'Beach' });
       (mockPrisma.tagLabel.create as jest.Mock).mockResolvedValue(newLabel);
 
-      const result = await service.create({
-        name: 'Beach',
-        description: 'Sandy shores',
-      });
+      const result = await service.create({ name: 'Beach' });
 
       expect(result).toEqual(newLabel);
       expect(mockPrisma.tagLabel.create).toHaveBeenCalledWith({
-        data: { name: 'Beach', description: 'Sandy shores' },
-      });
-    });
-
-    it('creates without description when description is omitted', async () => {
-      const newLabel = makeTagLabel({ name: 'Mountain', description: undefined });
-      (mockPrisma.tagLabel.create as jest.Mock).mockResolvedValue(newLabel);
-
-      await service.create({ name: 'Mountain' });
-
-      expect(mockPrisma.tagLabel.create).toHaveBeenCalledWith({
-        data: { name: 'Mountain', description: undefined },
+        data: { name: 'Beach' },
       });
     });
 

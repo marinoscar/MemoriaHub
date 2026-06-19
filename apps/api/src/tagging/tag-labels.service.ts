@@ -13,14 +13,12 @@ import { PrismaService } from '../prisma/prisma.service';
 
 export const createTagLabelSchema = z.object({
   name: z.string().min(1).max(100),
-  description: z.string().max(500).optional(),
 });
 
 export class CreateTagLabelDto extends createZodDto(createTagLabelSchema) {}
 
 export const updateTagLabelSchema = z.object({
   name: z.string().min(1).max(100).optional(),
-  description: z.string().max(500).optional(),
   enabled: z.boolean().optional(),
 });
 
@@ -41,7 +39,7 @@ export class TagLabelsService {
   async create(dto: CreateTagLabelDto) {
     try {
       return await this.prisma.tagLabel.create({
-        data: { name: dto.name, description: dto.description },
+        data: { name: dto.name },
       });
     } catch (e: any) {
       if (e.code === 'P2002')
@@ -56,7 +54,6 @@ export class TagLabelsService {
         where: { id },
         data: {
           ...(dto.name !== undefined && { name: dto.name }),
-          ...(dto.description !== undefined && { description: dto.description }),
           ...(dto.enabled !== undefined && { enabled: dto.enabled }),
         },
       });
