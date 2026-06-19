@@ -220,7 +220,7 @@ function AdvancedSearchTab() {
         variant="contained"
         disabled={!activeCircle || isSearching}
         onClick={() => void handleApply(1).then(() => setPage(1))}
-        sx={{ mb: 3 }}
+        sx={{ mb: 3, minHeight: 44, width: { xs: '100%', sm: 'auto' } }}
       >
         {isSearching ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
         Apply
@@ -603,6 +603,7 @@ function ChatTab() {
             onClick={() => void handleSend()}
             disabled={!input.trim() || isStreaming || !activeCircle}
             aria-label="Send message"
+            sx={{ minHeight: 44 }}
           >
             {isStreaming ? <CircularProgress size={24} /> : <SendIcon />}
           </IconButton>

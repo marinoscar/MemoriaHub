@@ -365,7 +365,7 @@ function TagsContent() {
               <CircularProgress />
             </Box>
           ) : (
-            <TableContainer>
+            <TableContainer sx={{ overflowX: 'auto' }}>
               <Table size="small">
                 <TableHead>
                   <TableRow>
@@ -487,7 +487,7 @@ function TagsContent() {
             </Select>
           </FormControl>
 
-          <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
             <TextField
               label="From date"
               type="date"
@@ -535,6 +535,7 @@ function TagsContent() {
             disabled={!backfillCircleId || backfillLoading}
             onClick={() => void handleRunBackfill()}
             startIcon={backfillLoading ? <CircularProgress size={16} /> : undefined}
+            sx={{ minHeight: 44 }}
           >
             Run Backfill
           </Button>
