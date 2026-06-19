@@ -51,10 +51,6 @@ export const systemSettingsSchema = z.object({
         model: z.string().nullable(),
       }),
     }),
-    conversations: z.object({
-      archiveAfterDays: z.number().int().min(1),
-      deleteAfterArchiveDays: z.number().int().min(1),
-    }),
   }),
   face: z.object({
     features: z.object({
@@ -84,10 +80,6 @@ export const systemSettingsPatchSchema = z.object({
         provider: z.string().nullable().optional(),
         model: z.string().nullable().optional(),
       }).optional(),
-    }).optional(),
-    conversations: z.object({
-      archiveAfterDays: z.number().int().min(1).optional(),
-      deleteAfterArchiveDays: z.number().int().min(1).optional(),
     }).optional(),
   }).optional(),
   face: z.object({

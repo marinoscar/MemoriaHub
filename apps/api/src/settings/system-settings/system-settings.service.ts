@@ -149,10 +149,6 @@ export class SystemSettingsService {
             model: (dto as any).ai?.features?.tagging?.model ?? current.ai?.features?.tagging?.model ?? null,
           },
         },
-        conversations: {
-          archiveAfterDays: (dto as any).ai?.conversations?.archiveAfterDays ?? current.ai?.conversations?.archiveAfterDays ?? 30,
-          deleteAfterArchiveDays: (dto as any).ai?.conversations?.deleteAfterArchiveDays ?? current.ai?.conversations?.deleteAfterArchiveDays ?? 30,
-        },
       },
       face: {
         features: {
