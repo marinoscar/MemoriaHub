@@ -55,6 +55,64 @@ export class MediaController {
   // ---------------------------------------------------------------------------
 
   /**
+   * GET /api/media/explore/places
+   */
+  @Get('explore/places')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({ summary: 'Explore: places with media counts and cover thumbnail' })
+  @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
+  @ApiResponse({
+    status: 200,
+    description: 'Array of places ordered by item count desc (max 50)',
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          count: { type: 'number' },
+          coverThumbnailUrl: { type: 'string', nullable: true },
+        },
+      },
+    },
+  })
+  async explorePlaces(
+    @Query('circleId') circleId: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.explorePlaces(circleId, user.id, user.permissions);
+  }
+
+  /**
+   * GET /api/media/explore/tags
+   */
+  @Get('explore/tags')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({ summary: 'Explore: tags with media counts and cover thumbnail' })
+  @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
+  @ApiResponse({
+    status: 200,
+    description: 'Array of tags ordered by item count desc (max 50)',
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          count: { type: 'number' },
+          coverThumbnailUrl: { type: 'string', nullable: true },
+        },
+      },
+    },
+  })
+  async exploreTags(
+    @Query('circleId') circleId: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.exploreTags(circleId, user.id, user.permissions);
+  }
+
+  /**
    * GET /api/media/tags
    */
   @Get('tags')

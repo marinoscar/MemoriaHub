@@ -1494,6 +1494,120 @@ export class MediaService {
   }
 
   /**
+   * Explore: aggregate media by place (locality or place name).
+   * Groups non-deleted geotagged items in the circle by their most specific
+   * available geo tier (geoLocality > geoPlaceName), returning up to 50
+   * places ordered by item count descending with a cover thumbnail.
+   */
+  async explorePlaces(
+    circleId: string,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<Array<{ name: string; count: number; coverThumbnailUrl: string | null }>> {
+    await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
+
+    // Fetch all geotagged items with the fields we need (no pagination — we aggregate)
+    const items = await this.prisma.mediaItem.findMany({
+      where: {
+        circleId,
+        deletedAt: null,
+        OR: [
+          { geoLocality: { not: null } },
+          { geoPlaceName: { not: null } },
+        ],
+      },
+      select: {
+        geoLocality: true,
+        geoPlaceName: true,
+        metadata: true,
+      },
+    });
+
+    // Group by most specific geo tier
+    const placeMap = new Map<
+      string,
+      { count: number; coverMetadata: Prisma.JsonValue | null }
+    >();
+
+    for (const item of items) {
+      const name = item.geoLocality ?? item.geoPlaceName;
+      if (!name) continue;
+
+      const existing = placeMap.get(name);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        placeMap.set(name, { count: 1, coverMetadata: item.metadata });
+      }
+    }
+
+    // Sort by count desc, cap at 50
+    const sorted = Array.from(placeMap.entries())
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 50);
+
+    // Sign cover thumbnails in parallel
+    return Promise.all(
+      sorted.map(async ([name, { count, coverMetadata }]) => ({
+        name,
+        count,
+        coverThumbnailUrl: await this.signThumb(coverMetadata),
+      })),
+    );
+  }
+
+  /**
+   * Explore: list tags in the circle with item counts and a cover thumbnail.
+   * Returns up to 50 tags ordered by count descending.
+   */
+  async exploreTags(
+    circleId: string,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<Array<{ name: string; count: number; coverThumbnailUrl: string | null }>> {
+    await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
+
+    // Fetch tags with count and one cover media item's metadata
+    const tags = await this.prisma.tag.findMany({
+      where: { circleId },
+      include: {
+        _count: {
+          select: { mediaTags: true },
+        },
+        mediaTags: {
+          take: 1,
+          include: {
+            mediaItem: {
+              select: { metadata: true, deletedAt: true },
+            },
+          },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    // Sort by count desc, cap at 50
+    const sorted = tags
+      .filter((t) => t._count.mediaTags > 0)
+      .sort((a, b) => b._count.mediaTags - a._count.mediaTags)
+      .slice(0, 50);
+
+    // Sign cover thumbnails in parallel
+    return Promise.all(
+      sorted.map(async (tag) => {
+        const coverMedia = tag.mediaTags[0]?.mediaItem;
+        const coverMeta =
+          coverMedia && !coverMedia.deletedAt ? coverMedia.metadata : null;
+        return {
+          name: tag.name,
+          count: tag._count.mediaTags,
+          coverThumbnailUrl: await this.signThumb(coverMeta),
+        };
+      }),
+    );
+  }
+
+  /**
    * Fetch an Album and enforce ownership/any-permission.
    */
   async getAlbumWithOwnershipCheck(
