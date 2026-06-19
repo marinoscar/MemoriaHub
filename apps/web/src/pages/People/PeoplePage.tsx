@@ -32,8 +32,11 @@ import {
   Settings as SettingsIcon,
   Delete as DeleteIcon,
   CallMerge as CallMergeIcon,
+  PhotoCamera as PhotoCameraIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+import Cropper from 'react-easy-crop';
+import type { Area } from 'react-easy-crop';
 import { useCircleContext } from '../../contexts/CircleContext';
 import { usePeople, usePerson } from '../../hooks/usePeople';
 import { PersonGrid } from '../../components/people/PersonGrid';
@@ -213,6 +216,215 @@ function DeletePersonDialog({ open, personName, onClose, onConfirm }: DeletePers
 }
 
 // ---------------------------------------------------------------------------
+// Set Profile Picture Dialog
+// ---------------------------------------------------------------------------
+
+interface SetProfilePictureDialogProps {
+  open: boolean;
+  onClose: () => void;
+  personId: string;
+  circleId: string;
+  onSaved: () => void;
+}
+
+function SetProfilePictureDialog({
+  open,
+  onClose,
+  personId,
+  circleId,
+  onSaved,
+}: SetProfilePictureDialogProps) {
+  const [step, setStep] = useState<1 | 2>(1);
+  const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
+  const [photosLoading, setPhotosLoading] = useState(false);
+  const [photosError, setPhotosError] = useState<string | null>(null);
+
+  const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
+  const [fullImageUrl, setFullImageUrl] = useState<string | null>(null);
+
+  // react-easy-crop state
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPercents, setCroppedAreaPercents] = useState<Area | null>(null);
+
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Load person's photos on open
+  useEffect(() => {
+    if (!open) return;
+    setStep(1);
+    setSelectedMediaId(null);
+    setFullImageUrl(null);
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    setCroppedAreaPercents(null);
+    setSaveError(null);
+    setPhotosLoading(true);
+    setPhotosError(null);
+    listMedia({ personId, circleId, pageSize: 50 })
+      .then((resp) => setMediaItems(resp.items))
+      .catch((err) => setPhotosError(err instanceof Error ? err.message : 'Failed to load photos'))
+      .finally(() => setPhotosLoading(false));
+  }, [open, personId, circleId]);
+
+  const handlePickPhoto = async (mediaId: string) => {
+    setSelectedMediaId(mediaId);
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    setCroppedAreaPercents(null);
+    setSaveError(null);
+    try {
+      const item = await getMedia(mediaId);
+      setFullImageUrl(item.downloadUrl ?? item.thumbnailUrl ?? null);
+    } catch {
+      setFullImageUrl(null);
+    }
+    setStep(2);
+  };
+
+  const handleSave = async () => {
+    if (!selectedMediaId || !croppedAreaPercents) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const normalized = {
+        x: croppedAreaPercents.x / 100,
+        y: croppedAreaPercents.y / 100,
+        w: croppedAreaPercents.width / 100,
+        h: croppedAreaPercents.height / 100,
+      };
+      await updatePerson(personId, {
+        profileMediaItemId: selectedMediaId,
+        profileCrop: normalized,
+      });
+      onSaved();
+      onClose();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save profile picture');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClear = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await updatePerson(personId, { profileMediaItemId: null, profileCrop: null });
+      onSaved();
+      onClose();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to clear profile picture');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>{step === 1 ? 'Pick a photo' : 'Crop your photo'}</DialogTitle>
+      <DialogContent>
+        {step === 1 && (
+          <>
+            {photosLoading && (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                <CircularProgress />
+              </Box>
+            )}
+            {photosError && <Alert severity="error">{photosError}</Alert>}
+            {!photosLoading && !photosError && (
+              <Grid container spacing={1}>
+                {mediaItems.map((item) => (
+                  <Grid key={item.id} size={{ xs: 4, sm: 3, md: 2 }}>
+                    <Box
+                      component="img"
+                      src={item.thumbnailUrl ?? undefined}
+                      alt=""
+                      onClick={() => void handlePickPhoto(item.id)}
+                      sx={{
+                        width: '100%',
+                        aspectRatio: '1/1',
+                        objectFit: 'cover',
+                        cursor: 'pointer',
+                        borderRadius: 1,
+                        display: 'block',
+                      }}
+                    />
+                  </Grid>
+                ))}
+                {mediaItems.length === 0 && (
+                  <Grid size={{ xs: 12 }}>
+                    <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 3 }}>
+                      No photos found for this person.
+                    </Typography>
+                  </Grid>
+                )}
+              </Grid>
+            )}
+          </>
+        )}
+
+        {step === 2 && (
+          <>
+            {fullImageUrl ? (
+              <Box sx={{ position: 'relative', height: 300, width: '100%' }}>
+                <Cropper
+                  image={fullImageUrl}
+                  crop={crop}
+                  zoom={zoom}
+                  aspect={1}
+                  onCropChange={setCrop}
+                  onZoomChange={setZoom}
+                  onCropComplete={(_croppedArea: Area, croppedAreaPixels: Area) => {
+                    // react-easy-crop first arg is percentage-based (0–100)
+                    setCroppedAreaPercents(_croppedArea);
+                    void croppedAreaPixels; // pixels arg unused
+                  }}
+                />
+              </Box>
+            ) : (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                <CircularProgress />
+              </Box>
+            )}
+            {saveError && (
+              <Alert severity="error" sx={{ mt: 2 }}>
+                {saveError}
+              </Alert>
+            )}
+          </>
+        )}
+      </DialogContent>
+      <DialogActions>
+        {step === 2 && (
+          <Button onClick={() => setStep(1)} disabled={saving}>
+            Back
+          </Button>
+        )}
+        {step === 2 && (
+          <Button onClick={() => void handleClear()} disabled={saving}>
+            Use detected face / Clear
+          </Button>
+        )}
+        <Button onClick={onClose} disabled={saving}>
+          Cancel
+        </Button>
+        {step === 2 && (
+          <Button
+            variant="contained"
+            onClick={() => void handleSave()}
+            disabled={saving || !croppedAreaPercents}
+          >
+            {saving ? <CircularProgress size={18} /> : 'Save'}
+          </Button>
+        )}
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Person detail drawer content
 // ---------------------------------------------------------------------------
 
@@ -245,6 +457,7 @@ function PersonDetailDrawer({
   const [mediaMap, setMediaMap] = useState<Record<string, string>>({});
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+  const [profilePicDialogOpen, setProfilePicDialogOpen] = useState(false);
 
   const canManage = circleRole === 'circle_admin' || circleRole === 'collaborator';
 
@@ -413,6 +626,18 @@ function PersonDetailDrawer({
         View their photos ({person.faces.length})
       </Button>
 
+      {/* Set profile picture button */}
+      <Button
+        variant="outlined"
+        fullWidth
+        startIcon={<PhotoCameraIcon />}
+        onClick={() => setProfilePicDialogOpen(true)}
+        sx={{ mb: 2 }}
+        disabled={!canManage}
+      >
+        Set profile picture
+      </Button>
+
       {/* Face crops */}
       <Typography variant="subtitle2" sx={{ mb: 1 }}>
         Face samples
@@ -447,6 +672,18 @@ function PersonDetailDrawer({
         sourcePerson={personAsListItem}
         people={allPeople}
         onMerge={handleMerge}
+      />
+
+      {/* Set profile picture dialog */}
+      <SetProfilePictureDialog
+        open={profilePicDialogOpen}
+        onClose={() => setProfilePicDialogOpen(false)}
+        personId={person.id}
+        circleId={circleId}
+        onSaved={() => {
+          setProfilePicDialogOpen(false);
+          onProfileUpdated?.();
+        }}
       />
     </Box>
   );
@@ -1056,6 +1293,7 @@ export default function PeoplePage() {
             allPeople={allPeople}
             onPersonDeleted={() => void handlePersonDeleted()}
             onPersonMerged={() => void handlePersonMerged()}
+            onProfileUpdated={() => void Promise.all([refreshLabeled(), refreshUnlabeled()])}
           />
         )}
       </Drawer>
