@@ -350,7 +350,7 @@ export function MediaLightbox({
             onDoubleClick={() => setZoomed((z) => !z)}
           >
             {item.type === 'video' ? (
-              /* Video branch — expanded in commit 5 */
+              /* Video branch: show spinner while downloading URL, then VideoPlayer */
               downloadUrl ? (
                 <Box sx={{ width: '100%', backgroundColor: 'black' }}>
                   <VideoPlayer
