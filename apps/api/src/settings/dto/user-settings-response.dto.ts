@@ -9,6 +9,9 @@ export const userSettingsResponseSchema = z.object({
     useProviderImage: z.boolean(),
     customImageUrl: z.string().url().nullable().optional(),
   }),
+  search: z.object({
+    visibleFields: z.array(z.string()),
+  }).optional(),
   updatedAt: isoDateTime,
   version: z.number(),
 });
