@@ -156,6 +156,8 @@ export interface PersonListItem {
   isUnlabeled: boolean;
   faceCount: number;
   coverFace: PersonCoverFace | null;
+  profileMediaItemId?: string | null;
+  profileCrop?: { x: number; y: number; w: number; h: number } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -185,6 +187,8 @@ export interface PersonDetail {
   isUnlabeled: boolean;
   circleId: string;
   coverFace: PersonCoverFace | null;
+  profileMediaItemId?: string | null;
+  profileCrop?: { x: number; y: number; w: number; h: number } | null;
   faces: PersonFace[];
   createdAt: string;
   updatedAt: string;
@@ -224,7 +228,12 @@ export async function createPerson(body: {
 
 export async function updatePerson(
   id: string,
-  body: { name?: string; coverFaceId?: string | null },
+  body: {
+    name?: string;
+    coverFaceId?: string | null;
+    profileMediaItemId?: string | null;
+    profileCrop?: { x: number; y: number; w: number; h: number } | null;
+  },
 ): Promise<{ id: string; name: string | null; coverFaceId: string | null; updatedAt: string }> {
   return api.patch<{ id: string; name: string | null; coverFaceId: string | null; updatedAt: string }>(`/people/${id}`, body);
 }
