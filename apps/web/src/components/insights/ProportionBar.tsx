@@ -5,7 +5,7 @@ interface Segment {
   label: string;
   value: number;   // percentage 0-100
   color: string;
-  displayValue: string;
+  // displayValue intentionally omitted — MB values are shown in the donut legend
 }
 
 interface ProportionBarProps {
@@ -19,25 +19,27 @@ export function ProportionBar({ segments, caption }: ProportionBarProps) {
 
   return (
     <Box>
-      {/* Legend row */}
-      <Box display="flex" gap={3} mb={1} flexWrap="wrap">
-        {segments.map((s) => (
-          <Box key={s.label} display="flex" alignItems="center" gap={0.75}>
-            <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: s.color, flexShrink: 0 }} />
-            <Typography variant="caption" color="text.secondary">
-              {s.label}
-            </Typography>
-            <Typography variant="caption" fontWeight={600}>
-              {s.displayValue}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              ({s.value.toFixed(1)}%)
-            </Typography>
-          </Box>
-        ))}
-      </Box>
-      {/* Bar */}
-      <Box display="flex" height={10} borderRadius={1} overflow="hidden" bgcolor="action.hover">
+      {/* Section caption above the bar */}
+      {caption && (
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ mb: 1, display: 'block' }}
+        >
+          {caption}
+        </Typography>
+      )}
+
+      {/* Prominent bar — 16px height, rounded ends, themed track */}
+      <Box
+        sx={{
+          display: 'flex',
+          height: 16,
+          borderRadius: 1,
+          overflow: 'hidden',
+          bgcolor: 'action.hover',
+        }}
+      >
         {segments.map((s) => (
           <Box
             key={s.label}
@@ -49,11 +51,40 @@ export function ProportionBar({ segments, caption }: ProportionBarProps) {
           />
         ))}
       </Box>
-      {caption && (
-        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-          {caption}
-        </Typography>
-      )}
+
+      {/* Compact percent-only caption row — no MB duplication */}
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 2.5,
+          mt: 1,
+          flexWrap: 'wrap',
+        }}
+      >
+        {segments.map((s) => (
+          <Box
+            key={s.label}
+            sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}
+          >
+            <Box
+              sx={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                bgcolor: s.color,
+                flexShrink: 0,
+              }}
+            />
+            <Typography variant="caption" color="text.secondary">
+              {s.label}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {s.value.toFixed(1)}%
+            </Typography>
+          </Box>
+        ))}
+      </Box>
     </Box>
   );
 }
