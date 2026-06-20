@@ -2,7 +2,20 @@
  * BulkActionToolbar — unit tests.
  *
  * Mocks the media service so we don't need a real API.
- * Covers: render, clear, set location, tags, classify, favorite, delete flows.
+ * Covers: render, cancel, select all, set location, tags, classify,
+ *         favorite, delete flows, and viewer role restrictions.
+ *
+ * UI shape (Immich-style icon bar):
+ *   Left: Cancel selection (✕) icon button
+ *   Centre: "{count} selected" typography
+ *   Right: Select all icon button (always visible, even for viewer)
+ *   Right (non-viewer): Add to favorites icon button
+ *   Right (non-viewer): More actions icon button → overflow Menu
+ *     Menu items: Set location, Edit tags, [Classification subheader],
+ *                 Mark as Memory / Low Value / Unreviewed, [Divider],
+ *                 Remove from favorites, [optional Remove from album],
+ *                 [Divider], Delete
+ *   Delete opens a confirmation Dialog (Cancel / Delete buttons).
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -42,6 +55,7 @@ const defaultProps = {
   circleId: 'circle-1',
   activeCircleRole: 'circle_admin' as const,
   onClear: vi.fn(),
+  onSelectAll: vi.fn(),
   onOpenLocation: vi.fn(),
   onOpenTags: vi.fn(),
   onSuccess: vi.fn(),
@@ -74,81 +88,113 @@ describe('BulkActionToolbar', () => {
       expect(container.firstChild).toBeNull();
     });
 
-    it('shows action buttons for non-viewer roles', () => {
+    it('shows action buttons for non-viewer roles', async () => {
+      const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} activeCircleRole="circle_admin" />);
-      expect(screen.getByRole('button', { name: /set location/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /tags/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /classification/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /favorite/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
+
+      // Direct icon buttons visible without opening any menu
+      expect(screen.getByRole('button', { name: /add to favorites/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /select all/i })).toBeInTheDocument();
+
+      // Overflow menu items require opening the menu first
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      expect(screen.getByText(/set location/i)).toBeInTheDocument();
+      expect(screen.getByText(/edit tags/i)).toBeInTheDocument();
+      expect(screen.getByText(/mark as memory/i)).toBeInTheDocument();
+      expect(screen.getByText(/delete/i)).toBeInTheDocument();
     });
 
     it('hides action buttons for viewer role', () => {
       render(<BulkActionToolbar {...defaultProps} activeCircleRole="viewer" />);
-      expect(screen.queryByRole('button', { name: /set location/i })).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
+
+      // Non-viewer buttons must be absent
+      expect(screen.queryByRole('button', { name: /more actions/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /add to favorites/i })).not.toBeInTheDocument();
+
+      // Select all is always visible, even for viewer
+      expect(screen.getByRole('button', { name: /select all/i })).toBeInTheDocument();
     });
   });
 
   // -------------------------------------------------------------------------
-  // Clear button
+  // Cancel selection button
   // -------------------------------------------------------------------------
-  describe('Clear button', () => {
-    it('calls onClear when Clear is clicked', async () => {
+  describe('Cancel selection button', () => {
+    it('calls onClear when Cancel selection is clicked', async () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /clear/i }));
+      await user.click(screen.getByRole('button', { name: /cancel selection/i }));
       expect(defaultProps.onClear).toHaveBeenCalledTimes(1);
     });
   });
 
   // -------------------------------------------------------------------------
-  // Set Location button
+  // Select all button
   // -------------------------------------------------------------------------
-  describe('Set Location button', () => {
-    it('calls onOpenLocation when Set Location is clicked', async () => {
+  describe('Select all button', () => {
+    it('calls onSelectAll when Select all is clicked', async () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /set location/i }));
+      await user.click(screen.getByRole('button', { name: /select all/i }));
+      expect(defaultProps.onSelectAll).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows Select all button even for viewer role', () => {
+      render(<BulkActionToolbar {...defaultProps} activeCircleRole="viewer" />);
+      expect(screen.getByRole('button', { name: /select all/i })).toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Set Location (in overflow menu)
+  // -------------------------------------------------------------------------
+  describe('Set Location button', () => {
+    it('calls onOpenLocation when Set location menu item is clicked', async () => {
+      const user = userEvent.setup();
+      render(<BulkActionToolbar {...defaultProps} />);
+
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      await user.click(screen.getByText(/set location/i));
       expect(defaultProps.onOpenLocation).toHaveBeenCalledTimes(1);
     });
   });
 
   // -------------------------------------------------------------------------
-  // Tags button
+  // Tags (in overflow menu)
   // -------------------------------------------------------------------------
   describe('Tags button', () => {
-    it('calls onOpenTags when Tags is clicked', async () => {
+    it('calls onOpenTags when Edit tags menu item is clicked', async () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /^tags$/i }));
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      await user.click(screen.getByText(/edit tags/i));
       expect(defaultProps.onOpenTags).toHaveBeenCalledTimes(1);
     });
   });
 
   // -------------------------------------------------------------------------
-  // Classification menu
+  // Classification menu (items live in the overflow menu)
   // -------------------------------------------------------------------------
   describe('Classification menu', () => {
-    it('opens classification menu when Classification is clicked', async () => {
+    it('opens classification items in overflow menu when More actions is clicked', async () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /classification/i }));
-      expect(screen.getByText(/^memory$/i)).toBeInTheDocument();
-      expect(screen.getByText(/low value/i)).toBeInTheDocument();
-      expect(screen.getByText(/unreviewed/i)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      expect(screen.getByText(/mark as memory/i)).toBeInTheDocument();
+      expect(screen.getByText(/mark as low value/i)).toBeInTheDocument();
+      expect(screen.getByText(/mark as unreviewed/i)).toBeInTheDocument();
     });
 
-    it('calls bulkUpdateMedia with "memory" when Memory is selected', async () => {
+    it('calls bulkUpdateMedia with "memory" when Mark as Memory is selected', async () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /classification/i }));
-      await user.click(screen.getByText(/^memory$/i));
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      await user.click(screen.getByText(/mark as memory/i));
 
       await waitFor(() => {
         expect(mockBulkUpdateMedia).toHaveBeenCalledWith({
@@ -159,12 +205,12 @@ describe('BulkActionToolbar', () => {
       });
     });
 
-    it('calls bulkUpdateMedia with "low_value" when Low Value is selected', async () => {
+    it('calls bulkUpdateMedia with "low_value" when Mark as Low Value is selected', async () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /classification/i }));
-      await user.click(screen.getByText(/low value/i));
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      await user.click(screen.getByText(/mark as low value/i));
 
       await waitFor(() => {
         expect(mockBulkUpdateMedia).toHaveBeenCalledWith(
@@ -173,12 +219,12 @@ describe('BulkActionToolbar', () => {
       });
     });
 
-    it('calls bulkUpdateMedia with "unreviewed" when Unreviewed is selected', async () => {
+    it('calls bulkUpdateMedia with "unreviewed" when Mark as Unreviewed is selected', async () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /classification/i }));
-      await user.click(screen.getByText(/unreviewed/i));
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      await user.click(screen.getByText(/mark as unreviewed/i));
 
       await waitFor(() => {
         expect(mockBulkUpdateMedia).toHaveBeenCalledWith(
@@ -191,8 +237,8 @@ describe('BulkActionToolbar', () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /classification/i }));
-      await user.click(screen.getByText(/^memory$/i));
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      await user.click(screen.getByText(/mark as memory/i));
 
       await waitFor(() => {
         expect(defaultProps.onSuccess).toHaveBeenCalledWith(
@@ -206,8 +252,8 @@ describe('BulkActionToolbar', () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /classification/i }));
-      await user.click(screen.getByText(/^memory$/i));
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      await user.click(screen.getByText(/mark as memory/i));
 
       await waitFor(() => {
         expect(defaultProps.onError).toHaveBeenCalledWith('API error');
@@ -216,24 +262,14 @@ describe('BulkActionToolbar', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Favorite menu
+  // Favorite actions
   // -------------------------------------------------------------------------
-  describe('Favorite menu', () => {
-    it('opens favorite menu when Favorite is clicked', async () => {
+  describe('Favorite actions', () => {
+    it('calls bulkUpdateMedia with favorite: true when Add to favorites icon button is clicked', async () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /favorite/i }));
-      expect(screen.getByText(/add to favorites/i)).toBeInTheDocument();
-      expect(screen.getByText(/remove from favorites/i)).toBeInTheDocument();
-    });
-
-    it('calls bulkUpdateMedia with favorite: true when Add is clicked', async () => {
-      const user = userEvent.setup();
-      render(<BulkActionToolbar {...defaultProps} />);
-
-      await user.click(screen.getByRole('button', { name: /favorite/i }));
-      await user.click(screen.getByText(/add to favorites/i));
+      await user.click(screen.getByRole('button', { name: /add to favorites/i }));
 
       await waitFor(() => {
         expect(mockBulkUpdateMedia).toHaveBeenCalledWith(
@@ -242,11 +278,11 @@ describe('BulkActionToolbar', () => {
       });
     });
 
-    it('calls bulkUpdateMedia with favorite: false when Remove is clicked', async () => {
+    it('calls bulkUpdateMedia with favorite: false when Remove from favorites menu item is clicked', async () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /favorite/i }));
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
       await user.click(screen.getByText(/remove from favorites/i));
 
       await waitFor(() => {
@@ -261,8 +297,7 @@ describe('BulkActionToolbar', () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /favorite/i }));
-      await user.click(screen.getByText(/add to favorites/i));
+      await user.click(screen.getByRole('button', { name: /add to favorites/i }));
 
       await waitFor(() => {
         expect(defaultProps.onError).toHaveBeenCalledWith('Favorite failed');
@@ -274,11 +309,12 @@ describe('BulkActionToolbar', () => {
   // Delete flow
   // -------------------------------------------------------------------------
   describe('Delete flow', () => {
-    it('opens delete confirmation dialog when Delete is clicked', async () => {
+    it('opens delete confirmation dialog when Delete menu item is clicked', async () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /delete/i }));
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      await user.click(screen.getByText(/^delete$/i));
       expect(screen.getByText(/delete 2 items\?/i)).toBeInTheDocument();
     });
 
@@ -286,7 +322,9 @@ describe('BulkActionToolbar', () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /^delete$/i }));
+      // Open overflow menu and trigger delete dialog
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      await user.click(screen.getByText(/^delete$/i));
 
       // Confirmation dialog appears — click the confirm button
       const confirmBtn = screen.getByRole('button', { name: /^delete$/i });
@@ -304,7 +342,8 @@ describe('BulkActionToolbar', () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /^delete$/i }));
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      await user.click(screen.getByText(/^delete$/i));
       const confirmBtn = screen.getByRole('button', { name: /^delete$/i });
       await user.click(confirmBtn);
 
@@ -320,7 +359,8 @@ describe('BulkActionToolbar', () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /^delete$/i }));
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      await user.click(screen.getByText(/^delete$/i));
       const confirmBtn = screen.getByRole('button', { name: /^delete$/i });
       await user.click(confirmBtn);
 
@@ -333,7 +373,8 @@ describe('BulkActionToolbar', () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /^delete$/i }));
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      await user.click(screen.getByText(/^delete$/i));
       expect(screen.getByText(/delete 2 items\?/i)).toBeInTheDocument();
 
       await user.click(screen.getByRole('button', { name: /cancel/i }));
@@ -357,8 +398,9 @@ describe('BulkActionToolbar', () => {
 
       expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
 
-      // Verify delete confirm dialog uses singular
-      await user.click(screen.getByRole('button', { name: /delete/i }));
+      // Verify delete confirm dialog uses singular via the overflow menu
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      await user.click(screen.getByText(/^delete$/i));
       expect(screen.getByText(/delete 1 item\?/i)).toBeInTheDocument();
     });
   });
