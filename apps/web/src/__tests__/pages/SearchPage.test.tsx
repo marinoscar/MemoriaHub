@@ -32,8 +32,8 @@ vi.mock('../../services/media', () => ({
   getExploreTags: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock('../../components/media/MediaResultsGrid', () => ({
-  MediaResultsGrid: vi.fn(() => null),
+vi.mock('../../components/media/MediaGallery', () => ({
+  MediaGallery: vi.fn(() => null),
 }));
 
 vi.mock('../../components/search/AdvancedSearchDialog', () => ({
@@ -137,7 +137,8 @@ describe('SearchPage', () => {
   describe('Search input', () => {
     it('renders the conversational search input', () => {
       render(<SearchPage />);
-      expect(screen.getByRole('textbox', { name: /conversational search input/i })).toBeInTheDocument();
+      // The aria-label is on the MUI TextField wrapper; query by placeholder instead.
+      expect(screen.getByPlaceholderText(/search your memories/i)).toBeInTheDocument();
     });
 
     it('renders the tune icon button for advanced search', () => {
@@ -154,7 +155,7 @@ describe('SearchPage', () => {
       const user = userEvent.setup();
       render(<SearchPage />);
 
-      const input = screen.getByRole('textbox', { name: /conversational search input/i });
+      const input = screen.getByPlaceholderText(/search your memories/i);
       await user.type(input, 'hello');
 
       expect(screen.getByRole('button', { name: /send message/i })).not.toBeDisabled();
@@ -197,7 +198,7 @@ describe('SearchPage', () => {
       const user = userEvent.setup();
       render(<SearchPage />);
 
-      const input = screen.getByRole('textbox', { name: /conversational search input/i });
+      const input = screen.getByPlaceholderText(/search your memories/i);
       await user.type(input, 'show me photos');
       await user.click(screen.getByRole('button', { name: /send message/i }));
 
