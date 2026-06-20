@@ -35,6 +35,7 @@ import { CreateAlbumDto } from './dto/create-album.dto';
 import { UpdateAlbumDto } from './dto/update-album.dto';
 import { AlbumQueryDto } from './dto/album-query.dto';
 import { AddAlbumItemsDto } from './dto/add-album-items.dto';
+import { AddAlbumItemsByFilterDto } from './dto/add-album-items-by-filter.dto';
 import { ExportQueryDto } from './dto/export-query.dto';
 import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
 import { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
@@ -392,6 +393,24 @@ export class MediaController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.mediaService.addAlbumItems(albumId, dto, user.id, user.permissions);
+  }
+
+  /**
+   * POST /api/media/albums/:id/items/by-filter
+   */
+  @Post('albums/:id/items/by-filter')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @ApiOperation({ summary: 'Add all media matching filters to an album' })
+  @ApiParam({ name: 'id', description: 'Album ID', type: String })
+  @ApiResponse({ status: 200, description: 'Number of items added' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Album not found' })
+  async addAlbumItemsByFilter(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AddAlbumItemsByFilterDto,
+    @CurrentUser() user: RequestUser,
+  ): Promise<{ added: number }> {
+    return this.mediaService.addAlbumItemsByFilter(id, dto, user.id, user.permissions);
   }
 
   /**

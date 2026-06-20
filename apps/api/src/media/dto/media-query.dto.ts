@@ -2,10 +2,12 @@ import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 import { isoDateTimeInput } from '../../common/schemas/iso-date';
 
-export const mediaQuerySchema = z.object({
-  circleId: z.string().uuid(),
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+/**
+ * Shared filter fields for media queries (everything except pagination and sort).
+ * Export this shape so other DTOs (e.g. AddAlbumItemsByFilterDto) can reuse it.
+ */
+export const mediaFilterFields = {
+  circleId: z.string().uuid().optional(),
   // Type / date filters
   type: z.enum(['photo', 'video']).optional(),
   capturedAtFrom: isoDateTimeInput.optional(),
@@ -26,9 +28,6 @@ export const mediaQuerySchema = z.object({
   location: z.string().optional(),
   // Dedup filter (used by CLI importer)
   contentHash: z.string().optional(),
-  // Sort
-  sortBy: z.enum(['capturedAt', 'importedAt', 'createdAt']).default('capturedAt'),
-  sortOrder: z.enum(['asc', 'desc']).default('desc'),
   cameraMake: z.string().optional(),
   cameraModel: z.string().optional(),
   sourceDeviceId: z.string().optional(),
@@ -48,6 +47,17 @@ export const mediaQuerySchema = z.object({
     )
     .optional(),
   peopleMatch: z.enum(['any', 'all']).optional().default('any'),
+};
+
+export const mediaQuerySchema = z.object({
+  ...mediaFilterFields,
+  // circleId is required in the list endpoint (override the optional from shared fields)
+  circleId: z.string().uuid(),
+  // Pagination / sort (not shared)
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  sortBy: z.enum(['capturedAt', 'importedAt', 'createdAt']).default('capturedAt'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
 });
 
 export class MediaQueryDto extends createZodDto(mediaQuerySchema) {}
