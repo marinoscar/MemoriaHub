@@ -16,6 +16,8 @@ import type {
   AlbumDetail,
   CreateAlbumDto,
   AlbumQueryParams,
+  UpdateAlbumDto,
+  AddAlbumItemsByFilterDto,
   BulkUpdateDto,
   BulkTagsDto,
   BulkDeleteDto,
@@ -195,6 +197,29 @@ export async function createAlbum(dto: CreateAlbumDto): Promise<Album> {
 
 export async function getAlbum(id: string): Promise<AlbumDetail> {
   return api.get<AlbumDetail>(`/media/albums/${id}`);
+}
+
+export async function updateAlbum(id: string, dto: UpdateAlbumDto): Promise<Album> {
+  return api.patch<Album>('/media/albums/' + id, dto);
+}
+
+export async function deleteAlbum(id: string): Promise<void> {
+  await api.delete<void>('/media/albums/' + id);
+}
+
+export async function addAlbumItems(id: string, mediaItemIds: string[]): Promise<unknown> {
+  return api.post<unknown>('/media/albums/' + id + '/items', { mediaItemIds });
+}
+
+export async function removeAlbumItem(id: string, itemId: string): Promise<void> {
+  await api.delete<void>('/media/albums/' + id + '/items/' + itemId);
+}
+
+export async function addAlbumItemsByFilter(
+  id: string,
+  filters: AddAlbumItemsByFilterDto,
+): Promise<{ added: number }> {
+  return api.post<{ added: number }>('/media/albums/' + id + '/items/by-filter', filters);
 }
 
 // ---------------------------------------------------------------------------

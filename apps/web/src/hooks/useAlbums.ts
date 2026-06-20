@@ -1,8 +1,10 @@
 import { useState, useCallback } from 'react';
-import type { Album, MediaListMeta, CreateAlbumDto, AlbumQueryParams } from '../types/media';
+import type { Album, MediaListMeta, CreateAlbumDto, AlbumQueryParams, UpdateAlbumDto } from '../types/media';
 import {
   listAlbums as listAlbumsApi,
   createAlbum as createAlbumApi,
+  updateAlbum as updateAlbumApi,
+  deleteAlbum as deleteAlbumApi,
 } from '../services/media';
 
 interface UseAlbumsResult {
@@ -12,6 +14,8 @@ interface UseAlbumsResult {
   error: string | null;
   fetchAlbums: (params?: AlbumQueryParams) => Promise<void>;
   addAlbum: (dto: CreateAlbumDto) => Promise<void>;
+  updateAlbum: (id: string, dto: UpdateAlbumDto) => Promise<void>;
+  deleteAlbum: (id: string) => Promise<void>;
 }
 
 export function useAlbums(): UseAlbumsResult {
@@ -52,6 +56,38 @@ export function useAlbums(): UseAlbumsResult {
     [fetchAlbums],
   );
 
+  const updateAlbum = useCallback(
+    async (id: string, dto: UpdateAlbumDto) => {
+      setError(null);
+      try {
+        await updateAlbumApi(id, dto);
+        // Refresh the list after update
+        await fetchAlbums({ page: 1, pageSize: 100 });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to update album';
+        setError(message);
+        throw err;
+      }
+    },
+    [fetchAlbums],
+  );
+
+  const deleteAlbum = useCallback(
+    async (id: string) => {
+      setError(null);
+      try {
+        await deleteAlbumApi(id);
+        // Refresh the list after deletion
+        await fetchAlbums({ page: 1, pageSize: 100 });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to delete album';
+        setError(message);
+        throw err;
+      }
+    },
+    [fetchAlbums],
+  );
+
   return {
     albums,
     meta,
@@ -59,5 +95,7 @@ export function useAlbums(): UseAlbumsResult {
     error,
     fetchAlbums,
     addAlbum,
+    updateAlbum,
+    deleteAlbum,
   };
 }
