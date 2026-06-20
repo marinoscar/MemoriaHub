@@ -15,14 +15,26 @@
  *  - No capturedAt → early return
  *  - No device info and no burstUuid → early return
  *  - Null perceptualHash → skip temporal-only link
+ *  - On-demand perceptual hash for legacy photos (perceptualHash null + storageObjectId present)
  */
+
+// ---------------------------------------------------------------------------
+// Module-level mock: computeVisualHash (must come before any imports that
+// transitively load the module so jest.mock hoisting works correctly)
+// ---------------------------------------------------------------------------
+jest.mock('../storage/processing/visual-hash.util', () => ({
+  computeVisualHash: jest.fn(),
+}));
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { BurstDetectionService } from './burst-detection.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { BurstGroupStatus, EnrichmentJob, JobReason, JobStatus, MediaType } from '@prisma/client';
+import { computeVisualHash } from '../storage/processing/visual-hash.util';
+import { Readable } from 'stream';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -67,6 +79,7 @@ function makeMediaItem(overrides: Partial<{
   cameraModel: string | null;
   deletedAt: Date | null;
   burstGroupId: string | null;
+  storageObjectId: string | null;
 }> = {}) {
   return {
     id: 'media-1',
@@ -81,6 +94,7 @@ function makeMediaItem(overrides: Partial<{
     cameraModel: 'iPhone 15 Pro',
     deletedAt: null,
     burstGroupId: null,
+    storageObjectId: null,
     ...overrides,
   };
 }
@@ -110,10 +124,12 @@ describe('BurstDetectionService', () => {
   let service: BurstDetectionService;
   let mockPrisma: MockPrismaService;
   let mockEnrichmentJobService: { enqueue: jest.Mock };
+  let mockStorageProvider: { download: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
     mockEnrichmentJobService = { enqueue: jest.fn() };
+    mockStorageProvider = { download: jest.fn() };
 
     // Default system settings: standard burst config
     (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue({
@@ -131,10 +147,23 @@ describe('BurstDetectionService', () => {
         BurstDetectionService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
+        { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
       ],
     }).compile();
 
     service = module.get<BurstDetectionService>(BurstDetectionService);
+
+    // Reset module-level mock between tests
+    jest.clearAllMocks();
+
+    // Re-apply defaults cleared by clearAllMocks
+    (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue({
+      key: 'global',
+      value: { burst: { timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3 } },
+    });
+    (mockPrisma.$transaction as jest.Mock).mockImplementation((ops: Promise<unknown>[]) =>
+      Promise.all(ops),
+    );
   });
 
   // -------------------------------------------------------------------------
@@ -427,6 +456,156 @@ describe('BurstDetectionService', () => {
           where: { id: { in: [groupB] } },
         }),
       );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // On-demand perceptual hash for legacy photos
+  // -------------------------------------------------------------------------
+
+  describe('on-demand perceptual hash (perceptualHash === null, storageObjectId present)', () => {
+    const STORAGE_OBJECT_ID = 'sobj-legacy-1';
+    const STORAGE_KEY = 'originals/legacy-photo.jpg';
+    const COMPUTED_HASH = 99999n;
+    const COMPUTED_SHARPNESS = 250.5;
+
+    function makeStream(): Readable {
+      return Readable.from([Buffer.from('fake-image-bytes')]);
+    }
+
+    function setupLegacyItem() {
+      // Media item with null perceptualHash but a storageObjectId
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({
+          perceptualHash: null,
+          sharpnessScore: null,
+          storageObjectId: STORAGE_OBJECT_ID,
+        }),
+      );
+      // StorageObject lookup inside computeAndPersistHashOnDemand
+      (mockPrisma.storageObject.findUnique as jest.Mock).mockResolvedValue({
+        storageKey: STORAGE_KEY,
+      });
+      // Storage download returns a readable stream
+      mockStorageProvider.download.mockResolvedValue(makeStream());
+    }
+
+    it('downloads the object via StorageProvider when perceptualHash is null', async () => {
+      setupLegacyItem();
+      // computeVisualHash returns null → hash not set, but process continues
+      (computeVisualHash as jest.Mock).mockResolvedValue(null);
+      // No candidates → early-exit after hash attempt
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockStorageProvider.download).toHaveBeenCalledWith(STORAGE_KEY);
+    });
+
+    it('persists computed perceptualHash and sharpnessScore via prisma.mediaItem.update', async () => {
+      setupLegacyItem();
+      (computeVisualHash as jest.Mock).mockResolvedValue({
+        perceptualHash: COMPUTED_HASH,
+        sharpnessScore: COMPUTED_SHARPNESS,
+      });
+      // No candidates → returns early after hash computation
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockPrisma.mediaItem.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'media-1' },
+          data: expect.objectContaining({
+            perceptualHash: COMPUTED_HASH,
+            sharpnessScore: COMPUTED_SHARPNESS,
+          }),
+        }),
+      );
+    });
+
+    it('uses the freshly computed hash value for burst grouping (links to a matching neighbor)', async () => {
+      setupLegacyItem();
+      (computeVisualHash as jest.Mock).mockResolvedValue({
+        perceptualHash: COMPUTED_HASH,
+        sharpnessScore: COMPUTED_SHARPNESS,
+      });
+
+      // A neighbor with identical hash → Hamming distance 0 → should link
+      (mockPrisma.mediaItem.findMany as jest.Mock)
+        .mockResolvedValueOnce([makeNeighbor({ perceptualHash: COMPUTED_HASH })])
+        .mockResolvedValueOnce([
+          { id: 'media-1', sharpnessScore: COMPUTED_SHARPNESS, width: 4032, height: 3024, capturedAt: BASE_TIME },
+          { id: 'media-neighbor-1', sharpnessScore: 80, width: 3024, height: 4032, capturedAt: BASE_TIME },
+        ]);
+      (mockPrisma.burstGroup.create as jest.Mock).mockResolvedValue({ id: 'group-legacy-1' });
+      (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: false });
+      (mockPrisma.mediaItem.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
+
+      await service.processMediaItem(makeJob());
+
+      // Group should be created because the computed hash matched the neighbor
+      expect(mockPrisma.burstGroup.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            circleId: 'circle-1',
+            status: BurstGroupStatus.pending,
+          }),
+        }),
+      );
+    });
+
+    it('skips the item (no crash) when computeVisualHash returns null', async () => {
+      setupLegacyItem();
+      (computeVisualHash as jest.Mock).mockResolvedValue(null);
+      // No candidates would be found (or they'd have non-null hashes)
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
+
+      // Must not throw
+      await expect(service.processMediaItem(makeJob())).resolves.toBeUndefined();
+      // No group should be created
+      expect(mockPrisma.burstGroup.create).not.toHaveBeenCalled();
+      // No hash persisted
+      expect(mockPrisma.mediaItem.update).not.toHaveBeenCalled();
+    });
+
+    it('re-throws when StorageProvider.download throws (allows enrichment worker to retry)', async () => {
+      setupLegacyItem();
+      const storageError = new Error('S3 connection timeout');
+      mockStorageProvider.download.mockRejectedValue(storageError);
+
+      await expect(service.processMediaItem(makeJob())).rejects.toThrow('S3 connection timeout');
+      // No hash persisted on transient failure
+      expect(mockPrisma.mediaItem.update).not.toHaveBeenCalled();
+    });
+
+    it('does NOT call StorageProvider.download when perceptualHash is already set', async () => {
+      // Item already has a perceptualHash → on-demand path is skipped entirely
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ perceptualHash: 12345n, storageObjectId: STORAGE_OBJECT_ID }),
+      );
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockStorageProvider.download).not.toHaveBeenCalled();
+    });
+
+    it('does NOT call StorageProvider.download when storageObjectId is null (no source to download)', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ perceptualHash: null, storageObjectId: null }),
+      );
+      // With null perceptualHash and no storageObjectId the item just skips hash; still
+      // needs device/burstUuid check. Force early-exit by having no device info + no burstUuid.
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ perceptualHash: null, storageObjectId: null, cameraMake: null, cameraModel: null, burstUuid: null }),
+      );
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockStorageProvider.download).not.toHaveBeenCalled();
     });
   });
 
