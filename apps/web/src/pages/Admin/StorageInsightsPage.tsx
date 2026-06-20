@@ -201,8 +201,8 @@ function StorageInsightsPageContent() {
               </Typography>
             </Box>
           </Box>
-          <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
-            {/* In-flight status chip */}
+          <Box display="flex" alignItems="center" gap={1.5} flexShrink={0}>
+            {/* In-flight status chip — only visible while refreshing */}
             <InFlightChip jobState={jobState} refreshing={refreshing} />
 
             {/* Freshness pill — always reflects last computedAt */}
