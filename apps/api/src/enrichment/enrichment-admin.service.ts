@@ -55,6 +55,9 @@ export interface JobListItem {
   createdAt: Date;
   startedAt: Date | null;
   finishedAt: Date | null;
+  scheduledFor: Date | null;
+  rateLimitedAt: Date | null;
+  rateLimitHits: number;
 }
 
 export interface JobListResult {
@@ -72,6 +75,8 @@ export interface ListJobsFilter {
   type?: string;
   page: number;
   pageSize: number;
+  /** When true, restrict to pending jobs with scheduledFor > now (backoff/deferred). */
+  scheduled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -166,13 +171,21 @@ export class EnrichmentAdminService {
   // -------------------------------------------------------------------------
 
   async listJobs(filter: ListJobsFilter): Promise<JobListResult> {
-    const { status, type, page, pageSize } = filter;
+    const { status, type, page, pageSize, scheduled } = filter;
     const skip = (page - 1) * pageSize;
 
-    const where = {
-      ...(status !== undefined ? { status } : {}),
-      ...(type !== undefined ? { type } : {}),
-    };
+    // When scheduled=true, force status=pending and require scheduledFor > now.
+    // Otherwise compose status/type filters as-is.
+    const where: Prisma.EnrichmentJobWhereInput = scheduled === true
+      ? {
+          status: JobStatus.pending,
+          scheduledFor: { gt: new Date() },
+          ...(type !== undefined ? { type } : {}),
+        }
+      : {
+          ...(status !== undefined ? { status } : {}),
+          ...(type !== undefined ? { type } : {}),
+        };
 
     const [items, totalItems] = await Promise.all([
       this.prisma.enrichmentJob.findMany({
@@ -196,6 +209,9 @@ export class EnrichmentAdminService {
           createdAt: true,
           startedAt: true,
           finishedAt: true,
+          scheduledFor: true,
+          rateLimitedAt: true,
+          rateLimitHits: true,
         },
       }),
       this.prisma.enrichmentJob.count({ where }),
@@ -256,6 +272,9 @@ export class EnrichmentAdminService {
         createdAt: true,
         startedAt: true,
         finishedAt: true,
+        scheduledFor: true,
+        rateLimitedAt: true,
+        rateLimitHits: true,
       },
     });
 

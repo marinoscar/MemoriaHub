@@ -40,6 +40,11 @@ const listJobsQuerySchema = z.object({
   type: z.string().min(1).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  // Parse the string 'true' → boolean true; absent or any other value → undefined
+  scheduled: z
+    .string()
+    .optional()
+    .transform((v) => (v === 'true' ? true : undefined)),
 });
 
 export class ListJobsQueryDto extends createZodDto(listJobsQuerySchema) {}
@@ -128,6 +133,15 @@ export class EnrichmentAdminController {
   @ApiQuery({ name: 'type', required: false, description: 'Filter by job type string' })
   @ApiQuery({ name: 'page', required: false, description: 'Page number (default 1)' })
   @ApiQuery({ name: 'pageSize', required: false, description: 'Page size 1–100 (default 20)' })
+  @ApiQuery({
+    name: 'scheduled',
+    required: false,
+    type: String,
+    enum: ['true'],
+    description:
+      'When "true", return only pending jobs currently deferred via backoff (scheduledFor > now). ' +
+      'Forces status=pending; the status filter is ignored when this param is set.',
+  })
   @ApiResponse({ status: 200, description: 'Paginated list of enrichment jobs' })
   async listJobs(@Query() query: ListJobsQueryDto) {
     return this.adminService.listJobs({
@@ -135,6 +149,7 @@ export class EnrichmentAdminController {
       type: query.type,
       page: query.page,
       pageSize: query.pageSize,
+      scheduled: query.scheduled,
     });
   }
 
