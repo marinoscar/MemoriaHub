@@ -7,8 +7,11 @@ import {
   getAiModels,
   putAiSearchFeature,
   putAiTaggingFeature,
+  putAiEmbeddingFeature,
+  getAiEmbeddingModels,
+  testAiEmbedding,
 } from '../services/ai';
-import type { AiSettingsResponse, AiTestResult } from '../services/ai';
+import type { AiSettingsResponse, AiTestResult, AiEmbeddingTestResult } from '../services/ai';
 
 export function useAiSettings() {
   const [settings, setSettings] = useState<AiSettingsResponse | null>(null);
@@ -67,6 +70,24 @@ export function useAiSettings() {
     [],
   );
 
+  const saveEmbeddingFeature = useCallback(
+    async (provider: string | null, model: string | null) => {
+      await putAiEmbeddingFeature({ provider, model });
+    },
+    [],
+  );
+
+  const getEmbeddingModels = useCallback(async (provider: string): Promise<string[]> => {
+    return getAiEmbeddingModels(provider);
+  }, []);
+
+  const testEmbedding = useCallback(
+    async (provider?: string, model?: string): Promise<AiEmbeddingTestResult> => {
+      return testAiEmbedding({ provider, model });
+    },
+    [],
+  );
+
   return {
     settings,
     loading,
@@ -78,5 +99,8 @@ export function useAiSettings() {
     getModels,
     saveSearchFeature,
     saveTaggingFeature,
+    saveEmbeddingFeature,
+    getEmbeddingModels,
+    testEmbedding,
   };
 }
