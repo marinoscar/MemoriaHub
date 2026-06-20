@@ -58,12 +58,12 @@ export class ExifProcessor implements ObjectProcessor {
       const exifr = await getExifr();
 
       const raw = await exifr.parse(buffer, {
-        // Parse the tags we care about; exifr accepts a tag-selection object
-        // to reduce parsing cost.
         tiff: true,
         exif: true,
         gps: true,
         ifd0: true,
+        makerNote: true,
+        mergeOutput: false,
         translateValues: false,
         reviveValues: true,
         sanitize: true,
@@ -79,7 +79,16 @@ export class ExifProcessor implements ObjectProcessor {
       // Captured timestamp
       const dto = raw['DateTimeOriginal'];
       if (dto instanceof Date) {
-        metadata['capturedAt'] = dto.toISOString();
+        let ms = 0;
+        const subSec = raw['SubSecTimeOriginal'];
+        if (typeof subSec === 'string' && subSec.trim()) {
+          const trimmed = subSec.trim().replace(/^\./, '');
+          const frac = parseFloat('0.' + trimmed);
+          if (!isNaN(frac)) ms = Math.round(frac * 1000);
+        }
+        const ts = new Date(dto.getTime());
+        ts.setUTCMilliseconds(ms);
+        metadata['capturedAt'] = ts.toISOString();
       }
 
       // UTC offset (stored as "+HH:MM" / "-HH:MM" or numeric minutes)
@@ -106,6 +115,14 @@ export class ExifProcessor implements ObjectProcessor {
       if (typeof make === 'string' && make.trim()) metadata['cameraMake'] = make.trim();
       if (typeof model === 'string' && model.trim()) metadata['cameraModel'] = model.trim();
       if (typeof orientation === 'number') metadata['orientation'] = orientation;
+
+      // BurstUUID (Apple MakerNote)
+      const burstUuid =
+        (raw['BurstUUID'] as string | undefined) ??
+        ((raw['MakerNote'] as Record<string, unknown> | undefined)?.['BurstUUID'] as string | undefined);
+      if (typeof burstUuid === 'string' && burstUuid.trim()) {
+        metadata['burstUuid'] = burstUuid.trim();
+      }
 
       this.logger.debug(`EXIF extracted for object ${object.id}: ${JSON.stringify(Object.keys(metadata))}`);
 
