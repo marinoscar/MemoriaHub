@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Drawer,
   List,
@@ -12,13 +12,16 @@ import {
   Box,
   useTheme,
   useMediaQuery,
+  IconButton,
+  Tooltip,
+  Typography,
+  CircularProgress,
 } from '@mui/material';
 import {
   Home as HomeIcon,
   Settings as SettingsIcon,
   AdminPanelSettings as AdminIcon,
   People as PeopleIcon,
-  PhotoLibrary as PhotoLibraryIcon,
   Map as MapIcon,
   GroupWork as GroupWorkIcon,
   Groups as GroupsIcon,
@@ -28,9 +31,14 @@ import {
   WorkHistory as WorkHistoryIcon,
   LocalOffer as LocalOfferIcon,
   Explore as ExploreIcon,
+  Add as AddIcon,
+  PhotoAlbum as AlbumIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
+import { useAlbums } from '../../hooks/useAlbums';
+import { useCircle } from '../../hooks/useCircle';
+import { CreateAlbumDialog } from '../album/CreateAlbumDialog';
 
 interface SidebarProps {
   open: boolean;
@@ -56,6 +64,17 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { isAdmin } = usePermissions();
+  const { activeCircle, activeCircleId, activeCircleRole } = useCircle();
+  const { albums, isLoading: albumsLoading, fetchAlbums } = useAlbums();
+  const [createAlbumOpen, setCreateAlbumOpen] = useState(false);
+
+  // Load albums whenever active circle changes
+  useEffect(() => {
+    if (!activeCircleId) return;
+    void fetchAlbums({ circleId: activeCircleId, pageSize: 100, sortBy: 'name', sortOrder: 'asc' });
+  }, [activeCircleId, fetchAlbums]);
+
+  const isViewer = activeCircleRole === 'viewer';
 
   const primaryItems: NavItemDef[] = [
     { label: 'Photos', icon: <HomeIcon />, path: '/' },
@@ -66,7 +85,6 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
   const libraryItems: NavItemDef[] = [
     { label: 'People', icon: <GroupsIcon />, path: '/people' },
-    { label: 'Albums', icon: <PhotoLibraryIcon />, path: '/media' },
   ];
 
   const adminItems: NavItemDef[] = [
@@ -162,6 +180,104 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           ))}
         </List>
 
+        {/* ALBUMS section */}
+        <List
+          dense
+          disablePadding
+          subheader={
+            <ListSubheader
+              disableSticky
+              sx={{
+                ...subheaderSx,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                pr: 0.5,
+              }}
+            >
+              <span>Albums</span>
+              {!isViewer && activeCircle && (
+                <Tooltip title="New album">
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCreateAlbumOpen(true);
+                    }}
+                    aria-label="Create new album"
+                    sx={{ color: theme.palette.text.disabled, p: 0.25 }}
+                  >
+                    <AddIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </ListSubheader>
+          }
+        >
+          {/* Scrollable album list */}
+          <Box sx={{ maxHeight: 240, overflowY: 'auto' }}>
+            {albumsLoading && (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}>
+                <CircularProgress size={16} />
+              </Box>
+            )}
+            {!albumsLoading && albums.length === 0 && activeCircleId && (
+              <Typography
+                variant="caption"
+                color="text.disabled"
+                sx={{ display: 'block', px: 2, py: 1 }}
+              >
+                No albums yet
+              </Typography>
+            )}
+            {albums.map((album) => {
+              const albumPath = `/albums/${album.id}`;
+              const active = isActive(albumPath, location.pathname);
+              return (
+                <ListItem key={album.id} disablePadding>
+                  <ListItemButton
+                    selected={active}
+                    onClick={() => handleNavigate(albumPath)}
+                    sx={{
+                      borderRadius: 1,
+                      mx: 0.5,
+                      '&.Mui-selected': {
+                        backgroundColor: theme.palette.action.selected,
+                        '&:hover': {
+                          backgroundColor: theme.palette.action.hover,
+                        },
+                      },
+                    }}
+                  >
+                    <ListItemIcon
+                      sx={{
+                        color: active
+                          ? theme.palette.primary.main
+                          : theme.palette.text.secondary,
+                        minWidth: 40,
+                      }}
+                    >
+                      <AlbumIcon fontSize="small" />
+                    </ListItemIcon>
+                    <ListItemText
+                      primary={album.name}
+                      sx={{
+                        my: 0,
+                        '& .MuiListItemText-primary': {
+                          fontSize: '0.875rem',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        },
+                      }}
+                    />
+                  </ListItemButton>
+                </ListItem>
+              );
+            })}
+          </Box>
+        </List>
+
         {/* ADMINISTRATION section — only when isAdmin */}
         {isAdmin && (
           <List
@@ -187,6 +303,20 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           item={{ label: 'User Settings', icon: <SettingsIcon />, path: '/settings' }}
         />
       </List>
+
+      {/* CreateAlbumDialog — renders via Portal so DOM position is fine */}
+      {activeCircle && (
+        <CreateAlbumDialog
+          open={createAlbumOpen}
+          onClose={() => setCreateAlbumOpen(false)}
+          circleId={activeCircle.id}
+          onCreated={(album) => {
+            setCreateAlbumOpen(false);
+            void fetchAlbums({ circleId: activeCircle.id, pageSize: 100, sortBy: 'name', sortOrder: 'asc' });
+            handleNavigate(`/albums/${album.id}`);
+          }}
+        />
+      )}
     </>
   );
 

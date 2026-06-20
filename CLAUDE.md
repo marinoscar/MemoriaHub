@@ -352,6 +352,17 @@ An admin dashboard at `/admin/jobs` provides monitoring and control over the gen
 - `GET /api/media/explore/places?circleId=` - List distinct places with item counts and cover thumbnails; returns `Array<{ name: string; count: number; coverThumbnailUrl: string | null }>` (media:read + viewer)
 - `GET /api/media/explore/tags?circleId=` - List tags with item counts and cover thumbnails; same response shape (media:read + viewer)
 
+### Albums (media:read / media:write / media:delete)
+Albums are circle-scoped named collections; deleting an album removes join rows only — `MediaItem` records are preserved.
+- `GET /api/media/albums?circleId=&page=&pageSize=&sortBy=&sortOrder=` - List albums in a circle (paginated; sortBy `name`|`createdAt`|`updatedAt`) (media:read + viewer)
+- `POST /api/media/albums` body `{circleId, name, description?}` - Create an album (media:write + collaborator)
+- `GET /api/media/albums/:id` - Get album with its ordered item list (media:read + viewer)
+- `PATCH /api/media/albums/:id` body `{name?, description?}` - Rename / update album; `description: null` clears it (media:write + collaborator)
+- `DELETE /api/media/albums/:id` - Delete album; cascades AlbumItems, preserves MediaItems (media:delete + collaborator)
+- `POST /api/media/albums/:id/items` body `{mediaItemIds[]}` (1–500) - Add specific media items to the album; idempotent (media:write + collaborator)
+- `DELETE /api/media/albums/:id/items/:itemId` - Remove one item from the album; `:itemId` is the MediaItem UUID (media:write + collaborator) — 204 No Content
+- `POST /api/media/albums/:id/items/by-filter` body `{circleId, ...mediaFilterFields}` - Add ALL media matching the given filters to the album in one operation; reuses `GET /api/media` filter semantics (minus pagination/sort); inserts with `skipDuplicates`; returns `{added: number}` (media:write + collaborator)
+
 ### AI Settings (Admin only — ai_settings:read / ai_settings:write)
 - `GET /api/ai/settings` - Get configured providers and search feature config (ai_settings:read)
 - `PUT /api/ai/credentials/:provider` - Upsert provider credentials, encrypted at rest (ai_settings:write)
@@ -484,6 +495,8 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `media_face_status` - Per-media-item detection status tracking (one row per item); records which provider/model processed the item and when; statuses: `not_processed`, `pending`, `processing`, `processed`, `failed`, `no_faces`
 - `tag_labels` - Global AI tag vocabulary managed by admins; unique `name`; `enabled` flag controls whether a label is included in vision model prompts; labels are not circle-scoped; supports CSV export/import
 - `media_tag_status` - Per-media-item auto-tagging status (one row per item); statuses: `not_processed`, `pending`, `processing`, `processed`, `failed`; records `provider_key`, `model_version`, `tag_count`, `processed_at`, `last_error`
+- `albums` - Circle-scoped named media collections; `added_by_id` tracks the creating user; unique per `(circle_id, name)` is not enforced — names are for display only
+- `album_items` - Join table linking `albums` to `media_items`; `@@unique([albumId, mediaItemId])` prevents duplicates; `added_at` records when the item was placed in the album; cascades on album delete, cascades on media item delete
 
 **Note:** `media_items`, `albums`, and `tags` use `added_by_id` (not `owner_id`) to track the uploading user. Dedup uniqueness for `media_items` is `(circle_id, content_hash)`. Tag names are unique per `(circle_id, name)`. The `media_tags` join table has a `source` column (`manual` | `ai`, default `manual`) that tracks whether a tag was applied by the AI auto-tagging service or by a user manually; AI re-runs are authoritative over `source='ai'` rows only and never modify `source='manual'` rows.
 

@@ -245,6 +245,16 @@ export interface AlbumQueryParams {
   circleId?: string;
 }
 
+export interface UpdateAlbumDto {
+  name?: string;
+  description?: string | null;
+}
+
+export type AddAlbumItemsByFilterDto = Omit<
+  MediaQueryParams,
+  'page' | 'pageSize' | 'sortBy' | 'sortOrder'
+>;
+
 // ---------------------------------------------------------------------------
 // Bulk operation DTOs
 // ---------------------------------------------------------------------------

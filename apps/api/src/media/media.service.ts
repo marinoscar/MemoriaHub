@@ -24,6 +24,7 @@ import { CreateAlbumDto } from './dto/create-album.dto';
 import { UpdateAlbumDto } from './dto/update-album.dto';
 import { AlbumQueryDto } from './dto/album-query.dto';
 import { AddAlbumItemsDto } from './dto/add-album-items.dto';
+import { AddAlbumItemsByFilterDto } from './dto/add-album-items-by-filter.dto';
 import { ExportQueryDto } from './dto/export-query.dto';
 import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
@@ -884,6 +885,97 @@ export class MediaService {
     );
 
     return created;
+  }
+
+  /**
+   * Add all MediaItems matching a filter set to an album (idempotent for existing joins).
+   * Forces the effective circleId to match the album's circle, ignoring any client-supplied mismatch.
+   */
+  async addAlbumItemsByFilter(
+    albumId: string,
+    dto: AddAlbumItemsByFilterDto,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{ added: number }> {
+    const album = await this.getAlbumWithOwnershipCheck(albumId, userId, userPermissions, 'collaborator' as CircleRole);
+
+    // Force the circle to match the album's circle — ignore any client-supplied circleId mismatch
+    const {
+      type,
+      capturedAtFrom,
+      capturedAtTo,
+      classification,
+      albumId: filterAlbumId,
+      favorite,
+      tag,
+      country,
+      region,
+      locality,
+      place,
+      location,
+      contentHash,
+      cameraMake,
+      cameraModel,
+      sourceDeviceId,
+      sourceDeviceName,
+      missingGeo,
+      personId,
+      personIds,
+      peopleMatch,
+    } = dto;
+
+    const where = {
+      ...buildMediaWhere(album.circleId, {
+        type,
+        capturedAtFrom,
+        capturedAtTo,
+        classification,
+        albumId: filterAlbumId,
+        favorite,
+        tag,
+        country,
+        region,
+        locality,
+        place,
+        location,
+        contentHash,
+        cameraMake,
+        cameraModel,
+        sourceDeviceId,
+        sourceDeviceName,
+        missingGeo,
+      }),
+      ...(() => {
+        const effectivePersonIds =
+          personIds && personIds.length > 0
+            ? personIds
+            : personId
+              ? [personId]
+              : [];
+        const effectiveMode = peopleMatch ?? 'any';
+        return effectivePersonIds.length > 0 ? wherePeople(effectivePersonIds, effectiveMode) : {};
+      })(),
+    };
+
+    const matches = await this.prisma.mediaItem.findMany({
+      where,
+      select: { id: true },
+    });
+
+    // Batch inserts in chunks of 1000
+    const CHUNK_SIZE = 1000;
+    let totalAdded = 0;
+    for (let i = 0; i < matches.length; i += CHUNK_SIZE) {
+      const chunk = matches.slice(i, i + CHUNK_SIZE);
+      const result = await this.prisma.albumItem.createMany({
+        data: chunk.map((m) => ({ albumId: album.id, mediaItemId: m.id })),
+        skipDuplicates: true,
+      });
+      totalAdded += result.count;
+    }
+
+    this.logger.log(`Added ${totalAdded} item(s) to album ${albumId} by filter`);
+    return { added: totalAdded };
   }
 
   /**

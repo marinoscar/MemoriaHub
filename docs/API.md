@@ -1907,6 +1907,306 @@ The route is registered before `GET /api/media/:id` in the controller so that th
 
 ---
 
+### Media — Albums (media:read / media:write / media:delete)
+
+Albums are circle-scoped named collections of `MediaItem` records. An album does not own its items — deleting an album removes the membership join rows only; the underlying `MediaItem` records are preserved. All album endpoints derive circle membership from the album's `circleId`; the caller must be a member of that circle with at least `viewer` (reads) or `collaborator` (writes/deletes).
+
+---
+
+#### GET /api/media/albums
+
+**Requires:** `media:read` permission + `viewer` role in the target circle
+
+List albums in a circle, paginated.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `circleId` | UUID | Yes | — | Circle to list albums for |
+| `page` | number | No | 1 | Page number (1-indexed) |
+| `pageSize` | number | No | 20 | Items per page (1–100) |
+| `sortBy` | enum | No | `createdAt` | Sort field: `name`, `createdAt`, `updatedAt` |
+| `sortOrder` | enum | No | `desc` | `asc` or `desc` |
+
+**Example response:**
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "circleId": "uuid",
+      "addedById": "uuid",
+      "name": "Summer 2024",
+      "description": "Beach trip photos",
+      "createdAt": "2024-08-01T10:00:00.000Z",
+      "updatedAt": "2024-08-15T12:00:00.000Z"
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 5,
+    "totalPages": 1
+  }
+}
+```
+
+**Error Cases:**
+- 403 Forbidden — caller is not a member of the circle
+- 404 Not Found — circle does not exist
+
+---
+
+#### POST /api/media/albums
+
+**Requires:** `media:write` permission + `collaborator` role in the target circle
+
+Create a new album.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `circleId` | UUID | Yes | Circle to create the album in |
+| `name` | string (1–256 chars) | Yes | Album name |
+| `description` | string (max 2048 chars) | No | Optional album description |
+
+**Example request:**
+
+```json
+{
+  "circleId": "a1b2c3d4-...",
+  "name": "Summer 2024",
+  "description": "Beach trip photos"
+}
+```
+
+**Example response (201 Created):**
+
+```json
+{
+  "id": "uuid",
+  "circleId": "uuid",
+  "addedById": "uuid",
+  "name": "Summer 2024",
+  "description": "Beach trip photos",
+  "createdAt": "2024-08-01T10:00:00.000Z",
+  "updatedAt": "2024-08-01T10:00:00.000Z"
+}
+```
+
+**Error Cases:**
+- 400 Bad Request — validation error (name missing or too long, invalid circleId)
+- 403 Forbidden — caller is not a `collaborator` in the circle
+
+---
+
+#### GET /api/media/albums/:id
+
+**Requires:** `media:read` permission + `viewer` role in the album's circle
+
+Get a single album with its item list. Items are ordered by `addedAt` ascending.
+
+**Path Parameter:** `id` — Album UUID
+
+**Response:**
+
+```json
+{
+  "id": "uuid",
+  "circleId": "uuid",
+  "addedById": "uuid",
+  "name": "Summer 2024",
+  "description": "Beach trip photos",
+  "createdAt": "2024-08-01T10:00:00.000Z",
+  "updatedAt": "2024-08-15T12:00:00.000Z",
+  "items": [
+    {
+      "id": "uuid",
+      "albumId": "uuid",
+      "mediaItemId": "uuid",
+      "addedAt": "2024-08-02T09:00:00.000Z",
+      "mediaItem": {
+        "id": "uuid",
+        "type": "photo",
+        "originalFilename": "IMG_4521.jpg",
+        "capturedAt": "2024-07-15T14:30:00.000Z",
+        "thumbnailUrl": "https://s3.amazonaws.com/..."
+      }
+    }
+  ]
+}
+```
+
+**Error Cases:**
+- 403 Forbidden — caller is not a member of the album's circle
+- 404 Not Found — album does not exist
+
+---
+
+#### PATCH /api/media/albums/:id
+
+**Requires:** `media:write` permission + `collaborator` role in the album's circle
+
+Rename or update the description of an album. Only supplied fields are changed. Pass `description: null` to clear the description.
+
+**Path Parameter:** `id` — Album UUID
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string (1–256 chars) | No | New album name |
+| `description` | string (max 2048 chars) \| null | No | New description; `null` clears it |
+
+**Response 200:** Updated album object (same shape as POST response, without `items`).
+
+**Error Cases:**
+- 403 Forbidden — caller is not a `collaborator` in the album's circle
+- 404 Not Found — album does not exist
+
+---
+
+#### DELETE /api/media/albums/:id
+
+**Requires:** `media:delete` permission + `collaborator` role in the album's circle
+
+Delete an album. Cascades to `album_items` join rows; the underlying `MediaItem` records are NOT deleted.
+
+**Path Parameter:** `id` — Album UUID
+
+**Response:** HTTP 204 No Content
+
+**Error Cases:**
+- 403 Forbidden — caller is not a `collaborator` in the album's circle
+- 404 Not Found — album does not exist
+
+---
+
+#### POST /api/media/albums/:id/items
+
+**Requires:** `media:write` permission + `collaborator` role in the album's circle
+
+Add up to 500 specific media items to an album. Items already in the album are skipped (insert is idempotent with `skipDuplicates`). All supplied `mediaItemIds` must belong to the same circle as the album.
+
+**Path Parameter:** `id` — Album UUID
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `mediaItemIds` | UUID[] (1–500) | Yes | IDs of `MediaItem` records to add |
+
+**Example request:**
+
+```json
+{
+  "mediaItemIds": ["uuid-1", "uuid-2", "uuid-3"]
+}
+```
+
+**Response 201:**
+
+```json
+{ "added": 3 }
+```
+
+`added` is the count of new `AlbumItem` join rows created (duplicates are skipped without error).
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | `mediaItemIds` is empty or contains more than 500 entries |
+| 403 | Caller is not a `collaborator` in the album's circle |
+| 404 | Album not found, or one or more `mediaItemIds` do not exist in the circle |
+
+---
+
+#### DELETE /api/media/albums/:id/items/:itemId
+
+**Requires:** `media:write` permission + `collaborator` role in the album's circle
+
+Remove a single media item from an album. The `MediaItem` record itself is not deleted.
+
+**Path Parameters:**
+- `id` — Album UUID
+- `itemId` — The `MediaItem` UUID to remove (not the `AlbumItem` join-row UUID)
+
+**Response:** HTTP 204 No Content
+
+**Error Cases:**
+- 403 Forbidden — caller is not a `collaborator` in the album's circle
+- 404 Not Found — album not found, or item is not in the album
+
+---
+
+#### POST /api/media/albums/:id/items/by-filter
+
+**Requires:** `media:write` permission + `collaborator` role in the album's circle
+
+Add all media items matching a set of filters to an album in a single operation. Uses the same filter semantics as `GET /api/media` (minus pagination and sort parameters). Items already in the album are skipped (`skipDuplicates`). `circleId` is required in the body and must match the album's circle.
+
+This endpoint is useful for bulk-populating an album from a date range, tag, location, or any combination of the standard media filters.
+
+**Path Parameter:** `id` — Album UUID
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `circleId` | UUID | Yes | Must match the album's circle |
+| `type` | `"photo"` \| `"video"` | No | Filter by media type |
+| `capturedAtFrom` | ISO 8601 datetime | No | Lower bound on `capturedAt` |
+| `capturedAtTo` | ISO 8601 datetime | No | Upper bound on `capturedAt` |
+| `classification` | `"memory"` \| `"low_value"` \| `"unreviewed"` | No | Filter by classification |
+| `favorite` | boolean | No | Filter by favorite flag |
+| `tag` | string | No | Exact tag name match (case-insensitive) |
+| `country` | string | No | Matches `geoCountry` (contains) or `geoCountryCode` (exact) |
+| `region` | string | No | Substring match on `geoAdmin1` |
+| `locality` | string | No | Substring match on `geoLocality` |
+| `place` | string | No | Substring match on `geoPlaceName` |
+| `location` | string | No | Free-text search across all geo tiers |
+| `cameraMake` | string | No | Substring match on `cameraMake`, case-insensitive |
+| `cameraModel` | string | No | Substring match on `cameraModel`, case-insensitive |
+| `sourceDeviceId` | string | No | Exact match on `sourceDeviceId` |
+| `sourceDeviceName` | string | No | Substring match on `sourceDeviceName`, case-insensitive |
+| `personId` | UUID | No | Items containing faces assigned to this person |
+| `personIds` | UUID[] | No | Comma-separated or repeated; combined with `peopleMatch` |
+| `peopleMatch` | `"any"` \| `"all"` | No | Match mode for `personIds` (default: `any`) |
+| `missingGeo` | boolean | No | `true` = items with no GPS; `false` = items with GPS |
+
+**Example request (add all photos from July 2024 tagged "vacation"):**
+
+```json
+{
+  "circleId": "a1b2c3d4-...",
+  "capturedAtFrom": "2024-07-01T00:00:00.000Z",
+  "capturedAtTo": "2024-07-31T23:59:59.999Z",
+  "tag": "vacation",
+  "type": "photo"
+}
+```
+
+**Response 200:**
+
+```json
+{ "added": 47 }
+```
+
+`added` is the count of new `AlbumItem` rows inserted. Items already in the album do not count toward this total.
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 403 | Caller is not a `collaborator` in the album's circle |
+| 404 | Album not found |
+
+---
+
 ### Health
 
 **Public endpoints** - Used for Kubernetes liveness/readiness probes.

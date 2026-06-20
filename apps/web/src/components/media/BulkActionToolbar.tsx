@@ -19,6 +19,8 @@ import {
   Star as StarIcon,
   Category as CategoryIcon,
   Close as CloseIcon,
+  PhotoAlbum as PhotoAlbumIcon,
+  RemoveCircleOutlined as RemoveCircleOutlineIcon,
 } from '@mui/icons-material';
 import type { CircleRole } from '../../types/circles';
 import type { MediaClassification } from '../../types/media';
@@ -33,6 +35,9 @@ interface BulkActionToolbarProps {
   onOpenTags: () => void;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
+  onOpenAlbum?: () => void;
+  albumMode?: boolean;
+  onRemoveFromAlbum?: () => void;
 }
 
 export function BulkActionToolbar({
@@ -44,6 +49,9 @@ export function BulkActionToolbar({
   onOpenTags,
   onSuccess,
   onError,
+  onOpenAlbum,
+  albumMode,
+  onRemoveFromAlbum,
 }: BulkActionToolbarProps) {
   const [classifyAnchor, setClassifyAnchor] = useState<null | HTMLElement>(null);
   const [favoriteAnchor, setFavoriteAnchor] = useState<null | HTMLElement>(null);
@@ -151,6 +159,32 @@ export function BulkActionToolbar({
             >
               Tags
             </Button>
+
+            {onOpenAlbum && (
+              <Button
+                size="small"
+                variant="outlined"
+                sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)', minHeight: 44 }}
+                startIcon={<PhotoAlbumIcon />}
+                onClick={onOpenAlbum}
+                disabled={loading}
+              >
+                Add to Album
+              </Button>
+            )}
+
+            {albumMode && onRemoveFromAlbum && (
+              <Button
+                size="small"
+                variant="outlined"
+                sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)', minHeight: 44 }}
+                startIcon={<RemoveCircleOutlineIcon />}
+                onClick={onRemoveFromAlbum}
+                disabled={loading}
+              >
+                Remove from Album
+              </Button>
+            )}
 
             <Button
               size="small"
