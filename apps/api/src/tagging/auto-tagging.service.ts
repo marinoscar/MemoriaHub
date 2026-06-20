@@ -276,7 +276,17 @@ export class AutoTaggingService {
         }
       });
 
-      // n. Upsert mediaTagStatus → processed
+      // n. Best-effort embedding — must not fail the tagging job
+      await this.embedAndStore(
+        mediaItem.id,
+        mediaItem.circleId,
+        caption,
+        description,
+        normalizedLabels,
+        peopleNames,
+      );
+
+      // o. Upsert mediaTagStatus → processed
       await this.prisma.mediaTagStatus.upsert({
         where: { mediaItemId: job.mediaItemId },
         create: {
@@ -302,10 +312,87 @@ export class AutoTaggingService {
         `AutoTagJob ${job.id}: assigned ${normalizedLabels.length} tag(s) to MediaItem ${job.mediaItemId} using ${provider}/${model}`,
       );
     } catch (err) {
-      // o. On unexpected error from step i onwards: mark failed and rethrow (let worker retry)
+      // p. On unexpected error from step i onwards: mark failed and rethrow (let worker retry)
       const errMsg = err instanceof Error ? err.message : String(err);
       await this.markFailed(job.mediaItemId, mediaItem.circleId, provider, model, errMsg);
       throw err;
+    }
+  }
+
+  /**
+   * Generate a text embedding from the caption, description, tags, and people names,
+   * then upsert it into the media_item_embedding table.
+   *
+   * This is best-effort: any error is logged and swallowed — embedding failures
+   * must NOT flip mediaTagStatus to failed or rethrow.
+   */
+  private async embedAndStore(
+    mediaItemId: string,
+    circleId: string,
+    caption: string | null,
+    description: string | null,
+    tagNames: string[],
+    peopleNames: string[],
+  ): Promise<void> {
+    try {
+      // Build text from all available signals
+      const text = [caption, description, ...tagNames, ...peopleNames]
+        .filter(Boolean)
+        .join('. ');
+      if (!text) {
+        return;
+      }
+
+      // Resolve embedding config
+      const embeddingConfig = await this.aiSettingsService.resolveEmbeddingConfig();
+      if (!embeddingConfig) {
+        this.logger.warn(
+          `AutoTagging embedAndStore: no embedding provider/model configured; skipping embedding for MediaItem ${mediaItemId}`,
+        );
+        return;
+      }
+
+      const { provider: embProvider, model: embModel } = embeddingConfig;
+
+      // Resolve credentials for embedding provider
+      let embCreds: { apiKey: string; baseUrl?: string };
+      try {
+        embCreds = await this.aiSettingsService.resolveCredentials(embProvider);
+      } catch (credErr) {
+        this.logger.warn(
+          `AutoTagging embedAndStore: failed to resolve credentials for embedding provider ${embProvider}: ${credErr instanceof Error ? credErr.message : String(credErr)}`,
+        );
+        return;
+      }
+
+      // Get provider instance and check embedText support
+      const embProviderInstance = this.aiProviderRegistry.get(embProvider);
+      if (typeof embProviderInstance.embedText !== 'function') {
+        this.logger.warn(
+          `AutoTagging embedAndStore: provider ${embProvider} does not support embedText; skipping embedding for MediaItem ${mediaItemId}`,
+        );
+        return;
+      }
+
+      // Generate embedding
+      const embedding = await embProviderInstance.embedText(embCreds, embModel, text);
+
+      // Store via parameterized raw SQL to handle the pgvector column type
+      const vectorLiteral = `[${embedding.join(',')}]`;
+      await this.prisma.$executeRaw`
+        INSERT INTO media_item_embedding (media_item_id, circle_id, embedding, model, updated_at)
+        VALUES (${mediaItemId}::uuid, ${circleId}::uuid, ${vectorLiteral}::vector, ${embModel}, now())
+        ON CONFLICT (media_item_id) DO UPDATE
+          SET embedding = EXCLUDED.embedding, model = EXCLUDED.model, updated_at = now()`;
+
+      this.logger.log(
+        `AutoTagging embedAndStore: stored ${embedding.length}-d embedding for MediaItem ${mediaItemId} using ${embProvider}/${embModel}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `AutoTagging embedAndStore: embedding failed for MediaItem ${mediaItemId} — ${err instanceof Error ? err.message : String(err)}`,
+      );
+      // Swallow the error — embedding failure must not fail the tagging job
     }
   }
 
