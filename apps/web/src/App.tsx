@@ -34,6 +34,7 @@ const SearchPage = lazy(() => import('./pages/SearchPage'));
 const PeoplePage = lazy(() => import('./pages/People/PeoplePage'));
 const AlbumsPage = lazy(() => import('./pages/Albums'));
 const AlbumPage = lazy(() => import('./pages/Albums/AlbumPage'));
+const TagsBrowsePage = lazy(() => import('./pages/Tags'));
 
 // Test login page (development only)
 const TestLoginPage = import.meta.env.PROD
@@ -81,6 +82,7 @@ function AppRoutes() {
                 <Route path="/admin/insights" element={<StorageInsightsPage />} />
                 <Route path="/search" element={<SearchPage />} />
                 <Route path="/people" element={<PeoplePage />} />
+                <Route path="/tags" element={<TagsBrowsePage />} />
                 <Route path="/albums" element={<AlbumsPage />} />
                 <Route path="/albums/:albumId" element={<AlbumPage />} />
               </Route>
