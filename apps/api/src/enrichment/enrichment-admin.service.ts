@@ -35,6 +35,8 @@ export interface JobStats {
   };
   byType: JobStatsByType[];
   stuckRunning: number;
+  /** Number of pending jobs currently deferred (scheduledFor > now). */
+  scheduled: number;
 }
 
 export interface JobListItem {
@@ -53,6 +55,9 @@ export interface JobListItem {
   createdAt: Date;
   startedAt: Date | null;
   finishedAt: Date | null;
+  scheduledFor: Date | null;
+  rateLimitedAt: Date | null;
+  rateLimitHits: number;
 }
 
 export interface JobListResult {
@@ -70,6 +75,8 @@ export interface ListJobsFilter {
   type?: string;
   page: number;
   pageSize: number;
+  /** When true, restrict to pending jobs with scheduledFor > now (backoff/deferred). */
+  scheduled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -89,7 +96,9 @@ export class EnrichmentAdminService {
   async getStats(): Promise<JobStats> {
     const stuckThreshold = new Date(Date.now() - STUCK_RUNNING_MINUTES * 60 * 1000);
 
-    const [statusGroups, typeStatusGroups, stuckCount] = await Promise.all([
+    const now = new Date();
+
+    const [statusGroups, typeStatusGroups, stuckCount, scheduledCount] = await Promise.all([
       // Count per status
       this.prisma.enrichmentJob.groupBy({
         by: ['status'],
@@ -105,6 +114,13 @@ export class EnrichmentAdminService {
         where: {
           status: JobStatus.running,
           startedAt: { lt: stuckThreshold },
+        },
+      }),
+      // Count pending jobs that are backed off (scheduledFor in the future)
+      this.prisma.enrichmentJob.count({
+        where: {
+          status: JobStatus.pending,
+          scheduledFor: { gt: now },
         },
       }),
     ]);
@@ -147,7 +163,7 @@ export class EnrichmentAdminService {
 
     const byType = Array.from(typeMap.values()).sort((a, b) => a.type.localeCompare(b.type));
 
-    return { total, byStatus, byType, stuckRunning: stuckCount };
+    return { total, byStatus, byType, stuckRunning: stuckCount, scheduled: scheduledCount };
   }
 
   // -------------------------------------------------------------------------
@@ -155,13 +171,21 @@ export class EnrichmentAdminService {
   // -------------------------------------------------------------------------
 
   async listJobs(filter: ListJobsFilter): Promise<JobListResult> {
-    const { status, type, page, pageSize } = filter;
+    const { status, type, page, pageSize, scheduled } = filter;
     const skip = (page - 1) * pageSize;
 
-    const where = {
-      ...(status !== undefined ? { status } : {}),
-      ...(type !== undefined ? { type } : {}),
-    };
+    // When scheduled=true, force status=pending and require scheduledFor > now.
+    // Otherwise compose status/type filters as-is.
+    const where: Prisma.EnrichmentJobWhereInput = scheduled === true
+      ? {
+          status: JobStatus.pending,
+          scheduledFor: { gt: new Date() },
+          ...(type !== undefined ? { type } : {}),
+        }
+      : {
+          ...(status !== undefined ? { status } : {}),
+          ...(type !== undefined ? { type } : {}),
+        };
 
     const [items, totalItems] = await Promise.all([
       this.prisma.enrichmentJob.findMany({
@@ -185,6 +209,9 @@ export class EnrichmentAdminService {
           createdAt: true,
           startedAt: true,
           finishedAt: true,
+          scheduledFor: true,
+          rateLimitedAt: true,
+          rateLimitHits: true,
         },
       }),
       this.prisma.enrichmentJob.count({ where }),
@@ -226,6 +253,8 @@ export class EnrichmentAdminService {
         lastError: null,
         startedAt: null,
         finishedAt: null,
+        scheduledFor: null,
+        rateLimitHits: 0,
       },
       select: {
         id: true,
@@ -243,6 +272,9 @@ export class EnrichmentAdminService {
         createdAt: true,
         startedAt: true,
         finishedAt: true,
+        scheduledFor: true,
+        rateLimitedAt: true,
+        rateLimitHits: true,
       },
     });
 
@@ -268,6 +300,8 @@ export class EnrichmentAdminService {
         lastError: null,
         startedAt: null,
         finishedAt: null,
+        scheduledFor: null,
+        rateLimitHits: 0,
       },
     });
 
@@ -293,6 +327,7 @@ export class EnrichmentAdminService {
       data: {
         status: JobStatus.pending,
         startedAt: null,
+        scheduledFor: null,
       },
     });
 

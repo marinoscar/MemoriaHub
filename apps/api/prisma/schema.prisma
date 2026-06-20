@@ -731,17 +731,21 @@ model EnrichmentJob {
   providerKey  String?   @map("provider_key")
   modelVersion String?   @map("model_version")
   payload      Json?     @db.JsonB
-  attempts     Int       @default(0)
-  lastError    String?   @map("last_error")
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  startedAt    DateTime? @map("started_at") @db.Timestamptz
-  finishedAt   DateTime? @map("finished_at") @db.Timestamptz
+  attempts        Int       @default(0)
+  lastError       String?   @map("last_error")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  startedAt       DateTime? @map("started_at") @db.Timestamptz
+  finishedAt      DateTime? @map("finished_at") @db.Timestamptz
+  scheduledFor    DateTime? @map("scheduled_for") @db.Timestamptz
+  rateLimitedAt   DateTime? @map("rate_limited_at") @db.Timestamptz
+  rateLimitHits   Int       @default(0) @map("rate_limit_hits")
 
   // Relations
   mediaItem MediaItem? @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
   circle    Circle?    @relation(fields: [circleId], references: [id], onDelete: Cascade)
 
   @@index([status, priority, createdAt])
+  @@index([status, scheduledFor, priority, createdAt])
   @@index([mediaItemId])
   @@index([type, status])
   @@map("enrichment_jobs")

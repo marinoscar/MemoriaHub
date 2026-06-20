@@ -12,6 +12,7 @@ import { DetectedFace } from './providers/face-provider.interface';
 import { FaceMatchingService } from './face-matching.service';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { RateLimitError } from '../enrichment/rate-limit.error';
 
 @Injectable()
 export class FaceDetectionService {
@@ -113,8 +114,36 @@ export class FaceDetectionService {
         );
       }
 
-      // 6. Detect faces (using upright buffer)
-      const detectedFaces: DetectedFace[] = await provider.detect(creds, uprightBuffer);
+      // 6. Detect faces (using upright buffer).
+      //    For the Rekognition provider, map AWS throttle errors to RateLimitError
+      //    so the worker routes them through the rate-limit deferral path.
+      //    Keyless providers (human, compreface) have no remote rate limit.
+      let detectedFaces: DetectedFace[];
+      try {
+        detectedFaces = await provider.detect(creds, uprightBuffer);
+      } catch (detectErr) {
+        if (providerKey === 'rekognition') {
+          const e = detectErr as Record<string, unknown> | null;
+          const name = typeof e?.['name'] === 'string' ? e['name'] : undefined;
+          const awsThrottleNames = new Set([
+            'ThrottlingException',
+            'ProvisionedThroughputExceededException',
+            'TooManyRequestsException',
+            'RequestLimitExceeded',
+            'SlowDown',
+          ]);
+          if (name && awsThrottleNames.has(name)) {
+            throw new RateLimitError(
+              typeof e?.['message'] === 'string'
+                ? e['message']
+                : `Rekognition throttled: ${name}`,
+              undefined,
+              providerKey,
+            );
+          }
+        }
+        throw detectErr;
+      }
 
       // 7. Delete existing non-manual Face rows (idempotency)
       await this.prisma.face.deleteMany({

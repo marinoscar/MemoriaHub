@@ -334,10 +334,10 @@ Metrics are precomputed into a snapshot table on a configurable schedule (defaul
 
 ### Admin: Job Queue (Admin role + jobs:read / jobs:write)
 An admin dashboard at `/admin/jobs` provides monitoring and control over the generic `enrichment_jobs` queue (used by face detection, storage insights computation, and all future enrichment handlers).
-- `GET /api/admin/jobs/stats` (jobs:read) - Queue stats: total, byStatus, byType breakdown, stuckRunning count
-- `GET /api/admin/jobs?status=&type=&page=&pageSize=` (jobs:read) - Paginated job list with optional status/type filters
-- `POST /api/admin/jobs/:id/retry` (jobs:write) - Reset a single failed/succeeded job to pending (400 if running, 404 if not found)
-- `POST /api/admin/jobs/retry-failed` (jobs:write) - Bulk-retry all failed jobs; optional `{type}` body to scope by job type
+- `GET /api/admin/jobs/stats` (jobs:read) - Queue stats: total, byStatus, byType breakdown, stuckRunning count, and `scheduled` (count of pending jobs currently in backoff, i.e. `scheduledFor > now`)
+- `GET /api/admin/jobs?status=&type=&page=&pageSize=&scheduled=` (jobs:read) - Paginated job list with optional filters; add `scheduled=true` to show only pending jobs currently in backoff (`scheduledFor > now`; forces status=pending, `type` still applies); each item includes `scheduledFor` (ISO 8601 | null), `rateLimitedAt` (ISO 8601 | null), and `rateLimitHits` (number)
+- `POST /api/admin/jobs/:id/retry` (jobs:write) - Reset a single failed/succeeded job to pending; also clears `scheduledFor` and resets `rateLimitHits` to 0 (400 if running, 404 if not found)
+- `POST /api/admin/jobs/retry-failed` (jobs:write) - Bulk-retry all failed jobs; optional `{type}` body to scope by job type; also clears `scheduledFor` and resets `rateLimitHits` to 0
 - `POST /api/admin/jobs/reset-stuck` (jobs:write) - Reset jobs stuck in `running` past a threshold; optional `{olderThanMinutes}` body (default 10)
 - `DELETE /api/admin/jobs/:id` (jobs:write) - Delete a job row (400 if running, 404 if not found)
 
@@ -504,7 +504,7 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `face_provider_credentials` - Face provider API keys/config (AES-256-GCM encrypted via same key as AI); one row per provider; `last4` exposed; plaintext never stored or returned. For keyless providers (`human`, `compreface`), the credential row (if present) stores only a `baseUrl` override — no API key is set or required.
 - `people` - Per-circle identity records for recognized individuals; supports `mergedIntoId` self-FK for cluster merge audit; `deletedAt` soft-delete
 - `faces` - Individual detected face records with bounding box, confidence, variable-dimension embedding (`Float[]` fallback or pgvector column; 128-d for `compreface` mobilenet, 1024-d for `human` WASM), and `externalFaceId` for Rekognition delegated path; keyed to `mediaItemId` + `circleId`; `manuallyAssigned` flag protects user-labeled faces from re-clustering
-- `enrichment_jobs` - Generic background job queue for all enrichment handlers (face detection, storage insights, etc.); statuses: `pending`, `running`, `succeeded`, `failed`; reasons: `upload`, `rerun`, `backfill`; `media_item_id` and `circle_id` are **NULLABLE** — null values indicate a global/system job that is not scoped to a single media item or circle (e.g. the `storage_insights` handler); idempotency for global jobs deduplicates on `(type, media_item_id IS NULL)`
+- `enrichment_jobs` - Generic background job queue for all enrichment handlers (face detection, storage insights, etc.); statuses: `pending`, `running`, `succeeded`, `failed`; reasons: `upload`, `rerun`, `backfill`; `media_item_id` and `circle_id` are **NULLABLE** — null values indicate a global/system job that is not scoped to a single media item or circle (e.g. the `storage_insights` handler); idempotency for global jobs deduplicates on `(type, media_item_id IS NULL)`; three backoff columns: `scheduled_for` (DateTime?, when the job becomes eligible again — null = eligible now; the worker claim query skips jobs where `scheduled_for > now`), `rate_limited_at` (DateTime?, timestamp of the most recent rate-limit hit), `rate_limit_hits` (Int default 0, count of rate-limit deferrals tracked separately from `attempts`)
 - `face_jobs` - Async face-detection job queue (no BullMQ); statuses: `pending`, `running`, `succeeded`, `failed`; reasons: `upload`, `rerun`, `backfill`
 - `media_face_status` - Per-media-item detection status tracking (one row per item); records which provider/model processed the item and when; statuses: `not_processed`, `pending`, `processing`, `processed`, `failed`, `no_faces`
 - `tag_labels` - Global AI tag vocabulary managed by admins; unique `name`; `enabled` flag controls whether a label is included in vision model prompts; labels are not circle-scoped; supports CSV export/import
@@ -615,6 +615,19 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 Note: Semantic search (pgvector embeddings) requires a pgvector-capable Postgres image (`pgvector/pgvector:pg16`). The embedding feature is configured in the Admin UI via `PUT /api/ai/features/embedding` — only OpenAI supports `embedText` (`text-embedding-3-small` recommended). If the embedding feature is not configured, `semanticQuery` silently falls back to filter-only search.
 
 Note: The enrichment worker shared by face detection, storage insights computation, and auto-tagging is controlled by `ENRICHMENT_WORKER_ENABLED` (default: `true`), `ENRICHMENT_JOB_POLL_MS` (default: `5000`), and `ENRICHMENT_WORKER_CONCURRENCY` (default: `1`). The legacy `FACE_WORKER_ENABLED` and `FACE_JOB_POLL_MS` aliases are still respected for backward compatibility.
+
+**Enrichment retry and rate-limit backoff:**
+- `ENRICHMENT_MAX_ATTEMPTS` - Maximum processing attempts before a job is permanently failed (default: `3`)
+- `ENRICHMENT_RETRY_BASE_MS` - Base backoff delay in ms for the first normal-error retry; equal-jitter exponential (default: `2000`)
+- `ENRICHMENT_RETRY_MAX_MS` - Maximum backoff cap in ms for normal-error retries (default: `60000`)
+- `ENRICHMENT_RATELIMIT_BASE_MS` - Base backoff delay in ms for the first rate-limit deferral (default: `30000`)
+- `ENRICHMENT_RATELIMIT_MAX_MS` - Maximum backoff cap in ms for rate-limit deferrals (default: `900000`, i.e. 15 minutes)
+- `ENRICHMENT_RATELIMIT_MAX_HITS` - Maximum rate-limit deferrals before a job is permanently failed; tracked separately from `ENRICHMENT_MAX_ATTEMPTS` (default: `10`)
+
+**Storage (S3 / Cloudflare R2):**
+- `S3_MAX_ATTEMPTS` - Maximum SDK-level retry attempts for server-initiated S3 operations (upload, complete multipart, signed-URL generation, download, delete, head); does not cover presigned part PUTs which are retried client-side by the CLI (default: `5`)
+- `S3_RETRY_MODE` - AWS SDK v3 retry strategy: `adaptive` (default; uses client-side congestion control that backs off on S3 `503 SlowDown` and R2 `429`), `standard`, or `legacy`
+- `S3_ENDPOINT` - S3-compatible endpoint URL; set to the Cloudflare R2 endpoint (e.g. `https://<account>.r2.cloudflarestorage.com`) to use R2 instead of AWS S3; adaptive retry handles R2 HTTP 429 and S3 503 SlowDown transparently
 
 **Storage Insights:**
 

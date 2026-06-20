@@ -44,6 +44,7 @@ import {
   Warning as WarningIcon,
   MoreVert as MoreVertIcon,
   Download as DownloadIcon,
+  Schedule as ScheduleIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useJobs } from '../../hooks/useJobs';
@@ -78,6 +79,25 @@ function formatDate(iso: string | null): string {
 
 function shortId(id: string | null | undefined): string {
   return id ? id.slice(0, 8) : '—';
+}
+
+/** Returns true when a pending job is actively backing off (scheduledFor is in the future). */
+function isBackingOff(job: EnrichmentJobDto): boolean {
+  return (
+    job.status === 'pending' &&
+    job.scheduledFor != null &&
+    new Date(job.scheduledFor) > new Date()
+  );
+}
+
+/** Human-readable relative time label, e.g. "in 2 min" or "in 45 sec". */
+function relativeTime(iso: string): string {
+  const diffMs = new Date(iso).getTime() - Date.now();
+  if (diffMs <= 0) return 'soon';
+  const secs = Math.round(diffMs / 1000);
+  if (secs < 60) return `in ${secs}s`;
+  const mins = Math.round(secs / 60);
+  return `in ${mins}m`;
 }
 
 function downloadJobJson(job: EnrichmentJobDto): void {
@@ -156,33 +176,48 @@ function JobsPageContent() {
   // Filter state (controlled locally, applied to hook via setFilters)
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [typeFilter, setTypeFilter] = useState<string>('');
+  const [scheduledFilter, setScheduledFilter] = useState<boolean>(false);
 
-  const applyFilters = (newStatus: string, newType: string, page = 1) => {
+  const applyFilters = (newStatus: string, newType: string, newScheduled: boolean, page = 1) => {
     setFilters({
-      status: (newStatus as JobStatus) || undefined,
+      // When scheduled=true the API forces status=pending; don't also send status
+      status: newScheduled ? undefined : ((newStatus as JobStatus) || undefined),
       type: newType || undefined,
+      scheduled: newScheduled || undefined,
       page,
       pageSize: filters.pageSize ?? 20,
     });
   };
 
   const handleStatusChange = (value: string) => {
+    // Switching the status dropdown clears the scheduled toggle
     setStatusFilter(value);
-    applyFilters(value, typeFilter);
+    setScheduledFilter(false);
+    applyFilters(value, typeFilter, false);
   };
 
   const handleTypeChange = (value: string) => {
     setTypeFilter(value);
-    applyFilters(statusFilter, value);
+    applyFilters(statusFilter, value, scheduledFilter);
+  };
+
+  const handleScheduledToggle = (checked: boolean) => {
+    setScheduledFilter(checked);
+    // When activating scheduled filter, clear the status dropdown (API will lock to pending)
+    if (checked) setStatusFilter('');
+    applyFilters(checked ? '' : statusFilter, typeFilter, checked);
   };
 
   const handlePageChange = (_: unknown, newPage: number) => {
-    applyFilters(statusFilter, typeFilter, newPage + 1); // MUI is 0-based
+    applyFilters(statusFilter, typeFilter, scheduledFilter, newPage + 1); // MUI is 0-based
   };
 
   const handleRowsPerPageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFilters({
       ...filters,
+      // When scheduled filter is active, don't send a conflicting status
+      status: scheduledFilter ? undefined : filters.status,
+      scheduled: scheduledFilter || undefined,
       pageSize: Number(e.target.value),
       page: 1,
     });
@@ -292,6 +327,17 @@ function JobsPageContent() {
                 <Badge badgeContent={stats.stuckRunning} color="warning">
                   <Chip label="Stuck running" color="warning" variant="outlined" />
                 </Badge>
+              )}
+              {stats.scheduled > 0 && (
+                <Tooltip title="Pending jobs waiting on backoff before the worker will retry them" arrow>
+                  <Chip
+                    icon={<ScheduleIcon />}
+                    label={`Scheduled (backing off): ${stats.scheduled}`}
+                    color="info"
+                    variant="outlined"
+                    sx={{ cursor: 'help' }}
+                  />
+                </Tooltip>
               )}
             </Box>
 
@@ -403,6 +449,28 @@ function JobsPageContent() {
               ))}
             </Select>
           </FormControl>
+
+          <Tooltip title="Show only pending jobs currently waiting on backoff (rate-limited retry delay)" arrow>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={scheduledFilter}
+                  onChange={(e) => handleScheduledToggle(e.target.checked)}
+                  size="small"
+                  color="info"
+                />
+              }
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <ScheduleIcon fontSize="small" color={scheduledFilter ? 'info' : 'disabled'} />
+                  <Typography variant="body2" color={scheduledFilter ? 'info.main' : 'text.secondary'}>
+                    Backing off
+                  </Typography>
+                </Box>
+              }
+              sx={{ ml: 0.5 }}
+            />
+          </Tooltip>
         </Stack>
 
         {/* Jobs error */}
@@ -455,7 +523,24 @@ function JobsPageContent() {
                           </Typography>
                         </TableCell>
                         <TableCell>
-                          <StatusChip status={job.status} />
+                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, alignItems: 'flex-start' }}>
+                            <StatusChip status={job.status} />
+                            {isBackingOff(job) && (
+                              <Tooltip
+                                title={`Retries ${relativeTime(job.scheduledFor!)}${job.rateLimitHits > 0 ? ` · ${job.rateLimitHits} rate-limit hit${job.rateLimitHits !== 1 ? 's' : ''}` : ''}`}
+                                arrow
+                              >
+                                <Chip
+                                  icon={<ScheduleIcon />}
+                                  label="backing off"
+                                  color="info"
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{ cursor: 'help' }}
+                                />
+                              </Tooltip>
+                            )}
+                          </Box>
                         </TableCell>
                         <TableCell>
                           <Typography variant="body2" color="text.secondary">

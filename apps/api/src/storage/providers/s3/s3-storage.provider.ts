@@ -63,6 +63,8 @@ export class S3StorageProvider implements StorageProvider {
           : undefined,
       // Force path-style URLs for MinIO/LocalStack compatibility
       forcePathStyle: !!endpoint,
+      maxAttempts: this.configService.get<number>('storage.s3.maxAttempts', 5),
+      retryMode: this.configService.get<string>('storage.s3.retryMode', 'adaptive') as 'standard' | 'adaptive' | 'legacy',
     });
 
     this.logger.log(

@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
+| **Version** | 1.1 |
 | **Last Updated** | June 2026 |
 
 ---
@@ -65,8 +65,11 @@ The worked example throughout this document is `face_detection`. See **[docs/spe
 | `providerKey` | String? | Hint to handler: which provider to use |
 | `modelVersion` | String? | Hint to handler: which model version |
 | `payload` | JsonB? | Handler-specific additional parameters |
-| `attempts` | Int (default 0) | Number of processing attempts |
+| `attempts` | Int (default 0) | Number of normal processing attempts (does not count rate-limit hits) |
 | `lastError` | String? | Error message from most recent failure |
+| `scheduledFor` | DateTime? | When the job becomes eligible to be claimed again; null = eligible now. Set by the worker on both normal-failure backoff and rate-limit deferral. |
+| `rateLimitedAt` | DateTime? | Timestamp of the most recent rate-limit hit, for debugging and admin display. |
+| `rateLimitHits` | Int (default 0) | Running count of rate-limit deferrals on this job; tracked separately from `attempts`. |
 | `createdAt` | DateTime | When the job was created |
 | `startedAt` | DateTime? | When the worker last claimed this job |
 | `finishedAt` | DateTime? | When the job reached `succeeded` or permanent `failed` |
@@ -75,10 +78,10 @@ The worked example throughout this document is `face_detection`. See **[docs/spe
 
 | Value | Meaning |
 |-------|---------|
-| `pending` | Waiting to be claimed by the worker |
+| `pending` | Waiting to be claimed by the worker (or backed off — see `scheduledFor`) |
 | `running` | Currently being processed |
 | `succeeded` | Completed successfully |
-| `failed` | Failed permanently (exhausted retry attempts) |
+| `failed` | Failed permanently (exhausted retry or rate-limit-hit cap) |
 
 ### JobReason Enum
 
@@ -91,9 +94,9 @@ The worked example throughout this document is `face_detection`. See **[docs/spe
 ### Indices
 
 ```
-[status, priority, createdAt]  — primary claim index (worker query)
-[mediaItemId]                  — fast lookup by media item
-[type, status]                 — admin stats and type-scoped queries
+[status, scheduledFor, priority, createdAt]  — primary claim index (worker skips backed-off jobs)
+[mediaItemId]                                — fast lookup by media item
+[type, status]                               — admin stats and type-scoped queries
 ```
 
 ### Priority Semantics
@@ -320,26 +323,50 @@ The claim is wrapped in a Prisma `$transaction`:
 
 ```typescript
 const job = await prisma.enrichmentJob.findFirst({
-  where: { status: JobStatus.pending },
+  where: {
+    status: JobStatus.pending,
+    OR: [{ scheduledFor: null }, { scheduledFor: { lte: now } }],
+  },
   orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
 });
 if (!job) return null;
 await prisma.enrichmentJob.update({
-  where: { id: job.id, status: JobStatus.pending }, // guard: still pending
-  data: { status: JobStatus.running, startedAt: new Date() },
+  where: { id: job.id },
+  data: { status: JobStatus.running, startedAt: new Date(), scheduledFor: null },
 });
 ```
 
-The status guard in the `update` ensures that if two worker processes run simultaneously (e.g. during a deploy overlap), only one can claim a given job.
+The `scheduledFor` filter ensures that backed-off jobs are invisible to the worker until their deferral period has elapsed. The transaction ensures only one worker process can claim a given job even during a deploy overlap.
 
-### MAX_ATTEMPTS = 3
+### Retry and Backoff
+
+The worker handles two distinct failure modes separately. Normal errors and rate-limit errors are tracked with separate counters so that a burst of throttle responses never consumes the normal-failure retry budget.
+
+**Normal failure path:**
 
 | Outcome | Action |
 |---------|--------|
 | `handler.process()` returns normally | `status = succeeded`, `finishedAt = now()` |
-| `handler.process()` throws, attempts < 3 | `attempts++`, `status = pending` (retry) |
-| `handler.process()` throws, attempts >= 3 | `attempts++`, `status = failed`, `finishedAt = now()`, `lastError = error.message` |
+| Throws a non-rate-limit error, `attempts < MAX_ATTEMPTS` | `attempts++`, `status = pending`, `scheduledFor = now + backoff` |
+| Throws a non-rate-limit error, `attempts >= MAX_ATTEMPTS` | `attempts++`, `status = failed`, `finishedAt = now()`, `lastError = message` |
 | `registry.get(type)` returns `undefined` | `status = failed` immediately (no retry), `lastError = "No handler registered..."` |
+
+The backoff delay uses equal-jitter exponential backoff: `delay = exp/2 + rand() * (exp/2)` where `exp = min(RETRY_MAX_MS, RETRY_BASE_MS * 2^(attempt-1))`. Default values give delays of roughly 1–2 s, 2–4 s, then permanent failure on the third attempt.
+
+**Rate-limit deferral path:**
+
+When a handler throws a `RateLimitError`, or when the worker's `classifyRateLimit()` fallback identifies an HTTP 429 or an AWS throttling exception in an unclassified error, the job enters a separate rate-limit deferral path:
+
+| Outcome | Action |
+|---------|--------|
+| Rate-limit error, `rateLimitHits < RL_MAX_HITS` | `rateLimitHits++`, `rateLimitedAt = now()`, `status = pending`, `scheduledFor = now + rl_backoff`; `attempts` is **not** incremented |
+| Rate-limit error, `rateLimitHits >= RL_MAX_HITS` | `rateLimitHits++`, `status = failed`, `finishedAt = now()`, `lastError = message` |
+
+Rate-limit backoff uses the same equal-jitter formula with longer base and cap values. If the provider supplies a `Retry-After` header (integer seconds or HTTP-date), the computed jitter is floored at that value so the worker never retries before the provider allows.
+
+**Rate-limit detection:**
+
+Handlers throw `RateLimitError` directly for known provider responses (auto-tagging handler → Anthropic/OpenAI HTTP 429; face detection handler → AWS Rekognition throttling exceptions). The worker also calls `classifyRateLimit(err)` as a fallback, which detects HTTP 429 via `err.status`, `err.response.status`, or `err.$metadata.httpStatusCode`, and AWS throttling by error name (`ThrottlingException`, `TooManyRequestsException`, `ProvisionedThroughputExceededException`, `RequestLimitExceeded`, `SlowDown`).
 
 Unknown handler types fail immediately without retry. This prevents an infinite retry loop for jobs created before a handler was removed.
 
@@ -373,7 +400,7 @@ A job is considered "stuck" if its `status` is `running` and `startedAt` is olde
 
 ### Stats
 
-`GET /api/admin/jobs/stats` (`jobs:read`) runs three parallel queries and returns:
+`GET /api/admin/jobs/stats` (`jobs:read`) runs four parallel queries and returns:
 
 ```typescript
 {
@@ -386,14 +413,29 @@ A job is considered "stuck" if its `status` is `running` and `startedAt` is olde
   };
   byType: JobStatsByType[];   // per-type breakdown
   stuckRunning: number;       // jobs running > STUCK_RUNNING_MINUTES
+  scheduled: number;          // pending jobs with scheduledFor > now (backed off)
 }
 ```
 
+The `scheduled` count lets operators distinguish jobs actively waiting in the queue (`pending` with null or past `scheduledFor`) from jobs that are temporarily deferred due to a failure or rate-limit backoff. The `/admin/jobs` frontend surfaces this as a "Scheduled (backing off)" stat tile.
+
 ### Job List
 
-`GET /api/admin/jobs?status=&type=&page=&pageSize=` (`jobs:read`):
+`GET /api/admin/jobs?status=&type=&page=&pageSize=&scheduled=` (`jobs:read`):
 
-Paginated. Optional `status` and `type` filters. Returns `lastError` for failed rows.
+Paginated. Optional `status`, `type`, and `scheduled` filters. Returns `lastError` for failed rows.
+
+The `scheduled=true` query parameter restricts the result to pending jobs that are currently in backoff (`scheduledFor > now`). When `scheduled=true`, the `status` filter is ignored (it is always forced to `pending`). The `type` filter still applies. Use this filter to see which jobs are waiting on a backoff delay and when they will next be eligible.
+
+Each returned item now includes three additional fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `scheduledFor` | ISO 8601 \| null | When the job becomes eligible for the worker to claim; null = eligible now |
+| `rateLimitedAt` | ISO 8601 \| null | Timestamp of the most recent rate-limit hit; null if the job has never been rate-limited |
+| `rateLimitHits` | number | Total rate-limit deferrals this job has accumulated |
+
+The `/admin/jobs` dashboard surfaces a per-row "backing off" badge when `scheduledFor` is in the future, and provides a filter toggle to show only backed-off jobs.
 
 ### Per-Row Actions
 
@@ -591,6 +633,8 @@ No dashboard code changes are needed.
 
 ## 12. Configuration
 
+### Worker lifecycle
+
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `ENRICHMENT_WORKER_ENABLED` | `'true'` | Set to `'false'` to disable the worker. Checked before the legacy variable. |
@@ -599,6 +643,24 @@ No dashboard code changes are needed.
 | `FACE_JOB_POLL_MS` | `'5000'` | Legacy alias for `ENRICHMENT_JOB_POLL_MS`. |
 | `ENRICHMENT_WORKER_CONCURRENCY` | `'1'` | Jobs to attempt per tick. |
 | `FACE_WORKER_CONCURRENCY` | `'1'` | Legacy alias for `ENRICHMENT_WORKER_CONCURRENCY`. |
+
+### Normal-failure retry
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `ENRICHMENT_MAX_ATTEMPTS` | `3` | Maximum processing attempts before a job is permanently failed. |
+| `ENRICHMENT_RETRY_BASE_MS` | `2000` | Base delay (ms) for the first retry backoff. Equal-jitter exponential; actual delay is roughly `base/2..base` for attempt 1, `base..2*base` for attempt 2, etc. |
+| `ENRICHMENT_RETRY_MAX_MS` | `60000` | Maximum backoff cap (ms) for normal retries. |
+
+### Rate-limit deferral
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `ENRICHMENT_RATELIMIT_BASE_MS` | `30000` | Base delay (ms) for the first rate-limit deferral. Same equal-jitter formula as normal retries. |
+| `ENRICHMENT_RATELIMIT_MAX_MS` | `900000` | Maximum backoff cap (ms) for rate-limit deferrals (15 minutes). |
+| `ENRICHMENT_RATELIMIT_MAX_HITS` | `10` | Maximum rate-limit deferrals before a job is permanently failed. |
+
+Rate-limit hits do not consume `ENRICHMENT_MAX_ATTEMPTS`. A job can exhaust its normal retry budget independently of how many times it has been rate-limited, and vice versa.
 
 For variables specific to the `face_detection` handler (thresholds, providers, image dimensions), see [face-recognition.md — Configuration](face-recognition.md#13-configuration-and-environment-variables).
 
@@ -639,3 +701,4 @@ Each of these would: implement `EnrichmentHandler`, self-register via `onModuleI
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | June 2026 | AI Assistant | Initial reference document |
+| 1.1 | June 2026 | AI Assistant | Rate-limit & scheduled backoff: new `scheduledFor`, `rateLimitedAt`, `rateLimitHits` columns; two-path retry model; `RateLimitError` detection; new env knobs; updated claim query; admin stats `scheduled` field; job list `scheduled=true` filter and new item fields |

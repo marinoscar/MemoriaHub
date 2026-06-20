@@ -2552,7 +2552,8 @@ Return aggregate counts for the entire enrichment queue.
       "total": 1042
     }
   ],
-  "stuckRunning": 1
+  "stuckRunning": 1,
+  "scheduled": 5
 }
 ```
 
@@ -2564,6 +2565,7 @@ Return aggregate counts for the entire enrichment queue.
 | `byStatus` | Counts keyed by `pending` / `running` / `succeeded` / `failed` |
 | `byType` | Per-job-type breakdown with the same four status counts plus a `total`; sorted alphabetically by type |
 | `stuckRunning` | Count of jobs with `status=running` and `startedAt` older than 10 minutes |
+| `scheduled` | Count of pending jobs whose `scheduledFor` is in the future (currently backed off and not yet eligible to run) |
 
 ---
 
@@ -2577,10 +2579,11 @@ Paginated, filterable list of enrichment job rows. Ordered by `createdAt DESC`.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `status` | enum | No | — | Filter by status: `pending` \| `running` \| `succeeded` \| `failed` |
+| `status` | enum | No | — | Filter by status: `pending` \| `running` \| `succeeded` \| `failed`; ignored when `scheduled=true` |
 | `type` | string | No | — | Filter by job type string (exact match) |
 | `page` | number | No | 1 | Page number (1-indexed) |
 | `pageSize` | number | No | 20 | Items per page (1–100) |
+| `scheduled` | boolean | No | — | When `true`, return only pending jobs currently in backoff (`scheduledFor > now`); forces `status=pending`, `type` filter still applies |
 
 **Response:**
 ```json
@@ -2589,18 +2592,21 @@ Paginated, filterable list of enrichment job rows. Ordered by `createdAt DESC`.
     {
       "id": "uuid",
       "type": "face_detection",
-      "status": "failed",
+      "status": "pending",
       "reason": "upload",
       "priority": 0,
       "mediaItemId": "uuid",
       "circleId": "uuid",
-      "attempts": 3,
+      "attempts": 2,
       "lastError": "Connection refused at http://compreface-core:3000",
       "providerKey": "compreface",
       "modelVersion": "compreface-arcface-mobilefacenet-128",
       "createdAt": "2026-06-17T10:00:00.000Z",
       "startedAt": "2026-06-17T10:01:00.000Z",
-      "finishedAt": "2026-06-17T10:01:05.000Z"
+      "finishedAt": null,
+      "scheduledFor": "2026-06-17T10:05:00.000Z",
+      "rateLimitedAt": null,
+      "rateLimitHits": 0
     }
   ],
   "meta": {
@@ -2620,16 +2626,19 @@ Paginated, filterable list of enrichment job rows. Ordered by `createdAt DESC`.
 | `type` | string | Job type string (e.g. `face_detection`) |
 | `status` | enum | `pending` \| `running` \| `succeeded` \| `failed` |
 | `reason` | enum | Why the job was created: `upload` \| `rerun` \| `backfill` |
-| `priority` | number | Scheduling priority (higher = picked sooner) |
-| `mediaItemId` | UUID | Target media item |
-| `circleId` | UUID | Circle the media item belongs to |
-| `attempts` | number | Number of processing attempts made |
+| `priority` | number | Scheduling priority (lower value = claimed sooner) |
+| `mediaItemId` | UUID \| null | Target media item; null for global/system jobs |
+| `circleId` | UUID \| null | Circle the media item belongs to; null for global/system jobs |
+| `attempts` | number | Normal processing attempts made (does not count rate-limit hits) |
 | `lastError` | string \| null | Error message from the most recent failure |
 | `providerKey` | string \| null | Provider that processed or will process the job |
 | `modelVersion` | string \| null | Model version used |
 | `createdAt` | ISO 8601 | When the job was enqueued |
 | `startedAt` | ISO 8601 \| null | When the most recent attempt started |
-| `finishedAt` | ISO 8601 \| null | When the job last completed (success or failure) |
+| `finishedAt` | ISO 8601 \| null | When the job last completed (success or permanent failure) |
+| `scheduledFor` | ISO 8601 \| null | When the job becomes eligible for the worker again; null = eligible now. Set on both normal-error backoff and rate-limit deferral. |
+| `rateLimitedAt` | ISO 8601 \| null | Timestamp of the most recent rate-limit hit; null if never rate-limited |
+| `rateLimitHits` | number | Total rate-limit deferrals accumulated on this job |
 
 ---
 
@@ -2637,7 +2646,7 @@ Paginated, filterable list of enrichment job rows. Ordered by `createdAt DESC`.
 
 **Requires:** Admin role + `jobs:write` permission
 
-Reset a single failed or succeeded job to `pending` so the worker will re-process it. Resets `attempts` to 0 and clears `lastError`, `startedAt`, and `finishedAt`.
+Reset a single failed or succeeded job to `pending` so the worker will re-process it. Resets `attempts` to 0, clears `lastError`, `startedAt`, `finishedAt`, `scheduledFor`, and resets `rateLimitHits` to 0.
 
 **Path Parameter:** `id` — enrichment job UUID
 
@@ -2667,7 +2676,7 @@ Returns the full updated job object (same shape as a list item).
 
 **Requires:** Admin role + `jobs:write` permission
 
-Bulk-reset all `failed` jobs to `pending`. Optionally scope to a specific job type. Resets `attempts` to 0 and clears `lastError`, `startedAt`, and `finishedAt` on all matched rows.
+Bulk-reset all `failed` jobs to `pending`. Optionally scope to a specific job type. Resets `attempts` to 0, clears `lastError`, `startedAt`, `finishedAt`, `scheduledFor`, and resets `rateLimitHits` to 0 on all matched rows.
 
 **Request Body (optional):**
 ```json
@@ -2738,7 +2747,7 @@ Permanently delete an enrichment job row. Cannot delete a job that is currently 
 
 All storage insights endpoints require the global `admin` role. Reading the latest snapshot additionally requires `system_settings:read`; triggering a refresh requires `system_settings:write`. No new permissions were added — the feature reuses the existing system settings permission pair.
 
-Metrics are precomputed into a snapshot table and refreshed on a configurable schedule (default every 4 hours). The `storage.insights.refreshIntervalHours` system setting (integer, 1–168) controls the automatic refresh cadence; the cron fires every hour and **enqueues** a `storage_insights` enrichment job only when the configured interval has elapsed and no job is already pending/running. Computation runs asynchronously on the shared enrichment worker (MAX_ATTEMPTS=3; visible and retryable in the `/admin/jobs` dashboard).
+Metrics are precomputed into a snapshot table and refreshed on a configurable schedule (default every 4 hours). The `storage.insights.refreshIntervalHours` system setting (integer, 1–168) controls the automatic refresh cadence; the cron fires every hour and **enqueues** a `storage_insights` enrichment job only when the configured interval has elapsed and no job is already pending/running. Computation runs asynchronously on the shared enrichment worker (default 3 attempts with exponential backoff; visible and retryable in the `/admin/jobs` dashboard).
 
 ---
 

@@ -37,6 +37,9 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     lastError: null,
     startedAt: null,
     finishedAt: null,
+    scheduledFor: null,
+    rateLimitedAt: null,
+    rateLimitHits: 0,
     createdAt: new Date(),
     ...overrides,
   };
