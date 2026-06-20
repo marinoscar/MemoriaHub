@@ -359,7 +359,7 @@ Burst detection is per-circle opt-in (default off) and non-destructive — no ph
 - `GET /api/media/bursts/:id` - Group detail; ordered members `{ id, capturedAt, burstScore, sharpnessScore, thumbnailUrl, width, height, isSuggestedBest }` (media:read + viewer)
 - `POST /api/media/bursts/:id/resolve` body `{ keepIds[] }` - Keep selected members, soft-delete the rest, mark resolved (media:delete + collaborator)
 - `POST /api/media/bursts/:id/dismiss` - Mark "not a burst": ungroup members, status=dismissed (media:write + collaborator)
-- `POST /api/media/bursts/backfill` body `{ circleId, force? }` - Bulk-enqueue burst_detection over the circle; requires circle opt-in; returns `{ enqueued }` (media:write + collaborator)
+- `POST /api/media/bursts/backfill` body `{ circleId, from?, to?, force? }` - Bulk-enqueue burst_detection over the circle, optionally limited to a `capturedAt` range (`from`/`to`, ISO-8601); the job computes the perceptual hash on demand for photos that lack one (retroactive fingerprinting of legacy uploads); requires circle opt-in; returns `{ enqueued }` (media:write + collaborator)
 
 ### Media — Explore
 - `GET /api/media/explore/places?circleId=` - List distinct places with item counts and cover thumbnails; returns `Array<{ name: string; count: number; coverThumbnailUrl: string | null }>` (media:read + viewer)
@@ -406,6 +406,8 @@ Auto-tagging is per-circle opt-in (default off); see Tag Vocabulary endpoints be
 ### Circle Burst Detection Settings (circles:read / circles:write + per-circle viewer/circle_admin role)
 - `GET /api/circles/:id/burst-settings` - Get burst-detection opt-in flag for a circle (circles:read + viewer)
 - `PUT /api/circles/:id/burst-settings` body `{enabled}` - Enable/disable burst detection for a circle; writes audit event (circles:write + circle_admin)
+
+> **UI:** The circle Settings tab exposes a "Scan for bursts" panel that lets a `circle_admin` choose an optional capture-date window (`from`/`to`) and a force flag before calling `POST /api/media/bursts/backfill`. This makes it easy to retroactively fingerprint and group photos from a specific date range without re-processing the entire library.
 
 ### Face Recognition / Face Settings (Admin only — face_settings:read / face_settings:write)
 Three providers: `human` (keyless WASM, in-process, 1024-d), `compreface` (keyless `compreface-core` sidecar, 128-d mobilenet, `requiresCredentials:false`), `rekognition` (delegated AWS, requires credentials). The Face Settings UI has a "Test connection" button for all providers including keyless ones.
@@ -683,7 +685,7 @@ Detailed specs live under `docs/specs/`:
 - [Semantic Search](docs/specs/semantic-search.md) — pgvector embedding storage, KNN-then-filter algorithm, `semanticQuery` param, graceful degradation, backfill and re-embed on people change
 - [Agentic Search](docs/specs/agentic-search.md) — stateless agentic search, SSE streaming, tool-call protocol
 - [Storage Insights](docs/specs/storage-insights.md) — precomputed global storage metrics, snapshot lifecycle, interval-gated cron, admin dashboard
-- [Burst Photo Detection](docs/specs/burst-detection.md) — on-server dHash + temporal proximity grouping, best-shot scoring, non-destructive review queue, per-circle opt-in, backfill
+- [Burst Photo Detection](docs/specs/burst-detection.md) — on-server dHash + temporal proximity grouping, best-shot scoring, non-destructive review queue, per-circle opt-in, backfill with optional capturedAt range and on-demand retroactive perceptual hashing
 
 ## Specialized Subagents (MANDATORY)
 

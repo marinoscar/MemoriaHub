@@ -244,6 +244,8 @@ If all checks pass, the listener calls `EnrichmentJobService.enqueue` with `type
 
 **Step 1.** Load the `MediaItem` including `perceptualHash`, `sharpnessScore`, `burstUuid`, `capturedAt`, `width`, `height`, `cameraMake`, `cameraModel`, `circleId`. If the item is not found or `deletedAt` is set, return early (non-retryable).
 
+**Step 1a (on-demand hashing — retroactive fingerprinting).** If `perceptualHash` is null (i.e. the item was uploaded before the `visual-hash` processor existed), the handler downloads the raw image from the storage provider and calls `computeVisualHash` from `apps/api/src/storage/processing/visual-hash.util.ts` to compute the 64-bit dHash and Laplacian sharpness score. Both values are persisted to `media_items` before proceeding. If the download or hash computation fails, the handler logs a warning and continues without a hash — the item will be eligible for grouping via BurstUUID only. This on-demand path is identical to the `visual-hash` storage processor but runs lazily inside the enrichment job so that libraries uploaded before the feature was introduced can be retroactively fingerprinted and grouped.
+
 **Step 2.** Load system settings for burst configuration: `burst.timeGapSeconds` (T), `burst.hashDistance` (D), `burst.minGroupSize` (N).
 
 **Step 3.** Find candidate neighbors. Query `media_items` in the same circle where:
@@ -418,20 +420,29 @@ Mark a burst group dismissed, indicating the reviewer considers these items to n
 
 Bulk-enqueue `burst_detection` jobs for photos in a circle that have not yet been processed (or all photos when `force: true`). Requires the circle to have `burstDetectionEnabled = true`.
 
+For each enqueued photo that lacks a `perceptualHash`, the enrichment job performs on-demand fingerprinting: it downloads the image from the storage provider, runs `computeVisualHash` (`apps/api/src/storage/processing/visual-hash.util.ts`) to compute the 64-bit dHash and Laplacian sharpness score, and persists both to `media_items` before applying burst-grouping logic. This retroactive path enables backfill to operate on libraries that pre-date the burst detection feature.
+
 - **Auth:** `media:write` + per-circle `collaborator` role
 - **Requirement:** `circle.burstDetectionEnabled` must be `true`; otherwise returns `400 Bad Request`.
 - **Request body:**
   ```json
   {
     "circleId": "uuid",
+    "from": "2025-01-01T00:00:00.000Z",
+    "to": "2025-12-31T23:59:59.999Z",
     "force": false
   }
   ```
-  When `force` is `false` (default), only items without an existing `burstGroupId` and without a `succeeded` `burst_detection` job are enqueued. When `force` is `true`, all non-deleted photos in the circle are enqueued (useful after changing `burst.timeGapSeconds` or `burst.hashDistance`).
+  `from` and `to` are optional ISO-8601 datetime strings that bound the `capturedAt` range of photos to enqueue (both bounds are inclusive). They may be provided independently or together. `from > to` returns `400 Bad Request`. When omitted, all eligible photos in the circle are in scope.
+
+  When `force` is `false` (default), only photos without an existing `burstGroupId` and without a `succeeded` `burst_detection` job are enqueued. When `force` is `true`, all non-deleted photos within the scope are enqueued (useful after changing `burst.timeGapSeconds` or `burst.hashDistance`, or to re-fingerprint photos that previously failed hashing).
 - **Response `201`:**
   ```json
   { "data": { "enqueued": 312 } }
   ```
+- **Error cases:**
+  - `400` — `circle.burstDetectionEnabled` is `false`
+  - `400` — `from` is later than `to`
 
 ### 7.4 Per-Circle Burst Settings
 
@@ -483,9 +494,17 @@ The reviewer selects which frames to keep (checkboxes, with the suggested best p
 
 The circle dashboard's existing review queue section gains a "Burst groups" entry alongside the existing review-queue counts (e.g., pending face labeling). The count is sourced from `pendingBurstGroups` in the dashboard API response.
 
-### 8.3 Per-Circle Settings Toggle
+### 8.3 Per-Circle Settings Toggle and Scan Panel
 
-The circle settings page gains a "Burst detection" toggle card, consistent with the existing "Face recognition" and "Auto-tagging" toggle cards. Enabling the toggle calls `PUT /api/circles/:id/burst-settings { enabled: true }` and, optionally, prompts the user to run a backfill over existing photos.
+The circle settings page gains a "Burst detection" toggle card, consistent with the existing "Face recognition" and "Auto-tagging" toggle cards. Enabling the toggle calls `PUT /api/circles/:id/burst-settings { enabled: true }`.
+
+Below the toggle, a "Scan for bursts" panel is always visible when burst detection is enabled. It exposes:
+
+- An optional **capture date range** (from / to date pickers) so the `circle_admin` can scope the scan to a specific date window rather than re-processing the entire library.
+- A **Force re-scan** checkbox that maps to the `force` request parameter.
+- A **Run scan** button that calls `POST /api/media/bursts/backfill` with the selected options and displays the `{ enqueued }` result.
+
+This UI makes retroactive fingerprinting of legacy libraries practical: a user can select the years before the feature was introduced, run the scan, and have their old photos grouped without touching more recent uploads.
 
 ---
 
@@ -535,7 +554,9 @@ All burst group endpoints enforce per-circle role checks. Viewers can read group
 - **Dismiss endpoint:** verify `burstGroupId` is cleared on all members, group status changes to `dismissed`.
 - **Opt-in check:** verify `BurstEnqueueListener` does not enqueue when `circle.burstDetectionEnabled = false`.
 - **`BURST_DETECTION_ENABLED=false`:** set the environment variable and verify the listener skips all circles.
-- **Backfill:** call `POST /api/media/bursts/backfill` with `force: false`; verify already-grouped items are not re-enqueued; call again with `force: true`; verify all items are enqueued.
+- **Backfill — basic:** call `POST /api/media/bursts/backfill` with `force: false`; verify already-grouped items are not re-enqueued; call again with `force: true`; verify all items are enqueued.
+- **Backfill — date range:** seed two photos with distinct `capturedAt` dates; call backfill with `from`/`to` scoping to only one date; verify only that photo is enqueued. Verify `from > to` returns 400.
+- **Backfill — on-demand hashing:** seed a photo with `perceptualHash = null` (simulating a legacy upload); run the enrichment job for it; verify `perceptualHash` and `sharpnessScore` are written to the `media_items` row before grouping logic runs.
 
 ### RBAC Tests
 
@@ -560,7 +581,7 @@ The following extensions are left for future iterations. None of them require ch
 | Cross-device grouping | Allow grouping items from different cameras (e.g., the same photographer using two bodies simultaneously) using pHash distance alone, without the same-device requirement; may produce more false positives |
 | Configurable scoring weights | Expose `w_sharp`, `w_face`, `w_res` as admin-editable system settings rather than code constants |
 | Auto-resolve single-obvious-best groups | When one member scores significantly above the rest (e.g., `burstScore > 0.9` and all others `< 0.3`), offer a one-click auto-resolve mode — still requires user confirmation, just pre-fills the selection |
-| Smart backfill on settings change | When `burst.timeGapSeconds` or `burst.hashDistance` is updated via the admin UI, offer a prompt to re-run backfill so existing groups reflect the new parameters |
+| Smart backfill on settings change | ~~Deferred~~ — The "Scan for bursts" panel on the circle Settings tab now provides `from`/`to` date scoping and a `force` flag, enabling targeted re-runs after parameter changes without reprocessing the entire library. An automatic admin-UI prompt on settings save remains a possible future polish item. |
 | Storage savings estimate | Display the estimated bytes that would be freed if all non-suggested-best members across pending groups were deleted |
 
 ---
@@ -570,3 +591,4 @@ The following extensions are left for future iterations. None of them require ch
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | June 2026 | AI Assistant | Initial specification |
+| 1.1 | June 2026 | AI Assistant | Document `from`/`to` date-range params on backfill endpoint; document on-demand retroactive perceptual hashing for legacy photos in the enrichment handler (§5.5 Step 1a) and backfill (§7.3); document "Scan for bursts" panel in circle Settings UI (§8.3); resolve deferred "Smart backfill on settings change" Future Work item |

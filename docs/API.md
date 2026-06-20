@@ -3726,12 +3726,18 @@ Mark a burst group dismissed — the reviewer considers these items to not be a 
 
 Bulk-enqueue `burst_detection` enrichment jobs for photos in a circle that have not yet been processed. Requires `circle.burstDetectionEnabled = true`.
 
+For each enqueued photo that lacks a `perceptualHash`, the enrichment job downloads the image via the storage provider, computes the dHash and sharpness score using the shared `computeVisualHash` utility (`apps/api/src/storage/processing/visual-hash.util.ts`), and persists the results before running the burst-grouping logic. This retroactive on-demand fingerprinting means the backfill endpoint works correctly on libraries that were uploaded before the burst detection feature was introduced.
+
 **Request Body:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `circleId` | UUID | Yes | Circle to backfill |
-| `force` | boolean | No | When `true`, re-enqueue all non-deleted photos (including already-processed ones). Useful after changing `burst.timeGapSeconds` or `burst.hashDistance`. Default `false`. |
+| `from` | ISO-8601 datetime | No | Inclusive lower bound on `capturedAt`; only photos captured at or after this timestamp are enqueued |
+| `to` | ISO-8601 datetime | No | Inclusive upper bound on `capturedAt`; only photos captured at or before this timestamp are enqueued |
+| `force` | boolean | No | When `true`, re-enqueue all non-deleted photos in the scope (including already-processed ones). Useful after changing `burst.timeGapSeconds` or `burst.hashDistance`. Default `false`. |
+
+`from` and `to` may be used independently or together. `from > to` returns 400. When omitted, the scope covers all photos in the circle (subject to the `force` flag).
 
 **Response:** 201 Created
 ```json
@@ -3740,6 +3746,7 @@ Bulk-enqueue `burst_detection` enrichment jobs for photos in a circle that have 
 
 **Error Cases:**
 - 400 — `circle.burstDetectionEnabled` is `false`
+- 400 — `from` is later than `to`
 
 ---
 
