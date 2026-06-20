@@ -36,6 +36,7 @@ import {
   PhotoCamera as PhotoCameraIcon,
   Star as StarIcon,
   StarBorder as StarBorderIcon,
+  ImageSearch as ImageSearchIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import Cropper from 'react-easy-crop';
@@ -1061,6 +1062,7 @@ function UnassignedFacesSection({
 
 export default function PeoplePage() {
   const { activeCircleId, activeCircleRole } = useCircleContext();
+  const navigate = useNavigate();
   const [selectedPerson, setSelectedPerson] = useState<PersonListItem | null>(null);
 
   // Optimistic favorite overrides: maps personId -> boolean
@@ -1331,6 +1333,21 @@ export default function PeoplePage() {
           {labeledError ?? unlabeledError}
         </Alert>
       )}
+
+      {/* "Photos with no faces" shortcut */}
+      <Box sx={{ mb: 3 }}>
+        <Button
+          variant="outlined"
+          startIcon={<ImageSearchIcon />}
+          onClick={() => navigate('/media?noFaces=1')}
+          sx={{ minHeight: 44 }}
+        >
+          Photos with no faces detected
+        </Button>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+          Find photos where face detection found no faces — add people manually.
+        </Typography>
+      </Box>
 
       {/* Labeled people section */}
       <Box sx={{ mb: 4 }}>

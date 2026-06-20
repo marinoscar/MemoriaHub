@@ -61,6 +61,7 @@ export async function listMedia(params?: MediaQueryParams): Promise<MediaListRes
     searchParams.set('personIds', params.personIds.join(','));
   }
   if (params?.peopleMatch) searchParams.set('peopleMatch', params.peopleMatch);
+  if (params?.noFaces !== undefined) searchParams.set('noFaces', params.noFaces ? '1' : '0');
 
   const qs = searchParams.toString();
   return api.get<MediaListResponse>(`/media${qs ? `?${qs}` : ''}`);

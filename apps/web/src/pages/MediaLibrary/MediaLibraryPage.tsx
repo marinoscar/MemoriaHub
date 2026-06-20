@@ -400,6 +400,7 @@ export default function MediaLibraryPage() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
   const [filterMissingGeo, setFilterMissingGeo] = useState<boolean>(searchParams.get('missingGeo') === '1');
+  const [filterNoFaces, setFilterNoFaces] = useState<boolean>(searchParams.get('noFaces') === '1');
   const [filterCameraMake, setFilterCameraMake] = useState<string>(searchParams.get('cameraMake') || '');
   const [filterCameraModel, setFilterCameraModel] = useState<string>(searchParams.get('cameraModel') || '');
   const [filterDeviceName, setFilterDeviceName] = useState<string>(searchParams.get('sourceDeviceName') || '');
@@ -453,6 +454,7 @@ export default function MediaLibraryPage() {
     if (filterCameraModel) count++;
     if (filterDeviceName) count++;
     if (filterMissingGeo) count++;
+    if (filterNoFaces) count++;
     if (peopleFilter.ids.length > 0) count++;
     return count;
   }, [
@@ -471,6 +473,7 @@ export default function MediaLibraryPage() {
     filterCameraModel,
     filterDeviceName,
     filterMissingGeo,
+    filterNoFaces,
     peopleFilter,
   ]);
 
@@ -497,6 +500,7 @@ export default function MediaLibraryPage() {
     if (filterCameraModel) params.cameraModel = filterCameraModel;
     if (filterDeviceName) params.sourceDeviceName = filterDeviceName;
     if (filterMissingGeo) params.missingGeo = true;
+    if (filterNoFaces) params.noFaces = true;
     if (peopleFilter.ids.length > 0) {
       params.personIds = peopleFilter.ids;
       params.peopleMatch = peopleFilter.mode;
@@ -524,6 +528,7 @@ export default function MediaLibraryPage() {
     filterCameraModel,
     filterDeviceName,
     filterMissingGeo,
+    filterNoFaces,
     personId,
     peopleFilter,
   ]);
@@ -550,6 +555,7 @@ export default function MediaLibraryPage() {
     sortBy,
     sortOrder,
     filterMissingGeo,
+    filterNoFaces,
     filterCameraMake,
     filterCameraModel,
     filterDeviceName,
@@ -562,13 +568,14 @@ export default function MediaLibraryPage() {
     const params = new URLSearchParams();
     if (filterClassification) params.set('classification', filterClassification);
     if (filterMissingGeo) params.set('missingGeo', '1');
+    if (filterNoFaces) params.set('noFaces', '1');
     if (filterCameraMake) params.set('cameraMake', filterCameraMake);
     if (filterCameraModel) params.set('cameraModel', filterCameraModel);
     if (filterDeviceName) params.set('sourceDeviceName', filterDeviceName);
     if (filterType) params.set('type', filterType);
     if (filterFavorite) params.set('favorite', '1');
     setSearchParams(params, { replace: true });
-  }, [filterClassification, filterMissingGeo, filterCameraMake, filterCameraModel, filterDeviceName, filterType, filterFavorite, setSearchParams]);
+  }, [filterClassification, filterMissingGeo, filterNoFaces, filterCameraMake, filterCameraModel, filterDeviceName, filterType, filterFavorite, setSearchParams]);
 
   useEffect(() => {
     if (!activeCircle) return;
@@ -989,6 +996,18 @@ export default function MediaLibraryPage() {
                   />
                 }
                 label="Missing location only"
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={filterNoFaces}
+                    onChange={(e) => { setFilterNoFaces(e.target.checked); setPage(1); }}
+                    size="small"
+                  />
+                }
+                label="No faces only"
               />
             </Grid>
 
