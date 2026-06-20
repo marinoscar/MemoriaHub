@@ -12,6 +12,9 @@ import {
   ImageListItem,
   ImageListItemBar,
   CircularProgress,
+  Stack,
+  Snackbar,
+  useMediaQuery,
 } from '@mui/material';
 import {
   CloudUpload as UploadIcon,
@@ -19,6 +22,8 @@ import {
   PlayCircleOutlined as PlayCircleOutlinedIcon,
   Star as StarIcon,
   StarBorder as StarBorderIcon,
+  CheckBox as CheckBoxIcon,
+  CheckBoxOutlineBlank as CheckBoxOutlineBlankIcon,
 } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
 import { useTheme } from '@mui/material/styles';
@@ -29,6 +34,10 @@ import { groupByDay } from '../utils/groupByDay';
 import { MediaDetailDrawer } from '../components/media/MediaDetailDrawer';
 import { MediaLightbox } from '../components/media/MediaLightbox';
 import { MediaUploadDialog } from '../components/media/MediaUploadDialog';
+import { BulkActionToolbar } from '../components/media/BulkActionToolbar';
+import { BulkLocationDialog } from '../components/media/BulkLocationDialog';
+import { BulkTagsDialog } from '../components/media/BulkTagsDialog';
+import { AddToAlbumDialog } from '../components/album/AddToAlbumDialog';
 import { patchMedia as patchMediaApi } from '../services/media';
 import type { MediaItem } from '../types/media';
 
@@ -40,15 +49,34 @@ interface HomeTileProps {
   item: MediaItem;
   onSelect: () => void;
   onToggleFavorite: (item: MediaItem) => void;
+  isSelected: boolean;
+  anySelected: boolean;
+  onToggleSelect: (id: string) => void;
+  selectionMode: boolean;
 }
 
-function HomeTile({ item, onSelect, onToggleFavorite }: HomeTileProps) {
+function HomeTile({
+  item,
+  onSelect,
+  onToggleFavorite,
+  isSelected,
+  anySelected,
+  onToggleSelect,
+  selectionMode,
+}: HomeTileProps) {
   const theme = useTheme();
+  const isMobileDevice = useMediaQuery(theme.breakpoints.down('sm'));
   const [imgError, setImgError] = useState(false);
 
   return (
     <ImageListItem
-      onClick={onSelect}
+      onClick={() => {
+        if (selectionMode || anySelected) {
+          onToggleSelect(item.id);
+        } else {
+          onSelect();
+        }
+      }}
       sx={{
         position: 'relative',
         cursor: 'pointer',
@@ -56,6 +84,11 @@ function HomeTile({ item, onSelect, onToggleFavorite }: HomeTileProps) {
         borderRadius: 0.5,
         aspectRatio: '1',
         backgroundColor: theme.palette.grey[900],
+        // Selected state: inset primary-colour border + slight dim
+        outline: isSelected ? `2px solid ${theme.palette.primary.main}` : 'none',
+        outlineOffset: '-2px',
+        opacity: isSelected ? 0.85 : 1,
+        transition: 'outline 0.1s, opacity 0.1s',
         '&:hover .home-tile-overlay': { opacity: 1 },
         '&:hover .home-tile-fav': { opacity: 1 },
       }}
@@ -124,6 +157,41 @@ function HomeTile({ item, onSelect, onToggleFavorite }: HomeTileProps) {
         </Box>
       )}
 
+      {/* Selection checkbox — shown on hover (desktop) or always on mobile / when any item selected */}
+      <Box
+        className="select-overlay"
+        sx={{
+          position: 'absolute',
+          top: 4,
+          left: 4,
+          zIndex: 2,
+          opacity: isMobileDevice || selectionMode || anySelected || isSelected ? 1 : 0,
+          transition: 'opacity 0.15s',
+          '.MuiImageListItem-root:hover &': { opacity: 1 },
+        }}
+      >
+        <IconButton
+          size="small"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleSelect(item.id);
+          }}
+          aria-label={isSelected ? 'Deselect item' : 'Select item'}
+          sx={{
+            color: isSelected ? 'primary.main' : 'white',
+            backgroundColor: 'rgba(0,0,0,0.4)',
+            '&:hover': { backgroundColor: 'rgba(0,0,0,0.6)' },
+            p: { xs: 0.5, sm: 0.25 },
+          }}
+        >
+          {isSelected ? (
+            <CheckBoxIcon fontSize="small" />
+          ) : (
+            <CheckBoxOutlineBlankIcon fontSize="small" />
+          )}
+        </IconButton>
+      </Box>
+
       {/* Subtle gradient — visible on hover or when favorited */}
       <Box
         className="home-tile-overlay"
@@ -177,7 +245,7 @@ const APP_BAR_HEIGHT = 64;
 
 export default function HomePage() {
   const theme = useTheme();
-  const { activeCircle, activeCircleId, loading: circleLoading } = useCircle();
+  const { activeCircle, activeCircleId, activeCircleRole, loading: circleLoading } = useCircle();
 
   // Params for infinite scroll — memoized so reference is stable when circleId unchanged
   const mediaParams = useMemo(
@@ -211,6 +279,21 @@ export default function HomePage() {
 
   // Upload dialog state
   const [uploadOpen, setUploadOpen] = useState(false);
+
+  // Selection state
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
+
+  // Bulk dialog state
+  const [bulkLocationOpen, setBulkLocationOpen] = useState(false);
+  const [bulkTagsOpen, setBulkTagsOpen] = useState(false);
+  const [addToAlbumOpen, setAddToAlbumOpen] = useState(false);
+
+  // Snackbar state
+  const [snackbar, setSnackbar] = useState<{
+    message: string;
+    severity: 'success' | 'error';
+  } | null>(null);
 
   // Optimistic patches for favorites without full refetch
   const [localPatches, setLocalPatches] = useState<Record<string, Partial<MediaItem>>>({});
@@ -250,12 +333,46 @@ export default function HomePage() {
     reset();
   }, [reset]);
 
+  // Selection handlers
+  const handleToggleSelect = useCallback((id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleClearSelection = useCallback(() => {
+    setSelected(new Set());
+    setSelectionMode(false);
+  }, []);
+
+  const handleBulkSuccess = useCallback(
+    (message: string) => {
+      setSnackbar({ message, severity: 'success' });
+      setSelected(new Set());
+      setSelectionMode(false);
+      setLocalPatches({});
+      reset();
+    },
+    [reset],
+  );
+
   // -----------------------------------------------------------------------
   // Derived display flags
   // -----------------------------------------------------------------------
   const showNoCircle = !activeCircle && !circleLoading;
   const showFirstLoad = isLoading && items.length === 0;
   const showEmpty = !isLoading && !error && items.length === 0 && !!activeCircle;
+
+  // Filters for AddToAlbumDialog — strip pagination/sort from mediaParams
+  const albumFilters = useMemo(
+    () => ({
+      circleId: activeCircleId ?? undefined,
+    }),
+    [activeCircleId],
+  );
 
   return (
     <Box sx={{ minHeight: '100vh', pb: { xs: 10, sm: 4 } }}>
@@ -325,9 +442,8 @@ export default function HomePage() {
         <Box sx={{ px: { xs: 1, sm: 2 }, pt: { xs: 1, sm: 2 } }}>
           {grouped.map((group) => (
             <Box key={group.key} sx={{ mb: 3 }}>
-              {/* Sticky day header */}
-              <Typography
-                variant="subtitle2"
+              {/* Sticky day header with select-all / clear controls */}
+              <Box
                 sx={{
                   position: 'sticky',
                   top: APP_BAR_HEIGHT,
@@ -335,14 +451,53 @@ export default function HomePage() {
                   py: 0.75,
                   px: 0.5,
                   mb: 0.5,
-                  fontWeight: 600,
-                  color: 'text.primary',
                   backgroundColor: theme.palette.background.default,
                   borderBottom: `1px solid ${theme.palette.divider}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
                 }}
               >
-                {group.label}
-              </Typography>
+                <Typography
+                  variant="subtitle2"
+                  sx={{ fontWeight: 600, color: 'text.primary' }}
+                >
+                  {group.label}
+                </Typography>
+
+                <Stack direction="row" spacing={0.5}>
+                  <Button
+                    size="small"
+                    variant="text"
+                    sx={{ minWidth: 'auto', fontSize: '0.7rem', py: 0 }}
+                    onClick={() => {
+                      setSelected((prev) => {
+                        const next = new Set(prev);
+                        group.items.forEach((item) => next.add(item.id));
+                        return next;
+                      });
+                    }}
+                  >
+                    Select all
+                  </Button>
+                  {group.items.some((item) => selected.has(item.id)) && (
+                    <Button
+                      size="small"
+                      variant="text"
+                      sx={{ minWidth: 'auto', fontSize: '0.7rem', py: 0 }}
+                      onClick={() => {
+                        setSelected((prev) => {
+                          const next = new Set(prev);
+                          group.items.forEach((item) => next.delete(item.id));
+                          return next;
+                        });
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  )}
+                </Stack>
+              </Box>
 
               {/* Responsive square thumbnail grid */}
               <Box
@@ -366,6 +521,10 @@ export default function HomePage() {
                         setLightboxIndex(globalIndex !== -1 ? globalIndex : 0)
                       }
                       onToggleFavorite={handleToggleFavorite}
+                      isSelected={selected.has(item.id)}
+                      anySelected={selected.size > 0}
+                      onToggleSelect={handleToggleSelect}
+                      selectionMode={selectionMode}
                     />
                   );
                 })}
@@ -431,6 +590,85 @@ export default function HomePage() {
         onSuccess={handleUploadSuccess}
         circleId={activeCircleId ?? undefined}
       />
+
+      {/* Bulk action toolbar — rendered when anything is selected */}
+      {activeCircle && (
+        <BulkActionToolbar
+          selected={selected}
+          circleId={activeCircle.id}
+          activeCircleRole={activeCircleRole}
+          onClear={handleClearSelection}
+          onOpenLocation={() => setBulkLocationOpen(true)}
+          onOpenTags={() => setBulkTagsOpen(true)}
+          onOpenAlbum={() => setAddToAlbumOpen(true)}
+          onSuccess={handleBulkSuccess}
+          onError={(msg) => setSnackbar({ message: msg, severity: 'error' })}
+        />
+      )}
+
+      {/* Bulk location dialog */}
+      {activeCircle && (
+        <BulkLocationDialog
+          open={bulkLocationOpen}
+          onClose={() => setBulkLocationOpen(false)}
+          circleId={activeCircle.id}
+          ids={Array.from(selected)}
+          onSuccess={(msg) => {
+            setBulkLocationOpen(false);
+            handleBulkSuccess(msg);
+          }}
+        />
+      )}
+
+      {/* Bulk tags dialog */}
+      {activeCircle && (
+        <BulkTagsDialog
+          open={bulkTagsOpen}
+          onClose={() => setBulkTagsOpen(false)}
+          circleId={activeCircle.id}
+          ids={Array.from(selected)}
+          onSuccess={(msg) => {
+            setBulkTagsOpen(false);
+            handleBulkSuccess(msg);
+          }}
+        />
+      )}
+
+      {/* Add to album dialog */}
+      {activeCircle && (
+        <AddToAlbumDialog
+          open={addToAlbumOpen}
+          onClose={() => setAddToAlbumOpen(false)}
+          circleId={activeCircle.id}
+          selectedIds={Array.from(selected)}
+          filters={albumFilters}
+          matchingCount={mergedItems.length}
+          onSuccess={(msg) => {
+            setAddToAlbumOpen(false);
+            handleBulkSuccess(msg);
+          }}
+          onError={(msg) => {
+            setAddToAlbumOpen(false);
+            setSnackbar({ message: msg, severity: 'error' });
+          }}
+        />
+      )}
+
+      {/* Snackbar for bulk operation feedback */}
+      <Snackbar
+        open={snackbar !== null}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setSnackbar(null)}
+          severity={snackbar?.severity ?? 'success'}
+          sx={{ width: '100%' }}
+        >
+          {snackbar?.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }
