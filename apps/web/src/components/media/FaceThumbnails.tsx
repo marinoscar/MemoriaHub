@@ -32,6 +32,7 @@ import {
 } from '../../services/face';
 import type { PersonListItem } from '../../services/face';
 import { FaceCrop } from '../people/FaceCrop';
+import { PersonAvatar } from '../people/PersonAvatar';
 
 function statusChipProps(status: MediaFaceStatusType): {
   label: string;
@@ -298,11 +299,12 @@ export function FaceThumbnails({
 
   const canAssign = Boolean(circleId);
 
-  // Load people suggestions when circleId changes (only when canAssign)
+  // Load people suggestions when circleId changes (only when canAssign).
+  // Filter to named people only — unlabeled provisional clusters must not appear.
   useEffect(() => {
     if (!circleId || !canAssign) return;
     listPeople(circleId, { pageSize: 100 })
-      .then((res) => setPeopleSuggestions(res.items))
+      .then((res) => setPeopleSuggestions(res.items.filter((p) => p.name != null)))
       .catch(() => setPeopleSuggestions([]));
   }, [circleId, canAssign]);
 
@@ -440,10 +442,25 @@ export function FaceThumbnails({
           {/* Autocomplete to add a person */}
           <Autocomplete<PersonListItem | string, false, false, true>
             freeSolo
+            openOnFocus
             options={peopleSuggestions}
             getOptionLabel={(opt) =>
-              typeof opt === 'string' ? opt : (opt.name ?? 'Unlabeled')
+              typeof opt === 'string' ? opt : (opt.name ?? '')
             }
+            isOptionEqualToValue={(option, val) =>
+              typeof option === 'string' || typeof val === 'string'
+                ? option === val
+                : option.id === (val as PersonListItem).id
+            }
+            renderOption={(props, option) => {
+              if (typeof option === 'string') return null;
+              return (
+                <Box component="li" {...props} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <PersonAvatar person={option} size={28} />
+                  <Typography variant="body2">{option.name}</Typography>
+                </Box>
+              );
+            }}
             value={null}
             inputValue={personInputValue}
             onInputChange={(_, val) => setPersonInputValue(val)}
