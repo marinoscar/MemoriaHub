@@ -706,8 +706,8 @@ model Face {
 model EnrichmentJob {
   id           String    @id @default(uuid()) @db.Uuid
   type         String
-  mediaItemId  String    @map("media_item_id") @db.Uuid
-  circleId     String    @map("circle_id") @db.Uuid
+  mediaItemId  String?   @map("media_item_id") @db.Uuid
+  circleId     String?   @map("circle_id") @db.Uuid
   status       JobStatus @default(pending)
   reason       JobReason
   priority     Int       @default(0)
@@ -721,8 +721,8 @@ model EnrichmentJob {
   finishedAt   DateTime? @map("finished_at") @db.Timestamptz
 
   // Relations
-  mediaItem MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
-  circle    Circle    @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  mediaItem MediaItem? @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  circle    Circle?    @relation(fields: [circleId], references: [id], onDelete: Cascade)
 
   @@index([status, priority, createdAt])
   @@index([mediaItemId])
@@ -745,6 +745,29 @@ model MediaFaceStatus {
   mediaItem MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
 
   @@map("media_face_status")
+}
+
+// =============================================================================
+// Storage Insights
+// =============================================================================
+
+enum InsightsSnapshotStatus {
+  computing
+  ready
+  failed
+}
+
+model InsightsSnapshot {
+  id         String                 @id @default(uuid()) @db.Uuid
+  status     InsightsSnapshotStatus @default(computing)
+  metrics    Json?                  @db.JsonB
+  computedAt DateTime?              @map("computed_at") @db.Timestamptz
+  durationMs Int?                   @map("duration_ms")
+  error      String?
+  createdAt  DateTime               @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([createdAt])
+  @@map("insights_snapshots")
 }
 
 // =============================================================================

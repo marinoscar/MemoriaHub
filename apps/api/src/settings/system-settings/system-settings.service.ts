@@ -58,6 +58,7 @@ export class SystemSettingsService {
       features: value.features,
       ai: value.ai,
       face: value.face,
+      storage: value.storage,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -104,6 +105,7 @@ export class SystemSettingsService {
       features: value.features,
       ai: value.ai,
       face: value.face,
+      storage: value.storage,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -158,6 +160,14 @@ export class SystemSettingsService {
           },
         },
       },
+      storage: {
+        insights: {
+          refreshIntervalHours:
+            (dto as any).storage?.insights?.refreshIntervalHours ??
+            (current as any).storage?.insights?.refreshIntervalHours ??
+            4,
+        },
+      },
     };
 
     // Validate merged result
@@ -192,6 +202,7 @@ export class SystemSettingsService {
       features: value.features,
       ai: value.ai,
       face: value.face,
+      storage: value.storage,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,

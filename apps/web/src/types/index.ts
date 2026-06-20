@@ -33,6 +33,11 @@ export interface SystemSettings {
     allowUserThemeOverride: boolean;
   };
   features: Record<string, boolean>;
+  storage?: {
+    insights?: {
+      refreshIntervalHours?: number;
+    };
+  };
   updatedAt: string;
   updatedBy: { id: string; email: string } | null;
   version: number;
