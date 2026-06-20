@@ -7,13 +7,21 @@ import {
   StorageProvider,
 } from '../storage/providers/storage-provider.interface';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
-import { computeVisualHash } from '../storage/processing/visual-hash.util';
+import { computeVisualHash, toSignedInt64 } from '../storage/processing/visual-hash.util';
+
+const UINT64_MASK = (1n << 64n) - 1n;
 
 /**
- * Computes the Hamming distance between two 64-bit BigInt values.
+ * Computes the Hamming distance between two 64-bit perceptual hashes.
+ *
+ * Hashes are stored as two's-complement signed int64 (Postgres bigint is
+ * signed), so a value read back may be negative. Mask the XOR to the low 64
+ * bits so the distance is correct regardless of each operand's sign — a plain
+ * `x > 0n` loop on a negative XOR would terminate immediately and wrongly
+ * report distance 0.
  */
 function hammingDistance(a: bigint, b: bigint): number {
-  let x = a ^ b;
+  let x = (a ^ b) & UINT64_MASK;
   let count = 0;
   while (x > 0n) {
     x &= x - 1n;
@@ -95,7 +103,9 @@ export class BurstDetectionService {
     await this.prisma.mediaItem.update({
       where: { id: mediaItemId },
       data: {
-        perceptualHash,   // Prisma BigInt — safe to store directly
+        // Reinterpret the unsigned 64-bit hash as signed int64 to fit the
+        // Postgres bigint column (hashes with the high bit set overflow).
+        perceptualHash: toSignedInt64(perceptualHash),
         sharpnessScore,
       },
     });

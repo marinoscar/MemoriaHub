@@ -23,6 +23,9 @@
 // transitively load the module so jest.mock hoisting works correctly)
 // ---------------------------------------------------------------------------
 jest.mock('../storage/processing/visual-hash.util', () => ({
+  // Mock only the heavy image computation; keep the real toSignedInt64 helper
+  // so the service can convert hashes for storage.
+  ...jest.requireActual('../storage/processing/visual-hash.util'),
   computeVisualHash: jest.fn(),
 }));
 

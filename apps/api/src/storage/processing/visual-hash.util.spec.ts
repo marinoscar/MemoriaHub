@@ -46,7 +46,7 @@ jest.mock('sharp', () => {
 // Imports (after mocks are hoisted)
 // ---------------------------------------------------------------------------
 
-import { computeVisualHash } from './visual-hash.util';
+import { computeVisualHash, toSignedInt64 } from './visual-hash.util';
 import { prepareImageForProcessing } from './image-orientation.util';
 
 // ---------------------------------------------------------------------------
@@ -220,5 +220,36 @@ describe('computeVisualHash', () => {
 
       expect(result!.sharpnessScore).toBeGreaterThanOrEqual(0);
     });
+  });
+});
+
+describe('toSignedInt64', () => {
+  const INT64_MIN = -(1n << 63n);
+  const INT64_MAX = (1n << 63n) - 1n;
+  const UINT64_MASK = (1n << 64n) - 1n;
+
+  it('passes through values already within the signed range', () => {
+    expect(toSignedInt64(0n)).toBe(0n);
+    expect(toSignedInt64(12345n)).toBe(12345n);
+    expect(toSignedInt64(INT64_MAX)).toBe(INT64_MAX);
+  });
+
+  it('reinterprets a high-bit-set unsigned hash as a negative signed int64', () => {
+    // The exact value from the production "out of range for type bigint" error.
+    const unsigned = 16488331711678253075n;
+    const signed = toSignedInt64(unsigned);
+
+    expect(signed).toBe(unsigned - (1n << 64n));
+    expect(signed).toBeLessThan(0n);
+    // Must fit a Postgres signed bigint column.
+    expect(signed).toBeGreaterThanOrEqual(INT64_MIN);
+    expect(signed).toBeLessThanOrEqual(INT64_MAX);
+  });
+
+  it('maps max uint64 (all bits set) to -1 and preserves the bit pattern', () => {
+    const allBits = UINT64_MASK;
+    expect(toSignedInt64(allBits)).toBe(-1n);
+    // Round-trip: masking the signed value back to 64 bits recovers the original.
+    expect(toSignedInt64(allBits) & UINT64_MASK).toBe(allBits);
   });
 });
