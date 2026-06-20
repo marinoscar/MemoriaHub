@@ -8,11 +8,12 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { CircleRole } from '@prisma/client';
+import { CircleRole, JobReason } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { FaceClusteringService } from './face-clustering.service';
 import { FaceMatchingService } from './face-matching.service';
+import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import {
   ListPeopleQueryDto,
   CreatePersonDto,
@@ -31,6 +32,7 @@ export class PeopleService {
     private readonly circleMembershipService: CircleMembershipService,
     private readonly clusteringService: FaceClusteringService,
     private readonly matchingService: FaceMatchingService,
+    private readonly enrichmentJobService: EnrichmentJobService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -284,6 +286,10 @@ export class PeopleService {
           data: { coverFaceId: dto.faceIds[0] },
         });
       }
+
+      // Re-enqueue auto-tagging for media items that now have a person assigned
+      const createAffected = await this.fetchAffectedMediaItems(dto.faceIds);
+      await this.enqueueAutoTaggingForMediaItems(createAffected);
     }
 
     this.logger.log(
@@ -431,6 +437,10 @@ export class PeopleService {
       });
     }
 
+    // Re-enqueue auto-tagging for affected media items (people names changed)
+    const affectedItems = await this.fetchAffectedMediaItems(dto.faceIds);
+    await this.enqueueAutoTaggingForMediaItems(affectedItems);
+
     this.logger.log(
       `Assigned ${dto.faceIds.length} face(s) to person ${personId} by user ${userId}`,
     );
@@ -475,6 +485,19 @@ export class PeopleService {
       where: { id: faceId },
       data: { personId: null, manuallyAssigned: false },
     });
+
+    // Re-enqueue auto-tagging — the person name is no longer in this media item's context
+    {
+      const circle = await this.prisma.circle.findUnique({
+        where: { id: person.circleId },
+        select: { autoTaggingEnabled: true },
+      });
+      if (circle?.autoTaggingEnabled) {
+        await this.enqueueAutoTaggingForMediaItems([
+          { mediaItemId: face.mediaItemId, circleId: person.circleId },
+        ]);
+      }
+    }
 
     this.logger.log(
       `Unassigned face ${faceId} from person ${personId} by user ${userId}`,
@@ -561,6 +584,20 @@ export class PeopleService {
 
     const now = new Date();
 
+    // Capture media items affected by the merge BEFORE the transaction moves faces.
+    // Both source's current media items (faces moving to target) and target's existing
+    // media items (new faces arriving) may need re-tagging.
+    const [sourceMI, targetMI] = await Promise.all([
+      this.fetchAffectedMediaItemsByPersonId(sourceId),
+      this.fetchAffectedMediaItemsByPersonId(targetId),
+    ]);
+    // Merge deduplicated by mediaItemId
+    const mergedMIMap = new Map<string, { mediaItemId: string; circleId: string }>();
+    for (const item of [...sourceMI, ...targetMI]) {
+      mergedMIMap.set(item.mediaItemId, item);
+    }
+    const allMergeAffected = [...mergedMIMap.values()];
+
     const updatedTarget = await this.prisma.$transaction(async (tx) => {
       // 1. Reassign all faces from source to target
       await tx.face.updateMany({
@@ -623,6 +660,9 @@ export class PeopleService {
       this.logger.warn(`Centroid recompute failed post-merge for person ${targetId}: ${err}`);
     }
 
+    // Re-enqueue auto-tagging for all media items affected by the merge
+    await this.enqueueAutoTaggingForMediaItems(allMergeAffected);
+
     this.logger.log(
       `Person merge: ${sourceId} → ${targetId} in circle ${circleId} by user ${userId}`,
     );
@@ -662,6 +702,9 @@ export class PeopleService {
       'collaborator' as CircleRole,
     );
 
+    // Capture affected media items BEFORE the transaction releases faces to the unknown pool
+    const deleteAffected = await this.fetchAffectedMediaItemsByPersonId(personId);
+
     await this.prisma.$transaction(async (tx) => {
       // 1. Release faces back to unknown pool
       await tx.face.updateMany({
@@ -689,6 +732,9 @@ export class PeopleService {
         },
       });
     });
+
+    // Re-enqueue auto-tagging for all media items that lost a person assignment
+    await this.enqueueAutoTaggingForMediaItems(deleteAffected);
 
     this.logger.log(
       `Person ${personId} soft-deleted by user ${userId}; faces returned to unknown pool`,
@@ -743,5 +789,97 @@ export class PeopleService {
         `Faces not found in circle: ${missing.join(', ')}`,
       );
     }
+  }
+
+  /**
+   * For each affected mediaItemId → circleId pair where autoTaggingEnabled is true,
+   * enqueue an auto_tagging rerun. Failures are logged and swallowed — they must
+   * never propagate to the caller.
+   */
+  private async enqueueAutoTaggingForMediaItems(
+    mediaItems: Array<{ mediaItemId: string; circleId: string }>,
+  ): Promise<void> {
+    for (const { mediaItemId, circleId } of mediaItems) {
+      try {
+        await this.enrichmentJobService.enqueue({
+          type: 'auto_tagging',
+          mediaItemId,
+          circleId,
+          reason: JobReason.rerun,
+          priority: 0,
+        });
+      } catch (err) {
+        this.logger.warn(
+          `Failed to enqueue auto-tagging rerun for MediaItem ${mediaItemId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Given a set of face IDs, return the distinct {mediaItemId, circleId} pairs
+   * where autoTaggingEnabled is true. Used to collect what needs re-tagging after
+   * face→person assignment changes.
+   */
+  private async fetchAffectedMediaItems(
+    faceIds: string[],
+  ): Promise<Array<{ mediaItemId: string; circleId: string }>> {
+    if (faceIds.length === 0) return [];
+
+    const faces = await this.prisma.face.findMany({
+      where: { id: { in: faceIds } },
+      select: {
+        mediaItemId: true,
+        mediaItem: {
+          select: {
+            circleId: true,
+            circle: { select: { autoTaggingEnabled: true } },
+          },
+        },
+      },
+    });
+
+    // Deduplicate by mediaItemId, filter to circles with autoTaggingEnabled
+    const seen = new Set<string>();
+    const result: Array<{ mediaItemId: string; circleId: string }> = [];
+    for (const f of faces) {
+      if (!f.mediaItem.circle.autoTaggingEnabled) continue;
+      if (seen.has(f.mediaItemId)) continue;
+      seen.add(f.mediaItemId);
+      result.push({ mediaItemId: f.mediaItemId, circleId: f.mediaItem.circleId });
+    }
+    return result;
+  }
+
+  /**
+   * Fetch distinct {mediaItemId, circleId} pairs for all faces currently assigned
+   * to a person, gating on autoTaggingEnabled. Used before faces are unlinked
+   * (merge source / delete-person) so the IDs are captured before the transaction.
+   */
+  private async fetchAffectedMediaItemsByPersonId(
+    personId: string,
+  ): Promise<Array<{ mediaItemId: string; circleId: string }>> {
+    const faces = await this.prisma.face.findMany({
+      where: { personId },
+      select: {
+        mediaItemId: true,
+        mediaItem: {
+          select: {
+            circleId: true,
+            circle: { select: { autoTaggingEnabled: true } },
+          },
+        },
+      },
+    });
+
+    const seen = new Set<string>();
+    const result: Array<{ mediaItemId: string; circleId: string }> = [];
+    for (const f of faces) {
+      if (!f.mediaItem.circle.autoTaggingEnabled) continue;
+      if (seen.has(f.mediaItemId)) continue;
+      seen.add(f.mediaItemId);
+      result.push({ mediaItemId: f.mediaItemId, circleId: f.mediaItem.circleId });
+    }
+    return result;
   }
 }
