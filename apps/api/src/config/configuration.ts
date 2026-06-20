@@ -71,6 +71,8 @@ export default () => {
       accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
       endpoint: process.env.S3_ENDPOINT || undefined,
+      maxAttempts: parseInt(process.env.S3_MAX_ATTEMPTS || '5', 10),
+      retryMode: process.env.S3_RETRY_MODE || 'adaptive',
     },
     maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '10737418240', 10), // 10GB default
     allowedMimeTypes: (
