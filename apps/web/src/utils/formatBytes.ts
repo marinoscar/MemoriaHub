@@ -35,10 +35,13 @@ export function percent(part: string | number, whole: string | number): number {
   return Number((p * 10000n) / w) / 100;
 }
 
-// bytesToMB: for use with chart libraries that need Number values
-export function bytesToMB(bytes: string): number {
-  const val = BigInt(bytes);
-  return Number(val / 1_000_000n);
+// bytesToNumber: safe BigInt-string → Number conversion for chart proportions.
+// Raw byte counts for a single media type are always well within Number's
+// safe integer range (2^53 ≈ 9 PB), so the donut can use raw byte counts
+// for correct proportions without the integer-truncation-to-zero bug that
+// bytesToMB() had for sub-1MB types.
+export function bytesToNumber(bytes: string): number {
+  return Number(BigInt(bytes));
 }
 
 // relativeTime: simple inline relative time (no date-fns dependency)

@@ -4,9 +4,9 @@ import { Box, Typography } from '@mui/material';
 
 interface DonutSegment {
   label: string;
-  value: number;    // numeric (e.g. MB or count)
+  value: number;       // numeric — raw bytes or count; used for proportions only
   color: string;
-  displayValue: string;  // formatted for legend (e.g. "1.24 GB" or "4,217")
+  displayValue: string;  // human-readable (e.g. "1.24 GB" or "4,217")
   percentage: number;    // 0-100
 }
 
@@ -17,29 +17,47 @@ interface CompositionDonutProps {
 }
 
 export function CompositionDonut({ title, segments, centerLabel }: CompositionDonutProps) {
+  // Guard: if all segments are zero the chart would be empty — render a
+  // placeholder ring so the layout never collapses.
+  const total = segments.reduce((sum, s) => sum + s.value, 0);
+  const chartSegments =
+    total === 0
+      ? [{ id: 0, value: 1, label: 'No data', color: '#e0e0e0' }]
+      : segments.map((s, i) => ({ id: i, value: s.value, label: s.label, color: s.color }));
+
   return (
-    <Box sx={{ flex: 1, minWidth: 0 }}>
-      <Typography variant="subtitle2" fontWeight={600} color="text.secondary" mb={1}>
+    <Box sx={{ width: '100%', textAlign: 'center' }}>
+      {/* Section title — always centered */}
+      <Typography
+        variant="subtitle2"
+        fontWeight={600}
+        color="text.secondary"
+        textAlign="center"
+        mb={1.5}
+      >
         {title}
       </Typography>
-      {/* Donut chart with centered label */}
-      <Box sx={{ position: 'relative', display: 'flex', justifyContent: 'center' }}>
+
+      {/* Fixed-size square container — prevents the SVG from stretching or
+          collapsing the outer flex item and guarantees the center overlay
+          positions correctly. */}
+      <Box sx={{ position: 'relative', width: 180, height: 180, mx: 'auto' }}>
         <PieChart
           series={[
             {
-              data: segments.map((s, i) => ({ id: i, value: s.value, label: s.label, color: s.color })),
-              innerRadius: 55,
-              outerRadius: 85,
+              data: chartSegments,
+              innerRadius: 52,
+              outerRadius: 80,
               paddingAngle: 2,
               cornerRadius: 3,
             },
           ]}
-          width={200}
-          height={200}
+          width={180}
+          height={180}
           hideLegend
           margin={{ top: 0, bottom: 0, left: 0, right: 0 }}
         />
-        {/* Centered total label */}
+        {/* Centered total overlay */}
         <Box
           sx={{
             position: 'absolute',
@@ -50,25 +68,62 @@ export function CompositionDonut({ title, segments, centerLabel }: CompositionDo
             pointerEvents: 'none',
           }}
         >
-          <Typography variant="caption" color="text.secondary" display="block" sx={{ fontSize: '0.65rem', lineHeight: 1 }}>
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            display="block"
+            sx={{ fontSize: '0.65rem', lineHeight: 1 }}
+          >
             Total
           </Typography>
-          <Typography variant="body2" fontWeight={700} sx={{ fontSize: '0.78rem', lineHeight: 1.3 }}>
+          <Typography
+            variant="body2"
+            fontWeight={700}
+            sx={{ fontSize: '0.78rem', lineHeight: 1.3 }}
+          >
             {centerLabel}
           </Typography>
         </Box>
       </Box>
-      {/* Custom legend */}
-      <Box sx={{ mt: 1.5, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+
+      {/* Legend — constrained width + space-between prevents cramping/clipping */}
+      <Box
+        sx={{
+          mt: 2,
+          maxWidth: 220,
+          mx: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 0.75,
+        }}
+      >
         {segments.map((s) => (
-          <Box key={s.label} display="flex" alignItems="center" justifyContent="space-between">
+          <Box
+            key={s.label}
+            display="flex"
+            alignItems="center"
+            justifyContent="space-between"
+          >
+            {/* Left: colored dot + label */}
             <Box display="flex" alignItems="center" gap={1}>
-              <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: s.color, flexShrink: 0 }} />
+              <Box
+                sx={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  bgcolor: s.color,
+                  flexShrink: 0,
+                }}
+              />
               <Typography variant="caption" color="text.secondary">
                 {s.label}
               </Typography>
             </Box>
-            <Box display="flex" gap={1} alignItems="center">
+            {/* Right: value + percentage — whiteSpace:nowrap prevents
+                the two values from wrapping onto separate lines */}
+            <Box
+              sx={{ display: 'flex', gap: 1, whiteSpace: 'nowrap', ml: 1 }}
+            >
               <Typography variant="caption" fontWeight={600}>
                 {s.displayValue}
               </Typography>
