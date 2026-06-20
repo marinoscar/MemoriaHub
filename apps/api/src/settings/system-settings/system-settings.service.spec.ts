@@ -111,6 +111,7 @@ describe('SystemSettingsService', () => {
           features: {
             search: { provider: null, model: null },
             tagging: { provider: null, model: null },
+            embedding: { provider: null, model: null },
           },
         },
       };
@@ -164,6 +165,7 @@ describe('SystemSettingsService', () => {
           features: {
             search: { provider: null, model: null },
             tagging: { provider: null, model: null },
+            embedding: { provider: null, model: null },
           },
         },
       };
@@ -196,6 +198,7 @@ describe('SystemSettingsService', () => {
           features: {
             search: { provider: null, model: null },
             tagging: { provider: null, model: null },
+            embedding: { provider: null, model: null },
           },
         },
       };
