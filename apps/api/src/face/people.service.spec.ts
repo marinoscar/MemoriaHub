@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { FaceClusteringService } from './face-clustering.service';
 import { FaceMatchingService } from './face-matching.service';
+import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 // ---------------------------------------------------------------------------
@@ -65,6 +66,7 @@ describe('PeopleService', () => {
   let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
   let mockClusteringService: { clusterUnknownFaces: jest.Mock };
   let mockMatchingService: { computePersonCentroid: jest.Mock };
+  let mockEnrichmentJobService: { enqueue: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -77,6 +79,9 @@ describe('PeopleService', () => {
     mockMatchingService = {
       computePersonCentroid: jest.fn().mockResolvedValue(undefined),
     };
+    mockEnrichmentJobService = {
+      enqueue: jest.fn().mockResolvedValue({ id: 'job-1' }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -85,6 +90,7 @@ describe('PeopleService', () => {
         { provide: CircleMembershipService, useValue: mockCircleMembershipService },
         { provide: FaceClusteringService, useValue: mockClusteringService },
         { provide: FaceMatchingService, useValue: mockMatchingService },
+        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
       ],
     }).compile();
 
@@ -271,8 +277,10 @@ describe('PeopleService', () => {
 
     it('with faceIds: verifies faces in circle and sets manuallyAssigned: true', async () => {
       (mockPrisma.person.create as jest.Mock).mockResolvedValue(makePerson());
-      // assertFacesInCircle uses face.findMany
-      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([makeFace()]);
+      // assertFacesInCircle call then fetchAffectedMediaItems call
+      (mockPrisma.face.findMany as jest.Mock)
+        .mockResolvedValueOnce([makeFace()])
+        .mockResolvedValueOnce([]); // fetchAffectedMediaItems — no auto-tagging circles
       (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       await service.createPerson(
@@ -376,7 +384,9 @@ describe('PeopleService', () => {
   describe('assignFaces', () => {
     it('calls assertCircleAccess with collaborator role', async () => {
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
-      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([makeFace()]);
+      (mockPrisma.face.findMany as jest.Mock)
+        .mockResolvedValueOnce([makeFace()])
+        .mockResolvedValueOnce([]); // fetchAffectedMediaItems
       (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       await service.assignFaces(PERSON_ID, { faceIds: [FACE_ID] } as any, USER_ID, PERMS);
@@ -391,7 +401,9 @@ describe('PeopleService', () => {
 
     it('sets manuallyAssigned: true on all assigned faces', async () => {
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
-      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([makeFace()]);
+      (mockPrisma.face.findMany as jest.Mock)
+        .mockResolvedValueOnce([makeFace()])
+        .mockResolvedValueOnce([]); // fetchAffectedMediaItems
       (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       await service.assignFaces(PERSON_ID, { faceIds: [FACE_ID] } as any, USER_ID, PERMS);
@@ -405,7 +417,7 @@ describe('PeopleService', () => {
     it('throws NotFoundException when face is not in circle', async () => {
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
       // findMany returns empty → assertFacesInCircle throws
-      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValueOnce([]);
 
       await expect(
         service.assignFaces(PERSON_ID, { faceIds: ['missing-face'] } as any, USER_ID, PERMS),
@@ -628,6 +640,8 @@ describe('PeopleService', () => {
       (mockPrisma.person.findUnique as jest.Mock)
         .mockResolvedValueOnce(makeSource())
         .mockResolvedValueOnce(makeTarget());
+      // fetchAffectedMediaItemsByPersonId: source then target
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
       mockPrisma.$transaction.mockImplementation(async (cb: any) => {
         (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
         (mockPrisma.person.update as jest.Mock)
@@ -646,6 +660,7 @@ describe('PeopleService', () => {
       (mockPrisma.person.findUnique as jest.Mock)
         .mockResolvedValueOnce(makeSource())
         .mockResolvedValueOnce(makeTarget());
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
       mockPrisma.$transaction.mockImplementation(async (cb: any) => {
         (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 3 });
         (mockPrisma.person.update as jest.Mock)
@@ -665,6 +680,7 @@ describe('PeopleService', () => {
       (mockPrisma.person.findUnique as jest.Mock)
         .mockResolvedValueOnce(makeSource())
         .mockResolvedValueOnce(makeTarget());
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
       mockPrisma.$transaction.mockImplementation(async (cb: any) => {
         (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
         (mockPrisma.person.update as jest.Mock)
@@ -687,6 +703,7 @@ describe('PeopleService', () => {
       (mockPrisma.person.findUnique as jest.Mock)
         .mockResolvedValueOnce(makeSource())
         .mockResolvedValueOnce(makeTarget());
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
       mockPrisma.$transaction.mockImplementation(async (cb: any) => {
         (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
         (mockPrisma.person.update as jest.Mock)
@@ -707,6 +724,7 @@ describe('PeopleService', () => {
       (mockPrisma.person.findUnique as jest.Mock)
         .mockResolvedValueOnce(makeSource({ coverFaceId: 'face-cover-src' }))
         .mockResolvedValueOnce(makeTarget({ coverFaceId: null }));
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
       mockPrisma.$transaction.mockImplementation(async (cb: any) => {
         (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
         (mockPrisma.person.update as jest.Mock)
@@ -725,6 +743,7 @@ describe('PeopleService', () => {
       (mockPrisma.person.findUnique as jest.Mock)
         .mockResolvedValueOnce(makeSource({ coverFaceId: 'face-cover-src' }))
         .mockResolvedValueOnce(makeTarget({ coverFaceId: 'face-cover-tgt' }));
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
       mockPrisma.$transaction.mockImplementation(async (cb: any) => {
         (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
         (mockPrisma.person.update as jest.Mock)
@@ -742,6 +761,7 @@ describe('PeopleService', () => {
       (mockPrisma.person.findUnique as jest.Mock)
         .mockResolvedValueOnce(makeSource())
         .mockResolvedValueOnce(makeTarget());
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
       mockPrisma.$transaction.mockImplementation(async (cb: any) => {
         (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
         (mockPrisma.person.update as jest.Mock)
@@ -758,6 +778,7 @@ describe('PeopleService', () => {
       (mockPrisma.person.findUnique as jest.Mock)
         .mockResolvedValueOnce(makeSource())
         .mockResolvedValueOnce(makeTarget());
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
       const now = new Date();
       mockPrisma.$transaction.mockImplementation(async (cb: any) => {
         (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
@@ -904,6 +925,7 @@ describe('PeopleService', () => {
 
     it('calls assertCircleAccess with collaborator role', async () => {
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
       mockPrisma.$transaction.mockImplementation(async (cb: any) => {
         (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
         (mockPrisma.person.update as jest.Mock).mockResolvedValue({});
@@ -918,6 +940,7 @@ describe('PeopleService', () => {
 
     it('nulls faces\' personId and sets manuallyAssigned=false', async () => {
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
       mockPrisma.$transaction.mockImplementation(async (cb: any) => {
         (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
         (mockPrisma.person.update as jest.Mock).mockResolvedValue({});
@@ -933,6 +956,7 @@ describe('PeopleService', () => {
 
     it('soft-deletes the person and clears coverFaceId', async () => {
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
       mockPrisma.$transaction.mockImplementation(async (cb: any) => {
         (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
         (mockPrisma.person.update as jest.Mock).mockResolvedValue({});
@@ -950,6 +974,7 @@ describe('PeopleService', () => {
 
     it('writes a person:delete audit event', async () => {
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
       mockPrisma.$transaction.mockImplementation(async (cb: any) => {
         (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
         (mockPrisma.person.update as jest.Mock).mockResolvedValue({});
@@ -973,7 +998,9 @@ describe('PeopleService', () => {
     it('sets coverFaceId to the first faceId when coverFaceId is null after create', async () => {
       const person = makePerson({ coverFaceId: null });
       (mockPrisma.person.create as jest.Mock).mockResolvedValue(person);
-      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([makeFace()]);
+      (mockPrisma.face.findMany as jest.Mock)
+        .mockResolvedValueOnce([makeFace()])  // assertFacesInCircle
+        .mockResolvedValueOnce([]);           // fetchAffectedMediaItems
       (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
       (mockPrisma.person.update as jest.Mock).mockResolvedValue({
         ...person,
@@ -1007,7 +1034,9 @@ describe('PeopleService', () => {
     it('does NOT override coverFaceId when person already has one', async () => {
       const person = makePerson({ coverFaceId: 'existing-cover-face' });
       (mockPrisma.person.create as jest.Mock).mockResolvedValue(person);
-      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([makeFace()]);
+      (mockPrisma.face.findMany as jest.Mock)
+        .mockResolvedValueOnce([makeFace()])  // assertFacesInCircle
+        .mockResolvedValueOnce([]);           // fetchAffectedMediaItems
       (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       await service.createPerson(
@@ -1029,7 +1058,9 @@ describe('PeopleService', () => {
     it('sets coverFaceId to the first faceId when person coverFaceId is null', async () => {
       const person = makePerson({ coverFaceId: null });
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(person);
-      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([makeFace()]);
+      (mockPrisma.face.findMany as jest.Mock)
+        .mockResolvedValueOnce([makeFace()])
+        .mockResolvedValueOnce([]); // fetchAffectedMediaItems
       (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
       (mockPrisma.person.update as jest.Mock).mockResolvedValue({
         ...person,
@@ -1047,7 +1078,9 @@ describe('PeopleService', () => {
     it('does NOT call person.update for coverFaceId when person already has one', async () => {
       const person = makePerson({ coverFaceId: 'already-set' });
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(person);
-      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([makeFace()]);
+      (mockPrisma.face.findMany as jest.Mock)
+        .mockResolvedValueOnce([makeFace()])
+        .mockResolvedValueOnce([]); // fetchAffectedMediaItems
       (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       await service.assignFaces(PERSON_ID, { faceIds: [FACE_ID] } as any, USER_ID, PERMS);
@@ -1492,6 +1525,349 @@ describe('PeopleService', () => {
         profileMediaItemId: MEDIA_ID,
         profileCrop: crop,
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Auto-tagging re-enqueue: assignFaces
+  // -------------------------------------------------------------------------
+
+  describe('assignFaces — auto-tagging re-enqueue', () => {
+    function setupAssignFacesHappy(autoTaggingEnabled: boolean) {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.face.findMany as jest.Mock)
+        // assertFacesInCircle call
+        .mockResolvedValueOnce([makeFace()])
+        // fetchAffectedMediaItems call — faces with their circle's autoTaggingEnabled
+        .mockResolvedValueOnce([
+          {
+            mediaItemId: MEDIA_ID,
+            mediaItem: {
+              circleId: CIRCLE_ID,
+              circle: { autoTaggingEnabled },
+            },
+          },
+        ]);
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+    }
+
+    it('enqueues auto_tagging rerun for affected media items when autoTaggingEnabled=true', async () => {
+      setupAssignFacesHappy(true);
+
+      await service.assignFaces(PERSON_ID, { faceIds: [FACE_ID] } as any, USER_ID, PERMS);
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'auto_tagging',
+          mediaItemId: MEDIA_ID,
+          circleId: CIRCLE_ID,
+          reason: 'rerun',
+          priority: 0,
+        }),
+      );
+    });
+
+    it('does NOT enqueue auto_tagging when autoTaggingEnabled=false', async () => {
+      setupAssignFacesHappy(false);
+
+      await service.assignFaces(PERSON_ID, { faceIds: [FACE_ID] } as any, USER_ID, PERMS);
+
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('does not propagate enqueue errors — assign still succeeds', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.face.findMany as jest.Mock)
+        .mockResolvedValueOnce([makeFace()])
+        .mockResolvedValueOnce([
+          {
+            mediaItemId: MEDIA_ID,
+            mediaItem: {
+              circleId: CIRCLE_ID,
+              circle: { autoTaggingEnabled: true },
+            },
+          },
+        ]);
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      mockEnrichmentJobService.enqueue.mockRejectedValue(new Error('Queue full'));
+
+      // Must not throw
+      await expect(
+        service.assignFaces(PERSON_ID, { faceIds: [FACE_ID] } as any, USER_ID, PERMS),
+      ).resolves.not.toThrow();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Auto-tagging re-enqueue: unassignFace
+  // -------------------------------------------------------------------------
+
+  describe('unassignFace — auto-tagging re-enqueue', () => {
+    it('enqueues auto_tagging rerun when circle autoTaggingEnabled=true', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.face.findUnique as jest.Mock).mockResolvedValue(
+        makeFace({ mediaItemId: MEDIA_ID }),
+      );
+      (mockPrisma.face.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ autoTaggingEnabled: true });
+
+      await service.unassignFace(PERSON_ID, FACE_ID, USER_ID, PERMS);
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'auto_tagging',
+          mediaItemId: MEDIA_ID,
+          circleId: CIRCLE_ID,
+          reason: 'rerun',
+          priority: 0,
+        }),
+      );
+    });
+
+    it('does NOT enqueue when autoTaggingEnabled=false', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.face.findUnique as jest.Mock).mockResolvedValue(makeFace());
+      (mockPrisma.face.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ autoTaggingEnabled: false });
+
+      await service.unassignFace(PERSON_ID, FACE_ID, USER_ID, PERMS);
+
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('does NOT enqueue when circle not found', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.face.findUnique as jest.Mock).mockResolvedValue(makeFace());
+      (mockPrisma.face.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await service.unassignFace(PERSON_ID, FACE_ID, USER_ID, PERMS);
+
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Auto-tagging re-enqueue: createPerson (with faceIds)
+  // -------------------------------------------------------------------------
+
+  describe('createPerson — auto-tagging re-enqueue', () => {
+    it('enqueues auto_tagging when faceIds are provided and autoTaggingEnabled=true', async () => {
+      (mockPrisma.person.create as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.face.findMany as jest.Mock)
+        // assertFacesInCircle
+        .mockResolvedValueOnce([makeFace()])
+        // fetchAffectedMediaItems
+        .mockResolvedValueOnce([
+          {
+            mediaItemId: MEDIA_ID,
+            mediaItem: {
+              circleId: CIRCLE_ID,
+              circle: { autoTaggingEnabled: true },
+            },
+          },
+        ]);
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+      await service.createPerson(
+        { circleId: CIRCLE_ID, name: 'Alice', faceIds: [FACE_ID] } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'auto_tagging',
+          mediaItemId: MEDIA_ID,
+          circleId: CIRCLE_ID,
+          reason: 'rerun',
+          priority: 0,
+        }),
+      );
+    });
+
+    it('does NOT call enqueue when no faceIds are provided', async () => {
+      (mockPrisma.person.create as jest.Mock).mockResolvedValue(makePerson());
+
+      await service.createPerson(
+        { circleId: CIRCLE_ID, name: 'Bob' } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Auto-tagging re-enqueue: mergePeople
+  // -------------------------------------------------------------------------
+
+  describe('mergePeople — auto-tagging re-enqueue', () => {
+    const SOURCE_ID = 'source-merge-uuid';
+    const TARGET_ID = 'target-merge-uuid';
+
+    function makeSource() {
+      return {
+        id: SOURCE_ID,
+        circleId: CIRCLE_ID,
+        name: 'Alice (source)',
+        coverFaceId: null,
+        mergedIntoId: null,
+        deletedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+    }
+
+    function makeTarget() {
+      return {
+        id: TARGET_ID,
+        circleId: CIRCLE_ID,
+        name: 'Alice',
+        coverFaceId: null,
+        mergedIntoId: null,
+        deletedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+    }
+
+    it('enqueues auto_tagging for media items affected by the merge when autoTaggingEnabled=true', async () => {
+      (mockPrisma.person.findUnique as jest.Mock)
+        .mockResolvedValueOnce(makeSource())
+        .mockResolvedValueOnce(makeTarget());
+
+      // fetchAffectedMediaItemsByPersonId for source (first face.findMany)
+      (mockPrisma.face.findMany as jest.Mock)
+        .mockResolvedValueOnce([
+          {
+            mediaItemId: MEDIA_ID,
+            mediaItem: {
+              circleId: CIRCLE_ID,
+              circle: { autoTaggingEnabled: true },
+            },
+          },
+        ])
+        // fetchAffectedMediaItemsByPersonId for target (second face.findMany)
+        .mockResolvedValueOnce([]);
+
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.person.update as jest.Mock)
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({
+            id: TARGET_ID,
+            name: 'Alice',
+            circleId: CIRCLE_ID,
+            coverFaceId: null,
+            _count: { faces: 0 },
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+
+      await service.mergePeople({ sourceId: SOURCE_ID, targetId: TARGET_ID }, USER_ID, PERMS);
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'auto_tagging',
+          mediaItemId: MEDIA_ID,
+          circleId: CIRCLE_ID,
+          reason: 'rerun',
+          priority: 0,
+        }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Auto-tagging re-enqueue: deletePerson
+  // -------------------------------------------------------------------------
+
+  describe('deletePerson — auto-tagging re-enqueue', () => {
+    it('enqueues auto_tagging for media items that lost a person when autoTaggingEnabled=true', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+
+      // fetchAffectedMediaItemsByPersonId
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
+        {
+          mediaItemId: MEDIA_ID,
+          mediaItem: {
+            circleId: CIRCLE_ID,
+            circle: { autoTaggingEnabled: true },
+          },
+        },
+      ]);
+
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+        (mockPrisma.person.update as jest.Mock).mockResolvedValue({});
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+
+      await service.deletePerson(PERSON_ID, USER_ID, PERMS);
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'auto_tagging',
+          mediaItemId: MEDIA_ID,
+          circleId: CIRCLE_ID,
+          reason: 'rerun',
+          priority: 0,
+        }),
+      );
+    });
+
+    it('does NOT enqueue when circle autoTaggingEnabled=false', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+
+      // fetchAffectedMediaItemsByPersonId — circle has auto-tagging disabled
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
+        {
+          mediaItemId: MEDIA_ID,
+          mediaItem: {
+            circleId: CIRCLE_ID,
+            circle: { autoTaggingEnabled: false },
+          },
+        },
+      ]);
+
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+        (mockPrisma.person.update as jest.Mock).mockResolvedValue({});
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+
+      await service.deletePerson(PERSON_ID, USER_ID, PERMS);
+
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('does not propagate enqueue errors — delete still succeeds', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
+        {
+          mediaItemId: MEDIA_ID,
+          mediaItem: {
+            circleId: CIRCLE_ID,
+            circle: { autoTaggingEnabled: true },
+          },
+        },
+      ]);
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.person.update as jest.Mock).mockResolvedValue({});
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+      mockEnrichmentJobService.enqueue.mockRejectedValue(new Error('Enqueue failed'));
+
+      await expect(service.deletePerson(PERSON_ID, USER_ID, PERMS)).resolves.not.toThrow();
     });
   });
 });
