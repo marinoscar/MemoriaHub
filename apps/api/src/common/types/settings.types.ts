@@ -47,6 +47,11 @@ export interface SystemSettingsValue {
       };
     };
   };
+  storage?: {
+    insights: {
+      refreshIntervalHours: number;
+    };
+  };
 }
 
 /**
@@ -79,6 +84,11 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
   face: {
     features: {
       detection: { provider: null, model: null },
+    },
+  },
+  storage: {
+    insights: {
+      refreshIntervalHours: 4,
     },
   },
 };

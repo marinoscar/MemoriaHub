@@ -60,6 +60,11 @@ export const systemSettingsSchema = z.object({
       }).default({ provider: null, model: null }),
     }).default({ detection: { provider: null, model: null } }),
   }).optional().default({ features: { detection: { provider: null, model: null } } }),
+  storage: z.object({
+    insights: z.object({
+      refreshIntervalHours: z.number().int().min(1).max(168).default(4),
+    }).default({ refreshIntervalHours: 4 }),
+  }).optional().default({ insights: { refreshIntervalHours: 4 } }),
 });
 
 export type SystemSettingsDto = z.infer<typeof systemSettingsSchema>;
@@ -88,6 +93,11 @@ export const systemSettingsPatchSchema = z.object({
         provider: z.string().nullable().optional(),
         model: z.string().nullable().optional(),
       }).optional(),
+    }).optional(),
+  }).optional(),
+  storage: z.object({
+    insights: z.object({
+      refreshIntervalHours: z.number().int().min(1).max(168).optional(),
     }).optional(),
   }).optional(),
 });
