@@ -27,6 +27,8 @@ import {
   createPerson,
   assignFaces,
   unassignFace,
+  addPersonToMedia,
+  removePersonFromMedia,
 } from '../../services/face';
 import type { PersonListItem } from '../../services/face';
 import { FaceCrop } from '../people/FaceCrop';
@@ -287,6 +289,51 @@ export function FaceThumbnails({
     useMediaFaces(mediaId);
   const [assignDialogFace, setAssignDialogFace] = useState<DetectedFaceDto | null>(null);
 
+  // Manual people state
+  const [peopleSuggestions, setPeopleSuggestions] = useState<PersonListItem[]>([]);
+  const [addingPerson, setAddingPerson] = useState(false);
+  const [removingPersonId, setRemovingPersonId] = useState<string | null>(null);
+  const [manualPeopleError, setManualPeopleError] = useState<string | null>(null);
+  const [personInputValue, setPersonInputValue] = useState('');
+
+  const canAssign = Boolean(circleId);
+
+  // Load people suggestions when circleId changes (only when canAssign)
+  useEffect(() => {
+    if (!circleId || !canAssign) return;
+    listPeople(circleId, { pageSize: 100 })
+      .then((res) => setPeopleSuggestions(res.items))
+      .catch(() => setPeopleSuggestions([]));
+  }, [circleId, canAssign]);
+
+  const handleAddPerson = async (personId?: string, name?: string) => {
+    if (!personId && !name?.trim()) return;
+    setAddingPerson(true);
+    setManualPeopleError(null);
+    try {
+      await addPersonToMedia(mediaId, personId ? { personId } : { name: name!.trim() });
+      setPersonInputValue('');
+      void refresh();
+    } catch (err) {
+      setManualPeopleError(err instanceof Error ? err.message : 'Failed to add person');
+    } finally {
+      setAddingPerson(false);
+    }
+  };
+
+  const handleRemovePerson = async (personId: string) => {
+    setRemovingPersonId(personId);
+    setManualPeopleError(null);
+    try {
+      await removePersonFromMedia(mediaId, personId);
+      void refresh();
+    } catch (err) {
+      setManualPeopleError(err instanceof Error ? err.message : 'Failed to remove person');
+    } finally {
+      setRemovingPersonId(null);
+    }
+  };
+
   if (mediaType === 'video') return null;
 
   if (loading) {
@@ -297,7 +344,9 @@ export function FaceThumbnails({
     ? statusChipProps(status.status)
     : { label: 'Not Processed', color: 'default' as const };
 
-  const canAssign = Boolean(circleId);
+  // Separate detected faces (with bounding boxes) from manual associations
+  const detectedFaces = faces.filter((f) => f.providerKey !== 'manual');
+  const manualFaces = faces.filter((f) => f.providerKey === 'manual');
 
   return (
     <Box>
@@ -332,7 +381,7 @@ export function FaceThumbnails({
             alt="Media thumbnail"
             sx={{ width: '100%', display: 'block', borderRadius: 1 }}
           />
-          {faces.map((face) => (
+          {detectedFaces.map((face) => (
             <FaceBox
               key={face.id}
               face={face}
@@ -345,9 +394,9 @@ export function FaceThumbnails({
       )}
 
       {/* Face count */}
-      {faces.length > 0 && (
+      {detectedFaces.length > 0 && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          {faces.length} face{faces.length !== 1 ? 's' : ''} detected
+          {detectedFaces.length} face{detectedFaces.length !== 1 ? 's' : ''} detected
           {canAssign && ' · click a face to assign'}
         </Typography>
       )}
@@ -362,6 +411,78 @@ export function FaceThumbnails({
       >
         Re-run face detection
       </Button>
+
+      {/* People in this photo — manual association editor */}
+      {canAssign && (
+        <Box sx={{ mt: 2 }}>
+          <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+            People in this photo
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            Add people who appear in this photo — no need to mark where.
+          </Typography>
+          {/* Existing manual people as deletable chips */}
+          {manualFaces.length > 0 && (
+            <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', mb: 1 }}>
+              {manualFaces
+                .filter((f, idx, arr) => arr.findIndex((ff) => ff.personId === f.personId) === idx)
+                .map((f) => (
+                  <Chip
+                    key={f.personId ?? f.id}
+                    label={f.personName ?? 'Unnamed'}
+                    size="small"
+                    onDelete={() => f.personId && void handleRemovePerson(f.personId)}
+                    disabled={removingPersonId === f.personId || addingPerson}
+                  />
+                ))}
+            </Stack>
+          )}
+          {/* Autocomplete to add a person */}
+          <Autocomplete<PersonListItem | string, false, false, true>
+            freeSolo
+            options={peopleSuggestions}
+            getOptionLabel={(opt) =>
+              typeof opt === 'string' ? opt : (opt.name ?? 'Unlabeled')
+            }
+            value={null}
+            inputValue={personInputValue}
+            onInputChange={(_, val) => setPersonInputValue(val)}
+            onChange={(_, selected) => {
+              if (!selected) return;
+              if (typeof selected === 'string') {
+                void handleAddPerson(undefined, selected);
+              } else {
+                void handleAddPerson((selected as PersonListItem).id);
+              }
+            }}
+            disabled={addingPerson}
+            size="small"
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Add a person"
+                placeholder="Type name or pick existing"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && personInputValue.trim()) {
+                    void handleAddPerson(undefined, personInputValue);
+                  }
+                }}
+                slotProps={{
+                  input: {
+                    ...params.InputProps,
+                    endAdornment: addingPerson ? <CircularProgress size={14} /> : params.InputProps.endAdornment,
+                  },
+                }}
+              />
+            )}
+          />
+          {manualPeopleError && (
+            <Alert severity="error" sx={{ mt: 1 }} onClose={() => setManualPeopleError(null)}>
+              {manualPeopleError}
+            </Alert>
+          )}
+        </Box>
+      )}
 
       {/* Assign dialog */}
       {circleId && (
