@@ -2,8 +2,29 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
 import { EnrichmentJob, JobStatus } from '@prisma/client';
+import { RateLimitError, classifyRateLimit } from './rate-limit.error';
+import { computeQueueBackoffMs } from './backoff.util';
 
-const MAX_ATTEMPTS = 3;
+// ---------------------------------------------------------------------------
+// Config helpers — read from env at startup (same pattern as existing worker)
+// ---------------------------------------------------------------------------
+
+function getEnvInt(key: string, defaultValue: number): number {
+  const raw = process.env[key];
+  if (!raw) return defaultValue;
+  const parsed = parseInt(raw, 10);
+  return isNaN(parsed) ? defaultValue : parsed;
+}
+
+// Normal-failure retry config
+const MAX_ATTEMPTS = getEnvInt('ENRICHMENT_MAX_ATTEMPTS', 3);
+const RETRY_BASE_MS = getEnvInt('ENRICHMENT_RETRY_BASE_MS', 2_000);
+const RETRY_MAX_MS = getEnvInt('ENRICHMENT_RETRY_MAX_MS', 60_000);
+
+// Rate-limit deferral config
+const RL_BASE_MS = getEnvInt('ENRICHMENT_RATELIMIT_BASE_MS', 30_000);
+const RL_MAX_MS = getEnvInt('ENRICHMENT_RATELIMIT_MAX_MS', 900_000);
+const RL_MAX_HITS = getEnvInt('ENRICHMENT_RATELIMIT_MAX_HITS', 10);
 
 @Injectable()
 export class EnrichmentJobWorker implements OnModuleInit, OnModuleDestroy {
@@ -81,10 +102,15 @@ export class EnrichmentJobWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   private async claimNextJob(): Promise<EnrichmentJob | null> {
-    // Atomic claim: find + update in one transaction
+    // Atomic claim: find + update in one transaction.
+    // Skip jobs that are backed off (scheduledFor is in the future).
     return this.prisma.$transaction(async (tx) => {
+      const now = new Date();
       const job = await tx.enrichmentJob.findFirst({
-        where: { status: JobStatus.pending },
+        where: {
+          status: JobStatus.pending,
+          OR: [{ scheduledFor: null }, { scheduledFor: { lte: now } }],
+        },
         orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
       });
 
@@ -95,6 +121,7 @@ export class EnrichmentJobWorker implements OnModuleInit, OnModuleDestroy {
         data: {
           status: JobStatus.running,
           startedAt: new Date(),
+          scheduledFor: null,
         },
       });
     });
@@ -131,25 +158,70 @@ export class EnrichmentJobWorker implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`EnrichmentJob ${job.id} (type="${job.type}") succeeded for MediaItem ${job.mediaItemId ?? 'global'}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`EnrichmentJob ${job.id} (type="${job.type}") failed: ${message}`);
 
-      const newAttempts = job.attempts + 1;
-      const shouldRetry = newAttempts < MAX_ATTEMPTS;
+      // Classify: did this handler throw (or cause) a rate-limit error?
+      const rl = error instanceof RateLimitError ? error : classifyRateLimit(error);
 
-      await this.prisma.enrichmentJob.update({
-        where: { id: job.id },
-        data: {
-          status: shouldRetry ? JobStatus.pending : JobStatus.failed,
-          attempts: newAttempts,
-          lastError: message,
-          ...(shouldRetry ? {} : { finishedAt: new Date() }),
-        },
-      });
+      if (rl) {
+        // ── Rate-limit deferral path ──────────────────────────────────────
+        const hits = job.rateLimitHits + 1;
+        const delayMs = computeQueueBackoffMs(hits, {
+          baseMs: RL_BASE_MS,
+          maxMs: RL_MAX_MS,
+          retryAfterMs: rl.retryAfterMs ?? null,
+        });
+        const giveUp = hits >= RL_MAX_HITS;
 
-      this.logger.warn(
-        `EnrichmentJob ${job.id}: attempt ${newAttempts}/${MAX_ATTEMPTS}; ` +
-          (shouldRetry ? 'will retry' : 'marked failed'),
-      );
+        await this.prisma.enrichmentJob.update({
+          where: { id: job.id },
+          data: {
+            status: giveUp ? JobStatus.failed : JobStatus.pending,
+            rateLimitHits: hits,
+            rateLimitedAt: new Date(),
+            scheduledFor: giveUp ? null : new Date(Date.now() + delayMs),
+            lastError: rl.message,
+            // attempts is NOT incremented for rate-limit deferrals
+            ...(giveUp ? { finishedAt: new Date() } : {}),
+          },
+        });
+
+        this.logger.warn(
+          `EnrichmentJob ${job.id} (type="${job.type}"): rate-limited by ${rl.providerKey ?? 'provider'} ` +
+            `(hit ${hits}/${RL_MAX_HITS}); ` +
+            (giveUp
+              ? 'giving up — marked failed'
+              : `backing off ${Math.round(delayMs / 1000)}s (scheduledFor +${Math.round(delayMs / 1000)}s)`),
+        );
+      } else {
+        // ── Normal failure / exponential retry path ───────────────────────
+        const newAttempts = job.attempts + 1;
+        const shouldRetry = newAttempts < MAX_ATTEMPTS;
+        const delayMs = computeQueueBackoffMs(newAttempts, {
+          baseMs: RETRY_BASE_MS,
+          maxMs: RETRY_MAX_MS,
+        });
+
+        await this.prisma.enrichmentJob.update({
+          where: { id: job.id },
+          data: {
+            status: shouldRetry ? JobStatus.pending : JobStatus.failed,
+            attempts: newAttempts,
+            lastError: message,
+            scheduledFor: shouldRetry ? new Date(Date.now() + delayMs) : null,
+            ...(!shouldRetry ? { finishedAt: new Date() } : {}),
+          },
+        });
+
+        this.logger.warn(
+          `EnrichmentJob ${job.id} (type="${job.type}"): attempt ${newAttempts}/${MAX_ATTEMPTS} failed — ` +
+            (shouldRetry
+              ? `will retry in ${Math.round(delayMs / 1000)}s`
+              : 'marked failed'),
+        );
+      }
+
+      // Always log the underlying error for debugging
+      this.logger.error(`EnrichmentJob ${job.id}: ${message}`);
     }
   }
 }
