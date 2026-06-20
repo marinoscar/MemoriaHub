@@ -30,7 +30,7 @@ export function BottomNav({ onMore }: BottomNavProps) {
     if (location.pathname === '/') return '/';
     if (location.pathname.startsWith('/search')) return '/search';
     if (location.pathname.startsWith('/map')) return '/map';
-    if (location.pathname.startsWith('/media')) return '/media';
+    if (location.pathname.startsWith('/albums')) return '/albums';
     return false;
   };
 
@@ -55,7 +55,7 @@ export function BottomNav({ onMore }: BottomNavProps) {
         <BottomNavigationAction label="Photos" icon={<HomeIcon />} value="/" />
         <BottomNavigationAction label="Explore" icon={<ExploreIcon />} value="/search" />
         <BottomNavigationAction label="Map" icon={<MapIcon />} value="/map" />
-        <BottomNavigationAction label="Albums" icon={<PhotoLibraryIcon />} value="/media" />
+        <BottomNavigationAction label="Albums" icon={<PhotoLibraryIcon />} value="/albums" />
         <BottomNavigationAction
           label="More"
           icon={<MoreHorizIcon />}
