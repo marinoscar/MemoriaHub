@@ -207,6 +207,7 @@ describe('AiSettingsService', () => {
       expect(result.features).toEqual({
         search: { provider: null, model: null },
         tagging: { provider: null, model: null },
+        embedding: { provider: null, model: null },
       });
     });
 
@@ -312,6 +313,149 @@ describe('AiSettingsService', () => {
       } as any);
 
       await expect(service.resolveCredentials('openai')).rejects.toThrow(/disabled/i);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // setEmbeddingFeature
+  // ---------------------------------------------------------------------------
+  describe('setEmbeddingFeature', () => {
+    it('calls patchSettings with the embedding provider and model', async () => {
+      mockSystemSettings.patchSettings.mockResolvedValue(undefined);
+
+      const result = await service.setEmbeddingFeature(
+        { provider: 'openai', model: 'text-embedding-3-small' },
+        'user-1',
+      );
+
+      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ai: {
+            features: {
+              embedding: { provider: 'openai', model: 'text-embedding-3-small' },
+            },
+          },
+        }),
+        'user-1',
+      );
+      expect(result).toEqual({ provider: 'openai', model: 'text-embedding-3-small' });
+    });
+
+    it('returns the dto values as-is', async () => {
+      mockSystemSettings.patchSettings.mockResolvedValue(undefined);
+
+      const result = await service.setEmbeddingFeature(
+        { provider: 'anthropic', model: 'embed-v1' },
+        'user-2',
+      );
+
+      expect(result).toEqual({ provider: 'anthropic', model: 'embed-v1' });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // resolveEmbeddingConfig
+  // ---------------------------------------------------------------------------
+  describe('resolveEmbeddingConfig', () => {
+    it('returns {provider, model} when both are set in system settings', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        ai: {
+          features: {
+            embedding: { provider: 'openai', model: 'text-embedding-3-large' },
+          },
+        },
+      });
+
+      const result = await service.resolveEmbeddingConfig();
+
+      expect(result).toEqual({ provider: 'openai', model: 'text-embedding-3-large' });
+    });
+
+    it('returns null when provider is null', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        ai: {
+          features: {
+            embedding: { provider: null, model: 'text-embedding-3-small' },
+          },
+        },
+      });
+
+      const result = await service.resolveEmbeddingConfig();
+
+      expect(result).toBeNull();
+    });
+
+    it('returns null when model is null', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        ai: {
+          features: {
+            embedding: { provider: 'openai', model: null },
+          },
+        },
+      });
+
+      const result = await service.resolveEmbeddingConfig();
+
+      expect(result).toBeNull();
+    });
+
+    it('returns null when embedding feature is absent from system settings', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({ ai: null });
+
+      const result = await service.resolveEmbeddingConfig();
+
+      expect(result).toBeNull();
+    });
+
+    it('returns null when ai block is entirely absent', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({});
+
+      const result = await service.resolveEmbeddingConfig();
+
+      expect(result).toBeNull();
+    });
+
+    it('returns null when features.embedding exists but both fields are undefined', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        ai: { features: { embedding: {} } },
+      });
+
+      const result = await service.resolveEmbeddingConfig();
+
+      expect(result).toBeNull();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // getSettings — embedding feature in response
+  // ---------------------------------------------------------------------------
+  describe('getSettings — embedding feature', () => {
+    it('returns default embedding feature when ai system settings are null', async () => {
+      mockPrisma.aiProviderCredential.findMany.mockResolvedValue([]);
+      mockSystemSettings.getSettings.mockResolvedValue({ ai: null });
+
+      const result = await service.getSettings();
+
+      expect(result.features).toMatchObject({
+        embedding: { provider: null, model: null },
+      });
+    });
+
+    it('returns stored embedding feature from system settings', async () => {
+      mockPrisma.aiProviderCredential.findMany.mockResolvedValue([]);
+      mockSystemSettings.getSettings.mockResolvedValue({
+        ai: {
+          features: {
+            embedding: { provider: 'openai', model: 'text-embedding-3-small' },
+          },
+        },
+      });
+
+      const result = await service.getSettings();
+
+      expect(result.features).toMatchObject({
+        embedding: { provider: 'openai', model: 'text-embedding-3-small' },
+      });
     });
   });
 
