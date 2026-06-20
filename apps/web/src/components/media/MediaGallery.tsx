@@ -419,6 +419,10 @@ export function MediaGallery({
     setSelectionMode(false);
   }, []);
 
+  const handleSelectAll = useCallback(() => {
+    setSelected(new Set(mergedItems.map((it) => it.id)));
+  }, [mergedItems]);
+
   // -------------------------------------------------------------------------
   // Snackbar
   // -------------------------------------------------------------------------
@@ -568,6 +572,22 @@ export function MediaGallery({
         </Box>
       )}
 
+      {/* Bulk action toolbar */}
+      <BulkActionToolbar
+        selected={selected}
+        circleId={circleId}
+        activeCircleRole={activeCircleRole}
+        onClear={handleClearSelection}
+        onSelectAll={handleSelectAll}
+        onOpenLocation={() => setBulkLocationOpen(true)}
+        onOpenTags={() => setBulkTagsOpen(true)}
+        onOpenAlbum={() => setAddToAlbumOpen(true)}
+        albumMode={Boolean(albumId)}
+        onRemoveFromAlbum={albumId ? () => void handleRemoveFromAlbum() : undefined}
+        onSuccess={handleBulkSuccess}
+        onError={(msg) => setSnackbar({ message: msg, severity: 'error' })}
+      />
+
       {/* Day-grouped grid */}
       {!showFirstLoad && mergedItems.length > 0 && (
         <Box sx={{ px: { xs: 1, sm: 2 }, pt: { xs: 1, sm: 2 } }}>
@@ -701,21 +721,6 @@ export function MediaGallery({
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         onItemUpdated={handleItemUpdated}
-      />
-
-      {/* Bulk action toolbar */}
-      <BulkActionToolbar
-        selected={selected}
-        circleId={circleId}
-        activeCircleRole={activeCircleRole}
-        onClear={handleClearSelection}
-        onOpenLocation={() => setBulkLocationOpen(true)}
-        onOpenTags={() => setBulkTagsOpen(true)}
-        onOpenAlbum={() => setAddToAlbumOpen(true)}
-        albumMode={Boolean(albumId)}
-        onRemoveFromAlbum={albumId ? () => void handleRemoveFromAlbum() : undefined}
-        onSuccess={handleBulkSuccess}
-        onError={(msg) => setSnackbar({ message: msg, severity: 'error' })}
       />
 
       {/* Bulk location dialog */}
