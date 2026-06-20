@@ -6,7 +6,6 @@ import {
 // Canonical valid ai block for PUT (full-replace) fixtures
 const validAiBlock = {
   features: { search: { provider: null, model: null } },
-  conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 30 },
 };
 
 describe('UpdateSystemSettingsDto (PUT)', () => {
@@ -140,14 +139,11 @@ describe('UpdateSystemSettingsDto (PUT)', () => {
         features: {},
         ai: {
           features: { search: { provider: null, model: null } },
-          conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 30 },
         },
       });
 
       expect(result.ai.features.search.provider).toBeNull();
       expect(result.ai.features.search.model).toBeNull();
-      expect(result.ai.conversations.archiveAfterDays).toBe(30);
-      expect(result.ai.conversations.deleteAfterArchiveDays).toBe(30);
     });
 
     it('should accept a valid ai block with string provider and model', () => {
@@ -156,38 +152,11 @@ describe('UpdateSystemSettingsDto (PUT)', () => {
         features: {},
         ai: {
           features: { search: { provider: 'openai', model: 'gpt-4o' } },
-          conversations: { archiveAfterDays: 90, deleteAfterArchiveDays: 365 },
         },
       });
 
       expect(result.ai.features.search.provider).toBe('openai');
       expect(result.ai.features.search.model).toBe('gpt-4o');
-    });
-
-    it('should reject archiveAfterDays less than 1', () => {
-      expect(() =>
-        updateSystemSettingsSchema.parse({
-          ui: { allowUserThemeOverride: true },
-          features: {},
-          ai: {
-            features: { search: { provider: null, model: null } },
-            conversations: { archiveAfterDays: 0, deleteAfterArchiveDays: 30 },
-          },
-        }),
-      ).toThrow();
-    });
-
-    it('should reject deleteAfterArchiveDays less than 1', () => {
-      expect(() =>
-        updateSystemSettingsSchema.parse({
-          ui: { allowUserThemeOverride: true },
-          features: {},
-          ai: {
-            features: { search: { provider: null, model: null } },
-            conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 0 },
-          },
-        }),
-      ).toThrow();
     });
   });
 
@@ -203,7 +172,6 @@ describe('UpdateSystemSettingsDto (PUT)', () => {
         },
         ai: {
           features: { search: { provider: null, model: null } },
-          conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 30 },
         },
       });
 
@@ -217,7 +185,6 @@ describe('UpdateSystemSettingsDto (PUT)', () => {
         },
         ai: {
           features: { search: { provider: null, model: null } },
-          conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 30 },
         },
       });
     });

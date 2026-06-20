@@ -112,7 +112,6 @@ describe('SystemSettingsService', () => {
             search: { provider: null, model: null },
             tagging: { provider: null, model: null },
           },
-          conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 30 },
         },
       };
 
@@ -166,7 +165,6 @@ describe('SystemSettingsService', () => {
             search: { provider: null, model: null },
             tagging: { provider: null, model: null },
           },
-          conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 30 },
         },
       };
 
@@ -199,7 +197,6 @@ describe('SystemSettingsService', () => {
             search: { provider: null, model: null },
             tagging: { provider: null, model: null },
           },
-          conversations: { archiveAfterDays: 30, deleteAfterArchiveDays: 30 },
         },
       };
 
