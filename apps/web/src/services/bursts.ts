@@ -93,8 +93,18 @@ export async function dismissBurstGroup(id: string): Promise<BurstDismissResult>
   return api.post<BurstDismissResult>(`/media/bursts/${id}/dismiss`);
 }
 
-export async function runBurstBackfill(circleId: string, force?: boolean): Promise<BurstBackfillResult> {
-  return api.post<BurstBackfillResult>('/media/bursts/backfill', { circleId, force });
+export interface BurstBackfillOptions {
+  from?: string;
+  to?: string;
+  force?: boolean;
+}
+
+export async function runBurstBackfill(circleId: string, opts?: BurstBackfillOptions): Promise<BurstBackfillResult> {
+  const body: Record<string, unknown> = { circleId };
+  if (opts?.from !== undefined) body.from = opts.from;
+  if (opts?.to !== undefined) body.to = opts.to;
+  if (opts?.force !== undefined) body.force = opts.force;
+  return api.post<BurstBackfillResult>('/media/bursts/backfill', body);
 }
 
 export async function getCircleBurstSettings(circleId: string): Promise<CircleBurstSettings> {
