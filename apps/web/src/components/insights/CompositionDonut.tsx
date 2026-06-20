@@ -36,7 +36,7 @@ export function CompositionDonut({ title, segments, centerLabel }: CompositionDo
           ]}
           width={200}
           height={200}
-          slotProps={{ legend: { hidden: true } }}
+          hideLegend
           margin={{ top: 0, bottom: 0, left: 0, right: 0 }}
         />
         {/* Centered total label */}
