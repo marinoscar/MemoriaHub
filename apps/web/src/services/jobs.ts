@@ -40,6 +40,7 @@ export interface EnrichmentJobDto {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+  payload?: unknown;
 }
 
 export interface JobsListResponse {

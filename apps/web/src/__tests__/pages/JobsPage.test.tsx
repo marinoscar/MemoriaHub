@@ -252,12 +252,12 @@ describe('JobsPage', () => {
   // =========================================================================
 
   describe('Action button visibility', () => {
-    // The page has a "Retry all failed" bulk button (always rendered, may be disabled)
-    // which contains a ReplayIcon. Per-row retry buttons also use ReplayIcon.
-    // DeleteIcon only appears in row actions (never in the bulk bar).
-    // We count icons: 1 in bulk bar + 1 per eligible row.
+    // Each row now shows a single kebab IconButton (aria-label="Job actions") that
+    // opens a MUI Menu with three MenuItems: "Download JSON", "Re-run", "Delete".
+    // "Re-run" is enabled only for failed/succeeded; "Delete" is disabled for running.
+    // Disabled MUI MenuItems render with aria-disabled="true".
 
-    it('shows per-row Retry button (additional ReplayIcon) for failed jobs', async () => {
+    it('Re-run menu item is enabled for failed jobs', async () => {
       const jobs = [makeJob({ id: 'job-1', status: 'failed' })];
       mockUseJobs.mockReturnValue(
         makeJobsHook({
@@ -265,80 +265,88 @@ describe('JobsPage', () => {
           stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0 },
         }),
       );
+      const user = userEvent.setup();
 
       render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      await waitFor(() => {
-        // 1 from bulk bar + 1 from row = at least 2
-        expect(screen.getAllByTestId('ReplayIcon').length).toBeGreaterThanOrEqual(2);
-      });
+      const kebab = await screen.findByRole('button', { name: /job actions/i });
+      await user.click(kebab);
+
+      const rerunItem = await screen.findByRole('menuitem', { name: /re-run/i });
+      expect(rerunItem).not.toHaveAttribute('aria-disabled', 'true');
     });
 
-    it('shows per-row Retry button for succeeded jobs', async () => {
+    it('Re-run menu item is enabled for succeeded jobs', async () => {
       const jobs = [makeJob({ id: 'job-1', status: 'succeeded' })];
       mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
+      const user = userEvent.setup();
 
       render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      await waitFor(() => {
-        // 1 from bulk bar + 1 from row = at least 2
-        expect(screen.getAllByTestId('ReplayIcon').length).toBeGreaterThanOrEqual(2);
-      });
+      const kebab = await screen.findByRole('button', { name: /job actions/i });
+      await user.click(kebab);
+
+      const rerunItem = await screen.findByRole('menuitem', { name: /re-run/i });
+      expect(rerunItem).not.toHaveAttribute('aria-disabled', 'true');
     });
 
-    it('does NOT show per-row Retry for pending jobs (only bulk bar icon)', async () => {
+    it('Re-run menu item is disabled for pending jobs', async () => {
       const jobs = [makeJob({ id: 'job-1', status: 'pending' })];
       mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
+      const user = userEvent.setup();
 
       render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      await waitFor(() => {
-        expect(screen.getByText('pending')).toBeInTheDocument();
-      });
+      const kebab = await screen.findByRole('button', { name: /job actions/i });
+      await user.click(kebab);
 
-      // Only the bulk bar Retry button — no per-row retry for pending
-      expect(screen.getAllByTestId('ReplayIcon').length).toBe(1);
+      const rerunItem = await screen.findByRole('menuitem', { name: /re-run/i });
+      expect(rerunItem).toHaveAttribute('aria-disabled', 'true');
     });
 
-    it('does NOT show per-row Retry for running jobs (only bulk bar icon)', async () => {
+    it('Re-run menu item is disabled for running jobs', async () => {
       const jobs = [makeJob({ id: 'job-1', status: 'running' })];
       mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
+      const user = userEvent.setup();
 
       render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      await waitFor(() => {
-        expect(screen.getByText('running')).toBeInTheDocument();
-      });
+      const kebab = await screen.findByRole('button', { name: /job actions/i });
+      await user.click(kebab);
 
-      // Only the bulk bar Retry button — no per-row retry for running
-      expect(screen.getAllByTestId('ReplayIcon').length).toBe(1);
+      const rerunItem = await screen.findByRole('menuitem', { name: /re-run/i });
+      expect(rerunItem).toHaveAttribute('aria-disabled', 'true');
     });
 
-    it('shows Delete button for non-running jobs (pending)', async () => {
+    it('Delete menu item is enabled for pending jobs', async () => {
       const jobs = [makeJob({ id: 'job-1', status: 'pending' })];
       mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
+      const user = userEvent.setup();
 
       render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      await waitFor(() => {
-        expect(screen.getByTestId('DeleteIcon')).toBeInTheDocument();
-      });
+      const kebab = await screen.findByRole('button', { name: /job actions/i });
+      await user.click(kebab);
+
+      const deleteItem = await screen.findByRole('menuitem', { name: /delete/i });
+      expect(deleteItem).not.toHaveAttribute('aria-disabled', 'true');
     });
 
-    it('does NOT show Delete button for running jobs', async () => {
+    it('Delete menu item is disabled for running jobs', async () => {
       const jobs = [makeJob({ id: 'job-1', status: 'running' })];
       mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
+      const user = userEvent.setup();
 
       render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      await waitFor(() => {
-        expect(screen.getByText('running')).toBeInTheDocument();
-      });
+      const kebab = await screen.findByRole('button', { name: /job actions/i });
+      await user.click(kebab);
 
-      expect(screen.queryByTestId('DeleteIcon')).not.toBeInTheDocument();
+      const deleteItem = await screen.findByRole('menuitem', { name: /delete/i });
+      expect(deleteItem).toHaveAttribute('aria-disabled', 'true');
     });
 
-    it('shows both per-row Retry and Delete for failed jobs', async () => {
+    it('Re-run and Delete menu items are both enabled for failed jobs', async () => {
       const jobs = [makeJob({ id: 'job-1', status: 'failed' })];
       mockUseJobs.mockReturnValue(
         makeJobsHook({
@@ -346,14 +354,17 @@ describe('JobsPage', () => {
           stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0 },
         }),
       );
+      const user = userEvent.setup();
 
       render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      await waitFor(() => {
-        // Multiple ReplayIcons (bulk bar + per-row) and one DeleteIcon in the row
-        expect(screen.getAllByTestId('ReplayIcon').length).toBeGreaterThanOrEqual(2);
-        expect(screen.getByTestId('DeleteIcon')).toBeInTheDocument();
-      });
+      const kebab = await screen.findByRole('button', { name: /job actions/i });
+      await user.click(kebab);
+
+      const rerunItem = await screen.findByRole('menuitem', { name: /re-run/i });
+      const deleteItem = await screen.findByRole('menuitem', { name: /delete/i });
+      expect(rerunItem).not.toHaveAttribute('aria-disabled', 'true');
+      expect(deleteItem).not.toHaveAttribute('aria-disabled', 'true');
     });
   });
 
@@ -504,7 +515,7 @@ describe('JobsPage', () => {
   // =========================================================================
 
   describe('Per-row retry', () => {
-    it('calls retryJob with the job id when Retry button is clicked', async () => {
+    it('calls retryJob with the job id when Re-run menu item is clicked', async () => {
       const retryJob = vi.fn().mockResolvedValue(undefined);
       const jobs = [makeJob({ id: 'job-abc', status: 'failed' })];
       mockUseJobs.mockReturnValue(
@@ -518,14 +529,12 @@ describe('JobsPage', () => {
 
       render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      // The page renders bulk Retry (index 0) and per-row Retry (index 1).
-      // Click the last ReplayIcon (the per-row one in the table body).
-      await waitFor(() => {
-        expect(screen.getAllByTestId('ReplayIcon').length).toBeGreaterThanOrEqual(2);
-      });
-      const replayIcons = screen.getAllByTestId('ReplayIcon');
-      const rowRetryIcon = replayIcons[replayIcons.length - 1];
-      await user.click(rowRetryIcon.closest('button')!);
+      // Open the kebab menu and click the Re-run menu item.
+      const kebab = await screen.findByRole('button', { name: /job actions/i });
+      await user.click(kebab);
+
+      const rerunItem = await screen.findByRole('menuitem', { name: /re-run/i });
+      await user.click(rerunItem);
 
       expect(retryJob).toHaveBeenCalledWith('job-abc');
     });
@@ -544,12 +553,11 @@ describe('JobsPage', () => {
 
       render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      await waitFor(() => {
-        expect(screen.getAllByTestId('ReplayIcon').length).toBeGreaterThanOrEqual(2);
-      });
-      const replayIcons = screen.getAllByTestId('ReplayIcon');
-      const rowRetryIcon = replayIcons[replayIcons.length - 1];
-      await user.click(rowRetryIcon.closest('button')!);
+      const kebab = await screen.findByRole('button', { name: /job actions/i });
+      await user.click(kebab);
+
+      const rerunItem = await screen.findByRole('menuitem', { name: /re-run/i });
+      await user.click(rerunItem);
 
       await waitFor(() => {
         // The snackbar message includes shortId(job.id)... = first 8 chars
@@ -563,16 +571,19 @@ describe('JobsPage', () => {
   // =========================================================================
 
   describe('Delete flow', () => {
-    it('shows confirm dialog when Delete button is clicked', async () => {
+    it('shows confirm dialog when Delete menu item is clicked', async () => {
       const jobs = [makeJob({ id: 'job-del-1', status: 'pending' })];
       mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
       const user = userEvent.setup();
 
       render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      // Find the DeleteIcon and click its parent button
-      const deleteIcon = await screen.findByTestId('DeleteIcon');
-      await user.click(deleteIcon.closest('button')!);
+      // Open the kebab menu and click Delete
+      const kebab = await screen.findByRole('button', { name: /job actions/i });
+      await user.click(kebab);
+
+      const deleteItem = await screen.findByRole('menuitem', { name: /delete/i });
+      await user.click(deleteItem);
 
       await waitFor(() => {
         expect(screen.getByRole('dialog')).toBeInTheDocument();
@@ -588,8 +599,11 @@ describe('JobsPage', () => {
 
       render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      const deleteIcon = await screen.findByTestId('DeleteIcon');
-      await user.click(deleteIcon.closest('button')!);
+      const kebab = await screen.findByRole('button', { name: /job actions/i });
+      await user.click(kebab);
+
+      const deleteItem = await screen.findByRole('menuitem', { name: /delete/i });
+      await user.click(deleteItem);
 
       const cancelBtn = await screen.findByRole('button', { name: /cancel/i });
       await user.click(cancelBtn);
@@ -606,8 +620,11 @@ describe('JobsPage', () => {
 
       render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      const deleteIcon = await screen.findByTestId('DeleteIcon');
-      await user.click(deleteIcon.closest('button')!);
+      const kebab = await screen.findByRole('button', { name: /job actions/i });
+      await user.click(kebab);
+
+      const deleteItem = await screen.findByRole('menuitem', { name: /delete/i });
+      await user.click(deleteItem);
 
       const confirmBtn = await screen.findByRole('button', { name: /^delete$/i });
       await user.click(confirmBtn);
@@ -623,8 +640,11 @@ describe('JobsPage', () => {
 
       render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      const deleteIcon = await screen.findByTestId('DeleteIcon');
-      await user.click(deleteIcon.closest('button')!);
+      const kebab = await screen.findByRole('button', { name: /job actions/i });
+      await user.click(kebab);
+
+      const deleteItem = await screen.findByRole('menuitem', { name: /delete/i });
+      await user.click(deleteItem);
 
       const confirmBtn = await screen.findByRole('button', { name: /^delete$/i });
       await user.click(confirmBtn);
@@ -632,6 +652,62 @@ describe('JobsPage', () => {
       await waitFor(() => {
         expect(screen.getByText(/deleted/i)).toBeInTheDocument();
       });
+    });
+  });
+
+  // =========================================================================
+  // Download JSON
+  // =========================================================================
+
+  describe('Download JSON', () => {
+    it('menu contains a Download JSON item that is not disabled', async () => {
+      const jobs = [makeJob({ id: 'job-dl-1', status: 'pending' })];
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
+      const user = userEvent.setup();
+
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const kebab = await screen.findByRole('button', { name: /job actions/i });
+      await user.click(kebab);
+
+      const downloadItem = screen.getByRole('menuitem', { name: /download json/i });
+      expect(downloadItem).toBeInTheDocument();
+      expect(downloadItem).not.toHaveAttribute('aria-disabled', 'true');
+    });
+
+    it('clicking Download JSON triggers a file download', async () => {
+      const mockCreateObjectURL = vi.fn().mockReturnValue('blob:mock');
+      const mockRevokeObjectURL = vi.fn();
+      Object.defineProperty(global.URL, 'createObjectURL', { value: mockCreateObjectURL, writable: true });
+      Object.defineProperty(global.URL, 'revokeObjectURL', { value: mockRevokeObjectURL, writable: true });
+
+      const mockClick = vi.fn();
+      const originalCreateElement = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+        const el = originalCreateElement(tag);
+        if (tag === 'a') {
+          vi.spyOn(el as HTMLAnchorElement, 'click').mockImplementation(mockClick);
+        }
+        return el;
+      });
+
+      const jobs = [makeJob({ id: 'job-dl-2', status: 'pending' })];
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
+      const user = userEvent.setup();
+
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const kebab = await screen.findByRole('button', { name: /job actions/i });
+      await user.click(kebab);
+
+      const downloadItem = await screen.findByRole('menuitem', { name: /download json/i });
+      await user.click(downloadItem);
+
+      expect(mockCreateObjectURL).toHaveBeenCalled();
+      expect(mockClick).toHaveBeenCalled();
+      expect(mockRevokeObjectURL).toHaveBeenCalled();
+
+      vi.restoreAllMocks();
     });
   });
 
