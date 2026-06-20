@@ -465,7 +465,6 @@ model MediaItem {
   metadata         Json?
 
   // --- User-added metadata ---
-  title       String?
   caption     String?
   description String?
   favorite    Boolean @default(false)
