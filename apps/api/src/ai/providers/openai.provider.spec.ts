@@ -150,3 +150,106 @@ describe('OpenAiProvider.analyzeImage', () => {
     expect(result).toBe('');
   });
 });
+
+// ---------------------------------------------------------------------------
+// OpenAiProvider.embedText — returns embedding from first data element
+// ---------------------------------------------------------------------------
+describe('OpenAiProvider.embedText', () => {
+  const provider = new OpenAiProvider();
+  const creds = { apiKey: 'sk-test', baseUrl: undefined };
+  let mockEmbeddingsCreate: jest.Mock;
+
+  beforeEach(() => {
+    mockEmbeddingsCreate = jest.fn();
+    MockOpenAI.mockImplementation(
+      () =>
+        ({
+          chat: {
+            completions: {
+              create: mockCreate,
+            },
+          },
+          embeddings: {
+            create: mockEmbeddingsCreate,
+          },
+        }) as unknown as OpenAI,
+    );
+  });
+
+  it('returns the embedding vector from data[0].embedding', async () => {
+    const expectedVector = [0.1, 0.2, 0.3, 0.4];
+    mockEmbeddingsCreate.mockResolvedValueOnce({
+      data: [{ embedding: expectedVector }],
+    });
+
+    const result = await provider.embedText(creds, 'text-embedding-3-small', 'hello world');
+
+    expect(result).toEqual(expectedVector);
+    expect(mockEmbeddingsCreate).toHaveBeenCalledWith({
+      model: 'text-embedding-3-small',
+      input: 'hello world',
+    });
+  });
+
+  it('passes the model and input correctly', async () => {
+    mockEmbeddingsCreate.mockResolvedValueOnce({
+      data: [{ embedding: [0.5, 0.6] }],
+    });
+
+    await provider.embedText(creds, 'text-embedding-3-large', 'test input text');
+
+    expect(mockEmbeddingsCreate).toHaveBeenCalledWith({
+      model: 'text-embedding-3-large',
+      input: 'test input text',
+    });
+  });
+
+  it('throws "Invalid API key" on 401', async () => {
+    mockEmbeddingsCreate.mockRejectedValueOnce({ status: 401, message: 'Unauthorized' });
+
+    await expect(provider.embedText(creds, 'text-embedding-3-small', 'hello')).rejects.toThrow(
+      'Invalid API key',
+    );
+  });
+
+  it('throws "Model not found: <model>" on 404', async () => {
+    mockEmbeddingsCreate.mockRejectedValueOnce({ status: 404, message: 'Not found' });
+
+    await expect(
+      provider.embedText(creds, 'text-embedding-3-small', 'hello'),
+    ).rejects.toThrow('Model not found: text-embedding-3-small');
+  });
+
+  it('throws "Model not found: <model>" on model_not_found code', async () => {
+    mockEmbeddingsCreate.mockRejectedValueOnce({ code: 'model_not_found', message: 'Model not found' });
+
+    await expect(
+      provider.embedText(creds, 'text-embedding-3-small', 'hello'),
+    ).rejects.toThrow('Model not found: text-embedding-3-small');
+  });
+
+  it('rethrows with the error message on generic failure', async () => {
+    mockEmbeddingsCreate.mockRejectedValueOnce({ message: 'Rate limit exceeded' });
+
+    await expect(provider.embedText(creds, 'text-embedding-3-small', 'hello')).rejects.toThrow(
+      'Rate limit exceeded',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OpenAiProvider.listEmbeddingModels — static list
+// ---------------------------------------------------------------------------
+describe('OpenAiProvider.listEmbeddingModels', () => {
+  const provider = new OpenAiProvider();
+
+  it('returns the OPENAI_EMBEDDING_MODELS list', () => {
+    const models = provider.listEmbeddingModels();
+    expect(models).toEqual(['text-embedding-3-small', 'text-embedding-3-large']);
+  });
+
+  it('returns an array (not frozen — spread copy)', () => {
+    const models = provider.listEmbeddingModels();
+    expect(Array.isArray(models)).toBe(true);
+  });
+});
