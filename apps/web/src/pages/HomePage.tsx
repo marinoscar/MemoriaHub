@@ -26,6 +26,7 @@ import { useCircle } from '../hooks/useCircle';
 import { useInfiniteMedia } from '../hooks/useInfiniteMedia';
 import { useIntersectionObserver } from '../hooks/useIntersectionObserver';
 import { groupByDay } from '../utils/groupByDay';
+import { MediaDetailDrawer } from '../components/media/MediaDetailDrawer';
 import { MediaLightbox } from '../components/media/MediaLightbox';
 import { MediaUploadDialog } from '../components/media/MediaUploadDialog';
 import { patchMedia as patchMediaApi } from '../services/media';
@@ -203,6 +204,10 @@ export default function HomePage() {
 
   // Lightbox state
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+
+  // Detail drawer state
+  const [detailItem, setDetailItem] = useState<MediaItem | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   // Upload dialog state
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -405,11 +410,17 @@ export default function HomePage() {
       <MediaLightbox
         items={mergedItems}
         index={lightboxIndex}
-        onIndexChange={(i) => setLightboxIndex(i)}
+        onIndexChange={(i) => { setLightboxIndex(i); setDrawerOpen(false); }}
         onClose={() => setLightboxIndex(null)}
-        onOpenProperties={() => {
-          /* detail drawer not shown on home */
-        }}
+        onOpenProperties={(item) => { setDetailItem(item); setDrawerOpen(true); }}
+        onItemUpdated={handleItemUpdated}
+      />
+
+      {/* Detail drawer */}
+      <MediaDetailDrawer
+        item={detailItem}
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
         onItemUpdated={handleItemUpdated}
       />
 
