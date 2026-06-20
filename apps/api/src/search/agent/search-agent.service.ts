@@ -1,5 +1,4 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
-import { SearchConversation, SearchMessage } from '@prisma/client';
 import { AiSettingsService } from '../../ai/ai-settings.service';
 import { AiProviderRegistry } from '../../ai/providers/ai-provider.registry';
 import { ChatMessage } from '../../ai/providers/ai-provider.interface';
@@ -11,12 +10,13 @@ export type AgentSseEvent =
   | { event: 'tool_call'; data: { name: string; args: Record<string, unknown> } }
   | { event: 'token'; data: { text: string } }
   | { event: 'results'; data: { items: unknown[]; meta: unknown } }
-  | { event: 'done'; data: { messageId: string } };
+  | { event: 'done'; data: Record<string, never> };
 
-export interface AgentAccumulator {
-  finalText: string;
-  toolCalls: unknown[];
-  toolResults: unknown[];
+export interface AgentTurnParams {
+  circleId: string;
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  userId: string;
+  permissions: string[];
 }
 
 const SYSTEM_PROMPT = `You are an intelligent media search assistant for MemoriaHub. You MUST search within ONLY the current circle's media.
@@ -50,7 +50,6 @@ export class SearchAgentService {
   /**
    * Resolve an array of person name strings to Person UUIDs within a circle.
    * Names are matched case-insensitively. Unknown names are silently dropped.
-   * Returns an empty array if none match.
    */
   private async resolvePersonNames(names: string[], circleId: string): Promise<string[]> {
     const trimmedNames = names
@@ -73,7 +72,6 @@ export class SearchAgentService {
   /**
    * If the tool input contains `people` (array of name strings) and/or `peopleMatch`,
    * resolve names to IDs and rewrite the input to use `people: { ids, mode }`.
-   * Unknown names are silently ignored; if none resolve, the filter is omitted entirely.
    */
   private async resolvePeopleFilter(
     toolInput: Record<string, unknown>,
@@ -82,7 +80,6 @@ export class SearchAgentService {
     const rawPeople = toolInput['people'];
     const rawMode = toolInput['peopleMatch'];
 
-    // Clean up agent-specific params regardless
     delete toolInput['peopleMatch'];
 
     if (!Array.isArray(rawPeople) || rawPeople.length === 0) {
@@ -94,7 +91,6 @@ export class SearchAgentService {
     const ids = await this.resolvePersonNames(names, circleId);
 
     if (ids.length === 0) {
-      // No names resolved — omit filter to avoid returning zero results due to a typo
       delete toolInput['people'];
       return;
     }
@@ -103,14 +99,8 @@ export class SearchAgentService {
     toolInput['people'] = { ids, mode };
   }
 
-  async *streamTurn(params: {
-    conversation: SearchConversation & { messages: SearchMessage[] };
-    userContent: string;
-    userId: string;
-    permissions: string[];
-    accumulator: AgentAccumulator;
-  }): AsyncGenerator<AgentSseEvent> {
-    const { conversation, userContent, userId, permissions, accumulator } = params;
+  async *streamTurn(params: AgentTurnParams): AsyncGenerator<AgentSseEvent> {
+    const { circleId, messages, userId, permissions } = params;
 
     // 1. Load AI settings
     const settings = await this.aiSettings.getSettings();
@@ -132,17 +122,13 @@ export class SearchAgentService {
     // 4. Build tool def
     const searchMediaTool = buildSearchMediaToolDef();
 
-    // 5. Build message history from existing conversation messages
-    const messages: ChatMessage[] = conversation.messages.map((m) => ({
+    // 5. Build message history from the passed-in messages array
+    const chatMessages: ChatMessage[] = messages.map((m) => ({
       role: m.role as ChatMessage['role'],
       content: m.content,
     }));
 
-    // Append the new user message
-    messages.push({ role: 'user', content: userContent });
-
     // 6. Multi-turn tool-calling loop
-    // Hard cap to prevent infinite loops in case of pathological tool-call chains
     const MAX_ROUNDS = 6;
     let round = 0;
     let continueLoop = true;
@@ -150,19 +136,15 @@ export class SearchAgentService {
     while (continueLoop && round < MAX_ROUNDS) {
       round++;
       let accumulatedText = '';
-      // Track whether any tool was called in this round — used for loop continuation
       let didToolCall = false;
 
-      // Collect all tool calls in this round so we can attach them to a single
-      // assistant message (required by OpenAI: every tool result must be preceded
-      // by an assistant message with a matching tool_calls entry).
       const roundToolCalls: Array<{ id: string; name: string; input: unknown }> = [];
       const roundToolResults: Array<{ toolCallId: string; toolName: string; result: unknown }> = [];
 
       for await (const event of provider.chat(creds, {
         model,
         system: SYSTEM_PROMPT,
-        messages,
+        messages: chatMessages,
         tools: [searchMediaTool],
       })) {
         if (event.type === 'text') {
@@ -171,51 +153,38 @@ export class SearchAgentService {
         } else if (event.type === 'tool_call' && event.name === 'search_media') {
           const toolInput = event.input as Record<string, unknown>;
 
-          // Resolve people names → IDs before executing the search.
-          // This rewrites toolInput in place: `people` (array of names) + `peopleMatch`
-          // become `people: { ids, mode }` that the registry's buildWhere understands.
-          await this.resolvePeopleFilter(toolInput, conversation.circleId);
+          await this.resolvePeopleFilter(toolInput, circleId);
 
-          // Emit tool_call SSE event
           yield { event: 'tool_call', data: { name: 'search_media', args: toolInput } };
 
-          // Execute search — circleId ALWAYS from conversation, NEVER from model input
+          // Execute search — circleId ALWAYS from params, NEVER from model input
           const searchResult = await this.searchService.runSearch(
             userId,
-            conversation.circleId,
+            circleId,
             permissions,
             toolInput,
           );
 
-          // Emit results SSE event
           yield { event: 'results', data: searchResult };
 
-          // Track in accumulator and for this round's message construction
-          accumulator.toolCalls.push({ id: event.id, name: event.name, input: toolInput });
-          accumulator.toolResults.push({ toolCallId: event.id, result: searchResult });
           roundToolCalls.push({ id: event.id, name: event.name, input: toolInput });
           roundToolResults.push({ toolCallId: event.id, toolName: event.name, result: searchResult });
 
           didToolCall = true;
         } else if (event.type === 'done') {
-          accumulator.finalText += accumulatedText;
-          // Always break out of the for-await after done
           break;
         }
       }
 
-      // After the streaming turn ends, append a single assistant message with
-      // all structured tool calls (required by OpenAI for tool round-trips).
       if (didToolCall) {
-        messages.push({
+        chatMessages.push({
           role: 'assistant',
           content: accumulatedText,
           toolCalls: roundToolCalls,
         });
 
-        // Append one tool result message per tool call
         for (const tr of roundToolResults) {
-          messages.push({
+          chatMessages.push({
             role: 'tool',
             content: JSON.stringify(tr.result),
             toolCallId: tr.toolCallId,
@@ -224,9 +193,6 @@ export class SearchAgentService {
         }
       }
 
-      // Continue looping if and only if a tool was called this round.
-      // Do NOT rely on stopReason — it differs between providers
-      // ('tool_use' for Anthropic, 'tool_calls' for OpenAI).
       continueLoop = didToolCall;
     }
 

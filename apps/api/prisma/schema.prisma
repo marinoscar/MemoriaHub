@@ -47,7 +47,6 @@ model User {
   circleInvitesClaimed      CircleInvite[]   @relation("CircleInviteClaimedBy")
   // AI Search relations
   aiCredentialsUpdated      AiProviderCredential[] @relation("AiCredentialUpdater")
-  searchConversations       SearchConversation[]   @relation("ConversationUser")
   // Face Recognition relations
   faceCredentialsUpdated    FaceProviderCredential[] @relation("FaceCredentialUpdater")
   peopleAdded               Person[]               @relation("PersonAddedBy")
@@ -360,7 +359,6 @@ model Circle {
   mediaItems          MediaItem[]
   albums              Album[]
   tags                Tag[]
-  searchConversations SearchConversation[] @relation("ConversationCircle")
   // Face Recognition relations
   people              Person[]
   faces               Face[]
@@ -601,48 +599,6 @@ model AiProviderCredential {
   updatedByUser User? @relation("AiCredentialUpdater", fields: [updatedByUserId], references: [id], onDelete: SetNull)
 
   @@map("ai_provider_credentials")
-}
-
-model SearchConversation {
-  id         String    @id @default(uuid()) @db.Uuid
-  circleId   String    @map("circle_id") @db.Uuid
-  userId     String    @map("user_id") @db.Uuid
-  title      String?
-  provider   String
-  model      String
-  favorite   Boolean   @default(false)
-  archivedAt DateTime? @map("archived_at") @db.Timestamptz
-  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz
-  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz
-
-  // Relations
-  circle   Circle          @relation("ConversationCircle", fields: [circleId], references: [id], onDelete: Cascade)
-  user     User            @relation("ConversationUser", fields: [userId], references: [id], onDelete: Cascade)
-  messages SearchMessage[]
-
-  @@index([circleId])
-  @@index([userId])
-  @@index([archivedAt])
-  @@index([favorite])
-  @@index([deletedAt])
-  @@map("search_conversations")
-}
-
-model SearchMessage {
-  id             String   @id @default(uuid()) @db.Uuid
-  conversationId String   @map("conversation_id") @db.Uuid
-  role           String
-  content        String   @db.Text
-  toolCalls      Json?    @map("tool_calls")
-  toolResults    Json?    @map("tool_results")
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  // Relations
-  conversation SearchConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-
-  @@index([conversationId])
-  @@map("search_messages")
 }
 
 // =============================================================================

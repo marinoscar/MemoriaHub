@@ -38,10 +38,6 @@ export interface SystemSettingsValue {
         model: string | null;
       };
     };
-    conversations: {
-      archiveAfterDays: number;
-      deleteAfterArchiveDays: number;
-    };
   };
   face?: {
     features: {
@@ -78,10 +74,6 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     features: {
       search: { provider: null, model: null },
       tagging: { provider: null, model: null },
-    },
-    conversations: {
-      archiveAfterDays: 30,
-      deleteAfterArchiveDays: 30,
     },
   },
   face: {

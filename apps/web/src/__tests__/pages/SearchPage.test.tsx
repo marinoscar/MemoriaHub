@@ -4,44 +4,59 @@ import userEvent from '@testing-library/user-event';
 import { render } from '../utils/test-utils';
 
 // ---------------------------------------------------------------------------
-// Module mocks — must be declared BEFORE the imports they affect
+// Module mocks
 // ---------------------------------------------------------------------------
 
 vi.mock('../../hooks/useSearch', () => ({
   useSearch: vi.fn(),
 }));
 
-vi.mock('../../hooks/useConversations', () => ({
-  useConversations: vi.fn(),
-}));
-
 vi.mock('../../hooks/useCircle', () => ({
   useCircle: vi.fn(),
 }));
 
-vi.mock('../../services/searchStream', () => ({
-  streamMessage: vi.fn(),
+vi.mock('../../hooks/usePeople', () => ({
+  usePeople: vi.fn(),
+}));
+
+vi.mock('../../hooks/useUserSettings', () => ({
+  useUserSettings: vi.fn(),
+}));
+
+vi.mock('../../services/searchAgentStream', () => ({
+  streamAgent: vi.fn(),
+}));
+
+vi.mock('../../services/media', () => ({
+  getExplorePlaces: vi.fn().mockResolvedValue([]),
+  getExploreTags: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('../../components/media/MediaResultsGrid', () => ({
   MediaResultsGrid: vi.fn(() => null),
 }));
 
+vi.mock('../../components/search/AdvancedSearchDialog', () => ({
+  AdvancedSearchDialog: vi.fn(() => null),
+}));
+
 // ---------------------------------------------------------------------------
-// Import after mocks
+// Imports after mocks
 // ---------------------------------------------------------------------------
 
 import SearchPage from '../../pages/SearchPage';
 import { useSearch } from '../../hooks/useSearch';
-import { useConversations } from '../../hooks/useConversations';
 import { useCircle } from '../../hooks/useCircle';
+import { usePeople } from '../../hooks/usePeople';
+import { useUserSettings } from '../../hooks/useUserSettings';
 
 const mockUseSearch = vi.mocked(useSearch);
-const mockUseConversations = vi.mocked(useConversations);
 const mockUseCircle = vi.mocked(useCircle);
+const mockUsePeople = vi.mocked(usePeople);
+const mockUseUserSettings = vi.mocked(useUserSettings);
 
 // ---------------------------------------------------------------------------
-// Default mock values
+// Default mocks
 // ---------------------------------------------------------------------------
 
 function defaultSearchMock() {
@@ -53,21 +68,7 @@ function defaultSearchMock() {
     isSearching: false,
     error: null,
     fetchFields: vi.fn().mockResolvedValue(undefined),
-    search: vi.fn(),
-  };
-}
-
-function defaultConversationsMock() {
-  return {
-    conversations: [],
-    activeConversation: null,
-    loading: false,
-    error: null,
-    fetchConversations: vi.fn().mockResolvedValue(undefined),
-    loadConversation: vi.fn().mockResolvedValue(undefined),
-    createNew: vi.fn().mockResolvedValue({ id: 'conv-new', circleId: 'circle-1' }),
-    updateConversation: vi.fn().mockResolvedValue(undefined),
-    removeConversation: vi.fn().mockResolvedValue(undefined),
+    search: vi.fn().mockResolvedValue({ items: [], meta: { totalItems: 0, totalPages: 0, page: 1, pageSize: 20 } }),
   };
 }
 
@@ -83,36 +84,43 @@ function defaultCircleMock() {
   };
 }
 
+function defaultPeopleMock() {
+  return {
+    data: { items: [], meta: { page: 1, pageSize: 100, totalItems: 0, totalPages: 0 } },
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+    create: vi.fn(),
+    rename: vi.fn(),
+    cluster: vi.fn(),
+    assignFaces: vi.fn(),
+    unassignFace: vi.fn(),
+  };
+}
+
+function defaultUserSettingsMock() {
+  return {
+    settings: { search: { visibleFields: [] } },
+    isLoading: false,
+    error: null,
+    updateSettings: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
 // ---------------------------------------------------------------------------
 
 describe('SearchPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // scrollIntoView is not implemented in jsdom — mock it globally for Chat tab tests
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
     mockUseCircle.mockReturnValue(defaultCircleMock() as any);
     mockUseSearch.mockReturnValue(defaultSearchMock() as any);
-    mockUseConversations.mockReturnValue(defaultConversationsMock() as any);
+    mockUsePeople.mockReturnValue(defaultPeopleMock() as any);
+    mockUseUserSettings.mockReturnValue(defaultUserSettingsMock() as any);
   });
 
-  // -------------------------------------------------------------------------
-  describe('Tab rendering', () => {
-    it('renders Advanced and Chat tabs', () => {
-      render(<SearchPage />);
-      expect(screen.getByRole('tab', { name: /advanced/i })).toBeInTheDocument();
-      expect(screen.getByRole('tab', { name: /chat/i })).toBeInTheDocument();
-    });
-
-    it('Advanced tab is selected by default', () => {
-      render(<SearchPage />);
-      expect(screen.getByRole('tab', { name: /advanced/i })).toHaveAttribute('aria-selected', 'true');
-      expect(screen.getByRole('tab', { name: /chat/i })).toHaveAttribute('aria-selected', 'false');
-    });
-  });
-
-  // -------------------------------------------------------------------------
   describe('No active circle', () => {
-    it('renders an alert asking to select a circle when activeCircle is null', () => {
+    it('renders an alert when activeCircle is null', () => {
       mockUseCircle.mockReturnValue({
         ...defaultCircleMock(),
         activeCircle: null,
@@ -121,223 +129,81 @@ describe('SearchPage', () => {
 
       render(<SearchPage />);
 
-      const alert = screen.getByRole('alert');
-      expect(alert).toBeInTheDocument();
-      expect(alert.textContent).toMatch(/select a circle/i);
-    });
-
-    it('does NOT render the tabs when activeCircle is null', () => {
-      mockUseCircle.mockReturnValue({
-        ...defaultCircleMock(),
-        activeCircle: null,
-        activeCircleId: null,
-      } as any);
-
-      render(<SearchPage />);
-
-      expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+      expect(screen.getByRole('alert').textContent).toMatch(/select a circle/i);
     });
   });
 
-  // -------------------------------------------------------------------------
-  describe('Advanced tab — field rendering', () => {
-    it('renders a text input for string-type field', () => {
-      mockUseSearch.mockReturnValue({
-        ...defaultSearchMock(),
-        fields: [{ key: 'tag', label: 'Tag', type: 'string', description: 'Filter by tag' }],
-      } as any);
-
+  describe('Search input', () => {
+    it('renders the conversational search input', () => {
       render(<SearchPage />);
-
-      expect(screen.getByRole('textbox', { name: /tag/i })).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: /conversational search input/i })).toBeInTheDocument();
     });
 
-    it('renders a select for enum-type field', () => {
-      mockUseSearch.mockReturnValue({
-        ...defaultSearchMock(),
-        fields: [
-          {
-            key: 'type',
-            label: 'Media type',
-            type: 'enum',
-            enumValues: ['photo', 'video'],
-            description: 'Filter by type',
-          },
-        ],
-      } as any);
-
-      const { container } = render(<SearchPage />);
-
-      // MUI Select renders the label text in both a <label> and a <span> (legend).
-      // Use getAllByText to handle both occurrences.
-      const labelElements = screen.getAllByText('Media type');
-      expect(labelElements.length).toBeGreaterThan(0);
-      // MUI Select trigger is a div with role="combobox" or .MuiSelect-select
-      const selectEl = container.querySelector('[role="combobox"], .MuiSelect-select');
-      expect(selectEl).not.toBeNull();
-    });
-
-    it('renders two date inputs for date-range fields', () => {
-      mockUseSearch.mockReturnValue({
-        ...defaultSearchMock(),
-        fields: [
-          {
-            key: 'capturedAt',
-            label: 'Capture date range',
-            type: 'date-range',
-            description: 'Date range',
-          },
-        ],
-      } as any);
-
+    it('renders the tune icon button for advanced search', () => {
       render(<SearchPage />);
-
-      expect(screen.getByLabelText(/capture date range from/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/capture date range to/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /open advanced search options/i })).toBeInTheDocument();
     });
 
-    it('renders multiple field types at the same time', () => {
-      mockUseSearch.mockReturnValue({
-        ...defaultSearchMock(),
-        fields: [
-          { key: 'tag', label: 'Tag', type: 'string', description: 'by tag' },
-          { key: 'type', label: 'Media type', type: 'enum', enumValues: ['photo', 'video'], description: 'by type' },
-        ],
-      } as any);
-
-      const { container } = render(<SearchPage />);
-
-      expect(screen.getByRole('textbox', { name: /tag/i })).toBeInTheDocument();
-      // MUI Select: label text appears in both <label> and <span> (legend)
-      const mediaTypeLabels = screen.getAllByText('Media type');
-      expect(mediaTypeLabels.length).toBeGreaterThan(0);
-      const selectEl = container.querySelector('[role="combobox"], .MuiSelect-select');
-      expect(selectEl).not.toBeNull();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  describe('Error states', () => {
-    it('shows a warning Alert with "AI Settings" link when AI is not configured', () => {
-      mockUseSearch.mockReturnValue({
-        ...defaultSearchMock(),
-        error: 'AI search is not configured. An admin must configure the AI provider and model in AI Settings.',
-      } as any);
-
+    it('send button is disabled when input is empty', () => {
       render(<SearchPage />);
-
-      const alert = screen.getByRole('alert');
-      expect(alert).toBeInTheDocument();
-      // The alert should contain a link to AI Settings
-      expect(screen.getByRole('link', { name: /ai settings/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /send message/i })).toBeDisabled();
     });
 
-    it('shows an error Alert (not the AI one) for other errors', () => {
-      mockUseSearch.mockReturnValue({
-        ...defaultSearchMock(),
-        error: 'Some other error occurred',
-      } as any);
-
-      render(<SearchPage />);
-
-      const alert = screen.getByRole('alert');
-      expect(alert).toBeInTheDocument();
-      expect(alert.textContent).toContain('Some other error occurred');
-      // No AI settings link for generic errors
-      expect(screen.queryByRole('link', { name: /ai settings/i })).not.toBeInTheDocument();
-    });
-
-    it('renders a warning alert for the not-configured error variant', () => {
-      // The error contains "not configured" so it should trigger the warning variant
-      mockUseSearch.mockReturnValue({
-        ...defaultSearchMock(),
-        error: 'ai search is not configured by the admin',
-      } as any);
-
-      render(<SearchPage />);
-
-      // Should be a warning (not an error severity) per the page logic
-      const alert = screen.getByRole('alert');
-      expect(alert).toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  describe('Chat tab', () => {
-    it('switches to chat view when Chat tab is clicked', async () => {
+    it('send button becomes enabled when input has text', async () => {
       const user = userEvent.setup();
       render(<SearchPage />);
 
-      await user.click(screen.getByRole('tab', { name: /chat/i }));
+      const input = screen.getByRole('textbox', { name: /conversational search input/i });
+      await user.type(input, 'hello');
 
-      await waitFor(() => {
-        // The chat textarea placeholder is the key indicator
-        expect(
-          screen.getByPlaceholderText(/ask about your memories/i),
-        ).toBeInTheDocument();
-      });
+      expect(screen.getByRole('button', { name: /send message/i })).not.toBeDisabled();
     });
+  });
 
-    it('Chat tab becomes selected after clicking it', async () => {
-      const user = userEvent.setup();
+  describe('Explore rows', () => {
+    it('shows People section when people are available', () => {
+      mockUsePeople.mockReturnValue({
+        ...defaultPeopleMock(),
+        data: {
+          items: [
+            { id: 'p-1', name: 'Alice', isUnlabeled: false, faceCount: 3, coverFace: null, createdAt: '', updatedAt: '', favorite: false },
+          ],
+          meta: { page: 1, pageSize: 100, totalItems: 1, totalPages: 1 },
+        },
+      } as any);
+
       render(<SearchPage />);
 
-      await user.click(screen.getByRole('tab', { name: /chat/i }));
-
-      await waitFor(() => {
-        expect(screen.getByRole('tab', { name: /chat/i })).toHaveAttribute('aria-selected', 'true');
-      });
+      // People section header
+      expect(screen.getByText('People')).toBeInTheDocument();
     });
 
-    it('hides the Advanced field inputs after switching to Chat tab', async () => {
-      mockUseSearch.mockReturnValue({
-        ...defaultSearchMock(),
-        fields: [{ key: 'tag', label: 'Tag', type: 'string', description: 'by tag' }],
-      } as any);
+    it('shows Places and Tags explore row headers', () => {
+      render(<SearchPage />);
+      expect(screen.getByText('Places')).toBeInTheDocument();
+      expect(screen.getByText('Tags')).toBeInTheDocument();
+    });
+  });
+
+  describe('Conversational thread', () => {
+    it('shows New search button after sending a message', async () => {
+      const { streamAgent } = await import('../../services/searchAgentStream');
+      vi.mocked(streamAgent).mockImplementation(async (_body, handlers) => {
+        handlers.onToken?.('Hello from assistant');
+        handlers.onDone?.();
+      });
 
       const user = userEvent.setup();
       render(<SearchPage />);
 
-      // Verify tag input is present first
-      expect(screen.getByRole('textbox', { name: /tag/i })).toBeInTheDocument();
-
-      await user.click(screen.getByRole('tab', { name: /chat/i }));
-
-      await waitFor(() => {
-        expect(screen.queryByRole('textbox', { name: /tag/i })).not.toBeInTheDocument();
-      });
-    });
-
-    it('switching back to Advanced tab shows field inputs again', async () => {
-      mockUseSearch.mockReturnValue({
-        ...defaultSearchMock(),
-        fields: [{ key: 'tag', label: 'Tag', type: 'string', description: 'by tag' }],
-      } as any);
-
-      const user = userEvent.setup();
-      render(<SearchPage />);
-
-      await user.click(screen.getByRole('tab', { name: /chat/i }));
-      await user.click(screen.getByRole('tab', { name: /advanced/i }));
+      const input = screen.getByRole('textbox', { name: /conversational search input/i });
+      await user.type(input, 'show me photos');
+      await user.click(screen.getByRole('button', { name: /send message/i }));
 
       await waitFor(() => {
-        expect(screen.getByRole('textbox', { name: /tag/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /new search/i })).toBeInTheDocument();
       });
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  describe('Loading state', () => {
-    it('shows a loading spinner while fields are loading', () => {
-      mockUseSearch.mockReturnValue({
-        ...defaultSearchMock(),
-        isLoadingFields: true,
-        fields: [],
-      } as any);
-
-      render(<SearchPage />);
-
-      expect(screen.getByRole('progressbar')).toBeInTheDocument();
     });
   });
 });

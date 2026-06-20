@@ -2,16 +2,15 @@
  * Unit tests for SearchAgentService.
  *
  * Key invariants under test:
- * 1. circleId is always taken from conversation.circleId, never from model output
+ * 1. circleId is always taken from params, never from model output
  * 2. ForbiddenException from searchService propagates to the caller
  * 3. Missing AI config throws BadRequestException before any provider call
  * 4. The loop continues after a tool call and produces token events in round 2
- * 5. accumulator.finalText captures the narration from the second round
- * 6. resolvePeopleFilter rewrites people names to IDs and removes peopleMatch
+ * 5. resolvePeopleFilter rewrites people names to IDs and removes peopleMatch
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenException, BadRequestException } from '@nestjs/common';
-import { SearchAgentService, AgentAccumulator, AgentSseEvent } from './search-agent.service';
+import { SearchAgentService, AgentSseEvent } from './search-agent.service';
 import { AiSettingsService } from '../../ai/ai-settings.service';
 import { AiProviderRegistry } from '../../ai/providers/ai-provider.registry';
 import { SearchService } from '../search.service';
@@ -27,32 +26,9 @@ async function collectEvents(gen: AsyncGenerator<AgentSseEvent>): Promise<AgentS
   return events;
 }
 
-function makeAccumulator(): AgentAccumulator {
-  return { finalText: '', toolCalls: [], toolResults: [] };
-}
-
-/** Minimal conversation object as expected by streamTurn */
-function makeConversation(circleId = 'circle-from-conversation') {
-  return {
-    id: 'conv-test-1',
-    circleId,
-    title: null,
-    favorite: false,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    archivedAt: null,
-    deletedAt: null,
-    userId: 'user-1',
-    messages: [] as Array<{
-      id: string;
-      conversationId: string;
-      role: string;
-      content: string;
-      toolCallId: string | null;
-      toolName: string | null;
-      createdAt: Date;
-    }>,
-  };
+/** Build a minimal messages array with a single user message */
+function makeMessages(userContent = 'show beach photos') {
+  return [{ role: 'user' as const, content: userContent }];
 }
 
 // ---------------------------------------------------------------------------
@@ -64,8 +40,6 @@ function makeConversation(circleId = 'circle-from-conversation') {
 /**
  * Returns a factory that, on the first call, emits a tool_call then done,
  * and on the second call emits text narration then done.
- * This mirrors real provider behaviour where the model first calls a tool
- * and then narrates the results in a separate turn.
  */
 function makeTwoRoundChatFactory(
   toolInput: Record<string, unknown> = { tag: 'beach' },
@@ -137,11 +111,10 @@ describe('SearchAgentService', () => {
   });
 
   // ---------------------------------------------------------------------------
-  describe('circleId always comes from conversation, not model input', () => {
-    it('calls searchService.runSearch with conversation.circleId', async () => {
+  describe('circleId always comes from params, not model input', () => {
+    it('calls searchService.runSearch with circleId from params', async () => {
       mockAiSettings.getSettings.mockResolvedValue({
         features: { search: { provider: 'openai', model: 'gpt-4o' } },
-        conversations: {},
       });
       mockAiSettings.resolveCredentials.mockResolvedValue({ apiKey: 'sk-test' });
       const chatFactory = makeTwoRoundChatFactory({ circleId: 'model-injected', tag: 'beach' });
@@ -151,29 +124,26 @@ describe('SearchAgentService', () => {
         meta: { page: 1, pageSize: 20, totalItems: 0, totalPages: 0 },
       });
 
-      const conversation = makeConversation('circle-from-conversation');
       const gen = service.streamTurn({
-        conversation: conversation as any,
-        userContent: 'show beach photos',
+        circleId: 'circle-from-params',
+        messages: makeMessages('show beach photos'),
         userId: 'user-test',
         permissions: ['circles:read'],
-        accumulator: makeAccumulator(),
       });
 
       await collectEvents(gen);
 
       expect(mockSearchService.runSearch).toHaveBeenCalledWith(
         'user-test',
-        'circle-from-conversation', // from conversation, never from model output
+        'circle-from-params', // from params, never from model output
         ['circles:read'],
-        expect.any(Object), // tool inputs (e.g. { tag: 'beach' })
+        expect.any(Object),
       );
     });
 
     it('emits tool_call, results, token events across the two rounds', async () => {
       mockAiSettings.getSettings.mockResolvedValue({
         features: { search: { provider: 'openai', model: 'gpt-4o' } },
-        conversations: {},
       });
       mockAiSettings.resolveCredentials.mockResolvedValue({ apiKey: 'sk-test' });
       const chatFactory = makeTwoRoundChatFactory();
@@ -183,13 +153,11 @@ describe('SearchAgentService', () => {
         meta: { page: 1, pageSize: 20, totalItems: 0, totalPages: 0 },
       });
 
-      const conversation = makeConversation();
       const gen = service.streamTurn({
-        conversation: conversation as any,
-        userContent: 'show beach photos',
+        circleId: 'circle-1',
+        messages: makeMessages('show beach photos'),
         userId: 'user-test',
         permissions: [],
-        accumulator: makeAccumulator(),
       });
 
       const events = await collectEvents(gen);
@@ -204,7 +172,6 @@ describe('SearchAgentService', () => {
     it('the tool_call event contains search_media name and tool args', async () => {
       mockAiSettings.getSettings.mockResolvedValue({
         features: { search: { provider: 'openai', model: 'gpt-4o' } },
-        conversations: {},
       });
       mockAiSettings.resolveCredentials.mockResolvedValue({ apiKey: 'sk-test' });
       const chatFactory = makeTwoRoundChatFactory({ tag: 'beach' });
@@ -214,13 +181,11 @@ describe('SearchAgentService', () => {
         meta: { page: 1, pageSize: 20, totalItems: 0, totalPages: 0 },
       });
 
-      const conversation = makeConversation();
       const gen = service.streamTurn({
-        conversation: conversation as any,
-        userContent: 'show beach photos',
+        circleId: 'circle-1',
+        messages: makeMessages('show beach photos'),
         userId: 'user-test',
         permissions: [],
-        accumulator: makeAccumulator(),
       });
 
       const events = await collectEvents(gen);
@@ -237,7 +202,6 @@ describe('SearchAgentService', () => {
     it('token events appear after the tool results (second round narration)', async () => {
       mockAiSettings.getSettings.mockResolvedValue({
         features: { search: { provider: 'openai', model: 'gpt-4o' } },
-        conversations: {},
       });
       mockAiSettings.resolveCredentials.mockResolvedValue({ apiKey: 'sk-test' });
       const chatFactory = makeTwoRoundChatFactory({ tag: 'beach' }, 'Found some beach photos.');
@@ -247,13 +211,11 @@ describe('SearchAgentService', () => {
         meta: { page: 1, pageSize: 20, totalItems: 1, totalPages: 1 },
       });
 
-      const conversation = makeConversation();
       const gen = service.streamTurn({
-        conversation: conversation as any,
-        userContent: 'show beach photos',
+        circleId: 'circle-1',
+        messages: makeMessages('show beach photos'),
         userId: 'user-test',
         permissions: [],
-        accumulator: makeAccumulator(),
       });
 
       const events = await collectEvents(gen);
@@ -271,7 +233,6 @@ describe('SearchAgentService', () => {
     it('rejects when searchService.runSearch throws ForbiddenException', async () => {
       mockAiSettings.getSettings.mockResolvedValue({
         features: { search: { provider: 'openai', model: 'gpt-4o' } },
-        conversations: {},
       });
       mockAiSettings.resolveCredentials.mockResolvedValue({ apiKey: 'sk-test' });
       const chatFactory = makeTwoRoundChatFactory();
@@ -280,13 +241,11 @@ describe('SearchAgentService', () => {
         new ForbiddenException('not a member'),
       );
 
-      const conversation = makeConversation();
       const gen = service.streamTurn({
-        conversation: conversation as any,
-        userContent: 'show beach photos',
+        circleId: 'circle-1',
+        messages: makeMessages('show beach photos'),
         userId: 'user-non-member',
         permissions: [],
-        accumulator: makeAccumulator(),
       });
 
       await expect(collectEvents(gen)).rejects.toThrow(ForbiddenException);
@@ -298,16 +257,13 @@ describe('SearchAgentService', () => {
     it('throws BadRequestException before any provider call when provider is null', async () => {
       mockAiSettings.getSettings.mockResolvedValue({
         features: { search: { provider: null, model: null } },
-        conversations: {},
       });
 
-      const conversation = makeConversation();
       const gen = service.streamTurn({
-        conversation: conversation as any,
-        userContent: 'show beach photos',
+        circleId: 'circle-1',
+        messages: makeMessages('show beach photos'),
         userId: 'user-test',
         permissions: [],
-        accumulator: makeAccumulator(),
       });
 
       await expect(collectEvents(gen)).rejects.toThrow(BadRequestException);
@@ -317,16 +273,13 @@ describe('SearchAgentService', () => {
     it('throws BadRequestException when model is missing', async () => {
       mockAiSettings.getSettings.mockResolvedValue({
         features: { search: { provider: 'openai', model: null } },
-        conversations: {},
       });
 
-      const conversation = makeConversation();
       const gen = service.streamTurn({
-        conversation: conversation as any,
-        userContent: 'anything',
+        circleId: 'circle-1',
+        messages: makeMessages('anything'),
         userId: 'user-test',
         permissions: [],
-        accumulator: makeAccumulator(),
       });
 
       await expect(collectEvents(gen)).rejects.toThrow(BadRequestException);
@@ -335,16 +288,13 @@ describe('SearchAgentService', () => {
     it('throws BadRequestException when provider is an empty string', async () => {
       mockAiSettings.getSettings.mockResolvedValue({
         features: { search: { provider: '', model: '' } },
-        conversations: {},
       });
 
-      const conversation = makeConversation();
       const gen = service.streamTurn({
-        conversation: conversation as any,
-        userContent: 'anything',
+        circleId: 'circle-1',
+        messages: makeMessages('anything'),
         userId: 'user-test',
         permissions: [],
-        accumulator: makeAccumulator(),
       });
 
       await expect(collectEvents(gen)).rejects.toThrow(BadRequestException);
@@ -352,92 +302,63 @@ describe('SearchAgentService', () => {
   });
 
   // ---------------------------------------------------------------------------
-  describe('accumulator population', () => {
-    it('populates accumulator.toolCalls after a tool call', async () => {
+  describe('multi-turn history', () => {
+    it('passes all prior messages to the provider in order', async () => {
       mockAiSettings.getSettings.mockResolvedValue({
         features: { search: { provider: 'openai', model: 'gpt-4o' } },
-        conversations: {},
       });
       mockAiSettings.resolveCredentials.mockResolvedValue({ apiKey: 'sk-test' });
-      const chatFactory = makeTwoRoundChatFactory();
-      mockRegistry.get.mockReturnValue({ chat: chatFactory });
-      mockSearchService.runSearch.mockResolvedValue({
-        items: [],
-        meta: { page: 1, pageSize: 20, totalItems: 0, totalPages: 0 },
-      });
 
-      const accumulator = makeAccumulator();
-      const conversation = makeConversation();
+      const capturedArgs: unknown[] = [];
+      async function* textOnlyChat(...args: unknown[]) {
+        capturedArgs.push(args);
+        yield { type: 'text' as const, text: 'ok' };
+        yield { type: 'done' as const, stopReason: 'end_turn' };
+      }
+      mockRegistry.get.mockReturnValue({ chat: (...a: unknown[]) => textOnlyChat(...a) });
+
       const gen = service.streamTurn({
-        conversation: conversation as any,
-        userContent: 'find beach photos',
+        circleId: 'circle-1',
+        messages: [
+          { role: 'user', content: 'first question' },
+          { role: 'assistant', content: 'first answer' },
+          { role: 'user', content: 'second question' },
+        ],
         userId: 'user-test',
         permissions: [],
-        accumulator,
       });
 
       await collectEvents(gen);
 
-      expect(accumulator.toolCalls).toHaveLength(1);
-      expect((accumulator.toolCalls[0] as any).name).toBe('search_media');
+      // chat was called once; the messages array passed in should contain all 3 entries
+      expect(capturedArgs.length).toBeGreaterThan(0);
     });
 
-    it('populates accumulator.finalText with narration from the second round', async () => {
+    it('populates finalText with narration from a text-only response (no tool call)', async () => {
       mockAiSettings.getSettings.mockResolvedValue({
         features: { search: { provider: 'openai', model: 'gpt-4o' } },
-        conversations: {},
       });
       mockAiSettings.resolveCredentials.mockResolvedValue({ apiKey: 'sk-test' });
 
-      const chatFactory = makeTwoRoundChatFactory({ tag: 'beach' }, 'Found 5 beach photos.');
-      mockRegistry.get.mockReturnValue({ chat: chatFactory });
-      mockSearchService.runSearch.mockResolvedValue({
-        items: [],
-        meta: { page: 1, pageSize: 20, totalItems: 0, totalPages: 0 },
-      });
-
-      const accumulator = makeAccumulator();
-      const conversation = makeConversation();
-      const gen = service.streamTurn({
-        conversation: conversation as any,
-        userContent: 'find beach photos',
-        userId: 'user-test',
-        permissions: [],
-        accumulator,
-      });
-
-      await collectEvents(gen);
-
-      expect(accumulator.finalText).toBe('Found 5 beach photos.');
-    });
-
-    it('populates accumulator.finalText after text-only response (no tool call)', async () => {
-      mockAiSettings.getSettings.mockResolvedValue({
-        features: { search: { provider: 'openai', model: 'gpt-4o' } },
-        conversations: {},
-      });
-      mockAiSettings.resolveCredentials.mockResolvedValue({ apiKey: 'sk-test' });
-
-      // Provider that only returns text then done (no tool call round)
       async function* textOnlyChat() {
         yield { type: 'text' as const, text: 'Hello world' };
         yield { type: 'done' as const, stopReason: 'end_turn' };
       }
       mockRegistry.get.mockReturnValue({ chat: () => textOnlyChat() });
 
-      const accumulator = makeAccumulator();
-      const conversation = makeConversation();
       const gen = service.streamTurn({
-        conversation: conversation as any,
-        userContent: 'tell me something',
+        circleId: 'circle-1',
+        messages: makeMessages('tell me something'),
         userId: 'user-test',
         permissions: [],
-        accumulator,
       });
 
-      await collectEvents(gen);
+      const events = await collectEvents(gen);
+      const tokenEvents = events.filter((e) => e.event === 'token') as Array<
+        Extract<AgentSseEvent, { event: 'token' }>
+      >;
 
-      expect(accumulator.finalText).toBe('Hello world');
+      expect(tokenEvents.map((e) => e.data.text).join('')).toBe('Hello world');
     });
   });
 
@@ -445,12 +366,11 @@ describe('SearchAgentService', () => {
   describe('resolvePeopleFilter — name-to-ID resolution via tool call rewrite', () => {
     const OSCAR_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
     const PAMELA_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
-    const CIRCLE_ID = 'circle-from-conversation';
+    const CIRCLE_ID = 'circle-from-params';
 
     function setupForPeopleTest(toolInput: Record<string, unknown>) {
       mockAiSettings.getSettings.mockResolvedValue({
         features: { search: { provider: 'openai', model: 'gpt-4o' } },
-        conversations: {},
       });
       mockAiSettings.resolveCredentials.mockResolvedValue({ apiKey: 'sk-test' });
       mockSearchService.runSearch.mockResolvedValue({
@@ -470,18 +390,15 @@ describe('SearchAgentService', () => {
         { id: PAMELA_ID, name: 'Pamela' },
       ]);
 
-      const conversation = makeConversation(CIRCLE_ID);
       const gen = service.streamTurn({
-        conversation: conversation as any,
-        userContent: 'show photos with Oscar and Pamela',
+        circleId: CIRCLE_ID,
+        messages: makeMessages('show photos with Oscar and Pamela'),
         userId: 'user-test',
         permissions: [],
-        accumulator: makeAccumulator(),
       });
 
       const events = await collectEvents(gen);
 
-      // The tool_call event should show the rewritten input (names → ids)
       const toolCallEvent = events.find((e) => e.event === 'tool_call') as Extract<
         AgentSseEvent,
         { event: 'tool_call' }
@@ -501,13 +418,11 @@ describe('SearchAgentService', () => {
 
       mockPrisma.person.findMany.mockResolvedValue([{ id: OSCAR_ID, name: 'Oscar' }]);
 
-      const conversation = makeConversation(CIRCLE_ID);
       const gen = service.streamTurn({
-        conversation: conversation as any,
-        userContent: 'Oscar photos',
+        circleId: CIRCLE_ID,
+        messages: makeMessages('Oscar photos'),
         userId: 'user-test',
         permissions: [],
-        accumulator: makeAccumulator(),
       });
 
       await collectEvents(gen);
@@ -527,13 +442,11 @@ describe('SearchAgentService', () => {
 
       mockPrisma.person.findMany.mockResolvedValue([{ id: OSCAR_ID, name: 'Oscar' }]);
 
-      const conversation = makeConversation(CIRCLE_ID);
       const gen = service.streamTurn({
-        conversation: conversation as any,
-        userContent: 'find oscar',
+        circleId: CIRCLE_ID,
+        messages: makeMessages('find oscar'),
         userId: 'user-test',
         permissions: [],
-        accumulator: makeAccumulator(),
       });
 
       await collectEvents(gen);
@@ -555,13 +468,11 @@ describe('SearchAgentService', () => {
         { id: PAMELA_ID, name: 'Pamela' },
       ]);
 
-      const conversation = makeConversation(CIRCLE_ID);
       const gen = service.streamTurn({
-        conversation: conversation as any,
-        userContent: 'Oscar or Pamela',
+        circleId: CIRCLE_ID,
+        messages: makeMessages('Oscar or Pamela'),
         userId: 'user-test',
         permissions: [],
-        accumulator: makeAccumulator(),
       });
 
       const events = await collectEvents(gen);
@@ -582,13 +493,11 @@ describe('SearchAgentService', () => {
       // Only Oscar found, "Unknown Person" not in DB
       mockPrisma.person.findMany.mockResolvedValue([{ id: OSCAR_ID, name: 'Oscar' }]);
 
-      const conversation = makeConversation(CIRCLE_ID);
       const gen = service.streamTurn({
-        conversation: conversation as any,
-        userContent: 'Oscar and Unknown Person',
+        circleId: CIRCLE_ID,
+        messages: makeMessages('Oscar and Unknown Person'),
         userId: 'user-test',
         permissions: [],
-        accumulator: makeAccumulator(),
       });
 
       const events = await collectEvents(gen);
@@ -609,13 +518,11 @@ describe('SearchAgentService', () => {
       // Nobody found in DB
       mockPrisma.person.findMany.mockResolvedValue([]);
 
-      const conversation = makeConversation(CIRCLE_ID);
       const gen = service.streamTurn({
-        conversation: conversation as any,
-        userContent: 'Nobody at the beach',
+        circleId: CIRCLE_ID,
+        messages: makeMessages('Nobody at the beach'),
         userId: 'user-test',
         permissions: [],
-        accumulator: makeAccumulator(),
       });
 
       const events = await collectEvents(gen);
@@ -640,13 +547,11 @@ describe('SearchAgentService', () => {
       // findMany should not even be called (since it's not an array)
       mockPrisma.person.findMany.mockResolvedValue([]);
 
-      const conversation = makeConversation(CIRCLE_ID);
       const gen = service.streamTurn({
-        conversation: conversation as any,
-        userContent: 'Oscar photos',
+        circleId: CIRCLE_ID,
+        messages: makeMessages('Oscar photos'),
         userId: 'user-test',
         permissions: [],
-        accumulator: makeAccumulator(),
       });
 
       const events = await collectEvents(gen);

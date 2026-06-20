@@ -1,272 +1,58 @@
-import { useEffect, useState, useRef } from 'react';
-import { Link as RouterLink, useNavigate } from 'react-router-dom';
+/**
+ * SearchPage — Immich-style Explore + Conversational Search
+ *
+ * Layout:
+ * 1. Top: Prominent search bar (conversational input is the hero)
+ *    - Tune icon button opens AdvancedSearchDialog for deterministic search
+ * 2. Conversation thread (in-memory React state only, no persistence)
+ *    - Messages as bubbles, streaming tokens append in-place
+ *    - Tool call chips shown during stream
+ *    - Media results rendered inline via MediaResultsGrid
+ *    - "New search" button resets messages to []
+ * 3. Advanced (deterministic) search results section (if any from AdvancedSearchDialog)
+ * 4. Explore rows (shown when thread is empty):
+ *    - People: circular avatar row, link to /media?personId=
+ *    - Places: thumbnail tiles, link to /media?locality=
+ *    - Tags: thumbnail tiles, link to /media?tag=
+ */
+
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box,
   Typography,
   Paper,
-  Tabs,
-  Tab,
-  Grid,
   TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  FormControlLabel,
-  Switch,
+  IconButton,
   Button,
   CircularProgress,
   Alert,
-  Pagination,
-  Link,
-  IconButton,
+  Chip,
+  Tooltip,
   Snackbar,
+  Skeleton,
 } from '@mui/material';
 import {
-  Star as StarIcon,
-  StarBorder as StarBorderIcon,
-  Delete as DeleteIcon,
   Send as SendIcon,
   Tune as TuneIcon,
+  Add as AddIcon,
+  Person as PersonIcon,
+  Place as PlaceIcon,
+  LocalOffer as TagIcon,
 } from '@mui/icons-material';
 import { useCircle } from '../hooks/useCircle';
-import { useSearch } from '../hooks/useSearch';
-import { useUserSettings } from '../hooks/useUserSettings';
-import { useConversations } from '../hooks/useConversations';
 import { usePeople } from '../hooks/usePeople';
-import { streamMessage } from '../services/searchStream';
+import { streamAgent } from '../services/searchAgentStream';
+import { getExplorePlaces, getExploreTags } from '../services/media';
+import type { ExploreItem } from '../services/media';
 import { MediaResultsGrid } from '../components/media/MediaResultsGrid';
-import { PersonMultiSelect } from '../components/search/PersonMultiSelect';
+import { PersonAvatar } from '../components/people/PersonAvatar';
+import { AdvancedSearchDialog } from '../components/search/AdvancedSearchDialog';
+import type { ChatMsg } from '../services/searchAgentStream';
 import type { MediaItem, MediaListMeta } from '../types/media';
 
 // ---------------------------------------------------------------------------
-// Advanced search tab
-// ---------------------------------------------------------------------------
-
-function AdvancedSearchTab() {
-  const navigate = useNavigate();
-  const { activeCircle } = useCircle();
-  const { settings } = useUserSettings();
-  const { fields, searchResults, meta, isLoadingFields, isSearching, error, fetchFields, search } =
-    useSearch();
-  const [filterValues, setFilterValues] = useState<Record<string, unknown>>({});
-  const [page, setPage] = useState(1);
-
-  // Apply user's visible-fields preference.
-  // Empty/absent visibleFields means "show all" (default).
-  const visibleFields = settings?.search?.visibleFields ?? [];
-  const fieldsToRender =
-    visibleFields.length > 0
-      ? fields.filter((f) => visibleFields.includes(f.key))
-      : fields;
-
-  useEffect(() => {
-    void fetchFields();
-  }, [fetchFields]);
-
-  const handleApply = async (p = page) => {
-    if (!activeCircle) return;
-    try {
-      const filters: Record<string, unknown> = { ...filterValues };
-      const peopleVal = filterValues['people'] as { ids: string[]; mode: 'all' | 'any' } | undefined;
-      if (!peopleVal || peopleVal.ids.length === 0) {
-        delete filters['people'];
-      }
-      await search({
-        circleId: activeCircle.id,
-        filters,
-        page: p,
-        pageSize: 20,
-      });
-    } catch {
-      // error is set in hook
-    }
-  };
-
-  const handlePageChange = async (_: React.ChangeEvent<unknown>, val: number) => {
-    setPage(val);
-    await handleApply(val);
-  };
-
-  const setFilter = (key: string, value: unknown) => {
-    setFilterValues((prev) => ({ ...prev, [key]: value }));
-  };
-
-  const isAiNotConfigured = error?.toLowerCase().includes('not configured') ?? false;
-
-  return (
-    <Box>
-      {isLoadingFields ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-          <CircularProgress />
-        </Box>
-      ) : (
-        <>
-          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
-            <Button
-              size="small"
-              startIcon={<TuneIcon />}
-              onClick={() => navigate('/settings#search-fields')}
-              sx={{ minHeight: 44 }}
-            >
-              Customize fields
-            </Button>
-          </Box>
-        <Grid container spacing={2} sx={{ mb: 2 }}>
-          {fieldsToRender.map((field) => {
-            if (field.type === 'date-range') {
-              return (
-                <Grid key={field.key} size={{ xs: 12 }}>
-                  <Grid container spacing={2}>
-                    <Grid size={{ xs: 12, sm: 6 }}>
-                      <TextField
-                        label={`${field.label} from`}
-                        type="date"
-                        size="small"
-                        fullWidth
-                        value={(filterValues[`${field.key}_from`] as string) ?? ''}
-                        onChange={(e) => setFilter(`${field.key}_from`, e.target.value)}
-                        slotProps={{ inputLabel: { shrink: true } }}
-                      />
-                    </Grid>
-                    <Grid size={{ xs: 12, sm: 6 }}>
-                      <TextField
-                        label={`${field.label} to`}
-                        type="date"
-                        size="small"
-                        fullWidth
-                        value={(filterValues[`${field.key}_to`] as string) ?? ''}
-                        onChange={(e) => setFilter(`${field.key}_to`, e.target.value)}
-                        slotProps={{ inputLabel: { shrink: true } }}
-                      />
-                    </Grid>
-                  </Grid>
-                </Grid>
-              );
-            }
-
-            if (field.type === 'enum') {
-              return (
-                <Grid key={field.key} size={{ xs: 12, sm: 6, md: 4 }}>
-                  <FormControl size="small" fullWidth>
-                    <InputLabel>{field.label}</InputLabel>
-                    <Select
-                      label={field.label}
-                      value={(filterValues[field.key] as string) ?? ''}
-                      onChange={(e) => setFilter(field.key, e.target.value)}
-                    >
-                      <MenuItem value="">All</MenuItem>
-                      {field.enumValues?.map((v) => (
-                        <MenuItem key={v} value={v}>
-                          {v}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-              );
-            }
-
-            if (field.type === 'boolean') {
-              return (
-                <Grid key={field.key} size={{ xs: 12, sm: 6, md: 4 }}>
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={(filterValues[field.key] as boolean) ?? false}
-                        onChange={(e) => setFilter(field.key, e.target.checked)}
-                        size="small"
-                      />
-                    }
-                    label={field.label}
-                  />
-                </Grid>
-              );
-            }
-
-            if (field.type === 'person-set') {
-              const personValue = (filterValues[field.key] as { ids: string[]; mode: 'all' | 'any' } | undefined)
-                ?? { ids: [], mode: 'all' as const };
-              return (
-                <Grid key={field.key} size={{ xs: 12 }}>
-                  <PersonMultiSelect
-                    circleId={activeCircle?.id ?? ''}
-                    value={personValue}
-                    onChange={(next) => setFilter(field.key, next)}
-                    label={field.label}
-                  />
-                </Grid>
-              );
-            }
-
-            // 'string' | 'geo'
-            return (
-              <Grid key={field.key} size={{ xs: 12, sm: 6, md: 4 }}>
-                <TextField
-                  label={field.label}
-                  size="small"
-                  fullWidth
-                  value={(filterValues[field.key] as string) ?? ''}
-                  onChange={(e) => setFilter(field.key, e.target.value)}
-                />
-              </Grid>
-            );
-          })}
-        </Grid>
-        </>
-      )}
-
-      <Button
-        variant="contained"
-        disabled={!activeCircle || isSearching}
-        onClick={() => void handleApply(1).then(() => setPage(1))}
-        sx={{ mb: 3, minHeight: 44, width: { xs: '100%', sm: 'auto' } }}
-      >
-        {isSearching ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
-        Apply
-      </Button>
-
-      {/* Errors */}
-      {error && !isAiNotConfigured && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
-        </Alert>
-      )}
-      {isAiNotConfigured && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          AI search is not configured. Admins can configure it in{' '}
-          <Link component={RouterLink} to="/admin/ai-settings">
-            AI Settings
-          </Link>
-          .
-        </Alert>
-      )}
-
-      {/* Results */}
-      {searchResults.length > 0 && (
-        <>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            {meta?.totalItems ?? searchResults.length} result(s)
-          </Typography>
-          <MediaResultsGrid items={searchResults} />
-          {meta && meta.totalPages > 1 && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
-              <Pagination
-                count={meta.totalPages}
-                page={page}
-                onChange={(e, val) => void handlePageChange(e, val)}
-                color="primary"
-              />
-            </Box>
-          )}
-        </>
-      )}
-    </Box>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Message bubble
+// MessageBubble
 // ---------------------------------------------------------------------------
 
 interface MessageBubbleProps {
@@ -285,14 +71,16 @@ function MessageBubble({ role, content }: MessageBubbleProps) {
       }}
     >
       <Paper
-        elevation={1}
+        elevation={isUser ? 0 : 1}
         sx={{
           px: 2,
           py: 1,
-          maxWidth: '80%',
+          maxWidth: '85%',
           bgcolor: isUser ? 'primary.main' : 'background.paper',
           color: isUser ? 'primary.contrastText' : 'text.primary',
           borderRadius: 2,
+          border: isUser ? 'none' : 1,
+          borderColor: 'divider',
         }}
       >
         <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
@@ -304,26 +92,56 @@ function MessageBubble({ role, content }: MessageBubbleProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Chat tab
+// ExploreRow — horizontal scrolling row with section header
 // ---------------------------------------------------------------------------
 
-function ChatTab() {
+interface ExploreRowProps {
+  title: string;
+  icon: React.ReactNode;
+  loading: boolean;
+  children: React.ReactNode;
+}
+
+function ExploreRow({ title, icon, loading, children }: ExploreRowProps) {
+  return (
+    <Box sx={{ mb: 3 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+        {icon}
+        <Typography variant="subtitle1" fontWeight={600}>
+          {title}
+        </Typography>
+      </Box>
+      {loading ? (
+        <Box sx={{ display: 'flex', gap: 1.5, overflowX: 'auto', pb: 1 }}>
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton
+              key={i}
+              variant="rectangular"
+              sx={{ width: 96, height: 96, borderRadius: 2, flexShrink: 0 }}
+            />
+          ))}
+        </Box>
+      ) : (
+        <Box sx={{ display: 'flex', gap: 1.5, overflowX: 'auto', pb: 1, '::-webkit-scrollbar': { height: 4 } }}>
+          {children}
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SearchPage
+// ---------------------------------------------------------------------------
+
+export default function SearchPage() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { activeCircle } = useCircle();
-  const {
-    conversations,
-    activeConversation,
-    loading,
-    fetchConversations,
-    loadConversation,
-    createNew,
-    updateConversation,
-    removeConversation,
-  } = useConversations();
+  const { data: peopleData, loading: peopleLoading } = usePeople(activeCircle?.id ?? null);
 
-  const [chatPeople, setChatPeople] = useState<{ ids: string[]; mode: 'all' | 'any' }>({ ids: [], mode: 'all' });
-  const { data: peopleData } = usePeople(activeCircle?.id ?? null);
-
-  const [showArchived, setShowArchived] = useState(false);
+  // Conversational state — IN MEMORY ONLY, intentionally lost on reload
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState('');
@@ -333,41 +151,55 @@ function ChatTab() {
     meta: MediaListMeta;
   } | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
+
+  // Advanced (deterministic) search results
+  const [advancedResults, setAdvancedResults] = useState<MediaItem[] | null>(null);
+  const [advancedTotal, setAdvancedTotal] = useState(0);
+
+  // Advanced dialog
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  // Explore data
+  const [places, setPlaces] = useState<ExploreItem[]>([]);
+  const [tags, setTags] = useState<ExploreItem[]>([]);
+  const [placesLoading, setPlacesLoading] = useState(false);
+  const [tagsLoading, setTagsLoading] = useState(false);
+
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
+  // Fetch explore data when circle changes
   useEffect(() => {
     if (!activeCircle) return;
-    void fetchConversations({
-      circleId: activeCircle.id,
-      archived: showArchived ? undefined : false,
-    });
-  }, [activeCircle, fetchConversations, showArchived]);
+    const id = activeCircle.id;
 
-  // Scroll to bottom when messages change
+    setPlacesLoading(true);
+    getExplorePlaces(id)
+      .then((data) => setPlaces(data))
+      .catch(() => setPlaces([]))
+      .finally(() => setPlacesLoading(false));
+
+    setTagsLoading(true);
+    getExploreTags(id)
+      .then((data) => setTags(data))
+      .catch(() => setTags([]))
+      .finally(() => setTagsLoading(false));
+  }, [activeCircle]);
+
+  // Scroll to bottom when messages or streaming text change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeConversation?.messages, streamingText]);
+  }, [messages, streamingText]);
 
-  const handleSend = async () => {
-    if (!input.trim() || isStreaming || !activeCircle) return;
-    let content = input.trim();
-    if (chatPeople.ids.length > 0 && peopleData) {
-      const names = chatPeople.ids
-        .map((id) => peopleData.items.find((p) => p.id === id)?.name ?? id.slice(0, 8))
-        .join(', ');
-      const modeWord = chatPeople.mode === 'all' ? 'all of these people' : 'any of these people';
-      content = `${content}\n\n(Only include photos containing ${modeWord}: ${names})`;
-    }
+  const handleSend = useCallback(async (overrideInput?: string) => {
+    const text = (overrideInput ?? input).trim();
+    if (!text || isStreaming || !activeCircle) return;
+
     setInput('');
-
-    let convId = activeConversation?.id;
-    if (!convId) {
-      const conv = await createNew(activeCircle.id);
-      convId = conv.id;
-      await loadConversation(convId);
-      await fetchConversations({ circleId: activeCircle.id });
-    }
+    const userMsg: ChatMsg = { role: 'user', content: text };
+    const nextMessages = [...messages, userMsg];
+    setMessages(nextMessages);
 
     setIsStreaming(true);
     setStreamingText('');
@@ -377,22 +209,33 @@ function ChatTab() {
     const abort = new AbortController();
     abortRef.current = abort;
 
+    let finalText = '';
+
     try {
-      await streamMessage(
-        convId,
-        content,
+      await streamAgent(
+        { circleId: activeCircle.id, messages: nextMessages },
         {
-          onToken: (text) => setStreamingText((prev) => prev + text),
-          onToolCall: (data) =>
-            setStreamingToolCalls((prev) => [...prev, data.name]),
-          onResults: (data) => setStreamingResults(data),
-          onError: (data) => setChatError(data.message),
-          onDone: async () => {
-            await loadConversation(convId!);
-            await fetchConversations({ circleId: activeCircle.id });
+          onToken: (chunk) => {
+            finalText += chunk;
+            setStreamingText((prev) => prev + chunk);
+          },
+          onToolCall: (data) => {
+            setStreamingToolCalls((prev) => [...prev, data.name]);
+          },
+          onResults: (data) => {
+            setStreamingResults(data);
+          },
+          onDone: () => {
+            // Commit the streamed assistant message to state
+            if (finalText) {
+              setMessages((prev) => [...prev, { role: 'assistant', content: finalText }]);
+            }
             setStreamingText('');
             setStreamingToolCalls([]);
             setStreamingResults(null);
+          },
+          onError: (data) => {
+            setChatError(data.message);
           },
         },
         abort.signal,
@@ -405,7 +248,21 @@ function ChatTab() {
       setIsStreaming(false);
       abortRef.current = null;
     }
-  };
+  }, [activeCircle, input, isStreaming, messages]);
+
+  // Support ?q= query param to kick off an initial search
+  useEffect(() => {
+    const q = searchParams.get('q');
+    if (q && !isStreaming && messages.length === 0) {
+      setInput(q);
+      // Kick off after a tick so input state is set
+      setTimeout(() => {
+        void handleSend(q);
+      }, 0);
+    }
+    // Only run on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -414,201 +271,377 @@ function ChatTab() {
     }
   };
 
+  const handleNewSearch = () => {
+    if (isStreaming) {
+      abortRef.current?.abort();
+    }
+    setMessages([]);
+    setStreamingText('');
+    setStreamingToolCalls([]);
+    setStreamingResults(null);
+    setAdvancedResults(null);
+    setChatError(null);
+    setInput('');
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const handleAdvancedResults = (items: MediaItem[], total: number) => {
+    setAdvancedResults(items);
+    setAdvancedTotal(total);
+    // Clear chat results so the two result sections don't compete
+    setMessages([]);
+    setStreamingResults(null);
+  };
+
+  const hasConversation = messages.length > 0 || isStreaming;
+  const showExplore = !hasConversation && advancedResults === null;
+  const labeledPeople = (peopleData?.items ?? []).filter((p) => p.name != null).slice(0, 10);
+
+  if (!activeCircle) {
+    return (
+      <Box sx={{ p: { xs: 2, md: 3 } }}>
+        <Alert severity="info">Select a circle to search your memories.</Alert>
+      </Box>
+    );
+  }
+
   return (
-    <Box sx={{ display: 'flex', gap: 2, minHeight: 500 }}>
-      {/* Conversation list sidebar */}
-      <Box
-        sx={{
-          width: 250,
-          flexShrink: 0,
-          display: { xs: 'none', md: 'flex' },
-          flexDirection: 'column',
-          gap: 1,
-        }}
-      >
-        <Button
-          variant="outlined"
+    <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 900, mx: 'auto' }}>
+      {/* ----------------------------------------------------------------- */}
+      {/* Hero search bar */}
+      {/* ----------------------------------------------------------------- */}
+      <Box sx={{ display: 'flex', gap: 1, mb: 3, alignItems: 'flex-end' }}>
+        <TextField
+          inputRef={inputRef}
+          multiline
+          maxRows={4}
+          size="medium"
           fullWidth
-          onClick={() => {
-            if (!activeCircle) return;
-            void createNew(activeCircle.id).then((conv) => {
-              void loadConversation(conv.id);
-              void fetchConversations({ circleId: activeCircle.id });
-            });
+          placeholder="Search your memories…"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={isStreaming}
+          aria-label="Conversational search input"
+          sx={{
+            '& .MuiOutlinedInput-root': {
+              borderRadius: 3,
+            },
           }}
-          disabled={!activeCircle || loading}
-        >
-          New Conversation
-        </Button>
-
-        <FormControlLabel
-          control={
-            <Switch
-              size="small"
-              checked={showArchived}
-              onChange={(e) => setShowArchived(e.target.checked)}
-            />
-          }
-          label="Show archived"
         />
-
-        <Box sx={{ overflowY: 'auto', flex: 1 }}>
-          {conversations.map((conv) => (
-            <Paper
-              key={conv.id}
-              variant={activeConversation?.id === conv.id ? 'elevation' : 'outlined'}
-              elevation={activeConversation?.id === conv.id ? 3 : undefined}
-              sx={{ p: 1, cursor: 'pointer', mb: 0.5 }}
-              onClick={() => void loadConversation(conv.id)}
-            >
-              <Box
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                }}
-              >
-                <Typography variant="body2" noWrap sx={{ flex: 1 }}>
-                  {conv.title ?? 'New conversation'}
-                </Typography>
-                <Box>
-                  <IconButton
-                    size="small"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void updateConversation(conv.id, { favorite: !conv.favorite });
-                    }}
-                    aria-label={conv.favorite ? 'Unfavorite' : 'Favorite'}
-                  >
-                    {conv.favorite ? (
-                      <StarIcon fontSize="small" />
-                    ) : (
-                      <StarBorderIcon fontSize="small" />
-                    )}
-                  </IconButton>
-                  <IconButton
-                    size="small"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void removeConversation(conv.id);
-                    }}
-                    aria-label="Delete conversation"
-                  >
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
-                </Box>
-              </Box>
-            </Paper>
-          ))}
-        </Box>
+        <Tooltip title="Advanced filter options">
+          <IconButton
+            onClick={() => setAdvancedOpen(true)}
+            aria-label="Open advanced search options"
+            sx={{
+              border: 1,
+              borderColor: 'divider',
+              borderRadius: 2,
+              p: 1.25,
+              minHeight: 44,
+              minWidth: 44,
+              flexShrink: 0,
+            }}
+          >
+            <TuneIcon />
+          </IconButton>
+        </Tooltip>
+        <IconButton
+          color="primary"
+          onClick={() => void handleSend()}
+          disabled={!input.trim() || isStreaming}
+          aria-label="Send message"
+          sx={{
+            bgcolor: 'primary.main',
+            color: 'primary.contrastText',
+            borderRadius: 2,
+            p: 1.25,
+            minHeight: 44,
+            minWidth: 44,
+            flexShrink: 0,
+            '&:hover': { bgcolor: 'primary.dark' },
+            '&:disabled': { bgcolor: 'action.disabledBackground' },
+          }}
+        >
+          {isStreaming ? <CircularProgress size={22} sx={{ color: 'inherit' }} /> : <SendIcon />}
+        </IconButton>
       </Box>
 
-      {/* Main chat area */}
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        {/* Messages */}
-        <Box
-          sx={{
-            flex: 1,
-            overflowY: 'auto',
-            mb: 2,
-            minHeight: 300,
-            maxHeight: 500,
-            p: 1,
-            border: 1,
-            borderColor: 'divider',
-            borderRadius: 1,
-          }}
-        >
-          {!activeConversation && !isStreaming && (
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-              <Typography variant="body2" color="text.secondary">
-                Start a new conversation or select one from the list.
-              </Typography>
-            </Box>
-          )}
+      {/* ----------------------------------------------------------------- */}
+      {/* Conversation thread */}
+      {/* ----------------------------------------------------------------- */}
+      {hasConversation && (
+        <Box sx={{ mb: 3 }}>
+          {/* New search control */}
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+            <Button
+              size="small"
+              startIcon={<AddIcon />}
+              onClick={handleNewSearch}
+              variant="outlined"
+              sx={{ minHeight: 36 }}
+            >
+              New search
+            </Button>
+          </Box>
 
-          {activeConversation?.messages.map((msg) => (
-            <MessageBubble key={msg.id} role={msg.role} content={msg.content} />
-          ))}
+          {/* Messages */}
+          <Box sx={{ display: 'flex', flexDirection: 'column', mb: 2 }}>
+            {messages.map((msg, i) => (
+              <MessageBubble key={i} role={msg.role} content={msg.content} />
+            ))}
 
-          {/* Streaming assistant bubble */}
-          {isStreaming && (
-            <Box>
-              {/* Tool call chips */}
-              {streamingToolCalls.length > 0 && (
-                <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
-                  {streamingToolCalls.map((name, i) => (
-                    <Paper key={i} variant="outlined" sx={{ px: 1, py: 0.25 }}>
-                      <Typography variant="caption" color="text.secondary">
-                        {name}
-                      </Typography>
-                    </Paper>
-                  ))}
-                </Box>
-              )}
+            {/* Streaming assistant response */}
+            {isStreaming && (
+              <Box>
+                {/* Tool call chips */}
+                {streamingToolCalls.length > 0 && (
+                  <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1, pl: 0.5 }}>
+                    {streamingToolCalls.map((name, i) => (
+                      <Chip
+                        key={i}
+                        label={name}
+                        size="small"
+                        variant="outlined"
+                        color="secondary"
+                        sx={{ fontSize: '0.7rem' }}
+                      />
+                    ))}
+                  </Box>
+                )}
 
-              {streamingText && (
-                <MessageBubble role="assistant" content={streamingText + '▍'} />
-              )}
+                {streamingText ? (
+                  <MessageBubble role="assistant" content={streamingText + '▍'} />
+                ) : (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, pl: 1, mb: 1 }}>
+                    <CircularProgress size={16} />
+                    <Typography variant="caption" color="text.secondary">
+                      Searching your memories…
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+            )}
 
-              {!streamingText && (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, pl: 1 }}>
-                  <CircularProgress size={16} />
-                  <Typography variant="caption" color="text.secondary">
-                    Thinking…
-                  </Typography>
-                </Box>
-              )}
-            </Box>
-          )}
+            <div ref={messagesEndRef} />
+          </Box>
 
           {/* Streaming results */}
           {streamingResults && (
             <Box sx={{ mt: 1 }}>
-              <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                 {streamingResults.meta.totalItems} result(s)
               </Typography>
               <MediaResultsGrid items={streamingResults.items} />
             </Box>
           )}
-
-          <div ref={messagesEndRef} />
         </Box>
+      )}
 
-        {/* Composer */}
-        {activeCircle && (
-          <Box sx={{ mb: 1 }}>
-            <PersonMultiSelect
-              circleId={activeCircle.id}
-              value={chatPeople}
-              onChange={setChatPeople}
-              label="Filter by people (optional)"
-            />
+      {/* ----------------------------------------------------------------- */}
+      {/* Advanced (deterministic) search results */}
+      {/* ----------------------------------------------------------------- */}
+      {advancedResults !== null && (
+        <Box sx={{ mb: 3 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              {advancedTotal} filter result(s)
+            </Typography>
+            <Button size="small" onClick={handleNewSearch} sx={{ minHeight: 36 }}>
+              Clear results
+            </Button>
           </Box>
-        )}
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <TextField
-            multiline
-            maxRows={4}
-            size="small"
-            fullWidth
-            placeholder="Ask about your memories…"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={isStreaming || !activeCircle}
-          />
-          <IconButton
-            color="primary"
-            onClick={() => void handleSend()}
-            disabled={!input.trim() || isStreaming || !activeCircle}
-            aria-label="Send message"
-            sx={{ minHeight: 44 }}
-          >
-            {isStreaming ? <CircularProgress size={24} /> : <SendIcon />}
-          </IconButton>
+          {advancedResults.length > 0 ? (
+            <MediaResultsGrid items={advancedResults} />
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              No results matched your filters.
+            </Typography>
+          )}
         </Box>
-      </Box>
+      )}
+
+      {/* ----------------------------------------------------------------- */}
+      {/* Explore rows — visible when no conversation and no advanced results */}
+      {/* ----------------------------------------------------------------- */}
+      {showExplore && (
+        <Box>
+          {/* People */}
+          {(peopleLoading || labeledPeople.length > 0) && (
+            <ExploreRow
+              title="People"
+              icon={<PersonIcon sx={{ color: 'text.secondary' }} />}
+              loading={peopleLoading}
+            >
+              {labeledPeople.map((person) => (
+                <Box
+                  key={person.id}
+                  onClick={() => navigate(`/media?personId=${person.id}`)}
+                  sx={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: 0.5,
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                    width: 80,
+                    '&:hover': { opacity: 0.8 },
+                  }}
+                  role="button"
+                  aria-label={`View photos of ${person.name}`}
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate(`/media?personId=${person.id}`); }}
+                >
+                  <PersonAvatar person={person} size={64} />
+                  <Typography
+                    variant="caption"
+                    align="center"
+                    sx={{
+                      maxWidth: 76,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      display: 'block',
+                    }}
+                  >
+                    {person.name}
+                  </Typography>
+                </Box>
+              ))}
+            </ExploreRow>
+          )}
+
+          {/* Places */}
+          <ExploreRow
+            title="Places"
+            icon={<PlaceIcon sx={{ color: 'text.secondary' }} />}
+            loading={placesLoading}
+          >
+            {places.slice(0, 12).map((place) => (
+              <Box
+                key={place.name}
+                onClick={() => navigate(`/media?locality=${encodeURIComponent(place.name)}`)}
+                sx={{
+                  flexShrink: 0,
+                  width: 96,
+                  cursor: 'pointer',
+                  borderRadius: 2,
+                  overflow: 'hidden',
+                  '&:hover': { opacity: 0.85 },
+                }}
+                role="button"
+                aria-label={`Browse photos from ${place.name}`}
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate(`/media?locality=${encodeURIComponent(place.name)}`); }}
+              >
+                <Box
+                  sx={{
+                    width: 96,
+                    height: 96,
+                    bgcolor: 'action.hover',
+                    position: 'relative',
+                    borderRadius: 2,
+                    overflow: 'hidden',
+                  }}
+                >
+                  {place.coverThumbnailUrl ? (
+                    <Box
+                      component="img"
+                      src={place.coverThumbnailUrl}
+                      alt={place.name}
+                      sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                    />
+                  ) : (
+                    <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <PlaceIcon sx={{ color: 'text.disabled', fontSize: 32 }} />
+                    </Box>
+                  )}
+                </Box>
+                <Typography variant="caption" sx={{ display: 'block', mt: 0.5, px: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {place.name}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ px: 0.5 }}>
+                  {place.count}
+                </Typography>
+              </Box>
+            ))}
+            {places.length === 0 && !placesLoading && (
+              <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
+                No places found. Add location data to your media.
+              </Typography>
+            )}
+          </ExploreRow>
+
+          {/* Tags */}
+          <ExploreRow
+            title="Tags"
+            icon={<TagIcon sx={{ color: 'text.secondary' }} />}
+            loading={tagsLoading}
+          >
+            {tags.slice(0, 12).map((tag) => (
+              <Box
+                key={tag.name}
+                onClick={() => navigate(`/media?tag=${encodeURIComponent(tag.name)}`)}
+                sx={{
+                  flexShrink: 0,
+                  width: 96,
+                  cursor: 'pointer',
+                  borderRadius: 2,
+                  overflow: 'hidden',
+                  '&:hover': { opacity: 0.85 },
+                }}
+                role="button"
+                aria-label={`Browse photos tagged ${tag.name}`}
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate(`/media?tag=${encodeURIComponent(tag.name)}`); }}
+              >
+                <Box
+                  sx={{
+                    width: 96,
+                    height: 96,
+                    bgcolor: 'action.hover',
+                    position: 'relative',
+                    borderRadius: 2,
+                    overflow: 'hidden',
+                  }}
+                >
+                  {tag.coverThumbnailUrl ? (
+                    <Box
+                      component="img"
+                      src={tag.coverThumbnailUrl}
+                      alt={tag.name}
+                      sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                    />
+                  ) : (
+                    <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <TagIcon sx={{ color: 'text.disabled', fontSize: 32 }} />
+                    </Box>
+                  )}
+                </Box>
+                <Typography variant="caption" sx={{ display: 'block', mt: 0.5, px: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {tag.name}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ px: 0.5 }}>
+                  {tag.count}
+                </Typography>
+              </Box>
+            ))}
+            {tags.length === 0 && !tagsLoading && (
+              <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
+                No tags yet. Tag your photos to see them here.
+              </Typography>
+            )}
+          </ExploreRow>
+        </Box>
+      )}
+
+      {/* Advanced search dialog */}
+      <AdvancedSearchDialog
+        open={advancedOpen}
+        onClose={() => setAdvancedOpen(false)}
+        circleId={activeCircle.id}
+        onResults={handleAdvancedResults}
+      />
 
       {/* Chat error snackbar */}
       <Snackbar
@@ -620,45 +653,6 @@ function ChatTab() {
           {chatError}
         </Alert>
       </Snackbar>
-    </Box>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// SearchPage — main entry
-// ---------------------------------------------------------------------------
-
-export default function SearchPage() {
-  const { activeCircle } = useCircle();
-  const [tabIndex, setTabIndex] = useState(0);
-
-  if (!activeCircle) {
-    return (
-      <Box sx={{ p: { xs: 2, md: 3 } }}>
-        <Alert severity="info">Select a circle to view media.</Alert>
-      </Box>
-    );
-  }
-
-  return (
-    <Box sx={{ p: { xs: 2, md: 3 } }}>
-      <Typography variant="h5" component="h1" sx={{ mb: 3 }}>
-        Search
-      </Typography>
-
-      <Paper sx={{ mb: 3 }}>
-        <Tabs
-          value={tabIndex}
-          onChange={(_, v: number) => setTabIndex(v)}
-          sx={{ borderBottom: 1, borderColor: 'divider' }}
-        >
-          <Tab label="Advanced" />
-          <Tab label="Chat" />
-        </Tabs>
-      </Paper>
-
-      {tabIndex === 0 && <AdvancedSearchTab />}
-      {tabIndex === 1 && <ChatTab />}
     </Box>
   );
 }

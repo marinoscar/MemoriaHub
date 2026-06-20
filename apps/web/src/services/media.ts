@@ -322,3 +322,21 @@ export async function exportMedia(
   // Revoke after a short delay to ensure the browser has started the download
   setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
 }
+
+// ---------------------------------------------------------------------------
+// Explore — places and tags (for Search/Explore page)
+// ---------------------------------------------------------------------------
+
+export interface ExploreItem {
+  name: string;
+  count: number;
+  coverThumbnailUrl: string | null;
+}
+
+export async function getExplorePlaces(circleId: string): Promise<ExploreItem[]> {
+  return api.get<ExploreItem[]>(`/media/explore/places?circleId=${encodeURIComponent(circleId)}`);
+}
+
+export async function getExploreTags(circleId: string): Promise<ExploreItem[]> {
+  return api.get<ExploreItem[]>(`/media/explore/tags?circleId=${encodeURIComponent(circleId)}`);
+}

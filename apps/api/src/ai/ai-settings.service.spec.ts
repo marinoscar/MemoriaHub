@@ -208,10 +208,6 @@ describe('AiSettingsService', () => {
         search: { provider: null, model: null },
         tagging: { provider: null, model: null },
       });
-      expect(result.conversations).toEqual({
-        archiveAfterDays: 30,
-        deleteAfterArchiveDays: 30,
-      });
     });
 
     it('returns stored feature settings from system settings', async () => {
@@ -219,17 +215,12 @@ describe('AiSettingsService', () => {
       mockSystemSettings.getSettings.mockResolvedValue({
         ai: {
           features: { search: { provider: 'openai', model: 'gpt-4o' } },
-          conversations: { archiveAfterDays: 14, deleteAfterArchiveDays: 7 },
         },
       });
 
       const result = await service.getSettings();
 
       expect(result.features).toEqual({ search: { provider: 'openai', model: 'gpt-4o' } });
-      expect(result.conversations).toEqual({
-        archiveAfterDays: 14,
-        deleteAfterArchiveDays: 7,
-      });
     });
   });
 

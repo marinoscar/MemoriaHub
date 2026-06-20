@@ -2,10 +2,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
+| **Version** | 2.0 |
 | **Last Updated** | June 2026 |
 | **Status** | Implemented |
-| **Branch** | `feat/ai-search` |
+| **Branch** | `feat/ui-immich-overhaul` |
 
 ---
 
@@ -17,12 +17,11 @@
 4. [AI Provider Abstraction](#4-ai-provider-abstraction)
 5. [Agent Tool-Calling Loop](#5-agent-tool-calling-loop)
 6. [SSE Streaming Protocol](#6-sse-streaming-protocol)
-7. [Conversation Lifecycle](#7-conversation-lifecycle)
-8. [Security Model](#8-security-model)
-9. [How to Add a New Search Dimension](#9-how-to-add-a-new-search-dimension)
-10. [How to Add a New AI Provider](#10-how-to-add-a-new-ai-provider)
-11. [Endpoint and Permission Reference](#11-endpoint-and-permission-reference)
-12. [Database Schema](#12-database-schema)
+7. [Security Model](#7-security-model)
+8. [How to Add a New Search Dimension](#8-how-to-add-a-new-search-dimension)
+9. [How to Add a New AI Provider](#9-how-to-add-a-new-ai-provider)
+10. [Endpoint and Permission Reference](#10-endpoint-and-permission-reference)
+11. [Database Schema](#11-database-schema)
 
 ---
 
@@ -39,18 +38,22 @@ The [VISION.MD](../../VISION.MD) calls out two future search enrichment capabili
 > **Search by Person** — face recognition so users can find photos of specific family members  
 > **Search by Objects and Scenes** — object detection so users can search based on what appears in a photo
 
-Those capabilities require an enrichment pipeline (Phase 09). This feature delivers the conversational search layer that will expose them once the enrichment data exists — without changing the search architecture. The registry-based design means adding face recognition later is a one-line change (see [Section 9](#9-how-to-add-a-new-search-dimension)).
+Those capabilities require an enrichment pipeline (Phase 09). This feature delivers the conversational search layer that will expose them once the enrichment data exists — without changing the search architecture. The registry-based design means adding face recognition later is a one-line change (see [Section 8](#8-how-to-add-a-new-search-dimension)).
 
 ### Intended Outcome
 
-Two complementary search modes are now available:
+Two complementary search modes are available:
 
 | Mode | Endpoint | Use Case |
 |------|----------|----------|
 | **Deterministic** | `POST /api/search` | Precise, machine-generated queries (frontend filter builder, CLI) |
-| **Agentic / Conversational** | `POST /api/search/conversations/:id/messages` | Natural-language queries with multi-turn refinement, streamed via SSE |
+| **Agentic** | `POST /api/search/agent` | Natural-language queries with multi-turn refinement, streamed via SSE |
 
 Both modes are powered by the same `SearchableFieldRegistry` and `buildWhereFromFields` helper, which guarantees they never drift apart.
+
+### Stateless Design
+
+Agentic search is **stateless on the server**. No conversation rows, message rows, or history is persisted to the database. The client (frontend or any API consumer) is responsible for maintaining message history in memory and sending the full history with each request. This eliminates the need for conversation lifecycle management and simplifies the server contract to a single SSE endpoint.
 
 ---
 
@@ -61,14 +64,10 @@ Both modes are powered by the same `SearchableFieldRegistry` and `buildWhereFrom
 │                        AI / SEARCH SUBSYSTEM                                │
 │                                                                             │
 │  ┌─────────────────────┐    ┌──────────────────────────────────────────┐   │
-│  │ SearchController    │    │ ConversationsController                  │   │
-│  │ POST /search        │    │ POST   /search/conversations             │   │
-│  │ GET  /search/fields │    │ GET    /search/conversations             │   │
-│  └────────┬────────────┘    │ GET    /search/conversations/:id        │   │
-│           │                 │ PATCH  /search/conversations/:id        │   │
-│           │                 │ DELETE /search/conversations/:id        │   │
-│           │                 │ POST   /search/conversations/:id/msgs   │   │
-│           │                 └──────────────────┬───────────────────────┘   │
+│  │ SearchController    │    │ SearchAgentController                    │   │
+│  │ POST /search        │    │ POST /search/agent                       │   │
+│  │ GET  /search/fields │    │ (stateless SSE — no DB conversation row) │   │
+│  └────────┬────────────┘    └──────────────────┬───────────────────────┘   │
 │           │                                    │                           │
 │           ▼                                    ▼                           │
 │  ┌────────────────────┐    ┌──────────────────────────────────────────┐   │
@@ -114,12 +113,6 @@ Both modes are powered by the same `SearchableFieldRegistry` and `buildWhereFrom
 │  │  GET  /ai/models                  (Admin — ai_settings:read)        │   │
 │  │  PUT  /ai/features/search         (Admin — ai_settings:write)       │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  ConversationLifecycleTask  (daily cron @ 04:00)                   │   │
-│  │  Reads ai.conversations.{archiveAfterDays, deleteAfterArchiveDays}  │   │
-│  │  from system settings. Favorites are exempt.                        │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -146,14 +139,10 @@ apps/api/src/
     ├── media-where.builder.ts            # Leaf where-clause helpers
     ├── dto/
     │   └── search-query.dto.ts
-    ├── agent/
-    │   ├── search-agent.service.ts       # Multi-turn tool-call loop + SSE emitter
-    │   └── search-tool-schema.ts         # Derives search_media tool from registry
-    ├── conversations/
-    │   ├── conversations.controller.ts
-    │   └── conversations.service.ts
-    └── tasks/
-        └── conversation-lifecycle.task.ts
+    └── agent/
+        ├── search-agent.controller.ts    # POST /search/agent (SSE)
+        ├── search-agent.service.ts       # Multi-turn tool-call loop + SSE emitter
+        └── search-tool-schema.ts         # Derives search_media tool from registry
 ```
 
 ---
@@ -200,7 +189,7 @@ The `buildWhere` function delegates to a named leaf helper in `media-where.build
 
 ### How the Registry Powers Both Search Modes
 
-`buildWhereFromFields(circleId, filters)` composes a `Prisma.MediaItemWhereInput` by iterating over the registry's `buildWhere` functions. The deterministic search endpoint calls this directly. The agent's `search_tool_schema.ts` also iterates `SEARCHABLE_FIELDS` to generate the JSON Schema for the `search_media` tool — the tool and the deterministic endpoint always accept and reject the same fields.
+`buildWhereFromFields(circleId, filters)` composes a `Prisma.MediaItemWhereInput` by iterating over the registry's `buildWhere` functions. The deterministic search endpoint calls this directly. The agent's `search-tool-schema.ts` also iterates `SEARCHABLE_FIELDS` to generate the JSON Schema for the `search_media` tool — the tool and the deterministic endpoint always accept and reject the same fields.
 
 ---
 
@@ -259,18 +248,18 @@ Credentials are retrieved from `ai_provider_credentials` (decrypted at query tim
 
 **File:** `apps/api/src/search/agent/search-agent.service.ts`
 
-The `SearchAgentService.streamTurn()` method is an async generator that executes one conversational turn:
+The `SearchAgentService.streamTurn()` method is an async generator that executes one conversational turn. Because search is stateless, the full message history is passed in by the caller on every request — the service never reads from or writes to a database conversation table.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  streamTurn({ conversation, userContent, userId, permissions })     │
+│  streamTurn({ circleId, messages, userId, permissions })            │
 │                                                                     │
 │  1. Load AI settings → providerKey, model                          │
 │  2. Decrypt credentials from DB                                     │
 │  3. Get provider from AiProviderRegistry                            │
 │  4. Build search_media tool def from SEARCHABLE_FIELDS registry     │
-│  5. Reconstruct message history from conversation.messages          │
-│  6. Append new user message                                         │
+│  5. Assert circle viewer membership for circleId                    │
+│  6. Use messages array as-is (client-supplied full history)         │
 │                                                                     │
 │  ┌──────────────── TOOL-CALL LOOP ─────────────────────────────┐   │
 │  │                                                             │   │
@@ -280,12 +269,12 @@ The `SearchAgentService.streamTurn()` method is an async generator that executes
 │  │    'text'      → yield { event: 'token', data: { text } }  │   │
 │  │    'tool_call' (search_media):                              │   │
 │  │      → yield { event: 'tool_call', data: { name, args } }  │   │
-│  │      → searchService.runSearch(userId, conversation.circleId│   │
+│  │      → searchService.runSearch(userId, circleId,           │   │
 │  │                              permissions, toolInput)        │   │
-│  │        NOTE: circleId is ALWAYS from the conversation row   │   │
-│  │        — never from the model's tool input                  │   │
+│  │        NOTE: circleId is ALWAYS from the request body —    │   │
+│  │        the model cannot override it via tool input          │   │
 │  │      → yield { event: 'results', data: searchResult }      │   │
-│  │      → append assistant + tool result messages to history   │   │
+│  │      → append assistant + tool result to in-flight history  │   │
 │  │    'done':                                                  │   │
 │  │      stopReason === 'tool_use' → loop again (continue)      │   │
 │  │      else → break (model finished)                          │   │
@@ -303,14 +292,31 @@ The agent is instructed to:
 - Use the `search_media` tool to translate natural-language requests into filter calls
 - Summarize results: total count, date range, notable locations
 - When no results are found, say so plainly and suggest 1-3 adjacent searches
-- Use conversation history across turns for refinement
-- Operate strictly within the conversation's circle — the `circleId` constraint is enforced server-side
+- Use the message history provided by the client for multi-turn refinement
+- Operate strictly within the `circleId` supplied in the request — the constraint is enforced server-side
 
 ---
 
 ## 6. SSE Streaming Protocol
 
-The `POST /api/search/conversations/:id/messages` endpoint writes raw HTTP response using Fastify's `reply.raw` with `Content-Type: text/event-stream`. All events use the `event: <type>\ndata: <json>\n\n` SSE format.
+The `POST /api/search/agent` endpoint writes raw HTTP response using Fastify's `reply.raw` with `Content-Type: text/event-stream`. All events use the `event: <type>\ndata: <json>\n\n` SSE format.
+
+### Request Body
+
+```json
+{
+  "circleId": "uuid",
+  "messages": [
+    { "role": "user", "content": "Show me photos from Costa Rica last summer" },
+    { "role": "assistant", "content": "I found 42 photos from Costa Rica in July 2024..." },
+    { "role": "user", "content": "Only show the ones from San José" }
+  ]
+}
+```
+
+- `circleId` — required; must be a circle the caller has at least `viewer` membership in
+- `messages` — required; the full conversation history; the last entry must have `role: 'user'`
+- Message history is held in client memory; nothing is persisted server-side
 
 ### Event Types
 
@@ -319,87 +325,16 @@ The `POST /api/search/conversations/:id/messages` endpoint writes raw HTTP respo
 | `token` | `{ text: string }` | A chunk of the model's text response |
 | `tool_call` | `{ name: string, args: Record<string, unknown> }` | The model is calling `search_media` |
 | `results` | `{ items: MediaItem[], meta: PaginationMeta }` | Search results returned by the tool |
-| `done` | `{ messageId: string }` | Stream complete; `messageId` is the persisted DB ID |
+| `done` | `{}` | Stream complete |
 | `error` | `{ message: string }` | Error occurred during streaming |
 
 ### Nginx Buffering
 
 The Nginx configuration must include `proxy_buffering off` (or the API sets `X-Accel-Buffering: no`) for SSE to stream in real time. The controller sets this header on every SSE response.
 
-### Post-Stream Persistence
-
-After the stream closes, the controller:
-
-1. Persists the assistant message (accumulated `finalText`, `toolCalls`, `toolResults`) to `search_messages`
-2. Touches `search_conversations.updated_at`
-3. If the conversation has no title yet, calls `ConversationsService.autoTitle()` — which uses the first user message and assistant response to generate a short title via the AI provider
-
 ---
 
-## 7. Conversation Lifecycle
-
-### States
-
-A `SearchConversation` row moves through these states:
-
-```
-active (archivedAt IS NULL, deletedAt IS NULL)
-    │
-    │  inactive for archiveAfterDays (non-favorite)
-    ▼
-archived (archivedAt IS NOT NULL, deletedAt IS NULL)
-    │
-    │  archived for deleteAfterArchiveDays (non-favorite)
-    ▼
-soft-deleted (deletedAt IS NOT NULL)
-```
-
-Favorites are exempt from both archive and soft-delete.
-
-### System Settings
-
-Lifecycle windows are stored in system settings under the `ai.conversations` key:
-
-```json
-{
-  "ai": {
-    "features": {
-      "search": {
-        "provider": "anthropic",
-        "model": "claude-opus-4-8"
-      }
-    },
-    "conversations": {
-      "archiveAfterDays": 30,
-      "deleteAfterArchiveDays": 30
-    }
-  }
-}
-```
-
-Admins change these via `PATCH /api/system-settings`.
-
-### Daily Cron
-
-**File:** `apps/api/src/search/tasks/conversation-lifecycle.task.ts`
-
-Runs at 04:00 daily (`@Cron(CronExpression.EVERY_DAY_AT_4AM)`):
-
-1. `updateMany` where `archivedAt IS NULL AND favorite = false AND updatedAt < archiveCutoff` → set `archivedAt = now`
-2. `updateMany` where `archivedAt IS NOT NULL AND archivedAt < deleteCutoff AND favorite = false` → set `deletedAt = now`
-
-### User Controls
-
-| Action | Endpoint | Effect |
-|--------|----------|--------|
-| Rename | `PATCH /api/search/conversations/:id` with `{ title }` | Sets title; also prevents auto-title on next turn |
-| Favorite | `PATCH /api/search/conversations/:id` with `{ favorite: true }` | Exempts conversation from archive and delete |
-| Unfavorite | `PATCH /api/search/conversations/:id` with `{ favorite: false }` | Re-enrolls in lifecycle |
-| Delete | `DELETE /api/search/conversations/:id` | Soft-deletes immediately (sets `deletedAt`) |
-
----
-
-## 8. Security Model
+## 7. Security Model
 
 ### AI Provider Key Encryption at Rest
 
@@ -423,11 +358,11 @@ openssl rand -base64 32
 
 ### Circle-Scoped Agent Authorization
 
-The agent's `search_media` tool receives `circleId` from the `SearchConversation` database row — not from the model's tool call input. The tool schema comment explicitly tells the model not to pass `circleId`:
+The agent's `search_media` tool always uses the `circleId` from the request body — not from the model's tool call input. The tool schema comment explicitly tells the model not to pass `circleId`:
 
-> "circleId is always fixed to the current conversation context — do NOT pass it."
+> "circleId is always fixed to the current request context — do NOT pass it."
 
-Before any search executes, `SearchService.runSearch` calls `CircleMembershipService.assertCircleAccess(userId, conversation.circleId, permissions, 'viewer')`. An attacker who crafts a tool call including a different `circleId` value is silently ignored because the service never reads it from tool input.
+Before any search executes, `SearchService.runSearch` calls `CircleMembershipService.assertCircleAccess(userId, circleId, permissions, 'viewer')`. An attacker who crafts a tool call including a different `circleId` value is silently ignored because the service never reads it from tool input.
 
 ### Permission Requirements
 
@@ -450,7 +385,7 @@ No built-in rotation tooling exists today; it is a manual migration step.
 
 ---
 
-## 9. How to Add a New Search Dimension
+## 8. How to Add a New Search Dimension
 
 ### The One-File Rule
 
@@ -487,11 +422,11 @@ import { wherePersonId } from './media-where.builder';
 },
 ```
 
-3. Deploy. Both the deterministic endpoint and the conversational agent now accept `personId` as a filter.
+3. Deploy. Both the deterministic endpoint and the agentic search now accept `personId` as a filter.
 
 ### Worked Example: People / Face Recognition
 
-When face recognition is added (Phase 09 or later), the enrichment pipeline produces `MediaPerson` rows linking a `media_item_id` to a `person_id`. The search integration is:
+When face recognition data is available, the enrichment pipeline produces `MediaPerson` rows linking a `media_item_id` to a `person_id`. The search integration is:
 
 **`apps/api/src/search/media-where.builder.ts`** — add one export:
 
@@ -524,7 +459,7 @@ No changes to the agent service, tool schema builder, controller, or any other f
 
 ---
 
-## 10. How to Add a New AI Provider
+## 9. How to Add a New AI Provider
 
 ### Native Provider (new SDK)
 
@@ -584,7 +519,7 @@ Other OpenAI-compatible providers that work the same way (config only, no new co
 
 ---
 
-## 11. Endpoint and Permission Reference
+## 10. Endpoint and Permission Reference
 
 ### AI Settings (`/api/ai`)
 
@@ -592,7 +527,7 @@ All endpoints in this group require `ROLES.ADMIN` plus the listed permission. Th
 
 | Method | Path | Permission | Body / Query | Description |
 |--------|------|------------|--------------|-------------|
-| `GET` | `/api/ai/settings` | `ai_settings:read` | — | Returns all configured providers (masked `last4`, no ciphertext), known unconfigured providers, active search feature config, and conversation lifecycle settings |
+| `GET` | `/api/ai/settings` | `ai_settings:read` | — | Returns all configured providers (masked `last4`, no ciphertext), known unconfigured providers, and active search feature config |
 | `PUT` | `/api/ai/credentials/:provider` | `ai_settings:write` | `{ apiKey, baseUrl?, enabled? }` | Upsert provider credentials. Key is encrypted at rest. Returns masked summary. |
 | `DELETE` | `/api/ai/credentials/:provider` | `ai_settings:write` | — | Remove provider credentials. Returns `{ deleted: true, provider }`. |
 | `POST` | `/api/ai/test` | `ai_settings:read` | `{ provider, model, apiKey?, baseUrl? }` | Test provider connectivity. Returns `{ ok: boolean, error? }`. |
@@ -606,18 +541,11 @@ All endpoints in this group require `ROLES.ADMIN` plus the listed permission. Th
 | `POST` | `/api/search` | `media:read` + `search:use` | `{ circleId, filters, page?, pageSize?, sort? }` | Execute a deterministic media search using explicit filter criteria. Unknown filter keys return 400. Returns the same paginated envelope as `GET /api/media`. |
 | `GET` | `/api/search/fields` | `search:use` | — | Return the full `SEARCHABLE_FIELDS` registry (key, label, type, description, enumValues). Used by the frontend filter builder and displayed to the agent at tool construction time. |
 
-### Search Conversations (`/api/search/conversations`)
+### Agentic Search (`/api/search/agent`)
 
-All endpoints require `search:use`. The `circleId` used for media authorization always comes from the persisted conversation row, never from request input.
-
-| Method | Path | Permission | Body / Query | Description |
-|--------|------|------------|--------------|-------------|
-| `POST` | `/api/search/conversations` | `search:use` | `{ circleId }` | Create a new conversation. Validates that AI search is configured and the user is a member of the circle. Returns the new conversation object. |
-| `GET` | `/api/search/conversations` | `search:use` | `?circleId=&favorite=&archived=&page=&pageSize=` | List the caller's conversations for a circle. Supports filtering by `favorite` and `archived` state. Returns paginated list. |
-| `GET` | `/api/search/conversations/:id` | `search:use` | — | Get a single conversation with its full message history. Returns 404 if not found or not owned by the caller. |
-| `PATCH` | `/api/search/conversations/:id` | `search:use` | `{ title?, favorite? }` | Update conversation title or favorite flag. Either field is optional. |
-| `DELETE` | `/api/search/conversations/:id` | `search:use` | — | Soft-delete the conversation (sets `deletedAt`). Returns 204 No Content. |
-| `POST` | `/api/search/conversations/:id/messages` | `search:use` | `{ content }` | Send a user message and receive the AI response as an SSE stream. Persists both the user and assistant messages after the stream closes. See [Section 6](#6-sse-streaming-protocol) for event types. |
+| Method | Path | Permission | Body | Description |
+|--------|------|------------|------|-------------|
+| `POST` | `/api/search/agent` | `search:use` | `{ circleId, messages[] }` | Send the full message history and stream the AI response via SSE. `messages` is an array of `{ role: 'user'|'assistant'; content: string }` objects; the last entry must be `role: 'user'`. Circle membership is verified server-side. Nothing is persisted. See [Section 6](#6-sse-streaming-protocol) for event types. |
 
 ### Permissions Summary
 
@@ -625,15 +553,15 @@ All endpoints require `search:use`. The `circleId` used for media authorization 
 |------------|------------|---------|
 | `ai_settings:read` | Admin | View AI provider config, test connectivity, list models |
 | `ai_settings:write` | Admin | Configure provider credentials, set active search model |
-| `search:use` | Admin, Contributor, Viewer | Use deterministic search, create and use conversations |
+| `search:use` | Admin, Contributor, Viewer | Use deterministic search and agentic search |
 
 ---
 
-## 12. Database Schema
+## 11. Database Schema
 
 ### `ai_provider_credentials`
 
-Stores one row per provider (unique by `provider` key).
+Stores one row per provider (unique by `provider` key). This is the only table owned by the AI/search subsystem. No conversation or message data is stored.
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -646,39 +574,3 @@ Stores one row per provider (unique by `provider` key).
 | `updated_by_user_id` | UUID FK → users | Admin who last updated the credential |
 | `created_at` | timestamptz | |
 | `updated_at` | timestamptz | |
-
-### `search_conversations`
-
-One row per user conversation within a circle.
-
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | UUID PK | |
-| `circle_id` | UUID FK → circles | The circle this conversation searches within; used for authz |
-| `user_id` | UUID FK → users | Owner of the conversation |
-| `title` | string? | Set by user or auto-generated; null until first turn completes |
-| `provider` | string | Provider key at conversation creation time |
-| `model` | string | Model ID at conversation creation time |
-| `favorite` | boolean | When true, exempt from archive and delete |
-| `archived_at` | timestamptz? | Set by lifecycle cron; null = active |
-| `deleted_at` | timestamptz? | Soft-delete timestamp |
-| `created_at` | timestamptz | |
-| `updated_at` | timestamptz | Touched after each turn |
-
-Indexes: `circle_id`, `user_id`, `archived_at`, `favorite`, `deleted_at`.
-
-### `search_messages`
-
-One row per message turn within a conversation.
-
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | UUID PK | |
-| `conversation_id` | UUID FK → search_conversations CASCADE | |
-| `role` | string | `user` or `assistant` |
-| `content` | text | Full message text |
-| `tool_calls` | JSON? | Array of `{ id, name, input }` for assistant messages that called tools |
-| `tool_results` | JSON? | Array of `{ toolCallId, result }` for the corresponding search results |
-| `created_at` | timestamptz | |
-
-Index: `conversation_id`.

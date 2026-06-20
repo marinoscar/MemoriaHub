@@ -65,10 +65,6 @@ export class AiSettingsService {
         search: { provider: null, model: null },
         tagging: { provider: null, model: null },
       },
-      conversations: ai?.conversations ?? {
-        archiveAfterDays: 30,
-        deleteAfterArchiveDays: 30,
-      },
     };
   }
 
