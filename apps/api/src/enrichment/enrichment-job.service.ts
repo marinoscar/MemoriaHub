@@ -4,8 +4,8 @@ import { EnrichmentJob, JobStatus, JobReason } from '@prisma/client';
 
 export interface EnqueueInput {
   type: string;
-  mediaItemId: string;
-  circleId: string;
+  mediaItemId?: string | null;
+  circleId?: string | null;
   reason: JobReason;
   priority?: number;
   providerKey?: string;
@@ -20,9 +20,11 @@ export class EnrichmentJobService {
   constructor(private readonly prisma: PrismaService) {}
 
   async enqueue(input: EnqueueInput): Promise<EnrichmentJob> {
-    const { type, mediaItemId, circleId, reason, priority = 0, providerKey, modelVersion, payload } = input;
+    const { type, mediaItemId = null, circleId = null, reason, priority = 0, providerKey, modelVersion, payload } = input;
 
-    // Idempotency: return existing pending/running job of same type for same media item
+    // Idempotency: return existing pending/running job of same type for same media item.
+    // For global jobs (mediaItemId IS NULL), Prisma treats `mediaItemId: null` as IS NULL,
+    // which correctly deduplicates global jobs by type.
     const existing = await this.prisma.enrichmentJob.findFirst({
       where: {
         type,
@@ -32,7 +34,7 @@ export class EnrichmentJobService {
     });
 
     if (existing) {
-      this.logger.debug(`Enrichment job already exists for type="${type}" mediaItemId="${mediaItemId}" (status=${existing.status}); skipping enqueue.`);
+      this.logger.debug(`Enrichment job already exists for type="${type}" mediaItemId="${mediaItemId ?? 'global'}" (status=${existing.status}); skipping enqueue.`);
       return existing;
     }
 
@@ -51,7 +53,7 @@ export class EnrichmentJobService {
       },
     });
 
-    this.logger.log(`Enqueued enrichment job type="${type}" mediaItemId="${mediaItemId}" reason="${reason}" priority=${priority} id=${job.id}`);
+    this.logger.log(`Enqueued enrichment job type="${type}" mediaItemId="${mediaItemId ?? 'global'}" reason="${reason}" priority=${priority} id=${job.id}`);
     return job;
   }
 
