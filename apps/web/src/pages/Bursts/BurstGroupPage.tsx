@@ -146,12 +146,12 @@ function MemberCard({ member, selected, onToggle }: MemberCardProps) {
           </Box>
         )}
         {capturedTime && (
-          <Typography variant="caption" display="block" color="text.secondary">
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
             {capturedTime}
           </Typography>
         )}
         {resolution && (
-          <Typography variant="caption" display="block" color="text.secondary">
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
             {resolution}
           </Typography>
         )}

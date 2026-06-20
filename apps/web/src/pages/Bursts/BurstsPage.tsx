@@ -89,7 +89,6 @@ function BurstGroupCard({ group }: { group: BurstGroupSummary }) {
 }
 
 export default function BurstsPage() {
-  const navigate = useNavigate();
   const { activeCircle, activeCircleId, activeCircleRole } = useCircle();
   const { isAdmin } = usePermissions();
   const { items, isLoading, error, fetchGroups } = useBurstGroups();
