@@ -70,7 +70,9 @@ export class AutoTaggingService {
             ? `MediaItem ${job.mediaItemId} has no storageObject`
             : `MediaItem ${job.mediaItemId} is type ${mediaItem.type}, not photo`;
       this.logger.warn(`AutoTagJob ${job.id}: ${reason}; skipping`);
-      const circleId = mediaItem?.circleId ?? job.circleId;
+      // job.circleId is always a real string for auto_tagging per-item jobs
+      // (the null guard above ensures global/null jobs never reach this handler)
+      const circleId = mediaItem?.circleId ?? (job.circleId as string);
       await this.markFailed(job.mediaItemId, circleId, null, 'unknown', reason);
       return;
     }

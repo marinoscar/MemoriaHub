@@ -2,14 +2,15 @@
  * Unit tests for InsightsController.
  *
  * Verifies handler delegation to InsightsService and the DTO shape returned
- * for both ready and empty states.  Also asserts @Auth metadata wiring
- * (role + permission decorators) using the same Reflect approach as the
- * EnrichmentAdminController spec.
+ * for both ready and empty states, including the new `refresh` state field.
+ * Also verifies POST /admin/insights/refresh enqueues and returns { jobId, state }.
+ * Also asserts @Auth metadata wiring (role + permission decorators).
  *
  * Auth guards are overridden — RBAC enforcement is covered by integration tests.
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
+import { JobStatus } from '@prisma/client';
 import { InsightsController } from './insights.controller';
 import { InsightsService } from './insights.service';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
@@ -22,7 +23,8 @@ import { PERMISSIONS_KEY } from '../auth/decorators/permissions.decorator';
 
 const mockInsightsService = {
   getLatest: jest.fn(),
-  recompute: jest.fn(),
+  getRefreshState: jest.fn(),
+  enqueueRefresh: jest.fn(),
 };
 
 // ---------------------------------------------------------------------------
@@ -50,6 +52,9 @@ function makeReadySnapshot() {
     updatedAt: new Date(),
   };
 }
+
+const idleRefreshState = { state: 'idle' as const, jobId: null, lastError: null };
+const pendingRefreshState = { state: 'pending' as const, jobId: 'job-1', lastError: null };
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -82,6 +87,7 @@ describe('InsightsController', () => {
     it('returns ready status with metrics and timestamps when snapshot exists', async () => {
       const snapshot = makeReadySnapshot();
       mockInsightsService.getLatest.mockResolvedValue(snapshot);
+      mockInsightsService.getRefreshState.mockResolvedValue(idleRefreshState);
 
       const result = await controller.getLatest();
 
@@ -91,30 +97,42 @@ describe('InsightsController', () => {
       expect(result.durationMs).toBe(snapshot.durationMs);
     });
 
-    it('delegates to insightsService.getLatest()', async () => {
+    it('includes the refresh state in the response', async () => {
       mockInsightsService.getLatest.mockResolvedValue(makeReadySnapshot());
+      mockInsightsService.getRefreshState.mockResolvedValue(pendingRefreshState);
+
+      const result = await controller.getLatest();
+
+      expect(result.refresh).toEqual(pendingRefreshState);
+    });
+
+    it('delegates to insightsService.getLatest() and getRefreshState()', async () => {
+      mockInsightsService.getLatest.mockResolvedValue(makeReadySnapshot());
+      mockInsightsService.getRefreshState.mockResolvedValue(idleRefreshState);
 
       await controller.getLatest();
 
       expect(mockInsightsService.getLatest).toHaveBeenCalledTimes(1);
+      expect(mockInsightsService.getRefreshState).toHaveBeenCalledTimes(1);
     });
 
     it('returns empty state when service returns null (no snapshot)', async () => {
       mockInsightsService.getLatest.mockResolvedValue(null);
+      mockInsightsService.getRefreshState.mockResolvedValue(idleRefreshState);
 
       const result = await controller.getLatest();
 
-      expect(result).toEqual({
-        status: 'empty',
-        metrics: null,
-        computedAt: null,
-        durationMs: null,
-      });
+      expect(result.status).toBe('empty');
+      expect(result.metrics).toBeNull();
+      expect(result.computedAt).toBeNull();
+      expect(result.durationMs).toBeNull();
+      expect(result.refresh).toEqual(idleRefreshState);
     });
 
     it('serialises computedAt as an ISO string', async () => {
       const snapshot = makeReadySnapshot();
       mockInsightsService.getLatest.mockResolvedValue(snapshot);
+      mockInsightsService.getRefreshState.mockResolvedValue(idleRefreshState);
 
       const result = await controller.getLatest();
 
@@ -125,6 +143,7 @@ describe('InsightsController', () => {
       const snapshot = makeReadySnapshot();
       (snapshot as any).computedAt = null;
       mockInsightsService.getLatest.mockResolvedValue(snapshot);
+      mockInsightsService.getRefreshState.mockResolvedValue(idleRefreshState);
 
       const result = await controller.getLatest();
 
@@ -137,30 +156,40 @@ describe('InsightsController', () => {
   // =========================================================================
 
   describe('refresh', () => {
-    it('delegates to insightsService.recompute()', async () => {
-      mockInsightsService.recompute.mockResolvedValue(makeReadySnapshot());
+    it('delegates to insightsService.enqueueRefresh() with priority 0', async () => {
+      const job = { id: 'job-uuid', status: JobStatus.pending };
+      mockInsightsService.enqueueRefresh.mockResolvedValue(job);
 
       await controller.refresh();
 
-      expect(mockInsightsService.recompute).toHaveBeenCalledTimes(1);
+      expect(mockInsightsService.enqueueRefresh).toHaveBeenCalledWith(
+        expect.anything(), // JobReason.rerun
+        0,                 // highest priority
+      );
     });
 
-    it('returns ready status with metrics from the freshly computed snapshot', async () => {
-      const snapshot = makeReadySnapshot();
-      mockInsightsService.recompute.mockResolvedValue(snapshot);
+    it('returns jobId and state from the enqueued job', async () => {
+      const job = { id: 'job-uuid-123', status: JobStatus.pending };
+      mockInsightsService.enqueueRefresh.mockResolvedValue(job);
 
       const result = await controller.refresh();
 
-      expect(result.status).toBe('ready');
-      expect(result.metrics).toEqual(snapshot.metrics);
-      expect(result.computedAt).toBe(snapshot.computedAt.toISOString());
-      expect(result.durationMs).toBe(snapshot.durationMs);
+      expect(result).toEqual({ jobId: 'job-uuid-123', state: JobStatus.pending });
     });
 
-    it('propagates errors thrown by insightsService.recompute()', async () => {
-      mockInsightsService.recompute.mockRejectedValue(new Error('compute failed'));
+    it('returns running state when dedup returns an already-running job', async () => {
+      const job = { id: 'job-running', status: JobStatus.running };
+      mockInsightsService.enqueueRefresh.mockResolvedValue(job);
 
-      await expect(controller.refresh()).rejects.toThrow('compute failed');
+      const result = await controller.refresh();
+
+      expect(result.state).toBe(JobStatus.running);
+    });
+
+    it('propagates errors thrown by insightsService.enqueueRefresh()', async () => {
+      mockInsightsService.enqueueRefresh.mockRejectedValue(new Error('enqueue failed'));
+
+      await expect(controller.refresh()).rejects.toThrow('enqueue failed');
     });
   });
 

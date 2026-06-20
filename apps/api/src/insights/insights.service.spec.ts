@@ -2,15 +2,17 @@
  * Unit tests for InsightsService.
  *
  * Verifies: computeMetrics() BigInt-safe serialisation, totalFaces/taggedItems
- * call args, recompute() happy path, error path, and concurrency lock;
- * getLatest() query shape.
+ * call args, runComputation() happy/error paths, enqueueRefresh(), and
+ * getRefreshState(); getLatest() query shape.
  *
- * No database required — PrismaService is fully mocked.
+ * No database required — PrismaService and EnrichmentJobService are fully mocked.
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
+import { JobStatus, JobReason } from '@prisma/client';
 import { InsightsService } from './insights.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import {
   createMockPrismaService,
   MockPrismaService,
@@ -34,6 +36,16 @@ function makeSnapshot(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function makeJob(status: JobStatus, lastError: string | null = null) {
+  return {
+    id: 'job-uuid-1',
+    type: 'storage_insights',
+    status,
+    lastError,
+    createdAt: new Date(),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -41,14 +53,19 @@ function makeSnapshot(overrides: Record<string, unknown> = {}) {
 describe('InsightsService', () => {
   let service: InsightsService;
   let mockPrisma: MockPrismaService;
+  let mockEnrichmentJobService: jest.Mocked<Pick<EnrichmentJobService, 'enqueue'>>;
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
+    mockEnrichmentJobService = {
+      enqueue: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         InsightsService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
       ],
     }).compile();
 
@@ -188,8 +205,6 @@ describe('InsightsService', () => {
 
       await service.computeMetrics();
 
-      // All three must have been called (concurrency is an impl detail;
-      // we just assert each was called exactly once)
       expect(callOrder).toContain('queryRaw');
       expect(callOrder).toContain('faceCount');
       expect(callOrder).toContain('tagCount');
@@ -224,158 +239,150 @@ describe('InsightsService', () => {
   });
 
   // =========================================================================
-  // recompute
+  // runComputation
   // =========================================================================
 
-  describe('recompute', () => {
-    const computingRow = makeSnapshot({ id: 'snap-computing', status: 'computing', computedAt: null, durationMs: null });
-    const readyRow = makeSnapshot({ id: 'snap-computing', status: 'ready' });
+  describe('runComputation', () => {
+    const readyRow = makeSnapshot({ id: 'snap-new', status: 'ready' });
 
     beforeEach(() => {
-      // computeMetrics prerequisites
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([
         { type: 'photo', cnt: 100n, bytes: 1_000_000n },
       ]);
       (mockPrisma.face.count as jest.Mock).mockResolvedValue(0);
       (mockPrisma.mediaTagStatus.count as jest.Mock).mockResolvedValue(0);
-
-      // Snapshot lifecycle
-      (mockPrisma.insightsSnapshot.create as jest.Mock).mockResolvedValue(computingRow);
-      (mockPrisma.insightsSnapshot.update as jest.Mock).mockResolvedValue(readyRow);
+      (mockPrisma.insightsSnapshot.create as jest.Mock).mockResolvedValue(readyRow);
       (mockPrisma.insightsSnapshot.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
     });
 
-    it('creates a computing snapshot row before computing', async () => {
-      await service.recompute();
+    it('creates a ready snapshot row with metrics, computedAt, and durationMs', async () => {
+      await service.runComputation();
 
-      expect(mockPrisma.insightsSnapshot.create).toHaveBeenCalledWith({
-        data: { status: 'computing' },
-      });
+      const createCall = (mockPrisma.insightsSnapshot.create as jest.Mock).mock.calls[0][0];
+      expect(createCall.data.status).toBe('ready');
+      expect(createCall.data.metrics).toBeTruthy();
+      expect(createCall.data.computedAt).toBeInstanceOf(Date);
+      expect(typeof createCall.data.durationMs).toBe('number');
+      expect(createCall.data.durationMs).toBeGreaterThanOrEqual(0);
     });
 
-    it('updates the snapshot to ready with metrics, computedAt, and durationMs', async () => {
-      await service.recompute();
-
-      const updateCall = (mockPrisma.insightsSnapshot.update as jest.Mock).mock.calls[0][0];
-      expect(updateCall.where).toEqual({ id: 'snap-computing' });
-      expect(updateCall.data.status).toBe('ready');
-      expect(updateCall.data.metrics).toBeTruthy();
-      expect(updateCall.data.computedAt).toBeInstanceOf(Date);
-      expect(typeof updateCall.data.durationMs).toBe('number');
-      expect(updateCall.data.durationMs).toBeGreaterThanOrEqual(0);
-    });
-
-    it('deletes all other snapshots after updating to ready', async () => {
-      await service.recompute();
+    it('deletes all other snapshots after creating the ready row', async () => {
+      await service.runComputation();
 
       expect(mockPrisma.insightsSnapshot.deleteMany).toHaveBeenCalledWith({
-        where: { id: { not: 'snap-computing' } },
+        where: { id: { not: readyRow.id } },
       });
     });
 
-    it('returns the updated ready snapshot', async () => {
-      const result = await service.recompute();
+    it('returns the newly created ready snapshot', async () => {
+      const result = await service.runComputation();
 
       expect(result).toEqual(readyRow);
     });
 
-    it('updates snapshot to failed with error string when computeMetrics throws', async () => {
+    it('throws when computeMetrics fails (worker will retry)', async () => {
       (mockPrisma.$queryRaw as jest.Mock).mockRejectedValue(new Error('DB unavailable'));
 
-      await expect(service.recompute()).rejects.toThrow('DB unavailable');
-
-      const updateCall = (mockPrisma.insightsSnapshot.update as jest.Mock).mock.calls[0][0];
-      expect(updateCall.where).toEqual({ id: 'snap-computing' });
-      expect(updateCall.data.status).toBe('failed');
-      expect(typeof updateCall.data.error).toBe('string');
-      expect(updateCall.data.error).toContain('DB unavailable');
+      await expect(service.runComputation()).rejects.toThrow('DB unavailable');
     });
 
-    it('re-throws the error after marking snapshot as failed', async () => {
-      const boom = new Error('compute failure');
-      (mockPrisma.$queryRaw as jest.Mock).mockRejectedValue(boom);
+    it('does NOT write a computing or failed snapshot row (job row owns failure state)', async () => {
+      (mockPrisma.$queryRaw as jest.Mock).mockRejectedValue(new Error('boom'));
 
-      await expect(service.recompute()).rejects.toThrow(boom);
+      await expect(service.runComputation()).rejects.toThrow('boom');
+
+      // Only create was never called in the error path (we throw before create on metrics failure)
+      // No update to a failed status — the job row owns failure state
+      expect(mockPrisma.insightsSnapshot.update).not.toHaveBeenCalled();
     });
+  });
 
-    it('concurrency lock: second concurrent call returns existing snapshot without re-running', async () => {
-      // First call takes long; second call should short-circuit
-      let unlockFirst!: () => void;
-      const firstCompute = new Promise<{ type: string; cnt: bigint; bytes: bigint }[]>((resolve) => {
-        unlockFirst = () => resolve([{ type: 'photo', cnt: 10n, bytes: 100n }]);
+  // =========================================================================
+  // enqueueRefresh
+  // =========================================================================
+
+  describe('enqueueRefresh', () => {
+    it('calls enrichmentJobService.enqueue with type=storage_insights and null scope', async () => {
+      const job = makeJob(JobStatus.pending);
+      mockEnrichmentJobService.enqueue.mockResolvedValue(job as any);
+
+      await service.enqueueRefresh(JobReason.rerun, 0);
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith({
+        type: 'storage_insights',
+        mediaItemId: null,
+        circleId: null,
+        reason: JobReason.rerun,
+        priority: 0,
       });
-      (mockPrisma.$queryRaw as jest.Mock).mockReturnValue(firstCompute);
-
-      const existingSnapshot = makeSnapshot({ id: 'snap-existing' });
-      (mockPrisma.insightsSnapshot.findFirst as jest.Mock).mockResolvedValue(existingSnapshot);
-
-      // Kick off first recompute (it will be stuck waiting for unlockFirst)
-      const firstPromise = service.recompute();
-
-      // Second concurrent call: service.computing is now true
-      const secondResult = await service.recompute();
-
-      // The second call must have returned the existing snapshot, not started a new compute
-      expect(secondResult).toEqual(existingSnapshot);
-      // $queryRaw was called once (only the first compute), not twice
-      expect(mockPrisma.$queryRaw as jest.Mock).toHaveBeenCalledTimes(1);
-
-      // Unblock first compute and let it finish
-      unlockFirst();
-      await firstPromise;
     });
 
-    it('concurrency lock: throws when locked and no existing snapshot', async () => {
-      let unlockFirst!: () => void;
-      const firstCompute = new Promise<{ type: string; cnt: bigint; bytes: bigint }[]>((resolve) => {
-        unlockFirst = () => resolve([{ type: 'photo', cnt: 10n, bytes: 100n }]);
+    it('returns the job returned by enrichmentJobService.enqueue', async () => {
+      const job = makeJob(JobStatus.pending);
+      mockEnrichmentJobService.enqueue.mockResolvedValue(job as any);
+
+      const result = await service.enqueueRefresh(JobReason.backfill, 100);
+
+      expect(result).toEqual(job);
+    });
+  });
+
+  // =========================================================================
+  // getRefreshState
+  // =========================================================================
+
+  describe('getRefreshState', () => {
+    it('returns idle when no job exists', async () => {
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(null);
+
+      const result = await service.getRefreshState();
+
+      expect(result).toEqual({ state: 'idle', jobId: null, lastError: null });
+    });
+
+    it('returns pending with jobId when latest job is pending', async () => {
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(makeJob(JobStatus.pending));
+
+      const result = await service.getRefreshState();
+
+      expect(result).toEqual({ state: 'pending', jobId: 'job-uuid-1', lastError: null });
+    });
+
+    it('returns running with jobId when latest job is running', async () => {
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(makeJob(JobStatus.running));
+
+      const result = await service.getRefreshState();
+
+      expect(result).toEqual({ state: 'running', jobId: 'job-uuid-1', lastError: null });
+    });
+
+    it('returns failed with jobId and lastError when latest job failed', async () => {
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(
+        makeJob(JobStatus.failed, 'DB connection lost'),
+      );
+
+      const result = await service.getRefreshState();
+
+      expect(result).toEqual({ state: 'failed', jobId: 'job-uuid-1', lastError: 'DB connection lost' });
+    });
+
+    it('returns idle when latest job succeeded', async () => {
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(makeJob(JobStatus.succeeded));
+
+      const result = await service.getRefreshState();
+
+      expect(result).toEqual({ state: 'idle', jobId: null, lastError: null });
+    });
+
+    it('queries enrichment_jobs by type=storage_insights ordered by createdAt desc', async () => {
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(null);
+
+      await service.getRefreshState();
+
+      expect(mockPrisma.enrichmentJob.findFirst).toHaveBeenCalledWith({
+        where: { type: 'storage_insights' },
+        orderBy: { createdAt: 'desc' },
       });
-      (mockPrisma.$queryRaw as jest.Mock).mockReturnValue(firstCompute);
-
-      // No existing snapshot
-      (mockPrisma.insightsSnapshot.findFirst as jest.Mock).mockResolvedValue(null);
-
-      // Start first (hangs)
-      const firstPromise = service.recompute();
-
-      // Second concurrent call: locked and no snapshot → throws
-      await expect(service.recompute()).rejects.toThrow(
-        /already in progress/i,
-      );
-
-      // Clean up
-      unlockFirst();
-      await firstPromise;
-    });
-
-    it('releases the lock after successful compute', async () => {
-      await service.recompute();
-
-      // A second sequential call should not be blocked
-      (mockPrisma.insightsSnapshot.create as jest.Mock).mockResolvedValue(
-        makeSnapshot({ id: 'snap-second', status: 'computing' }),
-      );
-      (mockPrisma.insightsSnapshot.update as jest.Mock).mockResolvedValue(
-        makeSnapshot({ id: 'snap-second', status: 'ready' }),
-      );
-
-      // Should not throw "already in progress"
-      await expect(service.recompute()).resolves.toBeDefined();
-    });
-
-    it('releases the lock even when compute fails', async () => {
-      (mockPrisma.$queryRaw as jest.Mock)
-        .mockRejectedValueOnce(new Error('first failure'))
-        .mockResolvedValue([{ type: 'photo', cnt: 10n, bytes: 100n }]);
-
-      await expect(service.recompute()).rejects.toThrow('first failure');
-
-      // Reset create/update mocks for the second call
-      (mockPrisma.insightsSnapshot.create as jest.Mock).mockResolvedValue(computingRow);
-      (mockPrisma.insightsSnapshot.update as jest.Mock).mockResolvedValue(readyRow);
-
-      // The lock should have been released; this must not throw "already in progress"
-      await expect(service.recompute()).resolves.toBeDefined();
     });
   });
 });
