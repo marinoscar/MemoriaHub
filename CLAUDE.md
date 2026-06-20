@@ -328,12 +328,12 @@ Face recognition is per-circle opt-in (default off); see Circle Face Settings en
 - `GET /api/admin/backup/objects` - List objects in the backup destination
 
 ### Admin: Insights (Admin role + system_settings:read / system_settings:write)
-Metrics are precomputed into a snapshot table on a configurable schedule (default every 4 hours); see `storage.insights.refreshIntervalHours` under System Settings. No new permissions were added — the feature reuses the existing system settings permission pair.
-- `GET /api/admin/insights` (system_settings:read) - Return the latest precomputed storage metrics snapshot; `{ status: 'ready'|'empty', metrics|null, computedAt|null, durationMs|null }` — byte fields in `metrics` are STRINGS (BigInt-safe), counts are numbers
-- `POST /api/admin/insights/refresh` (system_settings:write) - Force an immediate recompute and return the fresh snapshot; body-less; always returns `status: 'ready'` on success
+Metrics are precomputed into a snapshot table on a configurable schedule (default every 4 hours); see `storage.insights.refreshIntervalHours` under System Settings. No new permissions were added — the feature reuses the existing system settings permission pair. Computation runs on the shared `enrichment_jobs` queue via the `storage_insights` handler (retries, visible in `/admin/jobs`).
+- `GET /api/admin/insights` (system_settings:read) - Return the latest precomputed storage metrics snapshot plus a `refresh` object describing the in-flight job state; `{ status: 'ready'|'empty', metrics|null, computedAt|null, durationMs|null, refresh: { state: 'idle'|'pending'|'running'|'failed', jobId: uuid|null, lastError: string|null } }` — byte fields in `metrics` are STRINGS (BigInt-safe), counts are numbers
+- `POST /api/admin/insights/refresh` (system_settings:write) - Enqueue a `storage_insights` enrichment job at priority 0 (highest; pre-empts any scheduled job) and return IMMEDIATELY: `{ jobId: uuid, state: 'pending'|'running' }`; body-less; computation is async — poll `GET /api/admin/insights` until `refresh.state` becomes `idle` or `failed`
 
 ### Admin: Job Queue (Admin role + jobs:read / jobs:write)
-An admin dashboard at `/admin/jobs` provides monitoring and control over the generic `enrichment_jobs` queue (used by face detection and all future enrichment handlers).
+An admin dashboard at `/admin/jobs` provides monitoring and control over the generic `enrichment_jobs` queue (used by face detection, storage insights computation, and all future enrichment handlers).
 - `GET /api/admin/jobs/stats` (jobs:read) - Queue stats: total, byStatus, byType breakdown, stuckRunning count
 - `GET /api/admin/jobs?status=&type=&page=&pageSize=` (jobs:read) - Paginated job list with optional status/type filters
 - `POST /api/admin/jobs/:id/retry` (jobs:write) - Reset a single failed/succeeded job to pending (400 if running, 404 if not found)
@@ -485,11 +485,12 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `face_provider_credentials` - Face provider API keys/config (AES-256-GCM encrypted via same key as AI); one row per provider; `last4` exposed; plaintext never stored or returned. For keyless providers (`human`, `compreface`), the credential row (if present) stores only a `baseUrl` override — no API key is set or required.
 - `people` - Per-circle identity records for recognized individuals; supports `mergedIntoId` self-FK for cluster merge audit; `deletedAt` soft-delete
 - `faces` - Individual detected face records with bounding box, confidence, variable-dimension embedding (`Float[]` fallback or pgvector column; 128-d for `compreface` mobilenet, 1024-d for `human` WASM), and `externalFaceId` for Rekognition delegated path; keyed to `mediaItemId` + `circleId`; `manuallyAssigned` flag protects user-labeled faces from re-clustering
+- `enrichment_jobs` - Generic background job queue for all enrichment handlers (face detection, storage insights, etc.); statuses: `pending`, `running`, `succeeded`, `failed`; reasons: `upload`, `rerun`, `backfill`; `media_item_id` and `circle_id` are **NULLABLE** — null values indicate a global/system job that is not scoped to a single media item or circle (e.g. the `storage_insights` handler); idempotency for global jobs deduplicates on `(type, media_item_id IS NULL)`
 - `face_jobs` - Async face-detection job queue (no BullMQ); statuses: `pending`, `running`, `succeeded`, `failed`; reasons: `upload`, `rerun`, `backfill`
 - `media_face_status` - Per-media-item detection status tracking (one row per item); records which provider/model processed the item and when; statuses: `not_processed`, `pending`, `processing`, `processed`, `failed`, `no_faces`
 - `tag_labels` - Global AI tag vocabulary managed by admins; unique `name`; `enabled` flag controls whether a label is included in vision model prompts; labels are not circle-scoped; supports CSV export/import
 - `media_tag_status` - Per-media-item auto-tagging status (one row per item); statuses: `not_processed`, `pending`, `processing`, `processed`, `failed`; records `provider_key`, `model_version`, `tag_count`, `processed_at`, `last_error`
-- `insights_snapshots` - Precomputed global storage metrics snapshot; at most one row survives after each successful recompute (older rows are pruned); statuses: `InsightsSnapshotStatus` enum (`computing` | `ready` | `failed`); `metrics` JSONB holds `{ totalBytes, photoBytes, videoBytes (STRINGS), totalItems, photoCount, videoCount, totalFaces, taggedItems (NUMBERS) }` when `ready`; `computed_at`, `duration_ms`, and `error` track timing and failures
+- `insights_snapshots` - Precomputed global storage metrics snapshot; at most one row survives after each successful recompute (older rows are pruned); statuses: `InsightsSnapshotStatus` enum (`computing` | `ready` | `failed`) — in the queue-based flow the handler writes `ready` directly, so `computing` is not used at runtime; `metrics` JSONB holds `{ totalBytes, photoBytes, videoBytes (STRINGS), totalItems, photoCount, videoCount, totalFaces, taggedItems (NUMBERS) }` when `ready`; `computed_at` and `duration_ms` track timing; in-flight and failure state is tracked on the `enrichment_jobs` row, not here
 
 **Note:** `media_items`, `albums`, and `tags` use `added_by_id` (not `owner_id`) to track the uploading user. Dedup uniqueness for `media_items` is `(circle_id, content_hash)`. Tag names are unique per `(circle_id, name)`. The `media_tags` join table has a `source` column (`manual` | `ai`, default `manual`) that tracks whether a tag was applied by the AI auto-tagging service or by a user manually; AI re-runs are authoritative over `source='ai'` rows only and never modify `source='manual'` rows.
 
@@ -589,13 +590,13 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 - `AUTO_TAG_ENABLED` - Global kill-switch for auto-enqueue on upload; set to `false` to disable for all circles (per-circle opt-in still applies when `true`; default: `true`)
 - `TAG_MAX_IMAGE_DIM` - Maximum image long-edge in pixels before downscaling prior to the vision model call; 1568 matches Anthropic's auto-downscale threshold (default: `1568`)
 
-Note: The enrichment worker shared by both face detection and auto-tagging is controlled by `ENRICHMENT_WORKER_ENABLED` (default: `true`), `ENRICHMENT_JOB_POLL_MS` (default: `5000`), and `ENRICHMENT_WORKER_CONCURRENCY` (default: `1`). The legacy `FACE_WORKER_ENABLED` and `FACE_JOB_POLL_MS` aliases are still respected for backward compatibility.
+Note: The enrichment worker shared by face detection, storage insights computation, and auto-tagging is controlled by `ENRICHMENT_WORKER_ENABLED` (default: `true`), `ENRICHMENT_JOB_POLL_MS` (default: `5000`), and `ENRICHMENT_WORKER_CONCURRENCY` (default: `1`). The legacy `FACE_WORKER_ENABLED` and `FACE_JOB_POLL_MS` aliases are still respected for backward compatibility.
 
 **Storage Insights:**
 
 The refresh cadence for the precomputed storage metrics snapshot is controlled via a system setting (not an environment variable):
 
-- `storage.insights.refreshIntervalHours` — integer, 1–168, default 4; editable in the System Settings admin page. Controls how many hours must elapse between automatic cron-driven recomputes. The cron fires every hour and skips recompute when the configured interval has not yet elapsed. Manual refreshes via `POST /api/admin/insights/refresh` always run immediately regardless of this setting.
+- `storage.insights.refreshIntervalHours` — integer, 1–168, default 4; editable in the System Settings admin page. Controls how many hours must elapse between automatic cron-driven refreshes. The cron (`InsightsRefreshTask`) fires every hour; when the configured interval has elapsed (and no `storage_insights` job is already pending/running), it **enqueues** a `storage_insights` enrichment job at priority 100 (low priority, background). Computation is performed asynchronously by the enrichment worker with up to 3 retries. Manual refreshes via `POST /api/admin/insights/refresh` enqueue a job at priority 0 (highest priority, pre-empts the scheduled job) and return immediately — they do not wait for the compute to finish.
 
 ## Common Patterns
 
