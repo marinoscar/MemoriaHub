@@ -35,7 +35,7 @@ function ThumbnailStrip({ items, emptyText, onSelect }: ThumbnailStripProps) {
           key={item.id}
           component="img"
           src={item.thumbnailUrl ?? undefined}
-          alt={item.title ?? item.originalFilename}
+          alt={item.originalFilename}
           onClick={() => onSelect(item)}
           sx={{
             width: 120,

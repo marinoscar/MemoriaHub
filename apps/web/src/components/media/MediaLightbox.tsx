@@ -282,7 +282,7 @@ export function MediaLightbox({
               noWrap
               sx={{ color: 'white', flex: 1, textAlign: 'center', mx: 1 }}
             >
-              {item.title ?? item.originalFilename}
+              {item.originalFilename}
             </Typography>
 
             <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
@@ -350,7 +350,7 @@ export function MediaLightbox({
                   <VideoPlayer
                     src={downloadUrl}
                     poster={thumbnailUrl}
-                    title={item.title ?? item.originalFilename}
+                    title={item.originalFilename}
                   />
                 </Box>
               ) : (
@@ -374,7 +374,7 @@ export function MediaLightbox({
                   <Box
                     component="img"
                     src={thumbnailUrl}
-                    alt={item.title ?? item.originalFilename}
+                    alt={item.originalFilename}
                     sx={{
                       position: 'absolute',
                       top: 0,
@@ -393,7 +393,7 @@ export function MediaLightbox({
                   <Box
                     component="img"
                     src={fullItem.downloadUrl}
-                    alt={item.title ?? item.originalFilename}
+                    alt={item.originalFilename}
                     onLoad={() => setFullResLoaded(true)}
                     sx={{
                       position: 'absolute',

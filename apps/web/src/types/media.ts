@@ -43,7 +43,6 @@ export interface MediaItem {
   cameraMake: string | null;
   cameraModel: string | null;
   originalFilename: string;
-  title: string | null;
   caption: string | null;
   description: string | null;
   favorite: boolean;
@@ -126,7 +125,6 @@ export interface MediaQueryParams {
 export interface PatchMediaDto {
   capturedAt?: string | null;
   classification?: MediaClassification;
-  title?: string | null;
   caption?: string | null;
   description?: string | null;
   favorite?: boolean;
@@ -145,7 +143,6 @@ export interface RegisterMediaDto {
   capturedAt?: string;
   capturedAtOffset?: number;
   classification?: MediaClassification;
-  title?: string;
   caption?: string;
   description?: string;
   favorite?: boolean;

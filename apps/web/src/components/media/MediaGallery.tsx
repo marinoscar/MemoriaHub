@@ -113,7 +113,7 @@ function GalleryTile({
           <Box
             component="img"
             src={item.thumbnailUrl}
-            alt={item.title ?? item.originalFilename}
+            alt={item.originalFilename}
             onError={() => setImgError(true)}
             sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
           />
