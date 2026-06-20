@@ -15,6 +15,7 @@ export type PeopleFilterValue = z.infer<typeof peopleFilterValueSchema>;
 
 export const searchQuerySchema = z.object({
   circleId: z.string().uuid(),
+  semanticQuery: z.string().min(1).max(512).optional(),
   filters: z
     .record(z.string(), z.unknown())
     .default({})
