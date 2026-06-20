@@ -501,6 +501,8 @@ model MediaItem {
   profileForPeople Person[] @relation("PersonProfileMedia")
   // Auto-Tagging relations
   tagStatus      MediaTagStatus?
+  // Semantic search embedding (1536-d, stored via raw SQL / pgvector)
+  embedding      MediaItemEmbedding?
 
   @@index([circleId])
   @@index([addedById])
@@ -514,6 +516,22 @@ model MediaItem {
   @@index([geoAdmin1])
   @@index([geoLocality])
   @@map("media_items")
+}
+
+// Stores a 1536-d text embedding per media item for semantic (cosine-similarity) search.
+// Kept separate from media_items because Prisma cannot read/write Unsupported vector columns.
+// The embedding column is written and queried exclusively via raw SQL using pgvector operators.
+// circle_id is denormalized here (no FK constraint) for efficient circle-scoped filtering.
+model MediaItemEmbedding {
+  mediaItemId String                      @id @map("media_item_id") @db.Uuid
+  mediaItem   MediaItem                   @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  circleId    String                      @map("circle_id") @db.Uuid
+  embedding   Unsupported("vector(1536)")
+  model       String
+  updatedAt   DateTime                    @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([circleId])
+  @@map("media_item_embedding")
 }
 
 model Album {
