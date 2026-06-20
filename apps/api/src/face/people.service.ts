@@ -742,6 +742,163 @@ export class PeopleService {
   }
 
   // ---------------------------------------------------------------------------
+  // addPersonToMedia
+  // ---------------------------------------------------------------------------
+
+  async addPersonToMedia(
+    mediaItemId: string,
+    userId: string,
+    userPermissions: string[],
+    dto: { personId?: string; name?: string },
+  ): Promise<{ personId: string; personName: string | null; faceId: string; mediaItemId: string }> {
+    // 1. Load media item
+    const mediaItem = await this.prisma.mediaItem.findUnique({
+      where: { id: mediaItemId },
+      select: { id: true, circleId: true, deletedAt: true },
+    });
+    if (!mediaItem || mediaItem.deletedAt) {
+      throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
+    }
+
+    // 2. Assert collaborator access
+    await this.circleMembershipService.assertCircleAccess(
+      userId,
+      mediaItem.circleId,
+      userPermissions,
+      'collaborator' as CircleRole,
+    );
+
+    // 3. Resolve person
+    let person: { id: string; name: string | null };
+    if (dto.personId) {
+      const found = await this.prisma.person.findUnique({
+        where: { id: dto.personId },
+        select: { id: true, name: true, circleId: true, deletedAt: true },
+      });
+      if (!found || found.deletedAt || found.circleId !== mediaItem.circleId) {
+        throw new NotFoundException(`Person ${dto.personId} not found in this circle`);
+      }
+      person = { id: found.id, name: found.name };
+    } else {
+      // find-or-create by case-insensitive name match
+      const existing = await this.prisma.person.findFirst({
+        where: {
+          circleId: mediaItem.circleId,
+          name: { equals: dto.name!, mode: 'insensitive' },
+          deletedAt: null,
+        },
+        select: { id: true, name: true },
+      });
+      if (existing) {
+        person = existing;
+      } else {
+        const created = await this.prisma.person.create({
+          data: {
+            circleId: mediaItem.circleId,
+            addedById: userId,
+            name: dto.name!,
+          },
+          select: { id: true, name: true },
+        });
+        person = created;
+      }
+    }
+
+    // 4. Idempotency check
+    const existingFace = await this.prisma.face.findFirst({
+      where: { mediaItemId, personId: person.id },
+    });
+    if (existingFace) {
+      return { personId: person.id, personName: person.name, faceId: existingFace.id, mediaItemId };
+    }
+
+    // 5. Create manual Face row
+    const face = await this.prisma.face.create({
+      data: {
+        mediaItemId,
+        circleId: mediaItem.circleId,
+        personId: person.id,
+        providerKey: 'manual',
+        modelVersion: 'manual',
+        embedding: [],
+        boundingBox: { x: 0, y: 0, w: 0, h: 0 },
+        confidence: null,
+        manuallyAssigned: true,
+      },
+    });
+
+    // 6. Enqueue auto-tagging if circle has autoTaggingEnabled
+    const circle = await this.prisma.circle.findUnique({
+      where: { id: mediaItem.circleId },
+      select: { autoTaggingEnabled: true },
+    });
+    if (circle?.autoTaggingEnabled) {
+      await this.enqueueAutoTaggingForMediaItems([{ mediaItemId, circleId: mediaItem.circleId }]);
+    }
+
+    this.logger.log(
+      `Manual person association created: person ${person.id} → media ${mediaItemId} by user ${userId}`,
+    );
+
+    return { personId: person.id, personName: person.name, faceId: face.id, mediaItemId };
+  }
+
+  // ---------------------------------------------------------------------------
+  // removePersonFromMedia
+  // ---------------------------------------------------------------------------
+
+  async removePersonFromMedia(
+    mediaItemId: string,
+    personId: string,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{ deleted: number }> {
+    // 1. Load media item
+    const mediaItem = await this.prisma.mediaItem.findUnique({
+      where: { id: mediaItemId },
+      select: { id: true, circleId: true, deletedAt: true },
+    });
+    if (!mediaItem || mediaItem.deletedAt) {
+      throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
+    }
+
+    // 2. Assert collaborator access
+    await this.circleMembershipService.assertCircleAccess(
+      userId,
+      mediaItem.circleId,
+      userPermissions,
+      'collaborator' as CircleRole,
+    );
+
+    // 3. Delete manual Face rows
+    const { count } = await this.prisma.face.deleteMany({
+      where: { mediaItemId, personId, providerKey: 'manual' },
+    });
+
+    // 4. If nothing deleted, 404
+    if (count === 0) {
+      throw new NotFoundException(
+        'No manual association exists for this person on this media item',
+      );
+    }
+
+    // 5. Enqueue auto-tagging if circle has autoTaggingEnabled
+    const circle = await this.prisma.circle.findUnique({
+      where: { id: mediaItem.circleId },
+      select: { autoTaggingEnabled: true },
+    });
+    if (circle?.autoTaggingEnabled) {
+      await this.enqueueAutoTaggingForMediaItems([{ mediaItemId, circleId: mediaItem.circleId }]);
+    }
+
+    this.logger.log(
+      `Manual person association removed: person ${personId} → media ${mediaItemId} by user ${userId}`,
+    );
+
+    return { deleted: count };
+  }
+
+  // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
 
