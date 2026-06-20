@@ -1,9 +1,7 @@
 import { useState } from 'react';
 import {
   Box,
-  Button,
   Typography,
-  Stack,
   Menu,
   MenuItem,
   Dialog,
@@ -11,16 +9,26 @@ import {
   DialogContent,
   DialogActions,
   CircularProgress,
+  Button,
+  IconButton,
+  Tooltip,
+  ListItemIcon,
+  ListItemText,
+  ListSubheader,
+  Divider,
 } from '@mui/material';
 import {
   LocationOn as LocationOnIcon,
   Label as LabelIcon,
   Delete as DeleteIcon,
-  Star as StarIcon,
   Category as CategoryIcon,
   Close as CloseIcon,
-  PhotoAlbum as PhotoAlbumIcon,
   RemoveCircleOutlined as RemoveCircleOutlineIcon,
+  SelectAll as SelectAllIcon,
+  Add as AddIcon,
+  FavoriteBorder as FavoriteBorderIcon,
+  MoreVert as MoreVertIcon,
+  StarBorder as StarBorderIcon,
 } from '@mui/icons-material';
 import type { CircleRole } from '../../types/circles';
 import type { MediaClassification } from '../../types/media';
@@ -31,6 +39,7 @@ interface BulkActionToolbarProps {
   circleId: string;
   activeCircleRole: CircleRole | null;
   onClear: () => void;
+  onSelectAll: () => void;
   onOpenLocation: () => void;
   onOpenTags: () => void;
   onSuccess: (message: string) => void;
@@ -45,6 +54,7 @@ export function BulkActionToolbar({
   circleId,
   activeCircleRole,
   onClear,
+  onSelectAll,
   onOpenLocation,
   onOpenTags,
   onSuccess,
@@ -53,8 +63,7 @@ export function BulkActionToolbar({
   albumMode,
   onRemoveFromAlbum,
 }: BulkActionToolbarProps) {
-  const [classifyAnchor, setClassifyAnchor] = useState<null | HTMLElement>(null);
-  const [favoriteAnchor, setFavoriteAnchor] = useState<null | HTMLElement>(null);
+  const [moreAnchor, setMoreAnchor] = useState<null | HTMLElement>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -65,7 +74,6 @@ export function BulkActionToolbar({
   if (count === 0) return null;
 
   const handleClassify = async (classification: MediaClassification) => {
-    setClassifyAnchor(null);
     setLoading(true);
     try {
       const result = await bulkUpdateMedia({ circleId, ids, set: { classification } });
@@ -78,7 +86,6 @@ export function BulkActionToolbar({
   };
 
   const handleFavorite = async (favorite: boolean) => {
-    setFavoriteAnchor(null);
     setLoading(true);
     try {
       const result = await bulkUpdateMedia({ circleId, ids, set: { favorite } });
@@ -108,139 +115,116 @@ export function BulkActionToolbar({
       <Box
         sx={{
           position: 'sticky',
-          bottom: 80,
-          zIndex: 1200,
-          mx: { xs: -2, md: -3 },
-          px: { xs: 2, md: 3 },
+          top: 64,
+          zIndex: (theme) => theme.zIndex.appBar + 2,
+          mx: { xs: 0, md: 0 },
+          mb: 1.5,
+          px: { xs: 1, sm: 2 },
           py: 1,
-          backgroundColor: 'primary.main',
-          color: 'primary.contrastText',
+          minHeight: 56,
           display: 'flex',
           alignItems: 'center',
           gap: 1,
-          flexWrap: 'wrap',
-          boxShadow: 4,
+          bgcolor: 'background.paper',
+          color: 'text.primary',
+          borderRadius: 2,
+          boxShadow: 3,
         }}
       >
-        <Typography variant="body2" sx={{ fontWeight: 600, mr: 1 }}>
+        {/* Left cluster */}
+        <Tooltip title="Cancel selection">
+          <IconButton aria-label="Cancel selection" onClick={onClear}>
+            <CloseIcon />
+          </IconButton>
+        </Tooltip>
+
+        <Typography variant="subtitle1" sx={{ fontWeight: 700, color: 'primary.main' }}>
           {count} selected
         </Typography>
 
-        <Button
-          size="small"
-          variant="text"
-          sx={{ color: 'inherit', minHeight: 44 }}
-          startIcon={<CloseIcon />}
-          onClick={onClear}
-        >
-          Clear
-        </Button>
+        {/* Spacer */}
+        <Box sx={{ flexGrow: 1 }} />
+
+        {/* Right cluster */}
+        <Tooltip title="Select all">
+          <IconButton aria-label="Select all" onClick={onSelectAll}>
+            <SelectAllIcon />
+          </IconButton>
+        </Tooltip>
 
         {!isViewer && (
-          <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
-            <Button
-              size="small"
-              variant="outlined"
-              sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)', minHeight: 44 }}
-              startIcon={<LocationOnIcon />}
-              onClick={onOpenLocation}
-              disabled={loading}
-            >
-              Set Location
-            </Button>
-
-            <Button
-              size="small"
-              variant="outlined"
-              sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)', minHeight: 44 }}
-              startIcon={<LabelIcon />}
-              onClick={onOpenTags}
-              disabled={loading}
-            >
-              Tags
-            </Button>
-
+          <>
             {onOpenAlbum && (
-              <Button
-                size="small"
-                variant="outlined"
-                sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)', minHeight: 44 }}
-                startIcon={<PhotoAlbumIcon />}
-                onClick={onOpenAlbum}
-                disabled={loading}
-              >
-                Add to Album
-              </Button>
+              <Tooltip title="Add to album">
+                <IconButton aria-label="Add to album" onClick={onOpenAlbum} disabled={loading}>
+                  <AddIcon />
+                </IconButton>
+              </Tooltip>
             )}
 
-            {albumMode && onRemoveFromAlbum && (
-              <Button
-                size="small"
-                variant="outlined"
-                sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)', minHeight: 44 }}
-                startIcon={<RemoveCircleOutlineIcon />}
-                onClick={onRemoveFromAlbum}
+            <Tooltip title="Add to favorites">
+              <IconButton
+                aria-label="Add to favorites"
+                onClick={() => void handleFavorite(true)}
                 disabled={loading}
               >
-                Remove from Album
-              </Button>
-            )}
+                {loading ? <CircularProgress size={20} /> : <FavoriteBorderIcon />}
+              </IconButton>
+            </Tooltip>
 
-            <Button
-              size="small"
-              variant="outlined"
-              sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)', minHeight: 44 }}
-              startIcon={loading ? <CircularProgress size={14} sx={{ color: 'inherit' }} /> : <CategoryIcon />}
-              onClick={(e) => setClassifyAnchor(e.currentTarget)}
-              disabled={loading}
-            >
-              Classification
-            </Button>
-
-            <Button
-              size="small"
-              variant="outlined"
-              sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)', minHeight: 44 }}
-              startIcon={<StarIcon />}
-              onClick={(e) => setFavoriteAnchor(e.currentTarget)}
-              disabled={loading}
-            >
-              Favorite
-            </Button>
-
-            <Button
-              size="small"
-              variant="outlined"
-              sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.5)', minHeight: 44 }}
-              startIcon={<DeleteIcon />}
-              onClick={() => setDeleteConfirmOpen(true)}
-              disabled={loading}
-            >
-              Delete
-            </Button>
-          </Stack>
+            <Tooltip title="More actions">
+              <IconButton
+                aria-label="More actions"
+                onClick={(e) => setMoreAnchor(e.currentTarget)}
+                disabled={loading}
+              >
+                <MoreVertIcon />
+              </IconButton>
+            </Tooltip>
+          </>
         )}
       </Box>
 
-      {/* Classification menu */}
-      <Menu
-        anchorEl={classifyAnchor}
-        open={Boolean(classifyAnchor)}
-        onClose={() => setClassifyAnchor(null)}
-      >
-        <MenuItem onClick={() => void handleClassify('memory')}>Memory</MenuItem>
-        <MenuItem onClick={() => void handleClassify('low_value')}>Low Value</MenuItem>
-        <MenuItem onClick={() => void handleClassify('unreviewed')}>Unreviewed</MenuItem>
-      </Menu>
-
-      {/* Favorite menu */}
-      <Menu
-        anchorEl={favoriteAnchor}
-        open={Boolean(favoriteAnchor)}
-        onClose={() => setFavoriteAnchor(null)}
-      >
-        <MenuItem onClick={() => void handleFavorite(true)}>Add to Favorites</MenuItem>
-        <MenuItem onClick={() => void handleFavorite(false)}>Remove from Favorites</MenuItem>
+      {/* Overflow menu */}
+      <Menu anchorEl={moreAnchor} open={Boolean(moreAnchor)} onClose={() => setMoreAnchor(null)}>
+        <MenuItem onClick={() => { setMoreAnchor(null); onOpenLocation(); }}>
+          <ListItemIcon><LocationOnIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Set location</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => { setMoreAnchor(null); onOpenTags(); }}>
+          <ListItemIcon><LabelIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Edit tags</ListItemText>
+        </MenuItem>
+        <Divider />
+        <ListSubheader>Classification</ListSubheader>
+        <MenuItem onClick={() => { setMoreAnchor(null); void handleClassify('memory'); }}>
+          <ListItemIcon><CategoryIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Mark as Memory</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => { setMoreAnchor(null); void handleClassify('low_value'); }}>
+          <ListItemIcon><CategoryIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Mark as Low Value</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => { setMoreAnchor(null); void handleClassify('unreviewed'); }}>
+          <ListItemIcon><CategoryIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Mark as Unreviewed</ListItemText>
+        </MenuItem>
+        <Divider />
+        <MenuItem onClick={() => { setMoreAnchor(null); void handleFavorite(false); }}>
+          <ListItemIcon><StarBorderIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Remove from favorites</ListItemText>
+        </MenuItem>
+        {albumMode && onRemoveFromAlbum && (
+          <MenuItem onClick={() => { setMoreAnchor(null); onRemoveFromAlbum(); }}>
+            <ListItemIcon><RemoveCircleOutlineIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>Remove from album</ListItemText>
+          </MenuItem>
+        )}
+        <Divider />
+        <MenuItem onClick={() => { setMoreAnchor(null); setDeleteConfirmOpen(true); }} sx={{ color: 'error.main' }}>
+          <ListItemIcon><DeleteIcon fontSize="small" sx={{ color: 'error.main' }} /></ListItemIcon>
+          <ListItemText>Delete</ListItemText>
+        </MenuItem>
       </Menu>
 
       {/* Delete confirm */}
