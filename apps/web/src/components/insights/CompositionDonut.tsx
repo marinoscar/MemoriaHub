@@ -86,11 +86,11 @@ export function CompositionDonut({ title, segments, centerLabel }: CompositionDo
         </Box>
       </Box>
 
-      {/* Legend — constrained width + space-between prevents cramping/clipping */}
+      {/* Legend — wider container so each row stays on a single line */}
       <Box
         sx={{
           mt: 2,
-          maxWidth: 220,
+          maxWidth: 260,
           mx: 'auto',
           display: 'flex',
           flexDirection: 'column',
@@ -100,12 +100,16 @@ export function CompositionDonut({ title, segments, centerLabel }: CompositionDo
         {segments.map((s) => (
           <Box
             key={s.label}
-            display="flex"
-            alignItems="center"
-            justifyContent="space-between"
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'nowrap',
+              gap: 1,
+            }}
           >
-            {/* Left: colored dot + label */}
-            <Box display="flex" alignItems="center" gap={1}>
+            {/* Left: colored dot + label — label truncates if extremely long */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
               <Box
                 sx={{
                   width: 8,
@@ -115,14 +119,19 @@ export function CompositionDonut({ title, segments, centerLabel }: CompositionDo
                   flexShrink: 0,
                 }}
               />
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="text.secondary" noWrap>
                 {s.label}
               </Typography>
             </Box>
-            {/* Right: value + percentage — whiteSpace:nowrap prevents
-                the two values from wrapping onto separate lines */}
+            {/* Right: value + percentage — never wraps, always on the same line */}
             <Box
-              sx={{ display: 'flex', gap: 1, whiteSpace: 'nowrap', ml: 1 }}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+                flexShrink: 0,
+                whiteSpace: 'nowrap',
+              }}
             >
               <Typography variant="caption" fontWeight={600}>
                 {s.displayValue}
