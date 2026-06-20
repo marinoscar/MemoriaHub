@@ -468,9 +468,10 @@ export function FaceThumbnails({
                   }
                 }}
                 slotProps={{
+                  ...params.slotProps,
                   input: {
-                    ...params.InputProps,
-                    endAdornment: addingPerson ? <CircularProgress size={14} /> : params.InputProps.endAdornment,
+                    ...params.slotProps.input,
+                    endAdornment: addingPerson ? <CircularProgress size={14} /> : params.slotProps.input?.endAdornment,
                   },
                 }}
               />
