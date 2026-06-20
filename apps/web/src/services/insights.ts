@@ -15,11 +15,25 @@ export interface InsightsMetrics {
   taggedItems: number;
 }
 
+export type InsightsRefreshState = 'idle' | 'pending' | 'running' | 'failed';
+
+export interface InsightsRefresh {
+  state: InsightsRefreshState;
+  jobId: string | null;
+  lastError: string | null;
+}
+
 export interface InsightsSnapshot {
   status: 'ready' | 'empty';
   metrics: InsightsMetrics | null;
   computedAt: string | null;
   durationMs: number | null;
+  refresh: InsightsRefresh;
+}
+
+export interface RefreshEnqueueResult {
+  jobId: string;
+  state: 'pending' | 'running';
 }
 
 // ---------------------------------------------------------------------------
@@ -30,6 +44,7 @@ export async function getInsights(): Promise<InsightsSnapshot> {
   return api.get<InsightsSnapshot>('/admin/insights');
 }
 
-export async function refreshInsights(): Promise<InsightsSnapshot> {
-  return api.post<InsightsSnapshot>('/admin/insights/refresh');
+/** POST /api/admin/insights/refresh — enqueues a job and returns immediately. */
+export async function refreshInsights(): Promise<RefreshEnqueueResult> {
+  return api.post<RefreshEnqueueResult>('/admin/insights/refresh');
 }
