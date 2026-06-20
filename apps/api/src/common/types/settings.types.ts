@@ -56,6 +56,11 @@ export interface SystemSettingsValue {
       refreshIntervalHours: number;
     };
   };
+  burst?: {
+    timeGapSeconds: number;
+    hashDistance: number;
+    minGroupSize: number;
+  };
 }
 
 /**
@@ -95,5 +100,10 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     insights: {
       refreshIntervalHours: 4,
     },
+  },
+  burst: {
+    timeGapSeconds: 10,
+    hashDistance: 10,
+    minGroupSize: 3,
   },
 };

@@ -30,6 +30,8 @@ import {
   Switch,
   FormControlLabel,
   Snackbar,
+  Checkbox,
+  Divider,
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
@@ -45,6 +47,8 @@ import { getCircle, updateCircle } from '../../services/circles';
 import { getCircleFaceSettings, updateCircleFaceSettings } from '../../services/face';
 import { getCircleTaggingSettings, updateCircleTaggingSettings } from '../../services/tagging';
 import type { CircleTaggingSettings } from '../../services/tagging';
+import { getCircleBurstSettings, updateCircleBurstSettings, runBurstBackfill } from '../../services/bursts';
+import type { CircleBurstSettings } from '../../services/bursts';
 import type { Circle, CircleRole } from '../../types/circles';
 
 interface TabPanelProps {
@@ -101,6 +105,19 @@ export default function CircleDetailPage() {
   const [taggingSettingsError, setTaggingSettingsError] = useState<string | null>(null);
   const [taggingTogglingLoading, setTaggingTogglingLoading] = useState(false);
 
+  // Burst settings state
+  const [burstSettings, setBurstSettings] = useState<CircleBurstSettings | null>(null);
+  const [burstSettingsLoading, setBurstSettingsLoading] = useState(false);
+  const [burstSettingsError, setBurstSettingsError] = useState<string | null>(null);
+  const [burstTogglingLoading, setBurstTogglingLoading] = useState(false);
+
+  // Burst scan state
+  const [burstScanFrom, setBurstScanFrom] = useState('');
+  const [burstScanTo, setBurstScanTo] = useState('');
+  const [burstScanForce, setBurstScanForce] = useState(false);
+  const [burstScanning, setBurstScanning] = useState(false);
+  const [burstScanError, setBurstScanError] = useState<string | null>(null);
+
   // Invite dialog
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -117,6 +134,7 @@ export default function CircleDetailPage() {
   const [editError, setEditError] = useState<string | null>(null);
 
   const canManage = isAdmin || activeCircleRole === 'circle_admin';
+  const canBackfill = isAdmin || activeCircleRole === 'collaborator' || activeCircleRole === 'circle_admin';
 
   useEffect(() => {
     if (!circleId) return;
@@ -164,6 +182,18 @@ export default function CircleDetailPage() {
       .finally(() => setTaggingSettingsLoading(false));
   }, [circleId]);
 
+  useEffect(() => {
+    if (!circleId) return;
+    setBurstSettingsLoading(true);
+    setBurstSettingsError(null);
+    getCircleBurstSettings(circleId)
+      .then(setBurstSettings)
+      .catch((err: unknown) => {
+        setBurstSettingsError(err instanceof Error ? err.message : 'Failed to load burst settings');
+      })
+      .finally(() => setBurstSettingsLoading(false));
+  }, [circleId]);
+
   const handleFaceToggle = async (enabled: boolean) => {
     setFaceTogglingLoading(true);
     setFaceSettingsError(null);
@@ -189,6 +219,38 @@ export default function CircleDetailPage() {
       setTaggingSettingsError(err instanceof Error ? err.message : 'Failed to update auto-tagging setting');
     } finally {
       setTaggingTogglingLoading(false);
+    }
+  };
+
+  const handleBurstToggle = async (enabled: boolean) => {
+    setBurstTogglingLoading(true);
+    setBurstSettingsError(null);
+    try {
+      const updated = await updateCircleBurstSettings(circleId, enabled);
+      setBurstSettings(updated);
+      setFaceSuccessMsg(enabled ? 'Burst detection enabled.' : 'Burst detection disabled.');
+    } catch (err: unknown) {
+      setBurstSettingsError(err instanceof Error ? err.message : 'Failed to update burst detection setting');
+    } finally {
+      setBurstTogglingLoading(false);
+    }
+  };
+
+  const handleBurstScan = async () => {
+    if (!circleId) return;
+    setBurstScanError(null);
+    setBurstScanning(true);
+    try {
+      const opts: { from?: string; to?: string; force?: boolean } = {};
+      if (burstScanFrom) opts.from = burstScanFrom;
+      if (burstScanTo) opts.to = burstScanTo;
+      if (burstScanForce) opts.force = true;
+      const result = await runBurstBackfill(circleId, opts);
+      setFaceSuccessMsg(`Queued ${result.enqueued} photo${result.enqueued !== 1 ? 's' : ''} for burst scanning`);
+    } catch (err: unknown) {
+      setBurstScanError(err instanceof Error ? err.message : 'Failed to start burst scan');
+    } finally {
+      setBurstScanning(false);
     }
   };
 
@@ -530,6 +592,114 @@ export default function CircleDetailPage() {
                         {taggingSettings?.autoTaggingEnabled ? 'Enabled' : 'Disabled'}
                       </strong>
                     </Typography>
+                  )}
+                </Paper>
+
+                <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Burst detection automatically groups similar photos taken in quick succession, so
+                    you can review and keep only the best shot. It is opt-in per circle.
+                  </Typography>
+                  {burstSettingsError && (
+                    <Alert severity="error" sx={{ mb: 1 }}>
+                      {burstSettingsError}
+                    </Alert>
+                  )}
+                  {burstSettingsLoading ? (
+                    <CircularProgress size={20} />
+                  ) : canManage ? (
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={burstSettings?.burstDetectionEnabled ?? false}
+                          onChange={(e) => void handleBurstToggle(e.target.checked)}
+                          disabled={burstTogglingLoading || !burstSettings}
+                          color="primary"
+                        />
+                      }
+                      label={burstTogglingLoading ? 'Updating…' : 'Enable burst detection'}
+                    />
+                  ) : (
+                    <Typography variant="body2">
+                      Burst detection is currently{' '}
+                      <strong>
+                        {burstSettings?.burstDetectionEnabled ? 'Enabled' : 'Disabled'}
+                      </strong>
+                    </Typography>
+                  )}
+
+                  {burstSettings?.burstDetectionEnabled && canBackfill && (
+                    <>
+                      <Divider sx={{ my: 2 }} />
+                      <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'medium' }}>
+                        Scan for bursts
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        Run a retroactive scan to compute perceptual hashes for older photos and group
+                        bursts in the background. Results appear in Review Bursts once processing
+                        completes. Leave date fields empty to scan the entire circle.
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2, mb: 2 }}>
+                        <TextField
+                          label="From (capture date)"
+                          type="date"
+                          value={burstScanFrom}
+                          onChange={(e) => setBurstScanFrom(e.target.value)}
+                          slotProps={{ inputLabel: { shrink: true } }}
+                          size="small"
+                          sx={{ flex: 1 }}
+                          disabled={burstScanning}
+                        />
+                        <TextField
+                          label="To (capture date)"
+                          type="date"
+                          value={burstScanTo}
+                          onChange={(e) => setBurstScanTo(e.target.value)}
+                          slotProps={{ inputLabel: { shrink: true } }}
+                          size="small"
+                          sx={{ flex: 1 }}
+                          disabled={burstScanning}
+                        />
+                      </Box>
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={burstScanForce}
+                            onChange={(e) => setBurstScanForce(e.target.checked)}
+                            disabled={burstScanning}
+                            size="small"
+                          />
+                        }
+                        label={
+                          <Typography variant="body2">
+                            Re-scan all (force) — reprocess photos that were already scanned
+                          </Typography>
+                        }
+                        sx={{ mb: 2 }}
+                      />
+                      {burstScanError && (
+                        <Alert severity="error" sx={{ mb: 2 }}>
+                          {burstScanError}
+                        </Alert>
+                      )}
+                      {burstScanFrom && burstScanTo && burstScanFrom > burstScanTo && (
+                        <Alert severity="warning" sx={{ mb: 2 }}>
+                          "From" date must be on or before "To" date.
+                        </Alert>
+                      )}
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        onClick={() => void handleBurstScan()}
+                        disabled={
+                          burstScanning ||
+                          Boolean(burstScanFrom && burstScanTo && burstScanFrom > burstScanTo)
+                        }
+                        startIcon={burstScanning ? <CircularProgress size={14} /> : undefined}
+                      >
+                        {burstScanning ? 'Scanning…' : 'Scan for bursts'}
+                      </Button>
+                    </>
                   )}
                 </Paper>
               </>

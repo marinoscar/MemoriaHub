@@ -6,7 +6,7 @@ import {
   BadRequestException,
   Inject,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, BurstGroupStatus } from '@prisma/client';
 import { CircleRole } from '@prisma/client';
 import { FastifyReply } from 'fastify';
 import { stringify as csvStringify } from 'csv-stringify';
@@ -1310,7 +1310,16 @@ export class MediaService {
 
     const onThisDayIds = onThisDayRaw.map((r) => r.id);
 
-    const [onThisDayItems, recentItems, favoriteItems, totalCount, unreviewedCount, lowValueCount, missingGeoCount] =
+    // Load burst minGroupSize from system settings for the dashboard count filter
+    const burstSettings = await this.prisma.systemSettings.findUnique({
+      where: { key: 'global' },
+      select: { value: true },
+    });
+    const burstValue = (burstSettings?.value as Record<string, unknown> | null) ?? {};
+    const burstConfig = burstValue['burst'] as { minGroupSize?: number } | undefined;
+    const burstMinGroupSize = burstConfig?.minGroupSize ?? 3;
+
+    const [onThisDayItems, recentItems, favoriteItems, totalCount, unreviewedCount, lowValueCount, missingGeoCount, pendingBurstGroupsCount] =
       await Promise.all([
         onThisDayIds.length > 0
           ? this.prisma.mediaItem.findMany({
@@ -1337,6 +1346,13 @@ export class MediaService {
         }),
         this.prisma.mediaItem.count({
           where: { circleId, deletedAt: null, takenLat: null },
+        }),
+        this.prisma.burstGroup.count({
+          where: {
+            circleId,
+            status: BurstGroupStatus.pending,
+            mediaCount: { gte: burstMinGroupSize },
+          },
         }),
       ]);
 
@@ -1371,6 +1387,7 @@ export class MediaService {
         lowValue: lowValueCount,
         missingGeo: missingGeoCount,
       },
+      pendingBurstGroups: pendingBurstGroupsCount,
     };
   }
 

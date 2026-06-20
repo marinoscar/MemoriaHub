@@ -390,6 +390,56 @@ export class CirclesService {
     return { autoTaggingEnabled: updated.autoTaggingEnabled };
   }
 
+  // ----- Burst Settings -----
+
+  async getBurstSettings(circleId: string, user: RequestUser) {
+    await this.membership.assertCircleAccess(
+      user.id,
+      circleId,
+      user.permissions,
+      CircleRole.viewer,
+    );
+
+    const circle = await this.prisma.circle.findUnique({
+      where: { id: circleId },
+      select: { burstDetectionEnabled: true },
+    });
+    if (!circle) throw new NotFoundException(`Circle ${circleId} not found`);
+
+    return { burstDetectionEnabled: circle.burstDetectionEnabled };
+  }
+
+  async updateBurstSettings(circleId: string, enabled: boolean, user: RequestUser) {
+    await this.membership.assertCircleAccess(
+      user.id,
+      circleId,
+      user.permissions,
+      CircleRole.circle_admin,
+    );
+
+    const updated = await this.prisma.circle.update({
+      where: { id: circleId },
+      data: { burstDetectionEnabled: enabled },
+      select: { burstDetectionEnabled: true },
+    });
+
+    await this.prisma.auditEvent.create({
+      data: {
+        actorUserId: user.id,
+        action: 'circle:burst_settings_update',
+        targetType: 'circle',
+        targetId: circleId,
+        meta: { burstDetectionEnabled: enabled } as any,
+      },
+    });
+
+    this.logger.log(
+      `Circle ${circleId} burstDetectionEnabled=${enabled} set by user ${user.id}`,
+    );
+
+    return { burstDetectionEnabled: updated.burstDetectionEnabled };
+  }
+
   async revokeInvite(user: RequestUser, circleId: string, inviteId: string) {
     await this.membership.assertCircleAccess(user.id, circleId, user.permissions, CircleRole.circle_admin);
 

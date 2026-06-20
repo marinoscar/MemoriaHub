@@ -69,6 +69,11 @@ export const systemSettingsSchema = z.object({
       refreshIntervalHours: z.number().int().min(1).max(168).default(4),
     }).default({ refreshIntervalHours: 4 }),
   }).optional().default({ insights: { refreshIntervalHours: 4 } }),
+  burst: z.object({
+    timeGapSeconds: z.number().int().min(1).max(300).default(10),
+    hashDistance: z.number().int().min(0).max(32).default(10),
+    minGroupSize: z.number().int().min(2).max(20).default(3),
+  }).optional().default({ timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3 }),
 });
 
 export type SystemSettingsDto = z.infer<typeof systemSettingsSchema>;
@@ -107,5 +112,10 @@ export const systemSettingsPatchSchema = z.object({
     insights: z.object({
       refreshIntervalHours: z.number().int().min(1).max(168).optional(),
     }).optional(),
+  }).optional(),
+  burst: z.object({
+    timeGapSeconds: z.number().int().min(1).max(300).optional(),
+    hashDistance: z.number().int().min(0).max(32).optional(),
+    minGroupSize: z.number().int().min(2).max(20).optional(),
   }).optional(),
 });

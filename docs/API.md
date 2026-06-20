@@ -1625,7 +1625,8 @@ Returns aggregated dashboard data for a circle: On This Day (same month/day acro
     "unreviewed": 304,
     "lowValue": 92,
     "missingGeo": 517
-  }
+  },
+  "pendingBurstGroups": 3
 }
 ```
 
@@ -1640,6 +1641,7 @@ Returns aggregated dashboard data for a circle: On This Day (same month/day acro
 | `counts.unreviewed` | Items with `classification = 'unreviewed'` |
 | `counts.lowValue` | Items with `classification = 'low_value'` |
 | `counts.missingGeo` | Items with `takenLat IS NULL` |
+| `pendingBurstGroups` | Count of burst groups with `status = 'pending'` and `mediaCount >= burst.minGroupSize`; present only when burst detection is enabled for the circle (0 otherwise) |
 
 All items include a freshly signed `thumbnailUrl`.
 
@@ -3571,6 +3573,210 @@ Enable or disable face recognition for a circle. When disabled, the auto-enqueue
     "faceRecognitionEnabled": true
   }
 }
+```
+
+---
+
+## Media — Burst Detection (media:read / media:write / media:delete + per-circle roles)
+
+Burst detection is per-circle opt-in (default off). No photo is ever deleted automatically — the system surfaces groups as a review queue and a human confirms which frames to keep before any deletion occurs. Groups below `burst.minGroupSize` (default 3) are stored in the database but are not surfaced in the review queue. `GET /api/media/dashboard` gains a `pendingBurstGroups` count that contributes to the review-queue section of the dashboard UI.
+
+No new RBAC permissions are introduced — the feature reuses `media:read`, `media:write`, and `media:delete` combined with the existing per-circle viewer / collaborator roles.
+
+---
+
+### GET /media/bursts
+
+**Permissions:** `media:read` + circle viewer role (or `media:read_any` for admin bypass)
+
+List burst groups for a circle, filtered by status. Only groups with `mediaCount >= burst.minGroupSize` are returned.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `circleId` | UUID | required | Circle to query |
+| `status` | enum | `pending` | `pending` \| `resolved` \| `dismissed` |
+| `page` | number | 1 | Page number (1-indexed) |
+| `pageSize` | number | 20 | Items per page (max 100) |
+
+**Response:** 200 OK
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "circleId": "uuid",
+      "status": "pending",
+      "mediaCount": 7,
+      "capturedAt": "2026-06-15T14:32:01.234Z",
+      "suggestedBestItemId": "uuid",
+      "suggestedBestThumbnailUrl": "https://...",
+      "coverThumbnailUrls": ["https://...", "https://...", "https://..."]
+    }
+  ],
+  "meta": { "total": 12, "page": 1, "pageSize": 20 }
+}
+```
+
+`coverThumbnailUrls` contains up to 4 signed thumbnail URLs for the first 4 group members (sorted by `capturedAt ASC`), used as a stack preview. `suggestedBestThumbnailUrl` is the signed thumbnail for `suggestedBestItemId`.
+
+**Error Cases:**
+- 403 — Caller is not a member of the circle
+
+---
+
+### GET /media/bursts/:id
+
+**Permissions:** `media:read` + circle viewer role
+
+Get full detail for a single burst group: all members in capture order with their scores and thumbnail URLs.
+
+**Response:** 200 OK
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "circleId": "uuid",
+    "status": "pending",
+    "mediaCount": 7,
+    "capturedAt": "2026-06-15T14:32:01.234Z",
+    "suggestedBestItemId": "uuid",
+    "resolvedById": null,
+    "resolvedAt": null,
+    "members": [
+      {
+        "id": "uuid",
+        "capturedAt": "2026-06-15T14:32:01.234Z",
+        "burstScore": 0.87,
+        "sharpnessScore": 412.3,
+        "thumbnailUrl": "https://...",
+        "width": 4032,
+        "height": 3024,
+        "isSuggestedBest": true
+      }
+    ]
+  }
+}
+```
+
+Members are ordered by `capturedAt ASC`. `thumbnailUrl` is a signed URL.
+
+**Error Cases:**
+- 404 — Group not found or caller is not a member of the circle
+
+---
+
+### POST /media/bursts/:id/resolve
+
+**Permissions:** `media:delete` + circle collaborator role
+
+Keep the specified members and soft-delete all other members of the group, then mark the group `resolved`. The entire operation runs in a single database transaction.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `keepIds` | UUID[] | Yes | IDs of members to keep; must be non-empty and all belong to this group. The caller may keep all members (zero deletions). |
+
+**Example:**
+```json
+{ "keepIds": ["uuid-1", "uuid-2"] }
+```
+
+**Response:** 200 OK
+```json
+{ "data": { "deleted": 6, "kept": 1, "groupStatus": "resolved" } }
+```
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | `keepIds` is empty, contains IDs not in this group, or group is not `pending` |
+| 404 | Group not found |
+
+---
+
+### POST /media/bursts/:id/dismiss
+
+**Permissions:** `media:write` + circle collaborator role
+
+Mark a burst group dismissed — the reviewer considers these items to not be a burst. Clears `burstGroupId` and `burstScore` on all members; no items are deleted.
+
+**Response:** 200 OK
+```json
+{ "data": { "groupStatus": "dismissed", "ungrouped": 7 } }
+```
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | Group is not in `pending` status |
+| 404 | Group not found |
+
+---
+
+### POST /media/bursts/backfill
+
+**Permissions:** `media:write` + circle collaborator role
+
+Bulk-enqueue `burst_detection` enrichment jobs for photos in a circle that have not yet been processed. Requires `circle.burstDetectionEnabled = true`.
+
+For each enqueued photo that lacks a `perceptualHash`, the enrichment job downloads the image via the storage provider, computes the dHash and sharpness score using the shared `computeVisualHash` utility (`apps/api/src/storage/processing/visual-hash.util.ts`), and persists the results before running the burst-grouping logic. This retroactive on-demand fingerprinting means the backfill endpoint works correctly on libraries that were uploaded before the burst detection feature was introduced.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `circleId` | UUID | Yes | Circle to backfill |
+| `from` | ISO-8601 datetime | No | Inclusive lower bound on `capturedAt`; only photos captured at or after this timestamp are enqueued |
+| `to` | ISO-8601 datetime | No | Inclusive upper bound on `capturedAt`; only photos captured at or before this timestamp are enqueued |
+| `force` | boolean | No | When `true`, re-enqueue all non-deleted photos in the scope (including already-processed ones). Useful after changing `burst.timeGapSeconds` or `burst.hashDistance`. Default `false`. |
+
+`from` and `to` may be used independently or together. `from > to` returns 400. When omitted, the scope covers all photos in the circle (subject to the `force` flag).
+
+**Response:** 201 Created
+```json
+{ "data": { "enqueued": 312 } }
+```
+
+**Error Cases:**
+- 400 — `circle.burstDetectionEnabled` is `false`
+- 400 — `from` is later than `to`
+
+---
+
+### GET /circles/:id/burst-settings
+
+**Permissions:** `circles:read` + circle viewer role
+
+Get the per-circle burst detection opt-in flag.
+
+**Response:** 200 OK
+```json
+{ "data": { "burstDetectionEnabled": false } }
+```
+
+---
+
+### PUT /circles/:id/burst-settings
+
+**Permissions:** `circles:write` + circle_admin role (or `circles:manage_any` for admin bypass)
+
+Enable or disable burst detection for a circle. Emits `circle:burst_settings_update` audit event.
+
+**Request Body:**
+```json
+{ "enabled": true }
+```
+
+**Response:** 200 OK
+```json
+{ "data": { "burstDetectionEnabled": true } }
 ```
 
 ---

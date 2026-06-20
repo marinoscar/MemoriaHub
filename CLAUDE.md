@@ -351,7 +351,15 @@ An admin dashboard at `/admin/jobs` provides monitoring and control over the gen
 - `GET /api/media/geo/search?q=&limit=` - Forward geocoding via Nominatim (requires `GEO_FORWARD_SEARCH_ENABLED=true`)
 
 ### Media — Circle Dashboard
-- `GET /api/media/dashboard?circleId=` - On This Day + recent/favorites + review-queue counts
+- `GET /api/media/dashboard?circleId=` - On This Day + recent/favorites + review-queue counts; also returns `pendingBurstGroups` count when burst detection is enabled for the circle
+
+### Media — Burst Detection (media:read / media:write / media:delete + per-circle roles)
+Burst detection is per-circle opt-in (default off) and non-destructive — no photo is deleted until a human confirms. Groups are surfaced in a review queue only once they reach `burst.minGroupSize`. `GET /api/media/dashboard` returns a `pendingBurstGroups` count that feeds the review-queue section of the dashboard UI.
+- `GET /api/media/bursts?circleId=&status=&page=&pageSize=` - List burst groups (review queue); items `{ id, status, mediaCount, suggestedBestItemId, capturedAt, suggestedBestThumbnailUrl, coverThumbnailUrls[] }`; response `{ items, meta:{total,page,pageSize} }` (media:read + viewer)
+- `GET /api/media/bursts/:id` - Group detail; ordered members `{ id, capturedAt, burstScore, sharpnessScore, thumbnailUrl, width, height, isSuggestedBest }` (media:read + viewer)
+- `POST /api/media/bursts/:id/resolve` body `{ keepIds[] }` - Keep selected members, soft-delete the rest, mark resolved (media:delete + collaborator)
+- `POST /api/media/bursts/:id/dismiss` - Mark "not a burst": ungroup members, status=dismissed (media:write + collaborator)
+- `POST /api/media/bursts/backfill` body `{ circleId, from?, to?, force? }` - Bulk-enqueue burst_detection over the circle, optionally limited to a `capturedAt` range (`from`/`to`, ISO-8601); the job computes the perceptual hash on demand for photos that lack one (retroactive fingerprinting of legacy uploads); requires circle opt-in; returns `{ enqueued }` (media:write + collaborator)
 
 ### Media — Explore
 - `GET /api/media/explore/places?circleId=` - List distinct places with item counts and cover thumbnails; returns `Array<{ name: string; count: number; coverThumbnailUrl: string | null }>` (media:read + viewer)
@@ -394,6 +402,12 @@ Auto-tagging is per-circle opt-in (default off); see Tag Vocabulary endpoints be
 ### Circle Auto-Tagging Settings (circles:read / circles:write + per-circle viewer/circle_admin role)
 - `GET /api/circles/:id/tagging-settings` - Get auto-tagging opt-in flag for a circle (circles:read + viewer)
 - `PUT /api/circles/:id/tagging-settings` body `{enabled}` - Enable/disable auto-tagging for a circle; writes audit event (circles:write + circle_admin)
+
+### Circle Burst Detection Settings (circles:read / circles:write + per-circle viewer/circle_admin role)
+- `GET /api/circles/:id/burst-settings` - Get burst-detection opt-in flag for a circle (circles:read + viewer)
+- `PUT /api/circles/:id/burst-settings` body `{enabled}` - Enable/disable burst detection for a circle; writes audit event (circles:write + circle_admin)
+
+> **UI:** The circle Settings tab exposes a "Scan for bursts" panel that lets a `circle_admin` choose an optional capture-date window (`from`/`to`) and a force flag before calling `POST /api/media/bursts/backfill`. This makes it easy to retroactively fingerprint and group photos from a specific date range without re-processing the entire library.
 
 ### Face Recognition / Face Settings (Admin only — face_settings:read / face_settings:write)
 Three providers: `human` (keyless WASM, in-process, 1024-d), `compreface` (keyless `compreface-core` sidecar, 128-d mobilenet, `requiresCredentials:false`), `rekognition` (delegated AWS, requires credentials). The Face Settings UI has a "Test connection" button for all providers including keyless ones.
@@ -497,7 +511,7 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `storage_objects` - File metadata, status, storage references (no circle_id; auth resolves via media_item)
 - `storage_object_chunks` - Multipart upload chunk tracking
 - `personal_access_tokens` - User-created long-lived API tokens (hashed)
-- `circles` - Family circles; `is_personal=true` circles cannot be deleted; `face_recognition_enabled` column (default false) controls face recognition per-circle opt-in; `auto_tagging_enabled` column (default false) controls auto-tagging per-circle opt-in
+- `circles` - Family circles; `is_personal=true` circles cannot be deleted; `face_recognition_enabled` column (default false) controls face recognition per-circle opt-in; `auto_tagging_enabled` column (default false) controls auto-tagging per-circle opt-in; `burst_detection_enabled` column (default false) controls burst detection per-circle opt-in
 - `circle_members` - Per-circle memberships with `CircleRole` enum (`circle_admin` | `collaborator` | `viewer`)
 - `circle_invites` - Email invites for circles; claimed on invited user's first login
 - `ai_provider_credentials` - AI provider API keys (AES-256-GCM encrypted); one row per provider; `last4` exposed for display; plaintext never stored or returned
@@ -513,8 +527,9 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `album_items` - Join table linking `albums` to `media_items`; `@@unique([albumId, mediaItemId])` prevents duplicates; `added_at` records when the item was placed in the album; cascades on album delete, cascades on media item delete
 - `insights_snapshots` - Precomputed global storage metrics snapshot; at most one row survives after each successful recompute (older rows are pruned); statuses: `InsightsSnapshotStatus` enum (`computing` | `ready` | `failed`) — in the queue-based flow the handler writes `ready` directly, so `computing` is not used at runtime; `metrics` JSONB holds `{ totalBytes, photoBytes, videoBytes (STRINGS), totalItems, photoCount, videoCount, totalFaces, taggedItems (NUMBERS) }` when `ready`; `computed_at` and `duration_ms` track timing; in-flight and failure state is tracked on the `enrichment_jobs` row, not here
 - `media_item_embedding` - One row per media item; stores a 1536-d pgvector embedding of the item's caption + description + tags + people names; written via raw SQL (Prisma cannot handle the `vector(1536)` column type); circle_id is denormalized for circle-scoped KNN filtering; requires the `vector` pgvector Postgres extension and a `pgvector/pgvector:pg16` database image; HNSW cosine index on `embedding`; upserted by the auto-tagging handler as a best-effort final step — embedding failures never fail the tagging job
+- `burst_groups` - Circle-scoped burst review groups; one row per detected burst cluster; status `pending` | `resolved` | `dismissed`; `suggestedBestItemId` FK → `media_items` (SetNull on delete); `mediaCount` denormalized member count (updated whenever a member joins or leaves); `capturedAt` of the earliest member used for chronological queue sorting; `resolvedById` / `resolvedAt` track who resolved or dismissed the group
 
-**Note:** `media_items` has `caption` (nullable, max 2 048 chars) and `description` (nullable, max 8 192 chars) columns written by the auto-tagging handler on each successful vision call. There is no `title` column. `media_items`, `albums`, and `tags` use `added_by_id` (not `owner_id`) to track the uploading user. Dedup uniqueness for `media_items` is `(circle_id, content_hash)`. Tag names are unique per `(circle_id, name)`. The `media_tags` join table has a `source` column (`manual` | `ai`, default `manual`) that tracks whether a tag was applied by the AI auto-tagging service or by a user manually; AI re-runs are authoritative over `source='ai'` rows only and never modify `source='manual'` rows.
+**Note:** `media_items` has `caption` (nullable, max 2 048 chars) and `description` (nullable, max 8 192 chars) columns written by the auto-tagging handler on each successful vision call. There is no `title` column. `media_items`, `albums`, and `tags` use `added_by_id` (not `owner_id`) to track the uploading user. Dedup uniqueness for `media_items` is `(circle_id, content_hash)`. Tag names are unique per `(circle_id, name)`. The `media_tags` join table has a `source` column (`manual` | `ai`, default `manual`) that tracks whether a tag was applied by the AI auto-tagging service or by a user manually; AI re-runs are authoritative over `source='ai'` rows only and never modify `source='manual'` rows. `media_items` also carries burst detection columns: `perceptual_hash` (BigInt?, 64-bit dHash computed by the `visual-hash` processor), `sharpness_score` (Float?, variance-of-Laplacian sharpness measure), `burst_uuid` (String?, Apple BurstUUID from EXIF MakerNote — null for non-Apple cameras), `burst_score` (Float?, composite quality score within the group — null when not in a group), and `burst_group_id` (FK → `burst_groups`, SetNull on delete).
 
 **AI provider key encryption:** `SECRETS_ENCRYPTION_KEY` (base64-encoded 32-byte AES key) must be set at startup. Generate with `openssl rand -base64 32`. The API fails to start if the variable is missing or incorrectly sized.
 
@@ -629,6 +644,14 @@ Note: The enrichment worker shared by face detection, storage insights computati
 - `S3_RETRY_MODE` - AWS SDK v3 retry strategy: `adaptive` (default; uses client-side congestion control that backs off on S3 `503 SlowDown` and R2 `429`), `standard`, or `legacy`
 - `S3_ENDPOINT` - S3-compatible endpoint URL; set to the Cloudflare R2 endpoint (e.g. `https://<account>.r2.cloudflarestorage.com`) to use R2 instead of AWS S3; adaptive retry handles R2 HTTP 429 and S3 503 SlowDown transparently
 
+**Burst Detection:**
+- `BURST_DETECTION_ENABLED` - Global kill-switch for auto-enqueue on upload; set to `false` to disable `BurstEnqueueListener` for all circles (per-circle opt-in still applies when `true`; default: `true`)
+
+The following burst detection parameters are controlled via system settings (not environment variables), editable in the Admin UI under `burst.*`:
+- `burst.timeGapSeconds` — integer, 1–300, default 10; maximum capture-time gap (seconds) between consecutive items from the same device for temporal proximity to apply
+- `burst.hashDistance` — integer, 0–32, default 10; maximum Hamming distance (bits, out of 64) for two items to be considered visual near-duplicates
+- `burst.minGroupSize` — integer, 2–20, default 3; minimum number of items required for a group to be surfaced in the review queue
+
 **Storage Insights:**
 
 The refresh cadence for the precomputed storage metrics snapshot is controlled via a system setting (not an environment variable):
@@ -662,6 +685,7 @@ Detailed specs live under `docs/specs/`:
 - [Semantic Search](docs/specs/semantic-search.md) — pgvector embedding storage, KNN-then-filter algorithm, `semanticQuery` param, graceful degradation, backfill and re-embed on people change
 - [Agentic Search](docs/specs/agentic-search.md) — stateless agentic search, SSE streaming, tool-call protocol
 - [Storage Insights](docs/specs/storage-insights.md) — precomputed global storage metrics, snapshot lifecycle, interval-gated cron, admin dashboard
+- [Burst Photo Detection](docs/specs/burst-detection.md) — on-server dHash + temporal proximity grouping, best-shot scoring, non-destructive review queue, per-circle opt-in, backfill with optional capturedAt range and on-demand retroactive perceptual hashing
 
 ## Specialized Subagents (MANDATORY)
 
