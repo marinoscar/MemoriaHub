@@ -1,4 +1,3 @@
-import React from 'react';
 import {
   Container,
   Box,
@@ -195,7 +194,7 @@ function StorageInsightsPageContent() {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <InsightsIcon sx={{ fontSize: 32, color: 'primary.main' }} />
             <Box>
-              <Typography variant="h5" fontWeight={700}>
+              <Typography variant="h5" sx={{ fontWeight: 700 }}>
                 Storage Insights
               </Typography>
               <Typography variant="body2" color="text.secondary">
@@ -275,10 +274,10 @@ function StorageInsightsPageContent() {
                 }}
               >
                 <StorageIcon sx={{ fontSize: 56, color: 'text.disabled' }} />
-                <Typography variant="h6" fontWeight={600} color="text.secondary">
+                <Typography variant="h6" sx={{ fontWeight: 600, color: 'text.secondary' }}>
                   No insights computed yet
                 </Typography>
-                <Typography variant="body2" color="text.disabled" textAlign="center" maxWidth={360}>
+                <Typography variant="body2" sx={{ color: 'text.disabled', textAlign: 'center', maxWidth: 360 }}>
                   Run the first aggregation to see storage metrics across all circles.
                 </Typography>
                 <Button
@@ -307,10 +306,10 @@ function StorageInsightsPageContent() {
                 }}
               >
                 <CircularProgress size={48} thickness={3} />
-                <Typography variant="h6" fontWeight={600} color="text.secondary">
+                <Typography variant="h6" sx={{ fontWeight: 600, color: 'text.secondary' }}>
                   {jobState === 'pending' ? 'Job queued…' : 'Computing metrics…'}
                 </Typography>
-                <Typography variant="body2" color="text.disabled" textAlign="center" maxWidth={360}>
+                <Typography variant="body2" sx={{ color: 'text.disabled', textAlign: 'center', maxWidth: 360 }}>
                   Your first storage snapshot is being computed. This page will update automatically when it finishes.
                 </Typography>
               </Box>
@@ -363,15 +362,15 @@ function StorageInsightsPageContent() {
             {/* Tier 2 — Composition */}
             <Card variant="outlined" sx={{ borderRadius: 2 }}>
               <CardContent sx={{ p: 3 }}>
-                <Typography variant="subtitle1" fontWeight={700} mb={0.5}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 0.5 }}>
                   Photos vs Videos
                 </Typography>
-                <Typography variant="body2" color="text.secondary" mb={3}>
+                <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
                   How your library breaks down by media type
                 </Typography>
                 {/* Grid guarantees two-up on md+ and stacked on mobile;
                     each cell is centered so neither donut floats off to one side */}
-                <Grid container spacing={3} alignItems="flex-start" mb={3}>
+                <Grid container spacing={3} sx={{ alignItems: 'flex-start', mb: 3 }}>
                   <Grid size={{ xs: 12, md: 6 }}>
                     <CompositionDonut
                       title="By storage"

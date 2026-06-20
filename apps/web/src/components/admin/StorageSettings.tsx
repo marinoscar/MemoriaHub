@@ -63,7 +63,7 @@ export function StorageSettings({ settings, onSave, disabled }: StorageSettingsP
         Storage
       </Typography>
 
-      <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1 }}>
+      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
         Insights
       </Typography>
 
@@ -75,7 +75,7 @@ export function StorageSettings({ settings, onSave, disabled }: StorageSettingsP
         disabled={disabled}
         error={!!inputError}
         helperText={inputError ?? `How often storage metrics are recomputed. Default: ${DEFAULT_REFRESH_HOURS} hours.`}
-        inputProps={{ min: MIN_REFRESH_HOURS, max: MAX_REFRESH_HOURS, step: 1 }}
+        slotProps={{ htmlInput: { min: MIN_REFRESH_HOURS, max: MAX_REFRESH_HOURS, step: 1 } }}
         sx={{ width: 320 }}
       />
 

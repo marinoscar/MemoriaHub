@@ -554,7 +554,7 @@ function JobsPageContent() {
                                 {job.modelVersion}
                               </Typography>
                               {job.providerKey && (
-                                <Typography variant="caption" color="text.secondary" noWrap display="block">
+                                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }} noWrap>
                                   {job.providerKey}
                                 </Typography>
                               )}

@@ -722,7 +722,7 @@ export function MediaDetailDrawer({
         {(() => {
           const chipProps = tagStatusChipProps(tagStatus?.status);
           return (
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'flex-start', sm: 'center' }} sx={{ mb: 1 }}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ alignItems: { xs: 'flex-start', sm: 'center' }, mb: 1 }}>
               <Chip
                 label={chipProps.label}
                 color={chipProps.color}

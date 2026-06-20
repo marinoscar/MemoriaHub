@@ -664,6 +664,10 @@ export default function MediaLibraryPage() {
     setSelectionMode(false);
   }, []);
 
+  const handleSelectAll = useCallback(() => {
+    setSelected(new Set(items.map((item) => item.id)));
+  }, [items]);
+
   const handleBulkSuccess = useCallback((message: string) => {
     setSnackbar({ message, severity: 'success' });
     setSelected(new Set());
@@ -1336,6 +1340,7 @@ export default function MediaLibraryPage() {
         circleId={activeCircle.id}
         activeCircleRole={activeCircleRole}
         onClear={handleClearSelection}
+        onSelectAll={handleSelectAll}
         onOpenLocation={() => setBulkLocationOpen(true)}
         onOpenTags={() => setBulkTagsOpen(true)}
         onOpenAlbum={() => setAddToAlbumOpen(true)}

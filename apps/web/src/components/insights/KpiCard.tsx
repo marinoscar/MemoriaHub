@@ -1,4 +1,3 @@
-import React from 'react';
 import { Card, CardContent, Typography, Box, alpha } from '@mui/material';
 
 interface KpiCardProps {
@@ -22,7 +21,7 @@ export function KpiCard({ label, value, subLabel, icon, accentColor }: KpiCardPr
       }}
     >
       <CardContent sx={{ p: 3 }}>
-        <Box display="flex" alignItems="flex-start" justifyContent="space-between" mb={2}>
+        <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', mb: 2 }}>
           <Box
             sx={{
               width: 44,
@@ -50,7 +49,7 @@ export function KpiCard({ label, value, subLabel, icon, accentColor }: KpiCardPr
         >
           {label}
         </Typography>
-        <Typography variant="h4" fontWeight={700} sx={{ mt: 0.5, lineHeight: 1.2 }}>
+        <Typography variant="h4" sx={{ fontWeight: 700, mt: 0.5, lineHeight: 1.2 }}>
           {value}
         </Typography>
         {subLabel && (

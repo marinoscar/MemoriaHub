@@ -538,6 +538,7 @@ function PersonDetailDrawer({
     isUnlabeled: person.isUnlabeled,
     faceCount: person.faces.length,
     coverFace: person.coverFace,
+    favorite: false,
     createdAt: person.createdAt,
     updatedAt: person.updatedAt,
   };

@@ -1,4 +1,3 @@
-import React from 'react';
 import { Box, Chip, Typography } from '@mui/material';
 import { relativeTime } from '../../utils/formatBytes';
 
@@ -37,7 +36,7 @@ export function FreshnessPill({ computedAt, durationMs }: FreshnessPillProps) {
         sx={{ fontWeight: 500 }}
       />
       {duration && (
-        <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.25 }}>
+        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.25 }}>
           computed in {duration}
         </Typography>
       )}
