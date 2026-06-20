@@ -28,6 +28,7 @@ import {
   WorkHistory as WorkHistoryIcon,
   LocalOffer as LocalOfferIcon,
   Explore as ExploreIcon,
+  Insights as InsightsIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -78,6 +79,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     { label: 'Face Settings', icon: <FaceIcon />, path: '/admin/face-settings' },
     { label: 'Job Queue', icon: <WorkHistoryIcon />, path: '/admin/jobs' },
     { label: 'Tags', icon: <LocalOfferIcon />, path: '/admin/tags' },
+    { label: 'Storage Insights', icon: <InsightsIcon />, path: '/admin/insights' },
   ];
 
   const handleNavigate = useCallback(
