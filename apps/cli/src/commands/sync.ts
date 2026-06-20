@@ -12,12 +12,14 @@ import * as path from 'node:path';
 import { Command } from 'commander';
 import { requireConfig } from '../config.js';
 import { ApiClient } from '../api.js';
+import { CooldownGate } from '../http/cooldown-gate.js';
 import { getDb } from '../db/database.js';
 import { FolderRepo } from '../repo/folders.js';
 import { FileRepo } from '../repo/files.js';
 import { RunRepo } from '../repo/runs.js';
 import { SettingsRepo } from '../repo/settings.js';
 import { SyncEngine } from '../sync/sync-engine.js';
+import { EV } from '../sync/events.js';
 import { renderSyncHeadless } from '../render/headless-sync.js';
 import { ui, isTTY } from '../ui.js';
 
@@ -53,12 +55,25 @@ export function syncCommand(): Command {
     }
 
     const cfg = requireConfig();
-    const api  = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
     const db   = getDb();
     const folderRepo   = new FolderRepo(db);
     const fileRepo     = new FileRepo(db);
     const runRepo      = new RunRepo(db);
     const settingsRepo = new SettingsRepo(db);
+
+    // A single cooldown gate shared by all upload workers: a 429/503 seen by
+    // one worker pauses the others. The onTrip callback forwards a UI event
+    // through the engine (assigned just below, before engine.run()).
+    let engineRef: SyncEngine | undefined;
+    const gate = new CooldownGate(settingsRepo.cooldownConfig(), {
+      onTrip: (delayMs) => engineRef?.emit(EV.RATE_LIMITED, { delayMs }),
+    });
+    const api = new ApiClient({
+      serverUrl: cfg.serverUrl,
+      pat: cfg.pat,
+      retry: settingsRepo.retryConfig(),
+      cooldownGate: gate,
+    });
 
     // Resolve folder paths → IDs (auto-register unknown paths)
     let folderIds: number[] | undefined;
@@ -88,6 +103,7 @@ export function syncCommand(): Command {
       runs:    runRepo,
       settings: settingsRepo,
     });
+    engineRef = engine;
 
     renderSyncHeadless(engine);
 

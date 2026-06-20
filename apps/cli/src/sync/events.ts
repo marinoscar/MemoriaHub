@@ -23,6 +23,7 @@ export const EV = {
   FOLDER_DONE:    'folder:done',
   RUN_PROGRESS:   'run:progress',
   RUN_DONE:       'run:done',
+  RATE_LIMITED:   'rate:limited',
   ERROR:          'error',
 } as const;
 
@@ -120,6 +121,11 @@ export interface RunDonePayload {
   durationMs: number;
 }
 
+export interface RateLimitedPayload {
+  /** Length (ms) of the global cooldown window the gate just opened. */
+  delayMs: number;
+}
+
 export interface ErrorPayload {
   message: string;
 }
@@ -140,6 +146,7 @@ export interface SyncEngineEvents {
   [EV.FOLDER_DONE]:   (payload: FolderDonePayload)   => void;
   [EV.RUN_PROGRESS]:  (payload: RunProgressPayload)  => void;
   [EV.RUN_DONE]:      (payload: RunDonePayload)      => void;
+  [EV.RATE_LIMITED]:  (payload: RateLimitedPayload)  => void;
   [EV.ERROR]:         (payload: ErrorPayload)        => void;
 }
 
