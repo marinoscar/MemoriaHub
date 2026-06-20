@@ -35,6 +35,8 @@ export interface JobStats {
   };
   byType: JobStatsByType[];
   stuckRunning: number;
+  /** Number of pending jobs currently deferred (scheduledFor > now). */
+  scheduled: number;
 }
 
 export interface JobListItem {
@@ -89,7 +91,9 @@ export class EnrichmentAdminService {
   async getStats(): Promise<JobStats> {
     const stuckThreshold = new Date(Date.now() - STUCK_RUNNING_MINUTES * 60 * 1000);
 
-    const [statusGroups, typeStatusGroups, stuckCount] = await Promise.all([
+    const now = new Date();
+
+    const [statusGroups, typeStatusGroups, stuckCount, scheduledCount] = await Promise.all([
       // Count per status
       this.prisma.enrichmentJob.groupBy({
         by: ['status'],
@@ -105,6 +109,13 @@ export class EnrichmentAdminService {
         where: {
           status: JobStatus.running,
           startedAt: { lt: stuckThreshold },
+        },
+      }),
+      // Count pending jobs that are backed off (scheduledFor in the future)
+      this.prisma.enrichmentJob.count({
+        where: {
+          status: JobStatus.pending,
+          scheduledFor: { gt: now },
         },
       }),
     ]);
@@ -147,7 +158,7 @@ export class EnrichmentAdminService {
 
     const byType = Array.from(typeMap.values()).sort((a, b) => a.type.localeCompare(b.type));
 
-    return { total, byStatus, byType, stuckRunning: stuckCount };
+    return { total, byStatus, byType, stuckRunning: stuckCount, scheduled: scheduledCount };
   }
 
   // -------------------------------------------------------------------------
@@ -226,6 +237,8 @@ export class EnrichmentAdminService {
         lastError: null,
         startedAt: null,
         finishedAt: null,
+        scheduledFor: null,
+        rateLimitHits: 0,
       },
       select: {
         id: true,
@@ -268,6 +281,8 @@ export class EnrichmentAdminService {
         lastError: null,
         startedAt: null,
         finishedAt: null,
+        scheduledFor: null,
+        rateLimitHits: 0,
       },
     });
 
@@ -293,6 +308,7 @@ export class EnrichmentAdminService {
       data: {
         status: JobStatus.pending,
         startedAt: null,
+        scheduledFor: null,
       },
     });
 

@@ -75,7 +75,7 @@ export class EnrichmentAdminController {
   @ApiResponse({
     status: 200,
     description:
-      'Stats including total, byStatus breakdown, byType breakdown, and stuck-running count',
+      'Stats including total, byStatus breakdown, byType breakdown, stuck-running count, and scheduled (deferred/backed-off) count',
   })
   async getStats() {
     return this.adminService.getStats();
