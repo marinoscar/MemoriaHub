@@ -9,6 +9,7 @@ import { ImageDimensionsProcessor } from './processors/image-dimensions.processo
 import { VideoProbeProcessor } from './processors/video-probe.processor';
 import { ReverseGeocodeProcessor } from './processors/reverse-geocode.processor';
 import { ThumbnailProcessor } from './processors/thumbnail.processor';
+import { VisualHashProcessor } from './processors/visual-hash.processor';
 
 /**
  * ObjectProcessingModule
@@ -32,6 +33,7 @@ import { ThumbnailProcessor } from './processors/thumbnail.processor';
     VideoProbeProcessor,
     ReverseGeocodeProcessor,
     ThumbnailProcessor,
+    VisualHashProcessor,
 
     // Aggregate all processors under the OBJECT_PROCESSOR token as an array.
     // ObjectProcessingService.normalizeProcessors() handles the array form.
@@ -44,6 +46,7 @@ import { ThumbnailProcessor } from './processors/thumbnail.processor';
         VideoProbeProcessor,
         ReverseGeocodeProcessor,
         ThumbnailProcessor,
+        VisualHashProcessor,
       ],
       useFactory: (
         contentHash: ContentHashProcessor,
@@ -52,7 +55,8 @@ import { ThumbnailProcessor } from './processors/thumbnail.processor';
         videoProbe: VideoProbeProcessor,
         geocode: ReverseGeocodeProcessor,
         thumbnail: ThumbnailProcessor,
-      ) => [contentHash, exif, dimensions, videoProbe, geocode, thumbnail],
+        visualHash: VisualHashProcessor,
+      ) => [contentHash, exif, dimensions, videoProbe, geocode, thumbnail, visualHash],
     },
 
     ObjectProcessingService,
