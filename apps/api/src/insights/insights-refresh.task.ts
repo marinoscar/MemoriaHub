@@ -2,12 +2,14 @@
 // Insights Refresh Task
 // =============================================================================
 //
-// Interval-gated cron that recomputes the storage insights snapshot once
-// the configured refresh interval has elapsed since the last computation.
+// Interval-gated cron scheduler that enqueues a storage_insights enrichment
+// job once the configured refresh interval has elapsed since the last
+// computation. The enrichment worker performs the actual computation.
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { JobReason } from '@prisma/client';
 import { InsightsService } from './insights.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 
@@ -28,6 +30,14 @@ export class InsightsRefreshTask {
           'storage.insights.refreshIntervalHours',
         )) ?? 4;
 
+      // Skip if a refresh is already queued or running — enqueue idempotency
+      // also deduplicates, but checking first avoids log noise.
+      const refresh = await this.insights.getRefreshState();
+      if (refresh.state === 'pending' || refresh.state === 'running') {
+        this.logger.debug(`Storage insights refresh already ${refresh.state}; skipping schedule check`);
+        return;
+      }
+
       const latest = await this.insights.getLatest();
       if (
         latest?.computedAt &&
@@ -36,10 +46,10 @@ export class InsightsRefreshTask {
         return;
       }
 
-      await this.insights.recompute();
-      this.logger.log('Storage insights snapshot refreshed');
+      await this.insights.enqueueRefresh(JobReason.backfill, 100); // low priority
+      this.logger.log('Storage insights refresh enqueued (scheduled)');
     } catch (err) {
-      this.logger.error('Storage insights refresh failed', err as Error);
+      this.logger.error('Storage insights schedule check failed', err as Error);
     }
   }
 }
