@@ -282,6 +282,7 @@ export class MediaService {
       sourceDeviceId,
       sourceDeviceName,
       missingGeo,
+      noFaces,
       personId,
       personIds,
       peopleMatch,
@@ -320,6 +321,7 @@ export class MediaService {
         sourceDeviceId,
         sourceDeviceName,
         missingGeo,
+        noFaces,
       }),
       ...(effectivePersonIds.length > 0 ? wherePeople(effectivePersonIds, effectiveMode) : {}),
     };
@@ -917,6 +919,7 @@ export class MediaService {
       sourceDeviceId,
       sourceDeviceName,
       missingGeo,
+      noFaces,
       personId,
       personIds,
       peopleMatch,
@@ -942,6 +945,7 @@ export class MediaService {
         sourceDeviceId,
         sourceDeviceName,
         missingGeo,
+        noFaces,
       }),
       ...(() => {
         const effectivePersonIds =

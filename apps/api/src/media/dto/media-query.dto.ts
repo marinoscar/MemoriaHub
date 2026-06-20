@@ -33,6 +33,7 @@ export const mediaFilterFields = {
   sourceDeviceId: z.string().optional(),
   sourceDeviceName: z.string().optional(),
   missingGeo: z.string().optional().transform(v => v === 'true' ? true : v === 'false' ? false : undefined),
+  noFaces: z.string().optional().transform(v => v === 'true' ? true : v === 'false' ? false : undefined),
   personId: z.string().uuid().optional(),
   // Multi-person filter: accepts comma-separated string or repeated query params
   personIds: z

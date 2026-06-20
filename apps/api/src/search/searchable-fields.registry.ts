@@ -30,6 +30,7 @@ import {
   whereSourceDeviceId,
   whereSourceDeviceName,
   whereMissingGeo,
+  whereNoFaces,
   wherePeople,
 } from './media-where.builder';
 
@@ -179,6 +180,14 @@ export const SEARCHABLE_FIELDS: SearchableField[] = [
     description:
       'When true, returns only items without GPS coordinates. When false, returns only items that have GPS coordinates.',
     buildWhere: (v) => whereMissingGeo(Boolean(v)),
+  },
+  {
+    key: 'noFaces',
+    label: 'No faces detected',
+    type: 'boolean',
+    description:
+      'When true, returns only items that have no faces at all (neither detected nor manually added) — useful for finding photos that still need people tagged.',
+    buildWhere: (v) => whereNoFaces(v === true),
   },
   {
     key: 'people',
