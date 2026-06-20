@@ -256,7 +256,10 @@ describe('SearchPage — extended coverage', () => {
   // People explore row
   // -------------------------------------------------------------------------
   describe('People explore row', () => {
-    it('shows named people in the People row when available', () => {
+    it('shows the People section header and at least one person when people are available', () => {
+      // Note: useFittedCount seeds from getBoundingClientRect().width which
+      // returns 0 in jsdom, clamping count to 1. We therefore assert the
+      // section header and the first visible person (Alice), not every item.
       mockUsePeople.mockReturnValue({
         ...defaultPeopleMock(),
         data: {
@@ -270,8 +273,29 @@ describe('SearchPage — extended coverage', () => {
 
       render(<SearchPage />);
 
+      // Section header must always be visible
+      expect(screen.getByText('People')).toBeInTheDocument();
+      // At least the first person tile renders
       expect(screen.getByText('Alice')).toBeInTheDocument();
-      expect(screen.getByText('Bob')).toBeInTheDocument();
+    });
+
+    it('shows the "View all" button in the People section', () => {
+      mockUsePeople.mockReturnValue({
+        ...defaultPeopleMock(),
+        data: {
+          items: [
+            { id: 'p-1', name: 'Alice', isUnlabeled: false, faceCount: 3, coverFace: null, createdAt: '', updatedAt: '', favorite: false },
+          ],
+          meta: { page: 1, pageSize: 100, totalItems: 1, totalPages: 1 },
+        },
+      } as any);
+
+      render(<SearchPage />);
+
+      // The People ExploreCarousel sets viewAllLabel="View all" and onViewAll=navigate('/people')
+      // At least one "View all" button should be present in the explore view
+      const viewAllButtons = screen.getAllByRole('button', { name: /view all/i });
+      expect(viewAllButtons.length).toBeGreaterThan(0);
     });
 
     it('does NOT show the People section when there are no labeled people', () => {

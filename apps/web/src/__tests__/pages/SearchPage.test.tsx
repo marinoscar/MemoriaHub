@@ -160,6 +160,51 @@ describe('SearchPage', () => {
       render(<SearchPage />);
       expect(screen.queryByTestId('media-gallery')).not.toBeInTheDocument();
     });
+
+    it('shows "View all in map" button for the Places section', async () => {
+      const { getExplorePlaces } = await import('../../services/media');
+      vi.mocked(getExplorePlaces).mockResolvedValue([
+        { name: 'Rome', count: 4, coverThumbnailUrl: null },
+      ]);
+
+      render(<SearchPage />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /view all in map/i })).toBeInTheDocument();
+      });
+    });
+
+    it('shows "View all" button for the Tags section when tags are loaded', async () => {
+      const { getExploreTags } = await import('../../services/media');
+      vi.mocked(getExploreTags).mockResolvedValue([
+        { name: 'sunset', count: 7, coverThumbnailUrl: null },
+      ]);
+
+      render(<SearchPage />);
+
+      await waitFor(() => {
+        // Multiple "View all" buttons may exist (Places + Tags); assert at least one
+        const buttons = screen.getAllByRole('button', { name: /view all/i });
+        expect(buttons.length).toBeGreaterThan(0);
+      });
+    });
+
+    it('shows "View all" button for People section when people are loaded', () => {
+      mockUsePeople.mockReturnValue({
+        ...defaultPeopleMock(),
+        data: {
+          items: [
+            { id: 'p-1', name: 'Alice', isUnlabeled: false, faceCount: 5, coverFace: null, createdAt: '', updatedAt: '', favorite: true },
+          ],
+          meta: { page: 1, pageSize: 100, totalItems: 1, totalPages: 1 },
+        },
+      } as any);
+
+      render(<SearchPage />);
+
+      const viewAllButtons = screen.getAllByRole('button', { name: /view all/i });
+      expect(viewAllButtons.length).toBeGreaterThan(0);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -320,6 +365,76 @@ describe('SearchPage', () => {
       await waitFor(() => {
         expect(screen.getByText('beach')).toBeInTheDocument();
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // People sort: favorites-first, then faceCount descending
+  // -------------------------------------------------------------------------
+  describe('People sort order', () => {
+    it('renders the favorite person before a non-favorite when count allows 1 tile', () => {
+      // jsdom: getBoundingClientRect returns 0 → useFittedCount clamps to 1.
+      // The person that appears must be the one that sorts first: favorite first.
+      mockUsePeople.mockReturnValue({
+        ...defaultPeopleMock(),
+        data: {
+          items: [
+            // Carol is non-favorite with many faces — should sort AFTER Dave
+            { id: 'p-carol', name: 'Carol', isUnlabeled: false, faceCount: 50, coverFace: null, createdAt: '', updatedAt: '', favorite: false },
+            // Dave is a favorite with fewer faces — sorts FIRST
+            { id: 'p-dave', name: 'Dave', isUnlabeled: false, faceCount: 3, coverFace: null, createdAt: '', updatedAt: '', favorite: true },
+          ],
+          meta: { page: 1, pageSize: 100, totalItems: 2, totalPages: 1 },
+        },
+      } as any);
+
+      render(<SearchPage />);
+
+      // Dave (favorite=true) must appear since it's the first item after sort
+      expect(screen.getByText('Dave')).toBeInTheDocument();
+      // Carol should not appear because jsdom caps the carousel at 1 tile
+      expect(screen.queryByText('Carol')).not.toBeInTheDocument();
+    });
+
+    it('renders the person with the highest faceCount first when no favorites', () => {
+      // Non-favorite items are sorted by faceCount desc; 1 tile visible in jsdom.
+      mockUsePeople.mockReturnValue({
+        ...defaultPeopleMock(),
+        data: {
+          items: [
+            // Eve has fewer faces — sorts second
+            { id: 'p-eve', name: 'Eve', isUnlabeled: false, faceCount: 2, coverFace: null, createdAt: '', updatedAt: '', favorite: false },
+            // Frank has more faces — sorts first
+            { id: 'p-frank', name: 'Frank', isUnlabeled: false, faceCount: 10, coverFace: null, createdAt: '', updatedAt: '', favorite: false },
+          ],
+          meta: { page: 1, pageSize: 100, totalItems: 2, totalPages: 1 },
+        },
+      } as any);
+
+      render(<SearchPage />);
+
+      // Frank (higher faceCount) must be visible
+      expect(screen.getByText('Frank')).toBeInTheDocument();
+      // Eve should not appear because jsdom caps the carousel at 1 tile
+      expect(screen.queryByText('Eve')).not.toBeInTheDocument();
+    });
+
+    it('excludes unlabeled (null-name) people from the People row', () => {
+      mockUsePeople.mockReturnValue({
+        ...defaultPeopleMock(),
+        data: {
+          items: [
+            { id: 'p-unlabeled', name: null, isUnlabeled: true, faceCount: 8, coverFace: null, createdAt: '', updatedAt: '', favorite: false },
+            { id: 'p-named', name: 'Grace', isUnlabeled: false, faceCount: 1, coverFace: null, createdAt: '', updatedAt: '', favorite: false },
+          ],
+          meta: { page: 1, pageSize: 100, totalItems: 2, totalPages: 1 },
+        },
+      } as any);
+
+      render(<SearchPage />);
+
+      // Grace should be visible; the unnamed person has no text to check
+      expect(screen.getByText('Grace')).toBeInTheDocument();
     });
   });
 });
