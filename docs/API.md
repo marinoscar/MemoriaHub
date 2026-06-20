@@ -1649,6 +1649,82 @@ All items include a freshly signed `thumbnailUrl`.
 
 ---
 
+#### GET /api/media/explore/places
+
+**Requires:** `media:read` permission + `viewer` role in the target circle
+
+Return a summary of distinct geographic places represented in a circle, ordered by item count descending. Used by the Explore section of the UI to show a browsable grid of places.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `circleId` | UUID | Yes | Circle to aggregate (caller must be a viewer or higher) |
+
+**Response:**
+
+```json
+[
+  {
+    "name": "San José, Costa Rica",
+    "count": 312,
+    "coverThumbnailUrl": "https://s3.amazonaws.com/..."
+  },
+  {
+    "name": "New York, United States",
+    "count": 88,
+    "coverThumbnailUrl": "https://s3.amazonaws.com/..."
+  }
+]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Reverse-geocoded place name (typically `geoPlaceName`) |
+| `count` | number | Number of media items at this place |
+| `coverThumbnailUrl` | string \| null | Signed thumbnail URL from a representative item |
+
+**Error Cases:**
+- 403 Forbidden — caller is not a member of the circle
+
+---
+
+#### GET /api/media/explore/tags
+
+**Requires:** `media:read` permission + `viewer` role in the target circle
+
+Return a summary of tags used in a circle, ordered by item count descending. Used by the Explore section of the UI to show a browsable grid of tags.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `circleId` | UUID | Yes | Circle to aggregate (caller must be a viewer or higher) |
+
+**Response:**
+
+```json
+[
+  {
+    "name": "vacation",
+    "count": 204,
+    "coverThumbnailUrl": "https://s3.amazonaws.com/..."
+  },
+  {
+    "name": "family",
+    "count": 155,
+    "coverThumbnailUrl": null
+  }
+]
+```
+
+Same response shape as `/explore/places`. `coverThumbnailUrl` is null when no tagged item has a processable thumbnail.
+
+**Error Cases:**
+- 403 Forbidden — caller is not a member of the circle
+
+---
+
 #### PATCH /api/media/bulk
 
 **Requires:** `media:write` permission + `collaborator` role in the target circle
@@ -3057,7 +3133,7 @@ All endpoints in this group require the Admin system role plus the listed permis
 
 **Permission:** `ai_settings:read`
 
-Returns configured and known (unconfigured) AI providers, the active search feature configuration, and conversation lifecycle settings. The raw API key is never returned — only `last4`.
+Returns configured and known (unconfigured) AI providers and the active search feature configuration. The raw API key is never returned — only `last4`.
 
 **Response:**
 ```json
@@ -3077,10 +3153,6 @@ Returns configured and known (unconfigured) AI providers, the active search feat
   ],
   "features": {
     "search": { "provider": "anthropic", "model": "claude-opus-4-8" }
-  },
-  "conversations": {
-    "archiveAfterDays": 30,
-    "deleteAfterArchiveDays": 30
   }
 }
 ```
@@ -3259,97 +3331,39 @@ Return the registry of all available filter dimensions. The frontend uses this t
 
 ---
 
-## Search Conversations (Agentic Search)
+## Agentic Search
 
-All endpoints require `search:use`. The `circleId` used for media authorization always comes from the persisted conversation row — it cannot be overridden by request input.
+Agentic search is **stateless** — no conversation or message data is stored server-side. The client holds the full message history in memory and sends it with every request.
 
-For the complete SSE protocol, conversation lifecycle details, and architecture, see [docs/specs/agentic-search.md](specs/agentic-search.md).
+For the complete SSE protocol, architecture, and extensibility guide, see [docs/specs/agentic-search.md](specs/agentic-search.md).
 
 ---
 
-### POST /search/conversations
+### POST /search/agent
 
 **Permission:** `search:use`
 
-Create a new search conversation for the specified circle. Requires that an AI provider and model are configured in AI Settings.
+Send the full message history for a circle and receive a streamed AI response. The server verifies circle viewer membership for `circleId`, runs the tool-calling loop, and streams events. Nothing is persisted.
 
 **Request Body:**
-```json
-{ "circleId": "uuid" }
-```
 
-**Response:** 201 — Created conversation object
-
-**Error Cases:**
-- 400 — AI search not configured
-- 403 — Not a member of the circle
-
----
-
-### GET /search/conversations
-
-**Permission:** `search:use`
-
-List the caller's conversations for a circle.
-
-**Query Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `circleId` | UUID (required) | Filter to this circle |
-| `favorite` | boolean | Filter by favorite flag |
-| `archived` | boolean | Filter by archived state |
-| `page` | integer (default 1) | Page number |
-| `pageSize` | integer (default 20, max 100) | Items per page |
-
-**Response:** Paginated list of conversation summaries (no messages).
-
----
-
-### GET /search/conversations/:id
-
-**Permission:** `search:use`
-
-Get a single conversation with its full message history. Returns 404 if the conversation does not exist or is not owned by the caller.
-
----
-
-### PATCH /search/conversations/:id
-
-**Permission:** `search:use`
-
-Update conversation title or favorite flag.
-
-**Request Body:**
 ```json
 {
-  "title": "Costa Rica Summer 2024",
-  "favorite": true
+  "circleId": "uuid",
+  "messages": [
+    { "role": "user", "content": "Show me photos from our trip to Costa Rica last summer" },
+    { "role": "assistant", "content": "I found 42 photos from Costa Rica in July 2024..." },
+    { "role": "user", "content": "Only show the ones from San José" }
+  ]
 }
 ```
 
-Both fields are optional.
-
----
-
-### DELETE /search/conversations/:id
-
-**Permission:** `search:use`
-
-Soft-delete the conversation (sets `deletedAt`). Returns 204 No Content.
-
----
-
-### POST /search/conversations/:id/messages
-
-**Permission:** `search:use`
-
-Send a user message and receive the AI response as a Server-Sent Events (SSE) stream.
-
-**Request Body:**
-```json
-{ "content": "Show me photos from our trip to Costa Rica last summer" }
-```
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `circleId` | UUID | Yes | Circle to search within. Caller must be a `viewer` or higher. |
+| `messages` | array | Yes | Full conversation history. The last entry must have `role: 'user'`. |
+| `messages[].role` | `'user'` \| `'assistant'` | Yes | Message author |
+| `messages[].content` | string | Yes | Message text |
 
 **Response:** `200 OK`, `Content-Type: text/event-stream`
 
@@ -3360,11 +3374,9 @@ SSE event types:
 | `token` | `{ text: string }` | A chunk of the model's response text |
 | `tool_call` | `{ name: "search_media", args: { ... } }` | Model is executing a search |
 | `results` | `{ items: [...], meta: { total, ... } }` | Search results returned to the model |
-| `done` | `{ messageId: string }` | Stream complete; `messageId` is the persisted DB record |
+| `done` | `{}` | Stream complete |
 | `error` | `{ message: string }` | Error occurred |
 
-The user and assistant messages are persisted to the database after the stream closes. If the conversation has no title, an auto-title is generated from the first exchange.
-
 **Error Cases:**
-- 400 — AI not configured or invalid input
-- 404 — Conversation not found
+- 400 — AI not configured, invalid input, or last message is not `role: 'user'`
+- 403 — Not a member of the circle or insufficient permissions
