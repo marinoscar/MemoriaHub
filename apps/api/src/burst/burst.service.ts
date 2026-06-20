@@ -335,7 +335,7 @@ export class BurstService {
   // ---------------------------------------------------------------------------
 
   async backfillBurstDetection(dto: BurstBackfillDto, userId: string, perms: string[]) {
-    const { circleId, force } = dto;
+    const { circleId, force, from, to } = dto;
 
     await this.membership.assertCircleAccess(userId, circleId, perms, CircleRole.collaborator);
 
@@ -354,22 +354,29 @@ export class BurstService {
       );
     }
 
-    // Find items to enqueue
-    let itemsToEnqueue: { id: true }[];
+    // Build optional capturedAt range filter from the from/to bounds
+    const capturedAtFilter =
+      from || to
+        ? {
+            capturedAt: {
+              ...(from ? { gte: new Date(from) } : {}),
+              ...(to ? { lte: new Date(to) } : {}),
+            },
+          }
+        : {};
 
     if (force) {
-      // Enqueue all non-deleted photos in the circle
+      // Enqueue all non-deleted photos in the circle (optionally filtered by date range)
       const items = await this.prisma.mediaItem.findMany({
         where: {
           circleId,
           type: MediaType.photo,
           deletedAt: null,
+          ...capturedAtFilter,
         },
         select: { id: true },
       });
-      itemsToEnqueue = items as unknown as { id: true }[];
 
-      // Use the items directly
       let enqueued = 0;
       for (const item of items) {
         await this.enrichmentJobService.enqueue({
@@ -383,7 +390,7 @@ export class BurstService {
       }
 
       this.logger.log(
-        `Backfilled burst detection for circle ${circleId}: enqueued ${enqueued} items (force=true)`,
+        `Backfilled burst detection for circle ${circleId}: enqueued ${enqueued} items (force=true${from || to ? `, from=${from ?? '*'}, to=${to ?? '*'}` : ''})`,
       );
       return { data: { enqueued } };
     } else {
@@ -407,6 +414,7 @@ export class BurstService {
           deletedAt: null,
           burstGroupId: null,
           id: { notIn: [...excludeIds] },
+          ...capturedAtFilter,
         },
         select: { id: true },
       });
@@ -424,7 +432,7 @@ export class BurstService {
       }
 
       this.logger.log(
-        `Backfilled burst detection for circle ${circleId}: enqueued ${enqueued} items (force=false)`,
+        `Backfilled burst detection for circle ${circleId}: enqueued ${enqueued} items (force=false${from || to ? `, from=${from ?? '*'}, to=${to ?? '*'}` : ''})`,
       );
       return { data: { enqueued } };
     }

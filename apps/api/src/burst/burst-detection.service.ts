@@ -149,9 +149,13 @@ export class BurstDetectionService {
       return;
     }
 
+    // After the guard above capturedAt is narrowed to Date; store it explicitly
+    // so TypeScript knows it is non-null in subsequent accesses on `item`.
+    const capturedAt: Date = rawItem.capturedAt;
+
     // Build a mutable copy so we can patch perceptualHash/sharpnessScore below
     // without mutating the raw Prisma result.
-    let item = { ...rawItem };
+    let item = { ...rawItem, capturedAt };
 
     // Step 1b: On-demand hash computation for legacy photos.
     // Only attempt when perceptualHash is null AND we have a storageObjectId to
