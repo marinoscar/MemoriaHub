@@ -165,11 +165,20 @@ One row per detected burst group.
 
 | Column | Type | Notes |
 |--------|------|-------|
-| `perceptualHash` | BigInt? | 64-bit dHash; null until the `visual-hash` processor runs |
+| `perceptualHash` | String? (TEXT, unsigned decimal) | 64-bit dHash stored as an unsigned decimal string; null until the `visual-hash` processor runs. **Not `bigint`**: Postgres `bigint` is signed and overflows unsigned 64-bit hashes with the high bit set; JS `BigInt` is not JSON-serializable. Parsed with `BigInt(string)` inside the burst matcher only. Omitted from default API responses via Prisma global `omit`. |
 | `sharpnessScore` | Float? | Variance-of-Laplacian; null until the `visual-hash` processor runs |
 | `burstUuid` | String? | Apple BurstUUID from EXIF MakerNote; null for non-Apple cameras or manual-burst photos |
 | `burstScore` | Float? | Composite quality score within the group; null when item is not in a group |
 | `burstGroupId` | String? | FK → `burst_groups` (SetNull on delete); null when not assigned to a group |
+
+**Storage rationale for `perceptualHash` — lessons learned:**
+
+Two production bugs were encountered when `perceptualHash` was stored as a Postgres `bigint` (Prisma `BigInt`):
+
+1. **"value out of range for type bigint"** — a dHash is an unsigned 64-bit integer. Postgres `bigint` is signed (range −2^63 to 2^63−1). Any hash whose high bit is set (value ≥ 2^63) exceeds the signed range and causes a Postgres overflow error. This affected roughly half of all possible hash values.
+2. **"Do not know how to serialize a BigInt"** — Prisma maps `bigint` columns to JavaScript's `BigInt` primitive. `JSON.stringify` has no built-in serializer for `BigInt`, so any endpoint that returned a `MediaItem` row without explicitly excluding the column would 500.
+
+**Resolution:** the column is `TEXT` in Postgres and `String` in Prisma, storing the value as an unsigned decimal string (e.g. `"13853051937932480"`). Application code calls `BigInt(row.perceptualHash)` only inside the burst matcher where Hamming distance arithmetic is required. The column is excluded from all default API serialization via a Prisma global `omit` so it cannot accidentally appear in responses.
 
 ### 4.3 New Column on `circles`
 
@@ -592,3 +601,4 @@ The following extensions are left for future iterations. None of them require ch
 |---------|------|--------|---------|
 | 1.0 | June 2026 | AI Assistant | Initial specification |
 | 1.1 | June 2026 | AI Assistant | Document `from`/`to` date-range params on backfill endpoint; document on-demand retroactive perceptual hashing for legacy photos in the enrichment handler (§5.5 Step 1a) and backfill (§7.3); document "Scan for bursts" panel in circle Settings UI (§8.3); resolve deferred "Smart backfill on settings change" Future Work item |
+| 1.2 | June 2026 | AI Assistant | Change `perceptualHash` column type from `BigInt` to `String` (TEXT, unsigned decimal) to fix signed-overflow and JSON-serialization bugs; add storage rationale and lessons-learned note in §4.2 |
