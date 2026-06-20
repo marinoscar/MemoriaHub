@@ -1,7 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EnrichmentJob, MediaType, BurstGroupStatus, JobReason } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import {
+  STORAGE_PROVIDER,
+  StorageProvider,
+} from '../storage/providers/storage-provider.interface';
+import { streamToBuffer } from '../storage/processing/processors/stream-utils';
+import { computeVisualHash } from '../storage/processing/visual-hash.util';
 
 /**
  * Computes the Hamming distance between two 64-bit BigInt values.
@@ -35,7 +41,71 @@ export class BurstDetectionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly enrichmentJobService: EnrichmentJobService,
+    @Inject(STORAGE_PROVIDER)
+    private readonly storageProvider: StorageProvider,
   ) {}
+
+  /**
+   * For legacy photos that were uploaded before the visual-hash processor was
+   * introduced, perceptualHash may be null. This method fetches the image bytes
+   * from storage and computes + persists the hash on demand so the item can
+   * participate in burst grouping.
+   *
+   * This is best-effort: transient storage errors are re-thrown so the
+   * enrichment queue's normal retry logic kicks in; permanently unreadable
+   * images (null result from computeVisualHash) are logged and skipped.
+   *
+   * @returns the computed perceptualHash and sharpnessScore, or null if unavailable
+   */
+  private async computeAndPersistHashOnDemand(
+    mediaItemId: string,
+    storageObjectId: string,
+  ): Promise<{ perceptualHash: bigint; sharpnessScore: number } | null> {
+    // Fetch the StorageObject to get the storageKey
+    const storageObject = await this.prisma.storageObject.findUnique({
+      where: { id: storageObjectId },
+      select: { storageKey: true },
+    });
+
+    if (!storageObject?.storageKey) {
+      this.logger.warn(
+        `MediaItem ${mediaItemId}: storageObject ${storageObjectId} not found or has no storageKey; cannot compute hash`,
+      );
+      return null;
+    }
+
+    // Stream the object bytes from storage.
+    // Transient errors (network, throttle) propagate so the worker retries.
+    const stream = await this.storageProvider.download(storageObject.storageKey);
+    const buffer = await streamToBuffer(stream);
+
+    const result = await computeVisualHash(buffer);
+
+    if (!result) {
+      this.logger.warn(
+        `MediaItem ${mediaItemId}: computeVisualHash returned null for key ${storageObject.storageKey}; item will skip hash-based grouping`,
+      );
+      return null;
+    }
+
+    const { perceptualHash, sharpnessScore } = result;
+
+    // Persist the freshly computed values so subsequent runs and recomputeGroupScores
+    // benefit without re-downloading the image.
+    await this.prisma.mediaItem.update({
+      where: { id: mediaItemId },
+      data: {
+        perceptualHash,   // Prisma BigInt — safe to store directly
+        sharpnessScore,
+      },
+    });
+
+    this.logger.log(
+      `MediaItem ${mediaItemId}: on-demand hash computed and persisted (dHash=${perceptualHash}, sharpness=${sharpnessScore.toFixed(2)})`,
+    );
+
+    return { perceptualHash, sharpnessScore };
+  }
 
   async processMediaItem(job: EnrichmentJob): Promise<void> {
     const mediaItemId = job.mediaItemId;
@@ -45,7 +115,7 @@ export class BurstDetectionService {
     }
 
     // Step 1: Load the MediaItem
-    const item = await this.prisma.mediaItem.findUnique({
+    const rawItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },
       select: {
         id: true,
@@ -60,22 +130,53 @@ export class BurstDetectionService {
         circleId: true,
         deletedAt: true,
         burstGroupId: true,
+        storageObjectId: true,
       },
     });
 
-    if (!item) {
+    if (!rawItem) {
       this.logger.warn(`MediaItem ${mediaItemId} not found; skipping burst detection`);
       return;
     }
 
-    if (item.deletedAt) {
+    if (rawItem.deletedAt) {
       this.logger.debug(`MediaItem ${mediaItemId} is deleted; skipping burst detection`);
       return;
     }
 
-    if (!item.capturedAt) {
+    if (!rawItem.capturedAt) {
       this.logger.debug(`MediaItem ${mediaItemId} has no capturedAt; cannot do temporal proximity grouping`);
       return;
+    }
+
+    // Build a mutable copy so we can patch perceptualHash/sharpnessScore below
+    // without mutating the raw Prisma result.
+    let item = { ...rawItem };
+
+    // Step 1b: On-demand hash computation for legacy photos.
+    // Only attempt when perceptualHash is null AND we have a storageObjectId to
+    // download from. If computation fails non-transiently, we continue without
+    // a hash (BurstUUID grouping still works; temporal-only linking is skipped
+    // by the existing null-hash guard in Step 4).
+    if (item.perceptualHash === null && item.storageObjectId) {
+      try {
+        const computed = await this.computeAndPersistHashOnDemand(
+          item.id,
+          item.storageObjectId,
+        );
+        if (computed) {
+          item = { ...item, ...computed };
+        }
+      } catch (err) {
+        // Re-throw to let the enrichment worker retry on transient errors
+        // (e.g. storage unavailable). Permanently unreadable files should
+        // return null from computeAndPersistHashOnDemand, not throw.
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.error(
+          `MediaItem ${mediaItemId}: on-demand hash computation failed with error (will retry): ${msg}`,
+        );
+        throw err;
+      }
     }
 
     // Step 2: Load system settings for burst config
