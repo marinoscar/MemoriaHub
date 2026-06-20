@@ -18,12 +18,25 @@ import { ui } from '../ui.js';
 // Keys that must be positive integers
 // ---------------------------------------------------------------------------
 
-const INTEGER_KEYS = new Set(['concurrency', 'attempts_cap']);
+const INTEGER_KEYS = new Set([
+  'concurrency',
+  'attempts_cap',
+  'max_retries',
+  'retry_base_ms',
+  'retry_max_ms',
+  'rate_limit_cooldown_ms',
+  'rate_limit_max_cooldown_ms',
+]);
 
 // All known setting keys with defaults for display
 const KNOWN_SETTINGS: Array<{ key: string; default: unknown; description: string }> = [
   { key: 'concurrency',  default: 3, description: 'Max concurrent upload workers' },
   { key: 'attempts_cap', default: 5, description: 'Max upload attempts before a file is blocked' },
+  { key: 'max_retries',  default: 5, description: 'Retry attempts per request on 429/503/5xx/network' },
+  { key: 'retry_base_ms', default: 500, description: 'Base backoff (ms) for request retries' },
+  { key: 'retry_max_ms', default: 30000, description: 'Per-attempt backoff cap (ms)' },
+  { key: 'rate_limit_cooldown_ms', default: 2000, description: 'Base global cooldown (ms) when throttled' },
+  { key: 'rate_limit_max_cooldown_ms', default: 60000, description: 'Global cooldown ceiling (ms)' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -43,7 +56,7 @@ function listCmd(): Command {
 
     for (const s of KNOWN_SETTINGS) {
       const current = repo.get(s.key, s.default);
-      ui.line(`  ${s.key.padEnd(16)} = ${JSON.stringify(current)}    (default: ${JSON.stringify(s.default)})  ${s.description}`);
+      ui.line(`  ${s.key.padEnd(28)} = ${JSON.stringify(current)}    (default: ${JSON.stringify(s.default)})  ${s.description}`);
     }
 
     ui.blank();
