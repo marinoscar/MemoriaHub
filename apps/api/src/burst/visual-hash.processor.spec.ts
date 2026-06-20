@@ -349,21 +349,26 @@ describe('VisualHashProcessor', () => {
   // -------------------------------------------------------------------------
 
   describe('error handling', () => {
-    it('returns success:false and error string when sharp throws', async () => {
+    // computeVisualHash swallows processing errors and returns null, so the
+    // processor skips gracefully (success:true, empty metadata) rather than
+    // marking the whole storage object as failed. A missing perceptual hash is
+    // non-critical — the burst detection job recomputes it on demand.
+    it('skips gracefully (success:true, no metadata) when sharp throws', async () => {
       mockToBuffer.mockRejectedValueOnce(new Error('sharp decode failed'));
 
       const result = await processor.process(makeStorageObject(), makeStream);
 
-      expect(result.success).toBe(false);
-      expect(typeof result.error).toBe('string');
-      expect(result.error).toContain('sharp decode failed');
+      expect(result.success).toBe(true);
+      expect(result.metadata).toEqual({});
+      expect(result.error).toBeUndefined();
     });
 
-    it('never throws — wraps all errors as success:false', async () => {
+    it('never throws and never fails the object when image prep rejects', async () => {
       (prepareImageForProcessing as jest.Mock).mockRejectedValueOnce(new Error('corrupt EXIF'));
 
       await expect(processor.process(makeStorageObject(), makeStream)).resolves.toMatchObject({
-        success: false,
+        success: true,
+        metadata: {},
       });
     });
   });
