@@ -561,9 +561,17 @@ function AiSettingsContent() {
             AI Captions &amp; Description Search
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            When enabled, AI-generated captions and descriptions are stored as text embeddings,
+            When enabled, AI-generated captions and descriptions are indexed as text embeddings,
             making your photos semantically searchable by meaning and scene content.
           </Typography>
+
+          <Alert severity="info" icon={<InfoIcon fontSize="inherit" />} sx={{ mb: 1.5 }}>
+            Captions and descriptions are generated during the auto-tagging process — not here.
+            The <strong>Tagging Feature</strong> (above) must be configured and auto-tagging must
+            be enabled for at least one circle before any captions or descriptions exist to search.
+            This setting only controls whether those already-generated captions become
+            semantically searchable via embeddings.
+          </Alert>
 
           <Alert severity="info" icon={<InfoIcon fontSize="inherit" />} sx={{ mb: 2 }}>
             Requires OpenAI — text embeddings are only available through the OpenAI API.
