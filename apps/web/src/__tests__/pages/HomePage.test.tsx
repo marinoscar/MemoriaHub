@@ -1,62 +1,55 @@
+/**
+ * Component tests — HomePage (refactored to feed-based gallery)
+ *
+ * After the unify-gallery refactor, HomePage is a minimal page that:
+ *   - Shows a "Select or create a circle" alert when no circle is active
+ *   - Renders <MediaGallery> in feed mode when a circle is active
+ *   - Shows an Upload FAB when a circle is active
+ *   - Opens MediaUploadDialog on FAB click
+ *
+ * MediaGallery is mocked to isolate HomePage chrome tests from gallery
+ * internals. The MediaUploadDialog is also mocked to avoid service calls.
+ */
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, fireEvent } from '@testing-library/react';
-import { render, mockUser, mockAdminUser } from '../utils/test-utils';
-import HomePage from '../../pages/HomePage';
-import type { MediaItem } from '../../types/media';
+import { screen, fireEvent } from '@testing-library/react';
+import { render, mockUser } from '../utils/test-utils';
 
 // ---------------------------------------------------------------------------
-// Mock react-router-dom (keep MemoryRouter from test-utils; only override navigate)
+// Module mocks — declared before any imports of mocked modules
 // ---------------------------------------------------------------------------
-const mockNavigate = vi.fn();
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-  };
-});
 
-// ---------------------------------------------------------------------------
-// Mock useDashboard so we control data without real API calls
-// ---------------------------------------------------------------------------
-vi.mock('../../hooks/useDashboard', () => ({
-  useDashboard: vi.fn(),
-}));
-
-// ---------------------------------------------------------------------------
-// Mock useCircle so we can control loading state independently
-// ---------------------------------------------------------------------------
 vi.mock('../../hooks/useCircle', () => ({
   useCircle: vi.fn(),
 }));
 
-// ---------------------------------------------------------------------------
-// Mock media services used by MediaUploadDialog / MediaDetailDrawer
-// ---------------------------------------------------------------------------
-vi.mock('../../services/media', () => ({
-  getDashboard: vi.fn(),
-  patchMedia: vi.fn(),
-  getMedia: vi.fn(),
-  initUpload: vi.fn(),
-  uploadPart: vi.fn(),
-  completeUpload: vi.fn(),
-  registerMedia: vi.fn(),
-  listTags: vi.fn(),
-  listMedia: vi.fn(),
-  bulkUpdateMedia: vi.fn(),
-  bulkTags: vi.fn(),
+// Mock MediaGallery so its internal useInfiniteMedia / listMedia calls never fire.
+vi.mock('../../components/media/MediaGallery', () => ({
+  MediaGallery: vi.fn(({ emptyState }: { emptyState?: React.ReactNode }) => (
+    <div data-testid="media-gallery">{emptyState}</div>
+  )),
 }));
 
-import { useDashboard } from '../../hooks/useDashboard';
-import { useCircle } from '../../hooks/useCircle';
-import { getMedia, listTags } from '../../services/media';
+// Mock MediaUploadDialog to avoid upload service calls in these tests.
+vi.mock('../../components/media/MediaUploadDialog', () => ({
+  MediaUploadDialog: vi.fn(({ open, onClose }: { open: boolean; onClose: () => void }) =>
+    open ? <div data-testid="upload-dialog"><button onClick={onClose}>Close</button></div> : null,
+  ),
+}));
 
-const mockUseDashboard = vi.mocked(useDashboard);
+// ---------------------------------------------------------------------------
+// Imports after mocks
+// ---------------------------------------------------------------------------
+
+import HomePage from '../../pages/HomePage';
+import { useCircle } from '../../hooks/useCircle';
+
 const mockUseCircle = vi.mocked(useCircle);
 
 // ---------------------------------------------------------------------------
-// Default mock values
+// Shared fixtures
 // ---------------------------------------------------------------------------
+
 const defaultActiveCircle = {
   id: 'circle-1',
   name: "Test User's Library",
@@ -67,65 +60,7 @@ const defaultActiveCircle = {
   updatedAt: new Date().toISOString(),
 };
 
-const defaultDashboardData = {
-  onThisDay: [],
-  recent: [],
-  favorites: [],
-  counts: { total: 5, unreviewed: 2, lowValue: 1, missingGeo: 0 },
-};
-
-const mockItem: MediaItem = {
-  id: 'item-1',
-  storageObjectId: 'obj-1',
-  addedById: 'test-user-id',
-  circleId: 'circle-1',
-  type: 'photo',
-  capturedAt: null,
-  capturedAtOffset: null,
-  importedAt: new Date().toISOString(),
-  source: 'web',
-  contentHash: null,
-  classification: 'unreviewed',
-  width: null,
-  height: null,
-  durationMs: null,
-  orientation: null,
-  takenLat: null,
-  takenLng: null,
-  takenAltitude: null,
-  cameraMake: null,
-  cameraModel: null,
-  originalFilename: 'test.jpg',
-  title: 'A Test Memory',
-  caption: null,
-  description: null,
-  favorite: false,
-  geoCountry: null,
-  geoCountryCode: null,
-  geoAdmin1: null,
-  geoAdmin2: null,
-  geoLocality: null,
-  geoPlaceName: null,
-  geoSource: null,
-  geocodedAt: null,
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-  deletedAt: null,
-  metadata: null,
-  thumbnailUrl: 'https://example.com/thumb.jpg',
-};
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-function setupDefaults() {
-  mockUseDashboard.mockReturnValue({
-    data: defaultDashboardData,
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  });
-
+function setupActiveCircle() {
   mockUseCircle.mockReturnValue({
     circles: [defaultActiveCircle],
     activeCircle: defaultActiveCircle,
@@ -137,94 +72,45 @@ function setupDefaults() {
   });
 }
 
+function setupNoCircle() {
+  mockUseCircle.mockReturnValue({
+    circles: [],
+    activeCircle: null,
+    activeCircleId: null,
+    activeCircleRole: null,
+    loading: false,
+    setActiveCircle: vi.fn().mockResolvedValue(undefined),
+    refreshCircles: vi.fn().mockResolvedValue(undefined),
+  });
+}
+
+function setupCircleLoading() {
+  mockUseCircle.mockReturnValue({
+    circles: [],
+    activeCircle: null,
+    activeCircleId: null,
+    activeCircleRole: null,
+    loading: true,
+    setActiveCircle: vi.fn().mockResolvedValue(undefined),
+    refreshCircles: vi.fn().mockResolvedValue(undefined),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
 describe('HomePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    setupDefaults();
   });
 
   // -------------------------------------------------------------------------
-  // a) Rendering with active circle — main dashboard
+  // a) No active circle
   // -------------------------------------------------------------------------
-  describe('Rendering with active circle (main dashboard)', () => {
-    it('renders "Welcome back, Test User" heading', () => {
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(screen.getByRole('heading', { name: /welcome back, test user/i })).toBeInTheDocument();
-    });
-
-    it('shows the active circle name', () => {
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(screen.getByText("Test User's Library")).toBeInTheDocument();
-    });
-
-    it('shows the Review Queue card', () => {
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(screen.getByText(/review queue/i)).toBeInTheDocument();
-    });
-
-    it('shows the Quick Actions card', () => {
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(screen.getByText(/quick actions/i)).toBeInTheDocument();
-    });
-
-    it('does NOT show the "Select or create a circle" alert when a circle is active', () => {
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(
-        screen.queryByText(/select or create a circle/i),
-      ).not.toBeInTheDocument();
-    });
-
-    it('shows "No memories from this day — yet." when onThisDay is empty', () => {
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(
-        screen.getByText(/no memories from this day — yet\./i),
-      ).toBeInTheDocument();
-    });
-
-    it('shows "Welcome back" without a name when displayName is null', () => {
-      render(<HomePage />, {
-        wrapperOptions: { authenticated: true, user: { ...mockUser, displayName: null } },
-      });
-
-      expect(
-        screen.getByRole('heading', { name: /^welcome back$/i }),
-      ).toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // b) No active circle state
-  // -------------------------------------------------------------------------
-  describe('No active circle state', () => {
-    beforeEach(() => {
-      mockUseCircle.mockReturnValue({
-        circles: [],
-        activeCircle: null,
-        activeCircleId: null,
-        activeCircleRole: null,
-        loading: false,
-        setActiveCircle: vi.fn().mockResolvedValue(undefined),
-        refreshCircles: vi.fn().mockResolvedValue(undefined),
-      });
-
-      mockUseDashboard.mockReturnValue({
-        data: null,
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-    });
-
-    it('shows "Select or create a circle to get started" alert', () => {
+  describe('No active circle', () => {
+    it('shows "Select or create a circle" alert when no circle is active', () => {
+      setupNoCircle();
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
       expect(
@@ -232,451 +118,138 @@ describe('HomePage', () => {
       ).toBeInTheDocument();
     });
 
-    it('still shows Quick Actions when no circle is active', () => {
+    it('does NOT render MediaGallery when no circle is active', () => {
+      setupNoCircle();
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      expect(screen.getByText(/quick actions/i)).toBeInTheDocument();
+      expect(screen.queryByTestId('media-gallery')).not.toBeInTheDocument();
     });
 
-    it('does NOT show ReviewQueueCard sections (Unreviewed, Low value, Missing location)', () => {
+    it('does NOT render the Upload FAB when no circle is active', () => {
+      setupNoCircle();
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      expect(screen.queryByText(/review queue/i)).not.toBeInTheDocument();
-      expect(screen.queryByText(/unreviewed/i)).not.toBeInTheDocument();
-      expect(screen.queryByText(/low value/i)).not.toBeInTheDocument();
-      expect(screen.queryByText(/missing location/i)).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /upload media/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('does NOT show no-circle alert when circle is loading', () => {
+      setupCircleLoading();
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      // While loading, neither alert nor gallery is shown
+      expect(
+        screen.queryByText(/select or create a circle/i),
+      ).not.toBeInTheDocument();
     });
   });
 
   // -------------------------------------------------------------------------
-  // c) Loading state
+  // b) Active circle — gallery and FAB
   // -------------------------------------------------------------------------
-  describe('Loading state', () => {
-    it('shows MuiSkeleton elements when circleLoading is true', () => {
-      mockUseCircle.mockReturnValue({
-        circles: [],
-        activeCircle: null,
-        activeCircleId: null,
-        activeCircleRole: null,
-        loading: true,
-        setActiveCircle: vi.fn().mockResolvedValue(undefined),
-        refreshCircles: vi.fn().mockResolvedValue(undefined),
-      });
-
-      mockUseDashboard.mockReturnValue({
-        data: null,
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
-      const { container } = render(<HomePage />, {
-        wrapperOptions: { authenticated: true, user: mockUser },
-      });
-
-      const skeletons = container.querySelectorAll('.MuiSkeleton-root');
-      expect(skeletons.length).toBeGreaterThan(0);
-    });
-
-    it('shows MuiSkeleton elements when dashboardLoading is true', () => {
-      mockUseDashboard.mockReturnValue({
-        data: null,
-        isLoading: true,
-        error: null,
-        refetch: vi.fn(),
-      });
-
-      const { container } = render(<HomePage />, {
-        wrapperOptions: { authenticated: true, user: mockUser },
-      });
-
-      const skeletons = container.querySelectorAll('.MuiSkeleton-root');
-      expect(skeletons.length).toBeGreaterThan(0);
-    });
-
-    it('does NOT show the main grid content during loading', () => {
-      mockUseDashboard.mockReturnValue({
-        data: null,
-        isLoading: true,
-        error: null,
-        refetch: vi.fn(),
-      });
-
+  describe('Active circle', () => {
+    it('renders MediaGallery when a circle is active', () => {
+      setupActiveCircle();
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      // Main dashboard content (Review Queue) should be absent
-      expect(screen.queryByText(/review queue/i)).not.toBeInTheDocument();
+      expect(screen.getByTestId('media-gallery')).toBeInTheDocument();
+    });
+
+    it('does NOT show the no-circle alert when a circle is active', () => {
+      setupActiveCircle();
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      expect(
+        screen.queryByText(/select or create a circle to get started/i),
+      ).not.toBeInTheDocument();
+    });
+
+    it('shows the Upload FAB when a circle is active', () => {
+      setupActiveCircle();
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      // Both the FAB and the emptyState CTA (rendered by the MediaGallery mock) have
+      // aria-label="Upload media", so we check at least one is present.
+      const uploadBtns = screen.getAllByRole('button', { name: /upload media/i });
+      expect(uploadBtns.length).toBeGreaterThanOrEqual(1);
     });
   });
 
   // -------------------------------------------------------------------------
-  // d) Empty state — circle exists but 0 total media
+  // c) Empty state inside MediaGallery
   // -------------------------------------------------------------------------
-  describe('Empty state (circle exists, 0 total media)', () => {
-    beforeEach(() => {
-      mockUseDashboard.mockReturnValue({
-        data: {
-          onThisDay: [],
-          recent: [],
-          favorites: [],
-          counts: { total: 0, unreviewed: 0, lowValue: 0, missingGeo: 0 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-    });
-
-    it('shows "No memories here yet" empty-state card', () => {
+  describe('Empty state', () => {
+    it('passes an emptyState prop to MediaGallery that includes "No memories here yet"', () => {
+      setupActiveCircle();
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
+      // The mock renders children (emptyState) inside the data-testid element.
       expect(screen.getByText(/no memories here yet/i)).toBeInTheDocument();
     });
 
-    it('shows "Upload Media" button in empty state', () => {
+    it('shows an Upload Media button inside the empty state', () => {
+      setupActiveCircle();
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      expect(screen.getByRole('button', { name: /upload media/i })).toBeInTheDocument();
+      // There is the FAB AND the empty-state CTA; both should be present.
+      const uploadBtns = screen.getAllByRole('button', { name: /upload media/i });
+      expect(uploadBtns.length).toBeGreaterThanOrEqual(2);
     });
   });
 
   // -------------------------------------------------------------------------
-  // e) ReviewQueueCard deep links
+  // d) Upload dialog
   // -------------------------------------------------------------------------
-  describe('ReviewQueueCard deep links', () => {
-    it('navigates to /media?classification=unreviewed when unreviewed "Review" is clicked', async () => {
-      mockUseDashboard.mockReturnValue({
-        data: {
-          ...defaultDashboardData,
-          counts: { total: 5, unreviewed: 3, lowValue: 0, missingGeo: 0 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
+  describe('Upload dialog', () => {
+    it('opens MediaUploadDialog when the FAB is clicked', () => {
+      setupActiveCircle();
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      // There is exactly one Review button visible (lowValue and missingGeo are 0)
-      const reviewButtons = screen.getAllByRole('button', { name: /^review$/i });
-      // The first "Review" button corresponds to Unreviewed row
-      fireEvent.click(reviewButtons[0]);
+      // The FAB is the first "Upload media" button in the DOM (rendered before the
+      // emptyState which is inside MediaGallery mock).
+      const uploadBtns = screen.getAllByRole('button', { name: /upload media/i });
+      fireEvent.click(uploadBtns[0]);
 
-      expect(mockNavigate).toHaveBeenCalledWith('/media?classification=unreviewed');
+      expect(screen.getByTestId('upload-dialog')).toBeInTheDocument();
     });
 
-    it('navigates to /media?classification=low_value when low value "Review" is clicked', async () => {
-      mockUseDashboard.mockReturnValue({
-        data: {
-          ...defaultDashboardData,
-          counts: { total: 5, unreviewed: 0, lowValue: 2, missingGeo: 0 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
+    it('closes MediaUploadDialog when its onClose is triggered', () => {
+      setupActiveCircle();
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      const reviewButtons = screen.getAllByRole('button', { name: /^review$/i });
-      fireEvent.click(reviewButtons[0]);
+      // Open via first upload button (FAB)
+      const uploadBtns = screen.getAllByRole('button', { name: /upload media/i });
+      fireEvent.click(uploadBtns[0]);
+      expect(screen.getByTestId('upload-dialog')).toBeInTheDocument();
 
-      expect(mockNavigate).toHaveBeenCalledWith('/media?classification=low_value');
+      // Close
+      fireEvent.click(screen.getByRole('button', { name: /close/i }));
+      expect(screen.queryByTestId('upload-dialog')).not.toBeInTheDocument();
     });
 
-    it('navigates to /media?missingGeo=1 when missing location "Review" is clicked', async () => {
-      mockUseDashboard.mockReturnValue({
-        data: {
-          ...defaultDashboardData,
-          counts: { total: 5, unreviewed: 0, lowValue: 0, missingGeo: 4 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
+    it('opens upload dialog from the empty-state Upload Media button', () => {
+      setupActiveCircle();
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      const reviewButtons = screen.getAllByRole('button', { name: /^review$/i });
-      fireEvent.click(reviewButtons[0]);
+      // The empty-state "Upload Media" button (not the FAB)
+      const uploadBtns = screen.getAllByRole('button', { name: /upload media/i });
+      // Click the second one — first is FAB, second is inside the empty state
+      fireEvent.click(uploadBtns[1]);
 
-      expect(mockNavigate).toHaveBeenCalledWith('/media?missingGeo=1');
-    });
-
-    it('shows check icon (no Review button) for rows with zero count', () => {
-      // All counts are 0 → no Review buttons
-      mockUseDashboard.mockReturnValue({
-        data: {
-          ...defaultDashboardData,
-          counts: { total: 5, unreviewed: 0, lowValue: 0, missingGeo: 0 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(screen.queryByRole('button', { name: /^review$/i })).not.toBeInTheDocument();
+      expect(screen.getByTestId('upload-dialog')).toBeInTheDocument();
     });
   });
 
   // -------------------------------------------------------------------------
-  // f) Memory thumbnail click opens drawer
+  // e) "Go to Circles" link in no-circle alert
   // -------------------------------------------------------------------------
-  describe('Memory thumbnail click opens MediaDetailDrawer', () => {
-    it('opens the drawer when an OnThisDay thumbnail is clicked', async () => {
-      vi.mocked(getMedia).mockResolvedValue({ ...mockItem, downloadUrl: null });
-      vi.mocked(listTags).mockResolvedValue([]);
-
-      mockUseDashboard.mockReturnValue({
-        data: {
-          onThisDay: [mockItem],
-          recent: [],
-          favorites: [],
-          counts: { total: 5, unreviewed: 0, lowValue: 0, missingGeo: 0 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
+  describe('Go to Circles link', () => {
+    it('renders a "Go to Circles" link in the no-circle alert', () => {
+      setupNoCircle();
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      // The thumbnail is an img element
-      const thumbnail = screen.getByRole('img', {
-        name: mockItem.title ?? mockItem.originalFilename,
-      });
-      fireEvent.click(thumbnail);
-
-      // Drawer should open — MUI Drawer renders a role="presentation" container
-      await waitFor(() => {
-        expect(screen.getByRole('presentation')).toBeInTheDocument();
-      });
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // g) Dashboard error state
-  // -------------------------------------------------------------------------
-  describe('Dashboard error state', () => {
-    it('shows an error Alert when useDashboard returns an error', () => {
-      mockUseDashboard.mockReturnValue({
-        data: null,
-        isLoading: false,
-        error: 'Failed to load',
-        refetch: vi.fn(),
-      });
-
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      const alert = screen.getByRole('alert');
-      expect(alert).toBeInTheDocument();
-      expect(alert).toHaveTextContent(/failed to load/i);
-    });
-
-    it('error Alert has error severity (MuiAlert-colorError class)', () => {
-      mockUseDashboard.mockReturnValue({
-        data: null,
-        isLoading: false,
-        error: 'Something went wrong',
-        refetch: vi.fn(),
-      });
-
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      const alert = screen.getByRole('alert');
-      expect(alert.className).toMatch(/MuiAlert-colorError|MuiAlert-standardError/);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Admin-only system settings in Quick Actions
-  // -------------------------------------------------------------------------
-  describe('Admin visibility in Quick Actions', () => {
-    it('shows System Settings quick action for admin users', () => {
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockAdminUser } });
-
-      expect(screen.getByText(/^system settings$/i)).toBeInTheDocument();
-    });
-
-    it('hides System Settings quick action for viewer users', () => {
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(screen.queryByText(/^system settings$/i)).not.toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Handler: drawer close (handleDrawerClose)
-  // -------------------------------------------------------------------------
-  describe('Drawer close handler', () => {
-    it('closes the MediaDetailDrawer when its onClose prop is triggered', async () => {
-      vi.mocked(getMedia).mockResolvedValue({ ...mockItem, downloadUrl: null });
-      vi.mocked(listTags).mockResolvedValue([]);
-
-      mockUseDashboard.mockReturnValue({
-        data: {
-          onThisDay: [mockItem],
-          recent: [],
-          favorites: [],
-          counts: { total: 5, unreviewed: 0, lowValue: 0, missingGeo: 0 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      // Open the drawer first
-      const thumbnail = screen.getByRole('img', {
-        name: mockItem.title ?? mockItem.originalFilename,
-      });
-      fireEvent.click(thumbnail);
-
-      await waitFor(() => {
-        expect(screen.getByRole('presentation')).toBeInTheDocument();
-      });
-
-      // Close via keyboard Escape (MUI Drawer closes on Escape)
-      fireEvent.keyDown(document, { key: 'Escape' });
-
-      // Drawer remains in DOM but closed (MUI keeps it mounted)
-      expect(document.body).toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Handler: upload success (handleUploadSuccess)
-  // -------------------------------------------------------------------------
-  describe('Upload success handler', () => {
-    it('calls refetch after upload success (empty state upload button opens dialog)', async () => {
-      const refetchFn = vi.fn();
-      mockUseDashboard.mockReturnValue({
-        data: {
-          onThisDay: [],
-          recent: [],
-          favorites: [],
-          counts: { total: 0, unreviewed: 0, lowValue: 0, missingGeo: 0 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: refetchFn,
-      });
-
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      // Open the upload dialog via the empty state button
-      const uploadBtn = screen.getByRole('button', { name: /upload media/i });
-      fireEvent.click(uploadBtn);
-
-      // The MediaUploadDialog should open
-      await waitFor(() => {
-        // Dialog is rendered but upload hasn't happened yet — just verify button worked
-        expect(uploadBtn).toBeInTheDocument();
-      });
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // MemoryHighlights — recent/favorites thumbnails
-  // -------------------------------------------------------------------------
-  describe('MemoryHighlights thumbnails', () => {
-    it('opens drawer when a recent thumbnail is clicked', async () => {
-      vi.mocked(getMedia).mockResolvedValue({ ...mockItem, downloadUrl: null });
-      vi.mocked(listTags).mockResolvedValue([]);
-
-      mockUseDashboard.mockReturnValue({
-        data: {
-          onThisDay: [],
-          recent: [mockItem],
-          favorites: [],
-          counts: { total: 5, unreviewed: 0, lowValue: 0, missingGeo: 0 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      const thumbnail = screen.getByRole('img', {
-        name: mockItem.title ?? mockItem.originalFilename,
-      });
-      fireEvent.click(thumbnail);
-
-      await waitFor(() => {
-        expect(screen.getByRole('presentation')).toBeInTheDocument();
-      });
-    });
-
-    it('shows empty text when recent and favorites are both empty', () => {
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(screen.getByText(/no recent memories\./i)).toBeInTheDocument();
-      expect(screen.getByText(/no favorites yet\./i)).toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Quick Actions onUploadClick — opens MediaUploadDialog
-  // -------------------------------------------------------------------------
-  describe('QuickActions Upload button opens dialog', () => {
-    it('clicking Quick Actions Upload button triggers upload flow', async () => {
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      // Find the Upload button inside Quick Actions by text content
-      const allButtons = screen.getAllByRole('button');
-      const uploadAction = allButtons.find((btn) =>
-        btn.textContent?.includes('Upload') && btn.textContent?.includes('Add new'),
-      );
-      expect(uploadAction).toBeTruthy();
-      if (uploadAction) {
-        fireEvent.click(uploadAction);
-      }
-
-      // After clicking, Quick Actions card is still rendered
-      expect(screen.getByText(/quick actions/i)).toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // "No circle" QuickActions upload click — exercises the onUploadClick arrow on line 157
-  // -------------------------------------------------------------------------
-  describe('No circle QuickActions Upload button', () => {
-    it('clicking Upload in the no-circle fallback QuickActions does not crash', async () => {
-      mockUseCircle.mockReturnValue({
-        circles: [],
-        activeCircle: null,
-        activeCircleId: null,
-        activeCircleRole: null,
-        loading: false,
-        setActiveCircle: vi.fn().mockResolvedValue(undefined),
-        refreshCircles: vi.fn().mockResolvedValue(undefined),
-      });
-
-      mockUseDashboard.mockReturnValue({
-        data: null,
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      // Find the Upload button inside the no-circle Quick Actions
-      const allButtons = screen.getAllByRole('button');
-      const uploadAction = allButtons.find((btn) =>
-        btn.textContent?.includes('Upload') && btn.textContent?.includes('Add new'),
-      );
-      expect(uploadAction).toBeTruthy();
-      if (uploadAction) {
-        fireEvent.click(uploadAction);
-      }
-
-      // Page remains stable after clicking
-      expect(screen.getByText(/quick actions/i)).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /go to circles/i })).toBeInTheDocument();
     });
   });
 });

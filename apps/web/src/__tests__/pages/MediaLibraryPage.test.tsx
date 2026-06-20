@@ -34,6 +34,7 @@ vi.mock('../../hooks/useAlbums', () => ({
 vi.mock('../../services/media', () => ({
   listTags: vi.fn(),
   patchMedia: vi.fn(),
+  getMedia: vi.fn(),
   initUpload: vi.fn(),
   uploadPart: vi.fn(),
   completeUpload: vi.fn(),
@@ -48,13 +49,14 @@ vi.mock('../../hooks/useCircle', () => ({
 
 import { useMedia } from '../../hooks/useMedia';
 import { useAlbums } from '../../hooks/useAlbums';
-import { listTags, patchMedia } from '../../services/media';
+import { listTags, patchMedia, getMedia } from '../../services/media';
 import { useCircle } from '../../hooks/useCircle';
 
 const mockUseMedia = vi.mocked(useMedia);
 const mockUseAlbums = vi.mocked(useAlbums);
 const mockListTags = vi.mocked(listTags);
 const mockPatchMedia = vi.mocked(patchMedia);
+const mockGetMedia = vi.mocked(getMedia);
 const mockUseCircle = vi.mocked(useCircle);
 
 const mockActiveCircle = {
@@ -182,6 +184,7 @@ describe('MediaLibraryPage', () => {
     mockUseAlbums.mockReturnValue(makeUseAlbumsDefaults());
     mockListTags.mockResolvedValue([]);
     mockPatchMedia.mockResolvedValue(makeMediaItem('media-001'));
+    mockGetMedia.mockResolvedValue({ ...makeMediaItem('media-001'), downloadUrl: null });
     mockUseCircle.mockReturnValue(makeUseCircleDefaults());
   });
 
@@ -356,7 +359,10 @@ describe('MediaLibraryPage', () => {
       await user.click(screen.getByRole('button', { name: /filters/i }));
       const favoritesBtn = await screen.findByRole('button', { name: /favorites only/i });
       await user.click(favoritesBtn); // enable
-      await user.click(screen.getByRole('button', { name: /^all$/i })); // back to all
+      // Use getAllByRole because MUI Select (Classification) also renders as role="button"
+      // with name "All" when its current value is the "All" option (empty string).
+      const allBtns = screen.getAllByRole('button', { name: /^all$/i });
+      await user.click(allBtns[0]); // first match is the ToggleButton inside the Favorites group
 
       await waitFor(() => {
         // The last call should not include favorite: true
@@ -399,25 +405,26 @@ describe('MediaLibraryPage', () => {
   // -------------------------------------------------------------------------
 
   describe('detail drawer', () => {
-    it('should open the detail drawer when an image tile is clicked', async () => {
+    it('should open the lightbox when an image tile is clicked', async () => {
       const user = userEvent.setup();
-      const items = [
-        makeMediaItem('click-me', {
-          title: 'Click Target',
-          thumbnailUrl: 'http://cdn/click-me.jpg',
-        }),
-      ];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
+      const clickItem = makeMediaItem('click-me', {
+        title: 'Click Target',
+        thumbnailUrl: 'http://cdn/click-me.jpg',
+      });
+      mockUseMedia.mockReturnValue(makeUseMediaDefaults([clickItem]));
+      // getMedia is called by MediaLightbox to load the full-res version
+      mockGetMedia.mockResolvedValue({ ...clickItem, downloadUrl: 'http://cdn/full.jpg' });
       render(<MediaLibraryPage />);
 
       // The tile renders an <img> when thumbnailUrl is set
       const tileImg = screen.getByAltText('Click Target');
       await user.click(tileImg);
 
+      // MediaLightbox renders as a dialog when open (index !== null).
+      // Check that at least one presentation container is present.
       await waitFor(() => {
-        // The drawer renders the item title in its header — now more than one
-        // occurrence of the text is visible (tile + drawer header)
-        expect(screen.getAllByText('Click Target').length).toBeGreaterThan(1);
+        const presentations = screen.getAllByRole('presentation');
+        expect(presentations.length).toBeGreaterThan(0);
       });
     });
 

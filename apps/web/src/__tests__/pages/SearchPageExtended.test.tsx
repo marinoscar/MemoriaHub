@@ -140,7 +140,7 @@ describe('SearchPage — extended coverage', () => {
       const user = userEvent.setup();
       render(<SearchPage />);
 
-      const input = screen.getByRole('textbox', { name: /conversational search input/i });
+      const input = screen.getByPlaceholderText(/search your memories/i);
       await user.type(input, 'photos from Paris');
       await user.click(screen.getByRole('button', { name: /send message/i }));
 
@@ -162,7 +162,7 @@ describe('SearchPage — extended coverage', () => {
       const user = userEvent.setup();
       render(<SearchPage />);
 
-      const input = screen.getByRole('textbox', { name: /conversational search input/i });
+      const input = screen.getByPlaceholderText(/search your memories/i);
       await user.type(input, 'line1{Shift>}{Enter}{/Shift}');
 
       expect(mockStreamAgent).not.toHaveBeenCalled();
@@ -175,7 +175,7 @@ describe('SearchPage — extended coverage', () => {
       const user = userEvent.setup();
       render(<SearchPage />);
 
-      const input = screen.getByRole('textbox', { name: /conversational search input/i });
+      const input = screen.getByPlaceholderText(/search your memories/i);
       await user.type(input, 'hello');
       await user.click(screen.getByRole('button', { name: /send message/i }));
 
@@ -194,7 +194,7 @@ describe('SearchPage — extended coverage', () => {
       const user = userEvent.setup();
       render(<SearchPage />);
 
-      const input = screen.getByRole('textbox', { name: /conversational search input/i });
+      const input = screen.getByPlaceholderText(/search your memories/i);
       await user.type(input, 'test query');
       await user.click(screen.getByRole('button', { name: /send message/i }));
 
@@ -229,7 +229,7 @@ describe('SearchPage — extended coverage', () => {
       const user = userEvent.setup();
       render(<SearchPage />);
 
-      const input = screen.getByRole('textbox', { name: /conversational search input/i });
+      const input = screen.getByPlaceholderText(/search your memories/i);
       await user.type(input, 'hello');
       await user.click(screen.getByRole('button', { name: /send message/i }));
 
