@@ -1,4 +1,3 @@
-import React from 'react';
 import { PieChart } from '@mui/x-charts/PieChart';
 import { Box, Typography } from '@mui/material';
 
@@ -30,10 +29,7 @@ export function CompositionDonut({ title, segments, centerLabel }: CompositionDo
       {/* Section title — always centered */}
       <Typography
         variant="subtitle2"
-        fontWeight={600}
-        color="text.secondary"
-        textAlign="center"
-        mb={1.5}
+        sx={{ fontWeight: 600, color: 'text.secondary', textAlign: 'center', mb: 1.5 }}
       >
         {title}
       </Typography>
@@ -70,16 +66,13 @@ export function CompositionDonut({ title, segments, centerLabel }: CompositionDo
         >
           <Typography
             variant="caption"
-            color="text.secondary"
-            display="block"
-            sx={{ fontSize: '0.65rem', lineHeight: 1 }}
+            sx={{ color: 'text.secondary', display: 'block', fontSize: '0.65rem', lineHeight: 1 }}
           >
             Total
           </Typography>
           <Typography
             variant="body2"
-            fontWeight={700}
-            sx={{ fontSize: '0.78rem', lineHeight: 1.3 }}
+            sx={{ fontWeight: 700, fontSize: '0.78rem', lineHeight: 1.3 }}
           >
             {centerLabel}
           </Typography>
@@ -133,7 +126,7 @@ export function CompositionDonut({ title, segments, centerLabel }: CompositionDo
                 whiteSpace: 'nowrap',
               }}
             >
-              <Typography variant="caption" fontWeight={600}>
+              <Typography variant="caption" sx={{ fontWeight: 600 }}>
                 {s.displayValue}
               </Typography>
               <Typography variant="caption" color="text.secondary">
