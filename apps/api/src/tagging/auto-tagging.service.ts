@@ -11,6 +11,7 @@ import {
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import { detectImageMime } from './image-mime.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { RateLimitError, parseRetryAfterMs } from '../enrichment/rate-limit.error';
 
 /**
  * Maximum image dimension (long edge) before downscaling.
@@ -225,13 +226,38 @@ export class AutoTaggingService {
         '"description" must be a brief 1-3 sentence description of the photo. ' +
         'Respond with ONLY a JSON object with those three keys — no explanation, no code fences, no extra text.';
 
-      const raw = await aiProvider.analyzeImage(creds, {
-        model,
-        system: systemPrompt,
-        prompt: userPrompt,
-        imageBase64,
-        mimeType,
-      });
+      let raw: string;
+      try {
+        raw = await aiProvider.analyzeImage(creds, {
+          model,
+          system: systemPrompt,
+          prompt: userPrompt,
+          imageBase64,
+          mimeType,
+        });
+      } catch (providerErr) {
+        // Surface provider-level 429 / rate-limit errors explicitly so the
+        // worker routes them through the rate-limit deferral path instead of
+        // the normal exponential-retry path.
+        const e = providerErr as Record<string, unknown> | null;
+        const httpStatus =
+          typeof e?.['status'] === 'number' ? e['status'] : undefined;
+        if (httpStatus === 429) {
+          const retryHeader =
+            typeof (e?.['headers'] as Record<string, unknown> | undefined)?.['retry-after'] === 'string'
+              ? ((e?.['headers'] as Record<string, unknown>)['retry-after'] as string)
+              : typeof (e?.['response'] as Record<string, unknown> | undefined)?.['headers'] === 'object'
+                ? (((e?.['response'] as Record<string, unknown>)['headers'] as Record<string, unknown>)['retry-after'] as string | undefined)
+                : undefined;
+          const retryAfterMs = parseRetryAfterMs(retryHeader) ?? undefined;
+          throw new RateLimitError(
+            (typeof e?.['message'] === 'string' ? e['message'] : 'AI provider rate limit exceeded (429)'),
+            retryAfterMs,
+            provider,
+          );
+        }
+        throw providerErr;
+      }
 
       // l. Parse and validate response
       const labelNames2 = tagLabels.map((t) => t.name);
