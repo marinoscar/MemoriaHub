@@ -34,6 +34,7 @@ import { CreateInviteDto } from './dto/create-invite.dto';
 import { CirclesQueryDto } from './dto/circles-query.dto';
 import { UpdateFaceSettingsDto } from './dto/update-face-settings.dto';
 import { UpdateTaggingSettingsDto } from './dto/update-tagging-settings.dto';
+import { UpdateBurstSettingsDto } from './dto/update-burst-settings.dto';
 
 @ApiTags('Circles')
 @ApiBearerAuth('JWT-auth')
@@ -263,6 +264,42 @@ export class CirclesController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.circlesService.updateTaggingSettings(id, dto.enabled, user);
+  }
+
+  // ----- Burst Settings -----
+
+  /**
+   * GET /api/circles/:id/burst-settings
+   * Returns per-circle burst detection opt-in flag.
+   */
+  @Get(':id/burst-settings')
+  @Auth({ permissions: [PERMISSIONS.CIRCLES_READ] })
+  @ApiOperation({ summary: 'Get burst detection settings for a circle' })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Burst settings returned' })
+  async getBurstSettings(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.circlesService.getBurstSettings(id, user);
+  }
+
+  /**
+   * PUT /api/circles/:id/burst-settings
+   * Toggle per-circle burst detection opt-in. Requires circle_admin.
+   */
+  @Put(':id/burst-settings')
+  @Auth({ permissions: [PERMISSIONS.CIRCLES_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update burst detection opt-in for a circle (circle_admin)' })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Burst settings updated' })
+  async updateBurstSettings(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateBurstSettingsDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.circlesService.updateBurstSettings(id, dto.enabled, user);
   }
 
   @Delete(':id/invites/:inviteId')
