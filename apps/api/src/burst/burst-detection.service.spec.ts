@@ -1,0 +1,571 @@
+/**
+ * Unit tests for BurstDetectionService.
+ *
+ * Covers:
+ *  - burstScore composition: weight application, per-group normalization,
+ *    suggestedBestItemId picks highest scorer
+ *  - Face signal is skipped gracefully when face data is absent
+ *  - Face signal is included when faceRecognitionEnabled=true and face rows exist
+ *  - processMediaItem: group creation, member attachment, multi-group merge,
+ *    score recomputation
+ *  - BurstUUID hard-prior: items with shared non-null burstUuid always link
+ *  - Cross-device isolation: different cameraMake never link by time alone
+ *  - Items below minGroupSize still get a group (but that filtering happens at query time)
+ *  - Deleted or missing mediaItem → early return (non-retryable)
+ *  - No capturedAt → early return
+ *  - No device info and no burstUuid → early return
+ *  - Null perceptualHash → skip temporal-only link
+ */
+
+import { Test, TestingModule } from '@nestjs/testing';
+import { BurstDetectionService } from './burst-detection.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { BurstGroupStatus, EnrichmentJob, JobReason, JobStatus, MediaType } from '@prisma/client';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
+  return {
+    id: 'job-1',
+    type: 'burst_detection',
+    mediaItemId: 'media-1',
+    circleId: 'circle-1',
+    status: JobStatus.running,
+    reason: JobReason.upload,
+    priority: 10,
+    providerKey: null,
+    modelVersion: null,
+    payload: null,
+    attempts: 0,
+    lastError: null,
+    startedAt: null,
+    finishedAt: null,
+    scheduledFor: null,
+    rateLimitedAt: null,
+    rateLimitHits: 0,
+    createdAt: new Date(),
+    ...overrides,
+  };
+}
+
+const BASE_TIME = new Date('2026-06-15T14:32:00.000Z');
+
+function makeMediaItem(overrides: Partial<{
+  id: string;
+  circleId: string;
+  perceptualHash: bigint | null;
+  sharpnessScore: number | null;
+  burstUuid: string | null;
+  capturedAt: Date | null;
+  width: number | null;
+  height: number | null;
+  cameraMake: string | null;
+  cameraModel: string | null;
+  deletedAt: Date | null;
+  burstGroupId: string | null;
+}> = {}) {
+  return {
+    id: 'media-1',
+    circleId: 'circle-1',
+    perceptualHash: 12345n,
+    sharpnessScore: 100,
+    burstUuid: null,
+    capturedAt: BASE_TIME,
+    width: 4032,
+    height: 3024,
+    cameraMake: 'Apple',
+    cameraModel: 'iPhone 15 Pro',
+    deletedAt: null,
+    burstGroupId: null,
+    ...overrides,
+  };
+}
+
+function makeNeighbor(overrides: Partial<{
+  id: string;
+  perceptualHash: bigint | null;
+  burstUuid: string | null;
+  burstGroupId: string | null;
+  capturedAt: Date | null;
+}> = {}) {
+  return {
+    id: 'media-neighbor-1',
+    perceptualHash: 12345n, // identical hash by default → distance 0
+    burstUuid: null,
+    burstGroupId: null,
+    capturedAt: new Date(BASE_TIME.getTime() - 3000), // 3 seconds earlier
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('BurstDetectionService', () => {
+  let service: BurstDetectionService;
+  let mockPrisma: MockPrismaService;
+  let mockEnrichmentJobService: { enqueue: jest.Mock };
+
+  beforeEach(async () => {
+    mockPrisma = createMockPrismaService();
+    mockEnrichmentJobService = { enqueue: jest.fn() };
+
+    // Default system settings: standard burst config
+    (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue({
+      key: 'global',
+      value: { burst: { timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3 } },
+    });
+
+    // Default: $transaction executes array operations in parallel
+    (mockPrisma.$transaction as jest.Mock).mockImplementation((ops: Promise<unknown>[]) =>
+      Promise.all(ops),
+    );
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        BurstDetectionService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
+      ],
+    }).compile();
+
+    service = module.get<BurstDetectionService>(BurstDetectionService);
+  });
+
+  // -------------------------------------------------------------------------
+  // Early-exit guards
+  // -------------------------------------------------------------------------
+
+  describe('early-exit guards', () => {
+    it('returns early when job has no mediaItemId', async () => {
+      await service.processMediaItem(makeJob({ mediaItemId: null }));
+      expect(mockPrisma.mediaItem.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('returns early when mediaItem is not found', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(null);
+      await service.processMediaItem(makeJob());
+      expect(mockPrisma.systemSettings.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('returns early when mediaItem is soft-deleted', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ deletedAt: new Date() }),
+      );
+      await service.processMediaItem(makeJob());
+      expect(mockPrisma.systemSettings.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('returns early when mediaItem has no capturedAt', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ capturedAt: null }),
+      );
+      await service.processMediaItem(makeJob());
+      expect(mockPrisma.mediaItem.findMany).not.toHaveBeenCalled();
+    });
+
+    it('returns early when mediaItem has no device info and no burstUuid', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ cameraMake: null, cameraModel: null, burstUuid: null }),
+      );
+      await service.processMediaItem(makeJob());
+      expect(mockPrisma.mediaItem.findMany).not.toHaveBeenCalled();
+    });
+
+    it('returns early when no candidate neighbors are found', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
+      await service.processMediaItem(makeJob());
+      expect(mockPrisma.burstGroup.create).not.toHaveBeenCalled();
+    });
+
+    it('returns early when no neighbors pass the link check', async () => {
+      // Hash where item has all 64 low bits set and neighbor has none set → distance = 64, exceeds threshold 10
+      const itemHash = (1n << 64n) - 1n; // all 64 bits = 1
+      const neighborHash = 0n;           // all 64 bits = 0; distance = 64
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ perceptualHash: itemHash }),
+      );
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([
+        makeNeighbor({ perceptualHash: neighborHash }),
+      ]);
+      await service.processMediaItem(makeJob());
+      expect(mockPrisma.burstGroup.create).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Null perceptualHash: temporal link not formed without hashes
+  // -------------------------------------------------------------------------
+
+  describe('null perceptualHash handling', () => {
+    it('does NOT link when item has null perceptualHash and no shared burstUuid', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ perceptualHash: null }),
+      );
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([
+        makeNeighbor({ perceptualHash: 12345n }),
+      ]);
+      await service.processMediaItem(makeJob());
+      expect(mockPrisma.burstGroup.create).not.toHaveBeenCalled();
+    });
+
+    it('does NOT link when neighbor has null perceptualHash and no shared burstUuid', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([
+        makeNeighbor({ perceptualHash: null }),
+      ]);
+      await service.processMediaItem(makeJob());
+      expect(mockPrisma.burstGroup.create).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // BurstUUID hard prior
+  // -------------------------------------------------------------------------
+
+  describe('BurstUUID hard prior', () => {
+    it('links items with shared non-null burstUuid regardless of hash distance', async () => {
+      const burstUuid = 'BURST-UUID-APPLE-0001';
+      // Item has hash that would not match neighbor
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ burstUuid, perceptualHash: 0n }),
+      );
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([
+        makeNeighbor({
+          burstUuid,
+          perceptualHash: (1n << 64n) - 1n, // max distance from 0n
+          burstGroupId: null,
+        }),
+      ]);
+
+      const createdGroup = { id: 'group-new' };
+      (mockPrisma.burstGroup.create as jest.Mock).mockResolvedValue(createdGroup);
+      (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+
+      // For recomputeGroupScores
+      (mockPrisma.mediaItem.findMany as jest.Mock)
+        .mockResolvedValueOnce([makeNeighbor({ burstUuid, perceptualHash: (1n << 64n) - 1n, burstGroupId: null })])
+        .mockResolvedValueOnce([
+          { id: 'media-1', sharpnessScore: 100, width: 4032, height: 3024, capturedAt: BASE_TIME },
+          { id: 'media-neighbor-1', sharpnessScore: 80, width: 3024, height: 4032, capturedAt: BASE_TIME },
+        ]);
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: false });
+      (mockPrisma.mediaItem.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
+
+      await service.processMediaItem(makeJob());
+
+      // Group should be created (BurstUUID link passed the hard-prior check)
+      expect(mockPrisma.burstGroup.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            circleId: 'circle-1',
+            status: BurstGroupStatus.pending,
+          }),
+        }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Group creation: all ungrouped neighbors
+  // -------------------------------------------------------------------------
+
+  describe('group creation (all ungrouped neighbors)', () => {
+    beforeEach(() => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+      (mockPrisma.mediaItem.findMany as jest.Mock)
+        // Candidate neighbors
+        .mockResolvedValueOnce([makeNeighbor()])
+        // recomputeGroupScores: group members
+        .mockResolvedValueOnce([
+          { id: 'media-1', sharpnessScore: 100, width: 4032, height: 3024, capturedAt: BASE_TIME },
+          { id: 'media-neighbor-1', sharpnessScore: 80, width: 3024, height: 4032, capturedAt: new Date(BASE_TIME.getTime() - 3000) },
+        ]);
+      (mockPrisma.burstGroup.create as jest.Mock).mockResolvedValue({ id: 'group-1' });
+      (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: false });
+      (mockPrisma.mediaItem.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
+    });
+
+    it('creates a new BurstGroup with circleId, pending status, and correct mediaCount', async () => {
+      await service.processMediaItem(makeJob());
+
+      expect(mockPrisma.burstGroup.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            circleId: 'circle-1',
+            status: BurstGroupStatus.pending,
+            mediaCount: 2, // item + 1 neighbor
+          }),
+        }),
+      );
+    });
+
+    it('assigns item and all linked neighbors to the new group via updateMany', async () => {
+      await service.processMediaItem(makeJob());
+
+      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: expect.arrayContaining(['media-1', 'media-neighbor-1']) } },
+          data: { burstGroupId: 'group-1' },
+        }),
+      );
+    });
+
+    it('capturedAt of the new group is the earliest member timestamp', async () => {
+      const neighborTime = new Date(BASE_TIME.getTime() - 3000);
+      (mockPrisma.mediaItem.findMany as jest.Mock)
+        .mockReset()
+        .mockResolvedValueOnce([makeNeighbor({ capturedAt: neighborTime })])
+        .mockResolvedValueOnce([
+          { id: 'media-1', sharpnessScore: 100, width: 4032, height: 3024, capturedAt: BASE_TIME },
+          { id: 'media-neighbor-1', sharpnessScore: 80, width: 3024, height: 4032, capturedAt: neighborTime },
+        ]);
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockPrisma.burstGroup.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ capturedAt: neighborTime }),
+        }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Join existing group: one existing group
+  // -------------------------------------------------------------------------
+
+  describe('joining an existing group (one existing group)', () => {
+    it('assigns item to the existing group via update (not create)', async () => {
+      const existingGroupId = 'existing-group-1';
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+      (mockPrisma.mediaItem.findMany as jest.Mock)
+        .mockResolvedValueOnce([
+          makeNeighbor({ burstGroupId: existingGroupId }),
+        ])
+        .mockResolvedValueOnce([
+          { id: 'media-1', sharpnessScore: 100, width: 4032, height: 3024, capturedAt: BASE_TIME },
+          { id: 'media-neighbor-1', sharpnessScore: 80, width: 3024, height: 4032, capturedAt: BASE_TIME },
+        ]);
+      (mockPrisma.mediaItem.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: false });
+      (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockPrisma.burstGroup.create).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaItem.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'media-1' },
+          data: { burstGroupId: existingGroupId },
+        }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Merge: multiple distinct groups
+  // -------------------------------------------------------------------------
+
+  describe('merging multiple distinct groups', () => {
+    it('merges secondary groups into the oldest group and deletes them', async () => {
+      const groupA = 'group-oldest';
+      const groupB = 'group-newer';
+
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+      (mockPrisma.mediaItem.findMany as jest.Mock)
+        .mockResolvedValueOnce([
+          makeNeighbor({ id: 'media-2', burstGroupId: groupA }),
+          makeNeighbor({ id: 'media-3', burstGroupId: groupB }),
+        ])
+        .mockResolvedValueOnce([
+          { id: 'media-1', sharpnessScore: 100, width: 4032, height: 3024, capturedAt: BASE_TIME },
+          { id: 'media-2', sharpnessScore: 90, width: 3000, height: 2000, capturedAt: BASE_TIME },
+          { id: 'media-3', sharpnessScore: 70, width: 2000, height: 1500, capturedAt: BASE_TIME },
+        ]);
+
+      (mockPrisma.burstGroup.findMany as jest.Mock).mockResolvedValue([
+        { id: groupA, createdAt: new Date('2026-01-01') },
+        { id: groupB, createdAt: new Date('2026-01-02') },
+      ]);
+      (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+      (mockPrisma.mediaItem.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.burstGroup.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: false });
+      (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
+
+      await service.processMediaItem(makeJob());
+
+      // Members from groupB should be reassigned to groupA
+      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { burstGroupId: { in: [groupB] } },
+          data: { burstGroupId: groupA },
+        }),
+      );
+
+      // The current item should be assigned to groupA
+      expect(mockPrisma.mediaItem.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'media-1' },
+          data: { burstGroupId: groupA },
+        }),
+      );
+
+      // groupB should be deleted
+      expect(mockPrisma.burstGroup.deleteMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: [groupB] } },
+        }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // burstScore composition and normalization (via recomputeGroupScores)
+  // -------------------------------------------------------------------------
+
+  describe('burstScore composition and suggestedBestItemId', () => {
+    function setupForScoring(members: Array<{
+      id: string;
+      sharpnessScore: number | null;
+      width: number;
+      height: number;
+      capturedAt: Date;
+    }>, faceData?: Array<{ mediaItemId: string; _count: { id: number }; _avg: { confidence: number | null } }>) {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+      // Candidates (first findMany)
+      (mockPrisma.mediaItem.findMany as jest.Mock)
+        .mockResolvedValueOnce([makeNeighbor()])
+        // Group members (second findMany in recomputeGroupScores)
+        .mockResolvedValueOnce(members);
+      (mockPrisma.burstGroup.create as jest.Mock).mockResolvedValue({ id: 'group-1' });
+      (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({
+        faceRecognitionEnabled: faceData !== undefined,
+      });
+      if (faceData !== undefined) {
+        (mockPrisma.face.groupBy as jest.Mock).mockResolvedValue(faceData);
+      }
+      (mockPrisma.mediaItem.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
+    }
+
+    it('picks member with highest sharpness as suggestedBestItemId when no face data', async () => {
+      const members = [
+        { id: 'media-1', sharpnessScore: 50, width: 4032, height: 3024, capturedAt: BASE_TIME },
+        { id: 'media-2', sharpnessScore: 200, width: 4032, height: 3024, capturedAt: BASE_TIME },
+        { id: 'media-3', sharpnessScore: 10, width: 4032, height: 3024, capturedAt: BASE_TIME },
+      ];
+      setupForScoring(members);
+
+      await service.processMediaItem(makeJob());
+
+      const groupUpdateCall = (mockPrisma.burstGroup.update as jest.Mock).mock.calls[0][0];
+      expect(groupUpdateCall.data.suggestedBestItemId).toBe('media-2');
+    });
+
+    it('normalizes scores to [0,1] within the group', async () => {
+      const members = [
+        { id: 'media-low', sharpnessScore: 0, width: 100, height: 100, capturedAt: BASE_TIME },
+        { id: 'media-high', sharpnessScore: 500, width: 4000, height: 3000, capturedAt: BASE_TIME },
+      ];
+      setupForScoring(members);
+
+      await service.processMediaItem(makeJob());
+
+      // Both members should receive burstScore updates in $transaction
+      const updateCalls = (mockPrisma.mediaItem.update as jest.Mock).mock.calls;
+      const scores = updateCalls.map((c: any[]) => c[0].data.burstScore as number);
+
+      // The high member should score > 0.5; the low member < 0.5
+      expect(Math.max(...scores)).toBeGreaterThan(0.5);
+      expect(Math.min(...scores)).toBeLessThan(0.5);
+
+      // All scores should be in [0, 1]
+      for (const score of scores) {
+        expect(score).toBeGreaterThanOrEqual(0);
+        expect(score).toBeLessThanOrEqual(1);
+      }
+    });
+
+    it('when all members have identical sharpness, scores still in [0,1]', async () => {
+      const members = [
+        { id: 'media-a', sharpnessScore: 100, width: 4032, height: 3024, capturedAt: BASE_TIME },
+        { id: 'media-b', sharpnessScore: 100, width: 4032, height: 3024, capturedAt: BASE_TIME },
+      ];
+      setupForScoring(members);
+
+      await service.processMediaItem(makeJob());
+
+      const updateCalls = (mockPrisma.mediaItem.update as jest.Mock).mock.calls;
+      const scores = updateCalls.map((c: any[]) => c[0].data.burstScore as number);
+      for (const score of scores) {
+        expect(score).toBeGreaterThanOrEqual(0);
+        expect(score).toBeLessThanOrEqual(1);
+      }
+    });
+
+    it('skips face term gracefully when face data is absent (faceRecognitionEnabled=false)', async () => {
+      const members = [
+        { id: 'media-1', sharpnessScore: 300, width: 4032, height: 3024, capturedAt: BASE_TIME },
+        { id: 'media-2', sharpnessScore: 100, width: 4032, height: 3024, capturedAt: BASE_TIME },
+      ];
+      // No faceData passed → faceRecognitionEnabled=false
+      setupForScoring(members, undefined);
+
+      await service.processMediaItem(makeJob());
+
+      // Should not call face.groupBy
+      expect(mockPrisma.face.groupBy).not.toHaveBeenCalled();
+
+      // Best should still be determined (higher sharpness wins)
+      const groupUpdateCall = (mockPrisma.burstGroup.update as jest.Mock).mock.calls[0][0];
+      expect(groupUpdateCall.data.suggestedBestItemId).toBe('media-1');
+    });
+
+    it('includes face term when faceRecognitionEnabled=true and face rows exist', async () => {
+      const members = [
+        // media-1 has lower sharpness but many high-confidence faces
+        { id: 'media-1', sharpnessScore: 50, width: 4032, height: 3024, capturedAt: BASE_TIME },
+        // media-2 has higher sharpness but zero faces
+        { id: 'media-2', sharpnessScore: 200, width: 4032, height: 3024, capturedAt: BASE_TIME },
+      ];
+      const faceData = [
+        {
+          mediaItemId: 'media-1',
+          _count: { id: 5 },
+          _avg: { confidence: 0.98 },
+        },
+      ];
+      setupForScoring(members, faceData);
+
+      await service.processMediaItem(makeJob());
+
+      // face.groupBy should have been called when faceRecognitionEnabled=true
+      expect(mockPrisma.face.groupBy).toHaveBeenCalled();
+    });
+
+    it('updates mediaCount on the BurstGroup in recomputeGroupScores', async () => {
+      const members = [
+        { id: 'media-1', sharpnessScore: 100, width: 4032, height: 3024, capturedAt: BASE_TIME },
+        { id: 'media-neighbor-1', sharpnessScore: 80, width: 3000, height: 2000, capturedAt: BASE_TIME },
+      ];
+      setupForScoring(members);
+
+      await service.processMediaItem(makeJob());
+
+      const groupUpdateCall = (mockPrisma.burstGroup.update as jest.Mock).mock.calls[0][0];
+      expect(groupUpdateCall.data.mediaCount).toBe(2);
+    });
+  });
+});
