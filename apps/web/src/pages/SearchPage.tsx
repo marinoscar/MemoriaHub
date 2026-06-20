@@ -7,7 +7,7 @@
  * 2. Conversation thread (in-memory React state only, no persistence)
  *    - Messages as bubbles, streaming tokens append in-place
  *    - Tool call chips shown during stream
- *    - Media results rendered inline via MediaResultsGrid
+ *    - Media results rendered inline via MediaGallery
  *    - "New search" button resets messages to []
  * 3. Advanced (deterministic) search results section (if any from AdvancedSearchDialog)
  * 4. Explore rows (shown when thread is empty):
@@ -45,7 +45,7 @@ import { usePeople } from '../hooks/usePeople';
 import { streamAgent } from '../services/searchAgentStream';
 import { getExplorePlaces, getExploreTags } from '../services/media';
 import type { ExploreItem } from '../services/media';
-import { MediaResultsGrid } from '../components/media/MediaResultsGrid';
+import { MediaGallery } from '../components/media/MediaGallery';
 import { PersonAvatar } from '../components/people/PersonAvatar';
 import { AdvancedSearchDialog } from '../components/search/AdvancedSearchDialog';
 import type { ChatMsg } from '../services/searchAgentStream';
@@ -137,7 +137,7 @@ function ExploreRow({ title, icon, loading, children }: ExploreRowProps) {
 export default function SearchPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { activeCircle } = useCircle();
+  const { activeCircle, activeCircleRole } = useCircle();
   const { data: peopleData, loading: peopleLoading } = usePeople(activeCircle?.id ?? null);
 
   // Conversational state — IN MEMORY ONLY, intentionally lost on reload
@@ -432,7 +432,20 @@ export default function SearchPage() {
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                 {streamingResults.meta.totalItems} result(s)
               </Typography>
-              <MediaResultsGrid items={streamingResults.items} />
+              <MediaGallery
+                items={streamingResults.items}
+                isLoading={false}
+                circleId={activeCircle.id}
+                activeCircleRole={activeCircleRole}
+                emptyState={
+                  <Typography variant="body2" color="text.secondary">
+                    No results found.
+                  </Typography>
+                }
+                onChange={() => {
+                  setStreamingResults(null);
+                }}
+              />
             </Box>
           )}
         </Box>
@@ -451,13 +464,20 @@ export default function SearchPage() {
               Clear results
             </Button>
           </Box>
-          {advancedResults.length > 0 ? (
-            <MediaResultsGrid items={advancedResults} />
-          ) : (
-            <Typography variant="body2" color="text.secondary">
-              No results matched your filters.
-            </Typography>
-          )}
+          <MediaGallery
+            items={advancedResults}
+            isLoading={false}
+            circleId={activeCircle.id}
+            activeCircleRole={activeCircleRole}
+            emptyState={
+              <Typography variant="body2" color="text.secondary">
+                No results matched your filters.
+              </Typography>
+            }
+            onChange={() => {
+              setAdvancedResults(null);
+            }}
+          />
         </Box>
       )}
 

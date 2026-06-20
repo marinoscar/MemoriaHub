@@ -32,8 +32,8 @@ vi.mock('../../services/media', () => ({
   getExploreTags: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock('../../components/media/MediaResultsGrid', () => ({
-  MediaResultsGrid: vi.fn(() => null),
+vi.mock('../../components/media/MediaGallery', () => ({
+  MediaGallery: vi.fn(() => null),
 }));
 
 vi.mock('../../components/search/AdvancedSearchDialog', () => ({
