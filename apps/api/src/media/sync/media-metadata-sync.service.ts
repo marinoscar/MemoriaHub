@@ -6,7 +6,6 @@ import {
   OBJECT_PROCESSED_EVENT,
   ObjectProcessedEvent,
 } from '../../storage/processing/events/object-processed.event';
-import { toSignedInt64 } from '../../storage/processing/visual-hash.util';
 
 /**
  * MediaMetadataSyncService
@@ -170,10 +169,11 @@ export class MediaMetadataSyncService {
     const visualHashMeta = processing['visual-hash'];
     if (visualHashMeta) {
       if (typeof visualHashMeta['perceptualHash'] === 'string') {
+        // The processor emits the unsigned decimal string directly; store as-is.
+        // Validate it parses as a valid BigInt before accepting (rejects garbage).
         try {
-          // Store as signed int64 — the unsigned 64-bit dHash overflows the
-          // signed Postgres bigint column when the high bit is set.
-          update.perceptualHash = toSignedInt64(BigInt(visualHashMeta['perceptualHash']));
+          BigInt(visualHashMeta['perceptualHash']); // validation only
+          update.perceptualHash = visualHashMeta['perceptualHash'];
         } catch {
           // ignore invalid values
         }

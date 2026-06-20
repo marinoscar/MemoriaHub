@@ -7,21 +7,18 @@ import {
   StorageProvider,
 } from '../storage/providers/storage-provider.interface';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
-import { computeVisualHash, toSignedInt64 } from '../storage/processing/visual-hash.util';
-
-const UINT64_MASK = (1n << 64n) - 1n;
+import { computeVisualHash } from '../storage/processing/visual-hash.util';
 
 /**
  * Computes the Hamming distance between two 64-bit perceptual hashes.
  *
- * Hashes are stored as two's-complement signed int64 (Postgres bigint is
- * signed), so a value read back may be negative. Mask the XOR to the low 64
- * bits so the distance is correct regardless of each operand's sign — a plain
- * `x > 0n` loop on a negative XOR would terminate immediately and wrongly
- * report distance 0.
+ * Inputs are unsigned BigInts parsed from the TEXT column (unsigned decimal
+ * strings), so they are always non-negative. The XOR of two non-negative
+ * BigInts is also non-negative and the popcount loop terminates correctly
+ * without any masking.
  */
 function hammingDistance(a: bigint, b: bigint): number {
-  let x = (a ^ b) & UINT64_MASK;
+  let x = a ^ b;
   let count = 0;
   while (x > 0n) {
     x &= x - 1n;
@@ -103,9 +100,8 @@ export class BurstDetectionService {
     await this.prisma.mediaItem.update({
       where: { id: mediaItemId },
       data: {
-        // Reinterpret the unsigned 64-bit hash as signed int64 to fit the
-        // Postgres bigint column (hashes with the high bit set overflow).
-        perceptualHash: toSignedInt64(perceptualHash),
+        // Store as unsigned decimal string — the TEXT column accepts any uint64.
+        perceptualHash: perceptualHash.toString(),
         sharpnessScore,
       },
     });
@@ -179,7 +175,12 @@ export class BurstDetectionService {
           item.storageObjectId,
         );
         if (computed) {
-          item = { ...item, ...computed };
+          // Convert bigint → unsigned decimal string to match the DB column type.
+          item = {
+            ...item,
+            perceptualHash: computed.perceptualHash.toString(),
+            sharpnessScore: computed.sharpnessScore,
+          };
         }
       } catch (err) {
         // Re-throw to let the enrichment worker retry on transient errors
@@ -262,8 +263,9 @@ export class BurstDetectionService {
         continue;
       }
 
-      // Link if Hamming distance is within threshold
-      const dist = hammingDistance(item.perceptualHash, candidate.perceptualHash);
+      // Parse unsigned decimal strings from the TEXT column into BigInts for
+      // the popcount loop. Both values are guaranteed non-null here.
+      const dist = hammingDistance(BigInt(item.perceptualHash), BigInt(candidate.perceptualHash));
       if (dist <= hashDistance) {
         linkedCandidates.push(candidate);
       }
