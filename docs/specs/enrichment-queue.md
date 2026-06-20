@@ -56,9 +56,9 @@ The worked example throughout this document is `face_detection`. See **[docs/spe
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | UUID | Primary key |
-| `type` | String | Handler type identifier (e.g. `'face_detection'`) |
-| `mediaItemId` | UUID | FK to `media_items` (cascade delete) |
-| `circleId` | UUID | Scoping for RBAC and isolation |
+| `type` | String | Handler type identifier (e.g. `'face_detection'`, `'storage_insights'`) |
+| `mediaItemId` | UUID? | FK to `media_items` (cascade delete); **nullable** — null for global/system jobs not scoped to a media item |
+| `circleId` | UUID? | Scoping for RBAC and isolation; **nullable** — null for global/system jobs |
 | `status` | JobStatus | Current job state |
 | `reason` | JobReason | What caused the job to be created |
 | `priority` | Int (default 0) | Lower value = claimed sooner |
@@ -228,13 +228,13 @@ export class FaceModule {}
 
 ```typescript
 interface EnqueueInput {
-  type: string;           // Handler type identifier
-  mediaItemId: string;    // Target media item UUID
-  circleId: string;       // Circle UUID for scoping
-  reason: JobReason;      // upload | rerun | backfill
-  priority?: number;      // Default: 0
-  providerKey?: string;   // Optional hint
-  modelVersion?: string;  // Optional hint
+  type: string;                      // Handler type identifier
+  mediaItemId: string | null;        // Target media item UUID; null for global/system jobs
+  circleId: string | null;           // Circle UUID for scoping; null for global/system jobs
+  reason: JobReason;                 // upload | rerun | backfill
+  priority?: number;                 // Default: 0
+  providerKey?: string;              // Optional hint
+  modelVersion?: string;             // Optional hint
   payload?: Record<string, unknown>; // Handler-specific data
 }
 ```
@@ -254,6 +254,8 @@ prisma.enrichmentJob.findFirst({
 ```
 
 If an existing `pending` or `running` job is found for the same `type` and `mediaItemId`, the service returns the existing job without creating a duplicate. This means calling `enqueue` repeatedly for the same photo is safe — the backfill endpoint and the upload listener can both call `enqueue` without creating redundant work.
+
+For **global/system jobs** (null `mediaItemId`), the idempotency check matches on `(type, mediaItemId IS NULL)`. Only one global job of a given type can be pending or running at a time. The `storage_insights` handler uses this pattern — see [Storage Insights spec](storage-insights.md) for details.
 
 If no existing job is found, a new job is created with `status: pending` and the provided priority.
 
