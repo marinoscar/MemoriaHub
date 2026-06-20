@@ -12,7 +12,7 @@
  * to the BulkActionToolbar and wires onRemoveFromAlbum accordingly.
  */
 
-import { useState, useRef, useMemo, useCallback } from 'react';
+import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -39,6 +39,7 @@ import {
 import { useTheme } from '@mui/material/styles';
 import { useInfiniteMedia } from '../../hooks/useInfiniteMedia';
 import { useIntersectionObserver } from '../../hooks/useIntersectionObserver';
+import { useMediaRefresh } from '../../contexts/MediaRefreshContext';
 import { groupByDay } from '../../utils/groupByDay';
 import { MediaDetailDrawer } from './MediaDetailDrawer';
 import { MediaLightbox } from './MediaLightbox';
@@ -327,6 +328,20 @@ export function MediaGallery({
     rootMargin: '300px',
     disabled: !isFeedMode || !feedHasMore || feedIsLoading || !circleId,
   });
+
+  // Feed-mode refresh: reset to page 1 whenever a new upload completes.
+  // The context has a safe default (refreshToken:0, triggerRefresh:noop) so
+  // this is harmless when no MediaRefreshProvider is mounted.
+  const { refreshToken } = useMediaRefresh();
+  const refreshTokenRef = useRef(refreshToken);
+  useEffect(() => {
+    // Skip the initial mount — only react to increments.
+    if (refreshToken === refreshTokenRef.current) return;
+    refreshTokenRef.current = refreshToken;
+    if (isFeedMode) {
+      feedReset();
+    }
+  }, [refreshToken, isFeedMode, feedReset]);
 
   // -------------------------------------------------------------------------
   // Unified item list (either feed or controlled)
