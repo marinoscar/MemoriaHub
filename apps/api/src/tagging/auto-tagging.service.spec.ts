@@ -114,12 +114,13 @@ function makeSystemSettings(provider: string | null = 'openai', model: string | 
 describe('AutoTaggingService', () => {
   let service: AutoTaggingService;
   let mockPrisma: MockPrismaService;
-  let mockAiSettingsService: { resolveCredentials: jest.Mock };
+  let mockAiSettingsService: { resolveCredentials: jest.Mock; resolveEmbeddingConfig: jest.Mock };
   let mockRegistry: { get: jest.Mock };
   let mockProvider: { analyzeImage: jest.Mock };
   let mockStorageProvider: { download: jest.Mock };
   let mockDetectImageMime: jest.Mock;
   let mockEnrichmentJobService: { recordModel: jest.Mock };
+  let mockAiProviderForEmbedding: { embedText: jest.Mock };
 
   beforeEach(async () => {
     (jest.requireMock('sharp') as jest.Mock).mockClear();
@@ -141,9 +142,13 @@ describe('AutoTaggingService', () => {
 
     mockPrisma = createMockPrismaService();
     mockProvider = { analyzeImage: jest.fn() };
+    mockAiProviderForEmbedding = { embedText: jest.fn().mockResolvedValue([0.1, 0.2, 0.3]) };
+    // By default, registry.get returns the main tagging provider.
+    // Tests that need the embedding provider can override mockRegistry.get.
     mockRegistry = { get: jest.fn().mockReturnValue(mockProvider) };
     mockAiSettingsService = {
       resolveCredentials: jest.fn().mockResolvedValue({ apiKey: 'test-key' }),
+      resolveEmbeddingConfig: jest.fn().mockResolvedValue(null),
     };
     mockStorageProvider = {
       download: jest.fn().mockResolvedValue(makeReadable()),
@@ -172,6 +177,13 @@ describe('AutoTaggingService', () => {
     (mockPrisma.mediaTag.upsert as jest.Mock).mockResolvedValue({});
     (mockPrisma.mediaTag.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
     (mockPrisma.mediaTagStatus.upsert as jest.Mock).mockResolvedValue({});
+    (mockPrisma.mediaItem.update as jest.Mock).mockResolvedValue({});
+
+    // Default face.findMany — no faces with assigned persons (no people names)
+    (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
+
+    // Default $executeRaw — embedding upsert
+    (mockPrisma.$executeRaw as jest.Mock).mockResolvedValue(1);
 
     // $transaction executes the callback with mockPrisma as the tx
     (mockPrisma.$transaction as jest.Mock).mockImplementation(async (arg: any) => {
@@ -203,7 +215,7 @@ describe('AutoTaggingService', () => {
     it('upserts only vocabulary-matched labels; drops unrecognised items', async () => {
       // analyzeImage returns Beach (valid), Sunset (valid), Nonexistent Label (invalid)
       mockProvider.analyzeImage.mockResolvedValue(
-        '["Beach", "Sunset", "Nonexistent Label"]',
+        JSON.stringify({ tags: ['Beach', 'Sunset', 'Nonexistent Label'], caption: 'A beach scene.', description: 'Sun and water.' }),
       );
 
       await service.processMediaItem(makeJob());
@@ -219,7 +231,9 @@ describe('AutoTaggingService', () => {
     });
 
     it('upserts a MediaTag row for each validated label', async () => {
-      mockProvider.analyzeImage.mockResolvedValue('["Beach", "Sunset"]');
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach', 'Sunset'], caption: 'A beach.', description: 'Waves.' }),
+      );
 
       (mockPrisma.tag.upsert as jest.Mock)
         .mockResolvedValueOnce({ id: 'tag-beach' })
@@ -231,7 +245,9 @@ describe('AutoTaggingService', () => {
     });
 
     it('sets MediaTagStatus to processed with correct tagCount, providerKey, and modelVersion', async () => {
-      mockProvider.analyzeImage.mockResolvedValue('["Beach", "Sunset"]');
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach', 'Sunset'], caption: 'A beach.', description: 'Waves.' }),
+      );
 
       await service.processMediaItem(makeJob());
 
@@ -246,7 +262,9 @@ describe('AutoTaggingService', () => {
     });
 
     it('sets Tag.addedById to the media item addedById', async () => {
-      mockProvider.analyzeImage.mockResolvedValue('["Beach"]');
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach'], caption: 'Beach.', description: 'Sand.' }),
+      );
 
       await service.processMediaItem(makeJob());
 
@@ -255,7 +273,9 @@ describe('AutoTaggingService', () => {
     });
 
     it('sets Tag.circleId to the media item circleId', async () => {
-      mockProvider.analyzeImage.mockResolvedValue('["Beach"]');
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach'], caption: 'Beach.', description: 'Sand.' }),
+      );
 
       await service.processMediaItem(makeJob());
 
@@ -265,7 +285,9 @@ describe('AutoTaggingService', () => {
 
     it('deduplicates identical labels returned by the provider', async () => {
       // Provider returns Beach twice
-      mockProvider.analyzeImage.mockResolvedValue('["Beach", "Beach", "Sunset"]');
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach', 'Beach', 'Sunset'], caption: 'Beach.', description: 'Sand.' }),
+      );
 
       await service.processMediaItem(makeJob());
 
@@ -275,7 +297,9 @@ describe('AutoTaggingService', () => {
 
     it('normalizes label case to match the original TagLabel name', async () => {
       // Provider returns lowercase variant
-      mockProvider.analyzeImage.mockResolvedValue('["beach", "sunset"]');
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['beach', 'sunset'], caption: 'Beach.', description: 'Sand.' }),
+      );
 
       await service.processMediaItem(makeJob());
 
@@ -292,10 +316,10 @@ describe('AutoTaggingService', () => {
   // Robust JSON parse
   // -------------------------------------------------------------------------
 
-  describe('parseTagArray: robust JSON extraction', () => {
+  describe('parseAnalysisResult: robust JSON extraction', () => {
     it('parses response wrapped in triple-backtick json fences', async () => {
       mockProvider.analyzeImage.mockResolvedValue(
-        '```json\n["Beach", "Sunset"]\n```',
+        '```json\n{"tags":["Beach","Sunset"],"caption":"A beach.","description":"Sand and waves."}\n```',
       );
 
       await service.processMediaItem(makeJob());
@@ -303,9 +327,9 @@ describe('AutoTaggingService', () => {
       expect(mockPrisma.tag.upsert).toHaveBeenCalledTimes(2);
     });
 
-    it('parses response with leading prose before the JSON array', async () => {
+    it('parses response with leading prose before the JSON object', async () => {
       mockProvider.analyzeImage.mockResolvedValue(
-        'Here are the applicable labels: ["Beach", "Mountain"]',
+        'Here is my analysis: {"tags":["Beach","Mountain"],"caption":"Beach and mountain.","description":"Rocks and waves."}',
       );
 
       await service.processMediaItem(makeJob());
@@ -313,7 +337,7 @@ describe('AutoTaggingService', () => {
       expect(mockPrisma.tag.upsert).toHaveBeenCalledTimes(2);
     });
 
-    it('returns zero tags when response is not parseable JSON', async () => {
+    it('returns zero tags and parseOk=false when response is not parseable JSON', async () => {
       mockProvider.analyzeImage.mockResolvedValue('I cannot identify any labels.');
 
       await service.processMediaItem(makeJob());
@@ -326,8 +350,10 @@ describe('AutoTaggingService', () => {
       expect(finalUpsert.create.tagCount).toBe(0);
     });
 
-    it('returns zero tags when response is an empty array', async () => {
-      mockProvider.analyzeImage.mockResolvedValue('[]');
+    it('returns zero tags when response is a JSON object with empty tags array', async () => {
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: [], caption: 'Empty.', description: 'Nothing here.' }),
+      );
 
       await service.processMediaItem(makeJob());
 
@@ -341,7 +367,9 @@ describe('AutoTaggingService', () => {
 
   describe('initial status upsert', () => {
     it('upserts MediaTagStatus to processing at the start', async () => {
-      mockProvider.analyzeImage.mockResolvedValue('[]');
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: [], caption: null, description: null }),
+      );
 
       await service.processMediaItem(makeJob());
 
@@ -563,8 +591,10 @@ describe('AutoTaggingService', () => {
     }
 
     beforeEach(() => {
-      // Default: analyzeImage returns valid tags
-      mockProvider.analyzeImage.mockResolvedValue('["Beach"]');
+      // Default: analyzeImage returns valid tags in object format
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach'], caption: 'A beach.', description: 'Sandy shores.' }),
+      );
     });
 
     // -----------------------------------------------------------------------
@@ -655,7 +685,9 @@ describe('AutoTaggingService', () => {
 
   describe('AI tag reconciliation', () => {
     it('calls tx.mediaTag.deleteMany with notIn: normalizedLabels to remove stale AI tags', async () => {
-      mockProvider.analyzeImage.mockResolvedValue('["Mountains","Outdoors"]');
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Mountains', 'Outdoors'], caption: 'Mountains.', description: 'High peaks.' }),
+      );
       (mockPrisma.tagLabel.findMany as jest.Mock).mockResolvedValue([
         { name: 'Backyard' },
         { name: 'Mountains' },
@@ -676,7 +708,9 @@ describe('AutoTaggingService', () => {
     });
 
     it('upserts current labels with source=ai in create and empty update (no manual downgrade)', async () => {
-      mockProvider.analyzeImage.mockResolvedValue('["Mountains"]');
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Mountains'], caption: 'Mountain.', description: 'Peak.' }),
+      );
       (mockPrisma.tagLabel.findMany as jest.Mock).mockResolvedValue([{ name: 'Mountains' }]);
       (mockPrisma.tag.upsert as jest.Mock).mockResolvedValue({ id: 'tag-mountains' });
 
@@ -689,8 +723,10 @@ describe('AutoTaggingService', () => {
       });
     });
 
-    it('calls deleteMany with notIn: [] when model returns empty array (all AI tags removed)', async () => {
-      mockProvider.analyzeImage.mockResolvedValue('[]');
+    it('calls deleteMany with notIn: [] when model returns empty tags (all AI tags removed)', async () => {
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: [], caption: 'Empty.', description: 'Nothing.' }),
+      );
       (mockPrisma.tagLabel.findMany as jest.Mock).mockResolvedValue([
         { name: 'Beach' },
         { name: 'Sunset' },
@@ -716,7 +752,9 @@ describe('AutoTaggingService', () => {
 
   describe('recordModel integration', () => {
     it('calls enrichmentJobService.recordModel with job.id, provider, and model on the happy path', async () => {
-      mockProvider.analyzeImage.mockResolvedValue('["Beach"]');
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach'], caption: 'Beach.', description: 'Sand.' }),
+      );
 
       await service.processMediaItem(makeJob());
 
@@ -735,6 +773,260 @@ describe('AutoTaggingService', () => {
       await service.processMediaItem(makeJob());
 
       expect(mockEnrichmentJobService.recordModel).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Caption and description persistence
+  // -------------------------------------------------------------------------
+
+  describe('caption and description persistence', () => {
+    it('persists caption and description via tx.mediaItem.update when parse succeeds', async () => {
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({
+          tags: ['Beach'],
+          caption: 'A sunny beach.',
+          description: 'Waves crash on a sandy shore.',
+        }),
+      );
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockPrisma.mediaItem.update).toHaveBeenCalledWith({
+        where: { id: 'media-1' },
+        data: {
+          caption: 'A sunny beach.',
+          description: 'Waves crash on a sandy shore.',
+        },
+      });
+    });
+
+    it('does NOT call tx.mediaItem.update when response is not parseable (parseOk=false)', async () => {
+      mockProvider.analyzeImage.mockResolvedValue('This is not JSON at all.');
+
+      await service.processMediaItem(makeJob());
+
+      // mediaItem.update should not be called because parseOk is false
+      expect(mockPrisma.mediaItem.update).not.toHaveBeenCalled();
+    });
+
+    it('persists null caption when caption is missing from the JSON object', async () => {
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach'], description: 'Shore.' }),
+      );
+
+      await service.processMediaItem(makeJob());
+
+      // The update IS called with parseOk=true (object was valid), caption=null
+      expect(mockPrisma.mediaItem.update).toHaveBeenCalledWith({
+        where: { id: 'media-1' },
+        data: {
+          caption: null,
+          description: 'Shore.',
+        },
+      });
+    });
+
+    it('still processes tags=[] and sets tagCount=0 even when parse succeeds with empty tags', async () => {
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: [], caption: 'Empty scene.', description: 'Nothing visible.' }),
+      );
+
+      await service.processMediaItem(makeJob());
+
+      // mediaItem.update called (parseOk=true)
+      expect(mockPrisma.mediaItem.update).toHaveBeenCalledWith({
+        where: { id: 'media-1' },
+        data: { caption: 'Empty scene.', description: 'Nothing visible.' },
+      });
+
+      // Status reflects tagCount=0 but processed
+      const calls = (mockPrisma.mediaTagStatus.upsert as jest.Mock).mock.calls;
+      const finalUpsert = calls[calls.length - 1][0];
+      expect(finalUpsert.create.status).toBe(MediaTagStatusType.processed);
+      expect(finalUpsert.create.tagCount).toBe(0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // People names in prompt
+  // -------------------------------------------------------------------------
+
+  describe('people names in prompt', () => {
+    it('queries face.findMany with personId not null and non-deleted/non-merged person', async () => {
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach'], caption: 'Beach.', description: 'Sand.' }),
+      );
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
+
+      await service.processMediaItem(makeJob());
+
+      const findManyCalls = (mockPrisma.face.findMany as jest.Mock).mock.calls;
+      // find the face.findMany call (could be multiple due to tx, pick the one scoped to media item)
+      const faceLookup = findManyCalls.find(
+        (c: any[]) => c[0]?.where?.mediaItemId === 'media-1',
+      );
+      expect(faceLookup).toBeDefined();
+      expect(faceLookup![0].where).toMatchObject({
+        mediaItemId: 'media-1',
+        personId: { not: null },
+        person: { deletedAt: null, mergedIntoId: null },
+      });
+    });
+
+    it('includes named people in the prompt passed to analyzeImage', async () => {
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
+        { person: { name: 'Alice' } },
+        { person: { name: 'Bob' } },
+      ]);
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach'], caption: 'Alice and Bob.', description: 'Two people on a beach.' }),
+      );
+
+      await service.processMediaItem(makeJob());
+
+      const analyzeCall = (mockProvider.analyzeImage as jest.Mock).mock.calls[0];
+      const promptArg = analyzeCall[1].prompt as string;
+      expect(promptArg).toContain('Alice');
+      expect(promptArg).toContain('Bob');
+    });
+
+    it('does not include null person names in the prompt', async () => {
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
+        { person: { name: null } },
+        { person: { name: 'Carol' } },
+      ]);
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: [], caption: null, description: null }),
+      );
+
+      await service.processMediaItem(makeJob());
+
+      const analyzeCall = (mockProvider.analyzeImage as jest.Mock).mock.calls[0];
+      const promptArg = analyzeCall[1].prompt as string;
+      expect(promptArg).toContain('Carol');
+      // "null" should not appear as a name
+      expect(promptArg).not.toMatch(/\bnull\b/);
+    });
+
+    it('works correctly when there are no assigned persons (empty face list)', async () => {
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach'], caption: 'Beach.', description: 'Sand.' }),
+      );
+
+      await expect(service.processMediaItem(makeJob())).resolves.toBeUndefined();
+      expect(mockProvider.analyzeImage).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Best-effort embedding: embedAndStore
+  // -------------------------------------------------------------------------
+
+  describe('embedAndStore: best-effort embedding', () => {
+    it('skips embedding gracefully when resolveEmbeddingConfig returns null', async () => {
+      mockAiSettingsService.resolveEmbeddingConfig.mockResolvedValue(null);
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach'], caption: 'Beach.', description: 'Sand.' }),
+      );
+
+      // Must NOT throw
+      await expect(service.processMediaItem(makeJob())).resolves.toBeUndefined();
+
+      // $executeRaw must NOT be called for embedding upsert
+      expect(mockPrisma.$executeRaw).not.toHaveBeenCalled();
+    });
+
+    it('calls embedText and $executeRaw when embedding is configured', async () => {
+      mockAiSettingsService.resolveEmbeddingConfig.mockResolvedValue({
+        provider: 'openai',
+        model: 'text-embedding-3-small',
+      });
+      // On second call to resolveCredentials (for embedding), return different creds
+      mockAiSettingsService.resolveCredentials
+        .mockResolvedValueOnce({ apiKey: 'tagging-key' }) // tagging creds
+        .mockResolvedValueOnce({ apiKey: 'embedding-key' }); // embedding creds
+      // registry.get returns tagging provider first, then embedding provider
+      mockRegistry.get
+        .mockReturnValueOnce(mockProvider) // tagging provider (for analyzeImage)
+        .mockReturnValueOnce(mockAiProviderForEmbedding); // embedding provider
+      mockAiProviderForEmbedding.embedText.mockResolvedValue([0.1, 0.2, 0.3]);
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach'], caption: 'Beach.', description: 'Sand.' }),
+      );
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockAiProviderForEmbedding.embedText).toHaveBeenCalledWith(
+        expect.objectContaining({ apiKey: 'embedding-key' }),
+        'text-embedding-3-small',
+        expect.any(String),
+      );
+      expect(mockPrisma.$executeRaw).toHaveBeenCalled();
+    });
+
+    it('swallows embedText errors — tagging job still succeeds', async () => {
+      mockAiSettingsService.resolveEmbeddingConfig.mockResolvedValue({
+        provider: 'openai',
+        model: 'text-embedding-3-small',
+      });
+      mockAiSettingsService.resolveCredentials
+        .mockResolvedValueOnce({ apiKey: 'tagging-key' })
+        .mockResolvedValueOnce({ apiKey: 'embedding-key' });
+      mockRegistry.get
+        .mockReturnValueOnce(mockProvider)
+        .mockReturnValueOnce(mockAiProviderForEmbedding);
+      mockAiProviderForEmbedding.embedText.mockRejectedValue(new Error('Embedding API down'));
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach'], caption: 'Beach.', description: 'Sand.' }),
+      );
+
+      // Must NOT throw even though embedding failed
+      await expect(service.processMediaItem(makeJob())).resolves.toBeUndefined();
+
+      // Status should still be processed
+      const calls = (mockPrisma.mediaTagStatus.upsert as jest.Mock).mock.calls;
+      const finalUpsert = calls[calls.length - 1][0];
+      expect(finalUpsert.create.status).toBe(MediaTagStatusType.processed);
+    });
+
+    it('swallows resolveCredentials errors for embedding provider — tagging job still succeeds', async () => {
+      mockAiSettingsService.resolveEmbeddingConfig.mockResolvedValue({
+        provider: 'openai',
+        model: 'text-embedding-3-small',
+      });
+      // First resolveCredentials call succeeds (tagging), second fails (embedding)
+      mockAiSettingsService.resolveCredentials
+        .mockResolvedValueOnce({ apiKey: 'tagging-key' })
+        .mockRejectedValueOnce(new Error('Embedding creds not configured'));
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach'], caption: 'Beach.', description: 'Sand.' }),
+      );
+
+      await expect(service.processMediaItem(makeJob())).resolves.toBeUndefined();
+
+      // $executeRaw should NOT be called since credential resolution failed
+      expect(mockPrisma.$executeRaw).not.toHaveBeenCalled();
+
+      // Tagging status still processed
+      const calls = (mockPrisma.mediaTagStatus.upsert as jest.Mock).mock.calls;
+      const finalUpsert = calls[calls.length - 1][0];
+      expect(finalUpsert.create.status).toBe(MediaTagStatusType.processed);
+    });
+
+    it('skips embedding when caption, description, tags, and peopleNames are all empty', async () => {
+      mockAiSettingsService.resolveEmbeddingConfig.mockResolvedValue({
+        provider: 'openai',
+        model: 'text-embedding-3-small',
+      });
+      mockProvider.analyzeImage.mockResolvedValue('Not parseable JSON');
+
+      await service.processMediaItem(makeJob());
+
+      // Tags are empty, caption/description null from parse failure, no people
+      // embedAndStore should bail early (no text to embed)
+      expect(mockPrisma.$executeRaw).not.toHaveBeenCalled();
     });
   });
 });
