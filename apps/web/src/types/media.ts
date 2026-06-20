@@ -312,5 +312,6 @@ export interface DashboardResponse {
     unreviewed: number;
     lowValue: number;
     missingGeo: number;
+    pendingBurstGroups?: number;
   };
 }
