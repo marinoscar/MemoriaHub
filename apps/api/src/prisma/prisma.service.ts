@@ -39,12 +39,10 @@ export class PrismaService
     const adapter = new PrismaPg(buildConnectionString());
     super({
       adapter,
-      // perceptualHash is a 64-bit BigInt (dHash) used only internally by burst
-      // detection. JS BigInt is not JSON-serializable, so returning a MediaItem
-      // by default (e.g. GET /api/media, upload response) would throw
-      // "Do not know how to serialize a BigInt". Omit it globally; the burst
-      // code that needs it reads it via an explicit `select`, which overrides
-      // this omit.
+      // perceptualHash is an internal 64-bit dHash field used exclusively by
+      // burst detection. It is not part of the public API surface and is omitted
+      // globally to keep MediaItem responses clean. Burst detection code that
+      // needs it reads it via an explicit `select`, which overrides this omit.
       omit: {
         mediaItem: {
           perceptualHash: true,

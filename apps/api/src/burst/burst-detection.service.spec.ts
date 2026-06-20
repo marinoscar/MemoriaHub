@@ -19,13 +19,9 @@
  */
 
 // ---------------------------------------------------------------------------
-// Module-level mock: computeVisualHash (must come before any imports that
-// transitively load the module so jest.mock hoisting works correctly)
+// Module-level mock: computeVisualHash only (toSignedInt64 no longer exists)
 // ---------------------------------------------------------------------------
 jest.mock('../storage/processing/visual-hash.util', () => ({
-  // Mock only the heavy image computation; keep the real toSignedInt64 helper
-  // so the service can convert hashes for storage.
-  ...jest.requireActual('../storage/processing/visual-hash.util'),
   computeVisualHash: jest.fn(),
 }));
 
@@ -72,7 +68,7 @@ const BASE_TIME = new Date('2026-06-15T14:32:00.000Z');
 function makeMediaItem(overrides: Partial<{
   id: string;
   circleId: string;
-  perceptualHash: bigint | null;
+  perceptualHash: string | null;   // DB column is now TEXT (unsigned decimal string)
   sharpnessScore: number | null;
   burstUuid: string | null;
   capturedAt: Date | null;
@@ -87,7 +83,7 @@ function makeMediaItem(overrides: Partial<{
   return {
     id: 'media-1',
     circleId: 'circle-1',
-    perceptualHash: 12345n,
+    perceptualHash: '12345',   // unsigned decimal string
     sharpnessScore: 100,
     burstUuid: null,
     capturedAt: BASE_TIME,
@@ -104,14 +100,14 @@ function makeMediaItem(overrides: Partial<{
 
 function makeNeighbor(overrides: Partial<{
   id: string;
-  perceptualHash: bigint | null;
+  perceptualHash: string | null;   // DB column is TEXT
   burstUuid: string | null;
   burstGroupId: string | null;
   capturedAt: Date | null;
 }> = {}) {
   return {
     id: 'media-neighbor-1',
-    perceptualHash: 12345n, // identical hash by default → distance 0
+    perceptualHash: '12345', // identical hash by default → Hamming distance 0
     burstUuid: null,
     burstGroupId: null,
     capturedAt: new Date(BASE_TIME.getTime() - 3000), // 3 seconds earlier
@@ -217,9 +213,9 @@ describe('BurstDetectionService', () => {
     });
 
     it('returns early when no neighbors pass the link check', async () => {
-      // Hash where item has all 64 low bits set and neighbor has none set → distance = 64, exceeds threshold 10
-      const itemHash = (1n << 64n) - 1n; // all 64 bits = 1
-      const neighborHash = 0n;           // all 64 bits = 0; distance = 64
+      // Item hash = all 64 bits set (max uint64); neighbor = '0'; Hamming distance = 64 > threshold 10
+      const itemHash = ((1n << 64n) - 1n).toString(); // '18446744073709551615'
+      const neighborHash = '0';
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
         makeMediaItem({ perceptualHash: itemHash }),
       );
@@ -241,7 +237,7 @@ describe('BurstDetectionService', () => {
         makeMediaItem({ perceptualHash: null }),
       );
       (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([
-        makeNeighbor({ perceptualHash: 12345n }),
+        makeNeighbor({ perceptualHash: '12345' }),
       ]);
       await service.processMediaItem(makeJob());
       expect(mockPrisma.burstGroup.create).not.toHaveBeenCalled();
@@ -264,14 +260,15 @@ describe('BurstDetectionService', () => {
   describe('BurstUUID hard prior', () => {
     it('links items with shared non-null burstUuid regardless of hash distance', async () => {
       const burstUuid = 'BURST-UUID-APPLE-0001';
-      // Item has hash that would not match neighbor
+      const maxUint64 = ((1n << 64n) - 1n).toString(); // '18446744073709551615'
+      // Item has hash '0' and neighbor has max hash — Hamming distance 64, exceeds threshold
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
-        makeMediaItem({ burstUuid, perceptualHash: 0n }),
+        makeMediaItem({ burstUuid, perceptualHash: '0' }),
       );
       (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([
         makeNeighbor({
           burstUuid,
-          perceptualHash: (1n << 64n) - 1n, // max distance from 0n
+          perceptualHash: maxUint64, // max distance from '0'
           burstGroupId: null,
         }),
       ]);
@@ -282,7 +279,7 @@ describe('BurstDetectionService', () => {
 
       // For recomputeGroupScores
       (mockPrisma.mediaItem.findMany as jest.Mock)
-        .mockResolvedValueOnce([makeNeighbor({ burstUuid, perceptualHash: (1n << 64n) - 1n, burstGroupId: null })])
+        .mockResolvedValueOnce([makeNeighbor({ burstUuid, perceptualHash: maxUint64, burstGroupId: null })])
         .mockResolvedValueOnce([
           { id: 'media-1', sharpnessScore: 100, width: 4032, height: 3024, capturedAt: BASE_TIME },
           { id: 'media-neighbor-1', sharpnessScore: 80, width: 3024, height: 4032, capturedAt: BASE_TIME },
@@ -469,7 +466,9 @@ describe('BurstDetectionService', () => {
   describe('on-demand perceptual hash (perceptualHash === null, storageObjectId present)', () => {
     const STORAGE_OBJECT_ID = 'sobj-legacy-1';
     const STORAGE_KEY = 'originals/legacy-photo.jpg';
-    const COMPUTED_HASH = 99999n;
+    // computeVisualHash returns a bigint; the service converts to string for storage
+    const COMPUTED_HASH_BIGINT = 99999n;
+    const COMPUTED_HASH_STRING = '99999'; // what gets persisted and patched in-memory
     const COMPUTED_SHARPNESS = 250.5;
 
     function makeStream(): Readable {
@@ -505,10 +504,10 @@ describe('BurstDetectionService', () => {
       expect(mockStorageProvider.download).toHaveBeenCalledWith(STORAGE_KEY);
     });
 
-    it('persists computed perceptualHash and sharpnessScore via prisma.mediaItem.update', async () => {
+    it('persists computed hash as unsigned decimal string and sharpnessScore via prisma.mediaItem.update', async () => {
       setupLegacyItem();
       (computeVisualHash as jest.Mock).mockResolvedValue({
-        perceptualHash: COMPUTED_HASH,
+        perceptualHash: COMPUTED_HASH_BIGINT,
         sharpnessScore: COMPUTED_SHARPNESS,
       });
       // No candidates → returns early after hash computation
@@ -520,23 +519,24 @@ describe('BurstDetectionService', () => {
         expect.objectContaining({
           where: { id: 'media-1' },
           data: expect.objectContaining({
-            perceptualHash: COMPUTED_HASH,
+            // Must be stored as a string, not a bigint
+            perceptualHash: COMPUTED_HASH_STRING,
             sharpnessScore: COMPUTED_SHARPNESS,
           }),
         }),
       );
     });
 
-    it('uses the freshly computed hash value for burst grouping (links to a matching neighbor)', async () => {
+    it('uses the freshly computed hash string for burst grouping (links to a matching neighbor)', async () => {
       setupLegacyItem();
       (computeVisualHash as jest.Mock).mockResolvedValue({
-        perceptualHash: COMPUTED_HASH,
+        perceptualHash: COMPUTED_HASH_BIGINT,
         sharpnessScore: COMPUTED_SHARPNESS,
       });
 
-      // A neighbor with identical hash → Hamming distance 0 → should link
+      // A neighbor with an identical hash string → Hamming distance 0 → should link
       (mockPrisma.mediaItem.findMany as jest.Mock)
-        .mockResolvedValueOnce([makeNeighbor({ perceptualHash: COMPUTED_HASH })])
+        .mockResolvedValueOnce([makeNeighbor({ perceptualHash: COMPUTED_HASH_STRING })])
         .mockResolvedValueOnce([
           { id: 'media-1', sharpnessScore: COMPUTED_SHARPNESS, width: 4032, height: 3024, capturedAt: BASE_TIME },
           { id: 'media-neighbor-1', sharpnessScore: 80, width: 3024, height: 4032, capturedAt: BASE_TIME },
@@ -585,9 +585,9 @@ describe('BurstDetectionService', () => {
     });
 
     it('does NOT call StorageProvider.download when perceptualHash is already set', async () => {
-      // Item already has a perceptualHash → on-demand path is skipped entirely
+      // Item already has a perceptualHash string → on-demand path is skipped entirely
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
-        makeMediaItem({ perceptualHash: 12345n, storageObjectId: STORAGE_OBJECT_ID }),
+        makeMediaItem({ perceptualHash: '12345', storageObjectId: STORAGE_OBJECT_ID }),
       );
       (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
 
@@ -609,6 +609,35 @@ describe('BurstDetectionService', () => {
       await service.processMediaItem(makeJob());
 
       expect(mockStorageProvider.download).not.toHaveBeenCalled();
+    });
+
+    it('high-bit hash (previously overflow-prone) is stored and read as correct unsigned decimal string', async () => {
+      // 16488331711678253075 is the exact value that overflowed in production.
+      // computeVisualHash returns a bigint; the service must store bigint.toString().
+      const highBitHash = 16488331711678253075n;
+      const highBitHashStr = '16488331711678253075';
+
+      setupLegacyItem();
+      (computeVisualHash as jest.Mock).mockResolvedValue({
+        perceptualHash: highBitHash,
+        sharpnessScore: 100,
+      });
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
+
+      await service.processMediaItem(makeJob());
+
+      // Must be stored as the unsigned decimal string, not as a negative bigint
+      expect(mockPrisma.mediaItem.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'media-1' },
+          data: expect.objectContaining({
+            perceptualHash: highBitHashStr,
+          }),
+        }),
+      );
+
+      // And BigInt(stored) must recover the original value for Hamming comparison
+      expect(BigInt(highBitHashStr)).toBe(highBitHash);
     });
   });
 

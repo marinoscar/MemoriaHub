@@ -496,7 +496,7 @@ model MediaItem {
   geocodedAt    DateTime? @map("geocoded_at") @db.Timestamptz // when reverse geocoding ran; null = not yet geocoded
 
   // --- Burst Detection ---
-  perceptualHash  BigInt?  @map("perceptual_hash")   // 64-bit dHash; JSON-unsafe — must stringify in API responses
+  perceptualHash  String?  @map("perceptual_hash")   // 64-bit dHash stored as unsigned decimal string
   sharpnessScore  Float?   @map("sharpness_score")   // variance-of-Laplacian
   burstUuid       String?  @map("burst_uuid")         // Apple EXIF MakerNote BurstUUID
   burstScore      Float?   @map("burst_score")        // best-shot quality score
