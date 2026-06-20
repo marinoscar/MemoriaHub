@@ -71,8 +71,8 @@ function formatDate(iso: string | null): string {
   return new Date(iso).toLocaleString();
 }
 
-function shortId(id: string): string {
-  return id.slice(0, 8);
+function shortId(id: string | null | undefined): string {
+  return id ? id.slice(0, 8) : '—';
 }
 
 // ---------------------------------------------------------------------------
@@ -487,15 +487,23 @@ function JobsPageContent() {
                           )}
                         </TableCell>
                         <TableCell>
-                          <Tooltip title={job.mediaItemId} arrow>
-                            <Typography
-                              variant="body2"
-                              color="text.secondary"
-                              sx={{ fontFamily: 'monospace', cursor: 'help' }}
-                            >
-                              {shortId(job.mediaItemId)}&hellip;
-                            </Typography>
-                          </Tooltip>
+                          {job.mediaItemId ? (
+                            <Tooltip title={job.mediaItemId} arrow>
+                              <Typography
+                                variant="body2"
+                                color="text.secondary"
+                                sx={{ fontFamily: 'monospace', cursor: 'help' }}
+                              >
+                                {shortId(job.mediaItemId)}&hellip;
+                              </Typography>
+                            </Tooltip>
+                          ) : (
+                            <Tooltip title="System job — not scoped to a media item" arrow>
+                              <Typography variant="body2" color="text.disabled" sx={{ cursor: 'help' }}>
+                                Global
+                              </Typography>
+                            </Tooltip>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Typography variant="body2" color="text.secondary" noWrap>
