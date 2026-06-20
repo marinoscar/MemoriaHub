@@ -14,6 +14,7 @@ import {
   SetSearchFeatureDto,
   SetTaggingFeatureDto,
   SetEmbeddingFeatureDto,
+  TestEmbeddingDto,
 } from './dto/ai-credentials.dto';
 
 @Injectable()
@@ -157,6 +158,93 @@ export class AiSettingsService {
     }
 
     return provider.listModels(creds);
+  }
+
+  /**
+   * List embedding models for a provider.
+   * Returns an empty array for providers that do not support embeddings.
+   */
+  async listEmbeddingModels(providerKey: string): Promise<string[]> {
+    // Validate the provider key — registry.get throws for unknown providers.
+    const provider = this.registry.get(providerKey);
+    if (typeof (provider as any).listEmbeddingModels !== 'function') {
+      return [];
+    }
+    return (provider as any).listEmbeddingModels() as string[];
+  }
+
+  /**
+   * Test embedding connectivity.
+   * If provider/model are omitted, falls back to the configured embedding feature.
+   * Returns { ok: boolean, provider?, model?, dimensions?, warning?, error? }.
+   */
+  async testEmbedding(dto: TestEmbeddingDto): Promise<{
+    ok: boolean;
+    provider?: string;
+    model?: string;
+    dimensions?: number;
+    warning?: string;
+    error?: string;
+  }> {
+    const STORAGE_DIMENSIONS = 1536;
+
+    // Resolve provider + model
+    let providerKey = dto.provider;
+    let model = dto.model;
+
+    if (!providerKey || !model) {
+      const configured = await this.resolveEmbeddingConfig();
+      if (!configured) {
+        return { ok: false, error: 'No embedding provider/model configured' };
+      }
+      providerKey = providerKey ?? configured.provider;
+      model = model ?? configured.model;
+    }
+
+    // Resolve credentials
+    let creds: { apiKey: string; baseUrl?: string };
+    try {
+      creds = await this.resolveCredentials(providerKey);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, provider: providerKey, model, error: message };
+    }
+
+    // Check provider supports embedText
+    const provider = this.registry.get(providerKey);
+    if (typeof provider.embedText !== 'function') {
+      return {
+        ok: false,
+        provider: providerKey,
+        model,
+        error: `Provider "${providerKey}" does not support text embeddings`,
+      };
+    }
+
+    // Call embedText
+    try {
+      const vector = await provider.embedText(creds, model, 'embedding connectivity test');
+      const dimensions = vector.length;
+
+      const result: {
+        ok: boolean;
+        provider: string;
+        model: string;
+        dimensions: number;
+        warning?: string;
+      } = { ok: true, provider: providerKey, model, dimensions };
+
+      if (dimensions !== STORAGE_DIMENSIONS) {
+        result.warning =
+          `Model returned ${dimensions}-d vectors but storage expects ${STORAGE_DIMENSIONS}-d; ` +
+          `embeddings from this model cannot be stored. Use text-embedding-3-small.`;
+      }
+
+      return result;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, provider: providerKey, model, error: message };
+    }
   }
 
   /** Update search feature settings in system settings */

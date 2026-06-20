@@ -25,6 +25,7 @@ import {
   SetSearchFeatureDto,
   SetTaggingFeatureDto,
   SetEmbeddingFeatureDto,
+  TestEmbeddingDto,
 } from './dto/ai-credentials.dto';
 
 @ApiTags('AI Settings')
@@ -76,12 +77,47 @@ export class AiSettingsController {
     return this.aiSettingsService.testProvider(dto);
   }
 
+  @Post('test/embedding')
+  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.AI_SETTINGS_READ] })
+  @ApiOperation({
+    summary: 'Test embedding provider connectivity (Admin)',
+    description:
+      'Sends a probe text to the configured (or specified) embedding model and returns the ' +
+      'resulting vector length. If the model returns a dimension other than 1536 a warning ' +
+      'is included in the response — the test is still considered OK for connectivity purposes.',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      '{ ok: true, provider, model, dimensions, warning? } on success; ' +
+      '{ ok: false, provider?, model?, error } on failure.',
+  })
+  async testEmbedding(@Body() dto: TestEmbeddingDto) {
+    return this.aiSettingsService.testEmbedding(dto);
+  }
+
   @Get('models')
   @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.AI_SETTINGS_READ] })
-  @ApiOperation({ summary: 'List available models for a provider (Admin)' })
+  @ApiOperation({
+    summary: 'List available models for a provider (Admin)',
+    description:
+      'When capability=embedding, returns embedding model IDs instead of chat model IDs. ' +
+      'Providers that do not support the requested capability return an empty array.',
+  })
   @ApiQuery({ name: 'provider', required: true, description: 'Provider key' })
+  @ApiQuery({
+    name: 'capability',
+    required: false,
+    description: 'Model capability filter: "chat" (default) | "embedding"',
+  })
   @ApiResponse({ status: 200, description: 'List of model IDs' })
-  async listModels(@Query('provider') provider: string) {
+  async listModels(
+    @Query('provider') provider: string,
+    @Query('capability') capability?: string,
+  ) {
+    if (capability === 'embedding') {
+      return this.aiSettingsService.listEmbeddingModels(provider);
+    }
     return this.aiSettingsService.listModels(provider);
   }
 
