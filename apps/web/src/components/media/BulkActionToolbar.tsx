@@ -20,7 +20,7 @@ import {
   Category as CategoryIcon,
   Close as CloseIcon,
   PhotoAlbum as PhotoAlbumIcon,
-  RemoveCircleOutline as RemoveCircleOutlineIcon,
+  RemoveCircleOutlined as RemoveCircleOutlineIcon,
 } from '@mui/icons-material';
 import type { CircleRole } from '../../types/circles';
 import type { MediaClassification } from '../../types/media';

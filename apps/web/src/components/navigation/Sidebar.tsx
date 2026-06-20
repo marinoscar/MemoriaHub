@@ -261,7 +261,15 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                     </ListItemIcon>
                     <ListItemText
                       primary={album.name}
-                      primaryTypographyProps={{ noWrap: true, fontSize: '0.875rem' }}
+                      sx={{
+                        my: 0,
+                        '& .MuiListItemText-primary': {
+                          fontSize: '0.875rem',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        },
+                      }}
                     />
                   </ListItemButton>
                 </ListItem>

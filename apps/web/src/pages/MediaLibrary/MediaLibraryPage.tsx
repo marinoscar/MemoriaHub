@@ -813,7 +813,7 @@ export default function MediaLibraryPage() {
     try {
       await updateAlbumService(albumId, {
         name: albumRenameNameValue.trim(),
-        description: albumRenameDescValue.trim() || undefined,
+        description: albumRenameDescValue.trim() || null,
       });
       setAlbumName(albumRenameNameValue.trim());
       setAlbumDescription(albumRenameDescValue.trim() || null);
@@ -1703,7 +1703,7 @@ export default function MediaLibraryPage() {
             // added to a different album without being constrained to the current one
             if (albumId) {
               // eslint-disable-next-line @typescript-eslint/no-unused-vars
-              const { albumId: _aid, ...restWithoutAlbum } = rest as typeof rest & { albumId?: string };
+              const { albumId: _aid, ...restWithoutAlbum } = rest;
               return restWithoutAlbum;
             }
             return rest;
