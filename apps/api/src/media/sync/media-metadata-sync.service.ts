@@ -160,6 +160,24 @@ export class MediaMetadataSyncService {
       if (typeof exifMeta['orientation'] === 'number') {
         update.orientation = exifMeta['orientation'];
       }
+      if (typeof exifMeta['burstUuid'] === 'string') {
+        update.burstUuid = exifMeta['burstUuid'];
+      }
+    }
+
+    // --- visual-hash ---
+    const visualHashMeta = processing['visual-hash'];
+    if (visualHashMeta) {
+      if (typeof visualHashMeta['perceptualHash'] === 'string') {
+        try {
+          update.perceptualHash = BigInt(visualHashMeta['perceptualHash']);
+        } catch {
+          // ignore invalid values
+        }
+      }
+      if (typeof visualHashMeta['sharpnessScore'] === 'number') {
+        update.sharpnessScore = visualHashMeta['sharpnessScore'];
+      }
     }
 
     // --- dimensions (images) ---
