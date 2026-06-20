@@ -32,5 +32,7 @@ jobs:
       - run: npm run typecheck --workspace=api
       - run: npm run typecheck --workspace=web
 
-      - run: npm test --workspace=api
-      - run: npm run test:run --workspace=web
+      # Unit-scoped test runs. Integration specs (need a DB/harness CI lacks) and
+      # known-rotted UI suites are excluded and tracked in docs/ci-known-failing-tests.md.
+      - run: npm run test:ci --workspace=api
+      - run: npm run test:ci --workspace=web

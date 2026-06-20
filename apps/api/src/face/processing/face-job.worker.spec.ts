@@ -230,10 +230,16 @@ describe('EnrichmentJobWorker', () => {
 
       // $transaction was called (atomic claim)
       expect(mockPrisma.$transaction).toHaveBeenCalled();
-      // findFirst was called with pending status filter
+      // findFirst was called with pending status + scheduledFor OR-filter
       expect(mockPrisma.enrichmentJob.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { status: JobStatus.pending },
+          where: expect.objectContaining({
+            status: JobStatus.pending,
+            OR: expect.arrayContaining([
+              { scheduledFor: null },
+              { scheduledFor: { lte: expect.any(Date) } },
+            ]),
+          }),
         }),
       );
     });
