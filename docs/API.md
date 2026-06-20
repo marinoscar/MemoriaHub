@@ -2434,6 +2434,114 @@ Permanently delete an enrichment job row. Cannot delete a job that is currently 
 
 ---
 
+## Admin: Storage Insights
+
+All storage insights endpoints require the global `admin` role. Reading the latest snapshot additionally requires `system_settings:read`; forcing a recompute requires `system_settings:write`. No new permissions were added — the feature reuses the existing system settings permission pair.
+
+Metrics are precomputed into a snapshot table and refreshed on a configurable schedule (default every 4 hours). The `storage.insights.refreshIntervalHours` system setting (integer, 1–168) controls the automatic refresh cadence; the cron fires every hour and recomputes only when the configured interval has elapsed since the last successful compute.
+
+---
+
+### GET /admin/insights
+
+**Requires:** Admin role + `system_settings:read` permission
+
+Return the latest precomputed storage metrics snapshot. If no snapshot has ever been computed (or the last compute failed and was pruned), returns the `empty` DTO.
+
+**Request body:** none
+
+**Response 200 (snapshot available):**
+```json
+{
+  "status": "ready",
+  "metrics": {
+    "totalBytes": "128849018880",
+    "photoBytes": "107374182400",
+    "videoBytes": "21474836480",
+    "totalItems": 4200,
+    "photoCount": 4100,
+    "videoCount": 100,
+    "totalFaces": 9300,
+    "taggedItems": 2100
+  },
+  "computedAt": "2026-06-20T08:00:00.000Z",
+  "durationMs": 312
+}
+```
+
+**Response 200 (no snapshot):**
+```json
+{
+  "status": "empty",
+  "metrics": null,
+  "computedAt": null,
+  "durationMs": null
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status` | enum | `ready` — snapshot is available; `empty` — no ready snapshot exists |
+| `metrics` | object \| null | Null when `status` is `empty`; see metrics fields below |
+| `computedAt` | ISO 8601 \| null | When the snapshot was computed; null when `status` is `empty` |
+| `durationMs` | number \| null | Wall-clock milliseconds the aggregation took; null when `status` is `empty` |
+
+**Metrics fields:**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `totalBytes` | string | Total bytes across all non-deleted media items; serialized as a string for BigInt safety |
+| `photoBytes` | string | Bytes consumed by photos; string for BigInt safety |
+| `videoBytes` | string | Bytes consumed by videos; string for BigInt safety |
+| `totalItems` | number | Non-deleted photo + video count |
+| `photoCount` | number | Non-deleted photo count |
+| `videoCount` | number | Non-deleted video count |
+| `totalFaces` | number | Total rows in the `faces` table across all circles |
+| `taggedItems` | number | Non-deleted media items with at least one AI-assigned tag (`tag_count > 0`) |
+
+**Notes:**
+- Byte fields (`totalBytes`, `photoBytes`, `videoBytes`) are JSON **strings**, not numbers. Parse as `BigInt` for arithmetic; use a formatting utility for display.
+- All item counts exclude soft-deleted media items (`deleted_at IS NULL`). `totalFaces` is the sole exception — the `faces` table has no soft-delete column.
+- Byte totals reflect media storage (INNER JOIN `media_items → storage_objects`) and exclude orphan or in-progress upload objects that are not yet linked to a media item.
+
+---
+
+### POST /admin/insights/refresh
+
+**Requires:** Admin role + `system_settings:write` permission
+
+Force an immediate recompute of the storage metrics snapshot. Bypasses the interval gate — the aggregation runs synchronously and the fresh result is returned in the response. The previous snapshot is pruned after a successful recompute.
+
+**Request body:** none (body-less)
+
+**Response 201:**
+```json
+{
+  "status": "ready",
+  "metrics": {
+    "totalBytes": "128849018880",
+    "photoBytes": "107374182400",
+    "videoBytes": "21474836480",
+    "totalItems": 4200,
+    "photoCount": 4100,
+    "videoCount": 100,
+    "totalFaces": 9300,
+    "taggedItems": 2100
+  },
+  "computedAt": "2026-06-20T10:15:00.000Z",
+  "durationMs": 298
+}
+```
+
+Response shape is identical to `GET /admin/insights` with `status: 'ready'`. The `empty` state is never returned from this endpoint — if the aggregation fails, the endpoint throws a 500.
+
+**Error Cases:**
+- 500 Internal Server Error — Aggregation failed (check API logs for details)
+
+---
+
 ## HTTP Status Codes
 
 | Code | Description |
