@@ -460,6 +460,164 @@ describe('AiSettingsService', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // testEmbedding
+  // ---------------------------------------------------------------------------
+  describe('testEmbedding', () => {
+    const encryptAndSetup = (apiKey = 'sk-embed-key-1234') => {
+      const { encryptSecret: enc } = jest.requireActual<typeof import('../common/crypto/secret-cipher')>(
+        '../common/crypto/secret-cipher',
+      );
+      const encryptedValue = enc(apiKey);
+      mockPrisma.aiProviderCredential.findUnique.mockResolvedValue({
+        id: 'cred-1',
+        provider: 'openai',
+        encryptedKey: encryptedValue,
+        last4: '1234',
+        baseUrl: null,
+        enabled: true,
+        updatedByUserId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
+    };
+
+    it('(a) returns ok:true with dimensions:1536 when embedText returns a 1536-length array', async () => {
+      encryptAndSetup();
+      const mockEmbedText = jest.fn().mockResolvedValue(new Array(1536).fill(0.1));
+      mockRegistry.get.mockReturnValue({ embedText: mockEmbedText });
+
+      const result = await service.testEmbedding({
+        provider: 'openai',
+        model: 'text-embedding-3-small',
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.dimensions).toBe(1536);
+      expect(result.provider).toBe('openai');
+      expect(result.model).toBe('text-embedding-3-small');
+      expect(result.warning).toBeUndefined();
+      expect(result.error).toBeUndefined();
+    });
+
+    it('(b) returns ok:true WITH a warning when embedText returns a mismatched-dimension array (3072-d)', async () => {
+      encryptAndSetup();
+      const mockEmbedText = jest.fn().mockResolvedValue(new Array(3072).fill(0.1));
+      mockRegistry.get.mockReturnValue({ embedText: mockEmbedText });
+
+      const result = await service.testEmbedding({
+        provider: 'openai',
+        model: 'text-embedding-3-large',
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.dimensions).toBe(3072);
+      expect(result.warning).toBeDefined();
+      expect(result.warning).toMatch(/3072/);
+      expect(result.warning).toMatch(/1536/);
+    });
+
+    it('(c) returns ok:false when no provider/model configured and none passed', async () => {
+      // resolveEmbeddingConfig returns null when ai settings are absent
+      mockSystemSettings.getSettings.mockResolvedValue({ ai: null });
+
+      const result = await service.testEmbedding({});
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/no embedding provider/i);
+    });
+
+    it('(d) returns ok:false when the provider has no embedText method (e.g. anthropic)', async () => {
+      encryptAndSetup('sk-ant-key-abcd');
+      // Simulate a provider object with no embedText property (like AnthropicProvider)
+      mockRegistry.get.mockReturnValue({
+        testModel: jest.fn(),
+        listModels: jest.fn(),
+        chat: jest.fn(),
+        analyzeImage: jest.fn(),
+        // no embedText
+      });
+
+      const result = await service.testEmbedding({
+        provider: 'openai', // key used just to look up creds; mock controls the returned provider object
+        model: 'text-embedding-3-small',
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/does not support text embeddings/i);
+    });
+
+    it('(e) returns ok:false with the error message when embedText throws', async () => {
+      encryptAndSetup();
+      const mockEmbedText = jest.fn().mockRejectedValue(new Error('Network timeout'));
+      mockRegistry.get.mockReturnValue({ embedText: mockEmbedText });
+
+      const result = await service.testEmbedding({
+        provider: 'openai',
+        model: 'text-embedding-3-small',
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe('Network timeout');
+      expect(result.provider).toBe('openai');
+      expect(result.model).toBe('text-embedding-3-small');
+    });
+
+    it('(f) provider/model args override the configured feature when both are supplied', async () => {
+      // System settings have a different provider/model configured
+      mockSystemSettings.getSettings.mockResolvedValue({
+        ai: {
+          features: {
+            embedding: { provider: 'anthropic', model: 'some-other-model' },
+          },
+        },
+      });
+      encryptAndSetup('sk-openai-override-1234');
+      const mockEmbedText = jest.fn().mockResolvedValue(new Array(1536).fill(0.5));
+      mockRegistry.get.mockReturnValue({ embedText: mockEmbedText });
+
+      const result = await service.testEmbedding({
+        provider: 'openai',
+        model: 'text-embedding-3-small',
+      });
+
+      // Should use the explicitly passed provider+model, not the configured ones
+      expect(result.ok).toBe(true);
+      expect(result.provider).toBe('openai');
+      expect(result.model).toBe('text-embedding-3-small');
+      // resolveEmbeddingConfig should NOT have been called since both were supplied
+      expect(mockSystemSettings.getSettings).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // listEmbeddingModels
+  // ---------------------------------------------------------------------------
+  describe('listEmbeddingModels', () => {
+    it('returns the OpenAI embedding model list when the provider supports listEmbeddingModels', async () => {
+      const openAiModels = ['text-embedding-3-large', 'text-embedding-3-small'];
+      mockRegistry.get.mockReturnValue({
+        listEmbeddingModels: jest.fn().mockReturnValue(openAiModels),
+      });
+
+      const result = await service.listEmbeddingModels('openai');
+
+      expect(result).toEqual(openAiModels);
+    });
+
+    it('returns an empty array for a provider that has no listEmbeddingModels method (e.g. anthropic)', async () => {
+      mockRegistry.get.mockReturnValue({
+        testModel: jest.fn(),
+        listModels: jest.fn(),
+        // no listEmbeddingModels
+      });
+
+      const result = await service.listEmbeddingModels('anthropic');
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // testProvider
   // ---------------------------------------------------------------------------
   describe('testProvider', () => {
