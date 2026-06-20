@@ -20,7 +20,9 @@ import {
   CREATE_SYNC_RUNS_IDX_STARTED,
   CREATE_SETTINGS,
   SEED_SETTINGS,
+  SEED_SETTINGS_V4,
   ALTER_FILES_ADD_MTIME_MS,
+  ALTER_FOLDERS_ADD_CIRCLE_ID,
 } from '../../src/db/schema.js';
 import type BetterSqlite3 from 'better-sqlite3';
 
@@ -42,10 +44,10 @@ function openRaw(): BetterSqlite3.Database {
 // We do NOT override HOME here — we just use ':memory:' which bypasses the file path.
 
 describe('migrations — fresh :memory: database', () => {
-  it('reaches the latest user_version (3)', () => {
+  it('reaches the latest user_version (4)', () => {
     const db = openDb(':memory:');
     const version = db.pragma('user_version', { simple: true }) as number;
-    expect(version).toBe(3);
+    expect(version).toBe(4);
     db.close();
   });
 
@@ -136,17 +138,17 @@ describe('migrations — fresh :memory: database', () => {
     // Use raw DB so importLegacyManifests does not interfere with the settings count.
     const db = openRaw();
 
-    // Run again — should be a no-op (version already at 3, all seeds use INSERT OR IGNORE)
+    // Run again — should be a no-op (version already at 4, all seeds use INSERT OR IGNORE)
     runMigrations(db);
 
     const version = db.pragma('user_version', { simple: true }) as number;
-    expect(version).toBe(3);
+    expect(version).toBe(4);
 
     const count = (
       db.prepare('SELECT COUNT(*) as cnt FROM settings').get() as { cnt: number }
     ).cnt;
-    // Exactly the 3 seed rows — no duplicates
-    expect(count).toBe(3);
+    // 3 base seeds (v1) + 5 rate-limit seeds (v4) — no duplicates
+    expect(count).toBe(SEED_SETTINGS.length + SEED_SETTINGS_V4.length);
 
     db.close();
   });
@@ -166,14 +168,14 @@ describe('migrations — fresh :memory: database', () => {
 
   it('migration 2 is idempotent — re-running on an already-migrated db is a no-op', () => {
     const db = openRaw();
-    // openRaw() already runs all migrations including v2 and v3
+    // openRaw() already runs all migrations including v2, v3, and v4
     const versionBefore = db.pragma('user_version', { simple: true }) as number;
-    expect(versionBefore).toBe(3);
+    expect(versionBefore).toBe(4);
 
     // Re-running must not throw and must not change version
     runMigrations(db);
     const versionAfter = db.pragma('user_version', { simple: true }) as number;
-    expect(versionAfter).toBe(3);
+    expect(versionAfter).toBe(4);
 
     db.close();
   });
@@ -214,26 +216,90 @@ describe('migrations — fresh :memory: database', () => {
     const colsBefore = db.prepare("PRAGMA table_info('folders')").all() as Array<{ name: string }>;
     expect(colsBefore.some((c) => c.name === 'circle_id')).toBe(false);
 
-    // Now run runMigrations — should only apply v3
+    // Now run runMigrations — should apply v3 and v4
     runMigrations(db);
 
     const version = db.pragma('user_version', { simple: true }) as number;
-    expect(version).toBe(3);
+    expect(version).toBe(4);
 
     const colsAfter = db.prepare("PRAGMA table_info('folders')").all() as Array<{ name: string }>;
     expect(colsAfter.some((c) => c.name === 'circle_id')).toBe(true);
     db.close();
   });
 
-  it('migration 3 is idempotent — re-running on a v3 db is a no-op', () => {
+  it('migration 3 is idempotent — re-running on a v4 db is a no-op', () => {
     const db = openRaw();
     const versionBefore = db.pragma('user_version', { simple: true }) as number;
-    expect(versionBefore).toBe(3);
+    expect(versionBefore).toBe(4);
 
     runMigrations(db);
     const versionAfter = db.pragma('user_version', { simple: true }) as number;
-    expect(versionAfter).toBe(3);
+    expect(versionAfter).toBe(4);
 
+    db.close();
+  });
+
+  it('migration 4 seeds all rate-limit settings with their defaults', () => {
+    const db = openRaw();
+    for (const { key, value } of SEED_SETTINGS_V4) {
+      const row = db
+        .prepare('SELECT value FROM settings WHERE key = ?')
+        .get(key) as { value: string } | undefined;
+      expect(row).toBeDefined();
+      expect(row!.value).toBe(value);
+    }
+    db.close();
+  });
+
+  it('migration 4 backfills rate-limit settings on a pre-existing v3 database', () => {
+    // Build a v1+v2+v3 database without v4, mirroring an older install.
+    const db = new RawDatabase(':memory:') as BetterSqlite3.Database;
+    db.pragma('foreign_keys = ON');
+    db.exec(CREATE_FOLDERS);
+    db.exec(CREATE_FOLDERS_IDX_ENABLED);
+    db.exec(CREATE_FILES);
+    db.exec(CREATE_FILES_IDX_FOLDER_STATUS);
+    db.exec(CREATE_FILES_IDX_STATUS);
+    db.exec(CREATE_FILES_IDX_SHA256);
+    db.exec(CREATE_SYNC_RUNS);
+    db.exec(CREATE_SYNC_RUNS_IDX_STARTED);
+    db.exec(CREATE_SETTINGS);
+    const insert = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+    for (const { key, value } of SEED_SETTINGS) { insert.run(key, value); }
+    db.exec(ALTER_FILES_ADD_MTIME_MS);
+    db.exec(ALTER_FOLDERS_ADD_CIRCLE_ID);
+    db.exec('PRAGMA user_version = 3');
+
+    // Pre-condition: none of the v4 keys exist yet.
+    for (const { key } of SEED_SETTINGS_V4) {
+      const before = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+      expect(before).toBeUndefined();
+    }
+
+    runMigrations(db);
+
+    expect(db.pragma('user_version', { simple: true }) as number).toBe(4);
+    for (const { key } of SEED_SETTINGS_V4) {
+      const after = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+      expect(after).toBeDefined();
+    }
+    db.close();
+  });
+
+  it('migration 4 preserves a user-customized value (INSERT OR IGNORE)', () => {
+    // Pre-seed a custom max_retries before v4 runs, then ensure it is not overwritten.
+    const db = new RawDatabase(':memory:') as BetterSqlite3.Database;
+    db.pragma('foreign_keys = ON');
+    db.exec(CREATE_SETTINGS);
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+      .run('max_retries', JSON.stringify(99));
+    db.exec('PRAGMA user_version = 3');
+
+    runMigrations(db);
+
+    const row = db.prepare("SELECT value FROM settings WHERE key='max_retries'")
+      .get() as { value: string };
+    expect(JSON.parse(row.value)).toBe(99);
     db.close();
   });
 
