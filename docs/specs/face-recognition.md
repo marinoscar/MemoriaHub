@@ -16,7 +16,7 @@
 4. [Settings and Credentials](#4-settings-and-credentials)
 5. [Detection Pipeline Step by Step](#5-detection-pipeline-step-by-step)
 6. [Recognition: Embeddings, Matching, and Clustering](#6-recognition-embeddings-matching-and-clustering)
-7. [People, Labeling, and Merge](#7-people-labeling-and-merge)
+7. [People, Labeling, and Merge](#7-people-labeling-and-merge) (includes Manual People Association)
 8. [Image Quality and Resolution](#8-image-quality-and-resolution)
 9. [EXIF Orientation](#9-exif-orientation)
 10. [Per-Circle Opt-In and Biometric Privacy](#10-per-circle-opt-in-and-biometric-privacy)
@@ -377,6 +377,39 @@ Inside a transaction:
 
 Face rows and their embeddings are retained. The faces re-enter the unknown pool and can be reassigned or reclustered.
 
+### Manual People Association
+
+When face detection misses a face — or when a user wants to tag a person who is partially obscured — collaborators can associate a person with a photo from the media properties pane without a bounding box.
+
+**How it works:**
+
+Manual associations are stored as regular `Face` rows with the following sentinel values:
+
+| Field | Value |
+|-------|-------|
+| `providerKey` | `'manual'` |
+| `manuallyAssigned` | `true` |
+| `embedding` | `[]` (empty) |
+| `boundingBox` | `{ x: 0, y: 0, w: 0, h: 0 }` |
+| `confidence` | `null` |
+
+Using the existing `Face` model means all downstream features work unchanged: `GET /api/people?circleId=` counts the photo against the person, the person gallery includes the photo, `GET /api/media?personId=` returns the photo, and the `noFaces` filter correctly excludes it from the "no faces" work list.
+
+**Idempotency:** Calling `POST /api/media/:id/people` with a `personId` that already appears on the item (whether via detection or a prior manual call) returns the existing association without creating a duplicate row.
+
+**Find-or-create by name:** When `{ name }` is provided instead of `{ personId }`, the endpoint looks up an active `Person` with that name in the item's circle. If none exists, it creates one (equivalent to `POST /api/people { circleId, name }`). This allows tagging in a single request without a separate person-creation step.
+
+**Preserved across reruns:** Face-detection reruns delete only rows where `manuallyAssigned=false`. Manual rows are left intact. If the provider subsequently detects the same person's face in the photo, both a detected face row and the manual face row may coexist; the person will appear in the gallery through either row.
+
+**Auto-tagging re-enqueue:** Adding or removing a manual association re-enqueues an `auto_tagging` enrichment job for the media item (priority 0). This ensures the vision model's caption, description, and embedding reflect the updated person context.
+
+**Endpoints:**
+
+| Method | Path | Permission | Per-circle Role | Description |
+|--------|------|------------|-----------------|-------------|
+| `POST` | `/api/media/:id/people` | `media:write` | collaborator | Associate a person; body `{ personId }` or `{ name }` (exactly one); idempotent; returns `{ personId, personName, faceId, mediaItemId }` |
+| `DELETE` | `/api/media/:id/people/:personId` | `media:write` | collaborator | Remove the manual association; 404 if no manual face for that person; 204 No Content |
+
 ---
 
 ## 8. Image Quality and Resolution
@@ -628,6 +661,9 @@ Added to the `circles` table. All face operations check this column before proce
 | Method | Path | Permission | Per-circle Role | Description |
 |--------|------|------------|-----------------|-------------|
 | `GET` | `/api/media` | `media:read` | viewer | Add `?personId=<uuid>` to filter by person |
+| `GET` | `/api/media` | `media:read` | viewer | Add `?noFaces=true` to return only items with no faces (detected or manual); semantics: `faces: { none: {} }`; shrinks as people are tagged |
+
+The `noFaces` filter is also available in `POST /api/search` (as the `noFaces: true` boolean field) and in the agentic `search_media` tool. It appears in `GET /api/search/fields` with the label "No faces detected". The frontend exposes it as a filter switch in the library and as a "Photos with no faces detected" shortcut on the People page.
 
 ### Admin Job Queue (covers all enrichment types including face)
 
@@ -752,3 +788,4 @@ A job stuck in `running` status indicates the worker crashed or the container re
 | 1.0 | June 2026 | AI Assistant | Initial phase-roadmap spec |
 | 2.0 | June 2026 | AI Assistant | Updated to reflect all phases implemented |
 | 3.0 | June 2026 | AI Assistant | Complete rewrite as end-to-end reference; replaces phase-based structure |
+| 3.1 | June 2026 | AI Assistant | Added Manual People Association subsection (§7) and `noFaces` filter documentation (§12) |
