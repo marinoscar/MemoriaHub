@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
+| **Version** | 1.1 |
 | **Last Updated** | June 2026 |
 | **Status** | Implemented |
 
@@ -14,11 +14,12 @@
 2. [Data Model](#2-data-model)
 3. [Metric Definitions and Aggregation Logic](#3-metric-definitions-and-aggregation-logic)
 4. [Snapshot Lifecycle](#4-snapshot-lifecycle)
-5. [Cron and Interval-Gating Logic](#5-cron-and-interval-gating-logic)
-6. [System Setting](#6-system-setting)
-7. [API Endpoints and RBAC](#7-api-endpoints-and-rbac)
-8. [Frontend Dashboard](#8-frontend-dashboard)
-9. [Gotchas and Implementation Notes](#9-gotchas-and-implementation-notes)
+5. [Queue-Based Compute Architecture](#5-queue-based-compute-architecture)
+6. [Cron and Interval-Gating Logic](#6-cron-and-interval-gating-logic)
+7. [System Setting](#7-system-setting)
+8. [API Endpoints and RBAC](#8-api-endpoints-and-rbac)
+9. [Frontend Dashboard](#9-frontend-dashboard)
+10. [Gotchas and Implementation Notes](#10-gotchas-and-implementation-notes)
 
 ---
 
@@ -30,7 +31,8 @@ Storage Insights is a global, admin-only dashboard that surfaces media storage m
 
 - Give admins a quick, reliable read on storage growth without running manual SQL.
 - Keep queries off the hot path: metrics are precomputed and cached in a snapshot table rather than recomputed on every page load.
-- Provide a manual escape hatch (hard refresh) so admins can see up-to-date data immediately when needed.
+- Provide a manual escape hatch (hard refresh) so admins can see up-to-date data when needed.
+- Run computation on the existing enrichment queue to inherit retries, observability, and the admin jobs dashboard — no additional worker infrastructure.
 - Reuse existing `system_settings:read` / `system_settings:write` permissions — no new RBAC surface.
 
 ### Non-Goals
@@ -44,7 +46,7 @@ Storage Insights is a global, admin-only dashboard that surfaces media storage m
 
 ### `insights_snapshots` Table
 
-One row per compute run. After each successful run, older rows are pruned so at most one row survives.
+One row per successful compute run. After each successful run, older rows are pruned so at most one row survives.
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -53,16 +55,18 @@ One row per compute run. After each successful run, older rows are pruned so at 
 | `metrics` | JSONB | Null until status reaches `ready`; holds `InsightsMetrics` (see below) |
 | `computed_at` | Timestamptz | Timestamp of when the compute finished; null until `ready` |
 | `duration_ms` | Integer | Wall-clock milliseconds the compute took; null until `ready` |
-| `error` | Text | Error message if status is `failed`; null otherwise |
-| `created_at` | Timestamptz | When the row was inserted (`computing` status) |
+| `error` | Text | Reserved; not written in the queue-based flow (errors are tracked on the `enrichment_jobs` row) |
+| `created_at` | Timestamptz | When the row was inserted |
 
 ### `InsightsSnapshotStatus` Enum
 
 | Value | Meaning |
 |-------|---------|
-| `computing` | Aggregation query is in progress; `metrics` and `computed_at` are null |
+| `computing` | Reserved; not used in the queue-based flow — the handler writes `ready` directly |
 | `ready` | Aggregation succeeded; `metrics` and `computed_at` are populated |
-| `failed` | Aggregation threw an error; `error` column contains the message |
+| `failed` | Reserved; not used in the queue-based flow — failure state is on the enrichment job row |
+
+In the current architecture the snapshot table holds at most one row with `status='ready'`. In-flight and failure state lives on the `enrichment_jobs` row and is exposed via the `refresh` object on `GET /api/admin/insights`.
 
 ### `InsightsMetrics` JSON Shape
 
@@ -79,11 +83,19 @@ Stored in `insights_snapshots.metrics` as a JSONB object when status is `ready`.
 | `totalFaces` | number | Total rows in the `faces` table (all circles, all statuses). |
 | `taggedItems` | number | Media items with at least one AI-applied tag (`media_tag_status.tag_count > 0` and not soft-deleted). |
 
+### `enrichment_jobs` — Global Job Support
+
+The `enrichment_jobs` table has `media_item_id` and `circle_id` columns that are **nullable**. A null `media_item_id` indicates a global/system job not scoped to a specific media item or circle. The `storage_insights` handler uses this: it enqueues jobs with `mediaItemId: null, circleId: null`.
+
+Idempotency for global jobs deduplicates on `(type='storage_insights', media_item_id IS NULL)` — if a `storage_insights` job is already `pending` or `running`, a second `enqueue()` call returns the existing job without creating a duplicate.
+
+See [Enrichment Queue spec](enrichment-queue.md) for the full queue data model and worker behavior.
+
 ---
 
 ## 3. Metric Definitions and Aggregation Logic
 
-The service (`apps/api/src/insights/insights.service.ts`) runs three parallel database queries via `Promise.all`:
+`InsightsService.runComputation()` delegates to `computeMetrics()`, which runs three parallel database queries via `Promise.all`:
 
 ### Query 1 — Media type breakdown (bytes + counts)
 
@@ -133,52 +145,110 @@ Counts `media_tag_status` rows where `tag_count > 0` and the linked media item i
 ### States
 
 ```
-INSERT (status=computing)
+StorageInsightsHandler.process() called by worker
        │
-       ├─── computeMetrics() succeeds ──► UPDATE (status=ready, metrics=..., computed_at=now())
+       ├─── runComputation() succeeds ──► INSERT (status=ready, metrics=..., computed_at=now())
        │                                          │
        │                                          └─► DELETE older rows (prune to one)
        │
-       └─── computeMetrics() throws ──► UPDATE (status=failed, error=message)
+       └─── runComputation() throws ──► worker records lastError on enrichment_jobs row
+                                         (attempts++ ; retried up to MAX_ATTEMPTS=3)
 ```
+
+The in-flight and failure state is no longer tracked in `insights_snapshots`. It is tracked on the `enrichment_jobs` row and surfaced via the `refresh` object on `GET /api/admin/insights`.
 
 ### Pruning
 
-After each successful compute, the service deletes all `insights_snapshots` rows except the newly updated row:
+After each successful compute, the service deletes all `insights_snapshots` rows except the newly inserted row:
 
 ```typescript
 await this.prisma.insightsSnapshot.deleteMany({
-  where: { id: { not: updated.id } },
+  where: { id: { not: snapshot.id } },
 });
 ```
 
-This keeps the table to a single row at steady state: the latest ready snapshot. Failed rows are also pruned if a subsequent compute succeeds.
+This keeps the table to a single row at steady state: the latest ready snapshot.
 
-### In-Process Concurrency Guard
+### Concurrency Guarantee
 
-`InsightsService` maintains a `computing: boolean` flag. If `recompute()` is called while a compute is already in flight (e.g., a manual refresh arrives while the cron is running), the second caller immediately returns the current latest snapshot rather than starting a second concurrent aggregation:
-
-```typescript
-if (this.computing) {
-  const existing = await this.getLatest();
-  if (existing) return existing;
-  throw new Error('Insights recompute already in progress and no existing snapshot available');
-}
-```
-
-This guard is in-process only. If multiple API replicas run simultaneously (horizontal scale), both could start a compute. For the typical single-replica MemoriaHub deployment this is not an issue; in a multi-replica setup the worst case is two parallel aggregation queries and two snapshot rows, one of which is pruned by whichever replica finishes last.
-
-### `getLatest()`
-
-Returns the most recently created row with `status='ready'`. The `status='computing'` and `status='failed'` rows are excluded from this query, so a failed or in-progress compute never surfaces as the "latest" data on the dashboard.
+The enrichment queue provides the single-in-flight guarantee. `EnrichmentJobService.enqueue()` checks for an existing `pending` or `running` job with the same `type` and null `mediaItemId` before inserting. Only one `storage_insights` job is ever active at a time. The previous in-process boolean flag (`this.computing`) has been removed from `InsightsService`.
 
 ---
 
-## 5. Cron and Interval-Gating Logic
+## 5. Queue-Based Compute Architecture
+
+Metric computation is performed by the `storage_insights` enrichment handler. This section describes the full flow from schedule trigger or manual request through to snapshot write.
+
+### Components
+
+| Component | File | Role |
+|-----------|------|------|
+| `StorageInsightsHandler` | `apps/api/src/insights/storage-insights.handler.ts` | Enrichment handler; type `'storage_insights'`; self-registers on `onModuleInit` |
+| `InsightsService.runComputation()` | `apps/api/src/insights/insights.service.ts` | Runs three DB queries, writes a `ready` snapshot, prunes older rows |
+| `InsightsService.enqueueRefresh()` | `apps/api/src/insights/insights.service.ts` | Calls `EnrichmentJobService.enqueue()` with `mediaItemId: null, circleId: null` |
+| `InsightsService.getRefreshState()` | `apps/api/src/insights/insights.service.ts` | Queries the most recent `storage_insights` enrichment job row for state |
+| `InsightsRefreshTask` | `apps/api/src/insights/insights-refresh.task.ts` | Hourly cron; gates on interval; calls `enqueueRefresh(backfill, 100)` |
+| `InsightsController` | `apps/api/src/insights/insights.controller.ts` | Exposes `GET /admin/insights` and `POST /admin/insights/refresh` |
+| `EnrichmentJobWorker` | `apps/api/src/enrichment/enrichment-job.worker.ts` | Generic worker; polls queue; dispatches to `StorageInsightsHandler` |
+
+### Handler Registration
+
+`StorageInsightsHandler` follows the standard self-registration pattern:
+
+```typescript
+@Injectable()
+export class StorageInsightsHandler implements EnrichmentHandler, OnModuleInit {
+  readonly type = 'storage_insights';
+
+  constructor(
+    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly insights: InsightsService,
+  ) {}
+
+  onModuleInit(): void {
+    this.registry.register(this);
+  }
+
+  async process(_job: EnrichmentJob): Promise<void> {
+    await this.insights.runComputation();
+  }
+}
+```
+
+The handler ignores the job payload — `storage_insights` is a global job with no per-item context.
+
+### Enqueue API
+
+```typescript
+// InsightsService
+async enqueueRefresh(reason: JobReason, priority: number): Promise<EnrichmentJob> {
+  return this.enrichmentJobService.enqueue({
+    type: 'storage_insights',
+    mediaItemId: null,   // global job — no media item
+    circleId: null,      // global job — no circle
+    reason,
+    priority,
+  });
+}
+```
+
+Idempotency: if a `storage_insights` job is already `pending` or `running`, the existing job is returned without creating a duplicate.
+
+### Worker Processing
+
+The generic `EnrichmentJobWorker` claims and processes `storage_insights` jobs the same way it handles any other job type. Key properties:
+
+- **MAX_ATTEMPTS = 3**: if `runComputation()` throws, the job retries up to two more times before reaching `failed` status.
+- **Priority 0** (manual refresh via POST) pre-empts **priority 100** (scheduled refresh).
+- **Visible in `/admin/jobs`**: the job appears in the admin job dashboard with `type='storage_insights'` and can be retried or deleted manually.
+
+---
+
+## 6. Cron and Interval-Gating Logic
 
 **File:** `apps/api/src/insights/insights-refresh.task.ts`
 
-The `InsightsRefreshTask` is a NestJS scheduled task using `@nestjs/schedule`. It runs on a fixed `@Cron(CronExpression.EVERY_HOUR)` schedule — every clock hour.
+The `InsightsRefreshTask` is a NestJS scheduled task using `@nestjs/schedule`. It runs on a fixed `@Cron(CronExpression.EVERY_HOUR)` schedule — every clock hour. On each tick the task **enqueues** a `storage_insights` enrichment job; it does not compute directly.
 
 ### Why Hourly Cron with an Interval Gate?
 
@@ -189,15 +259,17 @@ Running the aggregation too frequently wastes database resources for metrics tha
 On each tick, the task:
 
 1. Reads `storage.insights.refreshIntervalHours` from system settings (default 4 if the key is absent).
-2. Fetches the latest ready snapshot.
-3. Checks whether `now - snapshot.computedAt >= refreshIntervalHours * 3_600_000`.
-4. If the interval has not elapsed, the task returns early without calling `recompute()`.
-5. If the interval has elapsed (or no snapshot exists), `recompute()` is called.
+2. Checks the current refresh state — if a `storage_insights` job is already `pending` or `running`, returns early (the queue idempotency would also prevent a duplicate, but the early-exit avoids log noise).
+3. Fetches the latest ready snapshot.
+4. Checks whether `now - snapshot.computedAt >= refreshIntervalHours * 3_600_000`.
+5. If the interval has not elapsed, the task returns early without enqueuing.
+6. If the interval has elapsed (or no snapshot exists), calls `enqueueRefresh(JobReason.backfill, 100)`.
 
 ```
+Tick at :00 → refresh already pending → SKIP
 Tick at :00 → last computed 3h 55m ago → interval is 4h → SKIP
-Tick at :00 → last computed 4h 02m ago → interval is 4h → RECOMPUTE
-Tick at :00 → no snapshot exists → RECOMPUTE
+Tick at :00 → last computed 4h 02m ago → interval is 4h → ENQUEUE (priority 100)
+Tick at :00 → no snapshot exists → ENQUEUE (priority 100)
 ```
 
 ### Effective Minimum Interval
@@ -206,11 +278,11 @@ The cron fires at most once per hour. Even if `refreshIntervalHours` is set to `
 
 ### Error Handling
 
-If `recompute()` throws, the task catches the error, logs it at `error` level, and does not rethrow. The cron continues to fire on the next tick. The `insights_snapshots` table will have a row with `status='failed'` in this case.
+If `enqueueRefresh()` throws, the task catches the error, logs it at `error` level, and does not rethrow. The cron continues to fire on the next tick. If the worker's execution of a queued job fails, the job is retried up to MAX_ATTEMPTS=3 times; permanent failure is recorded in the `enrichment_jobs` row and surfaced via `refresh.lastError` on `GET /admin/insights`.
 
 ---
 
-## 6. System Setting
+## 7. System Setting
 
 **Key:** `storage.insights.refreshIntervalHours`
 
@@ -223,35 +295,20 @@ If `recompute()` throws, the task catches the error, logs it at `error` level, a
 | Storage | `system_settings` JSONB, nested under `storage.insights.refreshIntervalHours` |
 | Admin UI | System Settings admin page |
 
-This setting controls how many hours must elapse between automatic cron-driven recomputes. It does not throttle manual hard refreshes via `POST /api/admin/insights/refresh` — an admin can always force a recompute regardless of when the last one ran.
+This setting controls how many hours must elapse between automatic cron-driven refreshes. It does not throttle manual refreshes via `POST /api/admin/insights/refresh` — an admin can enqueue a job at any time. However, the idempotency check means enqueuing while a job is already pending or running returns the existing job rather than creating a second one.
 
 ---
 
-## 7. API Endpoints and RBAC
+## 8. API Endpoints and RBAC
 
 Both endpoints are mounted under `/api/admin/insights` and require the `Admin` system role. No new permissions were added; the endpoints reuse existing `system_settings:read` and `system_settings:write` to distinguish read-only dashboard access from write (refresh) access.
-
-### Response DTO
-
-Both endpoints return an `InsightsSnapshotDto`:
-
-```typescript
-interface InsightsSnapshotDto {
-  status: 'ready' | 'empty';
-  metrics: InsightsMetrics | null;
-  computedAt: string | null;   // ISO 8601 string
-  durationMs: number | null;
-}
-```
-
-The `empty` status indicates no ready snapshot exists in the database (never computed or last compute failed). The `ready` status indicates `metrics`, `computedAt`, and `durationMs` are all populated.
 
 ### `GET /api/admin/insights`
 
 - **Auth:** Admin role + `system_settings:read`
 - **Request body:** none
-- **Behavior:** Queries `insights_snapshots` for the most recently created row with `status='ready'`. If no such row exists, returns the `empty` DTO.
-- **Response 200 (ready):**
+- **Behavior:** Parallel queries for the latest `ready` snapshot and the current `storage_insights` enrichment job state. Returns both.
+- **Response 200 (ready snapshot, no job in flight):**
   ```json
   {
     "status": "ready",
@@ -266,56 +323,66 @@ The `empty` status indicates no ready snapshot exists in the database (never com
       "taggedItems": 2100
     },
     "computedAt": "2026-06-20T08:00:00.000Z",
-    "durationMs": 312
+    "durationMs": 312,
+    "refresh": {
+      "state": "idle",
+      "jobId": null,
+      "lastError": null
+    }
   }
   ```
-- **Response 200 (empty):**
+- **Response 200 (no snapshot, job pending):**
   ```json
   {
     "status": "empty",
     "metrics": null,
     "computedAt": null,
-    "durationMs": null
+    "durationMs": null,
+    "refresh": {
+      "state": "pending",
+      "jobId": "a1b2c3d4-...",
+      "lastError": null
+    }
   }
   ```
+
+**`refresh.state` values:**
+
+| Value | Meaning |
+|-------|---------|
+| `idle` | No active job; last job succeeded (or no job has ever run) |
+| `pending` | Job is queued, waiting for the worker to claim it |
+| `running` | Worker is currently executing the computation |
+| `failed` | Job failed permanently after MAX_ATTEMPTS=3; `lastError` contains the error message |
 
 ### `POST /api/admin/insights/refresh`
 
 - **Auth:** Admin role + `system_settings:write`
 - **Request body:** none (body-less)
-- **Behavior:** Calls `InsightsService.recompute()` synchronously. Waits for the aggregation to complete and returns the freshly computed snapshot. This bypasses the interval gate — an admin can force a recompute at any time regardless of when the last automatic refresh ran.
-- **Response 201 (always `ready` on success):**
+- **Behavior:** Calls `InsightsService.enqueueRefresh(JobReason.rerun, 0)`. Returns immediately with the job ID and current state. Does not wait for computation to complete.
+- **Response 201:**
   ```json
   {
-    "status": "ready",
-    "metrics": {
-      "totalBytes": "128849018880",
-      "photoBytes": "107374182400",
-      "videoBytes": "21474836480",
-      "totalItems": 4200,
-      "photoCount": 4100,
-      "videoCount": 100,
-      "totalFaces": 9300,
-      "taggedItems": 2100
-    },
-    "computedAt": "2026-06-20T10:15:00.000Z",
-    "durationMs": 298
+    "jobId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "state": "pending"
   }
   ```
-- **Error:** If a compute is already in progress, the in-process guard returns the current snapshot; if none exists yet, a 500 is raised.
+- **If a job is already in flight:** Returns the existing job's ID and state (`pending` or `running`) — no duplicate is created.
+- **Polling:** The frontend polls `GET /api/admin/insights` and watches `refresh.state`. When state transitions to `idle`, the `metrics` and `computedAt` fields reflect the freshly computed snapshot. When state transitions to `failed`, `refresh.lastError` contains the failure reason.
 
 ### RBAC Summary
 
 | Resource | Permission | Granted To |
 |----------|------------|------------|
-| Read latest snapshot | `system_settings:read` | Admin only |
-| Force recompute | `system_settings:write` | Admin only |
+| Read latest snapshot + refresh state | `system_settings:read` | Admin only |
+| Enqueue a refresh job | `system_settings:write` | Admin only |
+| Retry/delete job in queue | `jobs:write` | Admin only (via `/admin/jobs` dashboard) |
 
 No new permission scopes were created for this feature.
 
 ---
 
-## 8. Frontend Dashboard
+## 9. Frontend Dashboard
 
 **Route:** `/admin/insights`
 
@@ -358,24 +425,28 @@ Component used: `ProportionBar` (`apps/web/src/components/insights/ProportionBar
 ### Header Controls
 
 - **Freshness pill:** `FreshnessPill` (`apps/web/src/components/insights/FreshnessPill.tsx`) displays the `computedAt` timestamp as a relative "last updated" label and `durationMs` as "computed in Xms". Rendered only when `data` is available.
-- **Refresh now button:** Calls `POST /api/admin/insights/refresh` via the `useInsights` hook. Shows a spinner while refreshing; label changes to "Updated!" for 3 seconds on success.
+- **Refresh now button:** Calls `POST /api/admin/insights/refresh` via the `useInsights` hook. After receiving `{ jobId, state }`, the hook begins polling `GET /api/admin/insights` until `refresh.state` transitions to `idle` or `failed`. Shows a spinner while the job is `pending` or `running`; surfaces `lastError` on failure.
 
 ### States
 
 | State | Trigger | Display |
 |-------|---------|---------|
 | Loading | Initial data fetch in progress | `KpiSkeleton` placeholder cards |
-| Empty | `data.status === 'empty'` or `metrics` is null | Centered card with storage icon, "No insights computed yet" message, and a "Compute now" button |
+| Empty | `data.status === 'empty'` and `refresh.state === 'idle'` | Centered card with storage icon, "No insights computed yet" message, and a "Compute now" button |
+| Refreshing | `refresh.state === 'pending'` or `'running'` | Existing metrics (or skeleton if none yet) with a refresh progress indicator |
+| Failed | `refresh.state === 'failed'` | `Alert` with `refresh.lastError` and a "Retry" action button |
 | Error | Network or API error | MUI `Alert` with severity `error` and a "Retry" action button |
-| Loaded | `metrics` is non-null | All three tiers rendered |
+| Loaded | `metrics` is non-null and `refresh.state === 'idle'` | All three tiers rendered |
 
 ### Data Fetching
 
 Data is fetched and mutation is triggered through the `useInsights` hook (`apps/web/src/hooks/useInsights.ts`). The hook exposes `{ data, loading, refreshing, error, refresh }`.
 
+When `data.refresh.state` is `pending` or `running` on page load (a scheduled job is already in flight), the hook automatically begins polling without requiring the user to click "Refresh now."
+
 ---
 
-## 9. Gotchas and Implementation Notes
+## 10. Gotchas and Implementation Notes
 
 ### BigInt Serialization
 
@@ -406,11 +477,18 @@ Admins who expect the number to match their S3 bucket `ListObjectsV2` total shou
 
 The cron fires every clock hour (`CronExpression.EVERY_HOUR`). Even if `refreshIntervalHours` is set to its minimum value of `1`, recomputes cannot happen more frequently than once per hour. In practice the gap will be between 1 and 2 hours depending on when the last compute finished relative to the hour boundary.
 
-The interval gate checks `now - computedAt < intervalMs` and skips the recompute when true. "Now" is evaluated at tick time, not at the time the cron was scheduled. Clock drift and container restarts can cause slight variation.
+### Manual Refresh Idempotency
 
-### Manual Refresh Bypasses the Interval Gate
+`POST /api/admin/insights/refresh` calls `enqueueRefresh(JobReason.rerun, 0)`. The `EnrichmentJobService.enqueue()` idempotency check prevents duplicate jobs when a job is already `pending` or `running`. The returned `{ jobId, state }` will reference the existing job in that case. An admin can call POST repeatedly and will always get a reference to a single in-flight job — no pile-up.
 
-`POST /api/admin/insights/refresh` calls `recompute()` directly, skipping the interval check. An admin can trigger as many hard refreshes as they want. The in-process guard prevents two concurrent aggregation queries from the same replica, but it does not enforce any per-request rate limit.
+### Admin Jobs Dashboard Visibility
+
+`storage_insights` jobs appear in the `/admin/jobs` dashboard under `type='storage_insights'`. Admins can:
+- Filter by `type=storage_insights` to see only insights jobs.
+- Retry a permanently failed job via `POST /api/admin/jobs/:id/retry`.
+- Delete old succeeded job rows for housekeeping.
+
+Failed jobs should be reviewed in the jobs dashboard when `GET /admin/insights` reports `refresh.state === 'failed'`.
 
 ---
 
@@ -419,3 +497,4 @@ The interval gate checks `now - computedAt < intervalMs` and skips the recompute
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | June 2026 | AI Assistant | Initial specification |
+| 1.1 | June 2026 | AI Assistant | Refactored: computation moved to enrichment queue; POST returns async {jobId,state}; GET adds refresh state object; removed in-process lock; documented nullable enrichment_jobs columns |
