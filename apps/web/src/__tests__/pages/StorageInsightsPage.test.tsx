@@ -3,7 +3,9 @@
  *
  * Covers: ready state renders KPI values; empty state shows the no-insights
  * message and refresh button; loading state shows skeletons; non-admin is
- * redirected.
+ * redirected; button label cycles Refresh now / Queued… / Computing… based
+ * on jobState; in-flight chip visible when pending/running; failed Alert shows
+ * lastError with a Retry button.
  *
  * Note: CompositionDonut imports @mui/x-charts/PieChart which is NOT installed
  * in the local node_modules (web deps live in the Docker container per project
@@ -12,7 +14,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, fireEvent } from '@testing-library/react';
 import { render, mockAdminUser, mockUser } from '../utils/test-utils';
 
 // ---------------------------------------------------------------------------
@@ -67,6 +69,7 @@ const readySnapshot: InsightsSnapshot = {
   },
   computedAt: '2025-06-20T10:00:00.000Z',
   durationMs: 142,
+  refresh: { state: 'idle', jobId: null, lastError: null },
 };
 
 const emptySnapshot: InsightsSnapshot = {
@@ -74,6 +77,7 @@ const emptySnapshot: InsightsSnapshot = {
   metrics: null,
   computedAt: null,
   durationMs: null,
+  refresh: { state: 'idle', jobId: null, lastError: null },
 };
 
 function makeAdminPermissions() {
@@ -103,6 +107,20 @@ function makeViewerPermissions() {
   };
 }
 
+/** Build a useInsights mock return with sensible defaults. */
+function makeHookReturn(overrides: Partial<ReturnType<typeof useInsights>> = {}) {
+  return {
+    data: readySnapshot,
+    loading: false,
+    refreshing: false,
+    jobState: 'idle' as const,
+    error: null,
+    load: vi.fn(),
+    refresh: vi.fn(),
+    ...overrides,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -113,14 +131,7 @@ describe('StorageInsightsPage', () => {
 
     // Default: admin, ready data, not loading
     mockUsePermissions.mockReturnValue(makeAdminPermissions());
-    mockUseInsights.mockReturnValue({
-      data: readySnapshot,
-      loading: false,
-      refreshing: false,
-      error: null,
-      load: vi.fn(),
-      refresh: vi.fn(),
-    });
+    mockUseInsights.mockReturnValue(makeHookReturn());
   });
 
   // =========================================================================
@@ -210,7 +221,7 @@ describe('StorageInsightsPage', () => {
       expect(screen.getByText('4,217')).toBeInTheDocument();
     });
 
-    it('renders a "Refresh now" button', () => {
+    it('renders a "Refresh now" button when idle', () => {
       render(<StorageInsightsPage />, {
         wrapperOptions: { user: mockAdminUser },
       });
@@ -233,14 +244,10 @@ describe('StorageInsightsPage', () => {
 
   describe('empty state', () => {
     beforeEach(() => {
-      mockUseInsights.mockReturnValue({
+      mockUseInsights.mockReturnValue(makeHookReturn({
         data: emptySnapshot,
-        loading: false,
-        refreshing: false,
-        error: null,
-        load: vi.fn(),
-        refresh: vi.fn(),
-      });
+        jobState: 'idle',
+      }));
     });
 
     it('renders the empty-state heading', () => {
@@ -269,14 +276,10 @@ describe('StorageInsightsPage', () => {
     });
 
     it('also shows empty state when data is null', () => {
-      mockUseInsights.mockReturnValue({
+      mockUseInsights.mockReturnValue(makeHookReturn({
         data: null,
-        loading: false,
-        refreshing: false,
-        error: null,
-        load: vi.fn(),
-        refresh: vi.fn(),
-      });
+        jobState: 'idle',
+      }));
 
       render(<StorageInsightsPage />, {
         wrapperOptions: { user: mockAdminUser },
@@ -292,14 +295,11 @@ describe('StorageInsightsPage', () => {
 
   describe('loading state', () => {
     beforeEach(() => {
-      mockUseInsights.mockReturnValue({
+      mockUseInsights.mockReturnValue(makeHookReturn({
         data: null,
         loading: true,
-        refreshing: false,
-        error: null,
-        load: vi.fn(),
-        refresh: vi.fn(),
-      });
+        jobState: 'idle',
+      }));
     });
 
     it('does not render the empty-state message while loading', () => {
@@ -326,14 +326,11 @@ describe('StorageInsightsPage', () => {
 
   describe('error state', () => {
     it('renders an error alert when the hook reports an error', async () => {
-      mockUseInsights.mockReturnValue({
+      mockUseInsights.mockReturnValue(makeHookReturn({
         data: null,
-        loading: false,
-        refreshing: false,
         error: 'Failed to load insights',
-        load: vi.fn(),
-        refresh: vi.fn(),
-      });
+        jobState: 'idle',
+      }));
 
       render(<StorageInsightsPage />, {
         wrapperOptions: { user: mockAdminUser },
@@ -342,6 +339,229 @@ describe('StorageInsightsPage', () => {
       await waitFor(() => {
         expect(screen.getByText(/Failed to load insights/i)).toBeInTheDocument();
       });
+    });
+  });
+
+  // =========================================================================
+  // Refresh button label — reflects jobState
+  // =========================================================================
+
+  describe('refresh button label', () => {
+    it('shows "Refresh now" when idle and not refreshing', () => {
+      mockUseInsights.mockReturnValue(makeHookReturn({
+        refreshing: false,
+        jobState: 'idle',
+      }));
+
+      render(<StorageInsightsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByRole('button', { name: /Refresh now/i })).toBeInTheDocument();
+    });
+
+    it('shows "Queued…" when refreshing with jobState=pending', () => {
+      mockUseInsights.mockReturnValue(makeHookReturn({
+        refreshing: true,
+        jobState: 'pending',
+      }));
+
+      render(<StorageInsightsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByRole('button', { name: /Queued/i })).toBeInTheDocument();
+    });
+
+    it('shows "Computing…" when refreshing with jobState=running', () => {
+      mockUseInsights.mockReturnValue(makeHookReturn({
+        refreshing: true,
+        jobState: 'running',
+      }));
+
+      render(<StorageInsightsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByRole('button', { name: /Computing/i })).toBeInTheDocument();
+    });
+
+    it('disables the button while refreshing', () => {
+      mockUseInsights.mockReturnValue(makeHookReturn({
+        refreshing: true,
+        jobState: 'pending',
+      }));
+
+      render(<StorageInsightsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const btn = screen.getByRole('button', { name: /Queued/i });
+      expect(btn).toBeDisabled();
+    });
+  });
+
+  // =========================================================================
+  // In-flight status chip
+  // =========================================================================
+
+  describe('in-flight chip', () => {
+    it('shows "Refresh queued" chip when refreshing with jobState=pending', () => {
+      mockUseInsights.mockReturnValue(makeHookReturn({
+        refreshing: true,
+        jobState: 'pending',
+      }));
+
+      render(<StorageInsightsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByText(/Refresh queued/i)).toBeInTheDocument();
+    });
+
+    it('shows "Computing metrics" chip when refreshing with jobState=running', () => {
+      mockUseInsights.mockReturnValue(makeHookReturn({
+        refreshing: true,
+        jobState: 'running',
+      }));
+
+      render(<StorageInsightsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByText(/Computing metrics/i)).toBeInTheDocument();
+    });
+
+    it('does not show in-flight chip when not refreshing', () => {
+      mockUseInsights.mockReturnValue(makeHookReturn({
+        refreshing: false,
+        jobState: 'idle',
+      }));
+
+      render(<StorageInsightsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.queryByText(/Refresh queued/i)).toBeNull();
+      expect(screen.queryByText(/Computing metrics/i)).toBeNull();
+    });
+  });
+
+  // =========================================================================
+  // Failed job — error alert with Retry button
+  // =========================================================================
+
+  describe('failed job alert', () => {
+    it('shows failed-job Alert with lastError when jobState=failed', () => {
+      const dataWithFailedRefresh: InsightsSnapshot = {
+        ...readySnapshot,
+        refresh: { state: 'failed', jobId: 'job-1', lastError: 'DB connection lost' },
+      };
+
+      mockUseInsights.mockReturnValue(makeHookReturn({
+        data: dataWithFailedRefresh,
+        refreshing: false,
+        jobState: 'failed',
+        error: null,
+      }));
+
+      render(<StorageInsightsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByText(/Refresh job failed/i)).toBeInTheDocument();
+      expect(screen.getByText(/DB connection lost/i)).toBeInTheDocument();
+    });
+
+    it('shows a Retry button in the failed-job Alert', () => {
+      const dataWithFailedRefresh: InsightsSnapshot = {
+        ...readySnapshot,
+        refresh: { state: 'failed', jobId: 'job-1', lastError: 'Timeout exceeded' },
+      };
+
+      mockUseInsights.mockReturnValue(makeHookReturn({
+        data: dataWithFailedRefresh,
+        refreshing: false,
+        jobState: 'failed',
+        error: null,
+      }));
+
+      render(<StorageInsightsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByRole('button', { name: /Retry/i })).toBeInTheDocument();
+    });
+
+    it('calls refresh() when the Retry button is clicked', () => {
+      const mockRefresh = vi.fn();
+      const dataWithFailedRefresh: InsightsSnapshot = {
+        ...readySnapshot,
+        refresh: { state: 'failed', jobId: 'job-1', lastError: 'Timeout exceeded' },
+      };
+
+      mockUseInsights.mockReturnValue(makeHookReturn({
+        data: dataWithFailedRefresh,
+        refreshing: false,
+        jobState: 'failed',
+        error: null,
+        refresh: mockRefresh,
+      }));
+
+      render(<StorageInsightsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      fireEvent.click(screen.getByRole('button', { name: /Retry/i }));
+
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not show the failed-job Alert when refreshing is true', () => {
+      // Alert is suppressed while a new retry is in flight
+      const dataWithFailedRefresh: InsightsSnapshot = {
+        ...readySnapshot,
+        refresh: { state: 'failed', jobId: 'job-1', lastError: 'Timeout exceeded' },
+      };
+
+      mockUseInsights.mockReturnValue(makeHookReturn({
+        data: dataWithFailedRefresh,
+        refreshing: true,
+        jobState: 'running',
+        error: null,
+      }));
+
+      render(<StorageInsightsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.queryByText(/Refresh job failed/i)).toBeNull();
+    });
+  });
+
+  // =========================================================================
+  // Empty + in-flight (first compute)
+  // =========================================================================
+
+  describe('empty + in-flight (first computation in progress)', () => {
+    it('shows the computing progress card when empty and refreshing=pending', () => {
+      mockUseInsights.mockReturnValue(makeHookReturn({
+        data: emptySnapshot,
+        refreshing: true,
+        jobState: 'pending',
+        error: null,
+      }));
+
+      render(<StorageInsightsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByText(/Job queued/i)).toBeInTheDocument();
+    });
+
+    it('shows "Computing metrics" text when empty and refreshing=running', () => {
+      mockUseInsights.mockReturnValue(makeHookReturn({
+        data: emptySnapshot,
+        refreshing: true,
+        jobState: 'running',
+        error: null,
+      }));
+
+      render(<StorageInsightsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      // Multiple elements may match "Computing metrics" (chip + empty card) — check at least one
+      const matches = screen.getAllByText(/Computing metrics/i);
+      expect(matches.length).toBeGreaterThan(0);
+    });
+
+    it('does not show the static "No insights computed yet" when in-flight', () => {
+      mockUseInsights.mockReturnValue(makeHookReturn({
+        data: null,
+        refreshing: true,
+        jobState: 'running',
+        error: null,
+      }));
+
+      render(<StorageInsightsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      // The static empty-state card is hidden when a computation is in flight
+      expect(screen.queryByText(/No insights computed yet/i)).toBeNull();
     });
   });
 });
