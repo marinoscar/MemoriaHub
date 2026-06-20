@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
+| **Version** | 1.1 |
 | **Last Updated** | June 2026 |
 | **Status** | Implemented |
 
@@ -18,19 +18,25 @@
 6. [API Endpoints](#6-api-endpoints)
 7. [Operations](#7-operations)
 
+**Related spec:** [Semantic Search](semantic-search.md) — pgvector embedding stored at the end of each tagging job.
+
 ---
 
 ## 1. Overview and User-Facing Behavior
 
-AI auto-tagging automatically assigns descriptive tags to uploaded photos using a vision language model. The model evaluates each photo against a **global vocabulary** of tag labels managed by the admin, then adds matching labels as regular circle-scoped tags.
+AI auto-tagging automatically assigns descriptive tags, generates a short caption, and generates a brief description for uploaded photos using a vision language model. A single vision call produces all three outputs as one JSON object `{"tags", "caption", "description"}`. The model evaluates each photo against a **global vocabulary** of tag labels managed by the admin, then adds matching labels as regular circle-scoped tags and writes the caption and description directly onto the `media_items` row.
 
 **Core capabilities:**
 
 - Tag photos automatically on upload when opted in per circle (default off).
+- Generate a `caption` (single sentence) and `description` (1–3 sentences) alongside tags in the same vision call.
+- Inject the names of people already assigned to faces in the photo into the prompt so the description can reference them by name.
+- Overwrite `caption` and `description` on every successful run — they always reflect the latest model output. On a parse failure, existing caption and description are left untouched and tags are treated as empty.
 - Use any configured AI provider (Anthropic, OpenAI) with admin-selected model.
-- Draw only from an admin-defined global vocabulary — the model cannot invent labels.
+- Draw only from an admin-defined global vocabulary — the model cannot invent tag labels.
 - Allow circle collaborators to trigger a per-item re-run from the media drawer.
-- Allow admins to backfill existing photos in a circle, with optional date-range scoping and a force flag to reprocess already-tagged items.
+- Allow admins to backfill existing photos in a circle, with optional date-range scoping and a force flag to reprocess already-tagged items. Backfilling also produces embeddings for any item that runs through the pipeline.
+- Generate a text embedding from caption + description + tags + people names at the end of each successful run and store it in `media_item_embedding` for semantic search (best-effort; embedding failures never fail the tagging job). See [Semantic Search](semantic-search.md) for the full embedding and search architecture.
 - Track per-item status (`not_processed`, `pending`, `processing`, `processed`, `failed`) for monitoring and UI display.
 
 Auto-tagging is deliberately decoupled from the synchronous upload path. Uploads complete immediately; image analysis runs in the background via the generic `enrichment_jobs` queue. See **[docs/specs/enrichment-queue.md](enrichment-queue.md)** for the full queue architecture.
@@ -53,14 +59,15 @@ flowchart TD
     H -->|atomic claim| I[AutoTaggingHandler.process]
     I --> J[AutoTaggingService.processMediaItem]
     J --> K[Read system_settings ai.features.tagging]
-    K --> L[Load enabled TagLabels]
+    K --> L[Load enabled TagLabels + assigned people names]
     L --> M[Download + prepareImageForProcessing]
     M --> N[AiProvider.analyzeImage — vision model call]
-    N --> O[Parse JSON array response]
-    O --> P[Case-insensitive vocabulary validation]
-    P --> Q[Upsert Tag + MediaTag rows per validated label]
-    Q --> R[Upsert MediaTagStatus → processed]
-    J -->|on error| S[Upsert MediaTagStatus → failed; rethrow for worker retry]
+    N --> O[Parse JSON object response: tags, caption, description]
+    O --> P[Case-insensitive vocabulary validation on tags]
+    P --> Q[Upsert Tag + MediaTag rows; write caption + description to media_items]
+    Q --> R[Best-effort embedding: embedAndStore caption+description+tags+people]
+    R --> S[Upsert MediaTagStatus → processed]
+    J -->|on error| T[Upsert MediaTagStatus → failed; rethrow for worker retry]
 ```
 
 ### Priority Ordering
@@ -212,30 +219,41 @@ interface AiProvider {
 ### Prompt Design
 
 **System prompt** (fixed):
-> You are an image analysis assistant. Your job is to identify which labels from a provided list apply to the given image. Respond with ONLY a JSON array of strings — no explanation, no code fences, no extra text. Each string must exactly match one of the labels in the provided list. Return an empty array if none apply.
+> You are an image analysis assistant. Your job is to analyze the given image and return a JSON object with three keys: "tags", "caption", and "description". "tags" must be a JSON array of strings — each string must exactly match one of the labels in the provided allowed list; return an empty array if none apply. "caption" must be a single-sentence caption for the photo. "description" must be a brief 1–3 sentence description of the photo. Respond with ONLY a JSON object with those three keys — no explanation, no code fences, no extra text.
 
 **User prompt** (constructed per job):
 ```
-Analyze this image and return a JSON array of applicable labels from the following allowed list.
-Only choose labels that clearly apply. Return ONLY the JSON array.
+Analyze this image and return a JSON object with three keys: "tags", "caption", and "description".
+
+"tags": an array of applicable labels from the following allowed list. Only choose labels that clearly
+apply. Return an empty array if none apply.
+"caption": a short single-sentence caption for the photo.
+"description": a brief 1-3 sentence description of the photo.
 
 Allowed labels:
 <label1>
 <label2>
 ...
 
-Example response: ["label1", "label2"]
+Example response: {"tags": ["label1", "label2"], "caption": "A family gathering in a sunny backyard.",
+"description": "Two adults and a child are seated around a picnic table."}
 ```
+
+If named people are already assigned to faces detected in the photo, the prompt appends:
+
+> The following named people appear in this photo: Alice, Bob. Mention them by name in the description where appropriate.
 
 Only `enabled` tag labels are included in the allowed list, sorted alphabetically by name.
 
 ### Response Parsing and Validation
 
-The raw response string is cleaned of any Markdown code fences, then the first JSON array (`[...]`) is extracted with a regex. The parsed array is filtered to strings only.
+The raw response string is cleaned of any Markdown code fences, then the first JSON object (`{...}`) is extracted with a regex and parsed.
 
-Validation is **case-insensitive**: each returned label is matched against the allowed set after lowercasing both sides. Unknown labels are silently dropped. Matching labels are then normalized back to their canonical casing as stored in `tag_labels.name`.
+**Tags:** the `tags` array is filtered to strings, then validated case-insensitively against the allowed label set. Unknown labels are silently dropped. Matching labels are normalized back to their canonical casing as stored in `tag_labels.name`. Duplicates are deduplicated before upsert.
 
-Duplicate labels in the model response are deduplicated before upsert.
+**Caption and description:** extracted as strings, trimmed, and capped (caption: 2 048 chars; description: 8 192 chars). Empty or missing strings are stored as `null`.
+
+**Parse failure semantics:** if the response cannot be parsed as a valid JSON object with the expected shape (`parseOk = false`), the existing `caption` and `description` on the `media_items` row are left untouched and tags are treated as empty for this run. The tagging status is still set to `processed` in this case (the job does not fail or retry). Successful parses always overwrite both fields.
 
 ### Image Preprocessing and Provider Limits
 
@@ -536,6 +554,14 @@ The `auto_tagging` job type appears automatically in `/admin/jobs` queue stats u
 | Image preprocessing failed + MIME recognized (JPEG/PNG/GIF/WebP) | Original bytes sent with detected MIME; processing continues |
 | Image buffer exceeds `MAX_IMAGE_BYTES` (4.5 MB) after preprocessing | Status → `failed`; job succeeds (no retry) |
 
+### People-Change Re-Enqueue
+
+When a person's assigned faces change (assign, unassign, merge, or soft-delete via the People API), the `PeopleService` re-enqueues an `auto_tagging` job at priority 0 (highest) for every `media_item` whose faces are affected, **gated on the circle's `autoTaggingEnabled`**. This ensures that caption, description, and the stored embedding reflect the updated people names without requiring a manual backfill.
+
+Errors during re-enqueue are logged and swallowed — they do not fail the people-management operation.
+
 ### Adding New AI Providers
 
 Any provider that implements `AiProvider` (including `analyzeImage`) is automatically available for selection in the tagging feature config. Register the provider in `AiProviderRegistry` following the same pattern as `anthropic` and `openai`.
+
+For **embedding support**, the provider must additionally implement `embedText(creds, model, text): Promise<number[]>`. Providers that do not implement it (e.g., Anthropic) throw and are silently skipped by the embedding step. Currently only `openai` supports `embedText` (models `text-embedding-3-small` and `text-embedding-3-large`).
