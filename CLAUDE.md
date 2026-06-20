@@ -327,6 +327,11 @@ Face recognition is per-circle opt-in (default off); see Circle Face Settings en
 - `GET /api/admin/backup/runs/:runId` - Get single run detail
 - `GET /api/admin/backup/objects` - List objects in the backup destination
 
+### Admin: Insights (Admin role + system_settings:read / system_settings:write)
+Metrics are precomputed into a snapshot table on a configurable schedule (default every 4 hours); see `storage.insights.refreshIntervalHours` under System Settings. No new permissions were added — the feature reuses the existing system settings permission pair.
+- `GET /api/admin/insights` (system_settings:read) - Return the latest precomputed storage metrics snapshot; `{ status: 'ready'|'empty', metrics|null, computedAt|null, durationMs|null }` — byte fields in `metrics` are STRINGS (BigInt-safe), counts are numbers
+- `POST /api/admin/insights/refresh` (system_settings:write) - Force an immediate recompute and return the fresh snapshot; body-less; always returns `status: 'ready'` on success
+
 ### Admin: Job Queue (Admin role + jobs:read / jobs:write)
 An admin dashboard at `/admin/jobs` provides monitoring and control over the generic `enrichment_jobs` queue (used by face detection and all future enrichment handlers).
 - `GET /api/admin/jobs/stats` (jobs:read) - Queue stats: total, byStatus, byType breakdown, stuckRunning count
@@ -484,6 +489,7 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `media_face_status` - Per-media-item detection status tracking (one row per item); records which provider/model processed the item and when; statuses: `not_processed`, `pending`, `processing`, `processed`, `failed`, `no_faces`
 - `tag_labels` - Global AI tag vocabulary managed by admins; unique `name`; `enabled` flag controls whether a label is included in vision model prompts; labels are not circle-scoped; supports CSV export/import
 - `media_tag_status` - Per-media-item auto-tagging status (one row per item); statuses: `not_processed`, `pending`, `processing`, `processed`, `failed`; records `provider_key`, `model_version`, `tag_count`, `processed_at`, `last_error`
+- `insights_snapshots` - Precomputed global storage metrics snapshot; at most one row survives after each successful recompute (older rows are pruned); statuses: `InsightsSnapshotStatus` enum (`computing` | `ready` | `failed`); `metrics` JSONB holds `{ totalBytes, photoBytes, videoBytes (STRINGS), totalItems, photoCount, videoCount, totalFaces, taggedItems (NUMBERS) }` when `ready`; `computed_at`, `duration_ms`, and `error` track timing and failures
 
 **Note:** `media_items`, `albums`, and `tags` use `added_by_id` (not `owner_id`) to track the uploading user. Dedup uniqueness for `media_items` is `(circle_id, content_hash)`. Tag names are unique per `(circle_id, name)`. The `media_tags` join table has a `source` column (`manual` | `ai`, default `manual`) that tracks whether a tag was applied by the AI auto-tagging service or by a user manually; AI re-runs are authoritative over `source='ai'` rows only and never modify `source='manual'` rows.
 
@@ -585,6 +591,12 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 
 Note: The enrichment worker shared by both face detection and auto-tagging is controlled by `ENRICHMENT_WORKER_ENABLED` (default: `true`), `ENRICHMENT_JOB_POLL_MS` (default: `5000`), and `ENRICHMENT_WORKER_CONCURRENCY` (default: `1`). The legacy `FACE_WORKER_ENABLED` and `FACE_JOB_POLL_MS` aliases are still respected for backward compatibility.
 
+**Storage Insights:**
+
+The refresh cadence for the precomputed storage metrics snapshot is controlled via a system setting (not an environment variable):
+
+- `storage.insights.refreshIntervalHours` — integer, 1–168, default 4; editable in the System Settings admin page. Controls how many hours must elapse between automatic cron-driven recomputes. The cron fires every hour and skips recompute when the configured interval has not yet elapsed. Manual refreshes via `POST /api/admin/insights/refresh` always run immediately regardless of this setting.
+
 ## Common Patterns
 
 ### Adding a New API Endpoint
@@ -610,6 +622,7 @@ Detailed specs live under `docs/specs/`:
 - [Face Recognition](docs/specs/face-recognition.md) — face detection, recognition, clustering, people management
 - [AI Auto-Tagging](docs/specs/auto-tagging.md) — vocabulary-driven vision model tagging, per-circle opt-in, backfill
 - [Agentic Search](docs/specs/agentic-search.md) — stateless agentic search, SSE streaming, tool-call protocol
+- [Storage Insights](docs/specs/storage-insights.md) — precomputed global storage metrics, snapshot lifecycle, interval-gated cron, admin dashboard
 
 ## Specialized Subagents (MANDATORY)
 
