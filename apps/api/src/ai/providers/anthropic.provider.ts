@@ -240,4 +240,8 @@ export class AnthropicProvider implements AiProvider {
       .map(block => block.text)
       .join('');
   }
+
+  embedText(_creds: AiProviderCredentials, _model: string, _input: string): Promise<number[]> {
+    throw new Error('Anthropic does not support text embeddings');
+  }
 }

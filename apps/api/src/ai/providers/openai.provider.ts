@@ -34,6 +34,8 @@ const OPENAI_REASONING_EFFORT = process.env['OPENAI_REASONING_EFFORT'] ?? 'low';
 // Shown when no API key is configured yet so the UI still has a selection.
 const OPENAI_CURATED_MODELS = ['gpt-5.4', 'gpt-5.5'] as const;
 
+const OPENAI_EMBEDDING_MODELS = ['text-embedding-3-small', 'text-embedding-3-large'] as const;
+
 /**
  * Returns true for OpenAI chat/LLM model ids that have a GPT major.minor
  * version of 5.4 or greater AND are not a non-text modality (embeddings,
@@ -213,6 +215,10 @@ export class OpenAiProvider implements AiProvider {
     }
   }
 
+  listEmbeddingModels(): string[] {
+    return [...OPENAI_EMBEDDING_MODELS];
+  }
+
   async testModel(
     creds: AiProviderCredentials,
     model: string,
@@ -289,5 +295,29 @@ export class OpenAiProvider implements AiProvider {
     });
 
     return response.choices[0]?.message?.content ?? '';
+  }
+
+  async embedText(
+    creds: AiProviderCredentials,
+    model: string,
+    input: string,
+  ): Promise<number[]> {
+    try {
+      const client = new OpenAI({
+        apiKey: creds.apiKey,
+        ...(creds.baseUrl && { baseURL: creds.baseUrl }),
+      });
+      const response = await client.embeddings.create({ model, input });
+      return response.data[0].embedding;
+    } catch (err: unknown) {
+      const e = err as { status?: number; code?: string; message?: string };
+      if (e?.status === 401) {
+        throw new Error('Invalid API key');
+      }
+      if (e?.status === 404 || e?.code === 'model_not_found') {
+        throw new Error(`Model not found: ${model}`);
+      }
+      throw new Error(e?.message ?? 'Unknown error calling OpenAI embeddings');
+    }
   }
 }
