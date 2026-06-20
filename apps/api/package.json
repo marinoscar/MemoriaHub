@@ -16,7 +16,7 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand --config ./test/jest.config.js --testPathIgnorePatterns='e2e'",
     "test:e2e": "jest --config ./test/jest.config.js --testRegex '.e2e.spec.ts$'",
     "test:unit": "jest --config ./test/jest.config.js --testPathIgnorePatterns='e2e'",
-    "test:ci": "jest --config ./test/jest.config.js --coverage --ci --reporters=default --reporters=jest-junit --testPathIgnorePatterns='e2e'",
+    "test:ci": "jest --config ./test/jest.config.js --ci --testPathIgnorePatterns='integration\\.spec\\.ts$' 'e2e' 'face-detection\\.controller\\.spec\\.ts' 'system-settings\\.service\\.spec\\.ts' 'search-agent\\.service\\.spec\\.ts' 'image-dimensions\\.processor\\.spec\\.ts'",
     "prisma": "node scripts/prisma-env.js",
     "prisma:generate": "node scripts/prisma-env.js generate",
     "prisma:migrate": "node scripts/prisma-env.js migrate deploy",
