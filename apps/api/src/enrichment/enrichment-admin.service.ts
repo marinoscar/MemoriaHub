@@ -7,7 +7,7 @@
 // =============================================================================
 
 import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
-import { JobStatus } from '@prisma/client';
+import { Prisma, JobStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export const STUCK_RUNNING_MINUTES = 10;
@@ -49,6 +49,7 @@ export interface JobListItem {
   lastError: string | null;
   providerKey: string | null;
   modelVersion: string | null;
+  payload: Prisma.JsonValue | null;
   createdAt: Date;
   startedAt: Date | null;
   finishedAt: Date | null;
@@ -180,6 +181,7 @@ export class EnrichmentAdminService {
           lastError: true,
           providerKey: true,
           modelVersion: true,
+          payload: true,
           createdAt: true,
           startedAt: true,
           finishedAt: true,
@@ -237,6 +239,7 @@ export class EnrichmentAdminService {
         lastError: true,
         providerKey: true,
         modelVersion: true,
+        payload: true,
         createdAt: true,
         startedAt: true,
         finishedAt: true,
