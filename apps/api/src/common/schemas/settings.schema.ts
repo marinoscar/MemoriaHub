@@ -50,6 +50,10 @@ export const systemSettingsSchema = z.object({
         provider: z.string().nullable(),
         model: z.string().nullable(),
       }),
+      embedding: z.object({
+        provider: z.string().nullable(),
+        model: z.string().nullable(),
+      }),
     }),
   }),
   face: z.object({
@@ -82,6 +86,10 @@ export const systemSettingsPatchSchema = z.object({
         model: z.string().nullable().optional(),
       }).optional(),
       tagging: z.object({
+        provider: z.string().nullable().optional(),
+        model: z.string().nullable().optional(),
+      }).optional(),
+      embedding: z.object({
         provider: z.string().nullable().optional(),
         model: z.string().nullable().optional(),
       }).optional(),

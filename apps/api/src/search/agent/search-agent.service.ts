@@ -34,7 +34,13 @@ You can filter photos by the people who appear in them using the \`people\` para
 - Use \`peopleMatch: "all"\` when the query asks for a photo containing ALL the listed people together (e.g. "Oscar and Pamela", "the whole family", "both of them", "with all of").
 - Use \`peopleMatch: "any"\` when the query asks for photos containing ANY of the listed people (e.g. "Oscar or Pamela", "either one", "any of these people").
 - When in doubt with multiple names, default to \`"all"\`.
-- If a person name you searched for is not found in the circle, the filter is silently skipped — mention to the user that no matching person was found.`;
+- If a person name you searched for is not found in the circle, the filter is silently skipped — mention to the user that no matching person was found.
+
+## Semantic search vs structured filters
+- Use \`semanticQuery\` when the user describes a visual scene, mood, activity, or photo content — e.g. "sunset over the ocean", "birthday cake with candles", "kids laughing in the garden". This performs vector similarity search over AI-generated photo descriptions.
+- Use structured filters (dates, places, people, tags, type, favorite, etc.) when the user specifies concrete metadata — e.g. "photos from last Christmas", "pictures taken in Costa Rica", "videos of Oscar".
+- You can combine both in a single call: e.g. \`semanticQuery: "snowy mountain trail"\` plus \`capturedAt: { from: "2023-01-01", to: "2023-03-31" }\` to find snowy mountain trail photos taken in Q1 2023.
+- When semanticQuery is used and the embedding feature is not configured, the search will silently fall back to filter-only mode.`;
 
 @Injectable()
 export class SearchAgentService {
@@ -155,7 +161,13 @@ export class SearchAgentService {
 
           await this.resolvePeopleFilter(toolInput, circleId);
 
-          yield { event: 'tool_call', data: { name: 'search_media', args: toolInput } };
+          // Extract semanticQuery before passing filters — it is a top-level param,
+          // not a registry filter key (buildWhereFromFields would reject it).
+          const semanticQuery =
+            typeof toolInput['semanticQuery'] === 'string' ? toolInput['semanticQuery'] : undefined;
+          delete toolInput['semanticQuery'];
+
+          yield { event: 'tool_call', data: { name: 'search_media', args: { ...toolInput, ...(semanticQuery ? { semanticQuery } : {}) } } };
 
           // Execute search — circleId ALWAYS from params, NEVER from model input
           const searchResult = await this.searchService.runSearch(
@@ -163,6 +175,8 @@ export class SearchAgentService {
             circleId,
             permissions,
             toolInput,
+            undefined,
+            semanticQuery,
           );
 
           yield { event: 'results', data: searchResult };

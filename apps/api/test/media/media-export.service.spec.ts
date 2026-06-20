@@ -82,7 +82,6 @@ function makeMediaRow(overrides: Record<string, any> = {}) {
     geoPlaceName: 'Arenal Volcano',
     geoSource: 'geonames-offline',
     geocodedAt: new Date('2024-06-15T10:35:00.000Z'),
-    title: 'Test Title',
     caption: null,
     description: null,
     favorite: false,

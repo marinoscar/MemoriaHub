@@ -180,7 +180,7 @@ function MediaTile({ item, onSelect, onToggleFavorite, isSelected, anySelected, 
           <Box
             component="img"
             src={thumbUrl}
-            alt={item.title ?? item.originalFilename}
+            alt={item.originalFilename}
             onError={() => setImgError(true)}
             sx={{
               width: '100%',

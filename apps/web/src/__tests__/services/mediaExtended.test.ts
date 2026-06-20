@@ -72,7 +72,6 @@ const mockMediaItem: MediaItem = {
   cameraMake: null,
   cameraModel: null,
   originalFilename: 'photo.jpg',
-  title: null,
   caption: null,
   description: null,
   favorite: false,
@@ -280,8 +279,8 @@ describe('patchMedia', () => {
       }),
     );
 
-    const result = await patchMedia('item-1', { title: 'Updated title', favorite: true });
-    expect(result.title).toBe('Updated title');
+    const result = await patchMedia('item-1', { caption: 'Updated caption', favorite: true });
+    expect(result.caption).toBe('Updated caption');
     expect(result.favorite).toBe(true);
   });
 });

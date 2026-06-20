@@ -18,6 +18,7 @@ export interface AiSettingsResponse {
   features: {
     search: { provider: string | null; model: string | null } | null;
     tagging: { provider: string | null; model: string | null } | null;
+    embedding: { provider: string | null; model: string | null } | null;
   };
   conversations: {
     archiveAfterDays: number;
@@ -27,6 +28,15 @@ export interface AiSettingsResponse {
 
 export interface AiTestResult {
   ok: boolean;
+  error?: string;
+}
+
+export interface AiEmbeddingTestResult {
+  ok: boolean;
+  provider?: string;
+  model?: string;
+  dimensions?: number;
+  warning?: string;
   error?: string;
 }
 
@@ -72,4 +82,24 @@ export async function putAiTaggingFeature(body: {
   model: string;
 }): Promise<void> {
   await api.put<void>('/ai/features/tagging', body);
+}
+
+export async function putAiEmbeddingFeature(body: {
+  provider: string | null;
+  model: string | null;
+}): Promise<void> {
+  await api.put<void>('/ai/features/embedding', body);
+}
+
+export async function getAiEmbeddingModels(provider: string): Promise<string[]> {
+  return api.get<string[]>(
+    `/ai/models?provider=${encodeURIComponent(provider)}&capability=embedding`,
+  );
+}
+
+export async function testAiEmbedding(body: {
+  provider?: string;
+  model?: string;
+}): Promise<AiEmbeddingTestResult> {
+  return api.post<AiEmbeddingTestResult>('/ai/test/embedding', body);
 }

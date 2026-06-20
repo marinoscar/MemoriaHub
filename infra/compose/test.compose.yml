@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   db-test:
-    image: postgres:16-alpine
+    # pgvector/pgvector:pg16 instead of postgres:16-alpine so the vector extension
+    # is available for integration tests that exercise semantic search migrations.
+    image: pgvector/pgvector:pg16
     container_name: enterprise-app-db-test
     environment:
       POSTGRES_USER: postgres

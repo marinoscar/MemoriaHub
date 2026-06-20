@@ -369,13 +369,15 @@ Albums are circle-scoped named collections; deleting an album removes join rows 
 - `POST /api/media/albums/:id/items/by-filter` body `{circleId, ...mediaFilterFields}` - Add ALL media matching the given filters to the album in one operation; reuses `GET /api/media` filter semantics (minus pagination/sort); inserts with `skipDuplicates`; returns `{added: number}` (media:write + collaborator)
 
 ### AI Settings (Admin only — ai_settings:read / ai_settings:write)
-- `GET /api/ai/settings` - Get configured providers and search feature config (ai_settings:read)
+- `GET /api/ai/settings` - Get configured providers and search/tagging/embedding feature config (ai_settings:read)
 - `PUT /api/ai/credentials/:provider` - Upsert provider credentials, encrypted at rest (ai_settings:write)
 - `DELETE /api/ai/credentials/:provider` - Remove provider credentials (ai_settings:write)
 - `POST /api/ai/test` - Test provider connectivity (ai_settings:read)
-- `GET /api/ai/models?provider=` - List available models for a provider (ai_settings:read)
+- `POST /api/ai/test/embedding` - Test embedding-provider connectivity; optional body `{ provider?, model? }` defaults to configured `ai.features.embedding`; returns `{ ok, provider, model, dimensions, warning? }` — `warning` is set when dimensions != 1536; `{ ok:false, error }` on failure (ai_settings:read)
+- `GET /api/ai/models?provider=&capability=` - List available models for a provider; optional `capability` param: `chat` (default) or `embedding` — when `embedding`, returns embedding model IDs (OpenAI only: `text-embedding-3-small`, `text-embedding-3-large`; other providers return empty) (ai_settings:read)
 - `PUT /api/ai/features/search` - Set active provider and model for AI search (ai_settings:write)
 - `PUT /api/ai/features/tagging` - Set active provider and model for AI auto-tagging (ai_settings:write)
+- `PUT /api/ai/features/embedding` - Set active provider and model for text embeddings used in semantic search; currently OpenAI-only (`text-embedding-3-small` = 1536-d); required for `semanticQuery` to work (ai_settings:write)
 
 ### AI Auto-Tagging (ai_settings:read / ai_settings:write + media:read / media:write)
 Auto-tagging is per-circle opt-in (default off); see Tag Vocabulary endpoints below and the [auto-tagging spec](docs/specs/auto-tagging.md). The global vocabulary is admin-managed; the vision model assigns labels only from enabled entries.
@@ -422,12 +424,12 @@ Three providers: `human` (keyless WASM, in-process, 1024-d), `compreface` (keyle
 - `GET /api/media?personId=` - Filter media list to items containing faces assigned to a specific person (media:read + viewer)
 
 ### Deterministic Search (search:use)
-- `POST /api/search` - Execute deterministic media search with explicit filters (media:read + search:use)
-- `GET /api/search/fields` - List all searchable field descriptors from the registry (search:use)
+- `POST /api/search` - Execute deterministic media search with explicit filters; optionally add `semanticQuery: string` (1–512 chars) to rank results by vector similarity instead of sort order (media:read + search:use)
+- `GET /api/search/fields` - List all searchable field descriptors from the registry plus the `semanticQuery` descriptor (search:use)
 
 ### Agentic Search (search:use)
 Agentic search is **stateless** — no conversation rows are stored server-side. The client holds the full message history in memory and sends it with every request.
-- `POST /api/search/agent` - Send a message history and stream the AI response via SSE (text/event-stream). Body: `{ circleId: string; messages: Array<{ role: 'user'|'assistant'; content: string }> }` (last message must be `role: 'user'`). Verifies circle viewer membership. Stream events: `token`, `tool_call`, `results`, `done`, `error`. (search:use)
+- `POST /api/search/agent` - Send a message history and stream the AI response via SSE (text/event-stream). Body: `{ circleId: string; messages: Array<{ role: 'user'|'assistant'; content: string }> }` (last message must be `role: 'user'`). Verifies circle viewer membership. Stream events: `token`, `tool_call`, `results`, `done`, `error`. The agent's `search_media` tool also accepts a top-level `semanticQuery` parameter for visual/scene-based queries. (search:use)
 
 ### Health
 - `GET /api/health/live` - Liveness check
@@ -504,8 +506,9 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `albums` - Circle-scoped named media collections; `added_by_id` tracks the creating user; unique per `(circle_id, name)` is not enforced — names are for display only
 - `album_items` - Join table linking `albums` to `media_items`; `@@unique([albumId, mediaItemId])` prevents duplicates; `added_at` records when the item was placed in the album; cascades on album delete, cascades on media item delete
 - `insights_snapshots` - Precomputed global storage metrics snapshot; at most one row survives after each successful recompute (older rows are pruned); statuses: `InsightsSnapshotStatus` enum (`computing` | `ready` | `failed`) — in the queue-based flow the handler writes `ready` directly, so `computing` is not used at runtime; `metrics` JSONB holds `{ totalBytes, photoBytes, videoBytes (STRINGS), totalItems, photoCount, videoCount, totalFaces, taggedItems (NUMBERS) }` when `ready`; `computed_at` and `duration_ms` track timing; in-flight and failure state is tracked on the `enrichment_jobs` row, not here
+- `media_item_embedding` - One row per media item; stores a 1536-d pgvector embedding of the item's caption + description + tags + people names; written via raw SQL (Prisma cannot handle the `vector(1536)` column type); circle_id is denormalized for circle-scoped KNN filtering; requires the `vector` pgvector Postgres extension and a `pgvector/pgvector:pg16` database image; HNSW cosine index on `embedding`; upserted by the auto-tagging handler as a best-effort final step — embedding failures never fail the tagging job
 
-**Note:** `media_items`, `albums`, and `tags` use `added_by_id` (not `owner_id`) to track the uploading user. Dedup uniqueness for `media_items` is `(circle_id, content_hash)`. Tag names are unique per `(circle_id, name)`. The `media_tags` join table has a `source` column (`manual` | `ai`, default `manual`) that tracks whether a tag was applied by the AI auto-tagging service or by a user manually; AI re-runs are authoritative over `source='ai'` rows only and never modify `source='manual'` rows.
+**Note:** `media_items` has `caption` (nullable, max 2 048 chars) and `description` (nullable, max 8 192 chars) columns written by the auto-tagging handler on each successful vision call. There is no `title` column. `media_items`, `albums`, and `tags` use `added_by_id` (not `owner_id`) to track the uploading user. Dedup uniqueness for `media_items` is `(circle_id, content_hash)`. Tag names are unique per `(circle_id, name)`. The `media_tags` join table has a `source` column (`manual` | `ai`, default `manual`) that tracks whether a tag was applied by the AI auto-tagging service or by a user manually; AI re-runs are authoritative over `source='ai'` rows only and never modify `source='manual'` rows.
 
 **AI provider key encryption:** `SECRETS_ENCRYPTION_KEY` (base64-encoded 32-byte AES key) must be set at startup. Generate with `openssl rand -base64 32`. The API fails to start if the variable is missing or incorrectly sized.
 
@@ -599,9 +602,11 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 - `FACE_CLUSTER_MIN_SIZE` - Minimum cluster size to create a provisional Person; singletons remain unknown (default: `2`)
 - `FACE_VECTOR_BACKEND` - Vector storage and matching backend: `app` (default; `Float[]` column + in-process cosine) or `pgvector` (requires the pgvector extension)
 
-**Auto-Tagging:**
+**Auto-Tagging and Semantic Search:**
 - `AUTO_TAG_ENABLED` - Global kill-switch for auto-enqueue on upload; set to `false` to disable for all circles (per-circle opt-in still applies when `true`; default: `true`)
 - `TAG_MAX_IMAGE_DIM` - Maximum image long-edge in pixels before downscaling prior to the vision model call; 1568 matches Anthropic's auto-downscale threshold (default: `1568`)
+
+Note: Semantic search (pgvector embeddings) requires a pgvector-capable Postgres image (`pgvector/pgvector:pg16`). The embedding feature is configured in the Admin UI via `PUT /api/ai/features/embedding` — only OpenAI supports `embedText` (`text-embedding-3-small` recommended). If the embedding feature is not configured, `semanticQuery` silently falls back to filter-only search.
 
 Note: The enrichment worker shared by face detection, storage insights computation, and auto-tagging is controlled by `ENRICHMENT_WORKER_ENABLED` (default: `true`), `ENRICHMENT_JOB_POLL_MS` (default: `5000`), and `ENRICHMENT_WORKER_CONCURRENCY` (default: `1`). The legacy `FACE_WORKER_ENABLED` and `FACE_JOB_POLL_MS` aliases are still respected for backward compatibility.
 
@@ -634,7 +639,8 @@ The refresh cadence for the precomputed storage metrics snapshot is controlled v
 Detailed specs live under `docs/specs/`:
 - [Enrichment Queue](docs/specs/enrichment-queue.md) — worker lifecycle, retry, priority, adding new handlers
 - [Face Recognition](docs/specs/face-recognition.md) — face detection, recognition, clustering, people management
-- [AI Auto-Tagging](docs/specs/auto-tagging.md) — vocabulary-driven vision model tagging, per-circle opt-in, backfill
+- [AI Auto-Tagging](docs/specs/auto-tagging.md) — vocabulary-driven vision model tagging, caption/description generation, per-circle opt-in, backfill, embedding step
+- [Semantic Search](docs/specs/semantic-search.md) — pgvector embedding storage, KNN-then-filter algorithm, `semanticQuery` param, graceful degradation, backfill and re-embed on people change
 - [Agentic Search](docs/specs/agentic-search.md) — stateless agentic search, SSE streaming, tool-call protocol
 - [Storage Insights](docs/specs/storage-insights.md) — precomputed global storage metrics, snapshot lifecycle, interval-gated cron, admin dashboard
 

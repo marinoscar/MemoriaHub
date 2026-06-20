@@ -146,7 +146,6 @@ export function MediaDetailDrawer({
   const [editing, setEditing] = useState(false);
   const [editCapturedAt, setEditCapturedAt] = useState('');
   const [editClassification, setEditClassification] = useState<MediaClassification>('unreviewed');
-  const [editTitle, setEditTitle] = useState('');
   const [editCaption, setEditCaption] = useState('');
   const [editDescription, setEditDescription] = useState('');
 
@@ -213,7 +212,6 @@ export function MediaDetailDrawer({
     if (!item) return;
     setEditCapturedAt(item.capturedAt ? item.capturedAt.slice(0, 16) : '');
     setEditClassification(item.classification);
-    setEditTitle(item.title ?? '');
     setEditCaption(item.caption ?? '');
     setEditDescription(item.description ?? '');
     setSaveError(null);
@@ -233,7 +231,6 @@ export function MediaDetailDrawer({
       const dto: PatchMediaDto = {
         capturedAt: editCapturedAt ? new Date(editCapturedAt).toISOString() : null,
         classification: editClassification,
-        title: editTitle || null,
         caption: editCaption || null,
         description: editDescription || null,
       };
@@ -254,7 +251,6 @@ export function MediaDetailDrawer({
     fullItem,
     editCapturedAt,
     editClassification,
-    editTitle,
     editCaption,
     editDescription,
     onItemUpdated,
@@ -372,7 +368,7 @@ export function MediaDetailDrawer({
           <CloseIcon />
         </IconButton>
         <Typography variant="h6" sx={{ ml: 1, flex: 1 }} noWrap>
-          {item.title ?? item.originalFilename}
+          {item.originalFilename}
         </Typography>
 
         {/* Favorite toggle */}
@@ -414,7 +410,7 @@ export function MediaDetailDrawer({
             <VideoPlayer
               src={displayItem.downloadUrl}
               poster={displayItem.thumbnailUrl}
-              title={displayItem.title ?? displayItem.originalFilename}
+              title={displayItem.originalFilename}
             />
           </Box>
         ) : (
@@ -450,7 +446,7 @@ export function MediaDetailDrawer({
             <Box
               component="img"
               src={previewUrl}
-              alt={item.title ?? item.originalFilename}
+              alt={item.originalFilename}
               onError={() => setImgError(true)}
               sx={{
                 maxWidth: '100%',
@@ -512,13 +508,6 @@ export function MediaDetailDrawer({
         {editing ? (
           <Stack spacing={2}>
             <TextField
-              label="Title"
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-              size="small"
-              fullWidth
-            />
-            <TextField
               label="Caption"
               value={editCaption}
               onChange={(e) => setEditCaption(e.target.value)}
@@ -564,11 +553,6 @@ export function MediaDetailDrawer({
         ) : (
           <>
             {/* Read-only view of editable fields */}
-            {item.title && (
-              <Typography variant="subtitle2" gutterBottom>
-                {item.title}
-              </Typography>
-            )}
             {item.caption && (
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 {item.caption}

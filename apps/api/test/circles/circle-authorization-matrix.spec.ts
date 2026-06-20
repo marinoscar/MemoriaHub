@@ -233,7 +233,7 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
       );
 
       await expect(
-        service.updateMedia(item.id, { title: 'new title' }, USER_A, ownPerms),
+        service.updateMedia(item.id, { caption: 'new caption' }, USER_A, ownPerms),
       ).rejects.toThrow(ForbiddenException);
     });
 
@@ -282,12 +282,12 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
 
     it('updateMedia succeeds for collaborator', async () => {
       const item = makeMediaItem({ circleId: CIRCLE_A });
-      const updated = { ...item, title: 'New Title' };
+      const updated = { ...item, caption: 'New Caption' };
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
       mockPrisma.mediaItem.update.mockResolvedValue(updated as any);
 
-      const result = await service.updateMedia(item.id, { title: 'New Title' }, USER_A, ownPerms);
-      expect(result.title).toBe('New Title');
+      const result = await service.updateMedia(item.id, { caption: 'New Caption' }, USER_A, ownPerms);
+      expect(result.caption).toBe('New Caption');
     });
 
     it('deleteMedia succeeds for collaborator', async () => {

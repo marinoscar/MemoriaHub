@@ -64,4 +64,5 @@ export interface AiProvider {
    * structured output is expected.
    */
   analyzeImage(creds: AiProviderCredentials, req: AnalyzeImageRequest): Promise<string>;
+  embedText?(creds: AiProviderCredentials, model: string, input: string): Promise<number[]>;
 }

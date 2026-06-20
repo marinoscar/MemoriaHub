@@ -151,7 +151,6 @@ function makeMediaItem(overrides: Partial<MediaItem> = {}): MediaItem {
     cameraMake: 'Apple',
     cameraModel: 'iPhone 15 Pro',
     originalFilename: 'DSC_0001.jpg',
-    title: 'Arenal Sunset',
     caption: 'Beautiful sunset at Arenal',
     description: null,
     favorite: false,
@@ -214,13 +213,8 @@ describe('MediaDetailDrawer', () => {
   // -------------------------------------------------------------------------
 
   describe('read-only metadata display', () => {
-    it('should render the item title in the drawer header', () => {
+    it('should render the original filename in the drawer header', () => {
       render(<MediaDetailDrawer {...defaultProps()} />);
-      expect(screen.getAllByText('Arenal Sunset').length).toBeGreaterThan(0);
-    });
-
-    it('should render the original filename when title is null', () => {
-      render(<MediaDetailDrawer {...defaultProps({ title: null })} />);
       expect(screen.getAllByText('DSC_0001.jpg').length).toBeGreaterThan(0);
     });
 
@@ -551,16 +545,6 @@ describe('MediaDetailDrawer', () => {
       });
     });
 
-    it('should pre-populate the Title field with the item title', async () => {
-      const user = userEvent.setup();
-      render(<MediaDetailDrawer {...defaultProps()} />);
-      await user.click(screen.getByRole('button', { name: 'Edit' }));
-      await waitFor(() => {
-        const titleInput = screen.getByLabelText(/title/i);
-        expect(titleInput).toHaveValue('Arenal Sunset');
-      });
-    });
-
     it('should pre-populate the Caption field with the item caption', async () => {
       const user = userEvent.setup();
       render(<MediaDetailDrawer {...defaultProps()} />);
@@ -571,28 +555,9 @@ describe('MediaDetailDrawer', () => {
       });
     });
 
-    it('should call patchMedia with changed title on Save', async () => {
-      const user = userEvent.setup();
-      render(<MediaDetailDrawer {...defaultProps()} />);
-      await user.click(screen.getByRole('button', { name: 'Edit' }));
-
-      const titleInput = await screen.findByLabelText(/title/i);
-      await user.clear(titleInput);
-      await user.type(titleInput, 'Updated Title');
-
-      await user.click(screen.getByRole('button', { name: /save/i }));
-
-      await waitFor(() => {
-        expect(mockPatchMedia).toHaveBeenCalledWith(
-          ITEM_ID,
-          expect.objectContaining({ title: 'Updated Title' }),
-        );
-      });
-    });
-
     it('should call onItemUpdated with the API response after save', async () => {
       const onItemUpdated = vi.fn();
-      const updatedItem = makeMediaItem({ title: 'New Title' });
+      const updatedItem = makeMediaItem({ caption: 'New Caption' });
       mockPatchMedia.mockResolvedValue(updatedItem);
 
       const user = userEvent.setup();

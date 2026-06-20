@@ -19,7 +19,7 @@ import {
   Alert,
   Snackbar,
 } from '@mui/material';
-import { CheckCircle as CheckCircleIcon, Error as ErrorIcon } from '@mui/icons-material';
+import { CheckCircle as CheckCircleIcon, Error as ErrorIcon, Info as InfoIcon, Warning as WarningIcon } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useAiSettings } from '../../hooks/useAiSettings';
 
@@ -35,6 +35,9 @@ function AiSettingsContent() {
     getModels,
     saveSearchFeature,
     saveTaggingFeature,
+    saveEmbeddingFeature,
+    getEmbeddingModels,
+    testEmbedding,
   } = useAiSettings();
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -62,6 +65,20 @@ function AiSettingsContent() {
   const [taggingModelsLoading, setTaggingModelsLoading] = useState(false);
   const [taggingTestResult, setTaggingTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
   const [taggingTestLoading, setTaggingTestLoading] = useState(false);
+
+  // Embedding feature state
+  const [embeddingEnabled, setEmbeddingEnabled] = useState(false);
+  const [embeddingProvider] = useState('openai'); // OpenAI is the only supported embedding provider
+  const [embeddingModel, setEmbeddingModel] = useState('text-embedding-3-small');
+  const [embeddingModels, setEmbeddingModels] = useState<string[]>([]);
+  const [embeddingModelsLoading, setEmbeddingModelsLoading] = useState(false);
+  const [embeddingTestResult, setEmbeddingTestResult] = useState<{
+    ok: boolean;
+    dimensions?: number;
+    warning?: string;
+    error?: string;
+  } | null>(null);
+  const [embeddingTestLoading, setEmbeddingTestLoading] = useState(false);
 
   useEffect(() => {
     void fetchSettings();
@@ -99,6 +116,14 @@ function AiSettingsContent() {
       setTaggingProvider(settings.features.tagging.provider ?? '');
       setTaggingModel(settings.features.tagging.model ?? '');
     }
+
+    // Pre-populate embedding feature selections
+    if (settings.features.embedding && settings.features.embedding.provider) {
+      setEmbeddingEnabled(true);
+      setEmbeddingModel(settings.features.embedding.model ?? 'text-embedding-3-small');
+    } else {
+      setEmbeddingEnabled(false);
+    }
   }, [settings]);
 
   // Load models when search provider changes
@@ -122,6 +147,15 @@ function AiSettingsContent() {
       .catch(() => setTaggingModels([]))
       .finally(() => setTaggingModelsLoading(false));
   }, [taggingProvider, getModels]);
+
+  // Load embedding models on mount (OpenAI only, capability=embedding)
+  useEffect(() => {
+    setEmbeddingModelsLoading(true);
+    getEmbeddingModels(embeddingProvider)
+      .then((models) => setEmbeddingModels(models))
+      .catch(() => setEmbeddingModels([]))
+      .finally(() => setEmbeddingModelsLoading(false));
+  }, [embeddingProvider, getEmbeddingModels]);
 
   const handleSaveCredentials = async (provider: string) => {
     try {
@@ -197,6 +231,33 @@ function AiSettingsContent() {
       setTaggingTestResult({ ok: false, error: err instanceof Error ? err.message : 'Test failed' });
     } finally {
       setTaggingTestLoading(false);
+    }
+  };
+
+  const handleSaveEmbeddingFeature = async () => {
+    try {
+      if (embeddingEnabled) {
+        await saveEmbeddingFeature(embeddingProvider, embeddingModel);
+        setSuccessMessage('AI captions embedding settings saved');
+      } else {
+        await saveEmbeddingFeature(null, null);
+        setSuccessMessage('AI captions embedding disabled');
+      }
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to save embedding feature');
+    }
+  };
+
+  const handleTestEmbedding = async () => {
+    setEmbeddingTestLoading(true);
+    setEmbeddingTestResult(null);
+    try {
+      const result = await testEmbedding(embeddingProvider, embeddingModel);
+      setEmbeddingTestResult(result);
+    } catch (err) {
+      setEmbeddingTestResult({ ok: false, error: err instanceof Error ? err.message : 'Test failed' });
+    } finally {
+      setEmbeddingTestLoading(false);
     }
   };
 
@@ -491,6 +552,121 @@ function AiSettingsContent() {
             >
               Test
             </Button>
+          </Stack>
+        </Paper>
+
+        {/* AI Captions & Description Search (embedding) section */}
+        <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>
+            AI Captions &amp; Description Search
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            When enabled, AI-generated captions and descriptions are stored as text embeddings,
+            making your photos semantically searchable by meaning and scene content.
+          </Typography>
+
+          <Alert severity="info" icon={<InfoIcon fontSize="inherit" />} sx={{ mb: 2 }}>
+            Requires OpenAI — text embeddings are only available through the OpenAI API.
+            Make sure your OpenAI credentials are configured above before enabling this feature.
+          </Alert>
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={embeddingEnabled}
+                onChange={(e) => {
+                  setEmbeddingEnabled(e.target.checked);
+                  setEmbeddingTestResult(null);
+                }}
+              />
+            }
+            label="Enable AI captions"
+            sx={{ mb: 2, display: 'block' }}
+          />
+
+          {embeddingEnabled && (
+            <>
+              {/* Provider is fixed to OpenAI */}
+              <TextField
+                label="Provider"
+                value="OpenAI"
+                size="small"
+                fullWidth
+                disabled
+                sx={{ mb: 2 }}
+              />
+
+              <FormControl size="small" fullWidth sx={{ mb: 2 }} disabled={embeddingModelsLoading}>
+                <InputLabel>Embedding Model</InputLabel>
+                <Select
+                  label="Embedding Model"
+                  value={embeddingModel}
+                  onChange={(e) => {
+                    setEmbeddingModel(e.target.value);
+                    setEmbeddingTestResult(null);
+                  }}
+                >
+                  {embeddingModelsLoading ? (
+                    <MenuItem disabled>Loading models…</MenuItem>
+                  ) : embeddingModels.length === 0 ? (
+                    <>
+                      <MenuItem value="text-embedding-3-small">text-embedding-3-small (recommended)</MenuItem>
+                      <MenuItem value="text-embedding-3-large">text-embedding-3-large</MenuItem>
+                    </>
+                  ) : (
+                    embeddingModels.map((m) => (
+                      <MenuItem key={m} value={m}>
+                        {m === 'text-embedding-3-small' ? `${m} (recommended)` : m}
+                      </MenuItem>
+                    ))
+                  )}
+                </Select>
+              </FormControl>
+
+              {/* Embedding test result */}
+              {embeddingTestResult !== null && (
+                <Box sx={{ mb: 2 }}>
+                  {embeddingTestResult.ok && embeddingTestResult.warning ? (
+                    <Alert severity="warning" icon={<WarningIcon fontSize="inherit" />}>
+                      {embeddingTestResult.warning}
+                    </Alert>
+                  ) : embeddingTestResult.ok ? (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <CheckCircleIcon color="success" />
+                      <Typography variant="body2" color="success.main">
+                        Connection successful — {embeddingTestResult.dimensions}-dimensional embeddings
+                      </Typography>
+                    </Box>
+                  ) : (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <ErrorIcon color="error" />
+                      <Typography variant="body2" color="error.main">
+                        {embeddingTestResult.error ?? 'Test failed'}
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+              )}
+            </>
+          )}
+
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant="contained"
+              onClick={() => void handleSaveEmbeddingFeature()}
+            >
+              Save
+            </Button>
+            {embeddingEnabled && (
+              <Button
+                variant="outlined"
+                disabled={embeddingTestLoading}
+                startIcon={embeddingTestLoading ? <CircularProgress size={16} /> : undefined}
+                onClick={() => void handleTestEmbedding()}
+              >
+                Test
+              </Button>
+            )}
           </Stack>
         </Paper>
 

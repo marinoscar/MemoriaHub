@@ -96,6 +96,18 @@ export function buildSearchMediaToolDef(): AiToolDef {
     }
   }
 
+  // semanticQuery is a special-case parameter outside the registry loop (like people/peopleMatch).
+  // It is NOT in SEARCHABLE_FIELDS because it is not a WHERE-clause filter;
+  // it drives the KNN path in SearchService.runSearch separately.
+  properties['semanticQuery'] = {
+    type: 'string',
+    description:
+      'Natural-language description of photo content to find semantically similar photos ' +
+      '(e.g. "kids playing on the beach at sunset"). ' +
+      'Can be combined with structured filters. ' +
+      'Use this for content/scene descriptions; use structured filters for dates, places, people, and tags.',
+  };
+
   return {
     name: 'search_media',
     description:

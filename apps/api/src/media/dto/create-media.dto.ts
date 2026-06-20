@@ -10,7 +10,6 @@ export const createMediaSchema = z.object({
   capturedAt: isoDateTimeInput.optional(),
   capturedAtOffset: z.number().int().optional(),
   classification: z.enum(['memory', 'low_value', 'unreviewed']).optional(),
-  title: z.string().max(512).optional(),
   caption: z.string().max(2048).optional(),
   description: z.string().max(8192).optional(),
   favorite: z.boolean().optional(),

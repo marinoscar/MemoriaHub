@@ -61,7 +61,6 @@ function makeMediaItem(ownerId: string, overrides: Record<string, any> = {}) {
     cameraMake: null,
     cameraModel: null,
     contentHash: null,
-    title: null,
     caption: null,
     description: null,
     favorite: false,
@@ -161,7 +160,7 @@ describe('Media Integration', () => {
     it('PATCH /api/media/:id returns 401 without token', async () => {
       await request(context.app.getHttpServer())
         .patch(`/api/media/${BASE_MEDIA_ID}`)
-        .send({ title: 'New Title' })
+        .send({ caption: 'New Caption' })
         .expect(401);
     });
 
@@ -485,12 +484,11 @@ describe('Media Integration', () => {
   // =========================================================================
 
   describe('PATCH /api/media/:id', () => {
-    it('should update title, caption, description, and favorite', async () => {
+    it('should update caption, description, and favorite', async () => {
       const contributor = await createMockContributorUser(context);
       const item = makeMediaItem(contributor.id);
       const updated = {
         ...item,
-        title: 'Sunset',
         caption: 'Golden hour',
         description: 'Beautiful sunset at the beach',
         favorite: true,
@@ -503,7 +501,6 @@ describe('Media Integration', () => {
         .patch(`/api/media/${BASE_MEDIA_ID}`)
         .set(authHeader(contributor.accessToken))
         .send({
-          title: 'Sunset',
           caption: 'Golden hour',
           description: 'Beautiful sunset at the beach',
           favorite: true,
@@ -511,7 +508,7 @@ describe('Media Integration', () => {
         .expect(200);
 
       expect(response.body.data).toMatchObject({
-        title: 'Sunset',
+        caption: 'Golden hour',
         favorite: true,
       });
     });
@@ -525,7 +522,7 @@ describe('Media Integration', () => {
       await request(context.app.getHttpServer())
         .patch(`/api/media/${BASE_MEDIA_ID}`)
         .set(authHeader(contributor.accessToken))
-        .send({ title: 'hack' })
+        .send({ caption: 'hack' })
         .expect(403);
     });
 
@@ -536,7 +533,7 @@ describe('Media Integration', () => {
       await request(context.app.getHttpServer())
         .patch(`/api/media/${BASE_MEDIA_ID}`)
         .set(authHeader(contributor.accessToken))
-        .send({ title: 'New Title' })
+        .send({ caption: 'New Caption' })
         .expect(404);
     });
   });
@@ -782,7 +779,7 @@ describe('Media Integration', () => {
       await request(context.app.getHttpServer())
         .patch(`/api/media/${BASE_MEDIA_ID}`)
         .set(authHeader(contributor.accessToken))
-        .send({ title: 'hack' })
+        .send({ caption: 'hack' })
         .expect(403);
     });
 
@@ -801,7 +798,7 @@ describe('Media Integration', () => {
     it('Admin with media:write_any can patch any user\'s MediaItem (200)', async () => {
       const admin = await createMockAdminUser(context);
       const otherUserItem = makeMediaItem('some-other-user');
-      const updated = { ...otherUserItem, title: 'Admin Updated' };
+      const updated = { ...otherUserItem, caption: 'Admin Updated' };
 
       context.prismaMock.mediaItem.findUnique.mockResolvedValue(otherUserItem);
       context.prismaMock.mediaItem.update.mockResolvedValue(updated);
@@ -809,7 +806,7 @@ describe('Media Integration', () => {
       await request(context.app.getHttpServer())
         .patch(`/api/media/${BASE_MEDIA_ID}`)
         .set(authHeader(admin.accessToken))
-        .send({ title: 'Admin Updated' })
+        .send({ caption: 'Admin Updated' })
         .expect(200);
     });
 

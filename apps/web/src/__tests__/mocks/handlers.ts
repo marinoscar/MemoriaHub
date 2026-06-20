@@ -313,7 +313,6 @@ export const handlers = [
       cameraMake: null,
       cameraModel: null,
       originalFilename: 'test.jpg',
-      title: null,
       caption: null,
       description: null,
       favorite: false,

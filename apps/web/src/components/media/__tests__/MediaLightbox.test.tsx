@@ -86,7 +86,6 @@ function makeMediaItem(id: string, overrides: Partial<MediaItem> = {}): MediaIte
     cameraMake: null,
     cameraModel: null,
     originalFilename: `file-${id}.jpg`,
-    title: `Photo ${id}`,
     caption: null,
     description: null,
     favorite: false,
@@ -182,16 +181,10 @@ describe('open / closed state', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows the item title in the header bar', () => {
-    const item = makeMediaItem('x1', { title: 'Sunset at the Beach' });
+  it('shows the originalFilename in the header bar', () => {
+    const item = makeMediaItem('x1', { originalFilename: 'Sunset at the Beach.jpg' });
     renderLightbox({ items: [item], index: 0 });
-    expect(screen.getByText('Sunset at the Beach')).toBeInTheDocument();
-  });
-
-  it('falls back to originalFilename when title is null', () => {
-    const item = makeMediaItem('x2', { title: null, originalFilename: 'IMG_9876.jpg' });
-    renderLightbox({ items: [item], index: 0 });
-    expect(screen.getByText('IMG_9876.jpg')).toBeInTheDocument();
+    expect(screen.getByText('Sunset at the Beach.jpg')).toBeInTheDocument();
   });
 });
 

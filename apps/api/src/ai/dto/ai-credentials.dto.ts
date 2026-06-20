@@ -25,3 +25,15 @@ export const setTaggingFeatureSchema = z.object({
   model: z.string().min(1).nullable(),
 });
 export class SetTaggingFeatureDto extends createZodDto(setTaggingFeatureSchema) {}
+
+export const setEmbeddingFeatureSchema = z.object({
+  provider: z.string().min(1).nullable(),
+  model: z.string().min(1).nullable(),
+});
+export class SetEmbeddingFeatureDto extends createZodDto(setEmbeddingFeatureSchema) {}
+
+export const testEmbeddingSchema = z.object({
+  provider: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+});
+export class TestEmbeddingDto extends createZodDto(testEmbeddingSchema) {}
