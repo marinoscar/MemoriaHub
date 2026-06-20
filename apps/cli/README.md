@@ -348,6 +348,19 @@ memoriahub settings set attempts_cap 10
 |-----|---------|-------------|
 | `concurrency` | `3` | Max concurrent upload workers per sync run |
 | `attempts_cap` | `5` | Max upload attempts per file before it is blocked |
+| `max_retries` | `5` | Retry attempts per request on `429`/`503`/`5xx`/network errors |
+| `retry_base_ms` | `500` | Base backoff (ms) for request retries (exponential + jitter) |
+| `retry_max_ms` | `30000` | Per-attempt backoff cap (ms) |
+| `rate_limit_cooldown_ms` | `2000` | Base global cooldown (ms) when a worker is throttled |
+| `rate_limit_max_cooldown_ms` | `60000` | Global cooldown ceiling (ms) |
+
+**Rate-limit handling.** Uploads go directly to the storage provider (AWS S3
+returns `503 SlowDown`, Cloudflare R2 returns `429`) and to the API. The CLI
+retries throttled/transient requests with exponential backoff + jitter,
+honoring the server's `Retry-After` header. A single shared cooldown gate makes
+all concurrent workers back off together when any one of them is throttled, so a
+bulk `sync` won't hammer a rate-limited endpoint. The sync output shows a
+`Rate limited — slowing down…` notice while a cooldown window is active.
 
 ### `memoriahub import <folder>` (legacy alias)
 

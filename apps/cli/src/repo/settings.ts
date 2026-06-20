@@ -6,6 +6,8 @@
  */
 
 import type BetterSqlite3 from 'better-sqlite3';
+import type { RetryConfig } from '../http/retry.js';
+import type { CooldownGateConfig } from '../http/cooldown-gate.js';
 
 interface SettingsRow {
   key: string;
@@ -62,5 +64,51 @@ export class SettingsRepo {
   /** Whether the legacy manifest import has been completed. */
   schemaImportedManifests(): boolean {
     return this.get<boolean>('schema_imported_manifests', false);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Rate-limit / retry settings (migration 4)
+  // ---------------------------------------------------------------------------
+
+  /** Max retry attempts after the first try, per request (default: 5). */
+  maxRetries(): number {
+    return this.get<number>('max_retries', 5);
+  }
+
+  /** Base backoff in ms for retries (default: 500). */
+  retryBaseMs(): number {
+    return this.get<number>('retry_base_ms', 500);
+  }
+
+  /** Per-attempt backoff cap in ms (default: 30000). */
+  retryMaxMs(): number {
+    return this.get<number>('retry_max_ms', 30000);
+  }
+
+  /** Base global cooldown window in ms on a throttle trip (default: 2000). */
+  rateLimitCooldownMs(): number {
+    return this.get<number>('rate_limit_cooldown_ms', 2000);
+  }
+
+  /** Cooldown window ceiling in ms (default: 60000). */
+  rateLimitMaxCooldownMs(): number {
+    return this.get<number>('rate_limit_max_cooldown_ms', 60000);
+  }
+
+  /** Aggregate retry policy for the ApiClient. */
+  retryConfig(): RetryConfig {
+    return {
+      maxRetries: this.maxRetries(),
+      baseMs: this.retryBaseMs(),
+      maxMs: this.retryMaxMs(),
+    };
+  }
+
+  /** Aggregate cooldown-gate config for the ApiClient. */
+  cooldownConfig(): CooldownGateConfig {
+    return {
+      cooldownMs: this.rateLimitCooldownMs(),
+      maxCooldownMs: this.rateLimitMaxCooldownMs(),
+    };
   }
 }

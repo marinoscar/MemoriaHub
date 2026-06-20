@@ -19,6 +19,7 @@ import {
   CREATE_SYNC_RUNS_IDX_STARTED,
   CREATE_SETTINGS,
   SEED_SETTINGS,
+  SEED_SETTINGS_V4,
   ALTER_FILES_ADD_MTIME_MS,
   ALTER_FOLDERS_ADD_CIRCLE_ID,
 } from './schema.js';
@@ -68,6 +69,20 @@ const MIGRATIONS: Migration[] = [
       // Add circle_id column to folders table for per-folder circle binding.
       // Nullable: existing rows get NULL (no circle bound yet).
       db.exec(ALTER_FOLDERS_ADD_CIRCLE_ID);
+    },
+  },
+  {
+    version: 4,
+    up(db: BetterSqlite3.Database): void {
+      // Seed rate-limit / retry settings. Existing installs already passed the
+      // version-1 seed loop, so backfill here. INSERT OR IGNORE keeps any value
+      // a user may have set and is safe to re-run.
+      const insert = db.prepare(
+        'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)',
+      );
+      for (const { key, value } of SEED_SETTINGS_V4) {
+        insert.run(key, value);
+      }
     },
   },
 ];

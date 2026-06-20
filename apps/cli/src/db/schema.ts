@@ -84,3 +84,15 @@ export const SEED_SETTINGS: Array<{ key: string; value: string }> = [
   { key: 'attempts_cap',               value: JSON.stringify(5) },
   { key: 'schema_imported_manifests',  value: JSON.stringify(false) },
 ];
+
+/**
+ * Migration 4: rate-limit / retry settings. Seeded for existing installs that
+ * already passed migration 1 (INSERT OR IGNORE, so re-running is safe).
+ */
+export const SEED_SETTINGS_V4: Array<{ key: string; value: string }> = [
+  { key: 'max_retries',                value: JSON.stringify(5) },
+  { key: 'retry_base_ms',              value: JSON.stringify(500) },
+  { key: 'retry_max_ms',               value: JSON.stringify(30000) },
+  { key: 'rate_limit_cooldown_ms',     value: JSON.stringify(2000) },
+  { key: 'rate_limit_max_cooldown_ms', value: JSON.stringify(60000) },
+];

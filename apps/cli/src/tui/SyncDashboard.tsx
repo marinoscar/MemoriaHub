@@ -23,6 +23,7 @@ import {
   type RunStats,
 } from '../sync/events.js';
 import { ApiClient } from '../api.js';
+import { CooldownGate } from '../http/cooldown-gate.js';
 import { FolderRepo } from '../repo/folders.js';
 import { FileRepo } from '../repo/files.js';
 import { RunRepo } from '../repo/runs.js';
@@ -69,6 +70,8 @@ interface DashboardState {
   doneStats: RunStats | null;
   durationMs: number;
   errorMsg: string | null;
+  /** Set while the cooldown gate is throttling requests; null otherwise. */
+  throttleDelayMs: number | null;
 }
 
 const EMPTY_COUNTS: RunProgressCounts = {
@@ -101,12 +104,15 @@ export function SyncDashboard({
     doneStats: null,
     durationMs: 0,
     errorMsg: null,
+    throttleDelayMs: null,
   });
 
   // Throttle accumulator for run:progress
   const pendingCounts = useRef<RunProgressCounts | null>(null);
   const pendingTotal  = useRef<number>(0);
   const throttleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Auto-clears the rate-limit indicator once a cooldown window elapses.
+  const rateLimitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const flushProgress = useCallback(() => {
     if (pendingCounts.current === null) return;
@@ -127,12 +133,24 @@ export function SyncDashboard({
     if (_engineForTesting) {
       engine = _engineForTesting;
     } else {
-      const api  = new ApiClient({ serverUrl: config.serverUrl, pat: config.pat });
       const folders = new FolderRepo(db);
       const files   = new FileRepo(db);
       const runs    = new RunRepo(db);
       const settings = new SettingsRepo(db);
+      // Shared cooldown gate so all upload workers back off together; onTrip
+      // forwards a UI event through the engine created just below.
+      let engineRef: SyncEngine | undefined;
+      const gate = new CooldownGate(settings.cooldownConfig(), {
+        onTrip: (delayMs) => engineRef?.emit(EV.RATE_LIMITED, { delayMs }),
+      });
+      const api  = new ApiClient({
+        serverUrl: config.serverUrl,
+        pat: config.pat,
+        retry: settings.retryConfig(),
+        cooldownGate: gate,
+      });
       engine = new SyncEngine({ api, folders, files, runs, settings });
+      engineRef = engine;
     }
 
     // run:start
@@ -250,6 +268,16 @@ export function SyncDashboard({
       }));
     });
 
+    // rate:limited — show a throttle indicator, auto-clear after the window
+    engine.on(EV.RATE_LIMITED, (payload) => {
+      setState((prev) => ({ ...prev, throttleDelayMs: payload.delayMs }));
+      if (rateLimitTimer.current) clearTimeout(rateLimitTimer.current);
+      rateLimitTimer.current = setTimeout(() => {
+        rateLimitTimer.current = null;
+        setState((prev) => ({ ...prev, throttleDelayMs: null }));
+      }, payload.delayMs);
+    });
+
     // error
     engine.on(EV.ERROR, (payload) => {
       setState((prev) => ({ ...prev, errorMsg: payload.message, isDone: true }));
@@ -271,11 +299,12 @@ export function SyncDashboard({
 
     return () => {
       if (throttleTimer.current) clearTimeout(throttleTimer.current);
+      if (rateLimitTimer.current) clearTimeout(rateLimitTimer.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { counts, total, activeFiles, logEvents, failures, isDone, doneStats, durationMs, runId, errorMsg } = state;
+  const { counts, total, activeFiles, logEvents, failures, isDone, doneStats, durationMs, runId, errorMsg, throttleDelayMs } = state;
 
   // Error state
   if (errorMsg) {
@@ -338,6 +367,15 @@ export function SyncDashboard({
           <Legend counts={counts} total={total || 1} />
         </Box>
       </Box>
+
+      {/* Rate-limit indicator */}
+      {throttleDelayMs !== null && (
+        <Box paddingLeft={1}>
+          <Text color="yellow">
+            ⏳ Rate limited — slowing down for {(throttleDelayMs / 1000).toFixed(1)}s…
+          </Text>
+        </Box>
+      )}
 
       {/* Active uploads */}
       {activeFiles.length > 0 && (

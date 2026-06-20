@@ -28,6 +28,7 @@ import {
   type FileSkippedPayload,
   type RunDonePayload,
   type RunProgressPayload,
+  type RateLimitedPayload,
 } from '../sync/events.js';
 
 // ---------------------------------------------------------------------------
@@ -154,6 +155,13 @@ export function renderSyncHeadless(engine: SyncEngine): void {
         );
       }
     }
+  });
+
+  engine.on(EV.RATE_LIMITED, (payload: RateLimitedPayload) => {
+    // The cooldown gate blocks workers for the window, so trips are naturally
+    // spaced — one dim notice per trip is not noisy.
+    const secs = (payload.delayMs / 1000).toFixed(1);
+    ui.dim(`  ⏳ Rate limited — slowing down for ${secs}s…`);
   });
 
   engine.on(EV.FILE_DONE, (payload: FileDonePayload) => {

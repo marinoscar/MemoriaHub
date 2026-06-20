@@ -17,7 +17,6 @@ interface PartUrlsResponse {
   presignedUrls: Array<{ partNumber: number; url: string }>;
 }
 
-const MAX_RETRIES = 3;
 const BATCH_PART_URLS = 50; // how many part numbers to request at once
 
 /**
@@ -43,30 +42,23 @@ function readFileSlice(
 }
 
 /**
- * Upload one part with retries. Returns the ETag.
+ * Upload one part. Transient/throttle retries (429/503/5xx/network) are owned
+ * by ApiClient.putRaw via the shared retry + cooldown machinery; here we only
+ * add part-number context to a terminal failure. Returns the ETag.
  */
-async function uploadPartWithRetry(
+async function uploadPart(
   api: ApiClient,
   url: string,
   buffer: Buffer,
   partNumber: number,
   mimeType: string,
 ): Promise<string> {
-  let lastErr: Error | null = null;
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      return await api.putRaw(url, buffer, mimeType);
-    } catch (err) {
-      lastErr = err instanceof Error ? err : new Error(String(err));
-      if (attempt < MAX_RETRIES) {
-        const delay = attempt * 1000;
-        await new Promise((r) => setTimeout(r, delay));
-      }
-    }
+  try {
+    return await api.putRaw(url, buffer, mimeType);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Part ${partNumber} failed: ${msg}`);
   }
-  throw new Error(
-    `Part ${partNumber} failed after ${MAX_RETRIES} attempts: ${lastErr?.message}`,
-  );
 }
 
 /**
@@ -151,7 +143,7 @@ export async function uploadFile(
     const length = Math.min(partSize, fileSize - start);
     const buffer = await readFileSlice(filePath, start, length);
 
-    const eTag = await uploadPartWithRetry(api, url, buffer, partNumber, mimeType);
+    const eTag = await uploadPart(api, url, buffer, partNumber, mimeType);
     completedParts.push({ partNumber, eTag });
 
     if (onProgress) {
