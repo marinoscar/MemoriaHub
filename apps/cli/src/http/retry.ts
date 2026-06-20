@@ -60,6 +60,15 @@ export function classifyError(err: unknown): RetryableInfo {
   }
   const e = err as Record<string, unknown>;
 
+  const status = typeof e.status === 'number' ? e.status : undefined;
+  const retryAfterMs =
+    typeof e.retryAfterMs === 'number' ? e.retryAfterMs : undefined;
+
+  // Explicit retryable marker (e.g. an S3 `SlowDown` body on a non-429 status).
+  if (e.retryable === true) {
+    return { retryable: true, status, retryAfterMs };
+  }
+
   // Explicit network-error marker (set by ApiClient.NetworkError).
   if (e.isNetworkError === true) {
     return { retryable: true };
@@ -70,10 +79,6 @@ export function classifyError(err: unknown): RetryableInfo {
   if (code && RETRYABLE_NET_CODES.has(code)) {
     return { retryable: true };
   }
-
-  const status = typeof e.status === 'number' ? e.status : undefined;
-  const retryAfterMs =
-    typeof e.retryAfterMs === 'number' ? e.retryAfterMs : undefined;
 
   // A bare fetch network failure surfaces as a TypeError with no status.
   if (status === undefined && err instanceof TypeError) {
