@@ -154,13 +154,11 @@ function StorageInsightsPageContent() {
           label: 'Photos',
           value: percent(m.photoBytes, m.totalBytes),
           color: PHOTO_COLOR,
-          displayValue: formatBytes(m.photoBytes),
         },
         {
           label: 'Videos',
           value: percent(m.videoBytes, m.totalBytes),
           color: VIDEO_COLOR,
-          displayValue: formatBytes(m.videoBytes),
         },
       ]
     : [];
