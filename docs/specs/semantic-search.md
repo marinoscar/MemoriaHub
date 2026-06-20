@@ -80,6 +80,8 @@ Set via `PUT /api/ai/features/embedding` (Admin, `ai_settings:write`). The same 
 
 The `media_item_embedding` table is created with `vector(1536)` so only 1536-d models are usable without a schema change.
 
+**Admin UI — AI Captions & Description Search:** The AI Settings page exposes a dedicated "AI Captions & Description Search" section where an admin can enable the embedding feature, select the OpenAI model, and click "Test" to verify connectivity. The Test button calls `POST /api/ai/test/embedding` and surfaces a dimension-mismatch warning (dimensions != 1536) inline before the admin saves the configuration. Embeddings require OpenAI credentials (`PUT /api/ai/credentials/openai`) — no other provider supports `embedText`. The embedding model list is retrieved via `GET /api/ai/models?provider=openai&capability=embedding`.
+
 ---
 
 ## 4. Data Model
