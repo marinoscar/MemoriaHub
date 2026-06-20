@@ -47,7 +47,6 @@ The authoritative list lives in the host Nginx `map` block (`/etc/nginx/sites-av
 | Knecta | 8319 | knecta.dev.marin.cr |
 | Clipboard | 8320 | clipboard.dev.marin.cr |
 | Semantic Convert | 8321 | semantic.dev.marin.cr |
-| Verbograph | 8322 | verbograph.dev.marin.cr |
 | ShellKeep | 8323 | shellkeep.dev.marin.cr |
 | Store Front (raul1) | 8324 | raul1.dev.marin.cr |
 | Store Front (raul2) | 8325 | raul2.dev.marin.cr |
