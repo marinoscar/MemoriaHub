@@ -2436,9 +2436,9 @@ Permanently delete an enrichment job row. Cannot delete a job that is currently 
 
 ## Admin: Storage Insights
 
-All storage insights endpoints require the global `admin` role. Reading the latest snapshot additionally requires `system_settings:read`; forcing a recompute requires `system_settings:write`. No new permissions were added — the feature reuses the existing system settings permission pair.
+All storage insights endpoints require the global `admin` role. Reading the latest snapshot additionally requires `system_settings:read`; triggering a refresh requires `system_settings:write`. No new permissions were added — the feature reuses the existing system settings permission pair.
 
-Metrics are precomputed into a snapshot table and refreshed on a configurable schedule (default every 4 hours). The `storage.insights.refreshIntervalHours` system setting (integer, 1–168) controls the automatic refresh cadence; the cron fires every hour and recomputes only when the configured interval has elapsed since the last successful compute.
+Metrics are precomputed into a snapshot table and refreshed on a configurable schedule (default every 4 hours). The `storage.insights.refreshIntervalHours` system setting (integer, 1–168) controls the automatic refresh cadence; the cron fires every hour and **enqueues** a `storage_insights` enrichment job only when the configured interval has elapsed and no job is already pending/running. Computation runs asynchronously on the shared enrichment worker (MAX_ATTEMPTS=3; visible and retryable in the `/admin/jobs` dashboard).
 
 ---
 
@@ -2446,11 +2446,11 @@ Metrics are precomputed into a snapshot table and refreshed on a configurable sc
 
 **Requires:** Admin role + `system_settings:read` permission
 
-Return the latest precomputed storage metrics snapshot. If no snapshot has ever been computed (or the last compute failed and was pruned), returns the `empty` DTO.
+Return the latest precomputed storage metrics snapshot plus a `refresh` object describing the current state of the enrichment job. If no snapshot has ever been computed (or the last compute failed and was pruned), returns the `empty` DTO.
 
 **Request body:** none
 
-**Response 200 (snapshot available):**
+**Response 200 (snapshot available, no job in flight):**
 ```json
 {
   "status": "ready",
@@ -2465,7 +2465,27 @@ Return the latest precomputed storage metrics snapshot. If no snapshot has ever 
     "taggedItems": 2100
   },
   "computedAt": "2026-06-20T08:00:00.000Z",
-  "durationMs": 312
+  "durationMs": 312,
+  "refresh": {
+    "state": "idle",
+    "jobId": null,
+    "lastError": null
+  }
+}
+```
+
+**Response 200 (snapshot available, refresh job running):**
+```json
+{
+  "status": "ready",
+  "metrics": { "...": "previous snapshot data" },
+  "computedAt": "2026-06-20T08:00:00.000Z",
+  "durationMs": 312,
+  "refresh": {
+    "state": "running",
+    "jobId": "a1b2c3d4-...",
+    "lastError": null
+  }
 }
 ```
 
@@ -2475,7 +2495,12 @@ Return the latest precomputed storage metrics snapshot. If no snapshot has ever 
   "status": "empty",
   "metrics": null,
   "computedAt": null,
-  "durationMs": null
+  "durationMs": null,
+  "refresh": {
+    "state": "idle",
+    "jobId": null,
+    "lastError": null
+  }
 }
 ```
 
@@ -2487,6 +2512,10 @@ Return the latest precomputed storage metrics snapshot. If no snapshot has ever 
 | `metrics` | object \| null | Null when `status` is `empty`; see metrics fields below |
 | `computedAt` | ISO 8601 \| null | When the snapshot was computed; null when `status` is `empty` |
 | `durationMs` | number \| null | Wall-clock milliseconds the aggregation took; null when `status` is `empty` |
+| `refresh` | object | In-flight enrichment job state; always present |
+| `refresh.state` | enum | `idle` — no job in flight or job succeeded; `pending` — job queued; `running` — job being processed; `failed` — last job failed permanently |
+| `refresh.jobId` | UUID \| null | ID of the active or most-recently-failed job; null when `state` is `idle` |
+| `refresh.lastError` | string \| null | Error message from the most recent failure; null unless `state` is `failed` |
 
 **Metrics fields:**
 
@@ -2505,6 +2534,7 @@ Return the latest precomputed storage metrics snapshot. If no snapshot has ever 
 - Byte fields (`totalBytes`, `photoBytes`, `videoBytes`) are JSON **strings**, not numbers. Parse as `BigInt` for arithmetic; use a formatting utility for display.
 - All item counts exclude soft-deleted media items (`deleted_at IS NULL`). `totalFaces` is the sole exception — the `faces` table has no soft-delete column.
 - Byte totals reflect media storage (INNER JOIN `media_items → storage_objects`) and exclude orphan or in-progress upload objects that are not yet linked to a media item.
+- The `refresh` object reflects the enrichment job row state. When `refresh.state` is `pending` or `running`, the snapshot data shown is from the previous successful compute — the page should poll until state becomes `idle` or `failed`.
 
 ---
 
@@ -2512,33 +2542,36 @@ Return the latest precomputed storage metrics snapshot. If no snapshot has ever 
 
 **Requires:** Admin role + `system_settings:write` permission
 
-Force an immediate recompute of the storage metrics snapshot. Bypasses the interval gate — the aggregation runs synchronously and the fresh result is returned in the response. The previous snapshot is pruned after a successful recompute.
+Enqueue a `storage_insights` enrichment job at priority 0 (highest priority; pre-empts any scheduled job at priority 100) and return immediately. The aggregation runs asynchronously — the caller must poll `GET /admin/insights` and check `refresh.state` until it becomes `idle` (success) or `failed` (permanent failure after 3 attempts).
+
+If a job is already pending or running, the existing job is returned (idempotent enqueue).
 
 **Request body:** none (body-less)
 
 **Response 201:**
 ```json
 {
-  "status": "ready",
-  "metrics": {
-    "totalBytes": "128849018880",
-    "photoBytes": "107374182400",
-    "videoBytes": "21474836480",
-    "totalItems": 4200,
-    "photoCount": 4100,
-    "videoCount": 100,
-    "totalFaces": 9300,
-    "taggedItems": 2100
-  },
-  "computedAt": "2026-06-20T10:15:00.000Z",
-  "durationMs": 298
+  "jobId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "state": "pending"
 }
 ```
 
-Response shape is identical to `GET /admin/insights` with `status: 'ready'`. The `empty` state is never returned from this endpoint — if the aggregation fails, the endpoint throws a 500.
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `jobId` | UUID | ID of the enqueued (or already in-flight) enrichment job |
+| `state` | string | `pending` or `running` — the job state at the time of this response |
+
+**Polling pattern:**
+```
+POST /admin/insights/refresh → { jobId, state: "pending" }
+GET  /admin/insights         → refresh.state === "running"  (still computing)
+GET  /admin/insights         → refresh.state === "idle"     (done; metrics updated)
+```
 
 **Error Cases:**
-- 500 Internal Server Error — Aggregation failed (check API logs for details)
+- 500 Internal Server Error — Failed to enqueue the job (check API logs)
 
 ---
 
