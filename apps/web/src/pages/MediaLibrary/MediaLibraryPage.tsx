@@ -38,10 +38,6 @@ import {
   Snackbar,
   Switch,
   FormControlLabel,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
 } from '@mui/material';
 import {
   Star as StarIcon,
@@ -56,15 +52,13 @@ import {
   CheckBoxOutlineBlank as CheckBoxOutlineBlankIcon,
   Checklist as ChecklistIcon,
   Person as PersonIcon,
-  ArrowBack as ArrowBackIcon,
-  MoreVert as MoreVertIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
-import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useMedia } from '../../hooks/useMedia';
 import { useAlbums } from '../../hooks/useAlbums';
 import { useCircle } from '../../hooks/useCircle';
-import { listTags, exportMedia, getAlbum, updateAlbum as updateAlbumService, deleteAlbum as deleteAlbumService, removeAlbumItem } from '../../services/media';
+import { listTags, exportMedia } from '../../services/media';
 import type { ExportFilters } from '../../services/media';
 import { MediaDetailDrawer } from '../../components/media/MediaDetailDrawer';
 import { MediaLightbox } from '../../components/media/MediaLightbox';
@@ -391,10 +385,6 @@ export default function MediaLibraryPage() {
 
   const colCount = isXl || isLg ? 4 : isMd ? 2 : 1;
 
-  // Album mode — set when route is /albums/:albumId
-  const { albumId } = useParams<{ albumId?: string }>();
-  const navigate = useNavigate();
-
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Person filter — set when navigating from PeoplePage
@@ -473,53 +463,10 @@ export default function MediaLibraryPage() {
   const [exportLoading, setExportLoading] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
-  // Album mode state
-  const [albumName, setAlbumName] = useState<string | null>(null);
-  const [albumDescription, setAlbumDescription] = useState<string | null>(null);
-  const [albumHeaderLoading, setAlbumHeaderLoading] = useState(false);
-  // Album rename dialog
-  const [albumRenameOpen, setAlbumRenameOpen] = useState(false);
-  const [albumRenameLoading, setAlbumRenameLoading] = useState(false);
-  const [albumRenameError, setAlbumRenameError] = useState<string | null>(null);
-  const [albumRenameNameValue, setAlbumRenameNameValue] = useState('');
-  const [albumRenameDescValue, setAlbumRenameDescValue] = useState('');
-  // Album actions menu
-  const [albumMenuAnchor, setAlbumMenuAnchor] = useState<null | HTMLElement>(null);
-  // Album delete confirm
-  const [albumDeleteConfirmOpen, setAlbumDeleteConfirmOpen] = useState(false);
-  const [albumDeleteLoading, setAlbumDeleteLoading] = useState(false);
   // Add to album dialog
   const [addToAlbumOpen, setAddToAlbumOpen] = useState(false);
 
   const geoFacets = useMemo(() => deriveGeoFacets(items), [items]);
-
-  // Load album detail when in album mode
-  useEffect(() => {
-    if (!albumId) {
-      setAlbumName(null);
-      setAlbumDescription(null);
-      return;
-    }
-    setAlbumHeaderLoading(true);
-    getAlbum(albumId)
-      .then((detail) => {
-        setAlbumName(detail.name);
-        setAlbumDescription(detail.description);
-      })
-      .catch(() => {
-        setAlbumName(null);
-        setAlbumDescription(null);
-      })
-      .finally(() => setAlbumHeaderLoading(false));
-  }, [albumId]);
-
-  // Sync filterAlbum with albumId param (album mode)
-  useEffect(() => {
-    if (albumId) {
-      setFilterAlbum(albumId);
-    }
-    // When not in album mode, the user controls filterAlbum via the filter panel
-  }, [albumId]);
 
   const activeFilterCount = useMemo(() => {
     let count = 0;
@@ -795,50 +742,6 @@ export default function MediaLibraryPage() {
     void fetchMedia(buildParams());
   }, [fetchMedia, buildParams]);
 
-  const handleRemoveFromAlbum = useCallback(async () => {
-    if (!albumId || selected.size === 0) return;
-    const ids = Array.from(selected);
-    try {
-      await Promise.all(ids.map((id) => removeAlbumItem(albumId, id)));
-      handleBulkSuccess(`Removed ${ids.length} item${ids.length !== 1 ? 's' : ''} from album`);
-    } catch (err) {
-      setSnackbar({ message: err instanceof Error ? err.message : 'Failed to remove items', severity: 'error' });
-    }
-  }, [albumId, selected, handleBulkSuccess]);
-
-  const handleAlbumRename = async () => {
-    if (!albumId || !albumRenameNameValue.trim()) return;
-    setAlbumRenameLoading(true);
-    setAlbumRenameError(null);
-    try {
-      await updateAlbumService(albumId, {
-        name: albumRenameNameValue.trim(),
-        description: albumRenameDescValue.trim() || null,
-      });
-      setAlbumName(albumRenameNameValue.trim());
-      setAlbumDescription(albumRenameDescValue.trim() || null);
-      setAlbumRenameOpen(false);
-    } catch (err) {
-      setAlbumRenameError(err instanceof Error ? err.message : 'Failed to rename album');
-    } finally {
-      setAlbumRenameLoading(false);
-    }
-  };
-
-  const handleAlbumDelete = async () => {
-    if (!albumId) return;
-    setAlbumDeleteLoading(true);
-    try {
-      await deleteAlbumService(albumId);
-      navigate('/albums');
-    } catch (err) {
-      setSnackbar({ message: err instanceof Error ? err.message : 'Failed to delete album', severity: 'error' });
-      setAlbumDeleteConfirmOpen(false);
-    } finally {
-      setAlbumDeleteLoading(false);
-    }
-  };
-
   const handleExport = useCallback(
     async (format: 'json' | 'csv') => {
       setExportAnchorEl(null);
@@ -901,76 +804,9 @@ export default function MediaLibraryPage() {
           gap: 1,
         }}
       >
-        {albumId ? (
-          <Box>
-            <Button
-              startIcon={<ArrowBackIcon />}
-              onClick={() => navigate('/albums')}
-              size="small"
-              sx={{ mb: 0.5 }}
-            >
-              Albums
-            </Button>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              {albumHeaderLoading ? (
-                <CircularProgress size={20} />
-              ) : (
-                <Typography variant="h5" component="h1">
-                  {albumName ?? 'Album'}
-                </Typography>
-              )}
-              {activeCircleRole !== 'viewer' && (
-                <>
-                  <IconButton
-                    size="small"
-                    onClick={(e) => {
-                      setAlbumRenameNameValue(albumName ?? '');
-                      setAlbumRenameDescValue(albumDescription ?? '');
-                      setAlbumMenuAnchor(e.currentTarget);
-                    }}
-                    aria-label="Album actions"
-                  >
-                    <MoreVertIcon />
-                  </IconButton>
-                  <Menu
-                    anchorEl={albumMenuAnchor}
-                    open={Boolean(albumMenuAnchor)}
-                    onClose={() => setAlbumMenuAnchor(null)}
-                  >
-                    <MenuItem
-                      onClick={() => {
-                        setAlbumMenuAnchor(null);
-                        setAlbumRenameNameValue(albumName ?? '');
-                        setAlbumRenameDescValue(albumDescription ?? '');
-                        setAlbumRenameOpen(true);
-                      }}
-                    >
-                      Rename
-                    </MenuItem>
-                    <MenuItem
-                      onClick={() => {
-                        setAlbumMenuAnchor(null);
-                        setAlbumDeleteConfirmOpen(true);
-                      }}
-                      sx={{ color: 'error.main' }}
-                    >
-                      Delete album
-                    </MenuItem>
-                  </Menu>
-                </>
-              )}
-            </Box>
-            {albumDescription && (
-              <Typography variant="body2" color="text.secondary">
-                {albumDescription}
-              </Typography>
-            )}
-          </Box>
-        ) : (
-          <Typography variant="h5" component="h1">
-            Media Library
-          </Typography>
-        )}
+        <Typography variant="h5" component="h1">
+          Media Library
+        </Typography>
 
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
           {/* Select toggle button — touch-friendly multi-select */}
@@ -994,8 +830,8 @@ export default function MediaLibraryPage() {
             </Button>
           )}
 
-          {/* Add to Album button — only in non-album mode for non-viewers */}
-          {!albumId && activeCircleRole !== 'viewer' && (
+          {/* Add to Album button */}
+          {activeCircleRole !== 'viewer' && (
             <Button
               variant="outlined"
               startIcon={<PhotoLibraryIcon />}
@@ -1100,29 +936,27 @@ export default function MediaLibraryPage() {
               </FormControl>
             </Grid>
 
-            {/* Album filter — hidden when already in album mode */}
-            {!albumId && (
-              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <FormControl size="small" fullWidth>
-                  <InputLabel>Album</InputLabel>
-                  <Select
-                    label="Album"
-                    value={filterAlbum}
-                    onChange={(e) => {
-                      setFilterAlbum(e.target.value);
-                      setPage(1);
-                    }}
-                  >
-                    <MenuItem value="">All albums</MenuItem>
-                    {albums.map((album) => (
-                      <MenuItem key={album.id} value={album.id}>
-                        {album.name}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-            )}
+            {/* Album filter */}
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <FormControl size="small" fullWidth>
+                <InputLabel>Album</InputLabel>
+                <Select
+                  label="Album"
+                  value={filterAlbum}
+                  onChange={(e) => {
+                    setFilterAlbum(e.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <MenuItem value="">All albums</MenuItem>
+                  {albums.map((album) => (
+                    <MenuItem key={album.id} value={album.id}>
+                      {album.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
 
             {/* Sort */}
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
@@ -1590,8 +1424,6 @@ export default function MediaLibraryPage() {
         onOpenLocation={() => setBulkLocationOpen(true)}
         onOpenTags={() => setBulkTagsOpen(true)}
         onOpenAlbum={() => setAddToAlbumOpen(true)}
-        albumMode={Boolean(albumId)}
-        onRemoveFromAlbum={() => void handleRemoveFromAlbum()}
         onSuccess={handleBulkSuccess}
         onError={(msg) => setSnackbar({ message: msg, severity: 'error' })}
       />
@@ -1614,80 +1446,6 @@ export default function MediaLibraryPage() {
         onSuccess={(msg) => { setBulkTagsOpen(false); handleBulkSuccess(msg); }}
       />
 
-      {/* Album rename dialog */}
-      <Dialog open={albumRenameOpen} onClose={() => setAlbumRenameOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Rename Album</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            fullWidth
-            size="small"
-            label="Album name"
-            value={albumRenameNameValue}
-            onChange={(e) => setAlbumRenameNameValue(e.target.value)}
-            sx={{ mt: 1, mb: 2 }}
-            disabled={albumRenameLoading}
-          />
-          <TextField
-            fullWidth
-            size="small"
-            label="Description (optional)"
-            value={albumRenameDescValue}
-            onChange={(e) => setAlbumRenameDescValue(e.target.value)}
-            multiline
-            rows={2}
-            disabled={albumRenameLoading}
-          />
-          {albumRenameError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              {albumRenameError}
-            </Alert>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAlbumRenameOpen(false)} disabled={albumRenameLoading}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            onClick={() => void handleAlbumRename()}
-            disabled={!albumRenameNameValue.trim() || albumRenameLoading}
-            startIcon={albumRenameLoading ? <CircularProgress size={16} /> : undefined}
-          >
-            {albumRenameLoading ? 'Saving...' : 'Save'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Album delete confirm dialog */}
-      <Dialog
-        open={albumDeleteConfirmOpen}
-        onClose={() => setAlbumDeleteConfirmOpen(false)}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>Delete Album?</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2">
-            Delete album <strong>{albumName}</strong>? The photos will not be deleted.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAlbumDeleteConfirmOpen(false)} disabled={albumDeleteLoading}>
-            Cancel
-          </Button>
-          <Button
-            color="error"
-            variant="contained"
-            onClick={() => void handleAlbumDelete()}
-            disabled={albumDeleteLoading}
-            startIcon={albumDeleteLoading ? <CircularProgress size={16} /> : undefined}
-          >
-            {albumDeleteLoading ? 'Deleting...' : 'Delete'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
       {/* Add to Album dialog */}
       {activeCircle && (
         <AddToAlbumDialog
@@ -1699,13 +1457,6 @@ export default function MediaLibraryPage() {
             const p = buildParams();
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
             const { page: _p, pageSize: _ps, sortBy: _sb, sortOrder: _so, ...rest } = p;
-            // In album mode, exclude the current albumId from the filter so items can be
-            // added to a different album without being constrained to the current one
-            if (albumId) {
-              // eslint-disable-next-line @typescript-eslint/no-unused-vars
-              const { albumId: _aid, ...restWithoutAlbum } = rest;
-              return restWithoutAlbum;
-            }
             return rest;
           })()}
           matchingCount={meta?.totalItems ?? 0}
