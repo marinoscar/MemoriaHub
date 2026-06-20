@@ -60,6 +60,7 @@ function makeJobsHook(overrides: Partial<UseJobsResult> = {}): UseJobsResult {
       byStatus: { pending: 4, running: 1, succeeded: 4, failed: 1 },
       byType: [{ type: 'face_detection', pending: 4, running: 1, succeeded: 4, failed: 1, total: 10 }],
       stuckRunning: 0,
+      scheduled: 0,
     },
     jobs: [],
     meta: null,
@@ -97,6 +98,9 @@ function makeJob(overrides: Record<string, unknown> = {}) {
     createdAt: '2024-01-15T10:00:00Z',
     startedAt: null as string | null,
     finishedAt: null as string | null,
+    scheduledFor: null as string | null,
+    rateLimitedAt: null as string | null,
+    rateLimitHits: 0,
     ...overrides,
   };
 }
@@ -158,6 +162,7 @@ describe('JobsPage', () => {
             byStatus: { pending: 0, running: 5, succeeded: 0, failed: 0 },
             byType: [],
             stuckRunning: 3,
+            scheduled: 0,
           },
         }),
       );
@@ -262,7 +267,7 @@ describe('JobsPage', () => {
       mockUseJobs.mockReturnValue(
         makeJobsHook({
           jobs,
-          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0 },
+          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0, scheduled: 0 },
         }),
       );
       const user = userEvent.setup();
@@ -351,7 +356,7 @@ describe('JobsPage', () => {
       mockUseJobs.mockReturnValue(
         makeJobsHook({
           jobs,
-          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0 },
+          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0, scheduled: 0 },
         }),
       );
       const user = userEvent.setup();
@@ -383,6 +388,7 @@ describe('JobsPage', () => {
             byStatus: { pending: 3, running: 0, succeeded: 1, failed: 1 },
             byType: [],
             stuckRunning: 0,
+            scheduled: 0,
           },
         }),
       );
@@ -406,6 +412,7 @@ describe('JobsPage', () => {
             byStatus: { pending: 2, running: 0, succeeded: 0, failed: 3 },
             byType: [],
             stuckRunning: 0,
+            scheduled: 0,
           },
         }),
       );
@@ -431,6 +438,7 @@ describe('JobsPage', () => {
             byStatus: { pending: 0, running: 5, succeeded: 0, failed: 0 },
             byType: [],
             stuckRunning: 5,
+            scheduled: 0,
           },
         }),
       );
@@ -454,6 +462,7 @@ describe('JobsPage', () => {
             byStatus: { pending: 0, running: 5, succeeded: 0, failed: 0 },
             byType: [],
             stuckRunning: 5,
+            scheduled: 0,
           },
         }),
       );
@@ -477,6 +486,7 @@ describe('JobsPage', () => {
             byStatus: { pending: 5, running: 0, succeeded: 0, failed: 0 },
             byType: [],
             stuckRunning: 0,
+            scheduled: 0,
           },
         }),
       );
@@ -497,6 +507,7 @@ describe('JobsPage', () => {
             byStatus: { pending: 5, running: 0, succeeded: 0, failed: 0 },
             byType: [],
             stuckRunning: 0,
+            scheduled: 0,
           },
         }),
       );
@@ -522,7 +533,7 @@ describe('JobsPage', () => {
         makeJobsHook({
           jobs,
           retryJob,
-          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0 },
+          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0, scheduled: 0 },
         }),
       );
       const user = userEvent.setup();
@@ -546,7 +557,7 @@ describe('JobsPage', () => {
         makeJobsHook({
           jobs,
           retryJob,
-          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0 },
+          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0, scheduled: 0 },
         }),
       );
       const user = userEvent.setup();
@@ -800,6 +811,133 @@ describe('JobsPage', () => {
       await waitFor(() => {
         expect(screen.getByText(/jobs load failed/i)).toBeInTheDocument();
       });
+    });
+  });
+
+  // =========================================================================
+  // Scheduled (backing off) stats chip
+  // =========================================================================
+
+  describe('Scheduled (backing off) stat chip', () => {
+    it('renders the "Scheduled (backing off)" chip when scheduled > 0', async () => {
+      mockUseJobs.mockReturnValue(
+        makeJobsHook({
+          stats: {
+            total: 5,
+            byStatus: { pending: 3, running: 0, succeeded: 2, failed: 0 },
+            byType: [],
+            stuckRunning: 0,
+            scheduled: 2,
+          },
+        }),
+      );
+
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await waitFor(() => {
+        expect(screen.getByText(/scheduled \(backing off\): 2/i)).toBeInTheDocument();
+      });
+    });
+
+    it('does not render the "Scheduled (backing off)" chip when scheduled is 0', async () => {
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await waitFor(() => {
+        expect(screen.getByText(/total: 10/i)).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText(/scheduled \(backing off\)/i)).not.toBeInTheDocument();
+    });
+  });
+
+  // =========================================================================
+  // Per-row backoff badge
+  // =========================================================================
+
+  describe('Per-row backoff badge', () => {
+    it('shows "backing off" chip for a pending job with a future scheduledFor', async () => {
+      const futureIso = new Date(Date.now() + 60_000).toISOString();
+      const jobs = [makeJob({ status: 'pending', scheduledFor: futureIso, rateLimitHits: 1 })];
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
+
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await waitFor(() => {
+        expect(screen.getByText(/backing off/i)).toBeInTheDocument();
+      });
+    });
+
+    it('does not show the backoff chip for a pending job with null scheduledFor', async () => {
+      const jobs = [makeJob({ status: 'pending', scheduledFor: null, rateLimitHits: 0 })];
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
+
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await waitFor(() => {
+        expect(screen.getByText('face_detection')).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText(/backing off/i)).not.toBeInTheDocument();
+    });
+
+    it('does not show the backoff chip for a failed job even if scheduledFor is set', async () => {
+      const futureIso = new Date(Date.now() + 60_000).toISOString();
+      const jobs = [makeJob({ status: 'failed', scheduledFor: futureIso, rateLimitHits: 2 })];
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
+
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await waitFor(() => {
+        expect(screen.getByText('face_detection')).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText(/backing off/i)).not.toBeInTheDocument();
+    });
+  });
+
+  // =========================================================================
+  // Scheduled filter toggle
+  // =========================================================================
+
+  describe('Scheduled filter toggle', () => {
+    it('renders the "Backing off" toggle in the filters area', async () => {
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await waitFor(() => {
+        expect(screen.getByText(/backing off/i)).toBeInTheDocument();
+      });
+    });
+
+    it('calls setFilters with scheduled=true when the backing-off toggle is enabled', async () => {
+      const setFilters = vi.fn();
+      mockUseJobs.mockReturnValue(makeJobsHook({ setFilters }));
+      const user = userEvent.setup();
+
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const toggle = await screen.findByRole('checkbox', { name: /backing off/i });
+      await user.click(toggle);
+
+      expect(setFilters).toHaveBeenCalledWith(
+        expect.objectContaining({ scheduled: true }),
+      );
+    });
+
+    it('calls setFilters without scheduled when the backing-off toggle is disabled again', async () => {
+      const setFilters = vi.fn();
+      mockUseJobs.mockReturnValue(makeJobsHook({ setFilters }));
+      const user = userEvent.setup();
+
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      // Enable then disable
+      const toggle = await screen.findByRole('checkbox', { name: /backing off/i });
+      await user.click(toggle); // on
+      await user.click(toggle); // off
+
+      // Second call should not include scheduled (or pass undefined/falsy)
+      const secondCall = setFilters.mock.calls[1]?.[0] ?? {};
+      expect(secondCall.scheduled).toBeFalsy();
     });
   });
 });

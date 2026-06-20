@@ -23,6 +23,8 @@ export interface JobStats {
     total: number;
   }>;
   stuckRunning: number;
+  /** Number of pending jobs currently waiting on backoff (scheduledFor > now). */
+  scheduled: number;
 }
 
 export interface EnrichmentJobDto {
@@ -40,6 +42,12 @@ export interface EnrichmentJobDto {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+  /** Earliest time the worker will retry; non-null & in the future means backing off. */
+  scheduledFor: string | null;
+  /** ISO timestamp of when the job was last rate-limited; null if never. */
+  rateLimitedAt: string | null;
+  /** How many times the job has been rate-limited; 0 if never. */
+  rateLimitHits: number;
   payload?: unknown;
 }
 
@@ -58,6 +66,8 @@ export interface ListJobsParams {
   type?: string;
   page?: number;
   pageSize?: number;
+  /** When true, returns only pending jobs currently in backoff (scheduledFor > now). */
+  scheduled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -70,7 +80,12 @@ export async function getJobStats(): Promise<JobStats> {
 
 export async function listJobs(params: ListJobsParams = {}): Promise<JobsListResponse> {
   const qs = new URLSearchParams();
-  if (params.status) qs.set('status', params.status);
+  if (params.scheduled) {
+    // scheduled=true forces status=pending on the API side; don't send a conflicting status param
+    qs.set('scheduled', 'true');
+  } else if (params.status) {
+    qs.set('status', params.status);
+  }
   if (params.type) qs.set('type', params.type);
   if (params.page != null) qs.set('page', String(params.page));
   if (params.pageSize != null) qs.set('pageSize', String(params.pageSize));

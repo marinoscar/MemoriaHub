@@ -44,6 +44,7 @@ const sampleStats: JobStats = {
     { type: 'face_detection', pending: 3, running: 1, succeeded: 5, failed: 1, total: 10 },
   ],
   stuckRunning: 0,
+  scheduled: 0,
 };
 
 const sampleListResponse: JobsListResponse = {
@@ -63,6 +64,9 @@ const sampleListResponse: JobsListResponse = {
       createdAt: '2024-01-01T10:00:00Z',
       startedAt: null,
       finishedAt: null,
+      scheduledFor: null,
+      rateLimitedAt: null,
+      rateLimitHits: 0,
     },
   ],
   meta: { page: 1, pageSize: 20, totalItems: 1, totalPages: 1 },
@@ -225,6 +229,26 @@ describe('useJobs', () => {
       // The first-mount guard should prevent re-fetch from the filter effect
       const initialCallCount = mockListJobs.mock.calls.length;
       expect(initialCallCount).toBe(1);
+    });
+
+    it('passes scheduled=true to listJobs when the scheduled filter is set', async () => {
+      mockListJobs.mockResolvedValue(emptyListResponse);
+
+      const { result } = renderHook(() => useJobs({ autoRefresh: false }));
+
+      await waitFor(() => {
+        expect(result.current.stats).not.toBeNull();
+      });
+
+      await act(async () => {
+        result.current.setFilters({ scheduled: true, page: 1, pageSize: 20 });
+      });
+
+      await waitFor(() => {
+        expect(mockListJobs).toHaveBeenLastCalledWith(
+          expect.objectContaining({ scheduled: true }),
+        );
+      });
     });
   });
 
