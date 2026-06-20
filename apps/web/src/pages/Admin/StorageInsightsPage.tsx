@@ -32,7 +32,7 @@ import { KpiSkeleton } from '../../components/insights/KpiSkeleton';
 import { CompositionDonut } from '../../components/insights/CompositionDonut';
 import { ProportionBar } from '../../components/insights/ProportionBar';
 import { FreshnessPill } from '../../components/insights/FreshnessPill';
-import { formatBytes, formatCompactNumber, percent, bytesToMB } from '../../utils/formatBytes';
+import { formatBytes, formatCompactNumber, percent, bytesToNumber } from '../../utils/formatBytes';
 
 // Suppress unused import warning — VideoIcon is available for future use
 void VideoIcon;
@@ -40,6 +40,14 @@ void VideoIcon;
 // Accent palette — two-tone for photos/videos, plus individual KPI accents
 const PHOTO_COLOR = '#3b82f6'; // blue
 const VIDEO_COLOR = '#8b5cf6'; // violet
+
+// ---------------------------------------------------------------------------
+// Tiny pluralization helper
+// ---------------------------------------------------------------------------
+
+function pluralize(n: number, word: string): string {
+  return n === 1 ? `1 ${word}` : `${formatCompactNumber(n)} ${word}s`;
+}
 
 // ---------------------------------------------------------------------------
 // Refresh button label derived from jobState
@@ -106,14 +114,14 @@ function StorageInsightsPageContent() {
     ? [
         {
           label: 'Photos',
-          value: bytesToMB(m.photoBytes),
+          value: bytesToNumber(m.photoBytes),
           color: PHOTO_COLOR,
           displayValue: formatBytes(m.photoBytes),
           percentage: percent(m.photoBytes, m.totalBytes),
         },
         {
           label: 'Videos',
-          value: bytesToMB(m.videoBytes),
+          value: bytesToNumber(m.videoBytes),
           color: VIDEO_COLOR,
           displayValue: formatBytes(m.videoBytes),
           percentage: percent(m.videoBytes, m.totalBytes),
@@ -324,7 +332,7 @@ function StorageInsightsPageContent() {
                 <KpiCard
                   label="Total Items"
                   value={formatCompactNumber(m.totalItems)}
-                  subLabel={`${formatCompactNumber(m.photoCount)} photos · ${formatCompactNumber(m.videoCount)} videos`}
+                  subLabel={`${pluralize(m.photoCount, 'photo')} · ${pluralize(m.videoCount, 'video')}`}
                   icon={<PhotoIcon />}
                   accentColor={PHOTO_COLOR}
                 />
@@ -351,27 +359,30 @@ function StorageInsightsPageContent() {
             {/* Tier 2 — Composition */}
             <Card variant="outlined" sx={{ borderRadius: 2 }}>
               <CardContent sx={{ p: 3 }}>
-                <Typography variant="subtitle1" fontWeight={700} mb={3}>
+                <Typography variant="subtitle1" fontWeight={700} mb={0.5}>
                   Photos vs Videos
                 </Typography>
-                <Box
-                  display="flex"
-                  flexDirection={{ xs: 'column', md: 'row' }}
-                  gap={4}
-                  mb={3}
-                >
-                  <CompositionDonut
-                    title="By storage"
-                    segments={storageSegments}
-                    centerLabel={formatBytes(m.totalBytes)}
-                  />
-                  <Divider orientation="vertical" flexItem sx={{ display: { xs: 'none', md: 'block' } }} />
-                  <CompositionDonut
-                    title="By count"
-                    segments={countSegments}
-                    centerLabel={formatCompactNumber(m.totalItems)}
-                  />
-                </Box>
+                <Typography variant="body2" color="text.secondary" mb={3}>
+                  How your library breaks down by media type
+                </Typography>
+                {/* Grid guarantees two-up on md+ and stacked on mobile;
+                    each cell is centered so neither donut floats off to one side */}
+                <Grid container spacing={3} alignItems="flex-start" mb={3}>
+                  <Grid size={{ xs: 12, md: 6 }}>
+                    <CompositionDonut
+                      title="By storage"
+                      segments={storageSegments}
+                      centerLabel={formatBytes(m.totalBytes)}
+                    />
+                  </Grid>
+                  <Grid size={{ xs: 12, md: 6 }}>
+                    <CompositionDonut
+                      title="By count"
+                      segments={countSegments}
+                      centerLabel={formatCompactNumber(m.totalItems)}
+                    />
+                  </Grid>
+                </Grid>
 
                 {/* Tier 3 — Proportion bar */}
                 <Divider sx={{ mb: 2.5 }} />
