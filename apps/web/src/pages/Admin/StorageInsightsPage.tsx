@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   Container,
   Box,
@@ -9,6 +9,7 @@ import {
   CardContent,
   Alert,
   CircularProgress,
+  Chip,
   Divider,
   useTheme,
 } from '@mui/material';
@@ -20,6 +21,8 @@ import {
   Videocam as VideoIcon,
   Face as FaceIcon,
   LocalOffer as TagIcon,
+  HourglassEmpty as QueuedIcon,
+  QueryStats as ComputingIcon,
 } from '@mui/icons-material';
 import { Navigate } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -39,19 +42,61 @@ const PHOTO_COLOR = '#3b82f6'; // blue
 const VIDEO_COLOR = '#8b5cf6'; // violet
 
 // ---------------------------------------------------------------------------
+// Refresh button label derived from jobState
+// ---------------------------------------------------------------------------
+
+function refreshButtonLabel(jobState: string, refreshing: boolean): string {
+  if (!refreshing) return 'Refresh now';
+  if (jobState === 'pending') return 'Queued…';
+  if (jobState === 'running') return 'Computing…';
+  return 'Refreshing…';
+}
+
+// ---------------------------------------------------------------------------
+// In-flight status indicator chip shown near the header
+// ---------------------------------------------------------------------------
+
+interface InFlightChipProps {
+  jobState: string;
+  refreshing: boolean;
+}
+
+function InFlightChip({ jobState, refreshing }: InFlightChipProps) {
+  if (!refreshing) return null;
+
+  const isPending = jobState === 'pending';
+  const label = isPending ? 'Refresh queued' : 'Computing metrics…';
+  const icon = isPending
+    ? <QueuedIcon sx={{ fontSize: 14 }} />
+    : <ComputingIcon sx={{ fontSize: 14 }} />;
+
+  return (
+    <Chip
+      size="small"
+      icon={icon}
+      label={
+        <Box display="flex" alignItems="center" gap={0.75}>
+          {label}
+          <CircularProgress size={10} thickness={5} color="inherit" />
+        </Box>
+      }
+      color="info"
+      variant="outlined"
+      sx={{ fontWeight: 500, '.MuiChip-label': { display: 'flex', alignItems: 'center' } }}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main content (admin-gated wrapper below)
 // ---------------------------------------------------------------------------
 
 function StorageInsightsPageContent() {
-  const { data, loading, refreshing, error, refresh } = useInsights();
+  const { data, loading, refreshing, jobState, error, refresh } = useInsights();
   const theme = useTheme();
-  const [refreshSuccess, setRefreshSuccess] = useState(false);
 
-  const handleRefresh = async () => {
-    setRefreshSuccess(false);
-    await refresh();
-    setRefreshSuccess(true);
-    setTimeout(() => setRefreshSuccess(false), 3000);
+  const handleRefresh = () => {
+    void refresh();
   };
 
   const m = data?.metrics;
@@ -112,6 +157,21 @@ function StorageInsightsPageContent() {
       ]
     : [];
 
+  // The empty state is the initial no-data state with no job in flight
+  const showEmpty =
+    !loading &&
+    !refreshing &&
+    (!data || data.status === 'empty' || !m) &&
+    !error;
+
+  // Show the empty card even while in-flight if there are no metrics yet,
+  // but swap its button to a disabled "queued/computing" state
+  const showEmptyWithInFlight =
+    !loading &&
+    refreshing &&
+    (!data || data.status === 'empty' || !m) &&
+    !error;
+
   return (
     <Container maxWidth="xl">
       <Box py={4}>
@@ -136,29 +196,52 @@ function StorageInsightsPageContent() {
             </Box>
           </Box>
           <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+            {/* In-flight status chip */}
+            <InFlightChip jobState={jobState} refreshing={refreshing} />
+
+            {/* Freshness pill — always reflects last computedAt */}
             {data && (
               <FreshnessPill computedAt={data.computedAt} durationMs={data.durationMs} />
             )}
+
             <Button
               variant="contained"
-              startIcon={refreshing ? <CircularProgress size={16} color="inherit" /> : <RefreshIcon />}
+              startIcon={
+                refreshing
+                  ? <CircularProgress size={16} color="inherit" />
+                  : <RefreshIcon />
+              }
               disabled={refreshing}
-              onClick={() => void handleRefresh()}
-              color={refreshSuccess ? 'success' : 'primary'}
+              onClick={handleRefresh}
               size="small"
             >
-              {refreshSuccess ? 'Updated!' : 'Refresh now'}
+              {refreshButtonLabel(jobState, refreshing)}
             </Button>
           </Box>
         </Box>
 
-        {/* Error state */}
-        {error && (
+        {/* Failed-job error banner (distinct from network errors) */}
+        {jobState === 'failed' && data?.refresh.lastError && !refreshing && (
           <Alert
             severity="error"
             sx={{ mb: 3 }}
             action={
-              <Button color="inherit" size="small" onClick={() => void handleRefresh()}>
+              <Button color="inherit" size="small" onClick={handleRefresh}>
+                Retry
+              </Button>
+            }
+          >
+            Refresh job failed: {data.refresh.lastError}
+          </Alert>
+        )}
+
+        {/* Generic / network error state */}
+        {error && jobState !== 'failed' && (
+          <Alert
+            severity="error"
+            sx={{ mb: 3 }}
+            action={
+              <Button color="inherit" size="small" onClick={handleRefresh}>
                 Retry
               </Button>
             }
@@ -167,11 +250,11 @@ function StorageInsightsPageContent() {
           </Alert>
         )}
 
-        {/* Loading state */}
+        {/* Initial loading skeleton */}
         {loading && <KpiSkeleton />}
 
-        {/* Empty state */}
-        {!loading && (!data || data.status === 'empty' || !m) && !error && (
+        {/* Empty state — no metrics and no in-flight job */}
+        {showEmpty && (
           <Card variant="outlined" sx={{ borderRadius: 2 }}>
             <CardContent>
               <Box
@@ -190,9 +273,8 @@ function StorageInsightsPageContent() {
                 </Typography>
                 <Button
                   variant="contained"
-                  startIcon={refreshing ? <CircularProgress size={16} color="inherit" /> : <RefreshIcon />}
-                  disabled={refreshing}
-                  onClick={() => void handleRefresh()}
+                  startIcon={<RefreshIcon />}
+                  onClick={handleRefresh}
                 >
                   Compute now
                 </Button>
@@ -201,7 +283,30 @@ function StorageInsightsPageContent() {
           </Card>
         )}
 
-        {/* Data loaded */}
+        {/* Empty state while first job is in flight */}
+        {showEmptyWithInFlight && (
+          <Card variant="outlined" sx={{ borderRadius: 2 }}>
+            <CardContent>
+              <Box
+                display="flex"
+                flexDirection="column"
+                alignItems="center"
+                py={6}
+                gap={2}
+              >
+                <CircularProgress size={48} thickness={3} />
+                <Typography variant="h6" fontWeight={600} color="text.secondary">
+                  {jobState === 'pending' ? 'Job queued…' : 'Computing metrics…'}
+                </Typography>
+                <Typography variant="body2" color="text.disabled" textAlign="center" maxWidth={360}>
+                  Your first storage snapshot is being computed. This page will update automatically when it finishes.
+                </Typography>
+              </Box>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Data loaded — KPIs update automatically as polling refreshes data */}
         {!loading && m && (
           <Box display="flex" flexDirection="column" gap={4}>
             {/* Tier 1 — Hero KPIs */}
