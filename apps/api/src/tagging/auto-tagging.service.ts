@@ -200,11 +200,30 @@ export class AutoTaggingService {
       // j. Convert to base64
       const imageBase64 = imageBuffer.toString('base64');
 
+      // j2. Load assigned people names for this media item
+      const faces = await this.prisma.face.findMany({
+        where: {
+          mediaItemId: job.mediaItemId,
+          personId: { not: null },
+          person: { deletedAt: null, mergedIntoId: null },
+        },
+        select: { person: { select: { name: true } } },
+      });
+      const peopleNames = [
+        ...new Set(
+          faces.map((f) => f.person?.name).filter((n): n is string => !!n),
+        ),
+      ];
+
       // k. Build prompt and call analyzeImage
       const labelNames = tagLabels.map((t) => t.name);
-      const userPrompt = buildTaggingPrompt(labelNames);
+      const userPrompt = buildTaggingPrompt(labelNames, peopleNames);
       const systemPrompt =
-        'You are an image analysis assistant. Your job is to identify which labels from a provided list apply to the given image. Respond with ONLY a JSON array of strings — no explanation, no code fences, no extra text. Each string must exactly match one of the labels in the provided list. Return an empty array if none apply.';
+        'You are an image analysis assistant. Your job is to analyze the given image and return a JSON object with three keys: "tags", "caption", and "description". ' +
+        '"tags" must be a JSON array of strings — each string must exactly match one of the labels in the provided allowed list; return an empty array if none apply. ' +
+        '"caption" must be a single-sentence caption for the photo. ' +
+        '"description" must be a brief 1-3 sentence description of the photo. ' +
+        'Respond with ONLY a JSON object with those three keys — no explanation, no code fences, no extra text.';
 
       const raw = await aiProvider.analyzeImage(creds, {
         model,
@@ -215,21 +234,17 @@ export class AutoTaggingService {
       });
 
       // l. Parse and validate response
-      const parsed = parseTagArray(raw);
-      const labelNameSet = new Set(labelNames.map((n) => n.toLowerCase()));
-      const validatedLabels = [
-        ...new Set(
-          parsed.filter((item) => labelNameSet.has(item.toLowerCase())),
-        ),
-      ];
+      const labelNames2 = tagLabels.map((t) => t.name);
+      const { tags: validRaw, caption, description, parseOk } = parseAnalysisResult(raw, labelNames2);
 
       // Normalize case to match the original TagLabel name
-      const labelByLower = new Map(labelNames.map((n) => [n.toLowerCase(), n]));
-      const normalizedLabels = validatedLabels.map(
+      const labelByLower = new Map(labelNames2.map((n) => [n.toLowerCase(), n]));
+      const normalizedLabels = validRaw.map(
         (item) => labelByLower.get(item.toLowerCase()) ?? item,
       );
 
       // m. Reconcile AI tags: remove stale AI tags, upsert current labels with source=ai
+      //    Also persist caption/description when parseOk is true.
       await this.prisma.$transaction(async (tx) => {
         // Remove AI-sourced tags no longer produced by the model
         await tx.mediaTag.deleteMany({
@@ -250,6 +265,13 @@ export class AutoTaggingService {
             where: { tagId_mediaItemId: { tagId: tag.id, mediaItemId: mediaItem.id } },
             create: { tagId: tag.id, mediaItemId: mediaItem.id, source: MediaTagSource.ai },
             update: {}, // do NOT downgrade manual tag to ai
+          });
+        }
+        // Persist caption and description only when parse succeeded
+        if (parseOk) {
+          await tx.mediaItem.update({
+            where: { id: mediaItem.id },
+            data: { caption, description },
           });
         }
       });
@@ -326,25 +348,92 @@ async function streamToBuffer(stream: Readable): Promise<Buffer> {
   });
 }
 
-function buildTaggingPrompt(labelNames: string[]): string {
-  return `Analyze this image and return a JSON array of applicable labels from the following allowed list.
-Only choose labels that clearly apply. Return ONLY the JSON array.
+function buildTaggingPrompt(labelNames: string[], peopleNames: string[]): string {
+  let prompt = `Analyze this image and return a JSON object with three keys: "tags", "caption", and "description".
+
+"tags": an array of applicable labels from the following allowed list. Only choose labels that clearly apply. Return an empty array if none apply.
+"caption": a short single-sentence caption for the photo.
+"description": a brief 1-3 sentence description of the photo.
 
 Allowed labels:
 ${labelNames.join('\n')}
 
-Example response: ["label1", "label2"]`;
+Example response: {"tags": ["label1", "label2"], "caption": "A family gathering in a sunny backyard.", "description": "Two adults and a child are seated around a picnic table. The yard is decorated with colorful balloons and streamers."}`;
+
+  if (peopleNames.length > 0) {
+    prompt += `\n\nThe following named people appear in this photo: ${peopleNames.join(', ')}. Mention them by name in the description where appropriate.`;
+  }
+
+  return prompt;
 }
 
-function parseTagArray(raw: string): string[] {
+interface AnalysisResult {
+  tags: string[];
+  caption: string | null;
+  description: string | null;
+  parseOk: boolean;
+}
+
+function parseAnalysisResult(raw: string, labelNames: string[]): AnalysisResult {
+  const failure: AnalysisResult = { tags: [], caption: null, description: null, parseOk: false };
+
+  // Strip code fences if present
   const cleaned = raw.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
-  const match = cleaned.match(/\[[\s\S]*?\]/);
-  if (!match) return [];
+
+  // Match a JSON object
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) return failure;
+
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(match[0]);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is string => typeof item === 'string');
+    parsed = JSON.parse(match[0]);
   } catch {
-    return [];
+    return failure;
   }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return failure;
+  }
+
+  const obj = parsed as Record<string, unknown>;
+
+  // Validate and extract tags
+  const rawTags = obj['tags'];
+  const tagsArray: string[] = [];
+  if (Array.isArray(rawTags)) {
+    const labelNameSet = new Set(labelNames.map((n) => n.toLowerCase()));
+    for (const item of rawTags) {
+      if (typeof item === 'string' && labelNameSet.has(item.toLowerCase())) {
+        tagsArray.push(item);
+      }
+    }
+    // Deduplicate (case-insensitive)
+    const seen = new Set<string>();
+    const dedupedTags: string[] = [];
+    for (const t of tagsArray) {
+      const lower = t.toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        dedupedTags.push(t);
+      }
+    }
+    tagsArray.length = 0;
+    tagsArray.push(...dedupedTags);
+  }
+
+  // Extract and validate caption (trim, cap at 2048 chars, null if empty/missing)
+  let caption: string | null = null;
+  if (typeof obj['caption'] === 'string') {
+    const trimmed = obj['caption'].trim();
+    caption = trimmed.length > 0 ? trimmed.slice(0, 2048) : null;
+  }
+
+  // Extract and validate description (trim, cap at 8192 chars, null if empty/missing)
+  let description: string | null = null;
+  if (typeof obj['description'] === 'string') {
+    const trimmed = obj['description'].trim();
+    description = trimmed.length > 0 ? trimmed.slice(0, 8192) : null;
+  }
+
+  return { tags: tagsArray, caption, description, parseOk: true };
 }
