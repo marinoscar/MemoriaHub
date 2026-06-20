@@ -38,6 +38,10 @@ function makeJobRow(overrides: Record<string, unknown> = {}) {
     createdAt: new Date('2024-01-01T10:00:00Z'),
     startedAt: null,
     finishedAt: null,
+    // New rate-limit fields
+    scheduledFor: null,
+    rateLimitedAt: null,
+    rateLimitHits: 0,
     ...overrides,
   };
 }
@@ -83,6 +87,7 @@ describe('EnrichmentAdminService', () => {
         byStatus: { pending: 0, running: 0, succeeded: 0, failed: 0 },
         byType: [],
         stuckRunning: 0,
+        scheduled: 0,
       });
     });
 
@@ -196,14 +201,15 @@ describe('EnrichmentAdminService', () => {
       expect(threshold.getTime()).toBeLessThanOrEqual(expectedUpperBound);
     });
 
-    it('issues both groupBy calls and one count call via Promise.all', async () => {
+    it('issues both groupBy calls and two count calls via Promise.all', async () => {
       (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([]);
       (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
 
       await service.getStats();
 
       expect(mockPrisma.enrichmentJob.groupBy).toHaveBeenCalledTimes(2);
-      expect(mockPrisma.enrichmentJob.count).toHaveBeenCalledTimes(1);
+      // Two count calls: stuckRunning + scheduledCount
+      expect(mockPrisma.enrichmentJob.count).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -555,6 +561,274 @@ describe('EnrichmentAdminService', () => {
       await expect(service.deleteJob('target-id')).rejects.toThrow(NotFoundException);
 
       expect(mockPrisma.enrichmentJob.findUnique).toHaveBeenCalledWith({ where: { id: 'target-id' } });
+    });
+  });
+
+  // =========================================================================
+  // retryJob — rate-limit field reset (new fields: scheduledFor, rateLimitHits)
+  // =========================================================================
+
+  describe('retryJob — resets scheduledFor and rateLimitHits', () => {
+    it('sets scheduledFor: null in the update payload', async () => {
+      const failedJob = makeJobRow({
+        status: JobStatus.failed,
+        scheduledFor: new Date(Date.now() + 60_000),
+        rateLimitHits: 3,
+      });
+      const updatedJob = makeJobRow({ status: JobStatus.pending, scheduledFor: null, rateLimitHits: 0 });
+      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(failedJob);
+      (mockPrisma.enrichmentJob.update as jest.Mock).mockResolvedValue(updatedJob);
+
+      await service.retryJob('job-uuid-1');
+
+      const updateCall = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls[0][0];
+      expect(updateCall.data.scheduledFor).toBeNull();
+    });
+
+    it('sets rateLimitHits: 0 in the update payload', async () => {
+      const failedJob = makeJobRow({
+        status: JobStatus.failed,
+        rateLimitHits: 7,
+      });
+      const updatedJob = makeJobRow({ status: JobStatus.pending, rateLimitHits: 0 });
+      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(failedJob);
+      (mockPrisma.enrichmentJob.update as jest.Mock).mockResolvedValue(updatedJob);
+
+      await service.retryJob('job-uuid-1');
+
+      const updateCall = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls[0][0];
+      expect(updateCall.data.rateLimitHits).toBe(0);
+    });
+
+    it('resets all retry-related fields together in a single update call', async () => {
+      const failedJob = makeJobRow({
+        status: JobStatus.failed,
+        attempts: 3,
+        lastError: 'RL max hits reached',
+        scheduledFor: new Date(Date.now() + 120_000),
+        rateLimitHits: 10,
+        startedAt: new Date(),
+        finishedAt: new Date(),
+      });
+      const updatedJob = makeJobRow({ status: JobStatus.pending });
+      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(failedJob);
+      (mockPrisma.enrichmentJob.update as jest.Mock).mockResolvedValue(updatedJob);
+
+      await service.retryJob('job-uuid-1');
+
+      const updateCall = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls[0][0];
+      expect(updateCall.data).toMatchObject({
+        status: JobStatus.pending,
+        attempts: 0,
+        lastError: null,
+        startedAt: null,
+        finishedAt: null,
+        scheduledFor: null,
+        rateLimitHits: 0,
+      });
+    });
+  });
+
+  // =========================================================================
+  // retryAllFailed — rate-limit field reset
+  // =========================================================================
+
+  describe('retryAllFailed — resets scheduledFor and rateLimitHits', () => {
+    it('sets scheduledFor: null in the updateMany data payload', async () => {
+      (mockPrisma.enrichmentJob.updateMany as jest.Mock).mockResolvedValue({ count: 4 });
+
+      await service.retryAllFailed();
+
+      const updateManyCall = (mockPrisma.enrichmentJob.updateMany as jest.Mock).mock.calls[0][0];
+      expect(updateManyCall.data.scheduledFor).toBeNull();
+    });
+
+    it('sets rateLimitHits: 0 in the updateMany data payload', async () => {
+      (mockPrisma.enrichmentJob.updateMany as jest.Mock).mockResolvedValue({ count: 4 });
+
+      await service.retryAllFailed();
+
+      const updateManyCall = (mockPrisma.enrichmentJob.updateMany as jest.Mock).mock.calls[0][0];
+      expect(updateManyCall.data.rateLimitHits).toBe(0);
+    });
+
+    it('bulk retry payload contains all expected reset fields', async () => {
+      (mockPrisma.enrichmentJob.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+
+      await service.retryAllFailed('face_detection');
+
+      const updateManyCall = (mockPrisma.enrichmentJob.updateMany as jest.Mock).mock.calls[0][0];
+      expect(updateManyCall.data).toMatchObject({
+        status: JobStatus.pending,
+        attempts: 0,
+        lastError: null,
+        startedAt: null,
+        finishedAt: null,
+        scheduledFor: null,
+        rateLimitHits: 0,
+      });
+    });
+  });
+
+  // =========================================================================
+  // resetStuck — scheduledFor cleared
+  // =========================================================================
+
+  describe('resetStuck — sets scheduledFor: null', () => {
+    it('includes scheduledFor: null in the resetStuck data payload', async () => {
+      (mockPrisma.enrichmentJob.updateMany as jest.Mock).mockResolvedValue({ count: 3 });
+
+      await service.resetStuck();
+
+      const updateManyCall = (mockPrisma.enrichmentJob.updateMany as jest.Mock).mock.calls[0][0];
+      expect(updateManyCall.data.scheduledFor).toBeNull();
+    });
+
+    it('resetStuck data contains status:pending, startedAt:null, scheduledFor:null', async () => {
+      (mockPrisma.enrichmentJob.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+      await service.resetStuck(15);
+
+      const updateManyCall = (mockPrisma.enrichmentJob.updateMany as jest.Mock).mock.calls[0][0];
+      expect(updateManyCall.data).toMatchObject({
+        status: JobStatus.pending,
+        startedAt: null,
+        scheduledFor: null,
+      });
+    });
+  });
+
+  // =========================================================================
+  // getStats — scheduled count
+  // =========================================================================
+
+  describe('getStats — scheduled count', () => {
+    it('returns a scheduled property in the stats result', async () => {
+      (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.enrichmentJob.count as jest.Mock)
+        .mockResolvedValueOnce(0)  // stuckRunning
+        .mockResolvedValueOnce(5); // scheduledCount
+
+      const stats = await service.getStats();
+
+      expect(stats).toHaveProperty('scheduled');
+      expect(stats.scheduled).toBe(5);
+    });
+
+    it('scheduled count is 0 when no deferred-pending jobs exist', async () => {
+      (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.enrichmentJob.count as jest.Mock)
+        .mockResolvedValueOnce(0)  // stuckRunning
+        .mockResolvedValueOnce(0); // scheduledCount
+
+      const stats = await service.getStats();
+
+      expect(stats.scheduled).toBe(0);
+    });
+
+    it('scheduledCount query filters status=pending and scheduledFor > now', async () => {
+      (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
+
+      const before = Date.now();
+      await service.getStats();
+      const after = Date.now();
+
+      // getStats issues two count calls (stuckRunning + scheduledCount)
+      const countCalls = (mockPrisma.enrichmentJob.count as jest.Mock).mock.calls;
+      expect(countCalls).toHaveLength(2);
+
+      // Find the scheduled count call — it must filter status=pending and scheduledFor > now
+      const scheduledCountCall = countCalls.find(
+        (c) => c[0].where?.status === JobStatus.pending,
+      );
+      expect(scheduledCountCall).toBeDefined();
+
+      const where = scheduledCountCall![0].where;
+      expect(where.status).toBe(JobStatus.pending);
+      expect(where.scheduledFor).toBeDefined();
+      const gtDate: Date = where.scheduledFor.gt;
+      expect(gtDate).toBeInstanceOf(Date);
+      // The gt date should be approximately now (within a 2-second window)
+      expect(gtDate.getTime()).toBeGreaterThanOrEqual(before - 100);
+      expect(gtDate.getTime()).toBeLessThanOrEqual(after + 100);
+    });
+
+    it('issues two groupBy calls and two count calls in total', async () => {
+      (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
+
+      await service.getStats();
+
+      expect(mockPrisma.enrichmentJob.groupBy).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.enrichmentJob.count).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // =========================================================================
+  // listJobs — scheduled filter
+  // =========================================================================
+
+  describe('listJobs — scheduled: true filter', () => {
+    it('forces status=pending and scheduledFor > now when scheduled=true', async () => {
+      (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
+
+      const before = Date.now();
+      await service.listJobs({ scheduled: true, page: 1, pageSize: 20 });
+      const after = Date.now();
+
+      const findManyCall = (mockPrisma.enrichmentJob.findMany as jest.Mock).mock.calls[0][0];
+      expect(findManyCall.where.status).toBe(JobStatus.pending);
+      expect(findManyCall.where.scheduledFor).toBeDefined();
+
+      const gtDate: Date = findManyCall.where.scheduledFor.gt;
+      expect(gtDate).toBeInstanceOf(Date);
+      expect(gtDate.getTime()).toBeGreaterThanOrEqual(before - 100);
+      expect(gtDate.getTime()).toBeLessThanOrEqual(after + 100);
+    });
+
+    it('same scheduled=true where clause is applied to the count query', async () => {
+      (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(3);
+
+      await service.listJobs({ scheduled: true, page: 1, pageSize: 20 });
+
+      const countCall = (mockPrisma.enrichmentJob.count as jest.Mock).mock.calls[0][0];
+      expect(countCall.where.status).toBe(JobStatus.pending);
+      expect(countCall.where.scheduledFor).toHaveProperty('gt');
+    });
+
+    it('includes optional type filter alongside scheduled=true', async () => {
+      (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
+
+      await service.listJobs({ scheduled: true, type: 'face_detection', page: 1, pageSize: 10 });
+
+      const findManyCall = (mockPrisma.enrichmentJob.findMany as jest.Mock).mock.calls[0][0];
+      expect(findManyCall.where.status).toBe(JobStatus.pending);
+      expect(findManyCall.where.type).toBe('face_detection');
+      expect(findManyCall.where.scheduledFor).toHaveProperty('gt');
+    });
+
+    it('scheduled=false does not add scheduledFor filter', async () => {
+      (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
+
+      await service.listJobs({ scheduled: false, page: 1, pageSize: 20 });
+
+      const findManyCall = (mockPrisma.enrichmentJob.findMany as jest.Mock).mock.calls[0][0];
+      expect(findManyCall.where).not.toHaveProperty('scheduledFor');
+    });
+
+    it('omitting scheduled does not add scheduledFor filter', async () => {
+      (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
+
+      await service.listJobs({ page: 1, pageSize: 20 });
+
+      const findManyCall = (mockPrisma.enrichmentJob.findMany as jest.Mock).mock.calls[0][0];
+      expect(findManyCall.where).not.toHaveProperty('scheduledFor');
     });
   });
 });
