@@ -34,6 +34,7 @@ import {
   Add as AddIcon,
   PhotoAlbum as AlbumIcon,
   Insights as InsightsIcon,
+  BurstMode as BurstModeIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -86,6 +87,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
   const libraryItems: NavItemDef[] = [
     { label: 'People', icon: <GroupsIcon />, path: '/people' },
+    { label: 'Review Bursts', icon: <BurstModeIcon />, path: '/bursts' },
   ];
 
   const adminItems: NavItemDef[] = [

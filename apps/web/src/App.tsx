@@ -35,6 +35,8 @@ const PeoplePage = lazy(() => import('./pages/People/PeoplePage'));
 const AlbumsPage = lazy(() => import('./pages/Albums'));
 const AlbumPage = lazy(() => import('./pages/Albums/AlbumPage'));
 const TagsBrowsePage = lazy(() => import('./pages/Tags'));
+const BurstsPage = lazy(() => import('./pages/Bursts/BurstsPage'));
+const BurstGroupPage = lazy(() => import('./pages/Bursts/BurstGroupPage'));
 
 // Test login page (development only)
 const TestLoginPage = import.meta.env.PROD
@@ -85,6 +87,8 @@ function AppRoutes() {
                 <Route path="/tags" element={<TagsBrowsePage />} />
                 <Route path="/albums" element={<AlbumsPage />} />
                 <Route path="/albums/:albumId" element={<AlbumPage />} />
+                <Route path="/bursts" element={<BurstsPage />} />
+                <Route path="/bursts/:id" element={<BurstGroupPage />} />
               </Route>
             </Route>
 
