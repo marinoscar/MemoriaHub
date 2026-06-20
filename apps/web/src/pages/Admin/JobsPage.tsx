@@ -32,6 +32,9 @@ import {
   DialogContentText,
   DialogActions,
   Badge,
+  Menu,
+  ListItemIcon,
+  ListItemText,
 } from '@mui/material';
 import {
   WorkHistory as WorkHistoryIcon,
@@ -39,6 +42,8 @@ import {
   Replay as RetryIcon,
   Delete as DeleteIcon,
   Warning as WarningIcon,
+  MoreVert as MoreVertIcon,
+  Download as DownloadIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useJobs } from '../../hooks/useJobs';
@@ -73,6 +78,18 @@ function formatDate(iso: string | null): string {
 
 function shortId(id: string | null | undefined): string {
   return id ? id.slice(0, 8) : '—';
+}
+
+function downloadJobJson(job: EnrichmentJobDto): void {
+  const blob = new Blob([JSON.stringify(job, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `enrichment-job-${job.id}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 // ---------------------------------------------------------------------------
@@ -134,6 +151,7 @@ function JobsPageContent() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<string | null>(null); // job id or null
+  const [menuState, setMenuState] = useState<{ anchorEl: HTMLElement; job: EnrichmentJobDto } | null>(null);
 
   // Filter state (controlled locally, applied to hook via setFilters)
   const [statusFilter, setStatusFilter] = useState<string>('');
@@ -521,36 +539,15 @@ function JobsPageContent() {
                           </Typography>
                         </TableCell>
                         <TableCell align="right">
-                          <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
-                            {(job.status === 'failed' || job.status === 'succeeded') && (
-                              <Tooltip title="Retry">
-                                <span>
-                                  <IconButton
-                                    size="small"
-                                    color="primary"
-                                    disabled={mutating}
-                                    onClick={() => void handleRetryJob(job)}
-                                  >
-                                    <RetryIcon fontSize="small" />
-                                  </IconButton>
-                                </span>
-                              </Tooltip>
-                            )}
-                            {job.status !== 'running' && (
-                              <Tooltip title="Delete">
-                                <span>
-                                  <IconButton
-                                    size="small"
-                                    color="error"
-                                    disabled={mutating}
-                                    onClick={() => setDeleteDialog(job.id)}
-                                  >
-                                    <DeleteIcon fontSize="small" />
-                                  </IconButton>
-                                </span>
-                              </Tooltip>
-                            )}
-                          </Stack>
+                          <Tooltip title="Actions">
+                            <IconButton
+                              size="small"
+                              aria-label="Job actions"
+                              onClick={(e) => setMenuState({ anchorEl: e.currentTarget, job })}
+                            >
+                              <MoreVertIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
                         </TableCell>
                       </TableRow>
                     ))
@@ -559,6 +556,60 @@ function JobsPageContent() {
               </Table>
             </TableContainer>
           )}
+
+          <Menu
+            anchorEl={menuState?.anchorEl}
+            open={Boolean(menuState)}
+            onClose={() => setMenuState(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+          >
+            {/* Download JSON — always enabled */}
+            <MenuItem
+              onClick={() => {
+                if (menuState) downloadJobJson(menuState.job);
+                setMenuState(null);
+              }}
+            >
+              <ListItemIcon>
+                <DownloadIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>Download JSON</ListItemText>
+            </MenuItem>
+
+            {/* Re-run — only for failed/succeeded; disabled while mutating */}
+            <MenuItem
+              disabled={
+                !menuState ||
+                !(menuState.job.status === 'failed' || menuState.job.status === 'succeeded') ||
+                mutating
+              }
+              onClick={() => {
+                if (menuState) void handleRetryJob(menuState.job);
+                setMenuState(null);
+              }}
+            >
+              <ListItemIcon>
+                <RetryIcon fontSize="small" color="primary" />
+              </ListItemIcon>
+              <ListItemText>Re-run</ListItemText>
+            </MenuItem>
+
+            {/* Delete — disabled for running; disabled while mutating */}
+            <MenuItem
+              disabled={!menuState || menuState.job.status === 'running' || mutating}
+              onClick={() => {
+                if (menuState) setDeleteDialog(menuState.job.id);
+                setMenuState(null);
+              }}
+              sx={{ color: 'error.main' }}
+            >
+              <ListItemIcon>
+                <DeleteIcon fontSize="small" sx={{ color: 'error.main' }} />
+              </ListItemIcon>
+              <ListItemText>Delete</ListItemText>
+            </MenuItem>
+          </Menu>
 
           {meta && (
             <TablePagination
