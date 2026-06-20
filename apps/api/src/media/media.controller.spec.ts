@@ -28,6 +28,7 @@ import type { BulkDeleteDto } from './dto/bulk-delete.dto';
 import type { DashboardQueryDto } from './dto/dashboard-query.dto';
 import type { ReverseGeocodeQueryDto } from './dto/reverse-geocode-query.dto';
 import type { GeoSearchQueryDto } from './dto/geo-search-query.dto';
+import type { AddAlbumItemsByFilterDto } from './dto/add-album-items-by-filter.dto';
 import { randomUUID } from 'crypto';
 
 // ---------------------------------------------------------------------------
@@ -75,6 +76,7 @@ const mockMediaService = {
   updateAlbum: jest.fn(),
   deleteAlbum: jest.fn(),
   addAlbumItems: jest.fn(),
+  addAlbumItemsByFilter: jest.fn(),
   removeAlbumItem: jest.fn(),
   streamExport: jest.fn(),
   bulkUpdateMedia: jest.fn(),
@@ -340,6 +342,80 @@ describe('MediaController', () => {
         query.limit,
       );
       expect(result).toBe(expectedResult);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // addAlbumItemsByFilter handler
+  // -------------------------------------------------------------------------
+
+  describe('addAlbumItemsByFilter', () => {
+    it('should delegate to mediaService.addAlbumItemsByFilter with albumId, dto, userId, and permissions', async () => {
+      const albumId = randomUUID();
+      const user = makeUser({
+        id: 'user-42',
+        permissions: [PERMISSIONS.MEDIA_WRITE],
+      });
+      const dto: Partial<AddAlbumItemsByFilterDto> = {
+        circleId: randomUUID(),
+        type: 'photo' as const,
+      };
+      const expectedResult = { added: 7 };
+
+      mockMediaService.addAlbumItemsByFilter.mockResolvedValue(expectedResult);
+
+      const result = await controller.addAlbumItemsByFilter(
+        albumId,
+        dto as AddAlbumItemsByFilterDto,
+        user,
+      );
+
+      expect(mockMediaService.addAlbumItemsByFilter).toHaveBeenCalledTimes(1);
+      expect(mockMediaService.addAlbumItemsByFilter).toHaveBeenCalledWith(
+        albumId,
+        dto,
+        user.id,
+        user.permissions,
+      );
+      expect(result).toBe(expectedResult);
+    });
+
+    it('should NOT call addAlbumItems when addAlbumItemsByFilter is invoked', async () => {
+      const albumId = randomUUID();
+      const user = makeUser({ permissions: [PERMISSIONS.MEDIA_WRITE] });
+      const dto: Partial<AddAlbumItemsByFilterDto> = { circleId: randomUUID() };
+      mockMediaService.addAlbumItemsByFilter.mockResolvedValue({ added: 0 });
+
+      await controller.addAlbumItemsByFilter(
+        albumId,
+        dto as AddAlbumItemsByFilterDto,
+        user,
+      );
+
+      expect(mockMediaService.addAlbumItems).not.toHaveBeenCalled();
+    });
+
+    it('should forward the exact user id and permissions to the service', async () => {
+      const albumId = randomUUID();
+      const adminUser = makeUser({
+        id: 'admin-99',
+        permissions: [PERMISSIONS.MEDIA_WRITE, PERMISSIONS.MEDIA_WRITE_ANY],
+      });
+      const dto: Partial<AddAlbumItemsByFilterDto> = { circleId: randomUUID() };
+      mockMediaService.addAlbumItemsByFilter.mockResolvedValue({ added: 1 });
+
+      await controller.addAlbumItemsByFilter(
+        albumId,
+        dto as AddAlbumItemsByFilterDto,
+        adminUser,
+      );
+
+      expect(mockMediaService.addAlbumItemsByFilter).toHaveBeenCalledWith(
+        albumId,
+        dto,
+        'admin-99',
+        expect.arrayContaining([PERMISSIONS.MEDIA_WRITE_ANY]),
+      );
     });
   });
 

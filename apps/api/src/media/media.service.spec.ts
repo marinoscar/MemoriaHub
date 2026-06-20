@@ -1296,6 +1296,131 @@ describe('MediaService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // addAlbumItemsByFilter
+  // -------------------------------------------------------------------------
+
+  describe('addAlbumItemsByFilter', () => {
+    // Minimal valid DTO — circleId is present but the service ignores it in favour
+    // of album.circleId (cross-circle safety).
+    const dto = { circleId: CIRCLE_ID } as any;
+
+    it('happy path: findMany called with album circleId and createMany called with skipDuplicates', async () => {
+      const album = makeAlbum({ addedById: 'user-1', circleId: CIRCLE_ID });
+      const matches = [{ id: 'item-a' }, { id: 'item-b' }, { id: 'item-c' }];
+
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.mediaItem.findMany.mockResolvedValue(matches as any);
+      (mockPrisma.albumItem.createMany as jest.Mock).mockResolvedValue({ count: 3 });
+
+      const result = await service.addAlbumItemsByFilter(album.id, dto, 'user-1', ownPerms);
+
+      // findMany must have been called with the album's circleId, not any client-supplied one
+      const [findManyCall] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(findManyCall[0].where).toMatchObject({ circleId: CIRCLE_ID });
+      expect(findManyCall[0].select).toEqual({ id: true });
+
+      // createMany must be called with skipDuplicates: true
+      expect(mockPrisma.albumItem.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          skipDuplicates: true,
+          data: expect.arrayContaining([
+            { albumId: album.id, mediaItemId: 'item-a' },
+            { albumId: album.id, mediaItemId: 'item-b' },
+            { albumId: album.id, mediaItemId: 'item-c' },
+          ]),
+        }),
+      );
+
+      expect(result).toEqual({ added: 3 });
+    });
+
+    it('cross-circle safety: where clause uses album.circleId even if dto carries a different circleId', async () => {
+      const ALBUM_CIRCLE = 'album-circle-uuid-aaa';
+      const CLIENT_CIRCLE = 'client-circle-uuid-bbb';
+      const album = makeAlbum({ addedById: 'user-1', circleId: ALBUM_CIRCLE });
+
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.mediaItem.findMany.mockResolvedValue([]);
+      (mockPrisma.albumItem.createMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+      await service.addAlbumItemsByFilter(
+        album.id,
+        { circleId: CLIENT_CIRCLE } as any, // client supplies a different circleId
+        'user-1',
+        ownPerms,
+      );
+
+      const [findManyCall] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      // Must use the album's circle, not the client-supplied one
+      expect(findManyCall[0].where).toMatchObject({ circleId: ALBUM_CIRCLE });
+      expect(findManyCall[0].where.circleId).not.toBe(CLIENT_CIRCLE);
+    });
+
+    it('role enforcement: viewer role causes rejection and createMany is NOT called', async () => {
+      const album = makeAlbum({ addedById: 'other-user', circleId: CIRCLE_ID });
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+        new ForbiddenException('insufficient circle role'),
+      );
+
+      await expect(
+        service.addAlbumItemsByFilter(album.id, dto, 'viewer-user', ownPerms),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(mockPrisma.albumItem.createMany).not.toHaveBeenCalled();
+    });
+
+    it('returns 0 when no media matches the filter', async () => {
+      const album = makeAlbum({ addedById: 'user-1', circleId: CIRCLE_ID });
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.mediaItem.findMany.mockResolvedValue([]);
+      (mockPrisma.albumItem.createMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+      const result = await service.addAlbumItemsByFilter(album.id, dto, 'user-1', ownPerms);
+
+      // createMany is still called (with empty data), count sums to 0
+      expect(result).toEqual({ added: 0 });
+    });
+
+    it('chunking: 2500 matches triggers 3 createMany calls and sums their counts', async () => {
+      const album = makeAlbum({ addedById: 'user-1', circleId: CIRCLE_ID });
+      // Build 2500 fake matches
+      const matches = Array.from({ length: 2500 }, (_, i) => ({ id: `item-${i}` }));
+
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.mediaItem.findMany.mockResolvedValue(matches as any);
+      // Each createMany call counts exactly its chunk size: 1000 + 1000 + 500
+      (mockPrisma.albumItem.createMany as jest.Mock)
+        .mockResolvedValueOnce({ count: 1000 })
+        .mockResolvedValueOnce({ count: 1000 })
+        .mockResolvedValueOnce({ count: 500 });
+
+      const result = await service.addAlbumItemsByFilter(album.id, dto, 'user-1', ownPerms);
+
+      expect(mockPrisma.albumItem.createMany).toHaveBeenCalledTimes(3);
+
+      // Verify each chunk carries the right slice
+      const calls = (mockPrisma.albumItem.createMany as jest.Mock).mock.calls;
+      expect(calls[0][0].data).toHaveLength(1000);
+      expect(calls[1][0].data).toHaveLength(1000);
+      expect(calls[2][0].data).toHaveLength(500);
+
+      // Total added is the sum across all chunks
+      expect(result).toEqual({ added: 2500 });
+    });
+
+    it('throws NotFoundException when the album does not exist', async () => {
+      mockPrisma.album.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.addAlbumItemsByFilter(randomUUID(), dto, 'user-1', ownPerms),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(mockPrisma.albumItem.createMany).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // removeAlbumItem
   // -------------------------------------------------------------------------
 
