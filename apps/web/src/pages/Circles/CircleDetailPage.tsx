@@ -45,6 +45,8 @@ import { getCircle, updateCircle } from '../../services/circles';
 import { getCircleFaceSettings, updateCircleFaceSettings } from '../../services/face';
 import { getCircleTaggingSettings, updateCircleTaggingSettings } from '../../services/tagging';
 import type { CircleTaggingSettings } from '../../services/tagging';
+import { getCircleBurstSettings, updateCircleBurstSettings } from '../../services/bursts';
+import type { CircleBurstSettings } from '../../services/bursts';
 import type { Circle, CircleRole } from '../../types/circles';
 
 interface TabPanelProps {
@@ -100,6 +102,12 @@ export default function CircleDetailPage() {
   const [taggingSettingsLoading, setTaggingSettingsLoading] = useState(false);
   const [taggingSettingsError, setTaggingSettingsError] = useState<string | null>(null);
   const [taggingTogglingLoading, setTaggingTogglingLoading] = useState(false);
+
+  // Burst settings state
+  const [burstSettings, setBurstSettings] = useState<CircleBurstSettings | null>(null);
+  const [burstSettingsLoading, setBurstSettingsLoading] = useState(false);
+  const [burstSettingsError, setBurstSettingsError] = useState<string | null>(null);
+  const [burstTogglingLoading, setBurstTogglingLoading] = useState(false);
 
   // Invite dialog
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -164,6 +172,18 @@ export default function CircleDetailPage() {
       .finally(() => setTaggingSettingsLoading(false));
   }, [circleId]);
 
+  useEffect(() => {
+    if (!circleId) return;
+    setBurstSettingsLoading(true);
+    setBurstSettingsError(null);
+    getCircleBurstSettings(circleId)
+      .then(setBurstSettings)
+      .catch((err: unknown) => {
+        setBurstSettingsError(err instanceof Error ? err.message : 'Failed to load burst settings');
+      })
+      .finally(() => setBurstSettingsLoading(false));
+  }, [circleId]);
+
   const handleFaceToggle = async (enabled: boolean) => {
     setFaceTogglingLoading(true);
     setFaceSettingsError(null);
@@ -189,6 +209,20 @@ export default function CircleDetailPage() {
       setTaggingSettingsError(err instanceof Error ? err.message : 'Failed to update auto-tagging setting');
     } finally {
       setTaggingTogglingLoading(false);
+    }
+  };
+
+  const handleBurstToggle = async (enabled: boolean) => {
+    setBurstTogglingLoading(true);
+    setBurstSettingsError(null);
+    try {
+      const updated = await updateCircleBurstSettings(circleId, enabled);
+      setBurstSettings(updated);
+      setFaceSuccessMsg(enabled ? 'Burst detection enabled.' : 'Burst detection disabled.');
+    } catch (err: unknown) {
+      setBurstSettingsError(err instanceof Error ? err.message : 'Failed to update burst detection setting');
+    } finally {
+      setBurstTogglingLoading(false);
     }
   };
 
@@ -528,6 +562,40 @@ export default function CircleDetailPage() {
                       Auto-tagging is currently{' '}
                       <strong>
                         {taggingSettings?.autoTaggingEnabled ? 'Enabled' : 'Disabled'}
+                      </strong>
+                    </Typography>
+                  )}
+                </Paper>
+
+                <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Burst detection automatically groups similar photos taken in quick succession, so
+                    you can review and keep only the best shot. It is opt-in per circle.
+                  </Typography>
+                  {burstSettingsError && (
+                    <Alert severity="error" sx={{ mb: 1 }}>
+                      {burstSettingsError}
+                    </Alert>
+                  )}
+                  {burstSettingsLoading ? (
+                    <CircularProgress size={20} />
+                  ) : canManage ? (
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={burstSettings?.burstDetectionEnabled ?? false}
+                          onChange={(e) => void handleBurstToggle(e.target.checked)}
+                          disabled={burstTogglingLoading || !burstSettings}
+                          color="primary"
+                        />
+                      }
+                      label={burstTogglingLoading ? 'Updating…' : 'Enable burst detection'}
+                    />
+                  ) : (
+                    <Typography variant="body2">
+                      Burst detection is currently{' '}
+                      <strong>
+                        {burstSettings?.burstDetectionEnabled ? 'Enabled' : 'Disabled'}
                       </strong>
                     </Typography>
                   )}
