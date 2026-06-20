@@ -1,7 +1,6 @@
 import {
   useState,
   useEffect,
-  useRef,
   useCallback,
   useMemo,
 } from 'react';
@@ -12,7 +11,6 @@ import {
   ImageListItem,
   ImageListItemBar,
   IconButton,
-  Fab,
   Chip,
   Stack,
   Tooltip,
@@ -42,7 +40,6 @@ import {
 import {
   Star as StarIcon,
   StarBorder as StarBorderIcon,
-  CloudUpload as UploadIcon,
   FilterList as FilterIcon,
   Search as SearchIcon,
   FileDownload as ExportIcon,
@@ -62,35 +59,12 @@ import { listTags, exportMedia } from '../../services/media';
 import type { ExportFilters } from '../../services/media';
 import { MediaDetailDrawer } from '../../components/media/MediaDetailDrawer';
 import { MediaLightbox } from '../../components/media/MediaLightbox';
-import { MediaUploadDialog } from '../../components/media/MediaUploadDialog';
 import { BulkActionToolbar } from '../../components/media/BulkActionToolbar';
 import { BulkLocationDialog } from '../../components/media/BulkLocationDialog';
 import { BulkTagsDialog } from '../../components/media/BulkTagsDialog';
 import { AddToAlbumDialog } from '../../components/album/AddToAlbumDialog';
 import type { MediaItem, MediaQueryParams, TagItem, MediaType, MediaClassification } from '../../types/media';
 import { PersonMultiSelect } from '../../components/search/PersonMultiSelect';
-
-// ---------------------------------------------------------------------------
-// Post-upload enrichment polling constants
-// ---------------------------------------------------------------------------
-
-/** How often (ms) to re-fetch after an upload while waiting for enrichment. */
-const ENRICHMENT_POLL_INTERVAL_MS = 3_000;
-/** Maximum number of poll attempts before giving up (~30 s). */
-const ENRICHMENT_POLL_MAX_ATTEMPTS = 10;
-
-/**
- * Returns true when every photo AND video item in the list already has a
- * thumbnailUrl (i.e. enrichment is complete for all media types that produce
- * thumbnails).
- */
-function allItemsEnriched(items: MediaItem[]): boolean {
-  return items.every(
-    (item) =>
-      (item.type !== 'photo' && item.type !== 'video') ||
-      item.thumbnailUrl !== null,
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -409,11 +383,6 @@ export default function MediaLibraryPage() {
     updateItemLocally,
   } = useMedia();
 
-  /** Holds the setInterval id for the post-upload enrichment poll. */
-  const enrichmentPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  /** Tracks how many poll attempts have fired for the current upload batch. */
-  const enrichmentPollAttemptsRef = useRef(0);
-
   const { albums, fetchAlbums } = useAlbums();
 
   const [tags, setTags] = useState<TagItem[]>([]);
@@ -455,7 +424,6 @@ export default function MediaLibraryPage() {
   const [selectedItem, setSelectedItem] = useState<MediaItem | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
-  const [uploadOpen, setUploadOpen] = useState(false);
 
   // Export menu
   const [exportAnchorEl, setExportAnchorEl] = useState<null | HTMLElement>(null);
@@ -561,13 +529,8 @@ export default function MediaLibraryPage() {
   ]);
 
   // Load data on mount and when filters change.
-  // Also stop any running enrichment poll so it doesn't fight a user-initiated refetch.
   useEffect(() => {
     if (!activeCircle) return;
-    if (enrichmentPollRef.current !== null) {
-      clearInterval(enrichmentPollRef.current);
-      enrichmentPollRef.current = null;
-    }
     void fetchMedia(buildParams());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -615,16 +578,6 @@ export default function MediaLibraryPage() {
       .catch(() => setTags([]));
   }, [fetchAlbums, activeCircle]);
 
-  // Clear any running enrichment poll on unmount so it never leaks.
-  useEffect(() => {
-    return () => {
-      if (enrichmentPollRef.current !== null) {
-        clearInterval(enrichmentPollRef.current);
-        enrichmentPollRef.current = null;
-      }
-    };
-  }, []);
-
   const handleToggleTag = useCallback((tagName: string) => {
     setSelectedTags((prev) =>
       prev.includes(tagName)
@@ -663,37 +616,6 @@ export default function MediaLibraryPage() {
     [patchMedia, selectedItem],
   );
 
-  const handleUploadSuccess = useCallback(() => {
-    setUploadOpen(false);
-    setPage(1);
-
-    // Cancel any previous enrichment poll before starting a new one.
-    if (enrichmentPollRef.current !== null) {
-      clearInterval(enrichmentPollRef.current);
-      enrichmentPollRef.current = null;
-    }
-    enrichmentPollAttemptsRef.current = 0;
-
-    // Immediate refetch so the new item appears right away.
-    void fetchMedia(buildParams());
-
-    // Bounded background poll: re-fetches every ENRICHMENT_POLL_INTERVAL_MS until
-    // all photos have thumbnails or ENRICHMENT_POLL_MAX_ATTEMPTS is reached.
-    enrichmentPollRef.current = setInterval(() => {
-      enrichmentPollAttemptsRef.current += 1;
-
-      void fetchMedia(buildParams()).then((loadedItems) => {
-        const done =
-          allItemsEnriched(loadedItems) ||
-          enrichmentPollAttemptsRef.current >= ENRICHMENT_POLL_MAX_ATTEMPTS;
-
-        if (done && enrichmentPollRef.current !== null) {
-          clearInterval(enrichmentPollRef.current);
-          enrichmentPollRef.current = null;
-        }
-      });
-    }, ENRICHMENT_POLL_INTERVAL_MS);
-  }, [fetchMedia, buildParams]);
 
   const handleCountrySelect = useCallback((country: string) => {
     setFilterCountry(country);
@@ -1274,16 +1196,8 @@ export default function MediaLibraryPage() {
             No media found
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Upload photos or videos to get started
+            Upload photos or videos using the Upload button in the toolbar.
           </Typography>
-          <Button
-            variant="contained"
-            sx={{ mt: 2 }}
-            startIcon={<UploadIcon />}
-            onClick={() => setUploadOpen(true)}
-          >
-            Upload Media
-          </Button>
         </Box>
       )}
 
@@ -1373,16 +1287,6 @@ export default function MediaLibraryPage() {
         </>
       )}
 
-      {/* Upload FAB */}
-      <Fab
-        color="primary"
-        aria-label="Upload media"
-        onClick={() => setUploadOpen(true)}
-        sx={{ position: 'fixed', bottom: { xs: 16, sm: 24 }, right: 24 }}
-      >
-        <UploadIcon />
-      </Fab>
-
       {/* Detail drawer */}
       <MediaDetailDrawer
         item={selectedItem}
@@ -1405,14 +1309,6 @@ export default function MediaLibraryPage() {
           setDrawerOpen(true);
         }}
         onItemUpdated={handleItemUpdated}
-      />
-
-      {/* Upload dialog */}
-      <MediaUploadDialog
-        open={uploadOpen}
-        onClose={() => setUploadOpen(false)}
-        onSuccess={handleUploadSuccess}
-        circleId={activeCircle.id}
       />
 
       {/* Bulk action toolbar */}

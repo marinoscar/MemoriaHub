@@ -1,9 +1,42 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
 import { AppBar } from '../../../components/navigation/AppBar';
 import { APP_NAME } from '../../../constants/app';
+
+// ---------------------------------------------------------------------------
+// Module mocks
+// ---------------------------------------------------------------------------
+
+// TopbarSearch calls useSearch() which requires SearchProvider.
+// Mock the entire SearchContext module so TopbarSearch can render in isolation.
+vi.mock('../../../contexts/SearchContext', () => ({
+  useSearch: vi.fn(() => ({
+    messages: [],
+    results: null,
+    isSearching: false,
+    error: null,
+    runAgentSearch: vi.fn(),
+    runAdvancedResults: vi.fn(),
+    clearSearch: vi.fn(),
+  })),
+  SearchProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+// AdvancedSearchDialog is heavy — stub it out for AppBar tests
+vi.mock('../../../components/search/AdvancedSearchDialog', () => ({
+  AdvancedSearchDialog: vi.fn(() => null),
+}));
+
+// MediaUploadDialog — stub to avoid upload service calls
+vi.mock('../../../components/media/MediaUploadDialog', () => ({
+  MediaUploadDialog: vi.fn(({ open, onClose }: { open: boolean; onClose: () => void }) =>
+    open ? <div data-testid="upload-dialog"><button onClick={onClose}>Close</button></div> : null,
+  ),
+}));
+
+// ---------------------------------------------------------------------------
 
 describe('AppBar', () => {
   describe('Rendering', () => {
@@ -141,6 +174,31 @@ describe('AppBar', () => {
       render(<AppBar />);
 
       expect(screen.getByRole('banner')).toBeInTheDocument();
+    });
+  });
+
+  describe('Upload button', () => {
+    it('shows Upload button when an active circle is present', () => {
+      render(<AppBar />, {
+        wrapperOptions: { authenticated: true },
+      });
+
+      // The test-utils wrapper provides a default active circle.
+      // AppBar shows Upload button (either outlined button or icon button) when circle is set.
+      const uploadBtns = screen.queryAllByRole('button', { name: /upload media/i });
+      expect(uploadBtns.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('opens MediaUploadDialog when Upload is clicked', async () => {
+      const user = userEvent.setup();
+      render(<AppBar />, {
+        wrapperOptions: { authenticated: true },
+      });
+
+      const uploadBtn = screen.getByRole('button', { name: /upload media/i });
+      await user.click(uploadBtn);
+
+      expect(screen.getByTestId('upload-dialog')).toBeInTheDocument();
     });
   });
 });
