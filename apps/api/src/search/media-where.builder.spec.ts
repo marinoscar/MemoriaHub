@@ -151,6 +151,23 @@ describe('buildMediaWhere', () => {
     });
   });
 
+  describe('noFaces filter', () => {
+    it('produces faces.none clause when noFaces is true', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { noFaces: true });
+      expect((where as any).faces).toEqual({ none: {} });
+    });
+
+    it('adds nothing extra when noFaces is false', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { noFaces: false });
+      expect((where as any).faces).toBeUndefined();
+    });
+
+    it('adds nothing extra when noFaces is undefined', () => {
+      const where = buildMediaWhere(CIRCLE_ID, {});
+      expect((where as any).faces).toBeUndefined();
+    });
+  });
+
   describe('helper functions directly', () => {
     it('whereTag returns the correct Prisma fragment', () => {
       const fragment = whereTag('nature');
@@ -305,6 +322,47 @@ describe('buildWhereFromFields', () => {
       expect(peopleField.type).toBe('person-set');
       expect(peopleField.optionsSource).toBe('people');
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// whereNoFaces — standalone helper
+// ---------------------------------------------------------------------------
+import { whereNoFaces } from './media-where.builder';
+
+describe('whereNoFaces', () => {
+  it('returns { faces: { none: {} } } when value is true', () => {
+    expect(whereNoFaces(true)).toEqual({ faces: { none: {} } });
+  });
+
+  it('returns {} when value is false', () => {
+    expect(whereNoFaces(false)).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// noFaces field in SEARCHABLE_FIELDS registry
+// ---------------------------------------------------------------------------
+describe('SEARCHABLE_FIELDS — noFaces field', () => {
+  it('contains the noFaces key', () => {
+    const keys = SEARCHABLE_FIELDS.map((f) => f.key);
+    expect(keys).toContain('noFaces');
+  });
+
+  it('noFaces field has type "boolean"', () => {
+    const field = SEARCHABLE_FIELDS.find((f) => f.key === 'noFaces')!;
+    expect(field).toBeDefined();
+    expect(field.type).toBe('boolean');
+  });
+
+  it('noFaces buildWhere returns faces.none clause for true', () => {
+    const field = SEARCHABLE_FIELDS.find((f) => f.key === 'noFaces')!;
+    expect(field.buildWhere(true)).toEqual({ faces: { none: {} } });
+  });
+
+  it('noFaces buildWhere returns {} for false', () => {
+    const field = SEARCHABLE_FIELDS.find((f) => f.key === 'noFaces')!;
+    expect(field.buildWhere(false)).toEqual({});
   });
 });
 

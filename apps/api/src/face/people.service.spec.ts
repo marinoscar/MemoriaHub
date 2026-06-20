@@ -1870,4 +1870,369 @@ describe('PeopleService', () => {
       await expect(service.deletePerson(PERSON_ID, USER_ID, PERMS)).resolves.not.toThrow();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // addPersonToMedia
+  // -------------------------------------------------------------------------
+
+  describe('addPersonToMedia', () => {
+    const MEDIA_ITEM = {
+      id: MEDIA_ID,
+      circleId: CIRCLE_ID,
+      deletedAt: null,
+    };
+    const CREATED_FACE_ID = 'face-uuid-manual-0001';
+
+    function setupMediaItem(overrides: Partial<typeof MEDIA_ITEM> = {}) {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
+        ...MEDIA_ITEM,
+        ...overrides,
+      });
+    }
+
+    function setupNoExistingFace() {
+      (mockPrisma.face.findFirst as jest.Mock).mockResolvedValue(null);
+    }
+
+    function setupCreatedFace(id = CREATED_FACE_ID) {
+      (mockPrisma.face.create as jest.Mock).mockResolvedValue({
+        id,
+        mediaItemId: MEDIA_ID,
+        circleId: CIRCLE_ID,
+        personId: PERSON_ID,
+        providerKey: 'manual',
+        modelVersion: 'manual',
+        embedding: [],
+        boundingBox: { x: 0, y: 0, w: 0, h: 0 },
+        confidence: null,
+        manuallyAssigned: true,
+        createdAt: new Date(),
+      });
+    }
+
+    function setupCircle(autoTaggingEnabled: boolean) {
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ autoTaggingEnabled });
+    }
+
+    it('creates a manual Face row with exact convention values when called with personId', async () => {
+      setupMediaItem();
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(
+        makePerson({ id: PERSON_ID, name: 'Alice', circleId: CIRCLE_ID, deletedAt: null }),
+      );
+      setupNoExistingFace();
+      setupCreatedFace();
+      setupCircle(false);
+
+      const result = await service.addPersonToMedia(MEDIA_ID, USER_ID, PERMS, { personId: PERSON_ID });
+
+      expect(mockPrisma.face.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          mediaItemId: MEDIA_ID,
+          circleId: CIRCLE_ID,
+          personId: PERSON_ID,
+          providerKey: 'manual',
+          modelVersion: 'manual',
+          embedding: [],
+          boundingBox: { x: 0, y: 0, w: 0, h: 0 },
+          confidence: null,
+          manuallyAssigned: true,
+        }),
+      });
+      expect(result).toMatchObject({
+        personId: PERSON_ID,
+        personName: 'Alice',
+        faceId: CREATED_FACE_ID,
+        mediaItemId: MEDIA_ID,
+      });
+    });
+
+    it('asserts collaborator access before creating the face', async () => {
+      setupMediaItem();
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(
+        makePerson({ id: PERSON_ID, circleId: CIRCLE_ID, deletedAt: null }),
+      );
+      setupNoExistingFace();
+      setupCreatedFace();
+      setupCircle(false);
+
+      await service.addPersonToMedia(MEDIA_ID, USER_ID, PERMS, { personId: PERSON_ID });
+
+      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+        USER_ID,
+        CIRCLE_ID,
+        PERMS,
+        'collaborator',
+      );
+    });
+
+    it('denies access when assertCircleAccess throws (ForbiddenException propagates)', async () => {
+      setupMediaItem();
+      const { ForbiddenException } = await import('@nestjs/common');
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValue(
+        new ForbiddenException('Forbidden'),
+      );
+
+      await expect(
+        service.addPersonToMedia(MEDIA_ID, USER_ID, PERMS, { personId: PERSON_ID }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    describe('find-or-create by name', () => {
+      it('reuses an existing person when the name matches case-insensitively', async () => {
+        setupMediaItem();
+        // findFirst returns an existing person (case-insensitive match)
+        (mockPrisma.person.findFirst as jest.Mock).mockResolvedValue(
+          { id: PERSON_ID, name: 'alice' },
+        );
+        setupNoExistingFace();
+        setupCreatedFace();
+        setupCircle(false);
+
+        const result = await service.addPersonToMedia(MEDIA_ID, USER_ID, PERMS, { name: 'Alice' });
+
+        // No new person created
+        expect(mockPrisma.person.create).not.toHaveBeenCalled();
+        expect(result.personId).toBe(PERSON_ID);
+      });
+
+      it('creates a new person when no name match exists', async () => {
+        const NEW_PERSON_ID = 'person-uuid-new';
+        setupMediaItem();
+        // findFirst returns null → must create
+        (mockPrisma.person.findFirst as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.person.create as jest.Mock).mockResolvedValue(
+          { id: NEW_PERSON_ID, name: 'New Person' },
+        );
+        setupNoExistingFace();
+        setupCreatedFace();
+        setupCircle(false);
+
+        const result = await service.addPersonToMedia(MEDIA_ID, USER_ID, PERMS, { name: 'New Person' });
+
+        expect(mockPrisma.person.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            circleId: CIRCLE_ID,
+            addedById: USER_ID,
+            name: 'New Person',
+          }),
+          select: expect.any(Object),
+        });
+        expect(result.personId).toBe(NEW_PERSON_ID);
+      });
+    });
+
+    describe('idempotency', () => {
+      it('returns the existing face without creating a new one when the person already has a face on the item', async () => {
+        const EXISTING_FACE_ID = 'face-uuid-existing';
+        setupMediaItem();
+        (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(
+          makePerson({ id: PERSON_ID, name: 'Alice', circleId: CIRCLE_ID, deletedAt: null }),
+        );
+        // Idempotency: existing face found
+        (mockPrisma.face.findFirst as jest.Mock).mockResolvedValue(
+          makeFace({ id: EXISTING_FACE_ID, personId: PERSON_ID, mediaItemId: MEDIA_ID }),
+        );
+
+        const result = await service.addPersonToMedia(MEDIA_ID, USER_ID, PERMS, { personId: PERSON_ID });
+
+        expect(mockPrisma.face.create).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+          personId: PERSON_ID,
+          faceId: EXISTING_FACE_ID,
+          mediaItemId: MEDIA_ID,
+        });
+      });
+    });
+
+    describe('auto-tagging re-enqueue', () => {
+      it('enqueues auto_tagging when autoTaggingEnabled=true', async () => {
+        setupMediaItem();
+        (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(
+          makePerson({ id: PERSON_ID, name: 'Alice', circleId: CIRCLE_ID, deletedAt: null }),
+        );
+        setupNoExistingFace();
+        setupCreatedFace();
+        setupCircle(true);
+
+        await service.addPersonToMedia(MEDIA_ID, USER_ID, PERMS, { personId: PERSON_ID });
+
+        expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: 'auto_tagging',
+            mediaItemId: MEDIA_ID,
+            circleId: CIRCLE_ID,
+            reason: 'rerun',
+            priority: 0,
+          }),
+        );
+      });
+
+      it('does NOT enqueue auto_tagging when autoTaggingEnabled=false', async () => {
+        setupMediaItem();
+        (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(
+          makePerson({ id: PERSON_ID, name: 'Alice', circleId: CIRCLE_ID, deletedAt: null }),
+        );
+        setupNoExistingFace();
+        setupCreatedFace();
+        setupCircle(false);
+
+        await service.addPersonToMedia(MEDIA_ID, USER_ID, PERMS, { personId: PERSON_ID });
+
+        expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+      });
+    });
+
+    it('throws NotFoundException when media item is not found', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.addPersonToMedia(MEDIA_ID, USER_ID, PERMS, { personId: PERSON_ID }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws NotFoundException when media item is soft-deleted', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
+        id: MEDIA_ID,
+        circleId: CIRCLE_ID,
+        deletedAt: new Date(),
+      });
+
+      await expect(
+        service.addPersonToMedia(MEDIA_ID, USER_ID, PERMS, { personId: PERSON_ID }),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // removePersonFromMedia
+  // -------------------------------------------------------------------------
+
+  describe('removePersonFromMedia', () => {
+    const MEDIA_ITEM = {
+      id: MEDIA_ID,
+      circleId: CIRCLE_ID,
+      deletedAt: null,
+    };
+
+    function setupMediaItem(overrides: Partial<typeof MEDIA_ITEM> = {}) {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
+        ...MEDIA_ITEM,
+        ...overrides,
+      });
+    }
+
+    function setupDeleteMany(count: number) {
+      (mockPrisma.face.deleteMany as jest.Mock).mockResolvedValue({ count });
+    }
+
+    function setupCircle(autoTaggingEnabled: boolean) {
+      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ autoTaggingEnabled });
+    }
+
+    it('deletes only providerKey="manual" Face rows for the (mediaItem, person) pair', async () => {
+      setupMediaItem();
+      setupDeleteMany(1);
+      setupCircle(false);
+
+      await service.removePersonFromMedia(MEDIA_ID, PERSON_ID, USER_ID, PERMS);
+
+      expect(mockPrisma.face.deleteMany).toHaveBeenCalledWith({
+        where: { mediaItemId: MEDIA_ID, personId: PERSON_ID, providerKey: 'manual' },
+      });
+    });
+
+    it('asserts collaborator access before deleting', async () => {
+      setupMediaItem();
+      setupDeleteMany(1);
+      setupCircle(false);
+
+      await service.removePersonFromMedia(MEDIA_ID, PERSON_ID, USER_ID, PERMS);
+
+      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+        USER_ID,
+        CIRCLE_ID,
+        PERMS,
+        'collaborator',
+      );
+    });
+
+    it('throws NotFoundException when no manual face exists for this (mediaItem, person) pair', async () => {
+      setupMediaItem();
+      setupDeleteMany(0);
+
+      await expect(
+        service.removePersonFromMedia(MEDIA_ID, PERSON_ID, USER_ID, PERMS),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws NotFoundException when media item is not found', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.removePersonFromMedia(MEDIA_ID, PERSON_ID, USER_ID, PERMS),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws NotFoundException when media item is soft-deleted', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
+        id: MEDIA_ID,
+        circleId: CIRCLE_ID,
+        deletedAt: new Date(),
+      });
+
+      await expect(
+        service.removePersonFromMedia(MEDIA_ID, PERSON_ID, USER_ID, PERMS),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    describe('auto-tagging re-enqueue', () => {
+      it('enqueues auto_tagging after deletion when autoTaggingEnabled=true', async () => {
+        setupMediaItem();
+        setupDeleteMany(1);
+        setupCircle(true);
+
+        await service.removePersonFromMedia(MEDIA_ID, PERSON_ID, USER_ID, PERMS);
+
+        expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: 'auto_tagging',
+            mediaItemId: MEDIA_ID,
+            circleId: CIRCLE_ID,
+            reason: 'rerun',
+            priority: 0,
+          }),
+        );
+      });
+
+      it('does NOT enqueue auto_tagging when autoTaggingEnabled=false', async () => {
+        setupMediaItem();
+        setupDeleteMany(1);
+        setupCircle(false);
+
+        await service.removePersonFromMedia(MEDIA_ID, PERSON_ID, USER_ID, PERMS);
+
+        expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+      });
+
+      it('does NOT enqueue when circle not found', async () => {
+        setupMediaItem();
+        setupDeleteMany(1);
+        (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(null);
+
+        await service.removePersonFromMedia(MEDIA_ID, PERSON_ID, USER_ID, PERMS);
+
+        expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+      });
+    });
+
+    it('returns the deleted count', async () => {
+      setupMediaItem();
+      setupDeleteMany(2);
+      setupCircle(false);
+
+      const result = await service.removePersonFromMedia(MEDIA_ID, PERSON_ID, USER_ID, PERMS);
+
+      expect(result).toEqual({ deleted: 2 });
+    });
+  });
 });

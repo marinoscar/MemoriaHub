@@ -422,14 +422,20 @@ Three providers: `human` (keyless WASM, in-process, 1024-d), `compreface` (keyle
 - `POST /api/people/merge` body `{sourceId, targetId}` - Reassign all faces source→target, soft-delete source with mergedIntoId audit breadcrumb (media:write + collaborator)
 - `DELETE /api/people/:id` - Soft-delete a person; all faces return to unknown pool (media:write + collaborator) — 204 No Content
 - `GET /api/media?personId=` - Filter media list to items containing faces assigned to a specific person (media:read + viewer)
+- `GET /api/media?noFaces=true` - Filter media list to items with no faces at all (detected or manually added) — useful for finding untagged photos; semantically `faces: { none: {} }` (media:read + viewer)
+
+### Face Recognition — Manual People Association (media:write + per-circle collaborator role)
+These endpoints let users associate people with a photo from the media properties pane when face detection misses a face. No bounding box is required. Internally each association is stored as a `Face` row with `providerKey='manual'`, `manuallyAssigned=true`, empty embedding, and zeroed bounding box — so all existing people filters and person galleries work without changes. Manual faces are preserved across face-detection reruns (the rerun delete is scoped to `manuallyAssigned=false`). Adding or removing a manual association re-enqueues `auto_tagging` so caption/description/embedding refresh.
+- `POST /api/media/:id/people` body `{ personId }` OR `{ name }` (exactly one) — associate a person with the photo; find-or-create by name when `name` is given; idempotent (no duplicate if the person is already associated); returns `{ personId, personName, faceId, mediaItemId }` (media:write + collaborator)
+- `DELETE /api/media/:id/people/:personId` — remove the manual association only (does not touch detected faces); 404 if no manual association exists; 204 No Content (media:write + collaborator)
 
 ### Deterministic Search (search:use)
-- `POST /api/search` - Execute deterministic media search with explicit filters; optionally add `semanticQuery: string` (1–512 chars) to rank results by vector similarity instead of sort order (media:read + search:use)
-- `GET /api/search/fields` - List all searchable field descriptors from the registry plus the `semanticQuery` descriptor (search:use)
+- `POST /api/search` - Execute deterministic media search with explicit filters; optionally add `semanticQuery: string` (1–512 chars) to rank results by vector similarity instead of sort order; also accepts `noFaces: true` boolean to return only items with no faces (detected or manually added) (media:read + search:use)
+- `GET /api/search/fields` - List all searchable field descriptors from the registry plus the `semanticQuery` descriptor; includes `noFaces` (label "No faces detected") (search:use)
 
 ### Agentic Search (search:use)
 Agentic search is **stateless** — no conversation rows are stored server-side. The client holds the full message history in memory and sends it with every request.
-- `POST /api/search/agent` - Send a message history and stream the AI response via SSE (text/event-stream). Body: `{ circleId: string; messages: Array<{ role: 'user'|'assistant'; content: string }> }` (last message must be `role: 'user'`). Verifies circle viewer membership. Stream events: `token`, `tool_call`, `results`, `done`, `error`. The agent's `search_media` tool also accepts a top-level `semanticQuery` parameter for visual/scene-based queries. (search:use)
+- `POST /api/search/agent` - Send a message history and stream the AI response via SSE (text/event-stream). Body: `{ circleId: string; messages: Array<{ role: 'user'|'assistant'; content: string }> }` (last message must be `role: 'user'`). Verifies circle viewer membership. Stream events: `token`, `tool_call`, `results`, `done`, `error`. The agent's `search_media` tool also accepts a top-level `semanticQuery` parameter for visual/scene-based queries and a `noFaces: true` parameter to filter to photos with no faces. (search:use)
 
 ### Health
 - `GET /api/health/live` - Liveness check

@@ -19,6 +19,7 @@ export interface MediaFilters {
   sourceDeviceId?: string;
   sourceDeviceName?: string;
   missingGeo?: boolean;
+  noFaces?: boolean;
 }
 
 export function whereType(value: string): Prisma.MediaItemWhereInput {
@@ -107,6 +108,10 @@ export function whereMissingGeo(value: boolean): Prisma.MediaItemWhereInput {
   return { takenLat: { not: null }, takenLng: { not: null } };
 }
 
+export function whereNoFaces(value: boolean): Prisma.MediaItemWhereInput {
+  return value === true ? { faces: { none: {} } } : {};
+}
+
 /**
  * Filter media items by people who appear in them (via face recognition).
  *
@@ -147,6 +152,7 @@ export function buildMediaWhere(
     sourceDeviceId,
     sourceDeviceName,
     missingGeo,
+    noFaces,
   } = filters;
 
   const where: Prisma.MediaItemWhereInput = {
@@ -169,6 +175,7 @@ export function buildMediaWhere(
     ...(sourceDeviceName ? whereSourceDeviceName(sourceDeviceName) : {}),
     ...(sourceDeviceId ? whereSourceDeviceId(sourceDeviceId) : {}),
     ...(missingGeo !== undefined ? whereMissingGeo(missingGeo) : {}),
+    ...(noFaces !== undefined ? whereNoFaces(noFaces) : {}),
   };
 
   return where;

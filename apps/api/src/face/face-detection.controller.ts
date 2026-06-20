@@ -21,7 +21,7 @@ import {
   ApiProperty,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { IsString, IsOptional, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsUUID } from 'class-validator';
 import { CircleRole } from '@prisma/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -35,6 +35,7 @@ import {
   MediaType,
 } from '@prisma/client';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { PeopleService } from './people.service';
 
 // ---------------------------------------------------------------------------
 // DTOs
@@ -55,6 +56,25 @@ class BackfillFaceDetectionDto {
   force?: boolean;
 }
 
+class AddPersonToMediaDto {
+  @ApiProperty({
+    description: 'Existing person ID (UUID); mutually exclusive with name',
+    required: false,
+  })
+  @IsOptional()
+  @IsUUID()
+  personId?: string;
+
+  @ApiProperty({
+    description:
+      'Person name; finds or creates a person in the circle; mutually exclusive with personId',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  name?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Controller
 // ---------------------------------------------------------------------------
@@ -69,6 +89,7 @@ export class FaceDetectionController {
     private readonly prisma: PrismaService,
     private readonly circleMembershipService: CircleMembershipService,
     private readonly enrichmentJobService: EnrichmentJobService,
+    private readonly peopleService: PeopleService,
   ) {}
 
   // --------------------------------------------------------------------------
@@ -400,6 +421,67 @@ export class FaceDetectionController {
     );
 
     return { data: result };
+  }
+
+  // --------------------------------------------------------------------------
+  // POST /api/media/:id/people
+  // --------------------------------------------------------------------------
+
+  @Post('media/:id/people')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Manually associate a person with a media item (no bounding box required)',
+  })
+  @ApiParam({ name: 'id', description: 'Media item ID' })
+  @ApiResponse({ status: 201, description: 'Association created or returned if already exists' })
+  @ApiResponse({ status: 400, description: 'Must provide personId or name (not both)' })
+  @ApiResponse({ status: 403, description: 'Collaborator role required' })
+  @ApiResponse({ status: 404, description: 'Media item or person not found' })
+  async addPersonToMedia(
+    @Param('id') mediaItemId: string,
+    @Body() dto: AddPersonToMediaDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    if (!dto.personId && !dto.name) {
+      throw new BadRequestException('Provide either personId or name');
+    }
+    if (dto.personId && dto.name) {
+      throw new BadRequestException('Provide either personId or name, not both');
+    }
+    const result = await this.peopleService.addPersonToMedia(
+      mediaItemId,
+      user.id,
+      user.permissions,
+      dto,
+    );
+    return { data: result };
+  }
+
+  // --------------------------------------------------------------------------
+  // DELETE /api/media/:id/people/:personId
+  // --------------------------------------------------------------------------
+
+  @Delete('media/:id/people/:personId')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Remove manual person association from a media item' })
+  @ApiParam({ name: 'id', description: 'Media item ID' })
+  @ApiParam({ name: 'personId', description: 'Person ID to disassociate' })
+  @ApiResponse({ status: 204, description: 'Manual association removed' })
+  @ApiResponse({ status: 403, description: 'Collaborator role required' })
+  @ApiResponse({ status: 404, description: 'Media item not found or no manual association exists' })
+  async removePersonFromMedia(
+    @Param('id') mediaItemId: string,
+    @Param('personId') personId: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    await this.peopleService.removePersonFromMedia(
+      mediaItemId,
+      personId,
+      user.id,
+      user.permissions,
+    );
   }
 
   // --------------------------------------------------------------------------

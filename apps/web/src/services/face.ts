@@ -348,3 +348,29 @@ export async function listUnassignedFaces(
   if (opts?.pageSize) p.set('pageSize', String(opts.pageSize));
   return api.get<UnassignedFacesResponse>(`/people/unassigned?${p.toString()}`);
 }
+
+// ---------------------------------------------------------------------------
+// Manual people association
+// ---------------------------------------------------------------------------
+
+export interface AddPersonToMediaResult {
+  personId: string;
+  personName: string | null;
+  faceId: string;
+  mediaItemId: string;
+}
+
+export async function addPersonToMedia(
+  mediaId: string,
+  body: { personId?: string; name?: string },
+): Promise<AddPersonToMediaResult> {
+  const result = await api.post<{ data: AddPersonToMediaResult }>(`/media/${mediaId}/people`, body);
+  return result.data;
+}
+
+export async function removePersonFromMedia(
+  mediaId: string,
+  personId: string,
+): Promise<void> {
+  await api.delete<void>(`/media/${mediaId}/people/${personId}`);
+}

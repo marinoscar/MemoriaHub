@@ -116,6 +116,8 @@ export interface MediaQueryParams {
   personIds?: string[];
   /** Match mode for multi-person filter. Default: 'any' (OR). */
   peopleMatch?: 'any' | 'all';
+  /** Filter to items with no detected faces (no_faces detection status). */
+  noFaces?: boolean;
 }
 
 // ---------------------------------------------------------------------------
