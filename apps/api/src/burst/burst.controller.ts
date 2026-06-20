@@ -48,7 +48,7 @@ export class BurstController {
     @Query() query: BurstQueryDto,
     @CurrentUser() user: RequestUser,
   ) {
-    return this.burstService.listBurstGroups(query, user.userId, user.permissions);
+    return this.burstService.listBurstGroups(query, user.id, user.permissions);
   }
 
   /**
@@ -66,7 +66,7 @@ export class BurstController {
     @Body() dto: BurstBackfillDto,
     @CurrentUser() user: RequestUser,
   ) {
-    return this.burstService.backfillBurstDetection(dto, user.userId, user.permissions);
+    return this.burstService.backfillBurstDetection(dto, user.id, user.permissions);
   }
 
   /**
@@ -83,7 +83,7 @@ export class BurstController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: RequestUser,
   ) {
-    return this.burstService.getBurstGroup(id, user.userId, user.permissions);
+    return this.burstService.getBurstGroup(id, user.id, user.permissions);
   }
 
   /**
@@ -103,7 +103,7 @@ export class BurstController {
     @Body() dto: ResolveBurstDto,
     @CurrentUser() user: RequestUser,
   ) {
-    return this.burstService.resolveBurstGroup(id, dto, user.userId, user.permissions);
+    return this.burstService.resolveBurstGroup(id, dto, user.id, user.permissions);
   }
 
   /**
@@ -122,6 +122,6 @@ export class BurstController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: RequestUser,
   ) {
-    return this.burstService.dismissBurstGroup(id, user.userId, user.permissions);
+    return this.burstService.dismissBurstGroup(id, user.id, user.permissions);
   }
 }
