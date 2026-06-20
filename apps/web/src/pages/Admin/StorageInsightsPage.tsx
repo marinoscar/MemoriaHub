@@ -83,7 +83,7 @@ function InFlightChip({ jobState, refreshing }: InFlightChipProps) {
       size="small"
       icon={icon}
       label={
-        <Box display="flex" alignItems="center" gap={0.75}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
           {label}
           <CircularProgress size={10} thickness={5} color="inherit" />
         </Box>
@@ -180,17 +180,19 @@ function StorageInsightsPageContent() {
 
   return (
     <Container maxWidth="xl">
-      <Box py={4}>
+      <Box sx={{ py: 4 }}>
         {/* Header */}
         <Box
-          display="flex"
-          alignItems={{ xs: 'flex-start', sm: 'center' }}
-          justifyContent="space-between"
-          flexDirection={{ xs: 'column', sm: 'row' }}
-          gap={2}
-          mb={4}
+          sx={{
+            display: 'flex',
+            alignItems: { xs: 'flex-start', sm: 'center' },
+            justifyContent: 'space-between',
+            flexDirection: { xs: 'column', sm: 'row' },
+            gap: 2,
+            mb: 4,
+          }}
         >
-          <Box display="flex" alignItems="center" gap={1.5}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <InsightsIcon sx={{ fontSize: 32, color: 'primary.main' }} />
             <Box>
               <Typography variant="h5" fontWeight={700}>
@@ -201,7 +203,7 @@ function StorageInsightsPageContent() {
               </Typography>
             </Box>
           </Box>
-          <Box display="flex" alignItems="center" gap={1.5} flexShrink={0}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0 }}>
             {/* In-flight status chip — only visible while refreshing */}
             <InFlightChip jobState={jobState} refreshing={refreshing} />
 
@@ -264,11 +266,13 @@ function StorageInsightsPageContent() {
           <Card variant="outlined" sx={{ borderRadius: 2 }}>
             <CardContent>
               <Box
-                display="flex"
-                flexDirection="column"
-                alignItems="center"
-                py={6}
-                gap={2}
+                sx={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  py: 6,
+                  gap: 2,
+                }}
               >
                 <StorageIcon sx={{ fontSize: 56, color: 'text.disabled' }} />
                 <Typography variant="h6" fontWeight={600} color="text.secondary">
@@ -294,11 +298,13 @@ function StorageInsightsPageContent() {
           <Card variant="outlined" sx={{ borderRadius: 2 }}>
             <CardContent>
               <Box
-                display="flex"
-                flexDirection="column"
-                alignItems="center"
-                py={6}
-                gap={2}
+                sx={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  py: 6,
+                  gap: 2,
+                }}
               >
                 <CircularProgress size={48} thickness={3} />
                 <Typography variant="h6" fontWeight={600} color="text.secondary">
@@ -314,7 +320,7 @@ function StorageInsightsPageContent() {
 
         {/* Data loaded — KPIs update automatically as polling refreshes data */}
         {!loading && m && (
-          <Box display="flex" flexDirection="column" gap={4}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {/* Tier 1 — Hero KPIs */}
             <Grid container spacing={3}>
               <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
