@@ -77,7 +77,6 @@ function makeMediaItem(overrides: Partial<any> = {}) {
     cameraMake: null,
     cameraModel: null,
     contentHash: null,
-    title: null,
     caption: null,
     description: null,
     favorite: false,
@@ -786,7 +785,7 @@ describe('MediaService', () => {
   describe('updateMedia', () => {
     it('should update mutable fields for the owner', async () => {
       const item = makeMediaItem({ addedById: 'user-1' });
-      const updated = { ...item, title: 'New Title', favorite: true };
+      const updated = { ...item, favorite: true };
 
       // findUnique called by getMediaWithOwnershipCheck
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
@@ -794,7 +793,7 @@ describe('MediaService', () => {
 
       const result = await service.updateMedia(
         item.id,
-        { title: 'New Title', favorite: true },
+        { favorite: true },
         'user-1',
         ownPerms,
       );
@@ -803,7 +802,7 @@ describe('MediaService', () => {
       expect(mockPrisma.mediaItem.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: item.id },
-          data: expect.objectContaining({ title: 'New Title', favorite: true }),
+          data: expect.objectContaining({ favorite: true }),
         }),
       );
     });
@@ -814,7 +813,7 @@ describe('MediaService', () => {
       mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
-        service.updateMedia(item.id, { title: 'hack' }, 'user-1', ownPerms),
+        service.updateMedia(item.id, { caption: 'hack' }, 'user-1', ownPerms),
       ).rejects.toThrow(ForbiddenException);
 
       expect(mockPrisma.mediaItem.update).not.toHaveBeenCalled();
@@ -822,19 +821,19 @@ describe('MediaService', () => {
 
     it('should allow Admin with media:write_any to update another user\'s item', async () => {
       const item = makeMediaItem({ addedById: 'other-user' });
-      const updated = { ...item, title: 'Admin Updated' };
+      const updated = { ...item, caption: 'Admin Updated' };
 
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
       mockPrisma.mediaItem.update.mockResolvedValue(updated as any);
 
       const result = await service.updateMedia(
         item.id,
-        { title: 'Admin Updated' },
+        { caption: 'Admin Updated' },
         'user-1',
         anyPerms,
       );
 
-      expect(result.title).toBe('Admin Updated');
+      expect(result.caption).toBe('Admin Updated');
     });
 
     it('should throw NotFoundException when item does not exist', async () => {

@@ -174,7 +174,6 @@ function makeFullItem(id: string): MediaItem {
     cameraMake: null,
     cameraModel: null,
     originalFilename: 'photo.jpg',
-    title: null,
     caption: null,
     description: null,
     favorite: false,

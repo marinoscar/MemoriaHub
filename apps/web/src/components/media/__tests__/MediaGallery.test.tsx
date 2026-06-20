@@ -105,7 +105,6 @@ function makeItem(id: string, overrides: Partial<MediaItem> = {}): MediaItem {
     cameraMake: null,
     cameraModel: null,
     originalFilename: `file-${id}.jpg`,
-    title: `Photo ${id}`,
     caption: null,
     description: null,
     favorite: false,
@@ -147,9 +146,9 @@ describe('MediaGallery', () => {
   describe('controlled mode', () => {
     it('renders items grouped by day with a sticky day header', () => {
       const items = [
-        makeItem('a', { capturedAt: '2024-06-15T10:00:00.000Z', title: 'Photo A' }),
-        makeItem('b', { capturedAt: '2024-06-15T12:00:00.000Z', title: 'Photo B' }),
-        makeItem('c', { capturedAt: '2024-05-20T09:00:00.000Z', title: 'Photo C' }),
+        makeItem('a', { capturedAt: '2024-06-15T10:00:00.000Z', originalFilename: 'Photo A.jpg' }),
+        makeItem('b', { capturedAt: '2024-06-15T12:00:00.000Z', originalFilename: 'Photo B.jpg' }),
+        makeItem('c', { capturedAt: '2024-05-20T09:00:00.000Z', originalFilename: 'Photo C.jpg' }),
       ];
 
       render(
@@ -161,14 +160,14 @@ describe('MediaGallery', () => {
       );
 
       // Thumbnails render as img elements
-      expect(screen.getByAltText('Photo A')).toBeInTheDocument();
-      expect(screen.getByAltText('Photo B')).toBeInTheDocument();
-      expect(screen.getByAltText('Photo C')).toBeInTheDocument();
+      expect(screen.getByAltText('Photo A.jpg')).toBeInTheDocument();
+      expect(screen.getByAltText('Photo B.jpg')).toBeInTheDocument();
+      expect(screen.getByAltText('Photo C.jpg')).toBeInTheDocument();
     });
 
     it('opens the lightbox when a tile is clicked (no selection active)', async () => {
       const user = userEvent.setup();
-      const items = [makeItem('x', { title: 'Click Me' })];
+      const items = [makeItem('x', { originalFilename: 'Click Me.jpg' })];
 
       render(
         <MediaGallery
@@ -178,7 +177,7 @@ describe('MediaGallery', () => {
         />,
       );
 
-      const tile = screen.getByAltText('Click Me');
+      const tile = screen.getByAltText('Click Me.jpg');
       await user.click(tile);
 
       await waitFor(() => {
@@ -231,7 +230,7 @@ describe('MediaGallery', () => {
   describe('selection', () => {
     it('shows the bulk toolbar after selecting an item via its checkbox', async () => {
       const user = userEvent.setup();
-      const items = [makeItem('sel-1', { title: 'Selectable' })];
+      const items = [makeItem('sel-1', { originalFilename: 'selectable.jpg' })];
 
       render(
         <MediaGallery
@@ -252,7 +251,7 @@ describe('MediaGallery', () => {
 
     it('deselects an item when the checkbox is clicked again', async () => {
       const user = userEvent.setup();
-      const items = [makeItem('sel-2', { title: 'Toggle Select' })];
+      const items = [makeItem('sel-2', { originalFilename: 'toggle-select.jpg' })];
 
       render(
         <MediaGallery
@@ -280,7 +279,7 @@ describe('MediaGallery', () => {
 
     it('clicking a tile in selection mode toggles selection instead of opening lightbox', async () => {
       const user = userEvent.setup();
-      const items = [makeItem('s1', { title: 'Select via tile' })];
+      const items = [makeItem('s1', { originalFilename: 'select-via-tile.jpg' })];
 
       render(
         <MediaGallery
@@ -297,7 +296,7 @@ describe('MediaGallery', () => {
       });
 
       // Now click the tile image — should deselect (toggle), not open lightbox
-      const tile = screen.getByAltText('Select via tile');
+      const tile = screen.getByAltText('select-via-tile.jpg');
       await user.click(tile);
 
       await waitFor(() => {
@@ -315,9 +314,9 @@ describe('MediaGallery', () => {
       const user = userEvent.setup();
       // All items on the same day so they fall in one group
       const items = [
-        makeItem('g1', { capturedAt: '2024-06-15T08:00:00.000Z', title: 'Group A' }),
-        makeItem('g2', { capturedAt: '2024-06-15T09:00:00.000Z', title: 'Group B' }),
-        makeItem('g3', { capturedAt: '2024-06-15T10:00:00.000Z', title: 'Group C' }),
+        makeItem('g1', { capturedAt: '2024-06-15T08:00:00.000Z', originalFilename: 'group-a.jpg' }),
+        makeItem('g2', { capturedAt: '2024-06-15T09:00:00.000Z', originalFilename: 'group-b.jpg' }),
+        makeItem('g3', { capturedAt: '2024-06-15T10:00:00.000Z', originalFilename: 'group-c.jpg' }),
       ];
 
       render(
@@ -345,7 +344,7 @@ describe('MediaGallery', () => {
     it('shows a "Clear" button after selecting items in a group', async () => {
       const user = userEvent.setup();
       const items = [
-        makeItem('c1', { capturedAt: '2024-06-15T08:00:00.000Z', title: 'Clear A' }),
+        makeItem('c1', { capturedAt: '2024-06-15T08:00:00.000Z', originalFilename: 'clear-a.jpg' }),
       ];
 
       render(
@@ -369,8 +368,8 @@ describe('MediaGallery', () => {
       const user = userEvent.setup();
       // Two groups: June 15 and June 16
       const items = [
-        makeItem('d1', { capturedAt: '2024-06-15T08:00:00.000Z', title: 'Day1' }),
-        makeItem('d2', { capturedAt: '2024-06-16T08:00:00.000Z', title: 'Day2' }),
+        makeItem('d1', { capturedAt: '2024-06-15T08:00:00.000Z', originalFilename: 'day1.jpg' }),
+        makeItem('d2', { capturedAt: '2024-06-16T08:00:00.000Z', originalFilename: 'day2.jpg' }),
       ];
 
       render(
@@ -402,8 +401,8 @@ describe('MediaGallery', () => {
   describe('feed mode', () => {
     it('renders items returned by listMedia in feed mode', async () => {
       const feedItems = [
-        makeItem('f1', { capturedAt: '2024-07-01T10:00:00.000Z', title: 'Feed Photo 1' }),
-        makeItem('f2', { capturedAt: '2024-07-01T11:00:00.000Z', title: 'Feed Photo 2' }),
+        makeItem('f1', { capturedAt: '2024-07-01T10:00:00.000Z', originalFilename: 'feed-photo-1.jpg' }),
+        makeItem('f2', { capturedAt: '2024-07-01T11:00:00.000Z', originalFilename: 'feed-photo-2.jpg' }),
       ];
 
       mockListMedia.mockResolvedValueOnce({
@@ -420,8 +419,8 @@ describe('MediaGallery', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByAltText('Feed Photo 1')).toBeInTheDocument();
-        expect(screen.getByAltText('Feed Photo 2')).toBeInTheDocument();
+        expect(screen.getByAltText('feed-photo-1.jpg')).toBeInTheDocument();
+        expect(screen.getByAltText('feed-photo-2.jpg')).toBeInTheDocument();
       });
     });
 

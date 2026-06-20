@@ -76,7 +76,6 @@ function makeMediaItem(overrides: Record<string, any> = {}) {
     cameraMake: null,
     cameraModel: null,
     contentHash: null,
-    title: null,
     caption: null,
     description: null,
     favorite: false,

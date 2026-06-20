@@ -116,7 +116,6 @@ function makeMediaItem(id: string, overrides: Partial<MediaItem> = {}): MediaIte
     cameraMake: null,
     cameraModel: null,
     originalFilename: `file-${id}.jpg`,
-    title: `Media ${id}`,
     caption: null,
     description: null,
     favorite: false,
@@ -245,29 +244,29 @@ describe('MediaLibraryPage', () => {
       // When thumbnailUrl is set the tile renders an <img> element.
       // When it's null, a placeholder icon is shown instead (no img).
       const items = [
-        makeMediaItem('a', { title: 'Photo A', thumbnailUrl: 'http://cdn/a.jpg' }),
-        makeMediaItem('b', { title: 'Photo B', thumbnailUrl: 'http://cdn/b.jpg' }),
-        makeMediaItem('c', { title: 'Photo C', thumbnailUrl: 'http://cdn/c.jpg' }),
+        makeMediaItem('a', { originalFilename: 'photo-a.jpg', thumbnailUrl: 'http://cdn/a.jpg' }),
+        makeMediaItem('b', { originalFilename: 'photo-b.jpg', thumbnailUrl: 'http://cdn/b.jpg' }),
+        makeMediaItem('c', { originalFilename: 'photo-c.jpg', thumbnailUrl: 'http://cdn/c.jpg' }),
       ];
       mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
       render(<MediaLibraryPage />);
-      expect(screen.getByAltText('Photo A')).toBeInTheDocument();
-      expect(screen.getByAltText('Photo B')).toBeInTheDocument();
-      expect(screen.getByAltText('Photo C')).toBeInTheDocument();
+      expect(screen.getByAltText('photo-a.jpg')).toBeInTheDocument();
+      expect(screen.getByAltText('photo-b.jpg')).toBeInTheDocument();
+      expect(screen.getByAltText('photo-c.jpg')).toBeInTheDocument();
     });
 
     it('should render placeholder icons when thumbnailUrl is null', () => {
       const items = [
-        makeMediaItem('p1', { title: 'No Thumb', thumbnailUrl: null }),
+        makeMediaItem('p1', { originalFilename: 'no-thumb.jpg', thumbnailUrl: null }),
       ];
       mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
       render(<MediaLibraryPage />);
       // No img alt text; placeholder icon is present
-      expect(screen.queryByAltText('No Thumb')).not.toBeInTheDocument();
+      expect(screen.queryByAltText('no-thumb.jpg')).not.toBeInTheDocument();
     });
 
     it('should not render empty-state text when items exist', () => {
-      const items = [makeMediaItem('x', { title: 'Any Photo' })];
+      const items = [makeMediaItem('x', { originalFilename: 'any-photo.jpg' })];
       mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
       render(<MediaLibraryPage />);
       expect(screen.queryByText(/no media found/i)).not.toBeInTheDocument();
@@ -400,7 +399,7 @@ describe('MediaLibraryPage', () => {
     it('should open the lightbox when an image tile is clicked', async () => {
       const user = userEvent.setup();
       const clickItem = makeMediaItem('click-me', {
-        title: 'Click Target',
+        originalFilename: 'click-target.jpg',
         thumbnailUrl: 'http://cdn/click-me.jpg',
       });
       mockUseMedia.mockReturnValue(makeUseMediaDefaults([clickItem]));
@@ -409,7 +408,7 @@ describe('MediaLibraryPage', () => {
       render(<MediaLibraryPage />);
 
       // The tile renders an <img> when thumbnailUrl is set
-      const tileImg = screen.getByAltText('Click Target');
+      const tileImg = screen.getByAltText('click-target.jpg');
       await user.click(tileImg);
 
       // MediaLightbox renders as a dialog when open (index !== null).
@@ -421,7 +420,7 @@ describe('MediaLibraryPage', () => {
     });
 
     it('should render the detail drawer in the closed state initially', () => {
-      const items = [makeMediaItem('d1', { title: 'Drawer Test' })];
+      const items = [makeMediaItem('d1', { originalFilename: 'drawer-test.jpg' })];
       mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
       render(<MediaLibraryPage />);
       // The close-detail-panel button should not be visible before tile click
@@ -484,7 +483,7 @@ describe('MediaLibraryPage', () => {
       const user = userEvent.setup();
       const items = [
         makeMediaItem('sel-1', {
-          title: 'Selectable Item',
+          originalFilename: 'selectable-item.jpg',
           thumbnailUrl: 'http://cdn/sel-1.jpg',
         }),
       ];
@@ -510,7 +509,7 @@ describe('MediaLibraryPage', () => {
       const user = userEvent.setup();
       const items = [
         makeMediaItem('click-me', {
-          title: 'Click Target',
+          originalFilename: 'click-target.jpg',
           thumbnailUrl: 'http://cdn/click-me.jpg',
         }),
       ];
@@ -518,13 +517,13 @@ describe('MediaLibraryPage', () => {
       render(<MediaLibraryPage />);
 
       // Verify tile image is present before entering selection mode
-      expect(screen.getByAltText('Click Target')).toBeInTheDocument();
+      expect(screen.getByAltText('click-target.jpg')).toBeInTheDocument();
 
       // Enter selection mode
       await user.click(screen.getByRole('button', { name: /enter selection mode/i }));
 
       // Click the tile image — in selection mode this should toggle selection, NOT open drawer
-      const tileImg = screen.getByAltText('Click Target');
+      const tileImg = screen.getByAltText('click-target.jpg');
       await user.click(tileImg);
 
       // The drawer "Close detail panel" button only appears when the drawer is open.
@@ -608,13 +607,13 @@ describe('MediaLibraryPage', () => {
         makeMediaItem('vid-thumb', {
           type: 'video',
           thumbnailUrl: 'http://cdn/poster.jpg',
-          title: 'My Video',
+          originalFilename: 'my-video.mp4',
         }),
       ];
       mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
       render(<MediaLibraryPage />);
       // The image renders
-      expect(screen.getByAltText('My Video')).toBeInTheDocument();
+      expect(screen.getByAltText('my-video.mp4')).toBeInTheDocument();
       // The play indicator is present
       expect(screen.getByTestId('play-indicator')).toBeInTheDocument();
     });
@@ -624,12 +623,12 @@ describe('MediaLibraryPage', () => {
         makeMediaItem('photo-thumb', {
           type: 'photo',
           thumbnailUrl: 'http://cdn/photo.jpg',
-          title: 'My Photo',
+          originalFilename: 'my-photo.jpg',
         }),
       ];
       mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
       render(<MediaLibraryPage />);
-      expect(screen.getByAltText('My Photo')).toBeInTheDocument();
+      expect(screen.getByAltText('my-photo.jpg')).toBeInTheDocument();
       expect(screen.queryByTestId('play-indicator')).not.toBeInTheDocument();
     });
 
