@@ -40,6 +40,11 @@ export class AutoTaggingService {
   ) {}
 
   async processMediaItem(job: EnrichmentJob): Promise<void> {
+    // Guard: auto_tagging jobs must always have a mediaItemId (global/null jobs are not valid here)
+    if (!job.mediaItemId) {
+      throw new Error('auto_tagging job missing mediaItemId');
+    }
+
     // a. Load MediaItem with storageObject, addedById, circleId, type, deletedAt
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: job.mediaItemId },

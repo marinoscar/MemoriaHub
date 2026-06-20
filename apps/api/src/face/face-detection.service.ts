@@ -27,6 +27,11 @@ export class FaceDetectionService {
   ) {}
 
   async processMediaItem(job: EnrichmentJob): Promise<void> {
+    // Guard: face_detection jobs must always have a mediaItemId (global/null jobs are not valid here)
+    if (!job.mediaItemId) {
+      throw new Error('face_detection job missing mediaItemId');
+    }
+
     // 1. Set MediaFaceStatus → processing
     await this.prisma.mediaFaceStatus.upsert({
       where: { mediaItemId: job.mediaItemId },

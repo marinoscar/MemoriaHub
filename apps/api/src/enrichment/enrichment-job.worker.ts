@@ -128,7 +128,7 @@ export class EnrichmentJobWorker implements OnModuleInit, OnModuleDestroy {
         },
       });
 
-      this.logger.log(`EnrichmentJob ${job.id} (type="${job.type}") succeeded for MediaItem ${job.mediaItemId}`);
+      this.logger.log(`EnrichmentJob ${job.id} (type="${job.type}") succeeded for MediaItem ${job.mediaItemId ?? 'global'}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`EnrichmentJob ${job.id} (type="${job.type}") failed: ${message}`);
