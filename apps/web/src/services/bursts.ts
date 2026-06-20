@@ -77,8 +77,8 @@ export async function listBurstGroups(params: {
   if (params.status) p.set('status', params.status);
   if (params.page) p.set('page', String(params.page));
   if (params.pageSize) p.set('pageSize', String(params.pageSize));
-  const result = await api.get<{ data: BurstGroupSummary[]; meta: BurstListMeta }>(`/media/bursts?${p.toString()}`);
-  return { items: result.data ?? [], meta: result.meta };
+  const result = await api.get<{ items: BurstGroupSummary[]; meta: BurstListMeta }>(`/media/bursts?${p.toString()}`);
+  return { items: result.items ?? [], meta: result.meta };
 }
 
 export async function getBurstGroup(id: string): Promise<BurstGroupDetail> {

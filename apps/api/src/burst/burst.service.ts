@@ -132,7 +132,7 @@ export class BurstService {
     );
 
     return {
-      data,
+      items: data,
       meta: { total, page, pageSize },
     };
   }
