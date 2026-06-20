@@ -748,6 +748,29 @@ model MediaFaceStatus {
 }
 
 // =============================================================================
+// Storage Insights
+// =============================================================================
+
+enum InsightsSnapshotStatus {
+  computing
+  ready
+  failed
+}
+
+model InsightsSnapshot {
+  id         String                 @id @default(uuid()) @db.Uuid
+  status     InsightsSnapshotStatus @default(computing)
+  metrics    Json?                  @db.JsonB
+  computedAt DateTime?              @map("computed_at") @db.Timestamptz
+  durationMs Int?                   @map("duration_ms")
+  error      String?
+  createdAt  DateTime               @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([createdAt])
+  @@map("insights_snapshots")
+}
+
+// =============================================================================
 // Auto-Tagging
 // =============================================================================
 
