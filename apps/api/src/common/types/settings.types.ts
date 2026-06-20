@@ -37,6 +37,10 @@ export interface SystemSettingsValue {
         provider: string | null;
         model: string | null;
       };
+      embedding: {
+        provider: string | null;
+        model: string | null;
+      };
     };
   };
   face?: {
@@ -79,6 +83,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     features: {
       search: { provider: null, model: null },
       tagging: { provider: null, model: null },
+      embedding: { provider: null, model: null },
     },
   },
   face: {

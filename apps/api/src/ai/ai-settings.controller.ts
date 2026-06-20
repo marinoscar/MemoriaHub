@@ -24,6 +24,7 @@ import {
   TestAiProviderDto,
   SetSearchFeatureDto,
   SetTaggingFeatureDto,
+  SetEmbeddingFeatureDto,
 } from './dto/ai-credentials.dto';
 
 @ApiTags('AI Settings')
@@ -108,5 +109,18 @@ export class AiSettingsController {
     @CurrentUser('id') userId: string,
   ) {
     return this.aiSettingsService.setTaggingFeature(dto, userId);
+  }
+
+  @Put('features/embedding')
+  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.AI_SETTINGS_WRITE] })
+  @ApiOperation({
+    summary: 'Set active provider and model for AI embedding feature (Admin)',
+  })
+  @ApiResponse({ status: 200, description: 'Embedding feature config updated' })
+  async setEmbeddingFeature(
+    @Body() dto: SetEmbeddingFeatureDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.aiSettingsService.setEmbeddingFeature(dto, userId);
   }
 }

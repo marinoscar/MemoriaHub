@@ -13,6 +13,7 @@ import {
   TestAiProviderDto,
   SetSearchFeatureDto,
   SetTaggingFeatureDto,
+  SetEmbeddingFeatureDto,
 } from './dto/ai-credentials.dto';
 
 @Injectable()
@@ -64,6 +65,7 @@ export class AiSettingsService {
       features: ai?.features ?? {
         search: { provider: null, model: null },
         tagging: { provider: null, model: null },
+        embedding: { provider: null, model: null },
       },
     };
   }
@@ -185,6 +187,35 @@ export class AiSettingsService {
       userId,
     );
     return { provider: dto.provider, model: dto.model };
+  }
+
+  /** Update embedding feature settings in system settings */
+  async setEmbeddingFeature(dto: SetEmbeddingFeatureDto, userId: string) {
+    await this.systemSettings.patchSettings(
+      {
+        ai: {
+          features: {
+            embedding: { provider: dto.provider, model: dto.model },
+          },
+        },
+      } as any,
+      userId,
+    );
+    return { provider: dto.provider, model: dto.model };
+  }
+
+  /**
+   * Resolve the active embedding provider + model from system settings.
+   * Returns null when either provider or model is unset.
+   * Used internally by enrichment services that need to generate text embeddings.
+   */
+  async resolveEmbeddingConfig(): Promise<{ provider: string; model: string } | null> {
+    const sysSettings = await this.systemSettings.getSettings();
+    const embedding = sysSettings.ai?.features?.embedding;
+    if (!embedding?.provider || !embedding?.model) {
+      return null;
+    }
+    return { provider: embedding.provider, model: embedding.model };
   }
 
   /**
