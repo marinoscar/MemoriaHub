@@ -31,8 +31,8 @@ export interface EnrichmentJobDto {
   status: JobStatus;
   reason: string;
   priority: number;
-  mediaItemId: string;
-  circleId: string;
+  mediaItemId: string | null;
+  circleId: string | null;
   attempts: number;
   lastError: string | null;
   providerKey: string | null;

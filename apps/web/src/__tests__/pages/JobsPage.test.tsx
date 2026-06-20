@@ -234,6 +234,17 @@ describe('JobsPage', () => {
         expect(screen.getByText(/no jobs found/i)).toBeInTheDocument();
       });
     });
+
+    it('renders "Global" in the Media Item cell for jobs with null mediaItemId (system jobs)', async () => {
+      const jobs = [makeJob({ id: 'job-global-1', type: 'storage_insights', mediaItemId: null, circleId: null })];
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
+
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await waitFor(() => {
+        expect(screen.getByText('Global')).toBeInTheDocument();
+      });
+    });
   });
 
   // =========================================================================
