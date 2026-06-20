@@ -205,13 +205,6 @@ describe('MediaLibraryPage', () => {
       expect(screen.getByRole('button', { name: /filters/i })).toBeInTheDocument();
     });
 
-    it('should render the Upload FAB', () => {
-      render(<MediaLibraryPage />);
-      // Multiple "Upload media" labelled buttons can exist (FAB + empty-state CTA)
-      expect(
-        screen.getAllByRole('button', { name: /upload media/i }).length,
-      ).toBeGreaterThan(0);
-    });
   });
 
   // -------------------------------------------------------------------------
@@ -236,11 +229,10 @@ describe('MediaLibraryPage', () => {
       expect(screen.getByText(/no media found/i)).toBeInTheDocument();
     });
 
-    it('should show an Upload Media CTA in empty state', () => {
+    it('should mention the Upload button in the toolbar in the empty state', () => {
       render(<MediaLibraryPage />);
-      // The "Upload Media" button in empty-state body + the FAB both have this label
-      const uploadBtns = screen.getAllByRole('button', { name: /upload media/i });
-      expect(uploadBtns.length).toBeGreaterThanOrEqual(1);
+      // The empty state now refers the user to "the Upload button in the toolbar" (moved to AppBar)
+      expect(screen.getByText(/upload button in the toolbar/i)).toBeInTheDocument();
     });
   });
 

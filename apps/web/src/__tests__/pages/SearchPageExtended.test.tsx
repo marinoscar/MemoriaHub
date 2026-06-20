@@ -1,6 +1,12 @@
 /**
- * Extended coverage for the new SearchPage.
- * Tests streaming behavior, keyboard interactions, and explore navigation.
+ * Extended coverage for SearchPage (topbar-search refactor).
+ *
+ * The new SearchPage is a passive results/explore view:
+ *   - No conversational input (moved to TopbarSearch in AppBar).
+ *   - Reads results/isSearching/error from SearchContext.
+ *   - Navigates to explore carousels when idle.
+ *
+ * Tests cover: results branch, explore branch, clear, error, and edge cases.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -12,8 +18,9 @@ import { render } from '../utils/test-utils';
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/useSearch', () => ({
+vi.mock('../../contexts/SearchContext', () => ({
   useSearch: vi.fn(),
+  SearchProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
 vi.mock('../../hooks/useCircle', () => ({
@@ -22,14 +29,6 @@ vi.mock('../../hooks/useCircle', () => ({
 
 vi.mock('../../hooks/usePeople', () => ({
   usePeople: vi.fn(),
-}));
-
-vi.mock('../../hooks/useUserSettings', () => ({
-  useUserSettings: vi.fn(),
-}));
-
-vi.mock('../../services/searchAgentStream', () => ({
-  streamAgent: vi.fn(),
 }));
 
 vi.mock('../../services/media', () => ({
@@ -42,7 +41,7 @@ vi.mock('../../services/media', () => ({
 }));
 
 vi.mock('../../components/media/MediaGallery', () => ({
-  MediaGallery: vi.fn(() => null),
+  MediaGallery: vi.fn(() => <div data-testid="media-gallery" />),
 }));
 
 vi.mock('../../components/search/AdvancedSearchDialog', () => ({
@@ -54,17 +53,13 @@ vi.mock('../../components/search/AdvancedSearchDialog', () => ({
 // ---------------------------------------------------------------------------
 
 import SearchPage from '../../pages/SearchPage';
-import { useSearch } from '../../hooks/useSearch';
+import { useSearch } from '../../contexts/SearchContext';
 import { useCircle } from '../../hooks/useCircle';
 import { usePeople } from '../../hooks/usePeople';
-import { useUserSettings } from '../../hooks/useUserSettings';
-import { streamAgent } from '../../services/searchAgentStream';
 
 const mockUseSearch = vi.mocked(useSearch);
 const mockUseCircle = vi.mocked(useCircle);
 const mockUsePeople = vi.mocked(usePeople);
-const mockUseUserSettings = vi.mocked(useUserSettings);
-const mockStreamAgent = vi.mocked(streamAgent);
 
 // ---------------------------------------------------------------------------
 // Default mock factories
@@ -72,14 +67,13 @@ const mockStreamAgent = vi.mocked(streamAgent);
 
 function defaultSearchMock() {
   return {
-    fields: [],
-    searchResults: [],
-    meta: null,
-    isLoadingFields: false,
+    messages: [],
+    results: null,
     isSearching: false,
     error: null,
-    fetchFields: vi.fn().mockResolvedValue(undefined),
-    search: vi.fn().mockResolvedValue({ items: [], meta: { totalItems: 0, totalPages: 0, page: 1, pageSize: 20 } }),
+    runAgentSearch: vi.fn(),
+    runAdvancedResults: vi.fn(),
+    clearSearch: vi.fn(),
   };
 }
 
@@ -109,12 +103,14 @@ function defaultPeopleMock() {
   };
 }
 
-function defaultUserSettingsMock() {
+// Convenience factory: results state
+function withResults(items = [], totalItems = 0) {
   return {
-    settings: { search: { visibleFields: [] } },
-    isLoading: false,
-    error: null,
-    updateSettings: vi.fn().mockResolvedValue(undefined),
+    ...defaultSearchMock(),
+    results: {
+      items,
+      meta: { page: 1, pageSize: 20, totalItems, totalPages: Math.max(1, Math.ceil(totalItems / 20)) },
+    },
   };
 }
 
@@ -127,90 +123,86 @@ describe('SearchPage — extended coverage', () => {
     mockUseCircle.mockReturnValue(defaultCircleMock() as any);
     mockUseSearch.mockReturnValue(defaultSearchMock() as any);
     mockUsePeople.mockReturnValue(defaultPeopleMock() as any);
-    mockUseUserSettings.mockReturnValue(defaultUserSettingsMock() as any);
-    mockStreamAgent.mockResolvedValue(undefined);
   });
 
-  describe('Conversational search flow', () => {
-    it('calls streamAgent with correct body when Send is clicked', async () => {
-      mockStreamAgent.mockImplementation(async (_body, handlers) => {
-        handlers.onDone?.();
-      });
+  // -------------------------------------------------------------------------
+  // Results / clear flow
+  // -------------------------------------------------------------------------
+  describe('Results and clear flow', () => {
+    it('renders MediaGallery with results items', () => {
+      mockUseSearch.mockReturnValue(withResults([], 7) as any);
 
-      const user = userEvent.setup();
       render(<SearchPage />);
 
-      const input = screen.getByPlaceholderText(/search your memories/i);
-      await user.type(input, 'photos from Paris');
-      await user.click(screen.getByRole('button', { name: /send message/i }));
-
-      await waitFor(() => {
-        expect(mockStreamAgent).toHaveBeenCalledWith(
-          expect.objectContaining({
-            circleId: 'circle-1',
-            messages: expect.arrayContaining([
-              { role: 'user', content: 'photos from Paris' },
-            ]),
-          }),
-          expect.any(Object),
-          expect.any(AbortSignal),
-        );
-      });
+      expect(screen.getByTestId('media-gallery')).toBeInTheDocument();
+      expect(screen.getByText(/7 result/i)).toBeInTheDocument();
     });
 
-    it('does not send when Enter+Shift is pressed (newline)', async () => {
-      const user = userEvent.setup();
+    it('renders "1 result" (singular) when totalItems is 1', () => {
+      mockUseSearch.mockReturnValue(withResults([], 1) as any);
+
       render(<SearchPage />);
 
-      const input = screen.getByPlaceholderText(/search your memories/i);
-      await user.type(input, 'line1{Shift>}{Enter}{/Shift}');
-
-      expect(mockStreamAgent).not.toHaveBeenCalled();
+      expect(screen.getByText('1 result')).toBeInTheDocument();
     });
 
-    it('shows streaming spinner while streaming', async () => {
-      // Never resolves so we can observe streaming state
-      mockStreamAgent.mockReturnValue(new Promise(() => {}));
+    it('calls clearSearch when Clear is clicked', async () => {
+      const clearSearch = vi.fn();
+      mockUseSearch.mockReturnValue({ ...withResults(), clearSearch } as any);
 
       const user = userEvent.setup();
       render(<SearchPage />);
 
-      const input = screen.getByPlaceholderText(/search your memories/i);
-      await user.type(input, 'hello');
-      await user.click(screen.getByRole('button', { name: /send message/i }));
+      await user.click(screen.getByRole('button', { name: /clear/i }));
 
-      await waitFor(() => {
-        const progressbars = screen.getAllByRole('progressbar');
-        expect(progressbars.length).toBeGreaterThan(0);
-      });
+      expect(clearSearch).toHaveBeenCalledOnce();
     });
 
-    it('clears conversation when New search is clicked', async () => {
-      mockStreamAgent.mockImplementation(async (_body, handlers) => {
-        handlers.onToken?.('Some response');
-        handlers.onDone?.();
-      });
+    it('returns to explore view after clearSearch empties results', () => {
+      // Simulate cleared state (results null, not searching)
+      mockUseSearch.mockReturnValue(defaultSearchMock() as any);
 
-      const user = userEvent.setup();
       render(<SearchPage />);
 
-      const input = screen.getByPlaceholderText(/search your memories/i);
-      await user.type(input, 'test query');
-      await user.click(screen.getByRole('button', { name: /send message/i }));
-
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: /new search/i })).toBeInTheDocument();
-      });
-
-      await user.click(screen.getByRole('button', { name: /new search/i }));
-
-      await waitFor(() => {
-        // After clearing, explore rows should be visible again
-        expect(screen.queryByRole('button', { name: /new search/i })).not.toBeInTheDocument();
-      });
+      // Explore rows visible, no gallery
+      expect(screen.getByText('Places')).toBeInTheDocument();
+      expect(screen.queryByTestId('media-gallery')).not.toBeInTheDocument();
     });
   });
 
+  // -------------------------------------------------------------------------
+  // Searching state
+  // -------------------------------------------------------------------------
+  describe('Searching spinner', () => {
+    it('shows spinner and "Searching…" while isSearching=true and results=null', () => {
+      mockUseSearch.mockReturnValue({
+        ...defaultSearchMock(),
+        isSearching: true,
+        results: null,
+      } as any);
+
+      render(<SearchPage />);
+
+      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+      expect(screen.getByText(/searching/i)).toBeInTheDocument();
+    });
+
+    it('shows Clear button even while searching (with null results)', () => {
+      mockUseSearch.mockReturnValue({
+        ...defaultSearchMock(),
+        isSearching: true,
+        results: null,
+      } as any);
+
+      render(<SearchPage />);
+
+      expect(screen.getByRole('button', { name: /clear/i })).toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Explore section
+  // -------------------------------------------------------------------------
   describe('Explore section', () => {
     it('shows Places and Tags from explore endpoints', async () => {
       render(<SearchPage />);
@@ -221,40 +213,72 @@ describe('SearchPage — extended coverage', () => {
       });
     });
 
-    it('hides explore section when conversation is active', async () => {
-      mockStreamAgent.mockImplementation(async (_body, handlers) => {
-        handlers.onDone?.();
-      });
+    it('hides explore section when results are present', () => {
+      mockUseSearch.mockReturnValue(withResults([], 3) as any);
 
-      const user = userEvent.setup();
       render(<SearchPage />);
 
-      const input = screen.getByPlaceholderText(/search your memories/i);
-      await user.type(input, 'hello');
-      await user.click(screen.getByRole('button', { name: /send message/i }));
+      expect(screen.queryByText('Places')).not.toBeInTheDocument();
+      expect(screen.queryByText('Tags')).not.toBeInTheDocument();
+    });
 
-      await waitFor(() => {
-        // After sending, explore rows should be hidden
-        expect(screen.queryByText('Places')).not.toBeInTheDocument();
-      });
+    it('hides explore section while isSearching is true', () => {
+      mockUseSearch.mockReturnValue({
+        ...defaultSearchMock(),
+        isSearching: true,
+        results: null,
+      } as any);
+
+      render(<SearchPage />);
+
+      // When searching (results view branch), explore rows should NOT be rendered.
+      expect(screen.queryByText('Places')).not.toBeInTheDocument();
     });
   });
 
-  describe('Advanced search dialog', () => {
-    it('opens the advanced dialog when Tune button is clicked', async () => {
-      const { AdvancedSearchDialog } = await import('../../components/search/AdvancedSearchDialog');
-      const mockDialog = vi.mocked(AdvancedSearchDialog);
-      // Initially closed
-      mockDialog.mockImplementation(({ open }) => open ? <div>dialog-open</div> : null);
+  // -------------------------------------------------------------------------
+  // Error handling
+  // -------------------------------------------------------------------------
+  describe('Error display', () => {
+    it('shows an error Alert when error is non-null', () => {
+      mockUseSearch.mockReturnValue({
+        ...withResults(),
+        error: 'Search failed: timeout',
+      } as any);
 
-      const user = userEvent.setup();
       render(<SearchPage />);
 
-      await user.click(screen.getByRole('button', { name: /open advanced search options/i }));
+      expect(screen.getByText(/search failed: timeout/i)).toBeInTheDocument();
+    });
+  });
 
-      await waitFor(() => {
-        expect(screen.getByText('dialog-open')).toBeInTheDocument();
-      });
+  // -------------------------------------------------------------------------
+  // People explore row
+  // -------------------------------------------------------------------------
+  describe('People explore row', () => {
+    it('shows named people in the People row when available', () => {
+      mockUsePeople.mockReturnValue({
+        ...defaultPeopleMock(),
+        data: {
+          items: [
+            { id: 'p-1', name: 'Alice', isUnlabeled: false, faceCount: 3, coverFace: null, createdAt: '', updatedAt: '', favorite: false },
+            { id: 'p-2', name: 'Bob', isUnlabeled: false, faceCount: 2, coverFace: null, createdAt: '', updatedAt: '', favorite: false },
+          ],
+          meta: { page: 1, pageSize: 100, totalItems: 2, totalPages: 1 },
+        },
+      } as any);
+
+      render(<SearchPage />);
+
+      expect(screen.getByText('Alice')).toBeInTheDocument();
+      expect(screen.getByText('Bob')).toBeInTheDocument();
+    });
+
+    it('does NOT show the People section when there are no labeled people', () => {
+      // defaultPeopleMock returns no items — People section should not render
+      render(<SearchPage />);
+
+      expect(screen.queryByText('People')).not.toBeInTheDocument();
     });
   });
 });
