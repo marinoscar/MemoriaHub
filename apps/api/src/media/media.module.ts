@@ -41,6 +41,6 @@ import { ImageDimensionsProcessor } from '../storage/processing/processors/image
     ThumbnailProcessor,
     ImageDimensionsProcessor,
   ],
-  exports: [MediaService, MediaReprocessService],
+  exports: [MediaService, MediaReprocessService, MediaMetadataSyncService],
 })
 export class MediaModule {}
