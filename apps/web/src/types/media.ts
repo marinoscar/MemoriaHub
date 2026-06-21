@@ -302,5 +302,6 @@ export interface DashboardResponse {
     total: number;
     missingGeo: number;
     pendingBurstGroups?: number;
+    pendingSimilarityGroups?: number;
   };
 }
