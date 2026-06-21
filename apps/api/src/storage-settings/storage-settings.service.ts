@@ -14,9 +14,16 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { Readable } from 'stream';
+import {
+  StorageMigrationItemStatus,
+  StorageMigrationStatus,
+  StorageObjectStatus,
+  JobReason,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { encryptSecret, decryptSecret } from '../common/crypto/secret-cipher';
 import {
   KNOWN_STORAGE_PROVIDERS,
@@ -35,6 +42,7 @@ export class StorageSettingsService {
     private readonly prisma: PrismaService,
     private readonly resolver: StorageProviderResolver,
     private readonly systemSettings: SystemSettingsService,
+    private readonly enrichmentJobService: EnrichmentJobService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -472,5 +480,303 @@ export class StorageSettingsService {
     );
 
     return { activeProvider: provider };
+  }
+
+  // ---------------------------------------------------------------------------
+  // triggerMigration
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Create a migration run that copies all `ready` objects from sourceProvider
+   * to targetProvider via the enrichment queue (one job per object, copy-only).
+   *
+   * Rejects when:
+   * - source === target
+   * - either provider is unknown
+   * - an active run (pending|running) already exists
+   */
+  async triggerMigration(
+    { sourceProvider, targetProvider }: { sourceProvider: string; targetProvider: string },
+    userId: string,
+  ): Promise<{ runId: string; totalCount: number }> {
+    if (sourceProvider === targetProvider) {
+      throw new BadRequestException('sourceProvider and targetProvider must be different');
+    }
+
+    const sourceDescriptor = getStorageProviderDescriptor(sourceProvider);
+    if (!sourceDescriptor) {
+      throw new BadRequestException(`Unknown storage provider: "${sourceProvider}"`);
+    }
+
+    const targetDescriptor = getStorageProviderDescriptor(targetProvider);
+    if (!targetDescriptor) {
+      throw new BadRequestException(`Unknown storage provider: "${targetProvider}"`);
+    }
+
+    // Validate that the target provider is resolvable (has credentials or env fallback).
+    // We attempt to build it via the resolver — if it throws, credentials are missing.
+    try {
+      await this.resolver.getProviderFor(targetProvider);
+    } catch (err) {
+      throw new BadRequestException(
+        `Target provider "${targetProvider}" is not resolvable: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    // Block concurrent runs
+    const activeRun = await this.prisma.storageMigrationRun.findFirst({
+      where: {
+        status: { in: [StorageMigrationStatus.pending, StorageMigrationStatus.running] },
+      },
+    });
+    if (activeRun) {
+      throw new BadRequestException(
+        `A migration is already in progress (runId=${activeRun.id}, status=${activeRun.status})`,
+      );
+    }
+
+    // Find objects to migrate: only `ready` objects on the source provider.
+    // We select only the id column for performance; the handler fetches the
+    // full object row when it processes each job.
+    const objects = await this.prisma.storageObject.findMany({
+      where: {
+        storageProvider: sourceProvider,
+        status: StorageObjectStatus.ready,
+      },
+      select: { id: true },
+    });
+
+    const totalCount = objects.length;
+
+    // Create the run row
+    const run = await this.prisma.storageMigrationRun.create({
+      data: {
+        sourceProvider,
+        targetProvider,
+        status: StorageMigrationStatus.pending,
+        totalCount,
+        createdById: userId,
+      },
+    });
+
+    // Short-circuit: no objects to migrate → complete immediately
+    if (totalCount === 0) {
+      await this.prisma.storageMigrationRun.update({
+        where: { id: run.id },
+        data: {
+          status: StorageMigrationStatus.completed,
+          finishedAt: new Date(),
+        },
+      });
+      this.logger.log(`Migration run ${run.id}: no ready objects on "${sourceProvider}"; completed immediately`);
+      return { runId: run.id, totalCount: 0 };
+    }
+
+    // Create StorageMigrationItem rows in a single createMany call.
+    // @@unique([runId, objectId]) prevents duplicates if this is somehow called twice.
+    await this.prisma.storageMigrationItem.createMany({
+      data: objects.map(o => ({
+        runId: run.id,
+        objectId: o.id,
+        status: StorageMigrationItemStatus.pending,
+      })),
+      skipDuplicates: true,
+    });
+
+    // Reload items to get their generated IDs (createMany doesn't return records in Prisma)
+    const items = await this.prisma.storageMigrationItem.findMany({
+      where: { runId: run.id },
+      select: { id: true, objectId: true },
+    });
+
+    // Enqueue one enrichment job per item.
+    // skipDedup=true is REQUIRED — all these jobs have null mediaItemId and the
+    // same type, so the default dedup logic would collapse them into one job.
+    // priority=100 (low) so migration doesn't starve foreground enrichment.
+    const enqueuedJobs: Array<{ itemId: string; jobId: string }> = [];
+
+    for (const item of items) {
+      const job = await this.enrichmentJobService.enqueue({
+        type: 'storage_migration',
+        mediaItemId: null,
+        circleId: null,
+        reason: JobReason.backfill,
+        priority: 100,
+        skipDedup: true,
+        payload: { runId: run.id, itemId: item.id, objectId: item.objectId },
+      });
+      enqueuedJobs.push({ itemId: item.id, jobId: job.id });
+    }
+
+    // Back-fill jobId onto each item (best-effort; non-fatal if it fails)
+    // We do this in a loop rather than a transaction because the item IDs are
+    // individual and we don't want one failure to roll back all updates.
+    for (const { itemId, jobId } of enqueuedJobs) {
+      try {
+        await this.prisma.storageMigrationItem.update({
+          where: { id: itemId },
+          data: { jobId },
+        });
+      } catch (err) {
+        this.logger.warn(
+          `Migration run ${run.id}: failed to record jobId ${jobId} on item ${itemId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `Migration run ${run.id} created: ${totalCount} objects queued from "${sourceProvider}" → "${targetProvider}"`,
+    );
+
+    return { runId: run.id, totalCount };
+  }
+
+  // ---------------------------------------------------------------------------
+  // getMigrationRun
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Return a single migration run with recomputed aggregate counts from the
+   * StorageMigrationItem table (more accurate than the denormalized counters,
+   * which may lag if a crash skipped an increment).
+   */
+  async getMigrationRun(runId: string) {
+    const run = await this.prisma.storageMigrationRun.findUnique({
+      where: { id: runId },
+    });
+    if (!run) {
+      throw new NotFoundException(`Migration run not found: ${runId}`);
+    }
+
+    // Recompute counts from the item rows (authoritative source)
+    const countsByStatus = await this.prisma.storageMigrationItem.groupBy({
+      by: ['status'],
+      where: { runId },
+      _count: { id: true },
+    });
+
+    const byStatus: Record<string, number> = {};
+    for (const row of countsByStatus) {
+      byStatus[row.status] = row._count.id;
+    }
+
+    const migratedCount = byStatus[StorageMigrationItemStatus.completed] ?? 0;
+    const failedCount = byStatus[StorageMigrationItemStatus.failed] ?? 0;
+    const skippedCount =
+      (byStatus[StorageMigrationItemStatus.skipped] ?? 0) +
+      // 'verified' is a transient state that may appear in older items
+      (byStatus[StorageMigrationItemStatus.verified] ?? 0);
+
+    return {
+      id: run.id,
+      sourceProvider: run.sourceProvider,
+      targetProvider: run.targetProvider,
+      status: run.status,
+      totalCount: run.totalCount,
+      // Prefer recomputed values; fall back to denormalized counters when the
+      // item table has no rows yet (e.g. immediately after run creation).
+      migratedCount: countsByStatus.length > 0 ? migratedCount : run.migratedCount,
+      failedCount: countsByStatus.length > 0 ? failedCount : run.failedCount,
+      skippedCount: countsByStatus.length > 0 ? skippedCount : run.skippedCount,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+      lastError: run.lastError,
+      counts: { byStatus },
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // listMigrationRuns
+  // ---------------------------------------------------------------------------
+
+  async listMigrationRuns({ page = 1, pageSize = 20 }: { page?: number; pageSize?: number } = {}) {
+    const skip = (page - 1) * pageSize;
+
+    const [items, total] = await Promise.all([
+      this.prisma.storageMigrationRun.findMany({
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+        select: {
+          id: true,
+          sourceProvider: true,
+          targetProvider: true,
+          status: true,
+          totalCount: true,
+          migratedCount: true,
+          failedCount: true,
+          skippedCount: true,
+          startedAt: true,
+          finishedAt: true,
+          lastError: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.storageMigrationRun.count(),
+    ]);
+
+    return {
+      items,
+      meta: { total, page, pageSize, totalPages: Math.ceil(total / pageSize) },
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // cancelMigration
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Cancel a pending or running migration run.
+   *
+   * Marks the run as cancelled.  In-flight items that are currently being
+   * processed by the worker will see the cancelled status when they load the
+   * run at the start of process() and will mark themselves as skipped.
+   *
+   * We also attempt to delete still-pending enrichment jobs for this run by
+   * matching on the JSONB payload field.  If the DB doesn't support the JSON
+   * path query (or if it's too expensive), the handler's run.status check
+   * provides the safety net — cancelled items are skipped without byte copies.
+   */
+  async cancelMigration(runId: string) {
+    const run = await this.prisma.storageMigrationRun.findUnique({
+      where: { id: runId },
+    });
+    if (!run) {
+      throw new NotFoundException(`Migration run not found: ${runId}`);
+    }
+
+    if (
+      run.status !== StorageMigrationStatus.pending &&
+      run.status !== StorageMigrationStatus.running
+    ) {
+      throw new BadRequestException(
+        `Cannot cancel a run with status "${run.status}"; only pending or running runs can be cancelled`,
+      );
+    }
+
+    const updated = await this.prisma.storageMigrationRun.update({
+      where: { id: runId },
+      data: { status: StorageMigrationStatus.cancelled, finishedAt: new Date() },
+    });
+
+    // Best-effort: delete pending enrichment jobs for this run.
+    // The JSONB path cast via raw SQL handles providers that support it.
+    // If this fails (e.g. cast not supported), the handler's run.status check
+    // will skip the in-flight items gracefully.
+    try {
+      await this.prisma.$executeRaw`
+        DELETE FROM enrichment_jobs
+        WHERE type = 'storage_migration'
+          AND status = 'pending'
+          AND payload->>'runId' = ${runId}
+      `;
+    } catch (err) {
+      this.logger.warn(
+        `cancelMigration: could not delete pending enrichment jobs for run ${runId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    this.logger.log(`Migration run ${runId} cancelled by admin`);
+    return updated;
   }
 }

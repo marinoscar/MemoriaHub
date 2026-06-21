@@ -14,12 +14,14 @@ import {
   Post,
   Body,
   Param,
+  Query,
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiResponse,
   ApiParam,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { StorageSettingsService } from './storage-settings.service';
 import { Auth } from '../auth/decorators/auth.decorator';
@@ -29,6 +31,7 @@ import { KNOWN_STORAGE_PROVIDERS } from './providers/storage-provider.registry';
 import { UpsertStorageCredentialsDto } from './dto/storage-credentials.dto';
 import { TestStorageProviderDto } from './dto/test-storage-provider.dto';
 import { SetActiveStorageProviderDto } from './dto/set-active-provider.dto';
+import { TriggerMigrationDto } from './dto/trigger-migration.dto';
 
 @ApiTags('Storage Settings')
 @Controller('storage-settings')
@@ -179,5 +182,105 @@ export class StorageSettingsController {
     @CurrentUser('id') userId: string,
   ) {
     return this.storageSettingsService.setActiveProvider(dto, userId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // POST /storage-settings/migrate
+  // ---------------------------------------------------------------------------
+
+  @Post('migrate')
+  @Auth({
+    roles: [ROLES.ADMIN],
+    permissions: [PERMISSIONS.STORAGE_SETTINGS_WRITE],
+  })
+  @ApiOperation({
+    summary: 'Trigger a copy-only storage migration (Admin)',
+    description:
+      'Copies all ready objects from sourceProvider to targetProvider via the ' +
+      'enrichment queue. Source files are never deleted. Only one migration can ' +
+      'run at a time. Returns { runId, totalCount } immediately; poll ' +
+      'GET /storage-settings/migrate/:runId for progress.',
+  })
+  @ApiResponse({
+    status: 201,
+    description: '{ runId: string; totalCount: number }',
+  })
+  async triggerMigration(
+    @Body() dto: TriggerMigrationDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.storageSettingsService.triggerMigration(dto, userId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // GET /storage-settings/migrate
+  // ---------------------------------------------------------------------------
+
+  @Get('migrate')
+  @Auth({
+    roles: [ROLES.ADMIN],
+    permissions: [PERMISSIONS.STORAGE_SETTINGS_READ],
+  })
+  @ApiOperation({ summary: 'List migration runs (Admin, paginated, newest first)' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number })
+  @ApiResponse({
+    status: 200,
+    description: '{ items: MigrationRun[]; meta: { total, page, pageSize, totalPages } }',
+  })
+  async listMigrationRuns(
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.storageSettingsService.listMigrationRuns({
+      page: page ? parseInt(page, 10) : 1,
+      pageSize: pageSize ? parseInt(pageSize, 10) : 20,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // GET /storage-settings/migrate/:runId
+  // ---------------------------------------------------------------------------
+
+  @Get('migrate/:runId')
+  @Auth({
+    roles: [ROLES.ADMIN],
+    permissions: [PERMISSIONS.STORAGE_SETTINGS_READ],
+  })
+  @ApiOperation({
+    summary: 'Get migration run detail (Admin)',
+    description:
+      'Returns run metadata plus counts recomputed from item rows (more ' +
+      'accurate than the denormalized counters on the run row).',
+  })
+  @ApiParam({ name: 'runId', description: 'Migration run UUID' })
+  @ApiResponse({ status: 200, description: 'Migration run with recomputed counts' })
+  @ApiResponse({ status: 404, description: 'Run not found' })
+  async getMigrationRun(@Param('runId') runId: string) {
+    return this.storageSettingsService.getMigrationRun(runId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // POST /storage-settings/migrate/:runId/cancel
+  // ---------------------------------------------------------------------------
+
+  @Post('migrate/:runId/cancel')
+  @Auth({
+    roles: [ROLES.ADMIN],
+    permissions: [PERMISSIONS.STORAGE_SETTINGS_WRITE],
+  })
+  @ApiOperation({
+    summary: 'Cancel a pending or running migration (Admin)',
+    description:
+      'Marks the run as cancelled and deletes still-pending enrichment jobs. ' +
+      'Items that are already copying will complete their current attempt then ' +
+      'be skipped on the next retry check.',
+  })
+  @ApiParam({ name: 'runId', description: 'Migration run UUID' })
+  @ApiResponse({ status: 200, description: 'Run cancelled' })
+  @ApiResponse({ status: 400, description: 'Run is not in a cancellable state' })
+  @ApiResponse({ status: 404, description: 'Run not found' })
+  async cancelMigration(@Param('runId') runId: string) {
+    return this.storageSettingsService.cancelMigration(runId);
   }
 }
