@@ -242,6 +242,49 @@ describe('ExifProcessor', () => {
     });
   });
 
+  describe('process — exifr parse options (regression: mergeOutput must be true)', () => {
+    // REGRESSION GUARD: exifr.parse must be called with mergeOutput:true.
+    //
+    // When mergeOutput is false, exifr returns a NESTED segment object:
+    //   { ifd0: { Make, Model }, exif: { DateTimeOriginal }, gps: { latitude } }
+    // The processor reads TOP-LEVEL keys (raw['Make'], raw['DateTimeOriginal'],
+    // raw['latitude'], etc.), so every field read returns undefined and the
+    // processor emits empty metadata {} for every photo — silently.
+    //
+    // makerNote:true is also asserted because BurstUUID extraction depends on it.
+    let parseSpy: jest.Mock;
+
+    beforeEach(() => {
+      parseSpy = jest.fn().mockResolvedValue({
+        DateTimeOriginal: new Date('2024-01-01T00:00:00.000Z'),
+        Make: 'Apple',
+        Model: 'iPhone 15 Pro',
+        Orientation: 1,
+        latitude: 10.0,
+        longitude: -84.0,
+      });
+      jest.doMock('exifr', () => ({ parse: parseSpy }));
+      processor = new ExifProcessor();
+    });
+
+    it('should call exifr.parse with mergeOutput:true', async () => {
+      const buf = await getPlainJpegBuffer();
+      await processor.process(makeObject(), makeGetStream(buf));
+
+      expect(parseSpy).toHaveBeenCalledTimes(1);
+      const opts = parseSpy.mock.calls[0][1] as Record<string, unknown>;
+      expect(opts).toMatchObject({ mergeOutput: true });
+    });
+
+    it('should call exifr.parse with makerNote:true', async () => {
+      const buf = await getPlainJpegBuffer();
+      await processor.process(makeObject(), makeGetStream(buf));
+
+      const opts = parseSpy.mock.calls[0][1] as Record<string, unknown>;
+      expect(opts).toMatchObject({ makerNote: true });
+    });
+  });
+
   describe('process — partial EXIF (missing GPS)', () => {
     beforeEach(() => {
       jest.doMock('exifr', () => ({
