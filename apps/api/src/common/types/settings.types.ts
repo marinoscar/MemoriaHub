@@ -61,6 +61,9 @@ export interface SystemSettingsValue {
     hashDistance: number;
     minGroupSize: number;
   };
+  geo?: {
+    reverseProvider: 'offline' | 'nominatim' | 'google';
+  };
 }
 
 /**
@@ -105,5 +108,8 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     timeGapSeconds: 10,
     hashDistance: 10,
     minGroupSize: 3,
+  },
+  geo: {
+    reverseProvider: 'offline',
   },
 };

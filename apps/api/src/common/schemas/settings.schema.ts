@@ -74,6 +74,9 @@ export const systemSettingsSchema = z.object({
     hashDistance: z.number().int().min(0).max(32).default(10),
     minGroupSize: z.number().int().min(2).max(20).default(3),
   }).optional().default({ timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3 }),
+  geo: z.object({
+    reverseProvider: z.enum(['offline', 'nominatim', 'google']).default('offline'),
+  }).optional().default({ reverseProvider: 'offline' }),
 });
 
 export type SystemSettingsDto = z.infer<typeof systemSettingsSchema>;
@@ -117,5 +120,8 @@ export const systemSettingsPatchSchema = z.object({
     timeGapSeconds: z.number().int().min(1).max(300).optional(),
     hashDistance: z.number().int().min(0).max(32).optional(),
     minGroupSize: z.number().int().min(2).max(20).optional(),
+  }).optional(),
+  geo: z.object({
+    reverseProvider: z.enum(['offline', 'nominatim', 'google']).optional(),
   }).optional(),
 });

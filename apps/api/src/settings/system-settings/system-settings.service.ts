@@ -59,6 +59,8 @@ export class SystemSettingsService {
       ai: value.ai,
       face: value.face,
       storage: value.storage,
+      burst: value.burst,
+      geo: value.geo,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -106,6 +108,8 @@ export class SystemSettingsService {
       ai: value.ai,
       face: value.face,
       storage: value.storage,
+      burst: value.burst,
+      geo: value.geo,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -172,6 +176,12 @@ export class SystemSettingsService {
             4,
         },
       },
+      geo: {
+        reverseProvider:
+          (dto as any).geo?.reverseProvider ??
+          (current as any).geo?.reverseProvider ??
+          'offline',
+      },
     };
 
     // Validate merged result
@@ -207,6 +217,8 @@ export class SystemSettingsService {
       ai: value.ai,
       face: value.face,
       storage: value.storage,
+      burst: value.burst,
+      geo: value.geo,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
