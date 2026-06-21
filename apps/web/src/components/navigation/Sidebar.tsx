@@ -35,6 +35,7 @@ import {
   PhotoAlbum as AlbumIcon,
   Insights as InsightsIcon,
   BurstMode as BurstModeIcon,
+  LocationOn as LocationOnIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -96,6 +97,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     { label: 'Backup', icon: <BackupIcon />, path: '/admin/backup' },
     { label: 'AI Settings', icon: <AiIcon />, path: '/admin/ai-settings' },
     { label: 'Face Settings', icon: <FaceIcon />, path: '/admin/face-settings' },
+    { label: 'Geo Settings', icon: <LocationOnIcon />, path: '/admin/geo-settings' },
     { label: 'Job Queue', icon: <WorkHistoryIcon />, path: '/admin/jobs' },
     { label: 'Tags', icon: <LocalOfferIcon />, path: '/admin/tags' },
     { label: 'Storage Insights', icon: <InsightsIcon />, path: '/admin/insights' },

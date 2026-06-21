@@ -26,6 +26,7 @@ const CircleDetailPage = lazy(() => import('./pages/Circles/CircleDetailPage'));
 const BackupPage = lazy(() => import('./pages/Admin/BackupPage'));
 const AiSettingsPage = lazy(() => import('./pages/Admin/AiSettingsPage'));
 const FaceSettingsPage = lazy(() => import('./pages/Admin/FaceSettingsPage'));
+const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
 const JobsPage = lazy(() => import('./pages/Admin/JobsPage'));
 const TagsPage = lazy(() => import('./pages/Admin/TagsPage'));
 const StorageInsightsPage = lazy(() => import('./pages/Admin/StorageInsightsPage'));
@@ -77,6 +78,7 @@ function AppRoutes() {
                 <Route path="/admin/backup" element={<BackupPage />} />
                 <Route path="/admin/ai-settings" element={<AiSettingsPage />} />
                 <Route path="/admin/face-settings" element={<FaceSettingsPage />} />
+                <Route path="/admin/geo-settings" element={<GeoSettingsPage />} />
                 <Route path="/admin/jobs" element={<JobsPage />} />
                 <Route path="/admin/tags" element={<TagsPage />} />
                 <Route path="/admin/insights" element={<StorageInsightsPage />} />
