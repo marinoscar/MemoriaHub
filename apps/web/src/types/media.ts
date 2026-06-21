@@ -41,7 +41,6 @@ export interface MediaItem {
   cameraMake: string | null;
   cameraModel: string | null;
   originalFilename: string;
-  caption: string | null;
   description: string | null;
   favorite: boolean;
   geoCountry: string | null;
@@ -123,7 +122,6 @@ export interface MediaQueryParams {
 
 export interface PatchMediaDto {
   capturedAt?: string | null;
-  caption?: string | null;
   description?: string | null;
   favorite?: boolean;
 }
@@ -140,7 +138,6 @@ export interface RegisterMediaDto {
   circleId: string;
   capturedAt?: string;
   capturedAtOffset?: number;
-  caption?: string;
   description?: string;
   favorite?: boolean;
   /** SHA-256 hex digest (64 lower-case hex chars) of the file bytes. */
