@@ -65,8 +65,8 @@ export class BurstEnqueueListener {
     }
 
     // 3. Check global system-settings feature flag
-    const burstDetectionEnabled = await this.systemSettings.isFeatureEnabled(FEATURE_KEYS.BURST_DETECTION);
-    if (!burstDetectionEnabled) {
+    const burstDetectionGloballyEnabled = await this.systemSettings.isFeatureEnabled(FEATURE_KEYS.BURST_DETECTION);
+    if (!burstDetectionGloballyEnabled) {
       this.logger.debug(
         `Burst detection disabled globally; skipping burst enqueue for MediaItem ${mediaItem.id}`,
       );

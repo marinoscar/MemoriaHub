@@ -351,9 +351,6 @@ model Circle {
   description            String?
   ownerId                String   @map("owner_id") @db.Uuid
   isPersonal             Boolean  @default(false) @map("is_personal")
-  faceRecognitionEnabled Boolean  @default(false) @map("face_recognition_enabled")
-  autoTaggingEnabled     Boolean  @default(false) @map("auto_tagging_enabled")
-  burstDetectionEnabled  Boolean  @default(false) @map("burst_detection_enabled")
   createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz
 

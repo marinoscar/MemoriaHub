@@ -65,8 +65,8 @@ export class TaggingEnqueueListener {
     }
 
     // 3. Check global system-settings feature flag
-    const autoTaggingEnabled = await this.systemSettings.isFeatureEnabled(FEATURE_KEYS.AUTO_TAGGING);
-    if (!autoTaggingEnabled) {
+    const autoTaggingGloballyEnabled = await this.systemSettings.isFeatureEnabled(FEATURE_KEYS.AUTO_TAGGING);
+    if (!autoTaggingGloballyEnabled) {
       this.logger.debug(
         `Auto-tagging disabled globally; skipping auto-tagging enqueue for MediaItem ${mediaItem.id}`,
       );

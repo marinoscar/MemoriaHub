@@ -66,8 +66,8 @@ export class FaceEnqueueListener {
     }
 
     // 3. Check global system-settings feature flag
-    const faceRecognitionEnabled = await this.systemSettings.isFeatureEnabled(FEATURE_KEYS.FACE_RECOGNITION);
-    if (!faceRecognitionEnabled) {
+    const faceRecognitionGloballyEnabled = await this.systemSettings.isFeatureEnabled(FEATURE_KEYS.FACE_RECOGNITION);
+    if (!faceRecognitionGloballyEnabled) {
       this.logger.debug(
         `Face recognition disabled globally; skipping face enqueue for MediaItem ${mediaItem.id}`,
       );
