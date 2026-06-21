@@ -41,6 +41,12 @@ import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
 import { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
 import { BulkTagsDto } from './dto/bulk-tags.dto';
 import { BulkDeleteDto } from './dto/bulk-delete.dto';
+import { BulkArchiveDto } from './dto/bulk-archive.dto';
+import { ListArchivedQueryDto } from './dto/list-archived-query.dto';
+import { ListTrashQueryDto } from './dto/list-trash-query.dto';
+import { RestoreFromTrashDto } from './dto/restore-from-trash.dto';
+import { DeleteForeverDto } from './dto/delete-forever.dto';
+import { EmptyTrashDto } from './dto/empty-trash.dto';
 import { ReverseGeocodeQueryDto } from './dto/reverse-geocode-query.dto';
 import { GeoSearchQueryDto } from './dto/geo-search-query.dto';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
@@ -254,6 +260,122 @@ export class MediaController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.mediaService.bulkDelete(dto, user.id, user.permissions);
+  }
+
+  /**
+   * PATCH /api/media/bulk/archive
+   * Bulk archive media items (sets archivedAt, hides from browse surfaces).
+   */
+  @Patch('bulk/archive')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Bulk archive media items' })
+  @ApiResponse({ status: 200, description: 'Items archived' })
+  async bulkArchive(
+    @Body() dto: BulkArchiveDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.bulkArchive(dto, user.id, user.permissions);
+  }
+
+  /**
+   * PATCH /api/media/bulk/unarchive
+   * Bulk unarchive media items (clears archivedAt, restores to browse surfaces).
+   */
+  @Patch('bulk/unarchive')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Bulk unarchive media items' })
+  @ApiResponse({ status: 200, description: 'Items unarchived' })
+  async bulkUnarchive(
+    @Body() dto: BulkArchiveDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.bulkUnarchive(dto, user.id, user.permissions);
+  }
+
+  /**
+   * GET /api/media/archived
+   * List archived media items for a circle (paginated).
+   */
+  @Get('archived')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({ summary: 'List archived media items' })
+  @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number })
+  @ApiResponse({ status: 200, description: 'Paginated archived items' })
+  async listArchived(
+    @Query() query: ListArchivedQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.listArchived(query, user.id, user.permissions);
+  }
+
+  /**
+   * GET /api/media/trash
+   * List trashed (soft-deleted) media items for a circle (paginated).
+   */
+  @Get('trash')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({ summary: 'List trashed media items' })
+  @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number })
+  @ApiResponse({ status: 200, description: 'Paginated trashed items' })
+  async listTrash(
+    @Query() query: ListTrashQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.listTrash(query, user.id, user.permissions);
+  }
+
+  /**
+   * POST /api/media/trash/restore
+   * Restore items from the trash (clears deletedAt).
+   */
+  @Post('trash/restore')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Restore items from trash' })
+  @ApiResponse({ status: 200, description: 'Items restored, with conflicts list' })
+  async restoreFromTrash(
+    @Body() dto: RestoreFromTrashDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.restoreFromTrash(dto, user.id, user.permissions);
+  }
+
+  /**
+   * POST /api/media/trash/delete-forever
+   * Permanently hard-delete trashed items (removes DB rows and blobs).
+   */
+  @Post('trash/delete-forever')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Permanently delete trashed items (hard delete)' })
+  @ApiResponse({ status: 200, description: 'Items permanently deleted' })
+  async deleteForever(
+    @Body() dto: DeleteForeverDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.deleteForever(dto, user.id, user.permissions);
+  }
+
+  /**
+   * POST /api/media/trash/empty
+   * Hard-delete all trashed items in a circle (circle_admin only).
+   */
+  @Post('trash/empty')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Empty trash (hard delete all trashed items, circle_admin only)' })
+  @ApiResponse({ status: 200, description: 'All trashed items permanently deleted' })
+  async emptyTrash(
+    @Body() dto: EmptyTrashDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.emptyTrash(dto, user.id, user.permissions);
   }
 
   /**
