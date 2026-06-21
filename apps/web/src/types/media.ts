@@ -54,6 +54,7 @@ export interface MediaItem {
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
+  archivedAt: string | null;
   metadata: Record<string, unknown> | null;
   // Enriched fields from thumbnail processing
   thumbnailUrl: string | null;
@@ -114,6 +115,8 @@ export interface MediaQueryParams {
   peopleMatch?: 'any' | 'all';
   /** Filter to items with no detected faces (no_faces detection status). */
   noFaces?: boolean;
+  /** Exclude archived items from results (archived are included by default). */
+  excludeArchived?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +272,42 @@ export interface BulkTagsDto {
 export interface BulkDeleteDto {
   circleId: string;
   ids: string[];
+}
+
+export interface BulkArchiveDto {
+  circleId: string;
+  ids: string[];
+}
+
+export interface ListArchivedParams {
+  circleId: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ListTrashParams {
+  circleId: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface RestoreFromTrashDto {
+  circleId: string;
+  ids: string[];
+}
+
+export interface RestoreFromTrashResponse {
+  restored: number;
+  conflicts: string[];
+}
+
+export interface DeleteForeverDto {
+  circleId: string;
+  ids: string[];
+}
+
+export interface EmptyTrashDto {
+  circleId: string;
 }
 
 // ---------------------------------------------------------------------------
