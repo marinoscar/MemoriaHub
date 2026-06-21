@@ -59,14 +59,6 @@ export interface BurstDismissResult {
   ungrouped: number;
 }
 
-export interface BurstBackfillResult {
-  enqueued: number;
-}
-
-export interface CircleBurstSettings {
-  burstDetectionEnabled: boolean;
-}
-
 export async function listBurstGroups(params: {
   circleId: string;
   status?: BurstGroupStatus;
@@ -91,26 +83,4 @@ export async function resolveBurstGroup(id: string, keepIds: string[]): Promise<
 
 export async function dismissBurstGroup(id: string): Promise<BurstDismissResult> {
   return api.post<BurstDismissResult>(`/media/bursts/${id}/dismiss`);
-}
-
-export interface BurstBackfillOptions {
-  from?: string;
-  to?: string;
-  force?: boolean;
-}
-
-export async function runBurstBackfill(circleId: string, opts?: BurstBackfillOptions): Promise<BurstBackfillResult> {
-  const body: Record<string, unknown> = { circleId };
-  if (opts?.from !== undefined) body.from = opts.from;
-  if (opts?.to !== undefined) body.to = opts.to;
-  if (opts?.force !== undefined) body.force = opts.force;
-  return api.post<BurstBackfillResult>('/media/bursts/backfill', body);
-}
-
-export async function getCircleBurstSettings(circleId: string): Promise<CircleBurstSettings> {
-  return api.get<CircleBurstSettings>(`/circles/${circleId}/burst-settings`);
-}
-
-export async function updateCircleBurstSettings(circleId: string, enabled: boolean): Promise<CircleBurstSettings> {
-  return api.put<CircleBurstSettings>(`/circles/${circleId}/burst-settings`, { enabled });
 }

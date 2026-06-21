@@ -136,10 +136,6 @@ export async function rerunMediaFaces(mediaId: string): Promise<RerunResult> {
   return api.post<RerunResult>(`/media/${mediaId}/faces/rerun`);
 }
 
-export async function runFaceBackfill(circleId: string, force?: boolean): Promise<BackfillResult> {
-  return api.post<BackfillResult>('/face/backfill', { circleId, force });
-}
-
 // ---------------------------------------------------------------------------
 // Phase 3 Types — people management
 // ---------------------------------------------------------------------------
@@ -272,10 +268,6 @@ export interface MergePeopleResult {
   updatedAt: string;
 }
 
-export interface CircleFaceSettings {
-  faceRecognitionEnabled: boolean;
-}
-
 export interface DeleteBiometricsResult {
   deletedFaces: number;
   deletedPeople: number;
@@ -294,17 +286,6 @@ export async function mergePeople(
 
 export async function deletePerson(personId: string): Promise<void> {
   await api.delete<void>(`/people/${personId}`);
-}
-
-export async function getCircleFaceSettings(circleId: string): Promise<CircleFaceSettings> {
-  return api.get<CircleFaceSettings>(`/circles/${circleId}/face-settings`);
-}
-
-export async function updateCircleFaceSettings(
-  circleId: string,
-  enabled: boolean,
-): Promise<CircleFaceSettings> {
-  return api.put<CircleFaceSettings>(`/circles/${circleId}/face-settings`, { enabled });
 }
 
 export async function deleteCircleBiometrics(circleId: string): Promise<DeleteBiometricsResult> {

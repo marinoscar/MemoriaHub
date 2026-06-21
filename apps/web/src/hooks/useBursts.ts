@@ -4,15 +4,12 @@ import {
   getBurstGroup,
   resolveBurstGroup,
   dismissBurstGroup,
-  getCircleBurstSettings,
-  updateCircleBurstSettings,
 } from '../services/bursts';
 import type {
   BurstGroupStatus,
   BurstGroupSummary,
   BurstGroupDetail,
   BurstListMeta,
-  CircleBurstSettings,
 } from '../services/bursts';
 
 interface UseBurstGroupsResult {
@@ -99,47 +96,3 @@ export function useBurstGroupDetail(groupId: string): UseBurstGroupDetailResult 
   return { group, isLoading, error, fetchGroup, resolve, dismiss, resolving, dismissing };
 }
 
-interface UseCircleBurstSettingsResult {
-  settings: CircleBurstSettings | null;
-  isLoading: boolean;
-  error: string | null;
-  toggling: boolean;
-  fetchSettings: (circleId: string) => Promise<void>;
-  toggle: (circleId: string, enabled: boolean) => Promise<void>;
-}
-
-export function useCircleBurstSettings(): UseCircleBurstSettingsResult {
-  const [settings, setSettings] = useState<CircleBurstSettings | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [toggling, setToggling] = useState(false);
-
-  const fetchSettings = useCallback(async (circleId: string) => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const result = await getCircleBurstSettings(circleId);
-      setSettings(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load burst settings');
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  const toggle = useCallback(async (circleId: string, enabled: boolean) => {
-    setToggling(true);
-    setError(null);
-    try {
-      const result = await updateCircleBurstSettings(circleId, enabled);
-      setSettings(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update burst settings');
-      throw err;
-    } finally {
-      setToggling(false);
-    }
-  }, []);
-
-  return { settings, isLoading, error, toggling, fetchSettings, toggle };
-}

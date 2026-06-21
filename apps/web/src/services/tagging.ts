@@ -25,10 +25,6 @@ export interface TagRerunResult {
   status: string;
 }
 
-export interface TagBackfillResult {
-  enqueued: number;
-}
-
 // ---------------------------------------------------------------------------
 // API functions
 // ---------------------------------------------------------------------------
@@ -39,14 +35,5 @@ export async function rerunMediaTags(mediaId: string): Promise<TagRerunResult> {
 
 export async function getMediaTagStatus(mediaId: string): Promise<MediaTagStatusDto> {
   return api.get<MediaTagStatusDto>(`/media/${mediaId}/tags/status`);
-}
-
-export async function runTaggingBackfill(body: {
-  circleId: string;
-  from?: string;
-  to?: string;
-  force?: boolean;
-}): Promise<TagBackfillResult> {
-  return api.post<TagBackfillResult>('/tagging/backfill', body);
 }
 

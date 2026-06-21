@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import {
   Box,
   Typography,
-  Button,
   CircularProgress,
   Alert,
   Card,
@@ -10,14 +9,11 @@ import {
   CardContent,
   Chip,
   Badge,
-  Snackbar,
 } from '@mui/material';
 import { BurstMode as BurstModeIcon } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
-import { usePermissions } from '../../hooks/usePermissions';
 import { useBurstGroups } from '../../hooks/useBursts';
-import { runBurstBackfill } from '../../services/bursts';
 import type { BurstGroupSummary } from '../../services/bursts';
 
 function CoverStack({ coverUrls, mediaCount }: { coverUrls: string[]; mediaCount: number }) {
@@ -89,38 +85,13 @@ function BurstGroupCard({ group }: { group: BurstGroupSummary }) {
 }
 
 export default function BurstsPage() {
-  const { activeCircle, activeCircleId, activeCircleRole } = useCircle();
-  const { isAdmin } = usePermissions();
+  const { activeCircle, activeCircleId } = useCircle();
   const { items, isLoading, error, fetchGroups } = useBurstGroups();
-  const [backfilling, setBackfilling] = useState(false);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [backfillError, setBackfillError] = useState<string | null>(null);
-
-  const canBackfill =
-    isAdmin || activeCircleRole === 'collaborator' || activeCircleRole === 'circle_admin';
 
   useEffect(() => {
     if (!activeCircleId) return;
     void fetchGroups({ circleId: activeCircleId, status: 'pending' });
   }, [activeCircleId, fetchGroups]);
-
-  const handleBackfill = async () => {
-    if (!activeCircleId) return;
-    setBackfilling(true);
-    setBackfillError(null);
-    try {
-      const result = await runBurstBackfill(activeCircleId);
-      setSuccessMsg(`Burst scan enqueued: ${result.enqueued} item${result.enqueued !== 1 ? 's' : ''} queued.`);
-      // Refresh the list after a brief moment
-      setTimeout(() => {
-        void fetchGroups({ circleId: activeCircleId, status: 'pending' });
-      }, 1500);
-    } catch (err) {
-      setBackfillError(err instanceof Error ? err.message : 'Failed to start burst scan');
-    } finally {
-      setBackfilling(false);
-    }
-  };
 
   if (!activeCircle) {
     return (
@@ -137,35 +108,15 @@ export default function BurstsPage() {
         sx={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
           mb: 3,
-          flexWrap: 'wrap',
           gap: 1,
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <BurstModeIcon color="primary" />
-          <Typography variant="h5" component="h1">
-            Review Bursts
-          </Typography>
-        </Box>
-        {canBackfill && (
-          <Button
-            variant="outlined"
-            onClick={() => void handleBackfill()}
-            disabled={backfilling}
-            startIcon={backfilling ? <CircularProgress size={16} /> : <BurstModeIcon />}
-          >
-            {backfilling ? 'Scanning…' : 'Scan for bursts'}
-          </Button>
-        )}
+        <BurstModeIcon color="primary" />
+        <Typography variant="h5" component="h1">
+          Review Bursts
+        </Typography>
       </Box>
-
-      {backfillError && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {backfillError}
-        </Alert>
-      )}
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -188,17 +139,6 @@ export default function BurstsPage() {
           <Typography variant="body2" color="text.secondary">
             Burst groups are created when multiple similar photos are taken within a short time.
           </Typography>
-          {canBackfill && (
-            <Button
-              variant="contained"
-              onClick={() => void handleBackfill()}
-              disabled={backfilling}
-              sx={{ mt: 3 }}
-              startIcon={backfilling ? <CircularProgress size={16} /> : <BurstModeIcon />}
-            >
-              {backfilling ? 'Scanning…' : 'Scan for bursts'}
-            </Button>
-          )}
         </Box>
       )}
 
@@ -213,16 +153,6 @@ export default function BurstsPage() {
         </Box>
       )}
 
-      <Snackbar
-        open={Boolean(successMsg)}
-        autoHideDuration={3000}
-        onClose={() => setSuccessMsg(null)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert onClose={() => setSuccessMsg(null)} severity="success" sx={{ width: '100%' }}>
-          {successMsg}
-        </Alert>
-      </Snackbar>
     </Box>
   );
 }
