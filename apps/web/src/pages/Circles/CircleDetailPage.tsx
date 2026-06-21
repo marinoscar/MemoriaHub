@@ -27,11 +27,7 @@ import {
   FormControl,
   InputLabel,
   Avatar,
-  Switch,
-  FormControlLabel,
   Snackbar,
-  Checkbox,
-  Divider,
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
@@ -44,12 +40,6 @@ import { useCircleInvites } from '../../hooks/useCircleInvites';
 import { useCircleContext } from '../../contexts/CircleContext';
 import { usePermissions } from '../../hooks/usePermissions';
 import { getCircle, updateCircle } from '../../services/circles';
-import { getCircleFaceSettings, updateCircleFaceSettings } from '../../services/face';
-import { getCircleTaggingSettings, updateCircleTaggingSettings } from '../../services/tagging';
-import type { CircleTaggingSettings } from '../../services/tagging';
-import { getCircleBurstSettings, updateCircleBurstSettings, runBurstBackfill } from '../../services/bursts';
-import type { CircleBurstSettings } from '../../services/bursts';
-import { runMetadataBackfill } from '../../services/metadata';
 import type { Circle, CircleRole } from '../../types/circles';
 
 interface TabPanelProps {
@@ -93,38 +83,7 @@ export default function CircleDetailPage() {
   const { invites, loading: invitesLoading, error: invitesError, fetchInvites, sendInvite, cancelInvite } =
     useCircleInvites(circleId);
 
-  // Face settings state
-  const [faceSettings, setFaceSettings] = useState<{ faceRecognitionEnabled: boolean } | null>(null);
-  const [faceSettingsLoading, setFaceSettingsLoading] = useState(false);
-  const [faceSettingsError, setFaceSettingsError] = useState<string | null>(null);
-  const [faceTogglingLoading, setFaceTogglingLoading] = useState(false);
-  const [faceSuccessMsg, setFaceSuccessMsg] = useState<string | null>(null);
-
-  // Tagging settings state
-  const [taggingSettings, setTaggingSettings] = useState<CircleTaggingSettings | null>(null);
-  const [taggingSettingsLoading, setTaggingSettingsLoading] = useState(false);
-  const [taggingSettingsError, setTaggingSettingsError] = useState<string | null>(null);
-  const [taggingTogglingLoading, setTaggingTogglingLoading] = useState(false);
-
-  // Burst settings state
-  const [burstSettings, setBurstSettings] = useState<CircleBurstSettings | null>(null);
-  const [burstSettingsLoading, setBurstSettingsLoading] = useState(false);
-  const [burstSettingsError, setBurstSettingsError] = useState<string | null>(null);
-  const [burstTogglingLoading, setBurstTogglingLoading] = useState(false);
-
-  // Burst scan state
-  const [burstScanFrom, setBurstScanFrom] = useState('');
-  const [burstScanTo, setBurstScanTo] = useState('');
-  const [burstScanForce, setBurstScanForce] = useState(false);
-  const [burstScanning, setBurstScanning] = useState(false);
-  const [burstScanError, setBurstScanError] = useState<string | null>(null);
-
-  // Metadata backfill state
-  const [metaScanFrom, setMetaScanFrom] = useState('');
-  const [metaScanTo, setMetaScanTo] = useState('');
-  const [metaScanForce, setMetaScanForce] = useState(false);
-  const [metaScanning, setMetaScanning] = useState(false);
-  const [metaScanError, setMetaScanError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // Invite dialog
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -142,7 +101,6 @@ export default function CircleDetailPage() {
   const [editError, setEditError] = useState<string | null>(null);
 
   const canManage = isAdmin || activeCircleRole === 'circle_admin';
-  const canBackfill = isAdmin || activeCircleRole === 'collaborator' || activeCircleRole === 'circle_admin';
 
   useEffect(() => {
     if (!circleId) return;
@@ -166,120 +124,6 @@ export default function CircleDetailPage() {
     void fetchInvites();
   }, [fetchInvites]);
 
-  useEffect(() => {
-    if (!circleId) return;
-    setFaceSettingsLoading(true);
-    setFaceSettingsError(null);
-    getCircleFaceSettings(circleId)
-      .then(setFaceSettings)
-      .catch((err: unknown) => {
-        setFaceSettingsError(err instanceof Error ? err.message : 'Failed to load face settings');
-      })
-      .finally(() => setFaceSettingsLoading(false));
-  }, [circleId]);
-
-  useEffect(() => {
-    if (!circleId) return;
-    setTaggingSettingsLoading(true);
-    setTaggingSettingsError(null);
-    getCircleTaggingSettings(circleId)
-      .then(setTaggingSettings)
-      .catch((err: unknown) => {
-        setTaggingSettingsError(err instanceof Error ? err.message : 'Failed to load tagging settings');
-      })
-      .finally(() => setTaggingSettingsLoading(false));
-  }, [circleId]);
-
-  useEffect(() => {
-    if (!circleId) return;
-    setBurstSettingsLoading(true);
-    setBurstSettingsError(null);
-    getCircleBurstSettings(circleId)
-      .then(setBurstSettings)
-      .catch((err: unknown) => {
-        setBurstSettingsError(err instanceof Error ? err.message : 'Failed to load burst settings');
-      })
-      .finally(() => setBurstSettingsLoading(false));
-  }, [circleId]);
-
-  const handleFaceToggle = async (enabled: boolean) => {
-    setFaceTogglingLoading(true);
-    setFaceSettingsError(null);
-    try {
-      const updated = await updateCircleFaceSettings(circleId, enabled);
-      setFaceSettings(updated);
-      setFaceSuccessMsg(enabled ? 'Face recognition enabled.' : 'Face recognition disabled.');
-    } catch (err: unknown) {
-      setFaceSettingsError(err instanceof Error ? err.message : 'Failed to update face recognition setting');
-    } finally {
-      setFaceTogglingLoading(false);
-    }
-  };
-
-  const handleTaggingToggle = async (enabled: boolean) => {
-    setTaggingTogglingLoading(true);
-    setTaggingSettingsError(null);
-    try {
-      const updated = await updateCircleTaggingSettings(circleId, enabled);
-      setTaggingSettings(updated);
-      setFaceSuccessMsg(enabled ? 'Auto-tagging enabled.' : 'Auto-tagging disabled.');
-    } catch (err: unknown) {
-      setTaggingSettingsError(err instanceof Error ? err.message : 'Failed to update auto-tagging setting');
-    } finally {
-      setTaggingTogglingLoading(false);
-    }
-  };
-
-  const handleBurstToggle = async (enabled: boolean) => {
-    setBurstTogglingLoading(true);
-    setBurstSettingsError(null);
-    try {
-      const updated = await updateCircleBurstSettings(circleId, enabled);
-      setBurstSettings(updated);
-      setFaceSuccessMsg(enabled ? 'Burst detection enabled.' : 'Burst detection disabled.');
-    } catch (err: unknown) {
-      setBurstSettingsError(err instanceof Error ? err.message : 'Failed to update burst detection setting');
-    } finally {
-      setBurstTogglingLoading(false);
-    }
-  };
-
-  const handleBurstScan = async () => {
-    if (!circleId) return;
-    setBurstScanError(null);
-    setBurstScanning(true);
-    try {
-      const opts: { from?: string; to?: string; force?: boolean } = {};
-      if (burstScanFrom) opts.from = burstScanFrom;
-      if (burstScanTo) opts.to = burstScanTo;
-      if (burstScanForce) opts.force = true;
-      const result = await runBurstBackfill(circleId, opts);
-      setFaceSuccessMsg(`Queued ${result.enqueued} photo${result.enqueued !== 1 ? 's' : ''} for burst scanning`);
-    } catch (err: unknown) {
-      setBurstScanError(err instanceof Error ? err.message : 'Failed to start burst scan');
-    } finally {
-      setBurstScanning(false);
-    }
-  };
-
-  const handleMetaScan = async () => {
-    if (!circleId) return;
-    setMetaScanError(null);
-    setMetaScanning(true);
-    try {
-      const opts: { from?: string; to?: string; force?: boolean } = {};
-      if (metaScanFrom) opts.from = metaScanFrom;
-      if (metaScanTo) opts.to = metaScanTo;
-      if (metaScanForce) opts.force = true;
-      const result = await runMetadataBackfill(circleId, opts);
-      setFaceSuccessMsg(`Queued ${result.enqueued} photo${result.enqueued !== 1 ? 's' : ''} for metadata extraction`);
-    } catch (err: unknown) {
-      setMetaScanError(err instanceof Error ? err.message : 'Failed to start metadata extraction');
-    } finally {
-      setMetaScanning(false);
-    }
-  };
-
   const handleEditOpen = () => {
     setEditName(circle?.name ?? '');
     setEditDescription(circle?.description ?? '');
@@ -298,7 +142,7 @@ export default function CircleDetailPage() {
       });
       setCircle(updated);
       setEditOpen(false);
-      setFaceSuccessMsg('Circle updated.');
+      setSuccessMsg('Circle updated.');
     } catch (err: unknown) {
       setEditError(err instanceof Error ? err.message : 'Failed to update circle');
     } finally {
@@ -367,7 +211,6 @@ export default function CircleDetailPage() {
         <Tabs value={tab} onChange={(_, v: number) => setTab(v)} sx={{ px: 2, borderBottom: 1, borderColor: 'divider' }}>
           <Tab label="Members" />
           <Tab label="Invites" />
-          <Tab label="Settings" />
         </Tabs>
 
         {/* Members tab */}
@@ -543,277 +386,16 @@ export default function CircleDetailPage() {
           </Box>
         </TabPanel>
 
-        {/* Settings tab */}
-        <TabPanel value={tab} index={2}>
-          <Box sx={{ px: 2, pb: 2 }}>
-            <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'medium' }}>
-              Face Recognition
-            </Typography>
-            {faceSettingsLoading ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                <CircularProgress />
-              </Box>
-            ) : (
-              <>
-                {faceSettingsError && (
-                  <Alert severity="error" sx={{ mb: 2 }}>
-                    {faceSettingsError}
-                  </Alert>
-                )}
-                <Paper variant="outlined" sx={{ p: 2 }}>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Face recognition uses biometric data (face embeddings) to identify people across
-                    photos. It is opt-in per circle. Disabling stops new processing; existing face data
-                    remains unless you delete biometrics on the People page.
-                  </Typography>
-                  {canManage ? (
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={faceSettings?.faceRecognitionEnabled ?? false}
-                          onChange={(e) => void handleFaceToggle(e.target.checked)}
-                          disabled={faceTogglingLoading || !faceSettings}
-                          color="primary"
-                        />
-                      }
-                      label={faceTogglingLoading ? 'Updating…' : 'Enable face recognition'}
-                    />
-                  ) : (
-                    <Typography variant="body2">
-                      Face recognition is currently{' '}
-                      <strong>
-                        {faceSettings?.faceRecognitionEnabled ? 'Enabled' : 'Disabled'}
-                      </strong>
-                    </Typography>
-                  )}
-                </Paper>
-
-                <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Auto-tagging uses AI to automatically add tags to photos in this circle. It is opt-in per circle.
-                  </Typography>
-                  {taggingSettingsError && (
-                    <Alert severity="error" sx={{ mb: 1 }}>
-                      {taggingSettingsError}
-                    </Alert>
-                  )}
-                  {taggingSettingsLoading ? (
-                    <CircularProgress size={20} />
-                  ) : canManage ? (
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={taggingSettings?.autoTaggingEnabled ?? false}
-                          onChange={(e) => void handleTaggingToggle(e.target.checked)}
-                          disabled={taggingTogglingLoading || !taggingSettings}
-                          color="primary"
-                        />
-                      }
-                      label={taggingTogglingLoading ? 'Updating…' : 'Enable auto-tagging'}
-                    />
-                  ) : (
-                    <Typography variant="body2">
-                      Auto-tagging is currently{' '}
-                      <strong>
-                        {taggingSettings?.autoTaggingEnabled ? 'Enabled' : 'Disabled'}
-                      </strong>
-                    </Typography>
-                  )}
-                </Paper>
-
-                <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Burst detection automatically groups similar photos taken in quick succession, so
-                    you can review and keep only the best shot. It is opt-in per circle.
-                  </Typography>
-                  {burstSettingsError && (
-                    <Alert severity="error" sx={{ mb: 1 }}>
-                      {burstSettingsError}
-                    </Alert>
-                  )}
-                  {burstSettingsLoading ? (
-                    <CircularProgress size={20} />
-                  ) : canManage ? (
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={burstSettings?.burstDetectionEnabled ?? false}
-                          onChange={(e) => void handleBurstToggle(e.target.checked)}
-                          disabled={burstTogglingLoading || !burstSettings}
-                          color="primary"
-                        />
-                      }
-                      label={burstTogglingLoading ? 'Updating…' : 'Enable burst detection'}
-                    />
-                  ) : (
-                    <Typography variant="body2">
-                      Burst detection is currently{' '}
-                      <strong>
-                        {burstSettings?.burstDetectionEnabled ? 'Enabled' : 'Disabled'}
-                      </strong>
-                    </Typography>
-                  )}
-
-                  {burstSettings?.burstDetectionEnabled && canBackfill && (
-                    <>
-                      <Divider sx={{ my: 2 }} />
-                      <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'medium' }}>
-                        Scan for bursts
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                        Run a retroactive scan to compute perceptual hashes for older photos and group
-                        bursts in the background. Results appear in Review Bursts once processing
-                        completes. Leave date fields empty to scan the entire circle.
-                      </Typography>
-                      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2, mb: 2 }}>
-                        <TextField
-                          label="From (capture date)"
-                          type="date"
-                          value={burstScanFrom}
-                          onChange={(e) => setBurstScanFrom(e.target.value)}
-                          slotProps={{ inputLabel: { shrink: true } }}
-                          size="small"
-                          sx={{ flex: 1 }}
-                          disabled={burstScanning}
-                        />
-                        <TextField
-                          label="To (capture date)"
-                          type="date"
-                          value={burstScanTo}
-                          onChange={(e) => setBurstScanTo(e.target.value)}
-                          slotProps={{ inputLabel: { shrink: true } }}
-                          size="small"
-                          sx={{ flex: 1 }}
-                          disabled={burstScanning}
-                        />
-                      </Box>
-                      <FormControlLabel
-                        control={
-                          <Checkbox
-                            checked={burstScanForce}
-                            onChange={(e) => setBurstScanForce(e.target.checked)}
-                            disabled={burstScanning}
-                            size="small"
-                          />
-                        }
-                        label={
-                          <Typography variant="body2">
-                            Re-scan all (force) — reprocess photos that were already scanned
-                          </Typography>
-                        }
-                        sx={{ mb: 2 }}
-                      />
-                      {burstScanError && (
-                        <Alert severity="error" sx={{ mb: 2 }}>
-                          {burstScanError}
-                        </Alert>
-                      )}
-                      {burstScanFrom && burstScanTo && burstScanFrom > burstScanTo && (
-                        <Alert severity="warning" sx={{ mb: 2 }}>
-                          "From" date must be on or before "To" date.
-                        </Alert>
-                      )}
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        onClick={() => void handleBurstScan()}
-                        disabled={
-                          burstScanning ||
-                          Boolean(burstScanFrom && burstScanTo && burstScanFrom > burstScanTo)
-                        }
-                        startIcon={burstScanning ? <CircularProgress size={14} /> : undefined}
-                      >
-                        {burstScanning ? 'Scanning…' : 'Scan for bursts'}
-                      </Button>
-                    </>
-                  )}
-                </Paper>
-              </>
-            )}
-
-            {canBackfill && (
-              <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
-                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'medium' }}>
-                  Re-extract metadata
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Re-run metadata extraction (capture date, camera info, GPS coordinates) for
-                  existing photos. Leave date fields empty to process the entire circle.
-                </Typography>
-                <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2, mb: 2 }}>
-                  <TextField
-                    label="From (capture date)"
-                    type="date"
-                    value={metaScanFrom}
-                    onChange={(e) => setMetaScanFrom(e.target.value)}
-                    slotProps={{ inputLabel: { shrink: true } }}
-                    size="small"
-                    sx={{ flex: 1 }}
-                    disabled={metaScanning}
-                  />
-                  <TextField
-                    label="To (capture date)"
-                    type="date"
-                    value={metaScanTo}
-                    onChange={(e) => setMetaScanTo(e.target.value)}
-                    slotProps={{ inputLabel: { shrink: true } }}
-                    size="small"
-                    sx={{ flex: 1 }}
-                    disabled={metaScanning}
-                  />
-                </Box>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={metaScanForce}
-                      onChange={(e) => setMetaScanForce(e.target.checked)}
-                      disabled={metaScanning}
-                      size="small"
-                    />
-                  }
-                  label={
-                    <Typography variant="body2">
-                      Re-extract all (force) — reprocess photos that were already extracted
-                    </Typography>
-                  }
-                  sx={{ mb: 2 }}
-                />
-                {metaScanError && (
-                  <Alert severity="error" sx={{ mb: 2 }}>
-                    {metaScanError}
-                  </Alert>
-                )}
-                {metaScanFrom && metaScanTo && metaScanFrom > metaScanTo && (
-                  <Alert severity="warning" sx={{ mb: 2 }}>
-                    "From" date must be on or before "To" date.
-                  </Alert>
-                )}
-                <Button
-                  variant="outlined"
-                  size="small"
-                  onClick={() => void handleMetaScan()}
-                  disabled={
-                    metaScanning ||
-                    Boolean(metaScanFrom && metaScanTo && metaScanFrom > metaScanTo)
-                  }
-                  startIcon={metaScanning ? <CircularProgress size={14} /> : undefined}
-                >
-                  {metaScanning ? 'Extracting…' : 'Re-extract metadata'}
-                </Button>
-              </Paper>
-            )}
-          </Box>
-        </TabPanel>
       </Paper>
 
       <Snackbar
-        open={Boolean(faceSuccessMsg)}
+        open={Boolean(successMsg)}
         autoHideDuration={3000}
-        onClose={() => setFaceSuccessMsg(null)}
+        onClose={() => setSuccessMsg(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
-        <Alert onClose={() => setFaceSuccessMsg(null)} severity="success" sx={{ width: '100%' }}>
-          {faceSuccessMsg}
+        <Alert onClose={() => setSuccessMsg(null)} severity="success" sx={{ width: '100%' }}>
+          {successMsg}
         </Alert>
       </Snackbar>
 

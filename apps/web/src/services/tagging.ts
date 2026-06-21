@@ -29,10 +29,6 @@ export interface TagBackfillResult {
   enqueued: number;
 }
 
-export interface CircleTaggingSettings {
-  autoTaggingEnabled: boolean;
-}
-
 // ---------------------------------------------------------------------------
 // API functions
 // ---------------------------------------------------------------------------
@@ -54,15 +50,3 @@ export async function runTaggingBackfill(body: {
   return api.post<TagBackfillResult>('/tagging/backfill', body);
 }
 
-export async function getCircleTaggingSettings(
-  circleId: string,
-): Promise<CircleTaggingSettings> {
-  return api.get<CircleTaggingSettings>(`/circles/${circleId}/tagging-settings`);
-}
-
-export async function updateCircleTaggingSettings(
-  circleId: string,
-  enabled: boolean,
-): Promise<CircleTaggingSettings> {
-  return api.put<CircleTaggingSettings>(`/circles/${circleId}/tagging-settings`, { enabled });
-}
