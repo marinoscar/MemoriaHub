@@ -162,7 +162,6 @@ export function MediaDetailDrawer({
   // Editable field state
   const [editing, setEditing] = useState(false);
   const [editCapturedAt, setEditCapturedAt] = useState('');
-  const [editCaption, setEditCaption] = useState('');
   const [editDescription, setEditDescription] = useState('');
 
   // Save state
@@ -227,7 +226,6 @@ export function MediaDetailDrawer({
   const handleStartEdit = useCallback(() => {
     if (!item) return;
     setEditCapturedAt(item.capturedAt ? item.capturedAt.slice(0, 16) : '');
-    setEditCaption(item.caption ?? '');
     setEditDescription(item.description ?? '');
     setSaveError(null);
     setEditing(true);
@@ -245,7 +243,6 @@ export function MediaDetailDrawer({
     try {
       const dto: PatchMediaDto = {
         capturedAt: editCapturedAt ? new Date(editCapturedAt).toISOString() : null,
-        caption: editCaption || null,
         description: editDescription || null,
       };
       const updated = await patchMediaApi(item.id, dto);
@@ -264,7 +261,6 @@ export function MediaDetailDrawer({
     item,
     fullItem,
     editCapturedAt,
-    editCaption,
     editDescription,
     onItemUpdated,
   ]);
@@ -526,15 +522,6 @@ export function MediaDetailDrawer({
         {editing ? (
           <Stack spacing={2}>
             <TextField
-              label="Caption"
-              value={editCaption}
-              onChange={(e) => setEditCaption(e.target.value)}
-              size="small"
-              fullWidth
-              multiline
-              rows={2}
-            />
-            <TextField
               label="Description"
               value={editDescription}
               onChange={(e) => setEditDescription(e.target.value)}
@@ -556,11 +543,6 @@ export function MediaDetailDrawer({
         ) : (
           <>
             {/* Read-only view of editable fields */}
-            {item.caption && (
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                {item.caption}
-              </Typography>
-            )}
             {item.description && (
               <Typography variant="body2" sx={{ mb: 1 }}>
                 {item.description}
