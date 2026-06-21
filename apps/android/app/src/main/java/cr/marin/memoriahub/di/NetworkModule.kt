@@ -7,6 +7,8 @@ import cr.marin.memoriahub.core.network.RetryInterceptor
 import cr.marin.memoriahub.core.network.TokenAuthenticator
 import cr.marin.memoriahub.core.network.api.AuthApi
 import cr.marin.memoriahub.core.network.api.CircleApi
+import cr.marin.memoriahub.core.network.api.MediaApi
+import cr.marin.memoriahub.core.network.api.StorageApi
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -103,4 +105,12 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideCircleApi(retrofit: Retrofit): CircleApi = retrofit.create(CircleApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideStorageApi(retrofit: Retrofit): StorageApi = retrofit.create(StorageApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideMediaApi(retrofit: Retrofit): MediaApi = retrofit.create(MediaApi::class.java)
 }

@@ -54,9 +54,16 @@ class AppConfigStore @Inject constructor(
             prefs.edit().putLong(KEY_LAST_SCAN_ADDED, value).apply()
         }
 
+    /** Stable per-install device id sent as MediaItem provenance; created lazily. */
+    val deviceId: String
+        get() = prefs.getString(KEY_DEVICE_ID, null) ?: java.util.UUID.randomUUID().toString().also {
+            prefs.edit().putString(KEY_DEVICE_ID, it).apply()
+        }
+
     private companion object {
         const val KEY_SERVER_URL = "server_url"
         const val KEY_TARGET_CIRCLE = "target_circle_id"
         const val KEY_LAST_SCAN_ADDED = "last_scan_date_added_sec"
+        const val KEY_DEVICE_ID = "device_id"
     }
 }

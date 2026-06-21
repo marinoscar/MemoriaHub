@@ -28,11 +28,11 @@ interface SyncFileDao {
     @Query("SELECT * FROM sync_files WHERE status = :status ORDER BY updatedAt DESC")
     fun observeByStatus(status: SyncStatus): Flow<List<SyncFileEntity>>
 
-    /** Next batch of work: queued (or retryable failed) items, newest capture first. */
+    /** Next batch of queued work, newest capture first. */
     @Query(
         """
         SELECT * FROM sync_files
-        WHERE status IN ('QUEUED', 'FAILED')
+        WHERE status = 'QUEUED'
         ORDER BY dateAddedSec DESC
         LIMIT :limit
         """,
