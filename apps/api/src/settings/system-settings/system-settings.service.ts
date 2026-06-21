@@ -169,6 +169,11 @@ export class SystemSettingsService {
         },
       },
       storage: {
+        activeProvider:
+          (dto as any).storage?.activeProvider ??
+          (current as any).storage?.activeProvider ??
+          process.env['STORAGE_PROVIDER'] ??
+          's3',
         insights: {
           refreshIntervalHours:
             (dto as any).storage?.insights?.refreshIntervalHours ??

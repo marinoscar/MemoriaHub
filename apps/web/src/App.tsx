@@ -30,6 +30,7 @@ const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
 const JobsPage = lazy(() => import('./pages/Admin/JobsPage'));
 const TagsPage = lazy(() => import('./pages/Admin/TagsPage'));
 const StorageInsightsPage = lazy(() => import('./pages/Admin/StorageInsightsPage'));
+const StorageProvidersPage = lazy(() => import('./pages/Admin/StorageProvidersPage'));
 const SearchPage = lazy(() => import('./pages/SearchPage'));
 const PeoplePage = lazy(() => import('./pages/People/PeoplePage'));
 const AlbumsPage = lazy(() => import('./pages/Albums'));
@@ -82,6 +83,7 @@ function AppRoutes() {
                 <Route path="/admin/jobs" element={<JobsPage />} />
                 <Route path="/admin/tags" element={<TagsPage />} />
                 <Route path="/admin/insights" element={<StorageInsightsPage />} />
+                <Route path="/admin/storage-providers" element={<StorageProvidersPage />} />
                 <Route path="/search" element={<SearchPage />} />
                 <Route path="/people" element={<PeoplePage />} />
                 <Route path="/tags" element={<TagsBrowsePage />} />

@@ -64,6 +64,10 @@ export const PERMISSIONS = {
   FACE_SETTINGS_READ: 'face_settings:read',
   FACE_SETTINGS_WRITE: 'face_settings:write',
 
+  // Storage Provider Settings (Admin only)
+  STORAGE_SETTINGS_READ: 'storage_settings:read',
+  STORAGE_SETTINGS_WRITE: 'storage_settings:write',
+
   // Search feature usage
   SEARCH_USE: 'search:use',
 
