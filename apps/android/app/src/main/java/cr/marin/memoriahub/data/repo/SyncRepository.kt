@@ -1,0 +1,142 @@
+package cr.marin.memoriahub.data.repo
+
+import cr.marin.memoriahub.core.storage.AppConfigStore
+import cr.marin.memoriahub.core.util.TimeProvider
+import cr.marin.memoriahub.data.db.StatusCount
+import cr.marin.memoriahub.data.db.SyncFileDao
+import cr.marin.memoriahub.data.db.SyncFileEntity
+import cr.marin.memoriahub.data.db.SyncRunDao
+import cr.marin.memoriahub.data.db.SyncRunEntity
+import cr.marin.memoriahub.data.db.SyncStatus
+import cr.marin.memoriahub.data.media.MediaStoreScanner
+import cr.marin.memoriahub.data.media.ScannedMedia
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlin.math.max
+
+@Singleton
+class SyncRepository @Inject constructor(
+    private val scanner: MediaStoreScanner,
+    private val syncFileDao: SyncFileDao,
+    private val syncRunDao: SyncRunDao,
+    private val appConfigStore: AppConfigStore,
+    private val time: TimeProvider,
+) {
+    fun observeFiles(): Flow<List<SyncFileEntity>> = syncFileDao.observeAll()
+
+    fun observeStatusCounts(): Flow<List<StatusCount>> = syncFileDao.observeStatusCounts()
+
+    fun observeLatestRun(): Flow<SyncRunEntity?> = syncRunDao.observeLatest()
+
+    fun observeByStatus(status: SyncStatus): Flow<List<SyncFileEntity>> =
+        syncFileDao.observeByStatus(status)
+
+    fun observeFailures(): Flow<List<SyncFileEntity>> = syncFileDao.observeFailures()
+
+    /**
+     * Reconciles MediaStore against the local state table — the idempotent diff that
+     * guarantees completeness. New items are queued; edited items (changed size/mtime)
+     * are reset and re-queued; unchanged uploaded items are left as-is (fast skip).
+     *
+     * @param fullScan when true, ignores the high-water mark and scans the whole bucket.
+     * @return the number of items newly queued or re-queued.
+     */
+    suspend fun reconcile(fullScan: Boolean = false): Int = withContext(Dispatchers.IO) {
+        val since = if (fullScan) 0L else appConfigStore.lastScanDateAddedSec
+        val scanned = scanner.scanCamera(sinceDateAddedSec = since)
+        val now = time.nowMillis()
+        var queuedCount = 0
+        var maxAdded = appConfigStore.lastScanDateAddedSec
+
+        for (item in scanned) {
+            val existing = syncFileDao.getById(item.mediaStoreId)
+            when {
+                existing == null -> {
+                    syncFileDao.upsert(item.toQueuedEntity(appConfigStore.targetCircleId, now))
+                    queuedCount++
+                }
+                existing.sizeBytes != item.sizeBytes || existing.mtimeMs != item.mtimeMs -> {
+                    // Content changed on device: drop prior upload identity and re-queue.
+                    syncFileDao.upsert(existing.resetForRescan(item, now))
+                    queuedCount++
+                }
+                existing.contentUri != item.contentUri || existing.displayName != item.displayName -> {
+                    // Pure metadata refresh; preserve sync status (fast skip).
+                    syncFileDao.upsert(
+                        existing.copy(
+                            contentUri = item.contentUri,
+                            displayName = item.displayName,
+                            bucket = item.bucket,
+                            dateTakenMs = item.dateTakenMs ?: existing.dateTakenMs,
+                            updatedAt = now,
+                        ),
+                    )
+                }
+            }
+            maxAdded = max(maxAdded, item.dateAddedSec)
+        }
+
+        appConfigStore.lastScanDateAddedSec = maxAdded
+        queuedCount
+    }
+
+    /** Crash recovery: return any rows left mid-flight by a killed run to the queue. */
+    suspend fun resetStaleActive(): Int = withContext(Dispatchers.IO) {
+        syncFileDao.resetStaleActive(time.nowMillis())
+    }
+
+    suspend fun requeueFailed(includeBlocked: Boolean): Int = withContext(Dispatchers.IO) {
+        syncFileDao.requeueFailed(
+            includeBlocked = includeBlocked,
+            resetAttempts = includeBlocked,
+            now = time.nowMillis(),
+        )
+    }
+
+    suspend fun pendingWorkCount(): Int = withContext(Dispatchers.IO) {
+        syncFileDao.pendingWorkCount()
+    }
+}
+
+private fun ScannedMedia.toQueuedEntity(circleId: String?, now: Long): SyncFileEntity =
+    SyncFileEntity(
+        mediaStoreId = mediaStoreId,
+        contentUri = contentUri,
+        displayName = displayName,
+        bucket = bucket,
+        relativePath = null,
+        mimeType = mimeType,
+        type = type,
+        sizeBytes = sizeBytes,
+        mtimeMs = mtimeMs,
+        dateAddedSec = dateAddedSec,
+        dateTakenMs = dateTakenMs,
+        circleId = circleId,
+        status = SyncStatus.QUEUED,
+        updatedAt = now,
+    )
+
+private fun SyncFileEntity.resetForRescan(item: ScannedMedia, now: Long): SyncFileEntity =
+    copy(
+        contentUri = item.contentUri,
+        displayName = item.displayName,
+        bucket = item.bucket,
+        mimeType = item.mimeType,
+        sizeBytes = item.sizeBytes,
+        mtimeMs = item.mtimeMs,
+        dateAddedSec = item.dateAddedSec,
+        dateTakenMs = item.dateTakenMs,
+        sha256 = null,
+        status = SyncStatus.QUEUED,
+        attemptCount = 0,
+        lastError = null,
+        mediaItemId = null,
+        storageObjectId = null,
+        uploadId = null,
+        partProgressJson = null,
+        uploadedAt = null,
+        updatedAt = now,
+    )
