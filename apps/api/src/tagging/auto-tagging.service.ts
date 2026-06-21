@@ -306,7 +306,6 @@ export class AutoTaggingService {
       await this.embedAndStore(
         mediaItem.id,
         mediaItem.circleId,
-        caption,
         description,
         normalizedLabels,
         peopleNames,
@@ -346,7 +345,7 @@ export class AutoTaggingService {
   }
 
   /**
-   * Generate a text embedding from the caption, description, tags, and people names,
+   * Generate a text embedding from the description, tags, and people names,
    * then upsert it into the media_item_embedding table.
    *
    * This is best-effort: any error is logged and swallowed — embedding failures
@@ -355,14 +354,13 @@ export class AutoTaggingService {
   private async embedAndStore(
     mediaItemId: string,
     circleId: string,
-    caption: string | null,
     description: string | null,
     tagNames: string[],
     peopleNames: string[],
   ): Promise<void> {
     try {
       // Build text from all available signals
-      const text = [caption, description, ...tagNames, ...peopleNames]
+      const text = [description, ...tagNames, ...peopleNames]
         .filter(Boolean)
         .join('. ');
       if (!text) {
