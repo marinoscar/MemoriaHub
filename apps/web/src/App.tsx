@@ -27,9 +27,13 @@ const BackupPage = lazy(() => import('./pages/Admin/BackupPage'));
 const AiSettingsPage = lazy(() => import('./pages/Admin/AiSettingsPage'));
 const FaceSettingsPage = lazy(() => import('./pages/Admin/FaceSettingsPage'));
 const JobsPage = lazy(() => import('./pages/Admin/JobsPage'));
-const TagsPage = lazy(() => import('./pages/Admin/TagsPage'));
+
 const StorageInsightsPage = lazy(() => import('./pages/Admin/StorageInsightsPage'));
 const StorageProvidersPage = lazy(() => import('./pages/Admin/StorageProvidersPage'));
+const SettingsHubPage = lazy(() => import('./pages/Admin/SettingsHubPage'));
+const TaggingSettingsPage = lazy(() => import('./pages/Admin/TaggingSettingsPage'));
+const BurstsSettingsPage = lazy(() => import('./pages/Admin/BurstsSettingsPage'));
+const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
 const SearchPage = lazy(() => import('./pages/SearchPage'));
 const PeoplePage = lazy(() => import('./pages/People/PeoplePage'));
 const AlbumsPage = lazy(() => import('./pages/Albums'));
@@ -73,15 +77,28 @@ function AppRoutes() {
                 <Route path="/map" element={<MediaMapPage />} />
                 <Route path="/circles" element={<CircleListPage />} />
                 <Route path="/circles/:id" element={<CircleDetailPage />} />
-                <Route path="/admin/users" element={<UserManagementPage />} />
-                <Route path="/admin/settings" element={<SystemSettingsPage />} />
-                <Route path="/admin/backup" element={<BackupPage />} />
-                <Route path="/admin/ai-settings" element={<AiSettingsPage />} />
-                <Route path="/admin/face-settings" element={<FaceSettingsPage />} />
-                <Route path="/admin/jobs" element={<JobsPage />} />
-                <Route path="/admin/tags" element={<TagsPage />} />
-                <Route path="/admin/insights" element={<StorageInsightsPage />} />
-                <Route path="/admin/storage-providers" element={<StorageProvidersPage />} />
+                {/* Settings Hub */}
+                <Route path="/admin/settings" element={<SettingsHubPage />} />
+                <Route path="/admin/settings/general" element={<SystemSettingsPage />} />
+                <Route path="/admin/settings/users" element={<UserManagementPage />} />
+                <Route path="/admin/settings/ai" element={<AiSettingsPage />} />
+                <Route path="/admin/settings/tagging" element={<TaggingSettingsPage />} />
+                <Route path="/admin/settings/face" element={<FaceSettingsPage />} />
+                <Route path="/admin/settings/bursts" element={<BurstsSettingsPage />} />
+                <Route path="/admin/settings/geo" element={<GeoSettingsPage />} />
+                <Route path="/admin/settings/storage/providers" element={<StorageProvidersPage />} />
+                <Route path="/admin/settings/storage/insights" element={<StorageInsightsPage />} />
+                <Route path="/admin/settings/jobs" element={<JobsPage />} />
+                <Route path="/admin/settings/backup" element={<BackupPage />} />
+                {/* Legacy admin route redirects */}
+                <Route path="/admin/users" element={<Navigate to="/admin/settings/users" replace />} />
+                <Route path="/admin/ai-settings" element={<Navigate to="/admin/settings/ai" replace />} />
+                <Route path="/admin/face-settings" element={<Navigate to="/admin/settings/face" replace />} />
+                <Route path="/admin/jobs" element={<Navigate to="/admin/settings/jobs" replace />} />
+                <Route path="/admin/tags" element={<Navigate to="/admin/settings/tagging" replace />} />
+                <Route path="/admin/insights" element={<Navigate to="/admin/settings/storage/insights" replace />} />
+                <Route path="/admin/storage-providers" element={<Navigate to="/admin/settings/storage/providers" replace />} />
+                <Route path="/admin/backup" element={<Navigate to="/admin/settings/backup" replace />} />
                 <Route path="/search" element={<SearchPage />} />
                 <Route path="/people" element={<PeoplePage />} />
                 <Route path="/tags" element={<TagsBrowsePage />} />
