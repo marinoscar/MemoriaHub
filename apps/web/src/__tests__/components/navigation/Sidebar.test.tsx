@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render, mockUser, mockAdminUser } from '../../utils/test-utils';
 import { Sidebar } from '../../../components/navigation/Sidebar';
@@ -20,6 +20,25 @@ vi.mock('react-router-dom', async () => {
 // Mock usePermissions hook
 vi.mock('../../../hooks/usePermissions', () => ({
   usePermissions: vi.fn(),
+}));
+
+// Mock useAlbums hook to prevent real API calls in tests
+vi.mock('../../../hooks/useAlbums', () => ({
+  useAlbums: vi.fn(() => ({
+    albums: [],
+    meta: null,
+    isLoading: false,
+    error: null,
+    fetchAlbums: vi.fn().mockResolvedValue(undefined),
+    addAlbum: vi.fn().mockResolvedValue(undefined),
+    updateAlbum: vi.fn().mockResolvedValue(undefined),
+    deleteAlbum: vi.fn().mockResolvedValue(undefined),
+  })),
+}));
+
+// Mock CreateAlbumDialog to avoid rendering its internals in navigation tests
+vi.mock('../../../components/album/CreateAlbumDialog', () => ({
+  CreateAlbumDialog: () => null,
 }));
 
 import { usePermissions } from '../../../hooks/usePermissions';
@@ -88,9 +107,9 @@ describe('Sidebar', () => {
 
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
-      // Non-admin users should see Home, Media Library, Map, and User Settings
-      expect(container.textContent).toContain('Home');
-      expect(container.textContent).toContain('Media Library');
+      // Non-admin users should see Photos, Explore, Map, and User Settings
+      expect(container.textContent).toContain('Photos');
+      expect(container.textContent).toContain('Explore');
       expect(container.textContent).toContain('Map');
       expect(container.textContent).toContain('User Settings');
     });
@@ -131,8 +150,8 @@ describe('Sidebar', () => {
       });
 
       // All menu items should be visible
-      expect(container.textContent).toContain('Home');
-      expect(container.textContent).toContain('Media Library');
+      expect(container.textContent).toContain('Photos');
+      expect(container.textContent).toContain('Explore');
       expect(container.textContent).toContain('Map');
       expect(container.textContent).toContain('User Settings');
       expect(container.textContent).toContain('User Management');
@@ -196,7 +215,7 @@ describe('Sidebar', () => {
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
       // Only items with visible: true should be rendered
-      // Non-admin: Home, Media Library, Map, Circles, Search, People, User Settings
+      // Non-admin: Photos, Explore, Map, Sharing, People, Review Bursts, User Settings
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
       expect(menuButtons).toHaveLength(7);
     });
@@ -217,7 +236,7 @@ describe('Sidebar', () => {
         wrapperOptions: { user: mockAdminUser },
       });
 
-      // Admin: Home, Media Library, Map, Circles, Search, People, User Settings,
+      // Admin: Photos, Explore, Map, Sharing, People, Review Bursts, User Settings,
       //        User Management, System Settings, Backup, AI Settings,
       //        Face Settings, Job Queue, Tags, Storage Insights
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
@@ -260,7 +279,6 @@ describe('Sidebar', () => {
 
   describe('Navigation Behavior', () => {
     it('should call onClose BEFORE navigate when menu item is clicked', async () => {
-      const user = userEvent.setup();
       const callOrder: string[] = [];
 
       const trackingOnClose = vi.fn(() => {
@@ -282,10 +300,13 @@ describe('Sidebar', () => {
         isAdmin: false,
       });
 
-      render(<Sidebar open={true} onClose={trackingOnClose} />);
+      const { container } = render(<Sidebar open={true} onClose={trackingOnClose} />);
 
-      const settingsButton = screen.getByText('User Settings').closest('.MuiListItemButton-root') as HTMLElement;
-      await user.click(settingsButton);
+      // Use container query + fireEvent to bypass MUI modal aria-hidden wrapping
+      // User Settings is the last button in the sidebar (pinned at bottom)
+      const buttons = container.querySelectorAll('.MuiListItemButton-root');
+      const settingsButton = buttons[buttons.length - 1] as HTMLElement;
+      fireEvent.click(settingsButton);
 
       // onClose should be called immediately (synchronously)
       expect(trackingOnClose).toHaveBeenCalledTimes(1);
@@ -299,9 +320,7 @@ describe('Sidebar', () => {
       expect(callOrder).toEqual(['onClose', 'navigate']);
     });
 
-    it('should navigate to home when Home menu item is clicked', async () => {
-      const user = userEvent.setup();
-
+    it('should navigate to / when Photos menu item is clicked', async () => {
       vi.mocked(usePermissions).mockReturnValue({
         permissions: new Set(),
         roles: new Set(),
@@ -313,10 +332,12 @@ describe('Sidebar', () => {
         isAdmin: false,
       });
 
-      render(<Sidebar open={true} onClose={mockOnClose} />);
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
-      const homeButton = screen.getByText('Home').closest('.MuiListItemButton-root') as HTMLElement;
-      await user.click(homeButton);
+      // Use container query + fireEvent to bypass MUI modal aria-hidden wrapping
+      const buttons = container.querySelectorAll('.MuiListItemButton-root');
+      const photosButton = buttons[0] as HTMLElement; // Photos is the first item
+      fireEvent.click(photosButton);
 
       await waitFor(() => {
         expect(mockNavigate).toHaveBeenCalledWith('/');
@@ -324,8 +345,6 @@ describe('Sidebar', () => {
     });
 
     it('should navigate to settings when User Settings menu item is clicked', async () => {
-      const user = userEvent.setup();
-
       vi.mocked(usePermissions).mockReturnValue({
         permissions: new Set(),
         roles: new Set(),
@@ -337,19 +356,20 @@ describe('Sidebar', () => {
         isAdmin: false,
       });
 
-      render(<Sidebar open={true} onClose={mockOnClose} />);
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
-      const settingsButton = screen.getByText('User Settings').closest('.MuiListItemButton-root') as HTMLElement;
-      await user.click(settingsButton);
+      // Use container query + fireEvent to bypass MUI modal aria-hidden wrapping
+      // User Settings is the last button in the sidebar (pinned at bottom)
+      const buttons = container.querySelectorAll('.MuiListItemButton-root');
+      const settingsButton = buttons[buttons.length - 1] as HTMLElement;
+      fireEvent.click(settingsButton);
 
       await waitFor(() => {
         expect(mockNavigate).toHaveBeenCalledWith('/settings');
       });
     });
 
-    it('should navigate to /media when Media Library is clicked', async () => {
-      const user = userEvent.setup();
-
+    it('should navigate to /search when Explore is clicked', async () => {
       vi.mocked(usePermissions).mockReturnValue({
         permissions: new Set(),
         roles: new Set(),
@@ -361,19 +381,19 @@ describe('Sidebar', () => {
         isAdmin: false,
       });
 
-      render(<Sidebar open={true} onClose={mockOnClose} />);
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
-      const mediaButton = screen.getByText('Media Library').closest('.MuiListItemButton-root') as HTMLElement;
-      await user.click(mediaButton);
+      // Use container query + fireEvent to bypass MUI modal aria-hidden wrapping
+      const buttons = container.querySelectorAll('.MuiListItemButton-root');
+      const exploreButton = buttons[1] as HTMLElement; // Explore is the second item
+      fireEvent.click(exploreButton);
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/media');
+        expect(mockNavigate).toHaveBeenCalledWith('/search');
       });
     });
 
     it('should navigate to /map when Map is clicked', async () => {
-      const user = userEvent.setup();
-
       vi.mocked(usePermissions).mockReturnValue({
         permissions: new Set(),
         roles: new Set(),
@@ -385,10 +405,12 @@ describe('Sidebar', () => {
         isAdmin: false,
       });
 
-      render(<Sidebar open={true} onClose={mockOnClose} />);
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
-      const mapButton = screen.getByText('Map').closest('.MuiListItemButton-root') as HTMLElement;
-      await user.click(mapButton);
+      // Use container query + fireEvent to bypass MUI modal aria-hidden wrapping
+      const buttons = container.querySelectorAll('.MuiListItemButton-root');
+      const mapButton = buttons[2] as HTMLElement; // Map is the third item
+      fireEvent.click(mapButton);
 
       await waitFor(() => {
         expect(mockNavigate).toHaveBeenCalledWith('/map');
@@ -396,8 +418,6 @@ describe('Sidebar', () => {
     });
 
     it('should navigate to admin/users when User Management is clicked', async () => {
-      const user = userEvent.setup();
-
       vi.mocked(usePermissions).mockReturnValue({
         permissions: new Set(),
         roles: new Set(['admin']),
@@ -409,12 +429,19 @@ describe('Sidebar', () => {
         isAdmin: true,
       });
 
-      render(<Sidebar open={true} onClose={mockOnClose} />, {
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />, {
         wrapperOptions: { user: mockAdminUser },
       });
 
-      const userMgmtButton = screen.getByText('User Management').closest('.MuiListItemButton-root') as HTMLElement;
-      await user.click(userMgmtButton);
+      // Use container query + fireEvent to bypass MUI modal aria-hidden wrapping
+      // Admin layout: Photos(0), Explore(1), Map(2), Sharing(3),
+      //               People(4), Review Bursts(5),
+      //               User Management(6), System Settings(7), Backup(8),
+      //               AI Settings(9), Face Settings(10), Job Queue(11), Tags(12), Storage Insights(13),
+      //               User Settings(14)
+      const buttons = container.querySelectorAll('.MuiListItemButton-root');
+      const userMgmtButton = buttons[6] as HTMLElement;
+      fireEvent.click(userMgmtButton);
 
       await waitFor(() => {
         expect(mockNavigate).toHaveBeenCalledWith('/admin/users');
@@ -422,8 +449,6 @@ describe('Sidebar', () => {
     });
 
     it('should navigate to admin/settings when System Settings is clicked', async () => {
-      const user = userEvent.setup();
-
       vi.mocked(usePermissions).mockReturnValue({
         permissions: new Set(),
         roles: new Set(['admin']),
@@ -435,12 +460,14 @@ describe('Sidebar', () => {
         isAdmin: true,
       });
 
-      render(<Sidebar open={true} onClose={mockOnClose} />, {
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />, {
         wrapperOptions: { user: mockAdminUser },
       });
 
-      const systemSettingsButton = screen.getByText('System Settings').closest('.MuiListItemButton-root') as HTMLElement;
-      await user.click(systemSettingsButton);
+      // Use container query + fireEvent to bypass MUI modal aria-hidden wrapping
+      const buttons = container.querySelectorAll('.MuiListItemButton-root');
+      const systemSettingsButton = buttons[7] as HTMLElement; // System Settings is the 8th button
+      fireEvent.click(systemSettingsButton);
 
       await waitFor(() => {
         expect(mockNavigate).toHaveBeenCalledWith('/admin/settings');
@@ -534,8 +561,6 @@ describe('Sidebar', () => {
     });
 
     it('should call onClose for each menu item click', async () => {
-      const user = userEvent.setup();
-
       vi.mocked(usePermissions).mockReturnValue({
         permissions: new Set(),
         roles: new Set(),
@@ -547,15 +572,19 @@ describe('Sidebar', () => {
         isAdmin: false,
       });
 
-      render(<Sidebar open={true} onClose={mockOnClose} />);
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
-      const homeButton = screen.getByText('Home').closest('.MuiListItemButton-root') as HTMLElement;
-      await user.click(homeButton);
+      // Use container query + fireEvent to bypass MUI modal aria-hidden wrapping
+      const buttons = container.querySelectorAll('.MuiListItemButton-root');
+      const photosButton = buttons[0] as HTMLElement; // Photos is the first item
+      fireEvent.click(photosButton);
 
       expect(mockOnClose).toHaveBeenCalledTimes(1);
 
-      const settingsButton = screen.getByText('User Settings').closest('.MuiListItemButton-root') as HTMLElement;
-      await user.click(settingsButton);
+      // User Settings is the last button in the sidebar (pinned at bottom)
+      const allButtons = container.querySelectorAll('.MuiListItemButton-root');
+      const settingsButton = allButtons[allButtons.length - 1] as HTMLElement;
+      fireEvent.click(settingsButton);
 
       expect(mockOnClose).toHaveBeenCalledTimes(2);
     });
@@ -579,7 +608,7 @@ describe('Sidebar', () => {
       });
 
       // Each menu item should have an icon
-      // Admin sees: Home, Media Library, Map, Circles, Search, People, User Settings,
+      // Admin sees: Photos, Explore, Map, Sharing, People, Review Bursts, User Settings,
       //             User Management, System Settings, Backup, AI Settings,
       //             Face Settings, Job Queue, Tags, Storage Insights
       const icons = container.querySelectorAll('.MuiListItemIcon-root');
@@ -646,8 +675,8 @@ describe('Sidebar', () => {
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
       // Verify text content for accessibility
-      expect(container.textContent).toContain('Home');
-      expect(container.textContent).toContain('Media Library');
+      expect(container.textContent).toContain('Photos');
+      expect(container.textContent).toContain('Explore');
       expect(container.textContent).toContain('Map');
       expect(container.textContent).toContain('User Settings');
     });
@@ -666,16 +695,20 @@ describe('Sidebar', () => {
         isAdmin: false,
       });
 
-      render(<Sidebar open={true} onClose={mockOnClose} />);
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
-      const homeButton = screen.getByText('Home').closest('.MuiListItemButton-root') as HTMLElement;
+      // Use container query to bypass aria-hidden wrapping
+      const buttons = container.querySelectorAll('.MuiListItemButton-root');
+      const photosButton = buttons[0] as HTMLElement; // Photos is the first item, path /
 
       // Should be able to focus and activate with keyboard
-      homeButton.focus();
-      expect(homeButton).toHaveFocus();
+      photosButton.focus();
+      expect(photosButton).toHaveFocus();
 
       await user.keyboard('{Enter}');
-      expect(mockNavigate).toHaveBeenCalledWith('/');
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/');
+      });
     });
   });
 
@@ -716,7 +749,6 @@ describe('Sidebar', () => {
     });
 
     it('should close drawer before navigation to prevent backdrop issues', async () => {
-      const user = userEvent.setup();
       let drawerClosed = false;
       let navigationOccurred = false;
 
@@ -745,9 +777,10 @@ describe('Sidebar', () => {
 
       const { container } = render(<Sidebar open={true} onClose={trackingOnClose} />);
 
+      // Use container query + fireEvent to bypass MUI modal aria-hidden wrapping
       const buttons = container.querySelectorAll('.MuiListItemButton-root');
-      const homeButton = buttons[0];
-      await user.click(homeButton);
+      const photosButton = buttons[0] as HTMLElement; // Photos is the first button
+      fireEvent.click(photosButton);
 
       // Drawer close should happen synchronously
       expect(drawerClosed).toBe(true);
