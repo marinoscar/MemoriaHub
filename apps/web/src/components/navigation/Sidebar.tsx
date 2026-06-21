@@ -93,7 +93,6 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const adminItems: NavItemDef[] = [
     { label: 'User Management', icon: <PeopleIcon />, path: '/admin/users' },
     { label: 'System Settings', icon: <AdminIcon />, path: '/admin/settings' },
-    { label: 'Admin Circles', icon: <GroupWorkIcon />, path: '/admin/circles' },
     { label: 'Backup', icon: <BackupIcon />, path: '/admin/backup' },
     { label: 'AI Settings', icon: <AiIcon />, path: '/admin/ai-settings' },
     { label: 'Face Settings', icon: <FaceIcon />, path: '/admin/face-settings' },
