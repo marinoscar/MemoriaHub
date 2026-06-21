@@ -200,7 +200,7 @@ describe('MediaController', () => {
       const dto: Partial<BulkUpdateMediaDto> = {
         circleId: randomUUID(),
         ids: [randomUUID()],
-        set: { classification: 'memory' as const },
+        set: { favorite: true },
       };
       const expectedResult = { updated: 1 };
       mockMediaService.bulkUpdateMedia.mockResolvedValue(expectedResult);

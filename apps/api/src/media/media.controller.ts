@@ -212,7 +212,7 @@ export class MediaController {
 
   /**
    * PATCH /api/media/bulk
-   * Bulk update location, classification, or favorite on a set of media items.
+   * Bulk update location or favorite on a set of media items.
    */
   @Patch('bulk')
   @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
