@@ -47,8 +47,16 @@ class AppConfigStore @Inject constructor(
         _targetCircleId.value = circleId
     }
 
+    /** High-water mark (MediaStore DATE_ADDED, seconds) of the last incremental scan. */
+    var lastScanDateAddedSec: Long
+        get() = prefs.getLong(KEY_LAST_SCAN_ADDED, 0L)
+        set(value) {
+            prefs.edit().putLong(KEY_LAST_SCAN_ADDED, value).apply()
+        }
+
     private companion object {
         const val KEY_SERVER_URL = "server_url"
         const val KEY_TARGET_CIRCLE = "target_circle_id"
+        const val KEY_LAST_SCAN_ADDED = "last_scan_date_added_sec"
     }
 }
