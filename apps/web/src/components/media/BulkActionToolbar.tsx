@@ -14,14 +14,12 @@ import {
   Tooltip,
   ListItemIcon,
   ListItemText,
-  ListSubheader,
   Divider,
 } from '@mui/material';
 import {
   LocationOn as LocationOnIcon,
   Label as LabelIcon,
   Delete as DeleteIcon,
-  Category as CategoryIcon,
   Close as CloseIcon,
   RemoveCircleOutlined as RemoveCircleOutlineIcon,
   SelectAll as SelectAllIcon,
@@ -31,7 +29,6 @@ import {
   StarBorder as StarBorderIcon,
 } from '@mui/icons-material';
 import type { CircleRole } from '../../types/circles';
-import type { MediaClassification } from '../../types/media';
 import { bulkUpdateMedia, bulkDelete } from '../../services/media';
 
 interface BulkActionToolbarProps {
@@ -72,18 +69,6 @@ export function BulkActionToolbar({
   const count = ids.length;
 
   if (count === 0) return null;
-
-  const handleClassify = async (classification: MediaClassification) => {
-    setLoading(true);
-    try {
-      const result = await bulkUpdateMedia({ circleId, ids, set: { classification } });
-      onSuccess(`Updated classification for ${result.updated} item${result.updated !== 1 ? 's' : ''}`);
-    } catch (err) {
-      onError(err instanceof Error ? err.message : 'Failed to update classification');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleFavorite = async (favorite: boolean) => {
     setLoading(true);
@@ -194,20 +179,6 @@ export function BulkActionToolbar({
         <MenuItem onClick={() => { setMoreAnchor(null); onOpenTags(); }}>
           <ListItemIcon><LabelIcon fontSize="small" /></ListItemIcon>
           <ListItemText>Edit tags</ListItemText>
-        </MenuItem>
-        <Divider />
-        <ListSubheader>Classification</ListSubheader>
-        <MenuItem onClick={() => { setMoreAnchor(null); void handleClassify('memory'); }}>
-          <ListItemIcon><CategoryIcon fontSize="small" /></ListItemIcon>
-          <ListItemText>Mark as Memory</ListItemText>
-        </MenuItem>
-        <MenuItem onClick={() => { setMoreAnchor(null); void handleClassify('low_value'); }}>
-          <ListItemIcon><CategoryIcon fontSize="small" /></ListItemIcon>
-          <ListItemText>Mark as Low Value</ListItemText>
-        </MenuItem>
-        <MenuItem onClick={() => { setMoreAnchor(null); void handleClassify('unreviewed'); }}>
-          <ListItemIcon><CategoryIcon fontSize="small" /></ListItemIcon>
-          <ListItemText>Mark as Unreviewed</ListItemText>
         </MenuItem>
         <Divider />
         <MenuItem onClick={() => { setMoreAnchor(null); void handleFavorite(false); }}>
