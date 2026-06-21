@@ -14,6 +14,13 @@ MemoriaHub is a personal media-ownership platform that gives families full contr
 - **Two-Layer Admin Model**: The global system Admin bypasses per-circle membership for full cross-circle management; per-circle roles govern everyday access
 - **Local-Drive Backup**: Admin-triggered server-side backup replicates S3 blobs to `BACKUP_LOCAL_PATH`; CLI `memoriahub backup` command lets operators pull blobs to their own drive
 
+### Android App (Camera Backup)
+- **Native Android Client**: A Kotlin/Jetpack Compose app at `apps/android/` that provides always-on camera photo and video backup to any circle (personal by default); built with AGP 8.11.1, minSdk 26 (Android 8.0+)
+- **Device-Flow Login**: Authenticates against any self-hosted MemoriaHub server using the RFC 8628 Device Authorization Flow — no browser Google OAuth required on the device; tokens are stored in `EncryptedSharedPreferences`
+- **Durable Sync**: All upload state is persisted in a local Room database (`sync_files` / `sync_runs`) and survives app kills and device reboots; SHA-256 dedup pre-check prevents re-uploading existing files; attempt cap (5) prevents indefinite retries
+- **Resumable Uploads**: Uses the same multipart presigned-URL pipeline as the CLI; per-part progress is saved so interrupted uploads resume where they left off
+- **Per-Photo Visibility**: The Photos screen shows a Google-Photos-style adaptive grid with per-tile sync badges (synced / pending / syncing / failed); the Backup screen shows aggregate counts and a failures list with per-file retry
+
 ### Media and Storage
 - **Media Domain**: Photos and videos as first-class `MediaItem` records with typed columns for capture date, camera make/model, GPS coordinates, reverse-geocoded country/region/city, tags, albums, favorites, and soft-delete. All items are circle-scoped (`circleId` required on create and list endpoints)
 - **Circle Dashboard**: The home page (`/`) shows a per-circle dashboard — On This Day (same month/day across all years), recent imports, favorites, and a review queue with deep-links to unreviewed and missing-location items
@@ -36,7 +43,7 @@ MemoriaHub is a personal media-ownership platform that gives families full contr
 - **Same-Origin Architecture**: Frontend and API served from the same host via Nginx reverse proxy
 
 ### Planned Capabilities
-The roadmap covers memory prioritization (Phase 07), Android sync (Phase 08 — circle-scoped from day one), and long-term enrichment such as face recognition, object detection, and duplicate detection (Phase 09). See [docs/plan/ROADMAP.md](docs/plan/ROADMAP.md) for details.
+The roadmap covers further long-term enrichment such as platform import paths (Google Photos Takeout, OneDrive), Azure storage, trip/event grouping, and additional duplicate-detection tiers (Phase 09). The Android MVP (Phase 08) and cross-cutting enrichment features (face recognition, AI auto-tagging, agentic search) are already shipped. See [docs/plan/ROADMAP.md](docs/plan/ROADMAP.md) for details.
 
 ## Technology Stack
 
