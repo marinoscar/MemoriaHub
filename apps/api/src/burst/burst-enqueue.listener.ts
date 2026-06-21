@@ -7,6 +7,8 @@ import {
   ObjectProcessedEvent,
 } from '../storage/processing/events/object-processed.event';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { FEATURE_KEYS } from '../common/types/settings.types';
 
 @Injectable()
 export class BurstEnqueueListener {
@@ -15,6 +17,7 @@ export class BurstEnqueueListener {
   constructor(
     private readonly prisma: PrismaService,
     private readonly enrichmentJobService: EnrichmentJobService,
+    private readonly systemSettings: SystemSettingsService,
   ) {}
 
   @OnEvent(OBJECT_PROCESSED_EVENT, { async: true })
@@ -61,14 +64,11 @@ export class BurstEnqueueListener {
       return;
     }
 
-    // 3. Check per-circle opt-in flag (default: false)
-    const circle = await this.prisma.circle.findUnique({
-      where: { id: mediaItem.circleId },
-      select: { burstDetectionEnabled: true },
-    });
-    if (!circle?.burstDetectionEnabled) {
+    // 3. Check global system-settings feature flag
+    const burstDetectionEnabled = await this.systemSettings.isFeatureEnabled(FEATURE_KEYS.BURST_DETECTION);
+    if (!burstDetectionEnabled) {
       this.logger.debug(
-        `Circle ${mediaItem.circleId} has burstDetectionEnabled=false; skipping burst enqueue for MediaItem ${mediaItem.id}`,
+        `Burst detection disabled globally; skipping burst enqueue for MediaItem ${mediaItem.id}`,
       );
       return;
     }
