@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Link as RouterLink } from 'react-router-dom';
 import {
   Container,
   Box,
@@ -18,6 +18,7 @@ import {
   CircularProgress,
   Alert,
   Snackbar,
+  Link,
 } from '@mui/material';
 import {
   CheckCircle as CheckCircleIcon,
@@ -26,6 +27,7 @@ import {
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useGeoSettings } from '../../hooks/useGeoSettings';
+import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { runGeoBackfill } from '../../services/geo';
 import type { GeoReverseProvider } from '../../services/geo';
 
@@ -49,6 +51,12 @@ function GeoSettingsContent() {
     testProvider,
     saveReverseFeature,
   } = useGeoSettings();
+
+  const {
+    settings: sysSettings,
+    isSaving: sysSaving,
+    updateSettings: updateSysSettings,
+  } = useSystemSettings();
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -176,6 +184,19 @@ function GeoSettingsContent() {
     }
   };
 
+  const handleForwardSearchChange = (checked: boolean) => {
+    void updateSysSettings({
+      geo: {
+        provider: sysSettings?.geo?.provider ?? 'offline',
+        forwardSearchEnabled: checked,
+      },
+    })
+      .then(() => setSuccessMessage('Forward search setting saved'))
+      .catch((err: unknown) => {
+        setLocalError(err instanceof Error ? err.message : 'Failed to save settings');
+      });
+  };
+
   if (loading && !settings) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
@@ -210,9 +231,22 @@ function GeoSettingsContent() {
       })),
   ];
 
+  const forwardSearchEnabled = sysSettings?.geo?.forwardSearchEnabled ?? false;
+
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: 4 }}>
+        {/* Back link */}
+        <Link
+          component={RouterLink}
+          to="/admin/settings"
+          underline="hover"
+          variant="body2"
+          sx={{ display: 'inline-block', mb: 2 }}
+        >
+          &larr; Back to Settings
+        </Link>
+
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
           <LocationOnIcon color="primary" />
           <Typography variant="h4" component="h1">
@@ -424,6 +458,35 @@ function GeoSettingsContent() {
             </Paper>
           );
         })}
+
+        {/* Forward Search section */}
+        <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>
+            Forward Search
+          </Typography>
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={forwardSearchEnabled}
+                onChange={(e) => handleForwardSearchChange(e.target.checked)}
+                disabled={sysSaving || !sysSettings}
+              />
+            }
+            label="Enable forward location search"
+            sx={{ mb: 1, display: 'block' }}
+          />
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Allows users to search by place name (e.g. &lsquo;Paris&rsquo;). Uses Nominatim &mdash;
+            only enable if your privacy policy allows off-server requests.
+          </Typography>
+
+          {forwardSearchEnabled && (
+            <Alert severity="warning">
+              Forward search sends typed location queries to nominatim.openstreetmap.org.
+            </Alert>
+          )}
+        </Paper>
 
         {/* Backfill section */}
         <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
