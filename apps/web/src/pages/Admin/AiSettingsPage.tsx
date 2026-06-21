@@ -238,10 +238,10 @@ function AiSettingsContent() {
     try {
       if (embeddingEnabled) {
         await saveEmbeddingFeature(embeddingProvider, embeddingModel);
-        setSuccessMessage('AI captions embedding settings saved');
+        setSuccessMessage('AI description embedding settings saved');
       } else {
         await saveEmbeddingFeature(null, null);
-        setSuccessMessage('AI captions embedding disabled');
+        setSuccessMessage('AI description embedding disabled');
       }
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : 'Failed to save embedding feature');
@@ -555,21 +555,21 @@ function AiSettingsContent() {
           </Stack>
         </Paper>
 
-        {/* AI Captions & Description Search (embedding) section */}
+        {/* AI Description Search (embedding) section */}
         <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
           <Typography variant="h6" sx={{ mb: 1 }}>
-            AI Captions &amp; Description Search
+            AI Description Search
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            When enabled, AI-generated captions and descriptions are indexed as text embeddings,
+            When enabled, AI-generated descriptions are indexed as text embeddings,
             making your photos semantically searchable by meaning and scene content.
           </Typography>
 
           <Alert severity="info" icon={<InfoIcon fontSize="inherit" />} sx={{ mb: 1.5 }}>
-            Captions and descriptions are generated during the auto-tagging process — not here.
+            Descriptions are generated during the auto-tagging process — not here.
             The <strong>Tagging Feature</strong> (above) must be configured and auto-tagging must
-            be enabled for at least one circle before any captions or descriptions exist to search.
-            This setting only controls whether those already-generated captions become
+            be enabled for at least one circle before any descriptions exist to search.
+            This setting only controls whether those already-generated descriptions become
             semantically searchable via embeddings.
           </Alert>
 
@@ -588,7 +588,7 @@ function AiSettingsContent() {
                 }}
               />
             }
-            label="Enable AI captions"
+            label="Enable AI description search"
             sx={{ mb: 2, display: 'block' }}
           />
 
