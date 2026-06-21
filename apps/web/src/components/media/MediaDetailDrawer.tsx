@@ -13,6 +13,10 @@ import {
   Stack,
   Chip,
   useMediaQuery,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -27,11 +31,22 @@ import {
   LocalOffer as LocalOfferIcon,
   Refresh as RefreshIcon,
   InfoOutlined as InfoOutlinedIcon,
+  Archive as ArchiveIcon,
+  Unarchive as UnarchiveIcon,
+  Delete as DeleteIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
 import type { MediaItem, PatchMediaDto } from '../../types/media';
-import { patchMedia as patchMediaApi, getMedia, bulkUpdateMedia, bulkTags } from '../../services/media';
+import {
+  patchMedia as patchMediaApi,
+  getMedia,
+  bulkUpdateMedia,
+  bulkTags,
+  bulkArchive,
+  bulkUnarchive,
+  bulkDelete,
+} from '../../services/media';
 import { VideoPlayer } from './VideoPlayer';
 import { LocationMiniMap } from './LocationMiniMap';
 import { LocationPickerMap } from './LocationPickerMap';
@@ -167,6 +182,13 @@ export function MediaDetailDrawer({
   // Save state
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Archive / delete state
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Image load state
   const [imgError, setImgError] = useState(false);
@@ -311,6 +333,42 @@ export function MediaDetailDrawer({
       setTagSaving(false);
     }
   }, [item, editTagsAdd, editTagsRemove, onItemUpdated]);
+
+  const handleToggleArchive = useCallback(async () => {
+    if (!item) return;
+    setArchiveLoading(true);
+    setArchiveError(null);
+    try {
+      const isArchived = item.archivedAt !== null;
+      if (isArchived) {
+        await bulkUnarchive({ circleId: item.circleId, ids: [item.id] });
+      } else {
+        await bulkArchive({ circleId: item.circleId, ids: [item.id] });
+      }
+      const refreshed = await getMedia(item.id);
+      setFullItem(refreshed);
+      onItemUpdated(refreshed);
+    } catch (err) {
+      setArchiveError(err instanceof Error ? err.message : 'Failed to update archive state');
+    } finally {
+      setArchiveLoading(false);
+    }
+  }, [item, onItemUpdated]);
+
+  const handleDelete = useCallback(async () => {
+    if (!item) return;
+    setDeleteConfirmOpen(false);
+    setDeleteLoading(true);
+    setDeleteError(null);
+    try {
+      await bulkDelete({ circleId: item.circleId, ids: [item.id] });
+      onClose();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to move item to Trash');
+    } finally {
+      setDeleteLoading(false);
+    }
+  }, [item, onClose]);
 
   const handleToggleFavorite = useCallback(async () => {
     if (!item) return;
@@ -814,7 +872,81 @@ export function MediaDetailDrawer({
         <Divider sx={{ my: 1.5 }} />
         <MetaRow label="Created" value={formatDateTime(item.createdAt)} />
         <MetaRow label="Updated" value={formatDateTime(item.updatedAt)} />
+        {item.archivedAt && (
+          <MetaRow label="Archived" value={formatDateTime(item.archivedAt)} />
+        )}
+
+        {/* Archive / Delete actions */}
+        <Divider sx={{ my: 1.5 }} />
+        <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+          Actions
+        </Typography>
+
+        {archiveError && (
+          <Alert severity="error" sx={{ mb: 1 }} onClose={() => setArchiveError(null)}>
+            {archiveError}
+          </Alert>
+        )}
+        {deleteError && (
+          <Alert severity="error" sx={{ mb: 1 }} onClose={() => setDeleteError(null)}>
+            {deleteError}
+          </Alert>
+        )}
+
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={
+              archiveLoading
+                ? <CircularProgress size={14} />
+                : displayItem.archivedAt !== null
+                  ? <UnarchiveIcon />
+                  : <ArchiveIcon />
+            }
+            onClick={() => void handleToggleArchive()}
+            disabled={archiveLoading}
+            sx={{ minHeight: 44 }}
+          >
+            {displayItem.archivedAt !== null ? 'Unarchive' : 'Archive'}
+          </Button>
+
+          <Button
+            size="small"
+            variant="outlined"
+            color="error"
+            startIcon={deleteLoading ? <CircularProgress size={14} /> : <DeleteIcon />}
+            onClick={() => setDeleteConfirmOpen(true)}
+            disabled={deleteLoading}
+            sx={{ minHeight: 44 }}
+          >
+            Move to Trash
+          </Button>
+        </Stack>
       </Box>
+
+      {/* Move to Trash confirm dialog */}
+      <Dialog open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Move to Trash?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            This item will be moved to Trash and can be recovered within the retention period.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteConfirmOpen(false)} disabled={deleteLoading}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => void handleDelete()}
+            color="error"
+            variant="contained"
+            disabled={deleteLoading}
+          >
+            Move to Trash
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Drawer>
   );
 }
