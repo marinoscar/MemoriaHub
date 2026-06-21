@@ -261,7 +261,7 @@ export class AutoTaggingService {
 
       // l. Parse and validate response
       const labelNames2 = tagLabels.map((t) => t.name);
-      const { tags: validRaw, caption, description, parseOk } = parseAnalysisResult(raw, labelNames2);
+      const { tags: validRaw, description, parseOk } = parseAnalysisResult(raw, labelNames2);
 
       // Normalize case to match the original TagLabel name
       const labelByLower = new Map(labelNames2.map((n) => [n.toLowerCase(), n]));
@@ -293,11 +293,11 @@ export class AutoTaggingService {
             update: {}, // do NOT downgrade manual tag to ai
           });
         }
-        // Persist caption and description only when parse succeeded
+        // Persist description only when parse succeeded
         if (parseOk) {
           await tx.mediaItem.update({
             where: { id: mediaItem.id },
-            data: { caption, description },
+            data: { description },
           });
         }
       });
@@ -462,16 +462,15 @@ async function streamToBuffer(stream: Readable): Promise<Buffer> {
 }
 
 function buildTaggingPrompt(labelNames: string[], peopleNames: string[]): string {
-  let prompt = `Analyze this image and return a JSON object with three keys: "tags", "caption", and "description".
+  let prompt = `Analyze this image and return a JSON object with two keys: "tags" and "description".
 
 "tags": an array of applicable labels from the following allowed list. Only choose labels that clearly apply. Return an empty array if none apply.
-"caption": a short single-sentence caption for the photo.
 "description": a brief 1-3 sentence description of the photo.
 
 Allowed labels:
 ${labelNames.join('\n')}
 
-Example response: {"tags": ["label1", "label2"], "caption": "A family gathering in a sunny backyard.", "description": "Two adults and a child are seated around a picnic table. The yard is decorated with colorful balloons and streamers."}`;
+Example response: {"tags": ["label1", "label2"], "description": "Two adults and a child are seated around a picnic table. The yard is decorated with colorful balloons and streamers."}`;
 
   if (peopleNames.length > 0) {
     prompt += `\n\nThe following named people appear in this photo: ${peopleNames.join(', ')}. Mention them by name in the description where appropriate.`;
@@ -482,13 +481,12 @@ Example response: {"tags": ["label1", "label2"], "caption": "A family gathering 
 
 interface AnalysisResult {
   tags: string[];
-  caption: string | null;
   description: string | null;
   parseOk: boolean;
 }
 
 function parseAnalysisResult(raw: string, labelNames: string[]): AnalysisResult {
-  const failure: AnalysisResult = { tags: [], caption: null, description: null, parseOk: false };
+  const failure: AnalysisResult = { tags: [], description: null, parseOk: false };
 
   // Strip code fences if present
   const cleaned = raw.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
@@ -534,13 +532,6 @@ function parseAnalysisResult(raw: string, labelNames: string[]): AnalysisResult 
     tagsArray.push(...dedupedTags);
   }
 
-  // Extract and validate caption (trim, cap at 2048 chars, null if empty/missing)
-  let caption: string | null = null;
-  if (typeof obj['caption'] === 'string') {
-    const trimmed = obj['caption'].trim();
-    caption = trimmed.length > 0 ? trimmed.slice(0, 2048) : null;
-  }
-
   // Extract and validate description (trim, cap at 8192 chars, null if empty/missing)
   let description: string | null = null;
   if (typeof obj['description'] === 'string') {
@@ -548,5 +539,5 @@ function parseAnalysisResult(raw: string, labelNames: string[]): AnalysisResult 
     description = trimmed.length > 0 ? trimmed.slice(0, 8192) : null;
   }
 
-  return { tags: tagsArray, caption, description, parseOk: true };
+  return { tags: tagsArray, description, parseOk: true };
 }
