@@ -6,7 +6,7 @@ import {
   BadRequestException,
   Inject,
 } from '@nestjs/common';
-import { Prisma, BurstGroupStatus } from '@prisma/client';
+import { Prisma, BurstGroupStatus, SimilarityGroupStatus } from '@prisma/client';
 import { CircleRole } from '@prisma/client';
 import { FastifyReply } from 'fastify';
 import { stringify as csvStringify } from 'csv-stringify';
@@ -1305,7 +1305,11 @@ export class MediaService {
     const burstConfig = burstValue['burst'] as { minGroupSize?: number } | undefined;
     const burstMinGroupSize = burstConfig?.minGroupSize ?? 3;
 
-    const [onThisDayItems, recentItems, favoriteItems, totalCount, missingGeoCount, pendingBurstGroupsCount] =
+    // Load similarity minGroupSize from system settings for the dashboard count filter
+    const similarityConfig = burstValue['similarity'] as { minGroupSize?: number } | undefined;
+    const similarityMinGroupSize = similarityConfig?.minGroupSize ?? 2;
+
+    const [onThisDayItems, recentItems, favoriteItems, totalCount, missingGeoCount, pendingBurstGroupsCount, pendingSimilarityGroupsCount] =
       await Promise.all([
         onThisDayIds.length > 0
           ? this.prisma.mediaItem.findMany({
@@ -1332,6 +1336,13 @@ export class MediaService {
             circleId,
             status: BurstGroupStatus.pending,
             mediaCount: { gte: burstMinGroupSize },
+          },
+        }),
+        this.prisma.similarityGroup.count({
+          where: {
+            circleId,
+            status: SimilarityGroupStatus.pending,
+            mediaCount: { gte: similarityMinGroupSize },
           },
         }),
       ]);
@@ -1366,6 +1377,7 @@ export class MediaService {
         missingGeo: missingGeoCount,
       },
       pendingBurstGroups: pendingBurstGroupsCount,
+      pendingSimilarityGroups: pendingSimilarityGroupsCount,
     };
   }
 

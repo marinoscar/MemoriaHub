@@ -49,6 +49,8 @@ import { getCircleTaggingSettings, updateCircleTaggingSettings } from '../../ser
 import type { CircleTaggingSettings } from '../../services/tagging';
 import { getCircleBurstSettings, updateCircleBurstSettings, runBurstBackfill } from '../../services/bursts';
 import type { CircleBurstSettings } from '../../services/bursts';
+import { getCircleDedupSettings, updateCircleDedupSettings, runSimilarBackfill } from '../../services/similar';
+import type { CircleDedupSettings } from '../../services/similar';
 import { runMetadataBackfill } from '../../services/metadata';
 import type { Circle, CircleRole } from '../../types/circles';
 
@@ -118,6 +120,19 @@ export default function CircleDetailPage() {
   const [burstScanForce, setBurstScanForce] = useState(false);
   const [burstScanning, setBurstScanning] = useState(false);
   const [burstScanError, setBurstScanError] = useState<string | null>(null);
+
+  // Dedup settings state
+  const [dedupSettings, setDedupSettings] = useState<CircleDedupSettings | null>(null);
+  const [dedupSettingsLoading, setDedupSettingsLoading] = useState(false);
+  const [dedupSettingsError, setDedupSettingsError] = useState<string | null>(null);
+  const [dedupTogglingLoading, setDedupTogglingLoading] = useState(false);
+
+  // Dedup scan state
+  const [dedupScanFrom, setDedupScanFrom] = useState('');
+  const [dedupScanTo, setDedupScanTo] = useState('');
+  const [dedupScanForce, setDedupScanForce] = useState(false);
+  const [dedupScanning, setDedupScanning] = useState(false);
+  const [dedupScanError, setDedupScanError] = useState<string | null>(null);
 
   // Metadata backfill state
   const [metaScanFrom, setMetaScanFrom] = useState('');
@@ -202,6 +217,18 @@ export default function CircleDetailPage() {
       .finally(() => setBurstSettingsLoading(false));
   }, [circleId]);
 
+  useEffect(() => {
+    if (!circleId) return;
+    setDedupSettingsLoading(true);
+    setDedupSettingsError(null);
+    getCircleDedupSettings(circleId)
+      .then(setDedupSettings)
+      .catch((err: unknown) => {
+        setDedupSettingsError(err instanceof Error ? err.message : 'Failed to load visual dedup settings');
+      })
+      .finally(() => setDedupSettingsLoading(false));
+  }, [circleId]);
+
   const handleFaceToggle = async (enabled: boolean) => {
     setFaceTogglingLoading(true);
     setFaceSettingsError(null);
@@ -259,6 +286,38 @@ export default function CircleDetailPage() {
       setBurstScanError(err instanceof Error ? err.message : 'Failed to start burst scan');
     } finally {
       setBurstScanning(false);
+    }
+  };
+
+  const handleDedupToggle = async (enabled: boolean) => {
+    setDedupTogglingLoading(true);
+    setDedupSettingsError(null);
+    try {
+      const updated = await updateCircleDedupSettings(circleId, enabled);
+      setDedupSettings(updated);
+      setFaceSuccessMsg(enabled ? 'Visual de-duplication enabled.' : 'Visual de-duplication disabled.');
+    } catch (err: unknown) {
+      setDedupSettingsError(err instanceof Error ? err.message : 'Failed to update visual de-duplication setting');
+    } finally {
+      setDedupTogglingLoading(false);
+    }
+  };
+
+  const handleDedupScan = async () => {
+    if (!circleId) return;
+    setDedupScanError(null);
+    setDedupScanning(true);
+    try {
+      const opts: { from?: string; to?: string; force?: boolean } = {};
+      if (dedupScanFrom) opts.from = dedupScanFrom;
+      if (dedupScanTo) opts.to = dedupScanTo;
+      if (dedupScanForce) opts.force = true;
+      const result = await runSimilarBackfill(circleId, opts);
+      setFaceSuccessMsg(`Queued ${result.enqueued} photo${result.enqueued !== 1 ? 's' : ''} for similarity scanning`);
+    } catch (err: unknown) {
+      setDedupScanError(err instanceof Error ? err.message : 'Failed to start similarity scan');
+    } finally {
+      setDedupScanning(false);
     }
   };
 
@@ -730,6 +789,115 @@ export default function CircleDetailPage() {
                 </Paper>
               </>
             )}
+
+            <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Visual de-duplication finds near-identical photos in your library so you can
+                keep the best copy and delete the rest. It compares visual content using
+                perceptual hashing — not just file names. It is opt-in per circle.
+              </Typography>
+              {dedupSettingsError && (
+                <Alert severity="error" sx={{ mb: 1 }}>
+                  {dedupSettingsError}
+                </Alert>
+              )}
+              {dedupSettingsLoading ? (
+                <CircularProgress size={20} />
+              ) : canManage ? (
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={dedupSettings?.visualDedupEnabled ?? false}
+                      onChange={(e) => void handleDedupToggle(e.target.checked)}
+                      disabled={dedupTogglingLoading || !dedupSettings}
+                      color="primary"
+                    />
+                  }
+                  label={dedupTogglingLoading ? 'Updating…' : 'Enable visual de-duplication'}
+                />
+              ) : (
+                <Typography variant="body2">
+                  Visual de-duplication is currently{' '}
+                  <strong>
+                    {dedupSettings?.visualDedupEnabled ? 'Enabled' : 'Disabled'}
+                  </strong>
+                </Typography>
+              )}
+
+              {dedupSettings?.visualDedupEnabled && canBackfill && (
+                <>
+                  <Divider sx={{ my: 2 }} />
+                  <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'medium' }}>
+                    Find similar photos
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Run a retroactive scan to find visually similar photos across the circle.
+                    Results appear in Similar Photos once processing completes. Leave date fields
+                    empty to scan the entire circle.
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2, mb: 2 }}>
+                    <TextField
+                      label="From (capture date)"
+                      type="date"
+                      value={dedupScanFrom}
+                      onChange={(e) => setDedupScanFrom(e.target.value)}
+                      slotProps={{ inputLabel: { shrink: true } }}
+                      size="small"
+                      sx={{ flex: 1 }}
+                      disabled={dedupScanning}
+                    />
+                    <TextField
+                      label="To (capture date)"
+                      type="date"
+                      value={dedupScanTo}
+                      onChange={(e) => setDedupScanTo(e.target.value)}
+                      slotProps={{ inputLabel: { shrink: true } }}
+                      size="small"
+                      sx={{ flex: 1 }}
+                      disabled={dedupScanning}
+                    />
+                  </Box>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={dedupScanForce}
+                        onChange={(e) => setDedupScanForce(e.target.checked)}
+                        disabled={dedupScanning}
+                        size="small"
+                      />
+                    }
+                    label={
+                      <Typography variant="body2">
+                        Re-scan all (force) — reprocess photos that were already scanned
+                      </Typography>
+                    }
+                    sx={{ mb: 2 }}
+                  />
+                  {dedupScanError && (
+                    <Alert severity="error" sx={{ mb: 2 }}>
+                      {dedupScanError}
+                    </Alert>
+                  )}
+                  {dedupScanFrom && dedupScanTo && dedupScanFrom > dedupScanTo && (
+                    <Alert severity="warning" sx={{ mb: 2 }}>
+                      "From" date must be on or before "To" date.
+                    </Alert>
+                  )}
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => void handleDedupScan()}
+                    disabled={
+                      dedupScanning ||
+                      Boolean(dedupScanFrom && dedupScanTo && dedupScanFrom > dedupScanTo)
+                    }
+                    startIcon={dedupScanning ? <CircularProgress size={14} /> : undefined}
+                  >
+                    {dedupScanning ? 'Scanning…' : 'Find similar photos'}
+                  </Button>
+                </>
+              )}
+            </Paper>
 
             {canBackfill && (
               <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>

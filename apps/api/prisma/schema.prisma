@@ -51,6 +51,7 @@ model User {
   faceCredentialsUpdated    FaceProviderCredential[] @relation("FaceCredentialUpdater")
   peopleAdded               Person[]               @relation("PersonAddedBy")
   resolvedBursts            BurstGroup[]           @relation("BurstGroupResolvedBy")
+  resolvedSimilarityGroups  SimilarityGroup[]      @relation("SimilarityGroupResolvedBy")
 
   @@map("users")
 }
@@ -351,6 +352,7 @@ model Circle {
   faceRecognitionEnabled Boolean  @default(false) @map("face_recognition_enabled")
   autoTaggingEnabled     Boolean  @default(false) @map("auto_tagging_enabled")
   burstDetectionEnabled  Boolean  @default(false) @map("burst_detection_enabled")
+  visualDedupEnabled     Boolean  @default(false) @map("visual_dedup_enabled")
   createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -371,6 +373,8 @@ model Circle {
   mediaMetadataStatuses MediaMetadataStatus[]
   // Burst Detection relations
   bursts              BurstGroup[]
+  // Visual De-duplication relations
+  similarityGroups    SimilarityGroup[]
 
   @@index([ownerId])
   @@map("circles")
@@ -498,6 +502,11 @@ model MediaItem {
   burstScore      Float?   @map("burst_score")        // best-shot quality score
   burstGroupId    String?  @map("burst_group_id") @db.Uuid
 
+  // --- Visual De-duplication ---
+  similarityGroupId String?                      @map("similarity_group_id") @db.Uuid
+  similarityScore   Float?                       @map("similarity_score")     // composite quality/similarity score within group
+  dhashBits         Unsupported("bit(64)")?      @map("dhash_bits")           // 64-bit dHash as native bit string; read/written via $queryRaw only
+
   // --- Relations ---
   albumItems AlbumItem[]
   mediaTags  MediaTag[]
@@ -515,6 +524,9 @@ model MediaItem {
   // Burst Detection relations
   burstGroup        BurstGroup?   @relation("BurstGroupItems", fields: [burstGroupId], references: [id], onDelete: SetNull)
   suggestedForBursts BurstGroup[] @relation("BurstGroupSuggestedBest")
+  // Visual De-duplication relations
+  similarityGroup         SimilarityGroup?   @relation("SimilarityGroupItems", fields: [similarityGroupId], references: [id], onDelete: SetNull)
+  suggestedForSimilarity  SimilarityGroup[]  @relation("SimilarityGroupSuggestedBest")
 
   @@index([circleId])
   @@index([addedById])
@@ -529,6 +541,7 @@ model MediaItem {
   @@index([geoLocality])
   @@index([burstUuid])
   @@index([burstGroupId])
+  @@index([similarityGroupId])
   @@map("media_items")
 }
 
@@ -911,4 +924,40 @@ model BurstGroup {
   @@index([circleId, status])
   @@index([capturedAt])
   @@map("burst_groups")
+}
+
+// =============================================================================
+// Visual De-duplication
+// =============================================================================
+
+enum SimilarityGroupStatus {
+  pending
+  resolved
+  dismissed
+}
+
+// Groups library-wide near-duplicate photos by dHash Hamming distance only
+// (no temporal/device window). Mirrors BurstGroup but without capturedAt/burstUuid
+// specifics. Workers scan the whole circle and cluster items whose dhash_bits
+// columns are within the configured Hamming distance threshold.
+model SimilarityGroup {
+  id                  String                @id @default(uuid()) @db.Uuid
+  circleId            String                @map("circle_id") @db.Uuid
+  status              SimilarityGroupStatus @default(pending)
+  suggestedBestItemId String?               @map("suggested_best_item_id") @db.Uuid
+  mediaCount          Int                   @default(0) @map("media_count")
+  resolvedById        String?               @map("resolved_by_id") @db.Uuid
+  resolvedAt          DateTime?             @map("resolved_at") @db.Timestamptz
+  createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime              @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  circle            Circle      @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  suggestedBestItem MediaItem?  @relation("SimilarityGroupSuggestedBest", fields: [suggestedBestItemId], references: [id], onDelete: SetNull)
+  resolvedBy        User?       @relation("SimilarityGroupResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  items             MediaItem[] @relation("SimilarityGroupItems")
+
+  @@index([circleId, status])
+  @@index([createdAt])
+  @@map("similarity_groups")
 }
