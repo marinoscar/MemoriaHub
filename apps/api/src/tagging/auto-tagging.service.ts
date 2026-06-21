@@ -220,11 +220,10 @@ export class AutoTaggingService {
       const labelNames = tagLabels.map((t) => t.name);
       const userPrompt = buildTaggingPrompt(labelNames, peopleNames);
       const systemPrompt =
-        'You are an image analysis assistant. Your job is to analyze the given image and return a JSON object with three keys: "tags", "caption", and "description". ' +
+        'You are an image analysis assistant. Your job is to analyze the given image and return a JSON object with two keys: "tags" and "description". ' +
         '"tags" must be a JSON array of strings — each string must exactly match one of the labels in the provided allowed list; return an empty array if none apply. ' +
-        '"caption" must be a single-sentence caption for the photo. ' +
         '"description" must be a brief 1-3 sentence description of the photo. ' +
-        'Respond with ONLY a JSON object with those three keys — no explanation, no code fences, no extra text.';
+        'Respond with ONLY a JSON object with those two keys — no explanation, no code fences, no extra text.';
 
       let raw: string;
       try {
@@ -270,7 +269,7 @@ export class AutoTaggingService {
       );
 
       // m. Reconcile AI tags: remove stale AI tags, upsert current labels with source=ai
-      //    Also persist caption/description when parseOk is true.
+      //    Also persist description when parseOk is true.
       await this.prisma.$transaction(async (tx) => {
         // Remove AI-sourced tags no longer produced by the model
         await tx.mediaTag.deleteMany({
