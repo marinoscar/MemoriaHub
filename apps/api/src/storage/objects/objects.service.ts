@@ -18,6 +18,7 @@ import { CircleRole } from '@prisma/client';
 import { CircleMembershipService } from '../../circles/circle-membership.service';
 import { STORAGE_PROVIDER } from '../providers/storage-provider.interface';
 import type { StorageProvider } from '../providers/storage-provider.interface';
+import { StorageProviderResolver } from '../providers/storage-provider.resolver';
 import {
   InitUploadDto,
   InitUploadResponseDto,
@@ -65,6 +66,7 @@ export class ObjectsService {
     private readonly config: ConfigService,
     private readonly eventEmitter: EventEmitter2,
     private readonly circleMembershipService: CircleMembershipService,
+    private readonly resolver: StorageProviderResolver,
   ) {}
 
   /**
@@ -104,21 +106,27 @@ export class ObjectsService {
 
     this.logger.log(`Initializing upload for ${name}, ${totalParts} parts`);
 
+    // Resolve the active storage provider dynamically from system settings so
+    // the id and bucket are persisted on the row rather than being hardcoded.
+    const { id: activeProviderId, provider: activeProvider } =
+      await this.resolver.getActiveProvider();
+
     // Initialize multipart upload with storage provider
-    const { uploadId } = await this.storageProvider.initMultipartUpload(
+    const { uploadId } = await activeProvider.initMultipartUpload(
       storageKey,
       { mimeType },
     );
 
-    // Create StorageObject record
+    // Create StorageObject record — persist the active provider id + bucket so
+    // per-object resolution works correctly for all subsequent operations.
     const storageObject = await this.prisma.storageObject.create({
       data: {
         name,
         size: BigInt(size),
         mimeType,
         storageKey,
-        storageProvider: 's3',
-        bucket: this.storageProvider.getBucket(),
+        storageProvider: activeProviderId,
+        bucket: activeProvider.getBucket(),
         status: 'pending',
         s3UploadId: uploadId,
         uploadedById: userId,
@@ -131,7 +139,7 @@ export class ObjectsService {
       Array.from({ length: urlBatchSize }, (_, i) => i + 1).map(
         async (partNumber) => ({
           partNumber,
-          url: await this.storageProvider.getSignedUploadUrl(
+          url: await activeProvider.getSignedUploadUrl(
             storageKey,
             uploadId,
             partNumber,
@@ -229,10 +237,17 @@ export class ObjectsService {
       throw new BadRequestException('No active multipart upload for this object');
     }
 
+    // Re-resolve from the object row so an active-provider switch mid-upload
+    // cannot misroute part-URL requests to the wrong provider.
+    const partProvider = await this.resolver.getProviderFor(
+      storageObject.storageProvider,
+      storageObject.bucket,
+    );
+
     const presignedUrls = await Promise.all(
       dto.partNumbers.map(async (partNumber) => ({
         partNumber,
-        url: await this.storageProvider.getSignedUploadUrl(
+        url: await partProvider.getSignedUploadUrl(
           storageObject.storageKey,
           storageObject.s3UploadId!,
           partNumber,
@@ -300,8 +315,15 @@ export class ObjectsService {
       ),
     );
 
+    // Re-resolve from the object row so an active-provider switch between
+    // initUpload and completeUpload cannot misroute to the wrong provider.
+    const completeProvider = await this.resolver.getProviderFor(
+      storageObject.storageProvider,
+      storageObject.bucket,
+    );
+
     // Complete upload with storage provider
-    await this.storageProvider.completeMultipartUpload(
+    await completeProvider.completeMultipartUpload(
       storageObject.storageKey,
       storageObject.s3UploadId,
       parts,
@@ -355,8 +377,15 @@ export class ObjectsService {
 
     this.logger.log(`Aborting upload ${objectId}`);
 
+    // Resolve from the object row so abort targets the same provider/bucket
+    // that was used for the initiation even if the active provider changed.
+    const abortProvider = await this.resolver.getProviderFor(
+      storageObject.storageProvider,
+      storageObject.bucket,
+    );
+
     // Abort with storage provider
-    await this.storageProvider.abortMultipartUpload(
+    await abortProvider.abortMultipartUpload(
       storageObject.storageKey,
       storageObject.s3UploadId,
     );
@@ -392,8 +421,12 @@ export class ObjectsService {
 
     this.logger.log(`Simple upload starting: ${filename}`);
 
+    // Resolve the active storage provider dynamically from system settings.
+    const { id: activeProviderId, provider: activeProvider } =
+      await this.resolver.getActiveProvider();
+
     // Upload to storage
-    const result = await this.storageProvider.upload(storageKey, stream, {
+    const result = await activeProvider.upload(storageKey, stream, {
       mimeType: mimetype,
     });
 
@@ -405,7 +438,7 @@ export class ObjectsService {
         size: BigInt(0), // Will be updated by post-processing
         mimeType: mimetype,
         storageKey,
-        storageProvider: 's3',
+        storageProvider: activeProviderId,
         bucket: result.bucket,
         status: 'processing',
         uploadedById: userId,
@@ -512,7 +545,12 @@ export class ObjectsService {
     );
     const expiry = expiresIn || defaultExpiry;
 
-    const url = await this.storageProvider.getSignedDownloadUrl(
+    const downloadProvider = await this.resolver.getProviderFor(
+      object.storageProvider,
+      object.bucket,
+    );
+
+    const url = await downloadProvider.getSignedDownloadUrl(
       object.storageKey,
       { expiresIn: expiry },
     );
@@ -533,8 +571,16 @@ export class ObjectsService {
 
     this.logger.log(`Deleting object ${id} from storage and database`);
 
+    // Resolve from the object row so the delete targets the provider and bucket
+    // where the file actually lives, regardless of what the current active
+    // provider is.
+    const deleteProvider = await this.resolver.getProviderFor(
+      object.storageProvider,
+      object.bucket,
+    );
+
     // Delete from storage provider
-    await this.storageProvider.delete(object.storageKey);
+    await deleteProvider.delete(object.storageKey);
 
     // Delete from database (cascade deletes chunks)
     await this.prisma.storageObject.delete({
