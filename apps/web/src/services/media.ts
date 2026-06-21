@@ -38,7 +38,6 @@ export async function listMedia(params?: MediaQueryParams): Promise<MediaListRes
   if (params?.type) searchParams.set('type', params.type);
   if (params?.capturedAtFrom) searchParams.set('capturedAtFrom', params.capturedAtFrom);
   if (params?.capturedAtTo) searchParams.set('capturedAtTo', params.capturedAtTo);
-  if (params?.classification) searchParams.set('classification', params.classification);
   if (params?.albumId) searchParams.set('albumId', params.albumId);
   if (params?.favorite !== undefined) searchParams.set('favorite', String(params.favorite));
   if (params?.tag) searchParams.set('tag', params.tag);

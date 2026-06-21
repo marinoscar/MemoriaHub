@@ -17,7 +17,6 @@ import {
 
 export interface MediaFilters {
   type?: MediaQueryParams['type'];
-  classification?: MediaQueryParams['classification'];
   favorite?: boolean;
   tag?: string;
   country?: string;
