@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import {
   AppBar as MuiAppBar,
+  Box,
   Toolbar,
   Typography,
   IconButton,
@@ -25,6 +26,7 @@ import { CircleSwitcher } from '../circles/CircleSwitcher';
 import { TopbarSearch } from '../search/TopbarSearch';
 import { MediaUploadDialog } from '../media/MediaUploadDialog';
 import { APP_NAME } from '../../constants/app';
+import appLogo from '../../assets/app_logo.png';
 
 interface AppBarProps {
   onMenuClick?: () => void;
@@ -73,8 +75,16 @@ export function AppBar({ onMenuClick }: AppBarProps) {
             <MenuIcon />
           </IconButton>
 
-          {/* Logo — hide text on phones to save space */}
-          {!isPhone && (
+          {/* Brand — desktop: text; mobile: logo image (~983KB, consider optimizing/downscaling in future) */}
+          {isPhone ? (
+            <Box
+              component="img"
+              src={appLogo}
+              alt={APP_NAME}
+              onClick={() => navigate('/')}
+              sx={{ height: 32, width: 'auto', cursor: 'pointer', flexShrink: 0, display: 'block', objectFit: 'contain' }}
+            />
+          ) : (
             <Typography
               variant="h6"
               component="div"

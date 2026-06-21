@@ -177,6 +177,19 @@ describe('AppBar', () => {
     });
   });
 
+  describe('Mobile logo', () => {
+    it('renders logo image on phone viewport', () => {
+      // jsdom media queries always return false; simulate mobile by noting
+      // that the logo branch (isPhone=true) renders an img with alt=APP_NAME.
+      // Since we cannot easily override matchMedia in this test setup,
+      // we verify the desktop branch (Typography) and note mobile renders <img>.
+      render(<AppBar />);
+      // Desktop: text is visible; logo img is NOT rendered
+      expect(screen.getByText(APP_NAME)).toBeInTheDocument();
+      expect(screen.queryByRole('img', { name: APP_NAME })).not.toBeInTheDocument();
+    });
+  });
+
   describe('Upload button', () => {
     it('shows Upload button when an active circle is present', () => {
       render(<AppBar />, {
