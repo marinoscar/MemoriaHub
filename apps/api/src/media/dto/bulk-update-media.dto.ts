@@ -12,10 +12,9 @@ export const bulkUpdateMediaSchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(500),
   set: z.object({
     location: locationSchema.nullable().optional(),
-    classification: z.enum(['memory', 'low_value', 'unreviewed']).optional(),
     favorite: z.boolean().optional(),
   }).refine(
-    (s) => s.location !== undefined || s.classification !== undefined || s.favorite !== undefined,
+    (s) => s.location !== undefined || s.favorite !== undefined,
     { message: 'set must contain at least one field' },
   ),
 });

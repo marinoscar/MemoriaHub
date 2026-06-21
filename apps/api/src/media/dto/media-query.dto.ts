@@ -12,7 +12,6 @@ export const mediaFilterFields = {
   type: z.enum(['photo', 'video']).optional(),
   capturedAtFrom: isoDateTimeInput.optional(),
   capturedAtTo: isoDateTimeInput.optional(),
-  classification: z.enum(['memory', 'low_value', 'unreviewed']).optional(),
   albumId: z.string().uuid().optional(),
   favorite: z
     .string()
