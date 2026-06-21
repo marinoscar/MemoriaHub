@@ -121,21 +121,22 @@ describe('ExifProcessor — real fixture (no exifr mock)', () => {
     // Exact-value assertions (verified against the real fixed processor)
     // -----------------------------------------------------------------------
 
-    it('capturedAt should be an ISO 8601 UTC string on 2026-06-20 with 438 ms sub-second from SubSecTimeOriginal', () => {
+    it('capturedAt should be exactly "2026-06-20T20:16:07.438Z" (timezone-determinism regression guard)', () => {
       // The 438 ms sub-second is read from SubSecTimeOriginal; this proves
       // the sub-second merge path works end-to-end with the real exifr call.
       //
-      // NOTE ON TIMEZONE: exifr with reviveValues:true parses DateTimeOriginal
-      // ("2026:06:20 15:16:07") as a JavaScript Date using the LOCAL timezone
-      // of the process, then the processor serialises it via .toISOString()
-      // which yields UTC.  The exact hour therefore varies by host timezone and
-      // we cannot pin it to a single constant without timezone-normalisation in
-      // the processor.  What we CAN assert deterministically is:
-      //   - the date portion is "2026-06-20"
-      //   - the sub-second ".438" is preserved (proves SubSecTimeOriginal merge)
-      //   - the string is a valid ISO 8601 UTC timestamp ending in "Z"
+      // Previously this used a regex because the processor was TZ-sensitive.
+      // Now it asserts the exact value — this is a timezone-determinism
+      // regression guard: if the processor reverts to TZ-sensitive behavior
+      // (e.g. using dto.toISOString() instead of re-encoding via Date.UTC from
+      // local getters), this will fail on non-UTC hosts.
+      //
+      // The processor now rebuilds capturedAt from local-getter wall-clock
+      // components re-encoded as UTC, so "2026:06:20 20:16:07" in the EXIF
+      // string always maps to exactly "2026-06-20T20:16:07.438Z" regardless
+      // of the server's local timezone.
       const capturedAt = metadata['capturedAt'] as string;
-      expect(capturedAt).toMatch(/^2026-06-20T\d{2}:16:07\.438Z$/);
+      expect(capturedAt).toBe('2026-06-20T20:16:07.438Z');
     });
 
     it('capturedAtOffset should be -300 (from OffsetTimeOriginal "-05:00")', () => {
@@ -161,6 +162,70 @@ describe('ExifProcessor — real fixture (no exifr mock)', () => {
 
     it('longitude should be approximately -95.4831974', () => {
       expect(metadata['longitude']).toBeCloseTo(-95.4831974, 5);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Timezone-determinism regression guard
+  //
+  // Verify that the processor emits the same exact capturedAt string even when
+  // the process timezone is changed to a non-UTC zone (America/Chicago, UTC-5/6).
+  //
+  // NOTE: In Node.js the `process.env.TZ` change only takes effect for Date
+  // operations that happen AFTER the assignment within the same isolate. Jest
+  // runs each spec file in its own worker, so setting TZ in beforeAll here
+  // affects all Date constructors called subsequently in this describe block.
+  // However, because `process.env.TZ` is applied at the libuv/ICU level, it
+  // may not take effect in all environments (notably on some glibc configurations
+  // the TZ is read only at process start). We therefore:
+  //   1. Set TZ in beforeAll and verify it took effect by checking the
+  //      getTimezoneOffset() of a known local-time Date.
+  //   2. If the change did NOT take effect (e.g. the host is already UTC and
+  //      glibc ignores runtime TZ changes), we skip the assertion with a
+  //      descriptive message — the processor is still correct for UTC.
+  //   3. If the change DID take effect, we assert the exact expected value.
+  // ---------------------------------------------------------------------------
+  describe('timezone determinism — TZ=America/Chicago', () => {
+    let originalTz: string | undefined;
+    let tzTookEffect: boolean;
+
+    beforeAll(() => {
+      originalTz = process.env.TZ;
+      process.env.TZ = 'America/Chicago';
+
+      // America/Chicago is UTC-5 (CST) or UTC-6 (CDT); either way non-zero.
+      // If TZ did not take effect the offset for a mid-summer date will be 0.
+      const offset = new Date(2026, 5, 20, 20, 16, 7).getTimezoneOffset();
+      // Non-UTC: offset is 300 (CST) or 360 (CDT)
+      tzTookEffect = offset !== 0;
+    });
+
+    afterAll(() => {
+      if (originalTz === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = originalTz;
+      }
+    });
+
+    it('should produce the same capturedAt under America/Chicago as under UTC', async () => {
+      if (!tzTookEffect) {
+        // Host's glibc did not honour the runtime TZ change — skip the TZ-specific
+        // assertion. The regression is still guarded by the UTC assertion above.
+        console.warn(
+          'process.env.TZ change did not take effect (host may ignore runtime TZ); ' +
+          'skipping TZ=America/Chicago capturedAt assertion.',
+        );
+        return;
+      }
+
+      const result = await processor.process(makeObject(), makeGetStream(buffer));
+      const capturedAt = (result.metadata as Record<string, unknown>)['capturedAt'] as string;
+
+      // Regardless of host TZ, the processor re-encodes EXIF wall-clock digits
+      // as UTC via Date.UTC(dto.getFullYear(), ..., dto.getHours(), ...) so the
+      // result is always the literal wall-clock digits in the EXIF string.
+      expect(capturedAt).toBe('2026-06-20T20:16:07.438Z');
     });
   });
 });

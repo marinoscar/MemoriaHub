@@ -93,7 +93,13 @@ describe('ExifProcessor', () => {
   });
 
   describe('process — with EXIF data (exifr mocked)', () => {
-    const MOCK_CAPTURED_AT = new Date('2024-06-15T10:30:00.000Z');
+    // Use a local-time constructor so that the Date's local getters
+    // (getFullYear, getMonth, getDate, getHours, getMinutes, getSeconds) always
+    // return 2024-06-15 10:30:00 wall-clock digits regardless of the host TZ.
+    // The processor re-encodes those local-getter values as UTC via Date.UTC(),
+    // so capturedAt is deterministically '2024-06-15T10:30:00.000Z' on every host.
+    // (months are 0-indexed: 5 = June)
+    const MOCK_CAPTURED_AT_LOCAL = new Date(2024, 5, 15, 10, 30, 0, 0);
     const MOCK_LAT = 9.9281;
     const MOCK_LNG = -84.0907;
     const MOCK_ALT = 1247.5;
@@ -102,7 +108,7 @@ describe('ExifProcessor', () => {
       // Mock the exifr module to return a full set of EXIF tags
       jest.doMock('exifr', () => ({
         parse: jest.fn().mockResolvedValue({
-          DateTimeOriginal: MOCK_CAPTURED_AT,
+          DateTimeOriginal: MOCK_CAPTURED_AT_LOCAL,
           OffsetTimeOriginal: '-06:00',
           latitude: MOCK_LAT,
           longitude: MOCK_LNG,
@@ -125,7 +131,10 @@ describe('ExifProcessor', () => {
     it('should extract capturedAt as ISO 8601 UTC string', async () => {
       const buf = await getPlainJpegBuffer();
       const result = await processor.process(makeObject(), makeGetStream(buf));
-      expect(result.metadata?.capturedAt).toBe(MOCK_CAPTURED_AT.toISOString());
+      // Local-time constructor ensures getFullYear/getMonth/.../getHours always
+      // return 2024-06-15 10:30:00 wall-clock digits regardless of host TZ.
+      // The processor re-encodes these as UTC, so capturedAt is always this string.
+      expect(result.metadata?.capturedAt).toBe('2024-06-15T10:30:00.000Z');
     });
 
     it('should extract capturedAtOffset in minutes from OffsetTimeOriginal', async () => {
@@ -176,7 +185,8 @@ describe('ExifProcessor', () => {
     beforeEach(() => {
       jest.doMock('exifr', () => ({
         parse: jest.fn().mockResolvedValue({
-          DateTimeOriginal: new Date('2024-06-15T10:30:00.000Z'),
+          // Local-time constructor for TZ-stability (see describe above)
+          DateTimeOriginal: new Date(2024, 5, 15, 10, 30, 0, 0),
           OffsetTimeOriginal: '+05:30',
           latitude: 12.0,
           longitude: 77.0,
@@ -256,7 +266,8 @@ describe('ExifProcessor', () => {
 
     beforeEach(() => {
       parseSpy = jest.fn().mockResolvedValue({
-        DateTimeOriginal: new Date('2024-01-01T00:00:00.000Z'),
+        // Local-time constructor for TZ-stability (months 0-indexed: 0 = January)
+        DateTimeOriginal: new Date(2024, 0, 1, 0, 0, 0, 0),
         Make: 'Apple',
         Model: 'iPhone 15 Pro',
         Orientation: 1,
@@ -289,7 +300,8 @@ describe('ExifProcessor', () => {
     beforeEach(() => {
       jest.doMock('exifr', () => ({
         parse: jest.fn().mockResolvedValue({
-          DateTimeOriginal: new Date('2024-01-01T12:00:00.000Z'),
+          // Local-time constructor for TZ-stability (months 0-indexed: 0 = January)
+          DateTimeOriginal: new Date(2024, 0, 1, 12, 0, 0, 0),
           Make: 'Canon',
           Model: 'EOS R5',
           Orientation: 1,
@@ -305,6 +317,7 @@ describe('ExifProcessor', () => {
       expect(result.success).toBe(true);
       expect(result.metadata?.latitude).toBeUndefined();
       expect(result.metadata?.longitude).toBeUndefined();
+      // Local-time constructor ensures 12:00:00 wall-clock always → '2024-01-01T12:00:00.000Z'
       expect(result.metadata?.capturedAt).toBe('2024-01-01T12:00:00.000Z');
       expect(result.metadata?.cameraMake).toBe('Canon');
     });
