@@ -30,6 +30,7 @@ import {
   AddLocation as AddLocationIcon,
   LocalOffer as LocalOfferIcon,
   Refresh as RefreshIcon,
+  InfoOutlined as InfoOutlinedIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
@@ -42,6 +43,8 @@ import { TagAutocomplete } from './TagAutocomplete';
 import { FaceThumbnails } from './FaceThumbnails';
 import { useMediaTags } from '../../hooks/useMediaTags';
 import type { MediaTagStatusType } from '../../services/tagging';
+import { useMediaMetadata } from '../../hooks/useMediaMetadata';
+import type { MediaMetadataStatusType } from '../../services/metadata';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -88,6 +91,24 @@ function tagStatusChipProps(status: MediaTagStatusType | undefined): {
       return { label: 'Failed', color: 'error' };
     default:
       return { label: 'Not Tagged', color: 'default' };
+  }
+}
+
+function metadataStatusChipProps(status: MediaMetadataStatusType | undefined): {
+  label: string;
+  color: 'success' | 'warning' | 'info' | 'default' | 'error';
+} {
+  switch (status) {
+    case 'processed':
+      return { label: 'Extracted', color: 'success' };
+    case 'pending':
+      return { label: 'Pending', color: 'warning' };
+    case 'processing':
+      return { label: 'Processing', color: 'info' };
+    case 'failed':
+      return { label: 'Failed', color: 'error' };
+    default:
+      return { label: 'Not Extracted', color: 'default' };
   }
 }
 
@@ -326,6 +347,11 @@ export function MediaDetailDrawer({
   }, [item?.id, onItemUpdated]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { status: tagStatus, rerun: rerunTags, rerunLoading: rerunTagsLoading } = useMediaTags(
+    item?.id ?? '',
+    onRefreshTags,
+  );
+
+  const { status: metadataStatus, rerun: rerunMetadata, rerunLoading: rerunMetadataLoading } = useMediaMetadata(
     item?.id ?? '',
     onRefreshTags,
   );
@@ -809,6 +835,38 @@ export function MediaDetailDrawer({
               </Button>
             </Stack>
           </Stack>
+        )}
+
+        {/* Metadata extraction */}
+        <Divider sx={{ my: 1.5 }} />
+        <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+          Metadata
+        </Typography>
+        {(() => {
+          const chipProps = metadataStatusChipProps(metadataStatus?.status);
+          return (
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ alignItems: { xs: 'flex-start', sm: 'center' }, mb: 1 }}>
+              <Chip
+                label={chipProps.label}
+                color={chipProps.color}
+                size="small"
+                icon={<InfoOutlinedIcon />}
+              />
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={rerunMetadataLoading ? <CircularProgress size={14} /> : <RefreshIcon />}
+                onClick={() => void rerunMetadata()}
+                disabled={rerunMetadataLoading}
+                sx={{ minHeight: 44 }}
+              >
+                Re-run metadata extraction
+              </Button>
+            </Stack>
+          );
+        })()}
+        {metadataStatus?.status === 'failed' && metadataStatus.lastError && (
+          <Alert severity="error" sx={{ mb: 1 }}>{metadataStatus.lastError}</Alert>
         )}
 
         {/* Timestamps */}
