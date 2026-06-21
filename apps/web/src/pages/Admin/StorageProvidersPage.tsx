@@ -93,7 +93,7 @@ interface ProviderCardProps {
   onSave: (provider: string) => Promise<void>;
   onRemove: (provider: string) => Promise<void>;
   onTest: (provider: string) => Promise<void>;
-  testResult: { ok: boolean; error?: string } | null;
+  testResult: { ok: boolean; bucket?: string; region?: string; endpoint?: string; error?: string } | null;
   testLoading: boolean;
 }
 
@@ -136,7 +136,7 @@ function ProviderCard({
           <Alert severity="info" icon={false} sx={{ py: 0.5, mb: 2 }}>
             No credentials required — files are stored on the server's local filesystem.
           </Alert>
-          <Stack direction="row" spacing={1} alignItems="center">
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <Button
               variant="outlined"
               size="small"
@@ -255,7 +255,7 @@ function ProviderCard({
             sx={{ mb: 2, display: 'block' }}
           />
 
-          <Stack direction="row" spacing={1} alignItems="center">
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <Button
               variant="contained"
               size="small"
@@ -686,7 +686,7 @@ function StorageProvidersContent() {
 
           {/* Start migration form */}
           {!migrationInProgress && (
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="flex-start">
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ alignItems: 'flex-start' }}>
               <FormControl size="small" sx={{ minWidth: 160 }}>
                 <InputLabel>Source provider</InputLabel>
                 <Select
