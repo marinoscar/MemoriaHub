@@ -28,6 +28,8 @@ import {
   Add as AddIcon,
   PhotoAlbum as AlbumIcon,
   BurstMode as BurstModeIcon,
+  Archive as ArchiveOutlinedIcon,
+  Delete as DeleteOutlineIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -81,6 +83,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const libraryItems: NavItemDef[] = [
     { label: 'People', icon: <GroupsIcon />, path: '/people' },
     { label: 'Review Bursts', icon: <BurstModeIcon />, path: '/bursts' },
+    { label: 'Archive', icon: <ArchiveOutlinedIcon />, path: '/archive' },
+    { label: 'Trash', icon: <DeleteOutlineIcon />, path: '/trash' },
   ];
 
   const adminItems: NavItemDef[] = [

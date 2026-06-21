@@ -680,7 +680,30 @@ For variables specific to the `face_detection` handler (thresholds, providers, i
 
 ---
 
-## 14. Future Extension Ideas
+## 14. Registered Handlers Reference
+
+The following handlers are registered in the current production codebase. Each implements `EnrichmentHandler`, self-registers via `onModuleInit`, and appears automatically in the `/admin/jobs` dashboard.
+
+| Handler type | Module | Scope | Scheduled by | Notes |
+|---|---|---|---|---|
+| `face_detection` | `FaceModule` | per media item | upload event + rerun + backfill | Per-circle opt-in; see [face-recognition.md](face-recognition.md) |
+| `auto_tagging` | `TaggingModule` | per media item | upload event + rerun + backfill | Per-circle opt-in; see [auto-tagging.md](auto-tagging.md) |
+| `burst_detection` | `BurstModule` | per media item | upload event + rerun + backfill | Per-circle opt-in; see [burst-detection.md](burst-detection.md) |
+| `metadata_extraction` | `MediaModule` | per media item | rerun + backfill only (no upload enqueue) | No per-circle opt-in; see [metadata-rerun.md](metadata-rerun.md) |
+| `storage_insights` | `InsightsModule` | global (`mediaItemId: null`) | hourly cron (`InsightsRefreshTask`) | Interval-gated; manual via `POST /api/admin/insights/refresh`; see [storage-insights.md](storage-insights.md) |
+| `trash_purge` | `MediaModule` | global (`mediaItemId: null`) | hourly cron (`TrashPurgeTask`) | Hard-deletes trashed `media_items` past `storage.trash.retentionDays` cutoff; see [archive-trash.md](archive-trash.md) |
+
+### Global handler pattern
+
+`storage_insights` and `trash_purge` are **global handlers** — they run across all circles and are not scoped to a single media item. They share two properties:
+
+- `mediaItemId: null` and `circleId: null` on the `enrichment_jobs` row.
+- Idempotency deduplicates on `(type, mediaItemId IS NULL)` — only one global job of a given type can be pending or running at a time.
+- The handler ignores the job payload; all context comes from system settings or a full-table query.
+
+---
+
+## 15. Future Extension Ideas
 
 The following capabilities would each become one new handler on the existing queue infrastructure:
 

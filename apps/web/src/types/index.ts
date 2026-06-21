@@ -38,6 +38,9 @@ export interface SystemSettings {
       refreshIntervalHours?: number;
     };
     activeProvider?: string;
+    trash?: {
+      retentionDays?: number;
+    };
   };
   burst?: {
     timeGapSeconds?: number;

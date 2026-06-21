@@ -30,6 +30,7 @@ import {
   whereSourceDeviceName,
   whereMissingGeo,
   whereNoFaces,
+  whereExcludeArchived,
   wherePeople,
 } from './media-where.builder';
 
@@ -178,6 +179,14 @@ export const SEARCHABLE_FIELDS: SearchableField[] = [
     description:
       'When true, returns only items that have no faces at all (neither detected nor manually added) — useful for finding photos that still need people tagged.',
     buildWhere: (v) => whereNoFaces(v === true),
+  },
+  {
+    key: 'excludeArchived',
+    label: 'Exclude archived',
+    type: 'boolean',
+    description:
+      'When true, excludes archived items from search results (only returns non-archived items). When false or omitted, archived items are included in search results by default.',
+    buildWhere: (v) => whereExcludeArchived(v === true),
   },
   {
     key: 'people',

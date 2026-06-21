@@ -27,9 +27,19 @@ import {
   FavoriteBorder as FavoriteBorderIcon,
   MoreVert as MoreVertIcon,
   StarBorder as StarBorderIcon,
+  Archive as ArchiveIcon,
+  Unarchive as UnarchiveIcon,
 } from '@mui/icons-material';
 import type { CircleRole } from '../../types/circles';
-import { bulkUpdateMedia, bulkDelete } from '../../services/media';
+import { bulkUpdateMedia, bulkDelete, bulkArchive, bulkUnarchive } from '../../services/media';
+
+/**
+ * Mode controls which archive-related actions are shown.
+ * - 'home'    (default): shows Archive, no Unarchive
+ * - 'archive': shows Unarchive, no Archive
+ * - 'trash':   neither (separate TrashBulkToolbar is used instead)
+ */
+export type BulkActionMode = 'home' | 'archive' | 'trash';
 
 interface BulkActionToolbarProps {
   selected: Set<string>;
@@ -44,6 +54,8 @@ interface BulkActionToolbarProps {
   onOpenAlbum?: () => void;
   albumMode?: boolean;
   onRemoveFromAlbum?: () => void;
+  /** Controls archive-related actions shown. Default: 'home'. */
+  mode?: BulkActionMode;
 }
 
 export function BulkActionToolbar({
@@ -59,6 +71,7 @@ export function BulkActionToolbar({
   onOpenAlbum,
   albumMode,
   onRemoveFromAlbum,
+  mode = 'home',
 }: BulkActionToolbarProps) {
   const [moreAnchor, setMoreAnchor] = useState<null | HTMLElement>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -87,9 +100,35 @@ export function BulkActionToolbar({
     setLoading(true);
     try {
       const result = await bulkDelete({ circleId, ids });
-      onSuccess(`Deleted ${result.deleted} item${result.deleted !== 1 ? 's' : ''}`);
+      onSuccess(`Moved ${result.deleted} item${result.deleted !== 1 ? 's' : ''} to Trash`);
     } catch (err) {
-      onError(err instanceof Error ? err.message : 'Failed to delete items');
+      onError(err instanceof Error ? err.message : 'Failed to move items to Trash');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleArchive = async () => {
+    setMoreAnchor(null);
+    setLoading(true);
+    try {
+      const result = await bulkArchive({ circleId, ids });
+      onSuccess(`Archived ${result.archived} item${result.archived !== 1 ? 's' : ''}`);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Failed to archive items');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUnarchive = async () => {
+    setMoreAnchor(null);
+    setLoading(true);
+    try {
+      const result = await bulkUnarchive({ circleId, ids });
+      onSuccess(`Unarchived ${result.unarchived} item${result.unarchived !== 1 ? 's' : ''}`);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Failed to unarchive items');
     } finally {
       setLoading(false);
     }
@@ -192,24 +231,37 @@ export function BulkActionToolbar({
           </MenuItem>
         )}
         <Divider />
+        {mode === 'home' && (
+          <MenuItem onClick={() => void handleArchive()}>
+            <ListItemIcon><ArchiveIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>Archive</ListItemText>
+          </MenuItem>
+        )}
+        {mode === 'archive' && (
+          <MenuItem onClick={() => void handleUnarchive()}>
+            <ListItemIcon><UnarchiveIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>Unarchive</ListItemText>
+          </MenuItem>
+        )}
         <MenuItem onClick={() => { setMoreAnchor(null); setDeleteConfirmOpen(true); }} sx={{ color: 'error.main' }}>
           <ListItemIcon><DeleteIcon fontSize="small" sx={{ color: 'error.main' }} /></ListItemIcon>
-          <ListItemText>Delete</ListItemText>
+          <ListItemText>Move to Trash</ListItemText>
         </MenuItem>
       </Menu>
 
-      {/* Delete confirm */}
+      {/* Move to Trash confirm */}
       <Dialog open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Delete {count} item{count !== 1 ? 's' : ''}?</DialogTitle>
+        <DialogTitle>Move {count} item{count !== 1 ? 's' : ''} to Trash?</DialogTitle>
         <DialogContent>
           <Typography variant="body2">
-            This will permanently delete {count} selected item{count !== 1 ? 's' : ''}. This action cannot be undone.
+            {count} selected item{count !== 1 ? 's' : ''} will be moved to Trash. You can restore
+            them within the retention period.
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteConfirmOpen(false)}>Cancel</Button>
           <Button onClick={() => void handleDelete()} color="error" variant="contained">
-            Delete
+            Move to Trash
           </Button>
         </DialogActions>
       </Dialog>

@@ -19,6 +19,12 @@ export interface MediaFilters {
   sourceDeviceName?: string;
   missingGeo?: boolean;
   noFaces?: boolean;
+  /**
+   * When true, only return items where archivedAt IS NULL (not archived).
+   * When false or undefined, archived items are included.
+   * Browse callers pass true; search callers omit this to include archived by default.
+   */
+  excludeArchived?: boolean;
 }
 
 export function whereType(value: string): Prisma.MediaItemWhereInput {
@@ -108,6 +114,14 @@ export function whereNoFaces(value: boolean): Prisma.MediaItemWhereInput {
 }
 
 /**
+ * Exclude archived media items (archivedAt IS NULL).
+ * Only applies when value is explicitly true.
+ */
+export function whereExcludeArchived(value: boolean): Prisma.MediaItemWhereInput {
+  return value === true ? { archivedAt: null } : {};
+}
+
+/**
  * Filter media items by people who appear in them (via face recognition).
  *
  * @param ids    Array of Person UUIDs to filter by.
@@ -147,6 +161,7 @@ export function buildMediaWhere(
     sourceDeviceName,
     missingGeo,
     noFaces,
+    excludeArchived,
   } = filters;
 
   const where: Prisma.MediaItemWhereInput = {
@@ -169,6 +184,9 @@ export function buildMediaWhere(
     ...(sourceDeviceId ? whereSourceDeviceId(sourceDeviceId) : {}),
     ...(missingGeo !== undefined ? whereMissingGeo(missingGeo) : {}),
     ...(noFaces !== undefined ? whereNoFaces(noFaces) : {}),
+    // Only add archivedAt: null when caller explicitly opts in (browse surfaces).
+    // Omitting this keeps archived items visible in search by default.
+    ...(excludeArchived === true ? whereExcludeArchived(true) : {}),
   };
 
   return where;
