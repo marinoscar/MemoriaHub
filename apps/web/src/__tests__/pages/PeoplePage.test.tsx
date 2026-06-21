@@ -6,6 +6,10 @@
  *   - CircleContext is provided via the test-utils render wrapper.
  *   - services/media and services/face are mocked to avoid real API calls
  *     from PersonCardContainer and PersonDetailDrawer.
+ *
+ * Note: The per-circle face recognition opt-in gate was removed in the
+ * settings refactor. PeoplePage now always renders the people view directly;
+ * face recognition is controlled globally from admin settings.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
@@ -33,11 +37,10 @@ vi.mock('../../services/face', () => ({
   assignFaces: vi.fn(),
   unassignFace: vi.fn(),
   clusterUnknownFaces: vi.fn(),
-  getCircleFaceSettings: vi.fn().mockResolvedValue({ faceRecognitionEnabled: true }),
-  updateCircleFaceSettings: vi.fn().mockResolvedValue({ faceRecognitionEnabled: true }),
   deleteCircleBiometrics: vi.fn().mockResolvedValue({ deletedFaces: 0, deletedPeople: 0 }),
   mergePeople: vi.fn().mockResolvedValue({}),
   deletePerson: vi.fn().mockResolvedValue(undefined),
+  setPersonFavorite: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('react-router-dom', async (importOriginal) => {
@@ -58,7 +61,6 @@ import * as faceService from '../../services/face';
 
 const mockUsePeople = vi.mocked(usePeople);
 const mockUsePerson = vi.mocked(usePerson);
-const mockGetCircleFaceSettings = vi.mocked(faceService.getCircleFaceSettings);
 const mockDeleteCircleBiometrics = vi.mocked(faceService.deleteCircleBiometrics);
 
 // ---------------------------------------------------------------------------
@@ -144,8 +146,6 @@ describe('PeoplePage', () => {
     it('renders "Named People" section heading', async () => {
       render(<PeoplePage />);
 
-      // Use heading role to uniquely identify the h6 heading (not the empty-state text).
-      // Wait for face settings to load (async) before asserting.
       expect(await screen.findByRole('heading', { name: /named people/i })).toBeInTheDocument();
     });
 
@@ -157,8 +157,6 @@ describe('PeoplePage', () => {
     });
 
     it('renders labeled people names', async () => {
-      // Use persistent mockReturnValue so every usePeople call returns the same data,
-      // including the re-renders triggered by async face settings loading.
       mockUsePeople.mockImplementation((_, opts?: { includeUnlabeled?: boolean }) => {
         if (opts?.includeUnlabeled) return makeUsePeopleDefaults([]) as any;
         return makeUsePeopleDefaults([makePerson('p1', 'Alice'), makePerson('p2', 'Bob')]) as any;
@@ -166,7 +164,6 @@ describe('PeoplePage', () => {
 
       render(<PeoplePage />);
 
-      // Wait for face settings to load before people grid appears
       expect(await screen.findByText('Alice')).toBeInTheDocument();
       expect(screen.getByText('Bob')).toBeInTheDocument();
     });
@@ -184,7 +181,6 @@ describe('PeoplePage', () => {
 
       render(<PeoplePage />);
 
-      // Wait for face settings to load before clicking
       await screen.findByText('Alice');
       await user.click(screen.getByText('Alice'));
 
@@ -200,7 +196,6 @@ describe('PeoplePage', () => {
         wrapperOptions: { activeCircleRole: 'collaborator' },
       });
 
-      // Wait for face settings to load
       expect(await screen.findByRole('button', { name: /find people/i })).toBeInTheDocument();
     });
 
@@ -209,7 +204,7 @@ describe('PeoplePage', () => {
         wrapperOptions: { activeCircleRole: 'viewer' },
       });
 
-      // Wait for face settings to load, then confirm button is absent
+      // Wait for progressbar to disappear
       await waitFor(() => {
         expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
       });
@@ -218,45 +213,8 @@ describe('PeoplePage', () => {
   });
 
   // -------------------------------------------------------------------------
-  describe('opt-in gate — face recognition disabled', () => {
-    beforeEach(() => {
-      mockGetCircleFaceSettings.mockResolvedValue({ faceRecognitionEnabled: false });
-      mockUsePeople.mockReturnValue(makeUsePeopleDefaults() as any);
-      mockUsePerson.mockReturnValue(makeUsePersonDefaults() as any);
-    });
-
-    it('shows "Face Recognition is not enabled" heading for circle_admin', async () => {
-      render(<PeoplePage />, { wrapperOptions: { activeCircleRole: 'circle_admin' } });
-      expect(await screen.findByText(/face recognition is not enabled for this circle/i)).toBeInTheDocument();
-    });
-
-    it('shows "Enable face recognition" label for circle_admin', async () => {
-      render(<PeoplePage />, { wrapperOptions: { activeCircleRole: 'circle_admin' } });
-      expect(await screen.findByText(/enable face recognition/i)).toBeInTheDocument();
-    });
-
-    it('shows an info alert for non-admin (viewer) when disabled', async () => {
-      render(<PeoplePage />, { wrapperOptions: { activeCircleRole: 'viewer' } });
-      expect(await screen.findByRole('alert')).toBeInTheDocument();
-      expect(await screen.findByText(/ask a circle admin to enable it/i)).toBeInTheDocument();
-    });
-
-    it('does NOT show "Named People" section when disabled', async () => {
-      render(<PeoplePage />);
-      await screen.findByText(/face recognition is not enabled/i);
-      expect(screen.queryByRole('heading', { name: /named people/i })).not.toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  describe('settings menu (face recognition enabled, circle_admin)', () => {
-    beforeEach(() => {
-      mockGetCircleFaceSettings.mockResolvedValue({ faceRecognitionEnabled: true });
-      mockUsePeople.mockReturnValue(makeUsePeopleDefaults() as any);
-      mockUsePerson.mockReturnValue(makeUsePersonDefaults() as any);
-    });
-
-    it('shows the settings (gear) icon button for circle_admin when enabled', async () => {
+  describe('settings menu (circle_admin)', () => {
+    it('shows the settings (gear) icon button for circle_admin', async () => {
       render(<PeoplePage />, { wrapperOptions: { activeCircleRole: 'circle_admin' } });
       expect(await screen.findByRole('button', { name: /face recognition settings/i })).toBeInTheDocument();
     });
@@ -267,24 +225,17 @@ describe('PeoplePage', () => {
       expect(screen.queryByRole('button', { name: /face recognition settings/i })).not.toBeInTheDocument();
     });
 
-    it('opens menu with "Disable face recognition" and "Delete all biometrics" items', async () => {
+    it('opens menu with "Delete all biometrics" item', async () => {
       const user = userEvent.setup();
       render(<PeoplePage />, { wrapperOptions: { activeCircleRole: 'circle_admin' } });
       const gearBtn = await screen.findByRole('button', { name: /face recognition settings/i });
       await user.click(gearBtn);
-      expect(await screen.findByText(/disable face recognition/i)).toBeInTheDocument();
       expect(screen.getByText(/delete all biometrics/i)).toBeInTheDocument();
     });
   });
 
   // -------------------------------------------------------------------------
   describe('delete-biometrics dialog', () => {
-    beforeEach(() => {
-      mockGetCircleFaceSettings.mockResolvedValue({ faceRecognitionEnabled: true });
-      mockUsePeople.mockReturnValue(makeUsePeopleDefaults() as any);
-      mockUsePerson.mockReturnValue(makeUsePersonDefaults() as any);
-    });
-
     async function openDeleteBiometricsDialog(user: ReturnType<typeof userEvent.setup>) {
       const gearBtn = await screen.findByRole('button', { name: /face recognition settings/i });
       await user.click(gearBtn);
@@ -296,7 +247,6 @@ describe('PeoplePage', () => {
       const user = userEvent.setup();
       render(<PeoplePage />, { wrapperOptions: { activeCircleRole: 'circle_admin' } });
       await openDeleteBiometricsDialog(user);
-      // The dialog title is an h2 heading; use heading role to avoid ambiguity with the button
       expect(await screen.findByRole('heading', { name: /delete all biometric data/i })).toBeInTheDocument();
     });
 

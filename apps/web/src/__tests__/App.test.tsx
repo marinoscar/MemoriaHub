@@ -5,21 +5,22 @@ import { BrowserRouter } from 'react-router-dom';
 import App from '../App';
 
 describe('App', () => {
-  it('renders without crashing and shows login page initially', async () => {
+  it('renders without crashing and shows the application shell', async () => {
     render(
       <BrowserRouter>
         <App />
       </BrowserRouter>
     );
 
-    // Wait for lazy loaded component to render
-    // The App will make an API call to check auth, MSW will handle it
+    // The MSW handler for /api/auth/me returns a valid user, so the app renders
+    // the authenticated layout. Wait for the application name in the AppBar.
     await waitFor(
       () => {
-        // Should either show login page or home page depending on mock auth state
-        const welcomeText = screen.queryByText(/Welcome/i);
-        const homeText = screen.queryByText(/Home Page/i);
-        expect(welcomeText || homeText).toBeTruthy();
+        // MemoriaHub title is always rendered in the AppBar regardless of route
+        const appTitle = screen.queryByText(/MemoriaHub/i);
+        // Fallback: if auth is still loading, login page elements may appear first
+        const loginText = screen.queryByText(/sign in/i);
+        expect(appTitle || loginText).toBeTruthy();
       },
       { timeout: 5000 }
     );

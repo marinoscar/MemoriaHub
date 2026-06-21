@@ -2,22 +2,23 @@
  * Unit tests for tagging service functions.
  *
  * Uses MSW to intercept HTTP requests so the real `api` singleton is exercised.
- * Covers: rerunMediaTags, getMediaTagStatus, runTaggingBackfill,
- *         getCircleTaggingSettings, updateCircleTaggingSettings.
+ * Covers: rerunMediaTags, getMediaTagStatus.
+ *
+ * Note: runTaggingBackfill, getCircleTaggingSettings, and
+ * updateCircleTaggingSettings were removed in the settings refactor. Per-circle
+ * tagging opt-in is now a global admin feature toggle (useSystemSettings), and
+ * backfill is a global admin operation via services/adminBackfill.ts.
  *
  * Note: runs with Vitest + MSW (container-only deps). If Vitest is not
  * available locally these tests pass inside the container.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import {
   rerunMediaTags,
   getMediaTagStatus,
-  runTaggingBackfill,
-  getCircleTaggingSettings,
-  updateCircleTaggingSettings,
 } from '../../services/tagging';
 import { api, ApiError } from '../../services/api';
 
@@ -128,148 +129,3 @@ describe('getMediaTagStatus', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// runTaggingBackfill
-// ---------------------------------------------------------------------------
-
-describe('runTaggingBackfill', () => {
-  it('returns enqueued count on success', async () => {
-    server.use(
-      http.post('*/api/tagging/backfill', () =>
-        HttpResponse.json({ data: { enqueued: 5 } }),
-      ),
-    );
-
-    const result = await runTaggingBackfill({ circleId: 'circle-1' });
-
-    expect(result.enqueued).toBe(5);
-  });
-
-  it('sends circleId in request body', async () => {
-    let capturedBody: any = null;
-    server.use(
-      http.post('*/api/tagging/backfill', async ({ request }) => {
-        capturedBody = await request.json();
-        return HttpResponse.json({ data: { enqueued: 0 } });
-      }),
-    );
-
-    await runTaggingBackfill({ circleId: 'circle-42' });
-
-    expect(capturedBody.circleId).toBe('circle-42');
-  });
-
-  it('sends optional from/to/force params when provided', async () => {
-    let capturedBody: any = null;
-    server.use(
-      http.post('*/api/tagging/backfill', async ({ request }) => {
-        capturedBody = await request.json();
-        return HttpResponse.json({ data: { enqueued: 3 } });
-      }),
-    );
-
-    await runTaggingBackfill({
-      circleId: 'circle-1',
-      from: '2026-01-01T00:00:00Z',
-      to: '2026-06-01T00:00:00Z',
-      force: true,
-    });
-
-    expect(capturedBody.from).toBe('2026-01-01T00:00:00Z');
-    expect(capturedBody.to).toBe('2026-06-01T00:00:00Z');
-    expect(capturedBody.force).toBe(true);
-  });
-
-  it('throws ApiError on 400 (auto-tagging not enabled)', async () => {
-    server.use(
-      http.post('*/api/tagging/backfill', () =>
-        HttpResponse.json(
-          { code: 'BAD_REQUEST', message: 'Auto-tagging not enabled' },
-          { status: 400 },
-        ),
-      ),
-    );
-
-    await expect(runTaggingBackfill({ circleId: 'circle-1' })).rejects.toThrow(
-      ApiError,
-    );
-  });
-});
-
-// ---------------------------------------------------------------------------
-// getCircleTaggingSettings
-// ---------------------------------------------------------------------------
-
-describe('getCircleTaggingSettings', () => {
-  it('returns autoTaggingEnabled flag', async () => {
-    server.use(
-      http.get('*/api/circles/:id/tagging-settings', () =>
-        HttpResponse.json({ data: { autoTaggingEnabled: true } }),
-      ),
-    );
-
-    const result = await getCircleTaggingSettings('circle-1');
-
-    expect(result.autoTaggingEnabled).toBe(true);
-  });
-
-  it('sends GET to /circles/:id/tagging-settings', async () => {
-    let capturedUrl = '';
-    server.use(
-      http.get('*/api/circles/:id/tagging-settings', ({ request }) => {
-        capturedUrl = request.url;
-        return HttpResponse.json({ data: { autoTaggingEnabled: false } });
-      }),
-    );
-
-    await getCircleTaggingSettings('circle-99');
-
-    expect(capturedUrl).toContain('/circles/circle-99/tagging-settings');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// updateCircleTaggingSettings
-// ---------------------------------------------------------------------------
-
-describe('updateCircleTaggingSettings', () => {
-  it('returns updated autoTaggingEnabled flag', async () => {
-    server.use(
-      http.put('*/api/circles/:id/tagging-settings', () =>
-        HttpResponse.json({ data: { autoTaggingEnabled: true } }),
-      ),
-    );
-
-    const result = await updateCircleTaggingSettings('circle-1', true);
-
-    expect(result.autoTaggingEnabled).toBe(true);
-  });
-
-  it('sends enabled=true in request body when enabling', async () => {
-    let capturedBody: any = null;
-    server.use(
-      http.put('*/api/circles/:id/tagging-settings', async ({ request }) => {
-        capturedBody = await request.json();
-        return HttpResponse.json({ data: { autoTaggingEnabled: true } });
-      }),
-    );
-
-    await updateCircleTaggingSettings('circle-1', true);
-
-    expect(capturedBody.enabled).toBe(true);
-  });
-
-  it('sends enabled=false in request body when disabling', async () => {
-    let capturedBody: any = null;
-    server.use(
-      http.put('*/api/circles/:id/tagging-settings', async ({ request }) => {
-        capturedBody = await request.json();
-        return HttpResponse.json({ data: { autoTaggingEnabled: false } });
-      }),
-    );
-
-    await updateCircleTaggingSettings('circle-1', false);
-
-    expect(capturedBody.enabled).toBe(false);
-  });
-});
