@@ -2,13 +2,11 @@
  * Unit tests for BurstEnqueueListener.
  *
  * Covers:
- *  - Happy path: photo + circle opt-in → enqueue called
+ *  - Happy path: photo → enqueue called
  *  - Type guard: video → skip
  *  - Soft-deleted mediaItem → skip
  *  - No mediaItem → skip
  *  - BURST_DETECTION_ENABLED=false → skip all circles
- *  - circle.burstDetectionEnabled=false → skip
- *  - circle is null → skip
  *  - Error inside handler is swallowed (does not rethrow)
  */
 
@@ -16,6 +14,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BurstEnqueueListener } from './burst-enqueue.listener';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { JobReason, JobStatus, MediaType } from '@prisma/client';
 import { ObjectProcessedEvent } from '../storage/processing/events/object-processed.event';
@@ -51,6 +50,7 @@ describe('BurstEnqueueListener', () => {
   let listener: BurstEnqueueListener;
   let mockPrisma: MockPrismaService;
   let mockEnrichmentJobService: { enqueue: jest.Mock };
+  let mockSystemSettings: { isFeatureEnabled: jest.Mock };
   let originalEnvValue: string | undefined;
 
   beforeEach(async () => {
@@ -59,6 +59,7 @@ describe('BurstEnqueueListener', () => {
 
     mockPrisma = createMockPrismaService();
     mockEnrichmentJobService = { enqueue: jest.fn() };
+    mockSystemSettings = { isFeatureEnabled: jest.fn().mockResolvedValue(true) };
 
     mockEnrichmentJobService.enqueue.mockResolvedValue({
       id: 'job-1',
@@ -69,14 +70,12 @@ describe('BurstEnqueueListener', () => {
       attempts: 0,
     });
 
-    // Default: circle has burstDetectionEnabled=true
-    (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ burstDetectionEnabled: true });
-
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BurstEnqueueListener,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
+        { provide: SystemSettingsService, useValue: mockSystemSettings },
       ],
     }).compile();
 
@@ -193,31 +192,22 @@ describe('BurstEnqueueListener', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Per-circle opt-in gate
+  // isFeatureEnabled global system-settings gate
   // -------------------------------------------------------------------------
 
-  describe('per-circle burstDetectionEnabled gate', () => {
-    it('does NOT enqueue when circle.burstDetectionEnabled=false', async () => {
+  describe('isFeatureEnabled (system settings gate)', () => {
+    it('does NOT enqueue when isFeatureEnabled returns false', async () => {
+      mockSystemSettings.isFeatureEnabled.mockResolvedValue(false);
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ burstDetectionEnabled: false });
 
       await listener.handleObjectProcessed(makeEvent());
 
       expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
     });
 
-    it('does NOT enqueue when circle is null', async () => {
+    it('DOES enqueue when isFeatureEnabled returns true', async () => {
+      mockSystemSettings.isFeatureEnabled.mockResolvedValue(true);
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(null);
-
-      await listener.handleObjectProcessed(makeEvent());
-
-      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
-    });
-
-    it('DOES enqueue when circle.burstDetectionEnabled=true', async () => {
-      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ burstDetectionEnabled: true });
 
       await listener.handleObjectProcessed(makeEvent());
 

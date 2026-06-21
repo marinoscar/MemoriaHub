@@ -4,8 +4,8 @@
  * Covers:
  *  - burstScore composition: weight application, per-group normalization,
  *    suggestedBestItemId picks highest scorer
- *  - Face signal is skipped gracefully when face data is absent
- *  - Face signal is included when faceRecognitionEnabled=true and face rows exist
+ *  - Face signal is skipped gracefully when no face rows exist
+ *  - Face signal is included when face rows exist
  *  - processMediaItem: group creation, member attachment, multi-group merge,
  *    score recomputation
  *  - BurstUUID hard-prior: items with shared non-null burstUuid always link
@@ -163,6 +163,8 @@ describe('BurstDetectionService', () => {
     (mockPrisma.$transaction as jest.Mock).mockImplementation((ops: Promise<unknown>[]) =>
       Promise.all(ops),
     );
+    // Default: face.groupBy returns empty array (face signal absent by default)
+    (mockPrisma.face.groupBy as jest.Mock).mockResolvedValue([]);
   });
 
   // -------------------------------------------------------------------------
@@ -284,7 +286,6 @@ describe('BurstDetectionService', () => {
           { id: 'media-1', sharpnessScore: 100, width: 4032, height: 3024, capturedAt: BASE_TIME },
           { id: 'media-neighbor-1', sharpnessScore: 80, width: 3024, height: 4032, capturedAt: BASE_TIME },
         ]);
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: false });
       (mockPrisma.mediaItem.update as jest.Mock).mockResolvedValue({});
       (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
 
@@ -319,7 +320,6 @@ describe('BurstDetectionService', () => {
         ]);
       (mockPrisma.burstGroup.create as jest.Mock).mockResolvedValue({ id: 'group-1' });
       (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: false });
       (mockPrisma.mediaItem.update as jest.Mock).mockResolvedValue({});
       (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
     });
@@ -386,7 +386,6 @@ describe('BurstDetectionService', () => {
           { id: 'media-neighbor-1', sharpnessScore: 80, width: 3024, height: 4032, capturedAt: BASE_TIME },
         ]);
       (mockPrisma.mediaItem.update as jest.Mock).mockResolvedValue({});
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: false });
       (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
 
       await service.processMediaItem(makeJob());
@@ -429,7 +428,6 @@ describe('BurstDetectionService', () => {
       (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
       (mockPrisma.mediaItem.update as jest.Mock).mockResolvedValue({});
       (mockPrisma.burstGroup.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: false });
       (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
 
       await service.processMediaItem(makeJob());
@@ -543,7 +541,6 @@ describe('BurstDetectionService', () => {
         ]);
       (mockPrisma.burstGroup.create as jest.Mock).mockResolvedValue({ id: 'group-legacy-1' });
       (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: false });
       (mockPrisma.mediaItem.update as jest.Mock).mockResolvedValue({});
       (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
 
@@ -661,12 +658,7 @@ describe('BurstDetectionService', () => {
         .mockResolvedValueOnce(members);
       (mockPrisma.burstGroup.create as jest.Mock).mockResolvedValue({ id: 'group-1' });
       (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({
-        faceRecognitionEnabled: faceData !== undefined,
-      });
-      if (faceData !== undefined) {
-        (mockPrisma.face.groupBy as jest.Mock).mockResolvedValue(faceData);
-      }
+      (mockPrisma.face.groupBy as jest.Mock).mockResolvedValue(faceData ?? []);
       (mockPrisma.mediaItem.update as jest.Mock).mockResolvedValue({});
       (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
     }
@@ -726,25 +718,25 @@ describe('BurstDetectionService', () => {
       }
     });
 
-    it('skips face term gracefully when face data is absent (faceRecognitionEnabled=false)', async () => {
+    it('skips face term gracefully when face.groupBy returns no rows (faceMap empty)', async () => {
       const members = [
         { id: 'media-1', sharpnessScore: 300, width: 4032, height: 3024, capturedAt: BASE_TIME },
         { id: 'media-2', sharpnessScore: 100, width: 4032, height: 3024, capturedAt: BASE_TIME },
       ];
-      // No faceData passed → faceRecognitionEnabled=false
+      // No faceData → face.groupBy returns []
       setupForScoring(members, undefined);
 
       await service.processMediaItem(makeJob());
 
-      // Should not call face.groupBy
-      expect(mockPrisma.face.groupBy).not.toHaveBeenCalled();
+      // face.groupBy is always called
+      expect(mockPrisma.face.groupBy).toHaveBeenCalled();
 
       // Best should still be determined (higher sharpness wins)
       const groupUpdateCall = (mockPrisma.burstGroup.update as jest.Mock).mock.calls[0][0];
       expect(groupUpdateCall.data.suggestedBestItemId).toBe('media-1');
     });
 
-    it('includes face term when faceRecognitionEnabled=true and face rows exist', async () => {
+    it('includes face term when face rows exist', async () => {
       const members = [
         // media-1 has lower sharpness but many high-confidence faces
         { id: 'media-1', sharpnessScore: 50, width: 4032, height: 3024, capturedAt: BASE_TIME },
@@ -762,7 +754,7 @@ describe('BurstDetectionService', () => {
 
       await service.processMediaItem(makeJob());
 
-      // face.groupBy should have been called when faceRecognitionEnabled=true
+      // face.groupBy is always called; it returned data this time
       expect(mockPrisma.face.groupBy).toHaveBeenCalled();
     });
 

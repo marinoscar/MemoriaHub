@@ -7,6 +7,7 @@ import { CircleRole } from '@prisma/client';
 import { ObjectsService } from '../../src/storage/objects/objects.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { STORAGE_PROVIDER } from '../../src/storage/providers/storage-provider.interface';
+import { StorageProviderResolver } from '../../src/storage/providers/storage-provider.resolver';
 import { createMockPrismaService, MockPrismaService } from '../mocks/prisma.mock';
 import { createMockStorageProvider } from '../mocks/storage-provider.mock';
 import { CircleMembershipService } from '../../src/circles/circle-membership.service';
@@ -89,6 +90,7 @@ describe('Storage Download Auth Matrix (ObjectsService unit)', () => {
   let mockConfig: jest.Mocked<ConfigService>;
   let mockEventEmitter: jest.Mocked<EventEmitter2>;
   let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
+  let mockStorageProviderResolver: { getActiveProvider: jest.Mock; getProviderFor: jest.Mock; invalidate: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -97,6 +99,11 @@ describe('Storage Download Auth Matrix (ObjectsService unit)', () => {
     mockEventEmitter = { emit: jest.fn() } as any;
     mockCircleMembershipService = {
       assertCircleAccess: jest.fn().mockResolvedValue({ role: 'viewer' as CircleRole, isSuperAdmin: false }),
+    };
+    mockStorageProviderResolver = {
+      getActiveProvider: jest.fn().mockResolvedValue({ id: 's3', provider: mockStorageProvider }),
+      getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider),
+      invalidate: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -107,6 +114,7 @@ describe('Storage Download Auth Matrix (ObjectsService unit)', () => {
         { provide: ConfigService, useValue: mockConfig },
         { provide: EventEmitter2, useValue: mockEventEmitter },
         { provide: CircleMembershipService, useValue: mockCircleMembershipService },
+        { provide: StorageProviderResolver, useValue: mockStorageProviderResolver },
       ],
     }).compile();
 

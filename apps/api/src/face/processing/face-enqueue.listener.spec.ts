@@ -8,6 +8,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { FaceEnqueueListener } from './face-enqueue.listener';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
+import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
 import { JobReason, JobStatus, MediaFaceStatusType, MediaType } from '@prisma/client';
 import { ObjectProcessedEvent } from '../../storage/processing/events/object-processed.event';
@@ -43,6 +44,7 @@ describe('FaceEnqueueListener', () => {
   let listener: FaceEnqueueListener;
   let mockPrisma: MockPrismaService;
   let mockEnrichmentJobService: { enqueue: jest.Mock };
+  let mockSystemSettings: { isFeatureEnabled: jest.Mock };
   let originalAutoDetect: string | undefined;
 
   beforeEach(async () => {
@@ -52,6 +54,7 @@ describe('FaceEnqueueListener', () => {
 
     mockPrisma = createMockPrismaService();
     mockEnrichmentJobService = { enqueue: jest.fn() };
+    mockSystemSettings = { isFeatureEnabled: jest.fn().mockResolvedValue(true) };
 
     // Default: enqueue returns a pending job
     mockEnrichmentJobService.enqueue.mockResolvedValue({
@@ -64,14 +67,13 @@ describe('FaceEnqueueListener', () => {
     });
     // Default: status upsert succeeds
     (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
-    // Default: circle has faceRecognitionEnabled=true
-    (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: true });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FaceEnqueueListener,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
+        { provide: SystemSettingsService, useValue: mockSystemSettings },
       ],
     }).compile();
 
@@ -210,6 +212,31 @@ describe('FaceEnqueueListener', () => {
   });
 
   // -------------------------------------------------------------------------
+  // isFeatureEnabled global system-settings gate
+  // -------------------------------------------------------------------------
+
+  describe('isFeatureEnabled (system settings gate)', () => {
+    it('does NOT enqueue when isFeatureEnabled returns false', async () => {
+      mockSystemSettings.isFeatureEnabled.mockResolvedValue(false);
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+
+      await listener.handleObjectProcessed(makeEvent());
+
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaFaceStatus.upsert).not.toHaveBeenCalled();
+    });
+
+    it('DOES enqueue when isFeatureEnabled returns true', async () => {
+      mockSystemSettings.isFeatureEnabled.mockResolvedValue(true);
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+
+      await listener.handleObjectProcessed(makeEvent());
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Error handling: exceptions inside handleObjectProcessed do NOT rethrow
   // -------------------------------------------------------------------------
 
@@ -222,32 +249,4 @@ describe('FaceEnqueueListener', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // per-circle faceRecognitionEnabled gate
-  // -------------------------------------------------------------------------
-
-  describe('per-circle faceRecognitionEnabled gate', () => {
-    it('does NOT enqueue when circle faceRecognitionEnabled is false', async () => {
-      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: false });
-      await listener.handleObjectProcessed(makeEvent());
-      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
-      expect(mockPrisma.mediaFaceStatus.upsert).not.toHaveBeenCalled();
-    });
-
-    it('does NOT enqueue when circle is null', async () => {
-      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(null);
-      await listener.handleObjectProcessed(makeEvent());
-      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
-    });
-
-    it('DOES enqueue when circle faceRecognitionEnabled is true and FACE_AUTO_DETECT is true', async () => {
-      process.env['FACE_AUTO_DETECT'] = 'true';
-      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: true });
-      await listener.handleObjectProcessed(makeEvent());
-      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledTimes(1);
-    });
-  });
 });

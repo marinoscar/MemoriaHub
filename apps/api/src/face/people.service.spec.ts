@@ -12,6 +12,7 @@ import { CircleMembershipService } from '../circles/circle-membership.service';
 import { FaceClusteringService } from './face-clustering.service';
 import { FaceMatchingService } from './face-matching.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 // ---------------------------------------------------------------------------
@@ -67,6 +68,7 @@ describe('PeopleService', () => {
   let mockClusteringService: { clusterUnknownFaces: jest.Mock };
   let mockMatchingService: { computePersonCentroid: jest.Mock };
   let mockEnrichmentJobService: { enqueue: jest.Mock };
+  let mockSystemSettings: { isFeatureEnabled: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -82,6 +84,9 @@ describe('PeopleService', () => {
     mockEnrichmentJobService = {
       enqueue: jest.fn().mockResolvedValue({ id: 'job-1' }),
     };
+    mockSystemSettings = {
+      isFeatureEnabled: jest.fn().mockResolvedValue(true),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -91,6 +96,7 @@ describe('PeopleService', () => {
         { provide: FaceClusteringService, useValue: mockClusteringService },
         { provide: FaceMatchingService, useValue: mockMatchingService },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
+        { provide: SystemSettingsService, useValue: mockSystemSettings },
       ],
     }).compile();
 
@@ -502,7 +508,6 @@ describe('PeopleService', () => {
 
   describe('clusterUnknowns', () => {
     it('calls assertCircleAccess with circle_admin role', async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: true });
       await service.clusterUnknowns(CIRCLE_ID, USER_ID, PERMS);
 
       expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
@@ -514,14 +519,12 @@ describe('PeopleService', () => {
     });
 
     it('delegates to clusteringService.clusterUnknownFaces', async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: true });
       await service.clusterUnknowns(CIRCLE_ID, USER_ID, PERMS);
 
       expect(mockClusteringService.clusterUnknownFaces).toHaveBeenCalledWith(CIRCLE_ID, USER_ID);
     });
 
     it('returns the result from clusteringService', async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: true });
       mockClusteringService.clusterUnknownFaces.mockResolvedValue({
         clustersCreated: 3,
         facesAssigned: 7,
@@ -531,27 +534,13 @@ describe('PeopleService', () => {
 
       expect(result).toEqual({ clustersCreated: 3, facesAssigned: 7 });
     });
-  });
 
-  // -------------------------------------------------------------------------
-  // clusterUnknowns — Phase 4 opt-in gate
-  // -------------------------------------------------------------------------
+    it('throws BadRequestException when face recognition is disabled globally', async () => {
+      mockSystemSettings.isFeatureEnabled.mockResolvedValue(false);
 
-  describe('clusterUnknowns — Phase 4 opt-in gate', () => {
-    it('throws BadRequestException when circle faceRecognitionEnabled is false', async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: false });
-      await expect(service.clusterUnknowns(CIRCLE_ID, USER_ID, PERMS)).rejects.toThrow(BadRequestException);
-    });
-
-    it('throws BadRequestException when circle is null (not found)', async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(null);
-      await expect(service.clusterUnknowns(CIRCLE_ID, USER_ID, PERMS)).rejects.toThrow(BadRequestException);
-    });
-
-    it('calls clusteringService when circle faceRecognitionEnabled is true', async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: true });
-      await service.clusterUnknowns(CIRCLE_ID, USER_ID, PERMS);
-      expect(mockClusteringService.clusterUnknownFaces).toHaveBeenCalledWith(CIRCLE_ID, USER_ID);
+      await expect(
+        service.clusterUnknowns(CIRCLE_ID, USER_ID, PERMS),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -1533,26 +1522,25 @@ describe('PeopleService', () => {
   // -------------------------------------------------------------------------
 
   describe('assignFaces — auto-tagging re-enqueue', () => {
-    function setupAssignFacesHappy(autoTaggingEnabled: boolean) {
+    function setupAssignFacesHappy() {
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
       (mockPrisma.face.findMany as jest.Mock)
         // assertFacesInCircle call
         .mockResolvedValueOnce([makeFace()])
-        // fetchAffectedMediaItems call — faces with their circle's autoTaggingEnabled
+        // fetchAffectedMediaItems call
         .mockResolvedValueOnce([
           {
             mediaItemId: MEDIA_ID,
             mediaItem: {
               circleId: CIRCLE_ID,
-              circle: { autoTaggingEnabled },
             },
           },
         ]);
       (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
     }
 
-    it('enqueues auto_tagging rerun for affected media items when autoTaggingEnabled=true', async () => {
-      setupAssignFacesHappy(true);
+    it('enqueues auto_tagging rerun for affected media items', async () => {
+      setupAssignFacesHappy();
 
       await service.assignFaces(PERSON_ID, { faceIds: [FACE_ID] } as any, USER_ID, PERMS);
 
@@ -1567,14 +1555,6 @@ describe('PeopleService', () => {
       );
     });
 
-    it('does NOT enqueue auto_tagging when autoTaggingEnabled=false', async () => {
-      setupAssignFacesHappy(false);
-
-      await service.assignFaces(PERSON_ID, { faceIds: [FACE_ID] } as any, USER_ID, PERMS);
-
-      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
-    });
-
     it('does not propagate enqueue errors — assign still succeeds', async () => {
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
       (mockPrisma.face.findMany as jest.Mock)
@@ -1584,7 +1564,6 @@ describe('PeopleService', () => {
             mediaItemId: MEDIA_ID,
             mediaItem: {
               circleId: CIRCLE_ID,
-              circle: { autoTaggingEnabled: true },
             },
           },
         ]);
@@ -1603,13 +1582,12 @@ describe('PeopleService', () => {
   // -------------------------------------------------------------------------
 
   describe('unassignFace — auto-tagging re-enqueue', () => {
-    it('enqueues auto_tagging rerun when circle autoTaggingEnabled=true', async () => {
+    it('enqueues auto_tagging rerun for the affected media item', async () => {
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
       (mockPrisma.face.findUnique as jest.Mock).mockResolvedValue(
         makeFace({ mediaItemId: MEDIA_ID }),
       );
       (mockPrisma.face.update as jest.Mock).mockResolvedValue({});
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ autoTaggingEnabled: true });
 
       await service.unassignFace(PERSON_ID, FACE_ID, USER_ID, PERMS);
 
@@ -1623,28 +1601,6 @@ describe('PeopleService', () => {
         }),
       );
     });
-
-    it('does NOT enqueue when autoTaggingEnabled=false', async () => {
-      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
-      (mockPrisma.face.findUnique as jest.Mock).mockResolvedValue(makeFace());
-      (mockPrisma.face.update as jest.Mock).mockResolvedValue({});
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ autoTaggingEnabled: false });
-
-      await service.unassignFace(PERSON_ID, FACE_ID, USER_ID, PERMS);
-
-      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
-    });
-
-    it('does NOT enqueue when circle not found', async () => {
-      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
-      (mockPrisma.face.findUnique as jest.Mock).mockResolvedValue(makeFace());
-      (mockPrisma.face.update as jest.Mock).mockResolvedValue({});
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(null);
-
-      await service.unassignFace(PERSON_ID, FACE_ID, USER_ID, PERMS);
-
-      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
-    });
   });
 
   // -------------------------------------------------------------------------
@@ -1652,7 +1608,7 @@ describe('PeopleService', () => {
   // -------------------------------------------------------------------------
 
   describe('createPerson — auto-tagging re-enqueue', () => {
-    it('enqueues auto_tagging when faceIds are provided and autoTaggingEnabled=true', async () => {
+    it('enqueues auto_tagging when faceIds are provided', async () => {
       (mockPrisma.person.create as jest.Mock).mockResolvedValue(makePerson());
       (mockPrisma.face.findMany as jest.Mock)
         // assertFacesInCircle
@@ -1663,7 +1619,6 @@ describe('PeopleService', () => {
             mediaItemId: MEDIA_ID,
             mediaItem: {
               circleId: CIRCLE_ID,
-              circle: { autoTaggingEnabled: true },
             },
           },
         ]);
@@ -1733,7 +1688,7 @@ describe('PeopleService', () => {
       };
     }
 
-    it('enqueues auto_tagging for media items affected by the merge when autoTaggingEnabled=true', async () => {
+    it('enqueues auto_tagging for media items affected by the merge', async () => {
       (mockPrisma.person.findUnique as jest.Mock)
         .mockResolvedValueOnce(makeSource())
         .mockResolvedValueOnce(makeTarget());
@@ -1745,7 +1700,6 @@ describe('PeopleService', () => {
             mediaItemId: MEDIA_ID,
             mediaItem: {
               circleId: CIRCLE_ID,
-              circle: { autoTaggingEnabled: true },
             },
           },
         ])
@@ -1788,7 +1742,7 @@ describe('PeopleService', () => {
   // -------------------------------------------------------------------------
 
   describe('deletePerson — auto-tagging re-enqueue', () => {
-    it('enqueues auto_tagging for media items that lost a person when autoTaggingEnabled=true', async () => {
+    it('enqueues auto_tagging for media items that lost a person', async () => {
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
 
       // fetchAffectedMediaItemsByPersonId
@@ -1797,7 +1751,6 @@ describe('PeopleService', () => {
           mediaItemId: MEDIA_ID,
           mediaItem: {
             circleId: CIRCLE_ID,
-            circle: { autoTaggingEnabled: true },
           },
         },
       ]);
@@ -1822,32 +1775,6 @@ describe('PeopleService', () => {
       );
     });
 
-    it('does NOT enqueue when circle autoTaggingEnabled=false', async () => {
-      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
-
-      // fetchAffectedMediaItemsByPersonId — circle has auto-tagging disabled
-      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
-        {
-          mediaItemId: MEDIA_ID,
-          mediaItem: {
-            circleId: CIRCLE_ID,
-            circle: { autoTaggingEnabled: false },
-          },
-        },
-      ]);
-
-      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
-        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
-        (mockPrisma.person.update as jest.Mock).mockResolvedValue({});
-        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
-        return cb(mockPrisma);
-      });
-
-      await service.deletePerson(PERSON_ID, USER_ID, PERMS);
-
-      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
-    });
-
     it('does not propagate enqueue errors — delete still succeeds', async () => {
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
       (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
@@ -1855,7 +1782,6 @@ describe('PeopleService', () => {
           mediaItemId: MEDIA_ID,
           mediaItem: {
             circleId: CIRCLE_ID,
-            circle: { autoTaggingEnabled: true },
           },
         },
       ]);
@@ -1910,10 +1836,6 @@ describe('PeopleService', () => {
       });
     }
 
-    function setupCircle(autoTaggingEnabled: boolean) {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ autoTaggingEnabled });
-    }
-
     it('creates a manual Face row with exact convention values when called with personId', async () => {
       setupMediaItem();
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(
@@ -1921,7 +1843,6 @@ describe('PeopleService', () => {
       );
       setupNoExistingFace();
       setupCreatedFace();
-      setupCircle(false);
 
       const result = await service.addPersonToMedia(MEDIA_ID, USER_ID, PERMS, { personId: PERSON_ID });
 
@@ -1953,7 +1874,6 @@ describe('PeopleService', () => {
       );
       setupNoExistingFace();
       setupCreatedFace();
-      setupCircle(false);
 
       await service.addPersonToMedia(MEDIA_ID, USER_ID, PERMS, { personId: PERSON_ID });
 
@@ -1986,7 +1906,6 @@ describe('PeopleService', () => {
         );
         setupNoExistingFace();
         setupCreatedFace();
-        setupCircle(false);
 
         const result = await service.addPersonToMedia(MEDIA_ID, USER_ID, PERMS, { name: 'Alice' });
 
@@ -2005,7 +1924,6 @@ describe('PeopleService', () => {
         );
         setupNoExistingFace();
         setupCreatedFace();
-        setupCircle(false);
 
         const result = await service.addPersonToMedia(MEDIA_ID, USER_ID, PERMS, { name: 'New Person' });
 
@@ -2045,14 +1963,13 @@ describe('PeopleService', () => {
     });
 
     describe('auto-tagging re-enqueue', () => {
-      it('enqueues auto_tagging when autoTaggingEnabled=true', async () => {
+      it('enqueues auto_tagging after associating a person', async () => {
         setupMediaItem();
         (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(
           makePerson({ id: PERSON_ID, name: 'Alice', circleId: CIRCLE_ID, deletedAt: null }),
         );
         setupNoExistingFace();
         setupCreatedFace();
-        setupCircle(true);
 
         await service.addPersonToMedia(MEDIA_ID, USER_ID, PERMS, { personId: PERSON_ID });
 
@@ -2065,20 +1982,6 @@ describe('PeopleService', () => {
             priority: 0,
           }),
         );
-      });
-
-      it('does NOT enqueue auto_tagging when autoTaggingEnabled=false', async () => {
-        setupMediaItem();
-        (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(
-          makePerson({ id: PERSON_ID, name: 'Alice', circleId: CIRCLE_ID, deletedAt: null }),
-        );
-        setupNoExistingFace();
-        setupCreatedFace();
-        setupCircle(false);
-
-        await service.addPersonToMedia(MEDIA_ID, USER_ID, PERMS, { personId: PERSON_ID });
-
-        expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
       });
     });
 
@@ -2125,14 +2028,9 @@ describe('PeopleService', () => {
       (mockPrisma.face.deleteMany as jest.Mock).mockResolvedValue({ count });
     }
 
-    function setupCircle(autoTaggingEnabled: boolean) {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ autoTaggingEnabled });
-    }
-
     it('deletes only providerKey="manual" Face rows for the (mediaItem, person) pair', async () => {
       setupMediaItem();
       setupDeleteMany(1);
-      setupCircle(false);
 
       await service.removePersonFromMedia(MEDIA_ID, PERSON_ID, USER_ID, PERMS);
 
@@ -2144,7 +2042,6 @@ describe('PeopleService', () => {
     it('asserts collaborator access before deleting', async () => {
       setupMediaItem();
       setupDeleteMany(1);
-      setupCircle(false);
 
       await service.removePersonFromMedia(MEDIA_ID, PERSON_ID, USER_ID, PERMS);
 
@@ -2186,10 +2083,9 @@ describe('PeopleService', () => {
     });
 
     describe('auto-tagging re-enqueue', () => {
-      it('enqueues auto_tagging after deletion when autoTaggingEnabled=true', async () => {
+      it('enqueues auto_tagging after removing a person association', async () => {
         setupMediaItem();
         setupDeleteMany(1);
-        setupCircle(true);
 
         await service.removePersonFromMedia(MEDIA_ID, PERSON_ID, USER_ID, PERMS);
 
@@ -2203,32 +2099,11 @@ describe('PeopleService', () => {
           }),
         );
       });
-
-      it('does NOT enqueue auto_tagging when autoTaggingEnabled=false', async () => {
-        setupMediaItem();
-        setupDeleteMany(1);
-        setupCircle(false);
-
-        await service.removePersonFromMedia(MEDIA_ID, PERSON_ID, USER_ID, PERMS);
-
-        expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
-      });
-
-      it('does NOT enqueue when circle not found', async () => {
-        setupMediaItem();
-        setupDeleteMany(1);
-        (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(null);
-
-        await service.removePersonFromMedia(MEDIA_ID, PERSON_ID, USER_ID, PERMS);
-
-        expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
-      });
     });
 
     it('returns the deleted count', async () => {
       setupMediaItem();
       setupDeleteMany(2);
-      setupCircle(false);
 
       const result = await service.removePersonFromMedia(MEDIA_ID, PERSON_ID, USER_ID, PERMS);
 
