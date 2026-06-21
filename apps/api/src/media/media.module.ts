@@ -3,6 +3,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 import { CirclesModule } from '../circles/circles.module';
 import { GeoLocationModule } from './geo/geo-location.module';
+import { SettingsModule } from '../settings/settings.module';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
@@ -31,7 +32,7 @@ import { ImageDimensionsProcessor } from '../storage/processing/processors/image
  * safe to instantiate as a separate provider scope.
  */
 @Module({
-  imports: [PrismaModule, StorageProvidersModule, CirclesModule, GeoLocationModule],
+  imports: [PrismaModule, StorageProvidersModule, CirclesModule, GeoLocationModule, SettingsModule],
   controllers: [MediaController, MediaReprocessController],
   providers: [
     MediaService,

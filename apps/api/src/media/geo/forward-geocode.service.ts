@@ -1,5 +1,6 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 
 export interface GeoSearchResult {
   lat: number;
@@ -24,22 +25,43 @@ export interface GeoSearchResult {
 export class ForwardGeocodeService {
   private readonly logger = new Logger(ForwardGeocodeService.name);
   private readonly baseUrl: string;
-  private readonly enabled: boolean;
   private readonly provider: string;
   private readonly googleApiKey: string;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    private readonly systemSettings: SystemSettingsService,
+  ) {
     this.baseUrl = this.config.get<string>(
       'NOMINATIM_BASE_URL',
       'https://nominatim.openstreetmap.org',
     );
-    this.enabled = this.config.get<string>('GEO_FORWARD_SEARCH_ENABLED', 'false') === 'true';
     this.provider = this.config.get<string>('GEO_FORWARD_PROVIDER', 'nominatim');
     this.googleApiKey = this.config.get<string>('GOOGLE_MAPS_API_KEY', '');
   }
 
+  /**
+   * Resolve whether forward search is enabled from system settings at runtime,
+   * falling back to GEO_FORWARD_SEARCH_ENABLED env var, then to false.
+   */
+  private async isEnabled(): Promise<boolean> {
+    const settingValue = await this.systemSettings
+      .getSettingValue<boolean>('geo.forwardSearchEnabled')
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Failed to read geo.forwardSearchEnabled from system settings: ${msg}`);
+        return undefined;
+      });
+
+    if (settingValue !== undefined) {
+      return settingValue;
+    }
+    return process.env['GEO_FORWARD_SEARCH_ENABLED'] === 'true';
+  }
+
   async searchPlaces(q: string, limit: number): Promise<GeoSearchResult[]> {
-    if (!this.enabled) {
+    const enabled = await this.isEnabled();
+    if (!enabled) {
       throw new ServiceUnavailableException('Place search is disabled');
     }
 
