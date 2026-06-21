@@ -59,6 +59,8 @@ export class SystemSettingsService {
       ai: value.ai,
       face: value.face,
       storage: value.storage,
+      burst: value.burst,
+      geo: value.geo,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -106,6 +108,8 @@ export class SystemSettingsService {
       ai: value.ai,
       face: value.face,
       storage: value.storage,
+      burst: value.burst,
+      geo: value.geo,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -177,6 +181,30 @@ export class SystemSettingsService {
             4,
         },
       },
+      burst: {
+        timeGapSeconds:
+          (dto as any).burst?.timeGapSeconds ??
+          (current as any).burst?.timeGapSeconds ??
+          10,
+        hashDistance:
+          (dto as any).burst?.hashDistance ??
+          (current as any).burst?.hashDistance ??
+          10,
+        minGroupSize:
+          (dto as any).burst?.minGroupSize ??
+          (current as any).burst?.minGroupSize ??
+          3,
+      },
+      geo: {
+        provider:
+          (dto as any).geo?.provider ??
+          (current as any).geo?.provider ??
+          (process.env['GEO_PROVIDER'] === 'nominatim' ? 'nominatim' : 'offline'),
+        forwardSearchEnabled:
+          (dto as any).geo?.forwardSearchEnabled ??
+          (current as any).geo?.forwardSearchEnabled ??
+          (process.env['GEO_FORWARD_SEARCH_ENABLED'] === 'true'),
+      },
     };
 
     // Validate merged result
@@ -212,6 +240,8 @@ export class SystemSettingsService {
       ai: value.ai,
       face: value.face,
       storage: value.storage,
+      burst: value.burst,
+      geo: value.geo,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,

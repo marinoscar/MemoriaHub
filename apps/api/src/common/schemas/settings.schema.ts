@@ -39,6 +39,10 @@ export const systemSettingsSchema = z.object({
   ui: z.object({
     allowUserThemeOverride: z.boolean(),
   }),
+  // Well-known global feature flag keys stored in this map (system-wide on/off, Admin-managed):
+  //   - autoTagging: AI auto-tagging + description generation
+  //   - faceRecognition: face detection / recognition
+  //   - burstDetection: burst photo (similar pictures) detection
   features: z.record(z.string(), z.boolean()),
   ai: z.object({
     features: z.object({
@@ -75,6 +79,10 @@ export const systemSettingsSchema = z.object({
     hashDistance: z.number().int().min(0).max(32).default(10),
     minGroupSize: z.number().int().min(2).max(20).default(3),
   }).optional().default({ timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3 }),
+  geo: z.object({
+    provider: z.enum(['offline', 'nominatim']).default('offline'),
+    forwardSearchEnabled: z.boolean().default(false),
+  }).optional().default({ provider: 'offline', forwardSearchEnabled: false }),
 });
 
 export type SystemSettingsDto = z.infer<typeof systemSettingsSchema>;
@@ -119,5 +127,9 @@ export const systemSettingsPatchSchema = z.object({
     timeGapSeconds: z.number().int().min(1).max(300).optional(),
     hashDistance: z.number().int().min(0).max(32).optional(),
     minGroupSize: z.number().int().min(2).max(20).optional(),
+  }).optional(),
+  geo: z.object({
+    provider: z.enum(['offline', 'nominatim']).optional(),
+    forwardSearchEnabled: z.boolean().optional(),
   }).optional(),
 });
