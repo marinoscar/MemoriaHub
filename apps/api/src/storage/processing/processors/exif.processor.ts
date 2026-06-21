@@ -63,7 +63,7 @@ export class ExifProcessor implements ObjectProcessor {
         gps: true,
         ifd0: true,
         makerNote: true,
-        mergeOutput: false,
+        mergeOutput: true,
         translateValues: false,
         reviveValues: true,
         sanitize: true,
