@@ -65,13 +65,14 @@ export const systemSettingsSchema = z.object({
     }).default({ detection: { provider: null, model: null } }),
   }).optional().default({ features: { detection: { provider: null, model: null } } }),
   storage: z.object({
+    activeProvider: z.string().default('s3'),
     insights: z.object({
       refreshIntervalHours: z.number().int().min(1).max(168).default(4),
     }).default({ refreshIntervalHours: 4 }),
     trash: z.object({
       retentionDays: z.number().int().min(1).max(365).default(30),
     }).default({ retentionDays: 30 }),
-  }).optional().default({ insights: { refreshIntervalHours: 4 }, trash: { retentionDays: 30 } }),
+  }).optional().default({ activeProvider: 's3', insights: { refreshIntervalHours: 4 }, trash: { retentionDays: 30 } }),
   burst: z.object({
     timeGapSeconds: z.number().int().min(1).max(300).default(10),
     hashDistance: z.number().int().min(0).max(32).default(10),
@@ -112,6 +113,7 @@ export const systemSettingsPatchSchema = z.object({
     }).optional(),
   }).optional(),
   storage: z.object({
+    activeProvider: z.string().optional(),
     insights: z.object({
       refreshIntervalHours: z.number().int().min(1).max(168).optional(),
     }).optional(),

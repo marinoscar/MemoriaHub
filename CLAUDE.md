@@ -464,6 +464,21 @@ These endpoints let users associate people with a photo from the media propertie
 - `POST /api/media/:id/people` body `{ personId }` OR `{ name }` (exactly one) — associate a person with the photo; find-or-create by name when `name` is given; idempotent (no duplicate if the person is already associated); returns `{ personId, personName, faceId, mediaItemId }` (media:write + collaborator)
 - `DELETE /api/media/:id/people/:personId` — remove the manual association only (does not touch detected faces); 404 if no manual association exists; 204 No Content (media:write + collaborator)
 
+### Storage Provider Configuration (Admin only — storage_settings:read / storage_settings:write)
+Admins can configure multiple object-storage providers (AWS S3, Cloudflare R2, local disk), test connectivity, choose the ACTIVE provider for new uploads, and migrate existing objects between providers (COPY-ONLY: bytes are copied and the object is repointed; the source file is left in place as a fallback). Objects on different providers are served simultaneously via per-object routing.
+- `GET /api/storage-settings` (storage_settings:read) — Return configured providers plus the active provider: `{ providers[], knownProviders[], activeProvider }`; provider rows include `provider, label, configured, enabled, requiresCredentials, accessKeyId, region, bucket, endpoint, last4, updatedAt`; secret/encryptedKey is NEVER returned
+- `GET /api/storage-settings/providers` (storage_settings:read) — List registry descriptors for all known provider types: `{ key, label, requiresCredentials, fields[], endpointRequired }`
+- `PUT /api/storage-settings/credentials/:provider` (storage_settings:write) body `{ accessKeyId?, secretAccessKey?, bucket?, region?, endpoint?, enabled? }` — Upsert provider credentials; omitting `secretAccessKey` on an update PRESERVES the stored secret; R2 requires `endpoint`
+- `DELETE /api/storage-settings/credentials/:provider` (storage_settings:write) — Remove provider credentials; 400 if the provider is currently the active provider
+- `POST /api/storage-settings/test` (storage_settings:read) body `{ provider, accessKeyId?, secretAccessKey?, bucket?, region?, endpoint? }` — Test provider connectivity before saving; performs a write→read→delete round-trip on a `__memoriahub_conn_test__/<uuid>` sentinel key; returns `{ ok, bucket?, region?, endpoint?, error? }`
+- `PUT /api/storage-settings/active` (storage_settings:write) body `{ provider }` — Set the active provider for new uploads; returns `{ activeProvider }`; switching affects NEW uploads only — existing objects continue to be served from their own provider/bucket and are NOT migrated
+- `POST /api/storage-settings/migrate` (storage_settings:write) body `{ sourceProvider, targetProvider }` — Start a copy-only migration run; returns `{ runId, totalCount }`; 400 if source === target or a run is already pending/running; enqueues one `storage_migration` enrichment job per object (priority 100, reason backfill)
+- `GET /api/storage-settings/migrate` (storage_settings:read) — List recent migration runs
+- `GET /api/storage-settings/migrate/:runId` (storage_settings:read) — Get migration run detail: `{ id, sourceProvider, targetProvider, status: pending|running|completed|failed|cancelled, totalCount, migratedCount, failedCount, skippedCount, startedAt, finishedAt, lastError }`; counts recomputed from item rows
+- `POST /api/storage-settings/migrate/:runId/cancel` (storage_settings:write) — Cancel a pending or running migration run; in-flight items detect the cancelled run and skip
+
+> **UI:** A new admin page at `/admin/storage-providers` (sidebar "Storage Providers", Admin only) shows provider cards with per-card "Test connection", an active-provider selector, and a copy-only migration panel with live progress and run history.
+
 ### Deterministic Search (search:use)
 - `POST /api/search` - Execute deterministic media search with explicit filters; optionally add `semanticQuery: string` (1–512 chars) to rank results by vector similarity instead of sort order; also accepts `noFaces: true` boolean to return only items with no faces (detected or manually added); also accepts `excludeArchived: true` to exclude archived items from results (archived items are included by default in search, unlike browse surfaces) (media:read + search:use)
 - `GET /api/search/fields` - List all searchable field descriptors from the registry plus the `semanticQuery` descriptor; includes `noFaces` (label "No faces detected") and `excludeArchived` (label "Exclude archived", boolean — opt-in filter to hide archived items from search results) (search:use)
@@ -491,6 +506,8 @@ Agentic search is **stateless** — no conversation rows are stored server-side.
 - `allowlist:read/write` - Allowlist management (Admin only)
 - `storage:read/write/delete` - Storage object access (own objects)
 - `storage:read_any/write_any/delete_any` - Storage object access (all objects, Admin only)
+- `storage_settings:read` - View storage provider configuration and test connectivity (Admin only)
+- `storage_settings:write` - Configure storage provider credentials, set active provider, and run migrations (Admin only)
 - `circles:read` - List and read circles the user is a member of (all roles)
 - `circles:write` - Create circles and manage circles the user owns (all roles)
 - `circles:manage_any` - Read/write/delete any circle regardless of membership (Admin only)
@@ -531,6 +548,9 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `device_codes` - Device authorization codes (RFC 8628)
 - `storage_objects` - File metadata, status, storage references (no circle_id; auth resolves via media_item)
 - `storage_object_chunks` - Multipart upload chunk tracking
+- `storage_provider_credentials` - Configured object-storage providers; one row per provider key (`s3` | `r2` | `local`); `secretAccessKey` stored AES-256-GCM encrypted via `SECRETS_ENCRYPTION_KEY` (same key as AI/Face credentials); `accessKeyId`, `region`, `bucket`, and `endpoint` stored plaintext; `last4` of the secret exposed for display; `enabled` flag; `updatedAt` for audit; plaintext secret never stored or returned
+- `storage_migration_runs` - Top-level record for a provider-to-provider copy migration; tracks `sourceProvider`, `targetProvider`, status (`pending` | `running` | `completed` | `failed` | `cancelled`), `totalCount`, `startedAt`, `finishedAt`, and `lastError`; counts (`migratedCount`, `failedCount`, `skippedCount`) are recomputed from item rows
+- `storage_migration_items` - Per-object tracking row for a migration run; `@@unique([runId, objectId])` provides idempotency anchor; cascades on run delete and on storage object delete; records per-item status and `lastError`
 - `personal_access_tokens` - User-created long-lived API tokens (hashed)
 - `circles` - Family circles; `is_personal=true` circles cannot be deleted; `face_recognition_enabled` column (default false) controls face recognition per-circle opt-in; `auto_tagging_enabled` column (default false) controls auto-tagging per-circle opt-in; `burst_detection_enabled` column (default false) controls burst detection per-circle opt-in
 - `circle_members` - Per-circle memberships with `CircleRole` enum (`circle_admin` | `collaborator` | `viewer`)
@@ -539,7 +559,7 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `face_provider_credentials` - Face provider API keys/config (AES-256-GCM encrypted via same key as AI); one row per provider; `last4` exposed; plaintext never stored or returned. For keyless providers (`human`, `compreface`), the credential row (if present) stores only a `baseUrl` override — no API key is set or required.
 - `people` - Per-circle identity records for recognized individuals; supports `mergedIntoId` self-FK for cluster merge audit; `deletedAt` soft-delete
 - `faces` - Individual detected face records with bounding box, confidence, variable-dimension embedding (`Float[]` fallback or pgvector column; 128-d for `compreface` mobilenet, 1024-d for `human` WASM), and `externalFaceId` for Rekognition delegated path; keyed to `mediaItemId` + `circleId`; `manuallyAssigned` flag protects user-labeled faces from re-clustering
-- `enrichment_jobs` - Generic background job queue for all enrichment handlers (face detection, storage insights, etc.); statuses: `pending`, `running`, `succeeded`, `failed`; reasons: `upload`, `rerun`, `backfill`; `media_item_id` and `circle_id` are **NULLABLE** — null values indicate a global/system job that is not scoped to a single media item or circle (e.g. the `storage_insights` handler); idempotency for global jobs deduplicates on `(type, media_item_id IS NULL)`; three backoff columns: `scheduled_for` (DateTime?, when the job becomes eligible again — null = eligible now; the worker claim query skips jobs where `scheduled_for > now`), `rate_limited_at` (DateTime?, timestamp of the most recent rate-limit hit), `rate_limit_hits` (Int default 0, count of rate-limit deferrals tracked separately from `attempts`)
+- `enrichment_jobs` - Generic background job queue for all enrichment handlers (face detection, storage insights, etc.); statuses: `pending`, `running`, `succeeded`, `failed`; reasons: `upload`, `rerun`, `backfill`; `media_item_id` and `circle_id` are **NULLABLE** — null values indicate a global/system job that is not scoped to a single media item or circle (e.g. the `storage_insights` handler); idempotency for global jobs deduplicates on `(type, media_item_id IS NULL)`; three backoff columns: `scheduled_for` (DateTime?, when the job becomes eligible again — null = eligible now; the worker claim query skips jobs where `scheduled_for > now`), `rate_limited_at` (DateTime?, timestamp of the most recent rate-limit hit), `rate_limit_hits` (Int default 0, count of rate-limit deferrals tracked separately from `attempts`); `storage_migration` copies a single object from source to target provider (copy→verify→repoint→leave source; one job per object; `skipDedup` option prevents the `(type, mediaItemId IS NULL)` dedup from collapsing per-object jobs)
 - `face_jobs` - Async face-detection job queue (no BullMQ); statuses: `pending`, `running`, `succeeded`, `failed`; reasons: `upload`, `rerun`, `backfill`
 - `media_face_status` - Per-media-item detection status tracking (one row per item); records which provider/model processed the item and when; statuses: `not_processed`, `pending`, `processing`, `processed`, `failed`, `no_faces`
 - `tag_labels` - Global AI tag vocabulary managed by admins; unique `name`; `enabled` flag controls whether a label is included in vision model prompts; labels are not circle-scoped; supports CSV export/import
@@ -666,6 +686,8 @@ Note: The enrichment worker shared by face detection, storage insights computati
 - `S3_RETRY_MODE` - AWS SDK v3 retry strategy: `adaptive` (default; uses client-side congestion control that backs off on S3 `503 SlowDown` and R2 `429`), `standard`, or `legacy`
 - `S3_ENDPOINT` - S3-compatible endpoint URL; set to the Cloudflare R2 endpoint (e.g. `https://<account>.r2.cloudflarestorage.com`) to use R2 instead of AWS S3; adaptive retry handles R2 HTTP 429 and S3 503 SlowDown transparently
 
+Note: Storage provider credentials (S3, R2, local) are now configurable in the Admin UI under Storage Providers. The `S3_*` environment variables and `STORAGE_PROVIDER` serve as bootstrap defaults and fallback for objects created before Admin UI configuration. The active provider for new uploads is controlled by the `storage.activeProvider` system setting (string; default: env `STORAGE_PROVIDER` or `'s3'`); switching the active provider affects new uploads only — existing objects are NOT migrated automatically.
+
 **Burst Detection:**
 - `BURST_DETECTION_ENABLED` - Global kill-switch for auto-enqueue on upload; set to `false` to disable `BurstEnqueueListener` for all circles (per-circle opt-in still applies when `true`; default: `true`)
 
@@ -719,6 +741,7 @@ Detailed specs live under `docs/specs/`:
 - [Burst Photo Detection](docs/specs/burst-detection.md) — on-server dHash + temporal proximity grouping, best-shot scoring, non-destructive review queue, per-circle opt-in, backfill with optional capturedAt range and on-demand retroactive perceptual hashing
 - [Metadata Extraction Re-run](docs/specs/metadata-rerun.md) — on-demand rerun and backfill of EXIF/dimensions/geocode/video-probe processors via enrichment queue; no per-circle opt-in; direct column sync without cascading to tagging, face, or burst
 - [Archive & Trash Bin](docs/specs/archive-trash.md) — two independent soft-state columns (`archivedAt` / `deletedAt`), search-inclusion asymmetry, automatic purge via `trash_purge` enrichment job, dedup-on-restore conflict handling
+- [Storage Provider Configuration](docs/specs/storage-providers.md) — multi-provider credential management, per-object routing with env fallback, copy-only migration model, active-provider selection
 
 ## Specialized Subagents (MANDATORY)
 

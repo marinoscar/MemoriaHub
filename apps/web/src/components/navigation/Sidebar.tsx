@@ -37,6 +37,7 @@ import {
   BurstMode as BurstModeIcon,
   Archive as ArchiveOutlinedIcon,
   Delete as DeleteOutlineIcon,
+  Storage as StorageIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -103,6 +104,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     { label: 'Job Queue', icon: <WorkHistoryIcon />, path: '/admin/jobs' },
     { label: 'Tags', icon: <LocalOfferIcon />, path: '/admin/tags' },
     { label: 'Storage Insights', icon: <InsightsIcon />, path: '/admin/insights' },
+    { label: 'Storage Providers', icon: <StorageIcon />, path: '/admin/storage-providers' },
   ];
 
   const handleNavigate = useCallback(

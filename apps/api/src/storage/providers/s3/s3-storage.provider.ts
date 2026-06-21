@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   S3Client,
@@ -25,51 +25,118 @@ import {
 } from '../storage-provider.types';
 
 /**
+ * Explicit configuration for building an S3StorageProvider instance outside
+ * of the NestJS DI container (e.g. from a credential row in the database).
+ * All fields are optional so callers only need to supply what they have.
+ */
+export interface S3ProviderConfig {
+  region?: string;
+  endpoint?: string;
+  accessKeyId?: string;
+  secretAccessKey?: string;
+  bucket?: string;
+  maxAttempts?: number;
+  retryMode?: 'standard' | 'adaptive' | 'legacy';
+  forcePathStyle?: boolean;
+  /** Part size in bytes for the SDK Upload helper (default: 10 485 760 = 10 MB) */
+  partSize?: number;
+}
+
+/**
  * S3-compatible storage provider implementation
- * Supports AWS S3, MinIO, LocalStack, and other S3-compatible storage services
+ * Supports AWS S3, MinIO, LocalStack, and other S3-compatible storage services.
+ *
+ * When constructed with an explicit `S3ProviderConfig` (via the optional second
+ * constructor parameter) the provider is built entirely from that config, which
+ * allows `StorageProviderResolver` to instantiate per-credential providers at
+ * runtime without going through the NestJS DI container.
+ *
+ * When the explicit config is absent, the provider falls back to the existing
+ * ConfigService-based behaviour so existing DI registrations, BackupService
+ * injection, and all existing tests continue to work unchanged.
  */
 @Injectable()
 export class S3StorageProvider implements StorageProvider {
   private readonly logger = new Logger(S3StorageProvider.name);
   private readonly s3Client: S3Client;
   private readonly bucket: string;
+  private readonly explicitPartSize: number | undefined;
 
-  constructor(private readonly configService: ConfigService) {
-    const region = this.configService.get<string>('storage.s3.region');
-    const endpoint = this.configService.get<string>('storage.s3.endpoint');
-    const accessKeyId = this.configService.get<string>(
-      'storage.s3.accessKeyId',
-    );
-    const secretAccessKey = this.configService.get<string>(
-      'storage.s3.secretAccessKey',
-    );
+  constructor(
+    private readonly configService: ConfigService,
+    @Optional() explicitConfig?: S3ProviderConfig,
+  ) {
+    if (explicitConfig) {
+      // ----------------------------------------------------------------
+      // Explicit-config path: used by StorageProviderResolver when
+      // building a provider from a database credential row.
+      // ----------------------------------------------------------------
+      const {
+        region,
+        endpoint,
+        accessKeyId,
+        secretAccessKey,
+        bucket,
+        maxAttempts = 5,
+        retryMode = 'adaptive',
+        forcePathStyle,
+        partSize,
+      } = explicitConfig;
 
-    this.bucket = this.configService.get<string>('storage.s3.bucket') || '';
+      this.bucket = bucket || '';
+      this.explicitPartSize = partSize;
 
-    if (!this.bucket) {
-      this.logger.warn('S3 bucket not configured');
+      if (!this.bucket) {
+        this.logger.warn('S3 bucket not configured (explicit config)');
+      }
+
+      this.s3Client = new S3Client({
+        region,
+        endpoint,
+        credentials:
+          accessKeyId && secretAccessKey
+            ? { accessKeyId, secretAccessKey }
+            : undefined,
+        forcePathStyle: forcePathStyle ?? !!endpoint,
+        maxAttempts,
+        retryMode,
+      });
+
+      this.logger.log(
+        `S3StorageProvider initialized (explicit config) - Bucket: ${this.bucket}, Region: ${region}${endpoint ? `, Endpoint: ${endpoint}` : ''}`,
+      );
+    } else {
+      // ----------------------------------------------------------------
+      // ConfigService path: original behaviour, unchanged.
+      // ----------------------------------------------------------------
+      const region = this.configService.get<string>('storage.s3.region');
+      const endpoint = this.configService.get<string>('storage.s3.endpoint');
+      const accessKeyId = this.configService.get<string>('storage.s3.accessKeyId');
+      const secretAccessKey = this.configService.get<string>('storage.s3.secretAccessKey');
+
+      this.bucket = this.configService.get<string>('storage.s3.bucket') || '';
+
+      if (!this.bucket) {
+        this.logger.warn('S3 bucket not configured');
+      }
+
+      this.s3Client = new S3Client({
+        region,
+        endpoint,
+        credentials:
+          accessKeyId && secretAccessKey
+            ? { accessKeyId, secretAccessKey }
+            : undefined,
+        // Force path-style URLs for MinIO/LocalStack compatibility
+        forcePathStyle: !!endpoint,
+        maxAttempts: this.configService.get<number>('storage.s3.maxAttempts', 5),
+        retryMode: this.configService.get<string>('storage.s3.retryMode', 'adaptive') as 'standard' | 'adaptive' | 'legacy',
+      });
+
+      this.logger.log(
+        `S3StorageProvider initialized - Bucket: ${this.bucket}, Region: ${region}${endpoint ? `, Endpoint: ${endpoint}` : ''}`,
+      );
     }
-
-    // Initialize S3 client
-    this.s3Client = new S3Client({
-      region,
-      endpoint,
-      credentials:
-        accessKeyId && secretAccessKey
-          ? {
-              accessKeyId,
-              secretAccessKey,
-            }
-          : undefined,
-      // Force path-style URLs for MinIO/LocalStack compatibility
-      forcePathStyle: !!endpoint,
-      maxAttempts: this.configService.get<number>('storage.s3.maxAttempts', 5),
-      retryMode: this.configService.get<string>('storage.s3.retryMode', 'adaptive') as 'standard' | 'adaptive' | 'legacy',
-    });
-
-    this.logger.log(
-      `S3StorageProvider initialized - Bucket: ${this.bucket}, Region: ${region}${endpoint ? `, Endpoint: ${endpoint}` : ''}`,
-    );
   }
 
   /**
@@ -94,8 +161,8 @@ export class S3StorageProvider implements StorageProvider {
           Metadata: options.metadata || {},
           ContentLength: options.contentLength,
         },
-        // Use configured part size for automatic multipart uploads
-        partSize: this.configService.get<number>('storage.partSize', 10485760), // 10MB default
+        // Use explicit part size when provided, otherwise fall back to config
+        partSize: this.explicitPartSize ?? this.configService.get<number>('storage.partSize', 10485760), // 10MB default
       });
 
       const result = await upload.done();
