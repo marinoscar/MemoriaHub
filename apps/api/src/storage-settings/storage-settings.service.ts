@@ -121,8 +121,17 @@ export class StorageSettingsService {
       throw new BadRequestException(`Unknown storage provider: "${provider}"`);
     }
 
-    // Per-provider validation of required fields
-    if (descriptor.requiresCredentials) {
+    // Look up the existing row so we can decide whether this is a CREATE or UPDATE
+    // and whether we need to preserve the stored secret.
+    const existing = await this.prisma.storageProviderCredential.findUnique({
+      where: { provider },
+    });
+    const isCreate = !existing;
+
+    // On CREATE, validate all required fields up front.
+    // On UPDATE, required-field checks are skipped — the admin may be changing only
+    // a subset of fields (e.g. region or enabled) without re-entering the secret.
+    if (isCreate && descriptor.requiresCredentials) {
       if (!dto.secretAccessKey) {
         throw new BadRequestException(
           `secretAccessKey is required for provider "${provider}"`,
@@ -145,9 +154,33 @@ export class StorageSettingsService {
       }
     }
 
-    const rawKey = dto.secretAccessKey ?? '';
-    const last4 = rawKey ? rawKey.slice(-4) : '';
-    const encryptedKey = encryptSecret(rawKey);
+    // Determine encryptedKey / last4:
+    //   1. New secret provided → encrypt it.
+    //   2. No secret, but an existing row exists → reuse its stored key.
+    //   3. No secret, no existing row, requiresCredentials → error (caught above for
+    //      isCreate; extra safety guard here in case logic changes).
+    //   4. Keyless provider (local) with no secret → store empty string.
+    let encryptedKey: string;
+    let last4: string;
+
+    if (dto.secretAccessKey) {
+      encryptedKey = encryptSecret(dto.secretAccessKey);
+      last4 = dto.secretAccessKey.slice(-4);
+    } else if (existing) {
+      // Partial update — preserve the existing secret, don't touch it.
+      encryptedKey = existing.encryptedKey;
+      last4 = existing.last4 ?? '';
+    } else if (descriptor.requiresCredentials) {
+      // CREATE without a secret on a provider that needs one — already rejected
+      // above, but guard here for safety.
+      throw new BadRequestException(
+        `secretAccessKey is required for provider "${provider}"`,
+      );
+    } else {
+      // Keyless provider (e.g. local) — no secret needed.
+      encryptedKey = encryptSecret('');
+      last4 = '';
+    }
 
     const cred = await this.prisma.storageProviderCredential.upsert({
       where: { provider },
@@ -164,10 +197,29 @@ export class StorageSettingsService {
       },
       update: {
         encryptedKey,
-        accessKeyId: dto.accessKeyId ?? null,
-        region: dto.region ?? null,
-        bucket: dto.bucket ?? null,
-        endpoint: dto.endpoint ?? null,
+        // Only overwrite non-secret fields when the dto provides them;
+        // fall back to the existing value so a partial PATCH doesn't null fields
+        // the admin didn't intend to clear.
+        ...(dto.accessKeyId !== undefined
+          ? { accessKeyId: dto.accessKeyId }
+          : existing?.accessKeyId !== undefined
+            ? { accessKeyId: existing.accessKeyId }
+            : {}),
+        ...(dto.region !== undefined
+          ? { region: dto.region }
+          : existing?.region !== undefined
+            ? { region: existing.region }
+            : {}),
+        ...(dto.bucket !== undefined
+          ? { bucket: dto.bucket }
+          : existing?.bucket !== undefined
+            ? { bucket: existing.bucket }
+            : {}),
+        ...(dto.endpoint !== undefined
+          ? { endpoint: dto.endpoint }
+          : existing?.endpoint !== undefined
+            ? { endpoint: existing.endpoint }
+            : {}),
         last4,
         ...(dto.enabled !== undefined && { enabled: dto.enabled }),
         updatedByUserId: userId,
