@@ -27,9 +27,11 @@ import {
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useFaceSettings } from '../../hooks/useFaceSettings';
+import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { useCircles } from '../../hooks/useCircles';
 import { runFaceBackfill, getCircleFaceSettings, updateCircleFaceSettings } from '../../services/face';
 import type { CircleFaceSettings } from '../../services/face';
+import { runGlobalFaceBackfill } from '../../services/adminBackfill';
 
 function FaceSettingsContent() {
   const {
@@ -45,9 +47,14 @@ function FaceSettingsContent() {
   } = useFaceSettings();
 
   const { circles, fetchCircles } = useCircles();
+  const { settings: sysSettings, isSaving: sysSaving, updateSettings: updateSysSettings } = useSystemSettings();
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+
+  // Global backfill state
+  const [globalBackfillForce, setGlobalBackfillForce] = useState(false);
+  const [globalBackfillLoading, setGlobalBackfillLoading] = useState(false);
 
   // Backfill state
   const [backfillCircleId, setBackfillCircleId] = useState('');
@@ -281,6 +288,69 @@ function FaceSettingsContent() {
         <Typography color="text.secondary" sx={{ mb: 3 }}>
           Configure face detection provider credentials and detection settings
         </Typography>
+
+        {/* Global face recognition section */}
+        <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>
+            Face Recognition (Global)
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Master switch for face recognition across all circles. Per-circle opt-in still applies.
+          </Typography>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={sysSettings?.features?.faceRecognition ?? false}
+                onChange={(e) => {
+                  void updateSysSettings({
+                    features: { ...(sysSettings?.features ?? {}), faceRecognition: e.target.checked },
+                  });
+                }}
+                disabled={sysSaving || !sysSettings}
+              />
+            }
+            label="Enable face recognition globally"
+            sx={{ mb: 2, display: 'block' }}
+          />
+
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            Run Global Face Backfill
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Queue face detection for existing photos across all circles that have face recognition
+            enabled.
+          </Typography>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={globalBackfillForce}
+                onChange={(e) => setGlobalBackfillForce(e.target.checked)}
+              />
+            }
+            label="Force (reprocess already-processed photos)"
+            sx={{ mb: 2, display: 'block' }}
+          />
+          <Button
+            variant="contained"
+            disabled={globalBackfillLoading || !(sysSettings?.features?.faceRecognition)}
+            startIcon={globalBackfillLoading ? <CircularProgress size={16} /> : undefined}
+            onClick={() => {
+              setGlobalBackfillLoading(true);
+              runGlobalFaceBackfill({ force: globalBackfillForce || undefined })
+                .then((result) =>
+                  setSuccessMessage(
+                    `${result.enqueued} jobs queued across ${result.circles} circle(s).`,
+                  ),
+                )
+                .catch((err: unknown) =>
+                  setLocalError(err instanceof Error ? err.message : 'Global backfill failed'),
+                )
+                .finally(() => setGlobalBackfillLoading(false));
+            }}
+          >
+            Run Global Backfill
+          </Button>
+        </Paper>
 
         {/* Provider sections */}
         {[...(settings?.providers ?? []), ...(settings?.knownProviders ?? [])].map((providerConfig) => (

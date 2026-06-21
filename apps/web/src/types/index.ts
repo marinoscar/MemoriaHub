@@ -37,6 +37,16 @@ export interface SystemSettings {
     insights?: {
       refreshIntervalHours?: number;
     };
+    activeProvider?: string;
+  };
+  burst?: {
+    timeGapSeconds?: number;
+    hashDistance?: number;
+    minGroupSize?: number;
+  };
+  geo?: {
+    provider: 'offline' | 'nominatim';
+    forwardSearchEnabled: boolean;
   };
   updatedAt: string;
   updatedBy: { id: string; email: string } | null;

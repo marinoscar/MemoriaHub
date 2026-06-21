@@ -52,7 +52,7 @@ import { runTaggingBackfill } from '../../services/tagging';
 // Inner content (only rendered when user is admin)
 // ---------------------------------------------------------------------------
 
-function TagsContent() {
+export function TagsContent() {
   // ---- Tag label vocabulary state ----
   const [labels, setLabels] = useState<TagLabel[]>([]);
   const [labelsLoading, setLabelsLoading] = useState(false);
