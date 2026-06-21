@@ -53,7 +53,6 @@ function makeMediaItem(ownerId: string, overrides: Record<string, any> = {}) {
     capturedAt: null,
     capturedAtOffset: null,
     importedAt: new Date(),
-    classification: 'unreviewed',
     width: null,
     height: null,
     durationMs: null,

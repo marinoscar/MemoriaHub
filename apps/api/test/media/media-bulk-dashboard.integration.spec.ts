@@ -68,7 +68,6 @@ function makeMediaItem(overrides: Record<string, any> = {}) {
     capturedAt: null,
     capturedAtOffset: null,
     importedAt: new Date(),
-    classification: 'unreviewed',
     width: null,
     height: null,
     durationMs: null,
@@ -131,7 +130,7 @@ describe('Media Bulk Dashboard Integration (DB-gated)', () => {
     const validBulkUpdateBody = {
       circleId: CIRCLE_ID,
       ids: [BASE_MEDIA_ID_1, BASE_MEDIA_ID_2],
-      set: { classification: 'memory' },
+      set: { favorite: true },
     };
 
     it('returns 401 without token', async () => {
@@ -312,16 +311,18 @@ describe('Media Bulk Dashboard Integration (DB-gated)', () => {
 
       // $queryRaw → no On This Day items
       (context.prismaMock.$queryRaw as jest.Mock).mockResolvedValue([]);
+      // systemSettings for burst config
+      context.prismaMock.systemSettings.findUnique.mockResolvedValue(null);
       // findMany: recent, favorites
       context.prismaMock.mediaItem.findMany
         .mockResolvedValueOnce([makeMediaItem()]) // recent
         .mockResolvedValueOnce([]);               // favorites
-      // count: total, unreviewed, low_value, missingGeo
+      // count: total, missingGeo
       context.prismaMock.mediaItem.count
         .mockResolvedValueOnce(50)
-        .mockResolvedValueOnce(10)
-        .mockResolvedValueOnce(3)
         .mockResolvedValueOnce(7);
+      // burstGroup.count
+      context.prismaMock.burstGroup.count.mockResolvedValue(0);
 
       const response = await request(context.app.getHttpServer())
         .get(`/api/media/dashboard?circleId=${CIRCLE_ID}`)
@@ -335,19 +336,19 @@ describe('Media Bulk Dashboard Integration (DB-gated)', () => {
       expect(data).toHaveProperty('counts');
     });
 
-    it('returns counts shape { total, unreviewed, lowValue, missingGeo } as numbers', async () => {
+    it('returns counts shape { total, missingGeo } as numbers', async () => {
       const viewer = await createMockViewerUser(context);
       setupCircleMocks(context, viewer.id, CIRCLE_ID, 'viewer');
 
       (context.prismaMock.$queryRaw as jest.Mock).mockResolvedValue([]);
+      context.prismaMock.systemSettings.findUnique.mockResolvedValue(null);
       context.prismaMock.mediaItem.findMany
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([]);
       context.prismaMock.mediaItem.count
         .mockResolvedValueOnce(100)
-        .mockResolvedValueOnce(25)
-        .mockResolvedValueOnce(8)
         .mockResolvedValueOnce(15);
+      context.prismaMock.burstGroup.count.mockResolvedValue(0);
 
       const response = await request(context.app.getHttpServer())
         .get(`/api/media/dashboard?circleId=${CIRCLE_ID}`)
@@ -356,12 +357,8 @@ describe('Media Bulk Dashboard Integration (DB-gated)', () => {
 
       const counts = response.body.data.counts;
       expect(typeof counts.total).toBe('number');
-      expect(typeof counts.unreviewed).toBe('number');
-      expect(typeof counts.lowValue).toBe('number');
       expect(typeof counts.missingGeo).toBe('number');
       expect(counts.total).toBe(100);
-      expect(counts.unreviewed).toBe(25);
-      expect(counts.lowValue).toBe(8);
       expect(counts.missingGeo).toBe(15);
     });
   });
