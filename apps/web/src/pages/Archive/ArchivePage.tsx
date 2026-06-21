@@ -243,7 +243,7 @@ export default function ArchivePage() {
                   gap: '2px',
                 }}
               >
-                {group.items.map((item, idx) => {
+                {group.items.map((item) => {
                   const globalIdx = mergedItems.indexOf(item);
                   const isSelected = selected.has(item.id);
                   return (
@@ -337,10 +337,10 @@ export default function ArchivePage() {
       {/* Lightbox */}
       <MediaLightbox
         items={mergedItems}
-        initialIndex={lightboxIndex}
+        index={lightboxIndex}
         onClose={() => setLightboxIndex(null)}
         onIndexChange={(i) => setLightboxIndex(i)}
-        onOpenDetail={(item) => {
+        onOpenProperties={(item: MediaItem) => {
           setDetailItem(item);
           setDrawerOpen(true);
           setLightboxIndex(null);

@@ -16,7 +16,7 @@ import {
   Stack,
 } from '@mui/material';
 import {
-  DeleteOutline as TrashIcon,
+  DeleteOutlined as TrashIcon,
   CheckBox as CheckBoxIcon,
   CheckBoxOutlineBlank as CheckBoxOutlineBlankIcon,
   Close as CloseIcon,
@@ -393,10 +393,10 @@ export default function TrashPage() {
       {/* Lightbox */}
       <MediaLightbox
         items={mergedItems}
-        initialIndex={lightboxIndex}
+        index={lightboxIndex}
         onClose={() => setLightboxIndex(null)}
         onIndexChange={(i) => setLightboxIndex(i)}
-        onOpenDetail={(item) => {
+        onOpenProperties={(item: MediaItem) => {
           setDetailItem(item);
           setDrawerOpen(true);
           setLightboxIndex(null);

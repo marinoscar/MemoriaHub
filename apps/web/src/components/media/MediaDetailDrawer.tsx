@@ -893,7 +893,7 @@ export function MediaDetailDrawer({
           </Alert>
         )}
 
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ mb: 1, flexWrap: 'wrap' }}>
           <Button
             size="small"
             variant="outlined"
