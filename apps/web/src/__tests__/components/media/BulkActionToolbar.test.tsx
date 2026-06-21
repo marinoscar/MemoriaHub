@@ -13,8 +13,9 @@
  *   Right (non-viewer): More actions icon button → overflow Menu
  *     Menu items: Set location, Edit tags, [Divider],
  *                 Remove from favorites, [optional Remove from album],
- *                 [Divider], Delete
- *   Delete opens a confirmation Dialog (Cancel / Delete buttons).
+ *                 [Divider], Archive (home mode) / Unarchive (archive mode),
+ *                 Move to Trash
+ *   "Move to Trash" opens a confirmation Dialog (Cancel / Move to Trash buttons).
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -29,6 +30,8 @@ import { BulkActionToolbar } from '../../../components/media/BulkActionToolbar';
 vi.mock('../../../services/media', () => ({
   bulkUpdateMedia: vi.fn(),
   bulkDelete: vi.fn(),
+  bulkArchive: vi.fn(),
+  bulkUnarchive: vi.fn(),
   getDashboard: vi.fn(),
   listMedia: vi.fn(),
   getMedia: vi.fn(),
@@ -99,7 +102,7 @@ describe('BulkActionToolbar', () => {
       await user.click(screen.getByRole('button', { name: /more actions/i }));
       expect(screen.getByText(/set location/i)).toBeInTheDocument();
       expect(screen.getByText(/edit tags/i)).toBeInTheDocument();
-      expect(screen.getByText(/delete/i)).toBeInTheDocument();
+      expect(screen.getByText(/move to trash/i)).toBeInTheDocument();
     });
 
     it('hides action buttons for viewer role', () => {
@@ -218,28 +221,29 @@ describe('BulkActionToolbar', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Delete flow
+  // Delete flow (Move to Trash)
   // -------------------------------------------------------------------------
   describe('Delete flow', () => {
-    it('opens delete confirmation dialog when Delete menu item is clicked', async () => {
+    it('opens delete confirmation dialog when Move to Trash menu item is clicked', async () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
       await user.click(screen.getByRole('button', { name: /more actions/i }));
-      await user.click(screen.getByText(/^delete$/i));
-      expect(screen.getByText(/delete 2 items\?/i)).toBeInTheDocument();
+      // The menu item is a MenuItem (role="menuitem"), not a button
+      await user.click(screen.getByRole('menuitem', { name: /move to trash/i }));
+      expect(screen.getByText(/move 2 items to trash\?/i)).toBeInTheDocument();
     });
 
-    it('calls bulkDelete when confirmation Delete button is clicked', async () => {
+    it('calls bulkDelete when confirmation Move to Trash button is clicked', async () => {
       const user = userEvent.setup();
       render(<BulkActionToolbar {...defaultProps} />);
 
       // Open overflow menu and trigger delete dialog
       await user.click(screen.getByRole('button', { name: /more actions/i }));
-      await user.click(screen.getByText(/^delete$/i));
+      await user.click(screen.getByRole('menuitem', { name: /move to trash/i }));
 
-      // Confirmation dialog appears — click the confirm button
-      const confirmBtn = screen.getByRole('button', { name: /^delete$/i });
+      // Confirmation dialog appears — click the confirm button (a Button, not a menuitem)
+      const confirmBtn = screen.getByRole('button', { name: /move to trash/i });
       await user.click(confirmBtn);
 
       await waitFor(() => {
@@ -255,13 +259,13 @@ describe('BulkActionToolbar', () => {
       render(<BulkActionToolbar {...defaultProps} />);
 
       await user.click(screen.getByRole('button', { name: /more actions/i }));
-      await user.click(screen.getByText(/^delete$/i));
-      const confirmBtn = screen.getByRole('button', { name: /^delete$/i });
+      await user.click(screen.getByRole('menuitem', { name: /move to trash/i }));
+      const confirmBtn = screen.getByRole('button', { name: /move to trash/i });
       await user.click(confirmBtn);
 
       await waitFor(() => {
         expect(defaultProps.onSuccess).toHaveBeenCalledWith(
-          expect.stringMatching(/deleted 2 items/i),
+          expect.stringMatching(/moved 2 items to trash/i),
         );
       });
     });
@@ -272,8 +276,8 @@ describe('BulkActionToolbar', () => {
       render(<BulkActionToolbar {...defaultProps} />);
 
       await user.click(screen.getByRole('button', { name: /more actions/i }));
-      await user.click(screen.getByText(/^delete$/i));
-      const confirmBtn = screen.getByRole('button', { name: /^delete$/i });
+      await user.click(screen.getByRole('menuitem', { name: /move to trash/i }));
+      const confirmBtn = screen.getByRole('button', { name: /move to trash/i });
       await user.click(confirmBtn);
 
       await waitFor(() => {
@@ -286,13 +290,13 @@ describe('BulkActionToolbar', () => {
       render(<BulkActionToolbar {...defaultProps} />);
 
       await user.click(screen.getByRole('button', { name: /more actions/i }));
-      await user.click(screen.getByText(/^delete$/i));
-      expect(screen.getByText(/delete 2 items\?/i)).toBeInTheDocument();
+      await user.click(screen.getByRole('menuitem', { name: /move to trash/i }));
+      expect(screen.getByText(/move 2 items to trash\?/i)).toBeInTheDocument();
 
       await user.click(screen.getByRole('button', { name: /cancel/i }));
 
       await waitFor(() => {
-        expect(screen.queryByText(/delete 2 items\?/i)).not.toBeInTheDocument();
+        expect(screen.queryByText(/move 2 items to trash\?/i)).not.toBeInTheDocument();
       });
     });
   });
@@ -312,8 +316,8 @@ describe('BulkActionToolbar', () => {
 
       // Verify delete confirm dialog uses singular via the overflow menu
       await user.click(screen.getByRole('button', { name: /more actions/i }));
-      await user.click(screen.getByText(/^delete$/i));
-      expect(screen.getByText(/delete 1 item\?/i)).toBeInTheDocument();
+      await user.click(screen.getByRole('menuitem', { name: /move to trash/i }));
+      expect(screen.getByText(/move 1 item to trash\?/i)).toBeInTheDocument();
     });
   });
 });
