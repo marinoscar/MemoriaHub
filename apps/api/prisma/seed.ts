@@ -73,6 +73,10 @@ const PERMISSIONS = [
   { name: 'face_settings:read', description: 'Read face recognition provider settings and status' },
   { name: 'face_settings:write', description: 'Configure face recognition provider credentials and settings' },
 
+  // Storage Provider Settings (Admin only)
+  { name: 'storage_settings:read', description: 'View storage provider configuration and test connectivity' },
+  { name: 'storage_settings:write', description: 'Configure storage provider credentials, set active provider, run migrations' },
+
   // Search feature usage
   { name: 'search:use', description: 'Use the AI-powered search feature' },
 
@@ -115,6 +119,9 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     // Face Recognition: admin-only credential management
     'face_settings:read',
     'face_settings:write',
+    // Storage Provider Settings: admin-only configuration
+    'storage_settings:read',
+    'storage_settings:write',
     // Search: all authenticated users
     'search:use',
     // Job queue dashboard: admin-only
@@ -163,6 +170,12 @@ const DEFAULT_SYSTEM_SETTINGS = {
     conversations: {
       archiveAfterDays: 30,
       deleteAfterArchiveDays: 30,
+    },
+  },
+  storage: {
+    activeProvider: process.env.STORAGE_PROVIDER || 's3',
+    insights: {
+      refreshIntervalHours: 4,
     },
   },
 };
