@@ -19,7 +19,6 @@ import {
 } from '@mui/material';
 import {
   Home as HomeIcon,
-  PhotoLibrary as PhotoLibraryIcon,
   Settings as SettingsIcon,
   AdminPanelSettings as AdminIcon,
   Map as MapIcon,
@@ -76,7 +75,6 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
   const primaryItems: NavItemDef[] = [
     { label: 'Photos', icon: <HomeIcon />, path: '/' },
-    { label: 'Memories', icon: <PhotoLibraryIcon />, path: '/memories' },
     { label: 'Explore', icon: <ExploreIcon />, path: '/search' },
     { label: 'Map', icon: <MapIcon />, path: '/map' },
     { label: 'Sharing', icon: <GroupWorkIcon />, path: '/circles' },

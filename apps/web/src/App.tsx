@@ -16,7 +16,6 @@ const LoginPage = lazy(() => import('./pages/LoginPage'));
 const AuthCallbackPage = lazy(() => import('./pages/AuthCallbackPage'));
 const ActivateDevicePage = lazy(() => import('./pages/ActivateDevicePage'));
 const HomePage = lazy(() => import('./pages/HomePage'));
-const MemoriesPage = lazy(() => import('./pages/MemoriesPage'));
 const UserSettingsPage = lazy(() => import('./pages/UserSettingsPage'));
 const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage'));
 const UserManagementPage = lazy(() => import('./pages/UserManagementPage'));
@@ -74,7 +73,6 @@ function AppRoutes() {
 
               <Route element={<Layout />}>
                 <Route path="/" element={<HomePage />} />
-                <Route path="/memories" element={<MemoriesPage />} />
                 <Route path="/settings" element={<UserSettingsPage />} />
                 <Route path="/media" element={<MediaLibraryPage />} />
                 <Route path="/map" element={<MediaMapPage />} />

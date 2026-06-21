@@ -1,13 +1,16 @@
 /**
- * Component tests — HomePage (memories-page refactor)
+ * Component tests — HomePage (topbar-search refactor)
  *
- * After the memories-page refactor, HomePage is a minimal page that:
+ * After the topbar-search refactor, HomePage is a minimal page that:
  *   - Shows a "Select or create a circle" alert when no circle is active
- *   - Shows a pending-burst-groups banner when there are burst groups to review
- *   - Does NOT render MediaGallery (that moved to MemoriesPage)
+ *   - Renders <MediaGallery> in feed mode when a circle is active
  *
- * MediaGallery is still mocked here (imported via useCircle mock scaffolding)
- * so any accidental re-introduction of the gallery import would be caught.
+ * The Upload button moved to the AppBar (global); HomePage no longer owns
+ * an Upload FAB or MediaUploadDialog.  Tests that previously asserted on
+ * those elements have been removed.
+ *
+ * MediaGallery is mocked to isolate HomePage chrome tests from gallery
+ * internals.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -22,8 +25,11 @@ vi.mock('../../hooks/useCircle', () => ({
   useCircle: vi.fn(),
 }));
 
-vi.mock('../../hooks/useDashboard', () => ({
-  useDashboard: vi.fn(),
+// Mock MediaGallery so its internal useInfiniteMedia / listMedia calls never fire.
+vi.mock('../../components/media/MediaGallery', () => ({
+  MediaGallery: vi.fn(({ emptyState }: { emptyState?: React.ReactNode }) => (
+    <div data-testid="media-gallery">{emptyState}</div>
+  )),
 }));
 
 // ---------------------------------------------------------------------------
@@ -32,10 +38,8 @@ vi.mock('../../hooks/useDashboard', () => ({
 
 import HomePage from '../../pages/HomePage';
 import { useCircle } from '../../hooks/useCircle';
-import { useDashboard } from '../../hooks/useDashboard';
 
 const mockUseCircle = vi.mocked(useCircle);
-const mockUseDashboard = vi.mocked(useDashboard);
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -87,16 +91,6 @@ function setupCircleLoading() {
   });
 }
 
-function setupDashboard(pendingBurstGroups: number | null = null) {
-  mockUseDashboard.mockReturnValue({
-    data: pendingBurstGroups != null
-      ? { counts: { pendingBurstGroups } }
-      : null,
-    isLoading: false,
-    error: null,
-  } as ReturnType<typeof useDashboard>);
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -104,7 +98,6 @@ function setupDashboard(pendingBurstGroups: number | null = null) {
 describe('HomePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    setupDashboard();
   });
 
   // -------------------------------------------------------------------------
@@ -124,7 +117,6 @@ describe('HomePage', () => {
       setupNoCircle();
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      // HomePage never renders the gallery — it lives on MemoriesPage
       expect(screen.queryByTestId('media-gallery')).not.toBeInTheDocument();
     });
 
@@ -132,7 +124,7 @@ describe('HomePage', () => {
       setupCircleLoading();
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      // While loading, the alert is suppressed
+      // While loading, neither alert nor gallery is shown
       expect(
         screen.queryByText(/select or create a circle/i),
       ).not.toBeInTheDocument();
@@ -140,15 +132,14 @@ describe('HomePage', () => {
   });
 
   // -------------------------------------------------------------------------
-  // b) Active circle
+  // b) Active circle — gallery and FAB
   // -------------------------------------------------------------------------
   describe('Active circle', () => {
-    it('does NOT render MediaGallery even when a circle is active', () => {
+    it('renders MediaGallery when a circle is active', () => {
       setupActiveCircle();
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      // Gallery lives on MemoriesPage, not HomePage
-      expect(screen.queryByTestId('media-gallery')).not.toBeInTheDocument();
+      expect(screen.getByTestId('media-gallery')).toBeInTheDocument();
     });
 
     it('does NOT show the no-circle alert when a circle is active', () => {
@@ -159,10 +150,32 @@ describe('HomePage', () => {
         screen.queryByText(/select or create a circle to get started/i),
       ).not.toBeInTheDocument();
     });
+
   });
 
   // -------------------------------------------------------------------------
-  // c) "Go to Circles" link in no-circle alert
+  // c) Empty state inside MediaGallery
+  // -------------------------------------------------------------------------
+  describe('Empty state', () => {
+    it('passes an emptyState prop to MediaGallery that includes "No memories here yet"', () => {
+      setupActiveCircle();
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      // The mock renders children (emptyState) inside the data-testid element.
+      expect(screen.getByText(/no memories here yet/i)).toBeInTheDocument();
+    });
+
+    it('mentions the Upload button in the toolbar in the empty state text', () => {
+      setupActiveCircle();
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      // Empty state now refers to "Upload button in the toolbar" (moved to AppBar)
+      expect(screen.getByText(/upload button in the toolbar/i)).toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // d) "Go to Circles" link in no-circle alert
   // -------------------------------------------------------------------------
   describe('Go to Circles link', () => {
     it('renders a "Go to Circles" link in the no-circle alert', () => {
@@ -170,36 +183,6 @@ describe('HomePage', () => {
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
       expect(screen.getByRole('link', { name: /go to circles/i })).toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // d) Pending burst groups banner
-  // -------------------------------------------------------------------------
-  describe('Pending burst groups banner', () => {
-    it('shows burst-groups banner when pendingBurstGroups > 0', () => {
-      setupActiveCircle();
-      setupDashboard(3);
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(screen.getByText(/3 burst groups? ready to review/i)).toBeInTheDocument();
-      expect(screen.getByText(/^review$/i)).toBeInTheDocument();
-    });
-
-    it('does NOT show burst-groups banner when pendingBurstGroups is 0', () => {
-      setupActiveCircle();
-      setupDashboard(0);
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(screen.queryByText(/burst group/i)).not.toBeInTheDocument();
-    });
-
-    it('does NOT show burst-groups banner when dashboard data is null', () => {
-      setupActiveCircle();
-      setupDashboard(null);
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(screen.queryByText(/burst group/i)).not.toBeInTheDocument();
     });
   });
 });
