@@ -48,8 +48,8 @@ export interface SystemSettings {
     minGroupSize?: number;
   };
   geo?: {
-    provider: 'offline' | 'nominatim';
-    forwardSearchEnabled: boolean;
+    reverseProvider?: 'offline' | 'nominatim' | 'google';
+    forwardSearchEnabled?: boolean;
   };
   updatedAt: string;
   updatedBy: { id: string; email: string } | null;

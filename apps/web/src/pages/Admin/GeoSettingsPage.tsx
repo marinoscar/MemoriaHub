@@ -187,7 +187,6 @@ function GeoSettingsContent() {
   const handleForwardSearchChange = (checked: boolean) => {
     void updateSysSettings({
       geo: {
-        provider: sysSettings?.geo?.provider ?? 'offline',
         forwardSearchEnabled: checked,
       },
     })
