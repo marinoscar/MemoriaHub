@@ -1,10 +1,7 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { StorageObject } from '@prisma/client';
 import { Readable } from 'stream';
-import {
-  GEO_LOCATION_PROVIDER,
-  GeoLocationProvider,
-} from '../../../media/geo/geo-location-provider.interface';
+import { GeoLocationService } from '../../../media/geo/geo-location.service';
 import { ObjectProcessor, ObjectProcessorResult } from '../object-processor.interface';
 import { streamToBuffer } from './stream-utils';
 
@@ -38,10 +35,7 @@ export class ReverseGeocodeProcessor implements ObjectProcessor {
   readonly name = 'geocode';
   readonly priority = 30;
 
-  constructor(
-    @Inject(GEO_LOCATION_PROVIDER)
-    private readonly geoProvider: GeoLocationProvider,
-  ) {}
+  constructor(private readonly geoLocationService: GeoLocationService) {}
 
   canProcess(object: StorageObject): boolean {
     return object.mimeType.startsWith('image/');
@@ -76,8 +70,8 @@ export class ReverseGeocodeProcessor implements ObjectProcessor {
         return { success: true, metadata: {} };
       }
 
-      // Step 2: Call geo provider
-      const result = await this.geoProvider.reverseGeocode(lat, lng);
+      // Step 2: Call geo location service (dynamic provider selection)
+      const { result, source } = await this.geoLocationService.reverseGeocode(lat, lng);
 
       if (!result) {
         this.logger.debug(`Geo provider returned null for object ${object.id} (${lat}, ${lng})`);
@@ -85,7 +79,7 @@ export class ReverseGeocodeProcessor implements ObjectProcessor {
       }
 
       const metadata: Record<string, unknown> = {
-        source: 'geonames-offline',
+        source,
         geocodedAt: new Date().toISOString(),
       };
 
