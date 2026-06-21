@@ -51,6 +51,8 @@ model User {
   faceCredentialsUpdated    FaceProviderCredential[] @relation("FaceCredentialUpdater")
   peopleAdded               Person[]               @relation("PersonAddedBy")
   resolvedBursts            BurstGroup[]           @relation("BurstGroupResolvedBy")
+  // Geo Provider relations
+  geoCredentialsUpdated     GeoProviderCredential[] @relation("GeoCredentialUpdater")
 
   @@map("users")
 }
@@ -369,6 +371,8 @@ model Circle {
   mediaTagStatuses    MediaTagStatus[]
   // Metadata Re-run relations
   mediaMetadataStatuses MediaMetadataStatus[]
+  // Geocode Status relations
+  mediaGeocodeStatuses  MediaGeocodeStatus[]
   // Burst Detection relations
   bursts              BurstGroup[]
 
@@ -510,6 +514,8 @@ model MediaItem {
   tagStatus      MediaTagStatus?
   // Metadata Re-run relations
   metadataStatus MediaMetadataStatus?
+  // Geocode Status relations
+  geocodeStatus  MediaGeocodeStatus?
   // Semantic search embedding (1536-d, stored via raw SQL / pgvector)
   embedding      MediaItemEmbedding?
   // Burst Detection relations
@@ -911,4 +917,48 @@ model BurstGroup {
   @@index([circleId, status])
   @@index([capturedAt])
   @@map("burst_groups")
+}
+
+// =============================================================================
+// Geo Provider Settings
+// =============================================================================
+
+model GeoProviderCredential {
+  id              String   @id @default(uuid()) @db.Uuid
+  provider        String   @unique
+  encryptedKey    String   @map("encrypted_key")
+  baseUrl         String?  @map("base_url")
+  last4           String   @map("last4")
+  enabled         Boolean  @default(true)
+  updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  updatedByUser User? @relation("GeoCredentialUpdater", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@map("geo_provider_credentials")
+}
+
+// =============================================================================
+// Geocode Status
+// =============================================================================
+
+model MediaGeocodeStatus {
+  id          String                   @id @default(uuid()) @db.Uuid
+  mediaItemId String                   @unique @map("media_item_id") @db.Uuid
+  circleId    String                   @map("circle_id") @db.Uuid
+  status      MediaMetadataStatusType  @default(not_processed)
+  processedAt DateTime?                @map("processed_at") @db.Timestamptz
+  lastError   String?                  @map("last_error")
+  createdAt   DateTime                 @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime                 @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  mediaItem MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  circle    Circle    @relation(fields: [circleId], references: [id], onDelete: Cascade)
+
+  @@index([circleId])
+  @@index([status])
+  @@map("media_geocode_status")
 }
