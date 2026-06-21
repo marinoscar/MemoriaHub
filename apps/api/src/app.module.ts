@@ -25,6 +25,7 @@ import { SearchModule } from './search/search.module';
 import { TaggingModule } from './tagging/tagging.module';
 import { InsightsModule } from './insights/insights.module';
 import { BurstModule } from './burst/burst.module';
+import { MetadataModule } from './metadata/metadata.module';
 import { LoggerModule } from './common/logger/logger.module';
 import { TestAuthModule } from './test-auth/test-auth.module';
 
@@ -75,6 +76,7 @@ import configuration from './config/configuration';
     TaggingModule,
     InsightsModule,
     BurstModule,
+    MetadataModule,
 
     // Test modules (non-production only)
     ...(process.env.NODE_ENV !== 'production' ? [TestAuthModule] : []),
