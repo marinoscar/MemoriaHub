@@ -86,8 +86,19 @@ export class ExifProcessor implements ObjectProcessor {
           const frac = parseFloat('0.' + trimmed);
           if (!isNaN(frac)) ms = Math.round(frac * 1000);
         }
-        const ts = new Date(dto.getTime());
-        ts.setUTCMilliseconds(ms);
+        // Rebuild the timestamp from local-getter wall-clock components as UTC so
+        // the result is timezone-deterministic. EXIF DateTimeOriginal is tz-naive
+        // (e.g. "2026:06:20 20:16:07"); exifr parses it using the process's local
+        // timezone, so dto.getTime() varies by server TZ. The local getters
+        // (getFullYear/getMonth/…) always reflect the original wall-clock digits, so
+        // we re-encode them as UTC. On the production UTC container this produces
+        // the same value as before; on a non-UTC host it now produces the correct
+        // wall-clock UTC instead of an offset-shifted instant.
+        // The real capture-time offset is preserved separately in capturedAtOffset.
+        const ts = new Date(Date.UTC(
+          dto.getFullYear(), dto.getMonth(), dto.getDate(),
+          dto.getHours(), dto.getMinutes(), dto.getSeconds(), ms,
+        ));
         metadata['capturedAt'] = ts.toISOString();
       }
 
