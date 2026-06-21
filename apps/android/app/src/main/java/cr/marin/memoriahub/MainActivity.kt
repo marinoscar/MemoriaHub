@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,8 +49,11 @@ private fun AppRoot(viewModel: RootViewModel = hiltViewModel()) {
             RootDestination.ServerUrl -> ServerUrlScreen(modifier = contentModifier)
             RootDestination.Auth -> DeviceAuthScreen(modifier = contentModifier)
             // The bottom-nav main shell (photos / sync / settings) is wired in a later milestone.
-            RootDestination.Main -> Box(contentModifier, contentAlignment = Alignment.Center) {
-                Text("Signed in — sync UI coming next")
+            RootDestination.Main -> {
+                LaunchedEffect(Unit) { viewModel.onMainVisible() }
+                Box(contentModifier, contentAlignment = Alignment.Center) {
+                    Text("Signed in — sync UI coming next")
+                }
             }
         }
     }

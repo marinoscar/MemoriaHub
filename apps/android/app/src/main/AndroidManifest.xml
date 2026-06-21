@@ -37,6 +37,15 @@
             </intent-filter>
         </activity>
 
+        <receiver
+            android:name=".sync.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
         <!-- Default WorkManager initializer is disabled; we provide a Hilt-aware
              WorkerFactory via Configuration.Provider on the Application. -->
         <provider
