@@ -35,7 +35,7 @@ export default function HomePage() {
     <Box sx={{ textAlign: 'center', py: 10, px: 3 }}>
       <PhotoLibraryIcon sx={{ fontSize: 72, color: 'text.disabled', mb: 2 }} />
       <Typography variant="h6" gutterBottom>
-        No memories here yet
+        No photos here yet
       </Typography>
       <Typography color="text.secondary" sx={{ mb: 3 }}>
         Upload your first photo or video to {activeCircle?.name} to get started.

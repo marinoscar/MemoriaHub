@@ -692,7 +692,7 @@ export function MediaGallery({
           {isFeedMode && !feedHasMore && !isLoading && baseItems.length > 0 && (
             <Box sx={{ textAlign: 'center', py: 3 }}>
               <Typography variant="caption" color="text.disabled">
-                All memories loaded
+                All photos loaded
               </Typography>
             </Box>
           )}

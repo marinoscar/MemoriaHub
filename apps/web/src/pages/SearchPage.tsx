@@ -273,7 +273,7 @@ export default function SearchPage() {
   if (!activeCircle) {
     return (
       <Box sx={{ p: { xs: 2, md: 3 } }}>
-        <Alert severity="info">Select a circle to search your memories.</Alert>
+        <Alert severity="info">Select a circle to search your photos.</Alert>
       </Box>
     );
   }

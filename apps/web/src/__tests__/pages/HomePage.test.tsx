@@ -157,12 +157,12 @@ describe('HomePage', () => {
   // c) Empty state inside MediaGallery
   // -------------------------------------------------------------------------
   describe('Empty state', () => {
-    it('passes an emptyState prop to MediaGallery that includes "No memories here yet"', () => {
+    it('passes an emptyState prop to MediaGallery that includes "No photos here yet"', () => {
       setupActiveCircle();
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
       // The mock renders children (emptyState) inside the data-testid element.
-      expect(screen.getByText(/no memories here yet/i)).toBeInTheDocument();
+      expect(screen.getByText(/no photos here yet/i)).toBeInTheDocument();
     });
 
     it('mentions the Upload button in the toolbar in the empty state text', () => {
