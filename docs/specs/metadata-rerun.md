@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
+| **Version** | 1.1 |
 | **Last Updated** | June 2026 |
 | **Status** | Specification |
 
@@ -47,7 +47,7 @@ During a refactor of the storage processing pipeline, a `mergeOutput` configurat
 
 Re-uploading the affected photos was not practical. The metadata re-run feature was introduced to fix the affected rows in place: re-read the stored file from S3, run the metadata processors with the corrected configuration, and sync the results directly into `media_items`.
 
-The backfill endpoint (`POST /api/metadata/backfill`) is the primary remediation tool. The single-item rerun (`POST /api/media/:id/metadata/rerun`) provides a convenient way to fix individual photos from the media properties pane.
+The global admin backfill endpoint (`POST /api/admin/metadata/backfill`) is the primary remediation tool. The single-item rerun (`POST /api/media/:id/metadata/rerun`) provides a convenient way to fix individual photos from the media properties pane.
 
 ---
 
@@ -180,17 +180,16 @@ Get the current metadata extraction status for a single media item.
   When no `media_metadata_status` row exists for the item, `status` is `"not_processed"` and both `processedAt` and `lastError` are `null`.
 - **Response `404`:** Item not found or soft-deleted.
 
-### 5.3 Circle Backfill
+### 5.3 Global Backfill (Admin)
 
-#### `POST /api/metadata/backfill`
+#### `POST /api/admin/metadata/backfill`
 
-Bulk-enqueue `metadata_extraction` jobs for media items in a circle.
+Bulk-enqueue `metadata_extraction` jobs for media items across **all circles**. Replaces the former per-circle `POST /api/metadata/backfill` endpoint. There is no feature gate — this endpoint is always available to Admins.
 
-- **Auth:** `media:write` + per-circle `collaborator` role (or `media:write_any` for admin bypass)
+- **Auth:** Admin role + `system_settings:write`
 - **Request body:**
   ```json
   {
-    "circleId": "uuid",
     "from": "2025-01-01T00:00:00.000Z",
     "to": "2025-12-31T23:59:59.999Z",
     "force": false
@@ -200,20 +199,19 @@ Bulk-enqueue `metadata_extraction` jobs for media items in a circle.
 - **Response `201`:**
   ```json
   {
-    "data": { "enqueued": 142 }
+    "data": { "enqueued": 142, "circles": 3 }
   }
   ```
   Jobs are enqueued at priority 100 (background). Each enqueued item has its `media_metadata_status` upserted to `pending`.
-- **Response `403`:** Caller is not a `collaborator` in the circle.
+- **Response `403`:** Caller is not an Admin with `system_settings:write`.
 
 ---
 
 ## 6. Backfill Semantics
 
-The backfill endpoint queries `media_items` in the target circle with the following filters applied in combination:
+The backfill endpoint queries `media_items` across all circles (iterating every non-deleted circle) with the following filters applied in combination:
 
-1. **Circle scope:** `circleId` = request `circleId`.
-2. **Not deleted:** `deletedAt IS NULL`.
+1. **Not deleted:** `deletedAt IS NULL`.
 3. **Date range (optional):** when `from` or `to` is provided, `capturedAt` is filtered against the range using the shared `whereDateRange` helper (inclusive bounds; null `capturedAt` values are excluded when a bound is specified).
 4. **Force flag:**
    - `force = false` (default): only items whose `media_metadata_status` row is absent OR whose status is NOT `processed` are included. This skips items that have already been successfully processed and avoids unnecessary re-runs.
@@ -233,15 +231,15 @@ The `enqueued` response count reflects the number of jobs successfully submitted
 
 A "Re-run metadata extraction" button in the media detail drawer calls `POST /api/media/:id/metadata/rerun` for the currently viewed item. The button is visible to collaborators and above. After the call, the UI polls `GET /api/media/:id/metadata/status` and displays the current status (`pending`, `processing`, `processed`, or `failed`) alongside `processedAt` and any `lastError`.
 
-### 7.2 Circle Settings Tab — Backfill Panel
+### 7.2 Admin Settings — Global Backfill Panel
 
-The circle Settings tab includes a "Re-extract metadata" panel (visible to `circle_admin` role). The panel provides:
+The Admin Settings page at `/admin/settings/general` (or a dedicated metadata sub-page) includes a "Re-extract metadata" panel (visible to Admins with `system_settings:write`). The panel provides:
 
-- An optional **capture date range** (`from` / `to` date pickers) to scope the backfill to a specific time window rather than re-processing the entire circle.
+- An optional **capture date range** (`from` / `to` date pickers) to scope the backfill to a specific time window rather than re-processing all photos across all circles.
 - A **Force re-run** checkbox that maps to the `force` request parameter.
-- A **Run** button that calls `POST /api/metadata/backfill` with the selected options and displays the `{ enqueued }` result.
+- A **Run** button that calls `POST /api/admin/metadata/backfill` with the selected options and displays the `{ enqueued, circles }` result.
 
-This panel is the primary tool for the mergeOutput regression remediation: an admin can select the affected date range and run the backfill without touching photos that were uploaded correctly.
+This panel is the primary tool for the mergeOutput regression remediation: an admin can select the affected date range and run the backfill across all circles without touching photos that were uploaded correctly. The former per-circle "Re-extract metadata" panel on the circle Settings tab has been removed.
 
 ---
 
@@ -258,16 +256,17 @@ This panel is the primary tool for the mergeOutput regression remediation: an ad
 
 - **Full pipeline:** enqueue a `metadata_extraction` job and verify that `media_metadata_status` transitions through `pending → processing → processed` and that typed columns on `media_items` are updated.
 - **No cascade:** verify that no `auto_tagging`, `face_detection`, or `burst_detection` jobs are enqueued as a side effect of a `metadata_extraction` job completing.
-- **Backfill — force=false:** seed items with `status=processed` and items with no status row; call backfill with `force=false`; verify only the unprocessed items are enqueued.
-- **Backfill — force=true:** call backfill with `force=true`; verify all non-deleted items in the circle are enqueued regardless of their existing status.
+- **Backfill — force=false:** seed items across multiple circles with `status=processed` and items with no status row; call `POST /api/admin/metadata/backfill` with `force=false`; verify only the unprocessed items across all circles are enqueued.
+- **Backfill — force=true:** call backfill with `force=true`; verify all non-deleted items in all circles are enqueued regardless of their existing status.
 - **Backfill — date range:** seed items with distinct `capturedAt` values; call backfill with a `from`/`to` range covering only some items; verify only those items are enqueued.
 - **Status endpoint — no row:** call `GET /api/media/:id/metadata/status` for an item with no `media_metadata_status` row; verify response is `{ status: 'not_processed', processedAt: null, lastError: null }`.
 
 ### RBAC Tests
 
-- Verify a `viewer` can call `GET /api/media/:id/metadata/status` but receives `403` on `POST /api/media/:id/metadata/rerun` and `POST /api/metadata/backfill`.
-- Verify a `collaborator` can call both write endpoints.
-- Verify a non-member receives `403` on all three endpoints.
+- Verify a `viewer` can call `GET /api/media/:id/metadata/status` but receives `403` on `POST /api/media/:id/metadata/rerun`.
+- Verify a `collaborator` can call `POST /api/media/:id/metadata/rerun`.
+- Verify `POST /api/admin/metadata/backfill` returns `403` for a non-admin and `201` for an Admin with `system_settings:write`.
+- Verify a non-member receives `403` on per-item endpoints.
 
 ---
 
@@ -276,3 +275,4 @@ This panel is the primary tool for the mergeOutput regression remediation: an ad
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | June 2026 | AI Assistant | Initial specification |
+| 1.1 | June 2026 | AI Assistant | Per-circle backfill replaced by global admin endpoint (`POST /api/admin/metadata/backfill`); circle Settings tab backfill panel moved to Admin Settings; no feature gate (endpoint is always available to Admins) |

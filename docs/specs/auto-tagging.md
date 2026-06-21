@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.1 |
+| **Version** | 1.2 |
 | **Last Updated** | June 2026 |
 | **Status** | Implemented |
 
@@ -28,14 +28,14 @@ AI auto-tagging automatically assigns descriptive tags and generates a brief des
 
 **Core capabilities:**
 
-- Tag photos automatically on upload when opted in per circle (default off).
+- Tag photos automatically on upload when enabled globally (system setting `features.autoTagging`, default off). Previously a per-circle opt-in; as of migration `20260621050000_drop_circle_feature_flags` this is a global toggle. **Note:** this migration dropped the per-circle `auto_tagging_enabled` column — any previously-enabled circles lost that setting and an Admin must re-enable the feature globally.
 - Generate a `description` (1–3 sentences) alongside tags in the same vision call.
 - Inject the names of people already assigned to faces in the photo into the prompt so the description can reference them by name.
 - Overwrite `description` on every successful run — it always reflects the latest model output. On a parse failure, the existing description is left untouched and tags are treated as empty.
 - Use any configured AI provider (Anthropic, OpenAI) with admin-selected model.
 - Draw only from an admin-defined global vocabulary — the model cannot invent tag labels.
 - Allow circle collaborators to trigger a per-item re-run from the media drawer.
-- Allow admins to backfill existing photos in a circle, with optional date-range scoping and a force flag to reprocess already-tagged items. Backfilling also produces embeddings for any item that runs through the pipeline.
+- Allow admins to backfill existing photos across all circles via a global admin endpoint, with optional date-range scoping and a force flag to reprocess already-tagged items. Backfilling also produces embeddings for any item that runs through the pipeline.
 - Generate a text embedding from description + tags + people names at the end of each successful run and store it in `media_item_embedding` for semantic search (best-effort; embedding failures never fail the tagging job). See [Semantic Search](semantic-search.md) for the full embedding and search architecture.
 - Track per-item status (`not_processed`, `pending`, `processing`, `processed`, `failed`) for monitoring and UI display.
 
@@ -50,7 +50,7 @@ Auto-tagging is deliberately decoupled from the synchronous upload path. Uploads
 ```mermaid
 flowchart TD
     A[File uploaded and processed] -->|OBJECT_PROCESSED_EVENT| B[TaggingEnqueueListener]
-    B -->|AUTO_TAG_ENABLED != false| C{circle.autoTaggingEnabled?}
+    B -->|AUTO_TAG_ENABLED != false| C{SystemSettings features.autoTagging enabled?}
     C -->|No| D[Skip — log and return]
     C -->|Yes| E[EnrichmentJobService.enqueue type=auto_tagging priority=20 reason=upload]
     E --> F[(enrichment_jobs table)]
@@ -134,9 +134,11 @@ One row per `media_item`, tracking where the item is in the pipeline.
 | `processed` | Completed successfully; `tag_count` reflects the result |
 | `failed` | All attempts exhausted or non-retryable error; see `last_error` |
 
-### `Circle.auto_tagging_enabled`
+### `features.autoTagging` — Global System Setting
 
-Boolean column on the `circles` table (default `false`). When `false`, `TaggingEnqueueListener` skips enqueueing for photos uploaded to that circle, and `POST /api/tagging/backfill` rejects the request with `400 Bad Request`.
+Boolean stored in the `system_settings` JSONB column under the key `global`, at path `.features.autoTagging` (default `false`). When `false`, `TaggingEnqueueListener` skips enqueueing for all uploaded photos, and `POST /api/admin/tagging/backfill` rejects the request with `400 Bad Request`.
+
+The previous per-circle `Circle.auto_tagging_enabled` column was dropped in migration `20260621050000_drop_circle_feature_flags`. The listener now calls `SystemSettingsService.isFeatureEnabled('autoTagging')` instead of reading the circle flag.
 
 ### AI Tagging Feature Setting
 
@@ -302,7 +304,7 @@ All of the above non-retryable failures surface as `media_tag_status = failed` w
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AUTO_TAG_ENABLED` | `true` | Global kill-switch. Set to `false` to disable auto-enqueue on upload for all circles. Per-circle opt-in still applies when `true`. |
+| `AUTO_TAG_ENABLED` | `true` | Environment kill-switch. Set to `false` to disable auto-enqueue on upload regardless of system settings. The system setting `features.autoTagging` is the runtime on/off toggle; this env var is a hard override for CI/test environments. |
 | `TAG_MAX_IMAGE_DIM` | `1568` | Maximum image long-edge in pixels before downscaling prior to the vision model call. 1568 matches Anthropic's auto-downscale threshold. |
 
 `MAX_IMAGE_BYTES` (4,500,000) is a code constant — not an environment variable. It caps the byte size of the image buffer sent to the provider; items exceeding it are marked `failed` without retry.
@@ -319,11 +321,10 @@ These are also used by face detection and any future enrichment handlers:
 
 ### Admin Configuration Steps
 
-1. Go to `/admin/ai-settings` and configure an AI provider credential (Anthropic or OpenAI API key).
+1. Go to `/admin/settings/ai` and configure an AI provider credential (Anthropic or OpenAI API key).
 2. In the "Tagging Feature" section of the same page, select the provider and model, then save. This writes to `system_settings.ai.features.tagging`.
-3. Go to `/admin/tags` to manage the global tag vocabulary. Add labels and toggle enabled/disabled state. Use the CSV export/import endpoints for bulk edits.
-4. On the circle detail page, enable auto-tagging for the circles where it should run.
-5. Optionally, go to `/admin/tags` and run a backfill to tag existing photos in a circle.
+3. Go to `/admin/settings/tagging` to enable auto-tagging globally (`features.autoTagging = true`) and manage the global tag vocabulary. Add labels and toggle enabled/disabled state. Use the CSV export/import endpoints for bulk edits.
+4. Optionally, run a global backfill from the same page to tag existing photos across all circles.
 
 ---
 
@@ -471,55 +472,26 @@ Get the current auto-tagging status for a media item.
 
 ---
 
-### Backfill
+### Global Backfill (Admin)
 
-#### `POST /api/tagging/backfill`
+#### `POST /api/admin/tagging/backfill`
 
-Queue auto-tagging jobs for photos in a circle that have not yet been processed (or all photos when `force: true`).
+Queue auto-tagging jobs for photos across **all circles** that have not yet been processed (or all photos when `force: true`). Replaces the former per-circle `POST /api/tagging/backfill` endpoint.
 
-- **Auth**: `media:write` + per-circle `collaborator` role
-- **Requirement**: `circle.autoTaggingEnabled` must be `true`, otherwise returns `400 Bad Request`.
+- **Auth**: Admin role + `system_settings:write`
+- **Requirement**: `features.autoTagging` must be `true` in system settings, otherwise returns `400 Bad Request`.
 - **Request body**:
   ```json
   {
-    "circleId": "uuid",
     "from": "2025-01-01T00:00:00Z",
     "to": "2026-01-01T00:00:00Z",
     "force": false
   }
   ```
-  `from`, `to`, and `force` are optional. `from`/`to` filter by the photo's date. When `force` is `false` (default), only items without a `processed` status are enqueued.
+  `from`, `to`, and `force` are optional. `from`/`to` filter by the photo's `capturedAt`. When `force` is `false` (default), only items without a `processed` status are enqueued.
 - **Response** `201`:
   ```json
-  { "data": { "enqueued": 47 } }
-  ```
-
----
-
-### Circle Tagging Settings
-
-#### `GET /api/circles/:id/tagging-settings`
-
-Get the per-circle auto-tagging opt-in flag.
-
-- **Auth**: `circles:read` + per-circle `viewer` role
-- **Response** `200`:
-  ```json
-  { "autoTaggingEnabled": false }
-  ```
-
-#### `PUT /api/circles/:id/tagging-settings`
-
-Enable or disable auto-tagging for a circle. Writes an audit event.
-
-- **Auth**: `circles:write` + per-circle `circle_admin` role (or `circles:manage_any` for super-admin bypass)
-- **Request body**:
-  ```json
-  { "enabled": true }
-  ```
-- **Response** `200`:
-  ```json
-  { "autoTaggingEnabled": true }
+  { "data": { "enqueued": 312, "circles": 4 } }
   ```
 
 ---
@@ -540,7 +512,7 @@ The `auto_tagging` job type appears automatically in `/admin/jobs` queue stats u
 | Cause | Behavior |
 |-------|---------|
 | `AUTO_TAG_ENABLED=false` | Listener skips enqueue silently at startup; no status row created |
-| `circle.autoTaggingEnabled=false` | Listener skips enqueue silently; no status row created |
+| `features.autoTagging=false` (system setting) | Listener skips enqueue silently; no status row created |
 | Media item not found or soft-deleted | Status → `failed`; job succeeds (no retry) |
 | Media item is not a photo | Status → `failed`; job succeeds (no retry) |
 | Provider or model not configured in system settings | Status → `failed`; job succeeds (no retry) |
@@ -554,7 +526,7 @@ The `auto_tagging` job type appears automatically in `/admin/jobs` queue stats u
 
 ### People-Change Re-Enqueue
 
-When a person's assigned faces change (assign, unassign, merge, or soft-delete via the People API), the `PeopleService` re-enqueues an `auto_tagging` job at priority 0 (highest) for every `media_item` whose faces are affected, **gated on the circle's `autoTaggingEnabled`**. This ensures that description and the stored embedding reflect the updated people names without requiring a manual backfill.
+When a person's assigned faces change (assign, unassign, merge, or soft-delete via the People API), the `PeopleService` re-enqueues an `auto_tagging` job at priority 0 (highest) for every `media_item` whose faces are affected, **gated on the global `features.autoTagging` system setting**. This ensures that description and the stored embedding reflect the updated people names without requiring a manual backfill.
 
 Errors during re-enqueue are logged and swallowed — they do not fail the people-management operation.
 

@@ -306,7 +306,7 @@ cd apps/api && npm run prisma:migrate
 - `DELETE /api/pat/{id}` - Revoke a token
 
 ### Family Circles (circles:read / circles:write)
-Face recognition is per-circle opt-in (default off); see Circle Face Settings endpoints below.
+Face recognition, auto-tagging, and burst detection are global feature toggles (`features.faceRecognition`, `features.autoTagging`, `features.burstDetection`) controlled in Admin Settings — no longer per-circle opt-ins.
 - `POST /api/circles` - Create a circle
 - `GET /api/circles` - List circles the caller is a member of
 - `GET /api/circles/:id` - Get circle detail
@@ -333,7 +333,7 @@ Metrics are precomputed into a snapshot table on a configurable schedule (defaul
 - `POST /api/admin/insights/refresh` (system_settings:write) - Enqueue a `storage_insights` enrichment job at priority 0 (highest; pre-empts any scheduled job) and return IMMEDIATELY: `{ jobId: uuid, state: 'pending'|'running' }`; body-less; computation is async — poll `GET /api/admin/insights` until `refresh.state` becomes `idle` or `failed`
 
 ### Admin: Job Queue (Admin role + jobs:read / jobs:write)
-An admin dashboard at `/admin/jobs` provides monitoring and control over the generic `enrichment_jobs` queue (used by face detection, storage insights computation, and all future enrichment handlers).
+An admin dashboard at `/admin/settings/jobs` provides monitoring and control over the generic `enrichment_jobs` queue (used by face detection, storage insights computation, and all future enrichment handlers).
 - `GET /api/admin/jobs/stats` (jobs:read) - Queue stats: total, byStatus, byType breakdown, stuckRunning count, and `scheduled` (count of pending jobs currently in backoff, i.e. `scheduledFor > now`)
 - `GET /api/admin/jobs?status=&type=&page=&pageSize=&scheduled=` (jobs:read) - Paginated job list with optional filters; add `scheduled=true` to show only pending jobs currently in backoff (`scheduledFor > now`; forces status=pending, `type` still applies); each item includes `scheduledFor` (ISO 8601 | null), `rateLimitedAt` (ISO 8601 | null), and `rateLimitHits` (number)
 - `POST /api/admin/jobs/:id/retry` (jobs:write) - Reset a single failed/succeeded job to pending; also clears `scheduledFor` and resets `rateLimitHits` to 0 (400 if running, 404 if not found)
@@ -347,27 +347,25 @@ An admin dashboard at `/admin/jobs` provides monitoring and control over the gen
 - `POST /api/media/bulk/delete` - Bulk soft-delete 1–500 items
 
 ### Media — Geo Services
-- `GET /api/media/geo/reverse?lat=&lng=` - On-demand reverse geocoding (offline provider by default)
-- `GET /api/media/geo/search?q=&limit=` - Forward geocoding via Nominatim (requires `GEO_FORWARD_SEARCH_ENABLED=true`)
+- `GET /api/media/geo/reverse?lat=&lng=` - On-demand reverse geocoding; provider resolved per-call from system setting `geo.provider` (fallback: `GEO_PROVIDER` env var; default `offline`)
+- `GET /api/media/geo/search?q=&limit=` - Forward geocoding via Nominatim; requires system setting `geo.forwardSearchEnabled=true` (fallback: `GEO_FORWARD_SEARCH_ENABLED=true`)
 
 ### Media — Circle Dashboard
-- `GET /api/media/dashboard?circleId=` - On This Day + recent/favorites + review-queue counts; also returns `pendingBurstGroups` count when burst detection is enabled for the circle
+- `GET /api/media/dashboard?circleId=` - On This Day + recent/favorites + review-queue counts; also returns `pendingBurstGroups` count when `features.burstDetection` is enabled globally
 
 ### Media — Burst Detection (media:read / media:write / media:delete + per-circle roles)
-Burst detection is per-circle opt-in (default off) and non-destructive — no photo is deleted until a human confirms. Groups are surfaced in a review queue only once they reach `burst.minGroupSize`. `GET /api/media/dashboard` returns a `pendingBurstGroups` count that feeds the review-queue section of the dashboard UI.
+Burst detection is enabled globally via `features.burstDetection` system setting (default off) and non-destructive — no photo is deleted until a human confirms. Groups are surfaced in a review queue only once they reach `burst.minGroupSize`. `GET /api/media/dashboard` returns a `pendingBurstGroups` count that feeds the review-queue section of the dashboard UI.
 - `GET /api/media/bursts?circleId=&status=&page=&pageSize=` - List burst groups (review queue); items `{ id, status, mediaCount, suggestedBestItemId, capturedAt, suggestedBestThumbnailUrl, coverThumbnailUrls[] }`; response `{ items, meta:{total,page,pageSize} }` (media:read + viewer)
 - `GET /api/media/bursts/:id` - Group detail; ordered members `{ id, capturedAt, burstScore, sharpnessScore, thumbnailUrl, width, height, isSuggestedBest }` (media:read + viewer)
 - `POST /api/media/bursts/:id/resolve` body `{ keepIds[] }` - Keep selected members, soft-delete the rest, mark resolved (media:delete + collaborator)
 - `POST /api/media/bursts/:id/dismiss` - Mark "not a burst": ungroup members, status=dismissed (media:write + collaborator)
-- `POST /api/media/bursts/backfill` body `{ circleId, from?, to?, force? }` - Bulk-enqueue burst_detection over the circle, optionally limited to a `capturedAt` range (`from`/`to`, ISO-8601); the job computes the perceptual hash on demand for photos that lack one (retroactive fingerprinting of legacy uploads); requires circle opt-in; returns `{ enqueued }` (media:write + collaborator)
 
 ### Media — Metadata Extraction Re-run (media:read / media:write + per-circle roles)
 Metadata re-run re-extracts EXIF, dimensions, geocode, and video-probe data on demand via the enrichment queue without re-triggering tagging, face detection, or burst detection. There is no per-circle opt-in and no upload-time enqueue — EXIF extraction already runs in the normal upload chain; this feature provides on-demand rerun and backfill only. The `metadata_extraction` enrichment handler runs the four allowlisted processors (`exif`, `dimensions`, `geocode`, `video-probe`), merges results into `StorageObject.metadata._processing`, then calls `MediaMetadataSyncService.syncFromStorageObject` to write typed columns directly. It deliberately does NOT emit `OBJECT_PROCESSED_EVENT`, so auto-tagging, face detection, and burst detection are not re-triggered.
 - `POST /api/media/:id/metadata/rerun` - Re-enqueue a `metadata_extraction` enrichment job at priority 0 for a single item; upserts `media_metadata_status` to `pending`; returns `{ jobId, status }` (media:write + collaborator)
 - `GET /api/media/:id/metadata/status` - Get per-item metadata extraction status: `{ status, processedAt, lastError }` (status `not_processed|pending|processing|processed|failed`); returns `not_processed` with null fields when no status row exists (media:read + viewer)
-- `POST /api/metadata/backfill` body `{ circleId, from?, to?, force? }` - Bulk-enqueue `metadata_extraction` jobs for non-deleted media in a circle; `from`/`to` (optional ISO-8601) bound `capturedAt`; when `force` is false (default) only items whose `media_metadata_status` is absent or not `processed` are enqueued; returns `{ enqueued }` (media:write + collaborator)
 
-> **UI:** A "Re-run metadata extraction" button appears in the media properties pane (MediaDetailDrawer) and calls `POST /api/media/:id/metadata/rerun`. The circle Settings tab exposes a "Re-extract metadata" backfill panel where a `circle_admin` can choose an optional `capturedAt` range and force flag before calling `POST /api/metadata/backfill`.
+> **UI:** A "Re-run metadata extraction" button appears in the media properties pane (MediaDetailDrawer) and calls `POST /api/media/:id/metadata/rerun`. For bulk backfill, Admins use the global backfill panel in Admin Settings (see `POST /api/admin/metadata/backfill` below).
 
 ### Media — Explore
 - `GET /api/media/explore/places?circleId=` - List distinct places with item counts and cover thumbnails; returns `Array<{ name: string; count: number; coverThumbnailUrl: string | null }>` (media:read + viewer)
@@ -396,7 +394,7 @@ Albums are circle-scoped named collections; deleting an album removes join rows 
 - `PUT /api/ai/features/embedding` - Set active provider and model for text embeddings used in semantic search; currently OpenAI-only (`text-embedding-3-small` = 1536-d); required for `semanticQuery` to work (ai_settings:write)
 
 ### AI Auto-Tagging (ai_settings:read / ai_settings:write + media:read / media:write)
-Auto-tagging is per-circle opt-in (default off); see Tag Vocabulary endpoints below and the [auto-tagging spec](docs/specs/auto-tagging.md). The global vocabulary is admin-managed; the vision model assigns labels only from enabled entries.
+Auto-tagging is enabled globally via the `features.autoTagging` system setting (default off); see Tag Vocabulary endpoints below and the [auto-tagging spec](docs/specs/auto-tagging.md). The global vocabulary is admin-managed; the vision model assigns labels only from enabled entries. The per-circle `auto_tagging_enabled` column was dropped in migration `20260621050000_drop_circle_feature_flags`.
 - `GET /api/tag-labels` - List all tag labels (ai_settings:read)
 - `POST /api/tag-labels` body `{name}` - Create a tag label (ai_settings:write); 409 if name exists
 - `PATCH /api/tag-labels/:id` body `{name?, enabled?}` - Update a tag label (ai_settings:write)
@@ -405,28 +403,16 @@ Auto-tagging is per-circle opt-in (default off); see Tag Vocabulary endpoints be
 - `POST /api/tag-labels/import` - Import tag labels from a multipart CSV upload (ai_settings:write); CSV columns: `id,name,delete`; empty `id` = create, truthy `delete` = delete by id, else update by id; returns `{created, updated, deleted, errors[]}`
 - `GET /api/media/:id/tags/status` - Get per-item tagging status: status, tagCount, providerKey, modelVersion, processedAt, lastError (media:read + viewer)
 - `POST /api/media/:id/tags/rerun` - Re-enqueue auto-tagging for a media item at priority 0; returns `{jobId, status}` (media:write + collaborator)
-- `POST /api/tagging/backfill` body `{circleId, from?, to?, force?}` - Bulk-enqueue unprocessed photos in a circle; requires circle opt-in; returns `{enqueued}` (media:write + collaborator)
-
-### Circle Auto-Tagging Settings (circles:read / circles:write + per-circle viewer/circle_admin role)
-- `GET /api/circles/:id/tagging-settings` - Get auto-tagging opt-in flag for a circle (circles:read + viewer)
-- `PUT /api/circles/:id/tagging-settings` body `{enabled}` - Enable/disable auto-tagging for a circle; writes audit event (circles:write + circle_admin)
-
-### Circle Burst Detection Settings (circles:read / circles:write + per-circle viewer/circle_admin role)
-- `GET /api/circles/:id/burst-settings` - Get burst-detection opt-in flag for a circle (circles:read + viewer)
-- `PUT /api/circles/:id/burst-settings` body `{enabled}` - Enable/disable burst detection for a circle; writes audit event (circles:write + circle_admin)
-
-> **UI:** The circle Settings tab exposes a "Scan for bursts" panel that lets a `circle_admin` choose an optional capture-date window (`from`/`to`) and a force flag before calling `POST /api/media/bursts/backfill`. This makes it easy to retroactively fingerprint and group photos from a specific date range without re-processing the entire library.
 
 ### Face Recognition / Face Settings (Admin only — face_settings:read / face_settings:write)
-Three providers: `human` (keyless WASM, in-process, 1024-d), `compreface` (keyless `compreface-core` sidecar, 128-d mobilenet, `requiresCredentials:false`), `rekognition` (delegated AWS, requires credentials). The Face Settings UI has a "Test connection" button for all providers including keyless ones.
+Three providers: `human` (keyless WASM, in-process, 1024-d), `compreface` (keyless `compreface-core` sidecar, 128-d mobilenet, `requiresCredentials:false`), `rekognition` (delegated AWS, requires credentials). The Face Settings UI has a "Test connection" button for all providers including keyless ones. Face recognition is enabled globally via `features.faceRecognition` system setting (default off); the per-circle `face_recognition_enabled` column was dropped in migration `20260621050000_drop_circle_feature_flags`.
 - `GET /api/face/settings` - Get configured providers (masked), known providers, capabilities, and active detection feature (face_settings:read)
 - `PUT /api/face/credentials/:provider` - Upsert provider credentials, encrypted at rest (face_settings:write)
 - `DELETE /api/face/credentials/:provider` - Remove provider credentials (face_settings:write)
 - `POST /api/face/test` - Test provider connectivity (face_settings:read)
 - `GET /api/face/models?provider=` - List available models for a provider (face_settings:read)
 - `PUT /api/face/features/detection` - Set active face-detection provider and model (face_settings:write)
-- `POST /api/face/backfill` body `{circleId, force?}` - Bulk-enqueue unprocessed photos in a circle; requires circle opt-in (face_settings:write)
-- `DELETE /api/face/biometrics?circleId=` - Permanently erase all Face, Person, MediaFaceStatus, and FaceJob rows for a circle; sets faceRecognitionEnabled=false (face_settings:write + circle_admin)
+- `DELETE /api/face/biometrics?circleId=` - Permanently erase all Face, Person, MediaFaceStatus, and FaceJob rows for a circle (face_settings:write + circle_admin); does NOT change any global feature toggle
 
 ### Face Recognition — Detection (media:read / media:write + per-circle viewer/collaborator role)
 - `GET /api/media/:id/faces` - List detected faces on a media item: id, boundingBox (normalized 0–1), confidence, landmarks, personId, providerKey, modelVersion, manuallyAssigned (media:read + viewer)
@@ -440,7 +426,7 @@ Three providers: `human` (keyless WASM, in-process, 1024-d), `compreface` (keyle
 - `PATCH /api/people/:id` body `{name?, coverFaceId?}` - Rename a person or set cover face (media:write + collaborator)
 - `POST /api/people/:id/faces` body `{faceIds[]}` - Assign faces to a person (sets manuallyAssigned=true) (media:write + collaborator)
 - `DELETE /api/people/:id/faces/:faceId` - Unassign a face; face returns to unknown pool (media:write + collaborator) — 204 No Content
-- `POST /api/people/cluster` body `{circleId}` - Cluster unknown faces into provisional Person records; requires circle opt-in (media:write + circle_admin)
+- `POST /api/people/cluster` body `{circleId}` - Cluster unknown faces into provisional Person records; requires `features.faceRecognition` enabled globally (media:write + circle_admin)
 - `POST /api/people/merge` body `{sourceId, targetId}` - Reassign all faces source→target, soft-delete source with mergedIntoId audit breadcrumb (media:write + collaborator)
 - `DELETE /api/people/:id` - Soft-delete a person; all faces return to unknown pool (media:write + collaborator) — 204 No Content
 - `GET /api/media?personId=` - Filter media list to items containing faces assigned to a specific person (media:read + viewer)
@@ -450,6 +436,29 @@ Three providers: `human` (keyless WASM, in-process, 1024-d), `compreface` (keyle
 These endpoints let users associate people with a photo from the media properties pane when face detection misses a face. No bounding box is required. Internally each association is stored as a `Face` row with `providerKey='manual'`, `manuallyAssigned=true`, empty embedding, and zeroed bounding box — so all existing people filters and person galleries work without changes. Manual faces are preserved across face-detection reruns (the rerun delete is scoped to `manuallyAssigned=false`). Adding or removing a manual association re-enqueues `auto_tagging` so description/embedding refresh.
 - `POST /api/media/:id/people` body `{ personId }` OR `{ name }` (exactly one) — associate a person with the photo; find-or-create by name when `name` is given; idempotent (no duplicate if the person is already associated); returns `{ personId, personName, faceId, mediaItemId }` (media:write + collaborator)
 - `DELETE /api/media/:id/people/:personId` — remove the manual association only (does not touch detected faces); 404 if no manual association exists; 204 No Content (media:write + collaborator)
+
+### Admin: Global Backfill Endpoints (Admin role + system_settings:write or face_settings:write)
+These endpoints replace the former per-circle backfill endpoints. Each iterates all circles and returns `{ enqueued, circles }`. The per-circle backfill endpoints (`POST /api/tagging/backfill`, `POST /api/media/bursts/backfill`, `POST /api/metadata/backfill`, `POST /api/face/backfill`) have been removed.
+- `POST /api/admin/tagging/backfill` body `{ from?, to?, force? }` - Bulk-enqueue auto-tagging jobs across all circles; 400 if `features.autoTagging` is disabled (Admin + system_settings:write)
+- `POST /api/admin/bursts/backfill` body `{ from?, to?, force? }` - Bulk-enqueue burst_detection jobs across all circles; includes on-demand perceptual hashing for legacy photos; 400 if `features.burstDetection` is disabled (Admin + system_settings:write)
+- `POST /api/admin/metadata/backfill` body `{ from?, to?, force? }` - Bulk-enqueue metadata_extraction jobs across all circles; no feature gate (Admin + system_settings:write)
+- `POST /api/admin/face/backfill` body `{ force? }` - Bulk-enqueue face_detection jobs across all circles; 400 if `features.faceRecognition` is disabled (Admin + face_settings:write)
+
+### Admin: Settings UI (`/admin/settings/*`)
+The admin settings UI is organized as a hub at `/admin/settings` with URL-addressable sub-pages. Old flat `/admin/*` routes redirect to the new nested paths. The sidebar shows a single "Settings" entry. Per-circle feature toggles and per-circle backfill panels have been removed from the circle detail page.
+
+Sub-pages:
+- `/admin/settings/general` — general app settings
+- `/admin/settings/users` — user management
+- `/admin/settings/ai` — AI provider credentials and model selection
+- `/admin/settings/tagging` — global auto-tagging toggle (`features.autoTagging`), tag vocabulary, global backfill
+- `/admin/settings/face` — global face recognition toggle (`features.faceRecognition`), provider configuration, global backfill
+- `/admin/settings/bursts` — global burst detection toggle (`features.burstDetection`), parameters, global backfill
+- `/admin/settings/geo` — geo provider settings (`geo.provider`, `geo.forwardSearchEnabled`)
+- `/admin/settings/storage/providers` — storage provider configuration (replaces `/admin/storage-providers`)
+- `/admin/settings/storage/insights` — storage insights dashboard
+- `/admin/settings/jobs` — enrichment job queue (replaces `/admin/jobs`)
+- `/admin/settings/backup` — backup configuration and run history
 
 ### Storage Provider Configuration (Admin only — storage_settings:read / storage_settings:write)
 Admins can configure multiple object-storage providers (AWS S3, Cloudflare R2, local disk), test connectivity, choose the ACTIVE provider for new uploads, and migrate existing objects between providers (COPY-ONLY: bytes are copied and the object is repointed; the source file is left in place as a fallback). Objects on different providers are served simultaneously via per-object routing.
@@ -464,7 +473,7 @@ Admins can configure multiple object-storage providers (AWS S3, Cloudflare R2, l
 - `GET /api/storage-settings/migrate/:runId` (storage_settings:read) — Get migration run detail: `{ id, sourceProvider, targetProvider, status: pending|running|completed|failed|cancelled, totalCount, migratedCount, failedCount, skippedCount, startedAt, finishedAt, lastError }`; counts recomputed from item rows
 - `POST /api/storage-settings/migrate/:runId/cancel` (storage_settings:write) — Cancel a pending or running migration run; in-flight items detect the cancelled run and skip
 
-> **UI:** A new admin page at `/admin/storage-providers` (sidebar "Storage Providers", Admin only) shows provider cards with per-card "Test connection", an active-provider selector, and a copy-only migration panel with live progress and run history.
+> **UI:** The Admin Settings page at `/admin/settings/storage/providers` (reachable from the Settings hub) shows provider cards with per-card "Test connection", an active-provider selector, and a copy-only migration panel with live progress and run history.
 
 ### Deterministic Search (search:use)
 - `POST /api/search` - Execute deterministic media search with explicit filters; optionally add `semanticQuery: string` (1–512 chars) to rank results by vector similarity instead of sort order; also accepts `noFaces: true` boolean to return only items with no faces (detected or manually added) (media:read + search:use)
@@ -539,7 +548,7 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `storage_migration_runs` - Top-level record for a provider-to-provider copy migration; tracks `sourceProvider`, `targetProvider`, status (`pending` | `running` | `completed` | `failed` | `cancelled`), `totalCount`, `startedAt`, `finishedAt`, and `lastError`; counts (`migratedCount`, `failedCount`, `skippedCount`) are recomputed from item rows
 - `storage_migration_items` - Per-object tracking row for a migration run; `@@unique([runId, objectId])` provides idempotency anchor; cascades on run delete and on storage object delete; records per-item status and `lastError`
 - `personal_access_tokens` - User-created long-lived API tokens (hashed)
-- `circles` - Family circles; `is_personal=true` circles cannot be deleted; `face_recognition_enabled` column (default false) controls face recognition per-circle opt-in; `auto_tagging_enabled` column (default false) controls auto-tagging per-circle opt-in; `burst_detection_enabled` column (default false) controls burst detection per-circle opt-in
+- `circles` - Family circles; `is_personal=true` circles cannot be deleted. Note: the `face_recognition_enabled`, `auto_tagging_enabled`, and `burst_detection_enabled` columns were dropped in migration `20260621050000_drop_circle_feature_flags` — these features are now controlled by global system settings (`features.faceRecognition`, `features.autoTagging`, `features.burstDetection`)
 - `circle_members` - Per-circle memberships with `CircleRole` enum (`circle_admin` | `collaborator` | `viewer`)
 - `circle_invites` - Email invites for circles; claimed on invited user's first login
 - `ai_provider_credentials` - AI provider API keys (AES-256-GCM encrypted); one row per provider; `last4` exposed for display; plaintext never stored or returned
@@ -638,13 +647,13 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 - `UPTRACE_DSN` - Uptrace connection string
 
 **Geo Services:**
-- `GEO_PROVIDER` - Reverse geocoding provider: `offline` (default, on-server GeoNames dataset) or `nominatim` (HTTP, sends GPS off-server)
+- `GEO_PROVIDER` - Reverse geocoding provider: `offline` (default, on-server GeoNames dataset) or `nominatim` (HTTP, sends GPS off-server). This env var is used as the fallback default; the runtime value is now also configurable via system setting `geo.provider` (editable in Admin Settings → `/admin/settings/geo`).
 - `NOMINATIM_BASE_URL` - Nominatim endpoint (default: `https://nominatim.openstreetmap.org`)
-- `GEO_FORWARD_SEARCH_ENABLED` - Enable `GET /api/media/geo/search` forward geocoding (default: `false`; only typed query leaves server, never GPS)
+- `GEO_FORWARD_SEARCH_ENABLED` - Enable `GET /api/media/geo/search` forward geocoding (default: `false`; only typed query leaves server, never GPS). Also configurable at runtime via system setting `geo.forwardSearchEnabled`.
 
 **Face Recognition:**
 - `FACE_COMPREFACE_URL` - Base URL of the CompreFace core sidecar (default: `http://compreface-core:3000`); used as the default `baseUrl` for the CompreFace provider. The provider is keyless — no API key is required.
-- `FACE_AUTO_DETECT` - Global kill-switch for auto-enqueue on upload; set to `false` to disable globally (per-circle opt-in still applies when `true`; default: `true`)
+- `FACE_AUTO_DETECT` - Environment kill-switch for auto-enqueue on upload; set to `false` to disable globally regardless of system settings. The runtime toggle is `features.faceRecognition` in system settings; this env var is a hard override for CI/test environments (default: `true`)
 - `FACE_JOB_POLL_MS` - Polling interval for the face-job worker in milliseconds (default: `5000`)
 - `FACE_WORKER_ENABLED` - Set to `false` to disable the FaceJobWorker (useful in test/CI environments; default: `true`)
 - `FACE_MATCH_THRESHOLD` - Cosine-similarity threshold for assigning a detected face to a known `Person` (default: `0.38`)
@@ -653,12 +662,12 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 - `FACE_VECTOR_BACKEND` - Vector storage and matching backend: `app` (default; `Float[]` column + in-process cosine) or `pgvector` (requires the pgvector extension)
 
 **Auto-Tagging and Semantic Search:**
-- `AUTO_TAG_ENABLED` - Global kill-switch for auto-enqueue on upload; set to `false` to disable for all circles (per-circle opt-in still applies when `true`; default: `true`)
+- `AUTO_TAG_ENABLED` - Environment kill-switch for auto-enqueue on upload; set to `false` to disable globally regardless of system settings. The runtime toggle is `features.autoTagging` in system settings; this env var is a hard override for CI/test environments (default: `true`)
 - `TAG_MAX_IMAGE_DIM` - Maximum image long-edge in pixels before downscaling prior to the vision model call; 1568 matches Anthropic's auto-downscale threshold (default: `1568`)
 
 Note: Semantic search (pgvector embeddings) requires a pgvector-capable Postgres image (`pgvector/pgvector:pg16`). The embedding feature is configured in the Admin UI via `PUT /api/ai/features/embedding` — only OpenAI supports `embedText` (`text-embedding-3-small` recommended). If the embedding feature is not configured, `semanticQuery` silently falls back to filter-only search.
 
-Note: The enrichment worker shared by face detection, storage insights computation, auto-tagging, and metadata re-extraction is controlled by `ENRICHMENT_WORKER_ENABLED` (default: `true`), `ENRICHMENT_JOB_POLL_MS` (default: `5000`), and `ENRICHMENT_WORKER_CONCURRENCY` (default: `1`). The legacy `FACE_WORKER_ENABLED` and `FACE_JOB_POLL_MS` aliases are still respected for backward compatibility. The `metadata_extraction` job type re-runs the `exif`, `dimensions`, `geocode`, and `video-probe` processors and syncs typed columns directly WITHOUT emitting `OBJECT_PROCESSED_EVENT`, so it does not cascade to auto-tagging, face detection, or burst detection. There is no upload-time enqueue and no per-circle opt-in for metadata extraction.
+Note: The enrichment worker shared by face detection, storage insights computation, auto-tagging, and metadata re-extraction is controlled by `ENRICHMENT_WORKER_ENABLED` (default: `true`), `ENRICHMENT_JOB_POLL_MS` (default: `5000`), and `ENRICHMENT_WORKER_CONCURRENCY` (default: `1`). The legacy `FACE_WORKER_ENABLED` and `FACE_JOB_POLL_MS` aliases are still respected for backward compatibility. The `metadata_extraction` job type re-runs the `exif`, `dimensions`, `geocode`, and `video-probe` processors and syncs typed columns directly WITHOUT emitting `OBJECT_PROCESSED_EVENT`, so it does not cascade to auto-tagging, face detection, or burst detection. There is no upload-time enqueue and no per-circle opt-in for metadata extraction. Per-item rerun remains available to circle collaborators; global backfill is now an admin-only endpoint (`POST /api/admin/metadata/backfill`).
 
 **Enrichment retry and rate-limit backoff:**
 - `ENRICHMENT_MAX_ATTEMPTS` - Maximum processing attempts before a job is permanently failed (default: `3`)
@@ -676,12 +685,25 @@ Note: The enrichment worker shared by face detection, storage insights computati
 Note: Storage provider credentials (S3, R2, local) are now configurable in the Admin UI under Storage Providers. The `S3_*` environment variables and `STORAGE_PROVIDER` serve as bootstrap defaults and fallback for objects created before Admin UI configuration. The active provider for new uploads is controlled by the `storage.activeProvider` system setting (string; default: env `STORAGE_PROVIDER` or `'s3'`); switching the active provider affects new uploads only — existing objects are NOT migrated automatically.
 
 **Burst Detection:**
-- `BURST_DETECTION_ENABLED` - Global kill-switch for auto-enqueue on upload; set to `false` to disable `BurstEnqueueListener` for all circles (per-circle opt-in still applies when `true`; default: `true`)
+- `BURST_DETECTION_ENABLED` - Environment kill-switch for auto-enqueue on upload; set to `false` to disable `BurstEnqueueListener` regardless of system settings. The runtime toggle is `features.burstDetection` in system settings; this env var is a hard override for CI/test environments (default: `true`)
 
 The following burst detection parameters are controlled via system settings (not environment variables), editable in the Admin UI under `burst.*`:
 - `burst.timeGapSeconds` — integer, 1–300, default 10; maximum capture-time gap (seconds) between consecutive items from the same device for temporal proximity to apply
 - `burst.hashDistance` — integer, 0–32, default 10; maximum Hamming distance (bits, out of 64) for two items to be considered visual near-duplicates
 - `burst.minGroupSize` — integer, 2–20, default 3; minimum number of items required for a group to be surfaced in the review queue
+
+**Feature Toggles (System Settings):**
+
+These boolean system settings replace the former per-circle feature columns dropped in migration `20260621050000_drop_circle_feature_flags`. Editable in Admin Settings (`/admin/settings/*`).
+- `features.autoTagging` — boolean, default false; global on/off for AI auto-tagging; env `AUTO_TAG_ENABLED=false` overrides this
+- `features.faceRecognition` — boolean, default false; global on/off for face detection and recognition; env `FACE_AUTO_DETECT=false` overrides this
+- `features.burstDetection` — boolean, default false; global on/off for burst photo detection; env `BURST_DETECTION_ENABLED=false` overrides this
+
+**Geo Settings (System Settings):**
+
+The geo provider is now configurable at runtime in addition to the env vars (env vars remain as fallback defaults):
+- `geo.provider` — string `'offline'` | `'nominatim'`, default resolved from `GEO_PROVIDER` env var; editable in `/admin/settings/geo`
+- `geo.forwardSearchEnabled` — boolean, default resolved from `GEO_FORWARD_SEARCH_ENABLED` env var; editable in `/admin/settings/geo`
 
 **Storage Insights:**
 
@@ -716,13 +738,13 @@ The refresh cadence for the precomputed storage metrics snapshot is controlled v
 
 Detailed specs live under `docs/specs/`:
 - [Enrichment Queue](docs/specs/enrichment-queue.md) — worker lifecycle, retry, priority, adding new handlers
-- [Face Recognition](docs/specs/face-recognition.md) — face detection, recognition, clustering, people management
-- [AI Auto-Tagging](docs/specs/auto-tagging.md) — vocabulary-driven vision model tagging, description generation, per-circle opt-in, backfill, embedding step
+- [Face Recognition](docs/specs/face-recognition.md) — face detection, recognition, clustering, people management, global feature toggle, global admin backfill
+- [AI Auto-Tagging](docs/specs/auto-tagging.md) — vocabulary-driven vision model tagging, description generation, global feature toggle, global admin backfill, embedding step
 - [Semantic Search](docs/specs/semantic-search.md) — pgvector embedding storage, KNN-then-filter algorithm, `semanticQuery` param, graceful degradation, backfill and re-embed on people change
 - [Agentic Search](docs/specs/agentic-search.md) — stateless agentic search, SSE streaming, tool-call protocol
 - [Storage Insights](docs/specs/storage-insights.md) — precomputed global storage metrics, snapshot lifecycle, interval-gated cron, admin dashboard
-- [Burst Photo Detection](docs/specs/burst-detection.md) — on-server dHash + temporal proximity grouping, best-shot scoring, non-destructive review queue, per-circle opt-in, backfill with optional capturedAt range and on-demand retroactive perceptual hashing
-- [Metadata Extraction Re-run](docs/specs/metadata-rerun.md) — on-demand rerun and backfill of EXIF/dimensions/geocode/video-probe processors via enrichment queue; no per-circle opt-in; direct column sync without cascading to tagging, face, or burst
+- [Burst Photo Detection](docs/specs/burst-detection.md) — on-server dHash + temporal proximity grouping, best-shot scoring, non-destructive review queue, global feature toggle, global admin backfill with optional capturedAt range and on-demand retroactive perceptual hashing
+- [Metadata Extraction Re-run](docs/specs/metadata-rerun.md) — on-demand per-item rerun and global admin backfill of EXIF/dimensions/geocode/video-probe processors via enrichment queue; direct column sync without cascading to tagging, face, or burst
 - [Storage Provider Configuration](docs/specs/storage-providers.md) — multi-provider credential management, per-object routing with env fallback, copy-only migration model, active-provider selection
 
 ## Specialized Subagents (MANDATORY)

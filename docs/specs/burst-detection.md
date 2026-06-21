@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
+| **Version** | 1.3 |
 | **Last Updated** | June 2026 |
 | **Status** | Specification |
 
@@ -36,7 +36,7 @@ The feature identifies these "burst groups" automatically and surfaces them as a
 - Support three complementary detection signals ranked by precision: Apple BurstUUID, temporal proximity, and perceptual hash.
 - Score each group member by visual quality so the reviewer has an informed starting point.
 - Surface pending burst groups through a dedicated review queue and contribute to the existing dashboard review-queue count.
-- Operate as a per-circle opt-in (default off) to match the privacy posture of face recognition and auto-tagging.
+- Operate as a global feature toggle (`features.burstDetection` system setting, default off) consistent with face recognition and auto-tagging. Previously a per-circle opt-in; as of migration `20260621050000_drop_circle_feature_flags` the per-circle `burst_detection_enabled` column is dropped and enablement is global. **Note:** any previously-enabled circles lost their opt-in — an Admin must re-enable the feature globally.
 - Keep all computation on-server using `sharp` with no new heavy dependencies (no OpenCV, no cloud calls).
 - Run as an enrichment job on the existing `enrichment_jobs` queue to inherit retries, observability, and the admin jobs dashboard at zero infrastructure cost.
 
@@ -109,7 +109,7 @@ The raw variance is stored as `MediaItem.sharpnessScore` (Float). This value is 
 
 ### 3.2 Face Signals (Secondary, Optional)
 
-When the circle has `faceRecognitionEnabled = true` and the media item has been processed by the face detection pipeline, the handler reads existing `Face` rows and incorporates two sub-signals:
+When `features.faceRecognition` is enabled globally and the media item has been processed by the face detection pipeline, the handler reads existing `Face` rows and incorporates two sub-signals:
 
 - **Face count:** more faces detected is generally preferable to fewer, on the assumption that the photographer was trying to capture a group.
 - **Face sharpness:** the mean `confidence` of detected faces on the item is used as a proxy for facial sharpness (providers report lower confidence on blurry, partially occluded, or rotated faces).
@@ -180,11 +180,9 @@ Two production bugs were encountered when `perceptualHash` was stored as a Postg
 
 **Resolution:** the column is `TEXT` in Postgres and `String` in Prisma, storing the value as an unsigned decimal string (e.g. `"13853051937932480"`). Application code calls `BigInt(row.perceptualHash)` only inside the burst matcher where Hamming distance arithmetic is required. The column is excluded from all default API serialization via a Prisma global `omit` so it cannot accidentally appear in responses.
 
-### 4.3 New Column on `circles`
+### 4.3 Global Feature Setting (replaces per-circle column)
 
-| Column | Type | Notes |
-|--------|------|-------|
-| `burstDetectionEnabled` | Boolean | Default `false`; controls per-circle opt-in |
+The `burstDetectionEnabled` column that was added to `circles` has been removed in migration `20260621050000_drop_circle_feature_flags`. Burst detection is now enabled globally via the system setting `features.burstDetection` (Boolean, default `false`) stored in the `system_settings` JSONB at path `.features.burstDetection`. The `BurstEnqueueListener` reads this via `SystemSettingsService.isFeatureEnabled('burstDetection')`.
 
 ### 4.4 Relationships
 
@@ -240,8 +238,8 @@ Before enqueueing, the listener checks:
 
 1. `MediaType` is `photo` (burst detection does not apply to videos).
 2. `mediaItem.deletedAt` is null.
-3. `BURST_DETECTION_ENABLED` environment variable is not `'false'` (global kill-switch).
-4. `circle.burstDetectionEnabled` is `true` (per-circle opt-in).
+3. `BURST_DETECTION_ENABLED` environment variable is not `'false'` (environment kill-switch).
+4. `features.burstDetection` is `true` in system settings (global feature toggle; previously a per-circle flag).
 
 If all checks pass, the listener calls `EnrichmentJobService.enqueue` with `type='burst_detection'`, `reason=upload`, `priority=10`. The idempotency check in `EnrichmentJobService.enqueue` prevents duplicate jobs if the event fires more than once.
 
@@ -278,7 +276,7 @@ Order by `capturedAt DESC` to find the most recent preceding neighbors first.
 - If linked neighbors belong to multiple distinct groups: merge all groups into the oldest one (by `createdAt`), reassign all members, delete the now-empty groups.
 
 **Step 6.** If the item was assigned to a group, recompute `suggestedBestItemId` and `burstScore` for all current members of the group:
-- Load face data for the group's members if `circle.faceRecognitionEnabled` is true and face rows exist.
+- Load face data for the group's members if `features.faceRecognition` is enabled globally and face rows exist.
 - Compute the composite score per §3.4.
 - Write `burstScore` to each member's `media_items` row.
 - Set `BurstGroup.suggestedBestItemId` to the highest-scoring member.
@@ -310,7 +308,7 @@ The upper bound of `hashDistance` is capped at 32 (half the 64-bit hash width) b
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BURST_DETECTION_ENABLED` | `true` | Global kill-switch. Set to `false` to disable `BurstEnqueueListener` for all circles. Per-circle opt-in still applies when `true`. Useful in test and CI environments. |
+| `BURST_DETECTION_ENABLED` | `true` | Environment kill-switch. Set to `false` to disable `BurstEnqueueListener` regardless of system settings. The system setting `features.burstDetection` is the runtime on/off toggle; this env var is a hard override for CI/test environments. |
 
 The enrichment worker variables (`ENRICHMENT_WORKER_ENABLED`, `ENRICHMENT_JOB_POLL_MS`, `ENRICHMENT_WORKER_CONCURRENCY`) govern the queue that runs `burst_detection` jobs alongside all other enrichment types. See [enrichment-queue.md — Configuration](enrichment-queue.md#12-configuration).
 
@@ -423,65 +421,38 @@ Mark a burst group dismissed, indicating the reviewer considers these items to n
 - **Response `400`:** Group is not in `pending` status (cannot dismiss an already-resolved or already-dismissed group).
 - **Response `404`:** Group not found.
 
-### 7.3 Backfill
+### 7.3 Global Backfill (Admin)
 
-#### `POST /api/media/bursts/backfill`
+#### `POST /api/admin/bursts/backfill`
 
-Bulk-enqueue `burst_detection` jobs for photos in a circle that have not yet been processed (or all photos when `force: true`). Requires the circle to have `burstDetectionEnabled = true`.
+Bulk-enqueue `burst_detection` jobs for photos across **all circles** that have not yet been processed (or all photos when `force: true`). Replaces the former per-circle `POST /api/media/bursts/backfill` endpoint.
 
 For each enqueued photo that lacks a `perceptualHash`, the enrichment job performs on-demand fingerprinting: it downloads the image from the storage provider, runs `computeVisualHash` (`apps/api/src/storage/processing/visual-hash.util.ts`) to compute the 64-bit dHash and Laplacian sharpness score, and persists both to `media_items` before applying burst-grouping logic. This retroactive path enables backfill to operate on libraries that pre-date the burst detection feature.
 
-- **Auth:** `media:write` + per-circle `collaborator` role
-- **Requirement:** `circle.burstDetectionEnabled` must be `true`; otherwise returns `400 Bad Request`.
+- **Auth:** Admin role + `system_settings:write`
+- **Requirement:** `features.burstDetection` must be `true` in system settings; otherwise returns `400 Bad Request`.
 - **Request body:**
   ```json
   {
-    "circleId": "uuid",
     "from": "2025-01-01T00:00:00.000Z",
     "to": "2025-12-31T23:59:59.999Z",
     "force": false
   }
   ```
-  `from` and `to` are optional ISO-8601 datetime strings that bound the `capturedAt` range of photos to enqueue (both bounds are inclusive). They may be provided independently or together. `from > to` returns `400 Bad Request`. When omitted, all eligible photos in the circle are in scope.
+  `from` and `to` are optional ISO-8601 datetime strings that bound the `capturedAt` range of photos to enqueue (both bounds are inclusive). They may be provided independently or together. `from > to` returns `400 Bad Request`. When omitted, all eligible photos across all circles are in scope.
 
   When `force` is `false` (default), only photos without an existing `burstGroupId` and without a `succeeded` `burst_detection` job are enqueued. When `force` is `true`, all non-deleted photos within the scope are enqueued (useful after changing `burst.timeGapSeconds` or `burst.hashDistance`, or to re-fingerprint photos that previously failed hashing).
 - **Response `201`:**
   ```json
-  { "data": { "enqueued": 312 } }
+  { "data": { "enqueued": 312, "circles": 4 } }
   ```
 - **Error cases:**
-  - `400` — `circle.burstDetectionEnabled` is `false`
+  - `400` — `features.burstDetection` is `false` in system settings
   - `400` — `from` is later than `to`
 
-### 7.4 Per-Circle Burst Settings
+### 7.4 Circle Dashboard
 
-#### `GET /api/circles/:id/burst-settings`
-
-Get the per-circle burst detection opt-in flag.
-
-- **Auth:** `circles:read` + per-circle `viewer` role
-- **Response `200`:**
-  ```json
-  { "burstDetectionEnabled": false }
-  ```
-
-#### `PUT /api/circles/:id/burst-settings`
-
-Enable or disable burst detection for a circle. Writes an audit event `circle:burst_settings_update`.
-
-- **Auth:** `circles:write` + per-circle `circle_admin` role (or `circles:manage_any` for admin bypass)
-- **Request body:**
-  ```json
-  { "enabled": true }
-  ```
-- **Response `200`:**
-  ```json
-  { "burstDetectionEnabled": true }
-  ```
-
-### 7.5 Circle Dashboard
-
-`GET /api/media/dashboard?circleId=` gains a `pendingBurstGroups` field in its response. This is the count of burst groups for the circle with `status = pending` and `mediaCount >= burst.minGroupSize`. The count feeds into the existing review-queue section of the dashboard UI.
+`GET /api/media/dashboard?circleId=` returns a `pendingBurstGroups` field. This is the count of burst groups for the circle with `status = pending` and `mediaCount >= burst.minGroupSize`. The count feeds into the existing review-queue section of the dashboard UI. The field is populated whenever `features.burstDetection` is enabled globally.
 
 ---
 
@@ -503,17 +474,17 @@ The reviewer selects which frames to keep (checkboxes, with the suggested best p
 
 The circle dashboard's existing review queue section gains a "Burst groups" entry alongside the existing review-queue counts (e.g., pending face labeling). The count is sourced from `pendingBurstGroups` in the dashboard API response.
 
-### 8.3 Per-Circle Settings Toggle and Scan Panel
+### 8.3 Global Feature Toggle and Scan Panel
 
-The circle settings page gains a "Burst detection" toggle card, consistent with the existing "Face recognition" and "Auto-tagging" toggle cards. Enabling the toggle calls `PUT /api/circles/:id/burst-settings { enabled: true }`.
+The Admin Settings page at `/admin/settings/bursts` provides a "Burst detection" toggle that writes `features.burstDetection` to system settings. The per-circle toggle cards that previously appeared on the circle detail page have been removed.
 
-Below the toggle, a "Scan for bursts" panel is always visible when burst detection is enabled. It exposes:
+A "Scan for bursts" panel is visible on the Admin Settings page when burst detection is globally enabled. It exposes:
 
-- An optional **capture date range** (from / to date pickers) so the `circle_admin` can scope the scan to a specific date window rather than re-processing the entire library.
+- An optional **capture date range** (from / to date pickers) to scope the scan to a specific time window rather than re-processing the entire library.
 - A **Force re-scan** checkbox that maps to the `force` request parameter.
-- A **Run scan** button that calls `POST /api/media/bursts/backfill` with the selected options and displays the `{ enqueued }` result.
+- A **Run scan** button that calls `POST /api/admin/bursts/backfill` with the selected options and displays the `{ enqueued, circles }` result.
 
-This UI makes retroactive fingerprinting of legacy libraries practical: a user can select the years before the feature was introduced, run the scan, and have their old photos grouped without touching more recent uploads.
+This UI makes retroactive fingerprinting of legacy libraries practical: an admin can select the years before the feature was introduced, run the scan, and have photos across all circles grouped without touching more recent uploads.
 
 ---
 
@@ -529,9 +500,9 @@ BurstUUID extraction reads from EXIF metadata already present in the uploaded fi
 
 The system stores suggestions and scores in the database. No deletion occurs without an authenticated, authorized API call to `POST /api/media/bursts/:id/resolve` with an explicit `keepIds` list. Soft-deletion is used (sets `deletedAt`); records remain recoverable by an admin until a hard-delete sweep is run separately.
 
-### Per-Circle Opt-In
+### Global Feature Toggle
 
-`burstDetectionEnabled` defaults to `false`. The `BurstEnqueueListener` checks the flag before enqueueing. Backfill also refuses to run when the flag is false. A circle never participates in burst detection unless a `circle_admin` explicitly enables it.
+`features.burstDetection` defaults to `false`. The `BurstEnqueueListener` checks this system setting before enqueueing. The global backfill also refuses to run when the setting is false. No circle participates in burst detection until an Admin enables the feature globally via `/admin/settings/bursts`.
 
 ### Authorization
 
@@ -539,7 +510,7 @@ All burst group endpoints enforce per-circle role checks. Viewers can read group
 
 ### Audit Trail
 
-`PUT /api/circles/:id/burst-settings` writes an `audit_events` row with action `circle:burst_settings_update`, `actorUserId`, and the new `enabled` value in `meta`. This matches the pattern used by face recognition and auto-tagging settings.
+Changes to the global `features.burstDetection` setting are tracked via the standard system-settings audit mechanism. The former per-circle `circle:burst_settings_update` event is no longer emitted (the per-circle settings endpoints have been removed).
 
 ---
 
@@ -561,17 +532,18 @@ All burst group endpoints enforce per-circle role checks. Viewers can read group
 - **Cross-device isolation:** upload two items with matching hash and capture time but different `cameraMake`; verify no group is created.
 - **Resolve endpoint:** verify soft-delete is applied to non-kept members, group status changes to `resolved`, non-deleted items remain accessible.
 - **Dismiss endpoint:** verify `burstGroupId` is cleared on all members, group status changes to `dismissed`.
-- **Opt-in check:** verify `BurstEnqueueListener` does not enqueue when `circle.burstDetectionEnabled = false`.
-- **`BURST_DETECTION_ENABLED=false`:** set the environment variable and verify the listener skips all circles.
-- **Backfill — basic:** call `POST /api/media/bursts/backfill` with `force: false`; verify already-grouped items are not re-enqueued; call again with `force: true`; verify all items are enqueued.
+- **Global feature check:** verify `BurstEnqueueListener` does not enqueue when `features.burstDetection` is `false` in system settings.
+- **`BURST_DETECTION_ENABLED=false`:** set the environment variable and verify the listener skips all photos regardless of system settings.
+- **Backfill — basic:** call `POST /api/admin/bursts/backfill` with `force: false`; verify already-grouped items are not re-enqueued; call again with `force: true`; verify all items are enqueued.
+- **Backfill — 400 when disabled:** verify `POST /api/admin/bursts/backfill` returns `400` when `features.burstDetection` is `false`.
 - **Backfill — date range:** seed two photos with distinct `capturedAt` dates; call backfill with `from`/`to` scoping to only one date; verify only that photo is enqueued. Verify `from > to` returns 400.
 - **Backfill — on-demand hashing:** seed a photo with `perceptualHash = null` (simulating a legacy upload); run the enrichment job for it; verify `perceptualHash` and `sharpnessScore` are written to the `media_items` row before grouping logic runs.
 
 ### RBAC Tests
 
-- Verify a viewer can call `GET /api/media/bursts` and `GET /api/media/bursts/:id` but receives `403` on resolve, dismiss, and backfill.
-- Verify a collaborator can call resolve, dismiss, and backfill.
-- Verify `PUT /api/circles/:id/burst-settings` returns `403` for a collaborator and `200` for a `circle_admin`.
+- Verify a viewer can call `GET /api/media/bursts` and `GET /api/media/bursts/:id` but receives `403` on resolve and dismiss.
+- Verify a collaborator can call resolve and dismiss.
+- Verify `POST /api/admin/bursts/backfill` returns `403` for a non-admin and `201` for an Admin with `system_settings:write`.
 - Verify a non-member receives `403` on all burst endpoints.
 
 ### Environment
@@ -602,3 +574,4 @@ The following extensions are left for future iterations. None of them require ch
 | 1.0 | June 2026 | AI Assistant | Initial specification |
 | 1.1 | June 2026 | AI Assistant | Document `from`/`to` date-range params on backfill endpoint; document on-demand retroactive perceptual hashing for legacy photos in the enrichment handler (§5.5 Step 1a) and backfill (§7.3); document "Scan for bursts" panel in circle Settings UI (§8.3); resolve deferred "Smart backfill on settings change" Future Work item |
 | 1.2 | June 2026 | AI Assistant | Change `perceptualHash` column type from `BigInt` to `String` (TEXT, unsigned decimal) to fix signed-overflow and JSON-serialization bugs; add storage rationale and lessons-learned note in §4.2 |
+| 1.3 | June 2026 | AI Assistant | Per-circle opt-in removed — burst detection is now a global system setting (`features.burstDetection`); per-circle backfill replaced by global admin endpoint (`POST /api/admin/bursts/backfill`); per-circle settings endpoints removed; Admin Settings UI updated |
