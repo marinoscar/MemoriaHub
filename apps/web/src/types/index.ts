@@ -37,6 +37,9 @@ export interface SystemSettings {
     insights?: {
       refreshIntervalHours?: number;
     };
+    trash?: {
+      retentionDays?: number;
+    };
   };
   updatedAt: string;
   updatedBy: { id: string; email: string } | null;
