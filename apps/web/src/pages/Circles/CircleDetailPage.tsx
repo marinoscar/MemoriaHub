@@ -49,6 +49,7 @@ import { getCircleTaggingSettings, updateCircleTaggingSettings } from '../../ser
 import type { CircleTaggingSettings } from '../../services/tagging';
 import { getCircleBurstSettings, updateCircleBurstSettings, runBurstBackfill } from '../../services/bursts';
 import type { CircleBurstSettings } from '../../services/bursts';
+import { runMetadataBackfill } from '../../services/metadata';
 import type { Circle, CircleRole } from '../../types/circles';
 
 interface TabPanelProps {
@@ -117,6 +118,13 @@ export default function CircleDetailPage() {
   const [burstScanForce, setBurstScanForce] = useState(false);
   const [burstScanning, setBurstScanning] = useState(false);
   const [burstScanError, setBurstScanError] = useState<string | null>(null);
+
+  // Metadata backfill state
+  const [metaScanFrom, setMetaScanFrom] = useState('');
+  const [metaScanTo, setMetaScanTo] = useState('');
+  const [metaScanForce, setMetaScanForce] = useState(false);
+  const [metaScanning, setMetaScanning] = useState(false);
+  const [metaScanError, setMetaScanError] = useState<string | null>(null);
 
   // Invite dialog
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -251,6 +259,24 @@ export default function CircleDetailPage() {
       setBurstScanError(err instanceof Error ? err.message : 'Failed to start burst scan');
     } finally {
       setBurstScanning(false);
+    }
+  };
+
+  const handleMetaScan = async () => {
+    if (!circleId) return;
+    setMetaScanError(null);
+    setMetaScanning(true);
+    try {
+      const opts: { from?: string; to?: string; force?: boolean } = {};
+      if (metaScanFrom) opts.from = metaScanFrom;
+      if (metaScanTo) opts.to = metaScanTo;
+      if (metaScanForce) opts.force = true;
+      const result = await runMetadataBackfill(circleId, opts);
+      setFaceSuccessMsg(`Queued ${result.enqueued} photo${result.enqueued !== 1 ? 's' : ''} for metadata extraction`);
+    } catch (err: unknown) {
+      setMetaScanError(err instanceof Error ? err.message : 'Failed to start metadata extraction');
+    } finally {
+      setMetaScanning(false);
     }
   };
 
@@ -703,6 +729,78 @@ export default function CircleDetailPage() {
                   )}
                 </Paper>
               </>
+            )}
+
+            {canBackfill && (
+              <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'medium' }}>
+                  Re-extract metadata
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Re-run metadata extraction (capture date, camera info, GPS coordinates) for
+                  existing photos. Leave date fields empty to process the entire circle.
+                </Typography>
+                <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2, mb: 2 }}>
+                  <TextField
+                    label="From (capture date)"
+                    type="date"
+                    value={metaScanFrom}
+                    onChange={(e) => setMetaScanFrom(e.target.value)}
+                    slotProps={{ inputLabel: { shrink: true } }}
+                    size="small"
+                    sx={{ flex: 1 }}
+                    disabled={metaScanning}
+                  />
+                  <TextField
+                    label="To (capture date)"
+                    type="date"
+                    value={metaScanTo}
+                    onChange={(e) => setMetaScanTo(e.target.value)}
+                    slotProps={{ inputLabel: { shrink: true } }}
+                    size="small"
+                    sx={{ flex: 1 }}
+                    disabled={metaScanning}
+                  />
+                </Box>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={metaScanForce}
+                      onChange={(e) => setMetaScanForce(e.target.checked)}
+                      disabled={metaScanning}
+                      size="small"
+                    />
+                  }
+                  label={
+                    <Typography variant="body2">
+                      Re-extract all (force) — reprocess photos that were already extracted
+                    </Typography>
+                  }
+                  sx={{ mb: 2 }}
+                />
+                {metaScanError && (
+                  <Alert severity="error" sx={{ mb: 2 }}>
+                    {metaScanError}
+                  </Alert>
+                )}
+                {metaScanFrom && metaScanTo && metaScanFrom > metaScanTo && (
+                  <Alert severity="warning" sx={{ mb: 2 }}>
+                    "From" date must be on or before "To" date.
+                  </Alert>
+                )}
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => void handleMetaScan()}
+                  disabled={
+                    metaScanning ||
+                    Boolean(metaScanFrom && metaScanTo && metaScanFrom > metaScanTo)
+                  }
+                  startIcon={metaScanning ? <CircularProgress size={14} /> : undefined}
+                >
+                  {metaScanning ? 'Extracting…' : 'Re-extract metadata'}
+                </Button>
+              </Paper>
             )}
           </Box>
         </TabPanel>
