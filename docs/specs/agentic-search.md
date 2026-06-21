@@ -81,9 +81,9 @@ Agentic search is **stateless on the server**. No conversation rows, message row
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │  SEARCHABLE FIELD REGISTRY  (single source of truth)               │   │
 │  │  searchable-fields.registry.ts                                      │   │
-│  │  • 16 fields: type, classification, favorite, capturedAt, albumId,  │   │
-│  │    tag, country, region, locality, place, location, cameraMake,     │   │
-│  │    cameraModel, sourceDeviceId, sourceDeviceName, missingGeo        │   │
+│  │  • 17 fields: type, favorite, capturedAt, albumId, tag, country,    │   │
+│  │    region, locality, place, location, cameraMake, cameraModel,      │   │
+│  │    sourceDeviceId, sourceDeviceName, missingGeo, noFaces, people    │   │
 │  │  • Each field carries: key, label, type, description, buildWhere()  │   │
 │  └───────────────────────────────┬─────────────────────────────────────┘   │
 │                                   │                                         │
@@ -166,12 +166,11 @@ export interface SearchableField {
 
 The `buildWhere` function delegates to a named leaf helper in `media-where.builder.ts`, so the Prisma where-clause logic is never duplicated.
 
-### Current Registry (16 fields)
+### Current Registry (17 fields)
 
 | Key | Type | Description |
 |-----|------|-------------|
 | `type` | enum | `photo` or `video` |
-| `classification` | enum | `memory`, `low_value`, or `unreviewed` |
 | `favorite` | boolean | Only favorited items |
 | `capturedAt` | date-range | `{ from?, to? }` ISO 8601 |
 | `albumId` | string | Album UUID |
@@ -186,6 +185,8 @@ The `buildWhere` function delegates to a named leaf helper in `media-where.build
 | `sourceDeviceId` | string | Exact source device identifier |
 | `sourceDeviceName` | string | Source device name (partial) |
 | `missingGeo` | boolean | Items without GPS coordinates |
+| `noFaces` | boolean | Items with no detected or manually-added faces |
+| `people` | person-set | `{ ids: UUID[], mode: 'any' \| 'all' }` — filter by people appearing in photos |
 
 ### How the Registry Powers Both Search Modes
 

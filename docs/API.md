@@ -1336,7 +1336,6 @@ Register an uploaded `StorageObject` as a `MediaItem`.
 | `contentHash` | string (64 lowercase hex chars) | No | SHA-256 hex digest of the file bytes. When supplied the server deduplicates by `(circleId, contentHash)`. |
 | `capturedAt` | ISO 8601 datetime | No | When the photo/video was taken |
 | `capturedAtOffset` | integer (minutes) | No | UTC offset of `capturedAt` |
-| `classification` | `"memory"` \| `"low_value"` \| `"unreviewed"` | No | Defaults to `"unreviewed"` |
 | `title` | string (max 512) | No | |
 | `caption` | string (max 2048) | No | |
 | `description` | string (max 8192) | No | |
@@ -1371,7 +1370,6 @@ Register an uploaded `StorageObject` as a `MediaItem`.
   "source": "web",
   "originalFilename": "IMG_4521.jpg",
   "contentHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "classification": "unreviewed",
   "favorite": false,
   "importedAt": "2026-06-12T10:00:00.000Z",
   "deduplicated": false
@@ -1408,7 +1406,6 @@ List active (non-deleted) media items for a circle. Admins holding `media:read_a
 | `type` | `"photo"` \| `"video"` | — | Filter by media type |
 | `capturedAtFrom` | ISO 8601 datetime | — | Lower bound on `capturedAt` |
 | `capturedAtTo` | ISO 8601 datetime | — | Upper bound on `capturedAt` |
-| `classification` | enum | — | `memory`, `low_value`, or `unreviewed` |
 | `albumId` | UUID | — | Return items in this album |
 | `favorite` | boolean | — | Filter by favorite flag |
 | `tag` | string | — | Exact tag name match (case-insensitive) |
@@ -1448,7 +1445,6 @@ If `items.length > 0` the file already exists in that circle and the upload can 
       "type": "photo",
       "originalFilename": "IMG_4521.jpg",
       "contentHash": "e3b0c44298fc1c149afbf4c8996fb924...",
-      "classification": "unreviewed",
       "capturedAt": "2024-07-15T14:30:00.000Z",
       "importedAt": "2026-06-12T10:00:00.000Z",
       "thumbnailUrl": "https://...",
@@ -1484,7 +1480,6 @@ Get a single `MediaItem` by ID. Returns fresh signed URLs for the thumbnail and 
   "contentHash": "e3b0c44298fc1c149afbf4c8996fb924...",
   "capturedAt": "2024-07-15T14:30:00.000Z",
   "importedAt": "2026-06-12T10:00:00.000Z",
-  "classification": "memory",
   "favorite": false,
   "tags": ["vacation", "summer"],
   "thumbnailUrl": "https://s3.amazonaws.com/...",
@@ -1506,7 +1501,7 @@ Get a single `MediaItem` by ID. Returns fresh signed URLs for the thumbnail and 
 
 Update mutable fields on a `MediaItem`. Only supplied fields are updated.
 
-**Mutable fields:** `capturedAt`, `capturedAtOffset`, `classification`, `metadata`, `title`, `caption`, `description`, `favorite`.
+**Mutable fields:** `capturedAt`, `capturedAtOffset`, `metadata`, `title`, `caption`, `description`, `favorite`.
 
 **Error Cases:**
 - 404 Not Found
@@ -1638,8 +1633,6 @@ Returns aggregated dashboard data for a circle: On This Day (same month/day acro
 | `recent` | Up to 12 items ordered by `importedAt DESC` |
 | `favorites` | Up to 12 favorited items ordered by `capturedAt DESC` |
 | `counts.total` | Non-deleted items in the circle |
-| `counts.unreviewed` | Items with `classification = 'unreviewed'` |
-| `counts.lowValue` | Items with `classification = 'low_value'` |
 | `counts.missingGeo` | Items with `takenLat IS NULL` |
 | `pendingBurstGroups` | Count of burst groups with `status = 'pending'` and `mediaCount >= burst.minGroupSize`; present only when burst detection is enabled for the circle (0 otherwise) |
 
@@ -1731,7 +1724,7 @@ Same response shape as `/explore/places`. `coverThumbnailUrl` is null when no ta
 
 **Requires:** `media:write` permission + `collaborator` role in the target circle
 
-Bulk update location, classification, or favorite flag on up to 500 media items in a single operation. All IDs must belong to the specified circle and must not be soft-deleted; any mismatch returns 404 without updating any items.
+Bulk update location or favorite flag on up to 500 media items in a single operation. All IDs must belong to the specified circle and must not be soft-deleted; any mismatch returns 404 without updating any items.
 
 When `set.location` contains coordinates, the server immediately performs an on-demand reverse geocode using the configured provider and overwrites all geo columns (`geoCountry`, `geoAdmin1`, `geoLocality`, etc.) with `geoSource = 'manual'`. When `set.location` is explicitly `null`, all geo columns and coordinates are cleared.
 
@@ -1746,7 +1739,6 @@ When `set.location` contains coordinates, the server immediately performs an on-
 | `set.location.lat` | number | Conditional | -90 to 90 |
 | `set.location.lng` | number | Conditional | -180 to 180 |
 | `set.location.altitude` | number | No | Altitude in metres |
-| `set.classification` | `"memory"` \| `"low_value"` \| `"unreviewed"` | No | New classification |
 | `set.favorite` | boolean | No | New favorite flag |
 
 **Example request:**
@@ -1756,8 +1748,7 @@ When `set.location` contains coordinates, the server immediately performs an on-
   "circleId": "a1b2c3d4-...",
   "ids": ["uuid-1", "uuid-2", "uuid-3"],
   "set": {
-    "location": { "lat": 9.9281, "lng": -84.0907 },
-    "classification": "memory"
+    "location": { "lat": 9.9281, "lng": -84.0907 }
   }
 }
 ```
@@ -2163,7 +2154,6 @@ This endpoint is useful for bulk-populating an album from a date range, tag, loc
 | `type` | `"photo"` \| `"video"` | No | Filter by media type |
 | `capturedAtFrom` | ISO 8601 datetime | No | Lower bound on `capturedAt` |
 | `capturedAtTo` | ISO 8601 datetime | No | Upper bound on `capturedAt` |
-| `classification` | `"memory"` \| `"low_value"` \| `"unreviewed"` | No | Filter by classification |
 | `favorite` | boolean | No | Filter by favorite flag |
 | `tag` | string | No | Exact tag name match (case-insensitive) |
 | `country` | string | No | Matches `geoCountry` (contains) or `geoCountryCode` (exact) |
@@ -3943,8 +3933,7 @@ Execute a deterministic media search using explicit filter criteria. Filter sema
   "filters": {
     "type": "photo",
     "capturedAt": { "from": "2024-06-01T00:00:00Z", "to": "2024-08-31T23:59:59Z" },
-    "country": "Costa Rica",
-    "classification": "memory"
+    "country": "Costa Rica"
   },
   "page": 1,
   "pageSize": 20,

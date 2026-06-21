@@ -49,8 +49,8 @@ From the vision: _"The web app should be clean, simple, and focused on control r
 **Frontend additions:**
 - `apps/web/src/services/media.ts` — API client with typed methods for the Phase 01/02 media endpoints and the resumable upload flow (init → upload parts → complete)
 - `apps/web/src/hooks/useMedia.ts` — pagination hook; `apps/web/src/hooks/useAlbums.ts`
-- `MediaLibraryPage` (`apps/web/src/pages/MediaLibrary/`) — responsive MUI `ImageList` grid; timeline grouping by `capturedAt` year/month; filter controls (type, date range, classification, album, favorite toggle, tag chips, location); infinite scroll or page controls
-- `MediaDetailDrawer` (`apps/web/src/components/media/`) — slide-in drawer showing full-resolution download link, all typed metadata fields from `MediaItem` (including `geoCountry`, `geoAdmin1`, `geoLocality`, `geoPlaceName` if present), the ability to edit `capturedAt`, `classification`, `title`, `caption`, `description`, and a favorite star toggle
+- `MediaLibraryPage` (`apps/web/src/pages/MediaLibrary/`) — responsive MUI `ImageList` grid; timeline grouping by `capturedAt` year/month; filter controls (type, date range, album, favorite toggle, tag chips, location); infinite scroll or page controls
+- `MediaDetailDrawer` (`apps/web/src/components/media/`) — slide-in drawer showing full-resolution download link, all typed metadata fields from `MediaItem` (including `geoCountry`, `geoAdmin1`, `geoLocality`, `geoPlaceName` if present), the ability to edit `capturedAt`, `title`, `caption`, `description`, and a favorite star toggle
 - **Location filter / facet** — a sidebar or collapsible filter panel in `MediaLibraryPage` that lets users drill down by country → region (state/province) → city, populated from the `geoCountry`, `geoAdmin1`, and `geoLocality` values present in the caller's media. A free-text **place search box** passes the typed value to the `?location=` query param, enabling searches like "California", "Costa Rica", or "Yosemite". Selecting a facet value applies the corresponding `country`, `region`, or `locality` filter param. An optional map view is explicitly deferred; no map dependency is introduced in this phase.
 - **Favorite toggle** — a star icon overlay on each grid thumbnail and in the drawer; clicking toggles `MediaItem.favorite` via `PATCH /api/media/:id`; a "Favorites only" filter chip in the toolbar passes `?favorite=true`.
 - **Tag filter chips** — a horizontal chip row below the filter toolbar showing the caller's tags (from `GET /api/media/tags`); clicking a chip appends `?tag=<name>` to the list query; multiple chips may be active simultaneously.
@@ -94,7 +94,7 @@ No new API endpoints beyond Phase 01 and Phase 02. The thumbnail signed URL is r
 | 3 | Create `apps/web/src/services/media.ts` with typed functions: `listMedia(params)`, `getMedia(id)`, `patchMedia(id, dto)`, `deleteMedia(id)`, `initUpload(dto)`, `uploadPart(uploadId, partNumber, chunk)`, `completeUpload(id, parts)`, `createAlbum(dto)`, `listAlbums()`, `getAlbum(id)` | `frontend-dev` |
 | 4 | Create `apps/web/src/hooks/useMedia.ts` (paginated list with filter state) and `useAlbums.ts`; mirror the `useAllowlist` hook pattern | `frontend-dev` |
 | 5 | Implement `MediaUploadDialog`: multi-file `<input>`, per-file progress state, calls `initUpload` → chunk loop → `completeUpload` → `POST /api/media`; handle retry for failed parts | `frontend-dev` |
-| 6 | Implement `MediaDetailDrawer`: MUI `Drawer` with image preview (via `thumbnailUrl` or full download URL), all `MediaItem` fields including geo location display, inline edit for `capturedAt`, `classification`, `title`, `caption`, `description`, and favorite star toggle (all call `PATCH /api/media/:id`) | `frontend-dev` |
+| 6 | Implement `MediaDetailDrawer`: MUI `Drawer` with image preview (via `thumbnailUrl` or full download URL), all `MediaItem` fields including geo location display, inline edit for `capturedAt`, `title`, `caption`, `description`, and favorite star toggle (all call `PATCH /api/media/:id`) | `frontend-dev` |
 | 7 | Implement `MediaLibraryPage`: MUI `ImageList` (Masonry variant on desktop, single-column on mobile), group items by `capturedAt` month/year, filter sidebar with location facet (country → region → city drill-down and free-text place search box), favorite toggle on thumbnails, tag filter chip row, open `MediaDetailDrawer` on click, upload FAB that opens `MediaUploadDialog` | `frontend-dev` |
 | 8 | Add `/media` route to React Router and sidebar navigation link (visible to all authenticated users) | `frontend-dev` |
 | 9 | Add Export button to library toolbar; button calls `GET /api/media/export?format=json` (Phase 04 endpoint) — render as disabled with tooltip "Export available in next release" until Phase 04 is deployed | `frontend-dev` |
@@ -109,8 +109,8 @@ No new API endpoints beyond Phase 01 and Phase 02. The thumbnail signed URL is r
 - Uploading a JPEG via `MediaUploadDialog` creates a `MediaItem` and the thumbnail appears in the grid within the next page load (thumbnail signed URL populated by `ThumbnailProcessor`).
 - `MediaLibraryPage` renders a responsive grid: 4-column on desktop (≥1200 px), 2-column on tablet, 1-column on mobile.
 - Items are grouped by `capturedAt` year/month header; items with no `capturedAt` are grouped under "Unknown Date".
-- `MediaDetailDrawer` shows all typed metadata fields from `MediaItem` (type, capturedAt, dimensions, duration, GPS, camera, source, classification, title, caption, description, and location geo fields when present).
-- Inline edit of `capturedAt`, `classification`, `title`, `caption`, `description`, and favorite toggle in the drawer call `PATCH /api/media/:id` and reflect the update without a full page reload.
+- `MediaDetailDrawer` shows all typed metadata fields from `MediaItem` (type, capturedAt, dimensions, duration, GPS, camera, source, title, caption, description, and location geo fields when present).
+- Inline edit of `capturedAt`, `title`, `caption`, `description`, and favorite toggle in the drawer call `PATCH /api/media/:id` and reflect the update without a full page reload.
 - The location filter facet drills down correctly: selecting a country limits the region list to regions within that country; selecting a region limits the city list accordingly; the free-text place search box sends `?location=<query>` to the API.
 - The favorite toggle on a thumbnail and in the drawer updates `MediaItem.favorite` immediately; the "Favorites only" chip correctly filters the grid to `?favorite=true`.
 - Tag filter chips appear for all of the caller's tags; selecting one or more filters the grid; deselecting restores all results.
@@ -127,6 +127,5 @@ No new API endpoints beyond Phase 01 and Phase 02. The thumbnail signed URL is r
 - Video thumbnail extraction (requires `ffmpeg` frame extraction; deferred to Phase 09)
 - In-browser video playback UI (deferred)
 - Album management UI (creating and editing albums via the web — deferred to a follow-up in Phase 03 or Phase 07)
-- Classification review UI (Phase 07)
 - Search by person, object, or scene (Phase 09)
 - Social sharing or public album links (explicitly out of scope per VISION.MD)

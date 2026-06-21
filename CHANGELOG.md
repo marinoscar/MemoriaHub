@@ -5,14 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- **Media classification feature** — The `MediaClassification` enum (`memory | low_value | unreviewed`) and the `classification` column on `media_items` (including its database index) have been removed entirely. This field was originally introduced in Phase 01 and partially surfaced in bulk editing (`PATCH /api/media/bulk`) and a review-queue UI, but the full automatic heuristic processors and dedicated review mode were never completed. Stored classification values were intentionally dropped as part of the schema migration. Removed surface area:
+  - `MediaClassification` Prisma enum and `media_items.classification` column + index (migration)
+  - `classification` filter on `GET /api/media` and `POST /api/search`
+  - `classification` field in the searchable-field registry (`GET /api/search/fields`)
+  - `set.classification` from the `PATCH /api/media/bulk` request body
+  - `classification` from `POST /api/media` create body and `PATCH /api/media/:id` mutable fields
+  - `counts.unreviewed` and `counts.lowValue` from `GET /api/media/dashboard` response
+  - All classification UI: filter controls, `ClassificationBadge` component, classification selects in `MediaDetailDrawer` and `BulkActionToolbar`, and review-queue card filtering
+
 ## [1.3.0] - 2026-06-15
 
 ### Added
 
-- **Circle Dashboard** (`GET /api/media/dashboard`): New home page (`/`) shows a per-circle dashboard. Returns On This Day (up to 24 items where `MONTH(capturedAt) = today` and `DAY(capturedAt) = today` across all years), recent imports (12), favorites (12), and review-queue counts (`total`, `unreviewed`, `lowValue`, `missingGeo`). Includes deep-links to `/media?missingGeo=1` and other review filters.
+- **Circle Dashboard** (`GET /api/media/dashboard`): New home page (`/`) shows a per-circle dashboard. Returns On This Day (up to 24 items where `MONTH(capturedAt) = today` and `DAY(capturedAt) = today` across all years), recent imports (12), favorites (12), and review-queue counts (`total`, `missingGeo`). Includes deep-links to `/media?missingGeo=1` and other review filters.
 
 - **Bulk media editing** — three new circle-scoped endpoints requiring `collaborator` per-circle role:
-  - `PATCH /api/media/bulk` (`media:write`) — update `location` (with on-demand reverse geocode, `geoSource='manual'`), `classification`, and/or `favorite` on 1–500 items. Setting `location: null` clears all geo columns
+  - `PATCH /api/media/bulk` (`media:write`) — update `location` (with on-demand reverse geocode, `geoSource='manual'`) and/or `favorite` on 1–500 items. Setting `location: null` clears all geo columns
   - `POST /api/media/bulk/tags` (`media:write`) — add and/or remove tags on 1–500 items atomically inside a single transaction
   - `POST /api/media/bulk/delete` (`media:delete`) — soft-delete 1–500 items. All bulk endpoints validate that every ID belongs to the stated circle before any write; mismatches return 404 without partial side-effects
 

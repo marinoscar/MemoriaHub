@@ -554,7 +554,7 @@ The `MediaService` provides three bulk-operation methods invoked by the static r
 
 | Route | Permission | Min per-circle role | Operation |
 |-------|------------|---------------------|-----------|
-| `PATCH /api/media/bulk` | `media:write` | `collaborator` | Update location, classification, or favorite on 1–500 items |
+| `PATCH /api/media/bulk` | `media:write` | `collaborator` | Update location or favorite on 1–500 items |
 | `POST /api/media/bulk/tags` | `media:write` | `collaborator` | Add/remove tags on 1–500 items (transactional) |
 | `POST /api/media/bulk/delete` | `media:delete` | `collaborator` | Soft-delete 1–500 items |
 
@@ -602,8 +602,6 @@ Returns `{ added: number, removed: number }` counts.
 | Recent items | `findMany where circleId`, ordered `importedAt DESC`, limit 12 |
 | Favorites | `findMany where circleId AND favorite = true`, ordered `capturedAt DESC`, limit 12 |
 | Total count | `count where circleId AND deletedAt IS NULL` |
-| Unreviewed count | `count where classification = 'unreviewed'` |
-| Low-value count | `count where classification = 'low_value'` |
 | Missing-geo count | `count where takenLat IS NULL` |
 
 Thumbnail URLs are signed in parallel via `signThumb` after the DB queries complete.
@@ -1286,7 +1284,7 @@ Before OAuth authentication completes:
 
 | Method | Path | Permission | Per-circle Role | Purpose |
 |--------|------|------------|-----------------|---------|
-| `PATCH` | `/api/media/bulk` | `media:write` | collaborator | Bulk update location / classification / favorite |
+| `PATCH` | `/api/media/bulk` | `media:write` | collaborator | Bulk update location / favorite |
 | `POST` | `/api/media/bulk/tags` | `media:write` | collaborator | Bulk add/remove tags |
 | `POST` | `/api/media/bulk/delete` | `media:delete` | collaborator | Bulk soft-delete |
 
@@ -1368,7 +1366,7 @@ Before OAuth authentication completes:
 | Auth Callback | `/auth/callback` | Public | - | Token handling |
 | Home | `/` | Required | Any | Circle dashboard — On This Day, recent, favorites, review queue |
 | User Settings | `/settings` | Required | Any | User preferences |
-| Media Library | `/media` | Required | Any | Browse and upload media; multi-select with bulk geo/tag/classification/delete toolbar |
+| Media Library | `/media` | Required | Any | Browse and upload media; multi-select with bulk geo/tag/delete toolbar |
 | Map | `/map` | Required | Any | Clustered map of geotagged media (active circle) |
 | Circle List | `/circles` | Required | Any | List and create circles |
 | Circle Detail | `/circles/:id` | Required | Any | Members, invites, and content for one circle |

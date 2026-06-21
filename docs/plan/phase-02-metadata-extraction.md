@@ -125,7 +125,7 @@ The metadata JSONB shape written by each processor:
 
 No new endpoints are introduced in this phase. Processor results are visible through the existing `GET /api/media/:id` endpoint (Phase 01) — the typed columns on `MediaItem` are populated asynchronously after upload completes.
 
-**Note:** Clients should poll `GET /api/media/:id` and check that `classification !== 'unreviewed'` or that `capturedAt` is populated to know that enrichment has finished. A future phase may add a WebSocket or SSE status push.
+**Note:** Clients should poll `GET /api/media/:id` and check that `capturedAt` is populated to know that enrichment has finished. A future phase may add a WebSocket or SSE status push.
 
 ---
 

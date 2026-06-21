@@ -5,11 +5,13 @@
 **Next Phase:** [Phase 02 — Metadata Extraction](phase-02-metadata-extraction.md)
 **Status:** Done
 
+> **Historical note:** The `MediaClassification` enum (`memory | low_value | unreviewed`) and the `classification` column on `media_items` that were shipped as part of this phase have since been removed. The schema column, its index, the API filter/field, and all UI were dropped in a later cleanup. This document reflects the original design.
+
 ---
 
 ## 1. Goal
 
-Introduce the `media` domain as a first-class module that wraps the existing `StorageObject` upload flow. Every uploaded photo or video becomes a `MediaItem` record with typed columns for ownership, type, source, classification, and core media attributes. This phase establishes the data model, API surface, and RBAC permissions that all subsequent phases depend on — without touching the existing storage, auth, or processing infrastructure.
+Introduce the `media` domain as a first-class module that wraps the existing `StorageObject` upload flow. Every uploaded photo or video becomes a `MediaItem` record with typed columns for ownership, type, source, and core media attributes. This phase establishes the data model, API surface, and RBAC permissions that all subsequent phases depend on — without touching the existing storage, auth, or processing infrastructure.
 
 ---
 

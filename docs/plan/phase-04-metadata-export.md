@@ -100,7 +100,6 @@ Transfer-Encoding: chunked
   "capturedAt": "2024-06-15T10:30:00Z",
   "importedAt": "2026-06-10T08:00:00Z",
   "source": "web",
-  "classification": "memory",
   "width": 4032,
   "height": 3024,
   "durationMs": null,
