@@ -76,7 +76,6 @@ function makeMediaItem(overrides: Partial<any> = {}) {
     cameraMake: null,
     cameraModel: null,
     contentHash: null,
-    caption: null,
     description: null,
     favorite: false,
     deletedAt: null,
@@ -801,7 +800,7 @@ describe('MediaService', () => {
       mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
-        service.updateMedia(item.id, { caption: 'hack' }, 'user-1', ownPerms),
+        service.updateMedia(item.id, { description: 'hack' }, 'user-1', ownPerms),
       ).rejects.toThrow(ForbiddenException);
 
       expect(mockPrisma.mediaItem.update).not.toHaveBeenCalled();
@@ -809,19 +808,19 @@ describe('MediaService', () => {
 
     it('should allow Admin with media:write_any to update another user\'s item', async () => {
       const item = makeMediaItem({ addedById: 'other-user' });
-      const updated = { ...item, caption: 'Admin Updated' };
+      const updated = { ...item, description: 'Admin Updated' };
 
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
       mockPrisma.mediaItem.update.mockResolvedValue(updated as any);
 
       const result = await service.updateMedia(
         item.id,
-        { caption: 'Admin Updated' },
+        { description: 'Admin Updated' },
         'user-1',
         anyPerms,
       );
 
-      expect(result.caption).toBe('Admin Updated');
+      expect(result.description).toBe('Admin Updated');
     });
 
     it('should throw NotFoundException when item does not exist', async () => {
