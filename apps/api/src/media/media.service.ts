@@ -1309,7 +1309,7 @@ export class MediaService {
     const burstConfig = burstValue['burst'] as { minGroupSize?: number } | undefined;
     const burstMinGroupSize = burstConfig?.minGroupSize ?? 3;
 
-    const [onThisDayItems, recentItems, favoriteItems, totalCount, unreviewedCount, lowValueCount, missingGeoCount, pendingBurstGroupsCount] =
+    const [onThisDayItems, recentItems, favoriteItems, totalCount, missingGeoCount, pendingBurstGroupsCount] =
       await Promise.all([
         onThisDayIds.length > 0
           ? this.prisma.mediaItem.findMany({
@@ -1328,12 +1328,6 @@ export class MediaService {
           take: 12,
         }),
         this.prisma.mediaItem.count({ where: { circleId, deletedAt: null } }),
-        this.prisma.mediaItem.count({
-          where: { circleId, deletedAt: null, classification: 'unreviewed' },
-        }),
-        this.prisma.mediaItem.count({
-          where: { circleId, deletedAt: null, classification: 'low_value' },
-        }),
         this.prisma.mediaItem.count({
           where: { circleId, deletedAt: null, takenLat: null },
         }),
@@ -1373,8 +1367,6 @@ export class MediaService {
       favorites,
       counts: {
         total: totalCount,
-        unreviewed: unreviewedCount,
-        lowValue: lowValueCount,
         missingGeo: missingGeoCount,
       },
       pendingBurstGroups: pendingBurstGroupsCount,
