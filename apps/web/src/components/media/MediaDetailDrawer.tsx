@@ -6,10 +6,6 @@ import {
   IconButton,
   Divider,
   TextField,
-  Select,
-  MenuItem,
-  FormControl,
-  InputLabel,
   Button,
   Alert,
   CircularProgress,
@@ -34,7 +30,7 @@ import {
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
-import type { MediaItem, MediaClassification, PatchMediaDto } from '../../types/media';
+import type { MediaItem, PatchMediaDto } from '../../types/media';
 import { patchMedia as patchMediaApi, getMedia, bulkUpdateMedia, bulkTags } from '../../services/media';
 import { VideoPlayer } from './VideoPlayer';
 import { LocationMiniMap } from './LocationMiniMap';
@@ -166,7 +162,6 @@ export function MediaDetailDrawer({
   // Editable field state
   const [editing, setEditing] = useState(false);
   const [editCapturedAt, setEditCapturedAt] = useState('');
-  const [editClassification, setEditClassification] = useState<MediaClassification>('unreviewed');
   const [editCaption, setEditCaption] = useState('');
   const [editDescription, setEditDescription] = useState('');
 
@@ -232,7 +227,6 @@ export function MediaDetailDrawer({
   const handleStartEdit = useCallback(() => {
     if (!item) return;
     setEditCapturedAt(item.capturedAt ? item.capturedAt.slice(0, 16) : '');
-    setEditClassification(item.classification);
     setEditCaption(item.caption ?? '');
     setEditDescription(item.description ?? '');
     setSaveError(null);
@@ -251,7 +245,6 @@ export function MediaDetailDrawer({
     try {
       const dto: PatchMediaDto = {
         capturedAt: editCapturedAt ? new Date(editCapturedAt).toISOString() : null,
-        classification: editClassification,
         caption: editCaption || null,
         description: editDescription || null,
       };
@@ -271,7 +264,6 @@ export function MediaDetailDrawer({
     item,
     fullItem,
     editCapturedAt,
-    editClassification,
     editCaption,
     editDescription,
     onItemUpdated,
@@ -560,21 +552,6 @@ export function MediaDetailDrawer({
               fullWidth
               slotProps={{ inputLabel: { shrink: true } }}
             />
-            <FormControl size="small" fullWidth>
-              <InputLabel id="classification-label">Classification</InputLabel>
-              <Select
-                labelId="classification-label"
-                label="Classification"
-                value={editClassification}
-                onChange={(e) =>
-                  setEditClassification(e.target.value as MediaClassification)
-                }
-              >
-                <MenuItem value="memory">Memory</MenuItem>
-                <MenuItem value="low_value">Low Value</MenuItem>
-                <MenuItem value="unreviewed">Unreviewed</MenuItem>
-              </Select>
-            </FormControl>
           </Stack>
         ) : (
           <>
@@ -593,24 +570,6 @@ export function MediaDetailDrawer({
         )}
 
         <Divider sx={{ my: 1.5 }} />
-
-        {/* Classification chip (read-only mode) */}
-        {!editing && (
-          <Box sx={{ mb: 1 }}>
-            <Chip
-              label={item.classification}
-              size="small"
-              color={
-                item.classification === 'memory'
-                  ? 'primary'
-                  : item.classification === 'low_value'
-                    ? 'default'
-                    : 'warning'
-              }
-              variant="outlined"
-            />
-          </Box>
-        )}
 
         {/* Metadata */}
         <Typography
