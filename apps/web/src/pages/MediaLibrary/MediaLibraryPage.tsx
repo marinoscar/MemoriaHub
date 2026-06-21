@@ -63,7 +63,7 @@ import { BulkActionToolbar } from '../../components/media/BulkActionToolbar';
 import { BulkLocationDialog } from '../../components/media/BulkLocationDialog';
 import { BulkTagsDialog } from '../../components/media/BulkTagsDialog';
 import { AddToAlbumDialog } from '../../components/album/AddToAlbumDialog';
-import type { MediaItem, MediaQueryParams, TagItem, MediaType, MediaClassification } from '../../types/media';
+import type { MediaItem, MediaQueryParams, TagItem, MediaType } from '../../types/media';
 import { PersonMultiSelect } from '../../components/search/PersonMultiSelect';
 
 // ---------------------------------------------------------------------------
@@ -391,7 +391,6 @@ export default function MediaLibraryPage() {
   // Filter state
   const [showFilters, setShowFilters] = useState(false);
   const [filterType, setFilterType] = useState<MediaType | ''>((searchParams.get('type') as MediaType) || '');
-  const [filterClassification, setFilterClassification] = useState<MediaClassification | ''>((searchParams.get('classification') as MediaClassification) || '');
   const [filterFavorite, setFilterFavorite] = useState(searchParams.get('favorite') === '1');
   const [filterAlbum, setFilterAlbum] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
@@ -440,7 +439,6 @@ export default function MediaLibraryPage() {
   const activeFilterCount = useMemo(() => {
     let count = 0;
     if (filterType) count++;
-    if (filterClassification) count++;
     if (filterFavorite) count++;
     if (filterAlbum) count++;
     if (filterDateFrom) count++;
@@ -459,7 +457,6 @@ export default function MediaLibraryPage() {
     return count;
   }, [
     filterType,
-    filterClassification,
     filterFavorite,
     filterAlbum,
     filterDateFrom,
@@ -486,7 +483,6 @@ export default function MediaLibraryPage() {
     };
     if (activeCircle) params.circleId = activeCircle.id;
     if (filterType) params.type = filterType;
-    if (filterClassification) params.classification = filterClassification;
     if (filterFavorite) params.favorite = true;
     if (filterAlbum) params.albumId = filterAlbum;
     if (filterDateFrom) params.capturedAtFrom = new Date(filterDateFrom).toISOString();
@@ -514,7 +510,6 @@ export default function MediaLibraryPage() {
     sortOrder,
     activeCircle,
     filterType,
-    filterClassification,
     filterFavorite,
     filterAlbum,
     filterDateFrom,
@@ -542,7 +537,6 @@ export default function MediaLibraryPage() {
     activeCircle,
     page,
     filterType,
-    filterClassification,
     filterFavorite,
     filterAlbum,
     filterDateFrom,
@@ -566,7 +560,6 @@ export default function MediaLibraryPage() {
   // Reflect filter changes to URL params
   useEffect(() => {
     const params = new URLSearchParams();
-    if (filterClassification) params.set('classification', filterClassification);
     if (filterMissingGeo) params.set('missingGeo', '1');
     if (filterNoFaces) params.set('noFaces', '1');
     if (filterCameraMake) params.set('cameraMake', filterCameraMake);
@@ -575,7 +568,7 @@ export default function MediaLibraryPage() {
     if (filterType) params.set('type', filterType);
     if (filterFavorite) params.set('favorite', '1');
     setSearchParams(params, { replace: true });
-  }, [filterClassification, filterMissingGeo, filterNoFaces, filterCameraMake, filterCameraModel, filterDeviceName, filterType, filterFavorite, setSearchParams]);
+  }, [filterMissingGeo, filterNoFaces, filterCameraMake, filterCameraModel, filterDeviceName, filterType, filterFavorite, setSearchParams]);
 
   useEffect(() => {
     if (!activeCircle) return;
@@ -845,26 +838,6 @@ export default function MediaLibraryPage() {
                   <MenuItem value="">All types</MenuItem>
                   <MenuItem value="photo">Photos</MenuItem>
                   <MenuItem value="video">Videos</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-
-            {/* Classification filter */}
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <FormControl size="small" fullWidth>
-                <InputLabel>Classification</InputLabel>
-                <Select
-                  label="Classification"
-                  value={filterClassification}
-                  onChange={(e) => {
-                    setFilterClassification(e.target.value as MediaClassification | '');
-                    setPage(1);
-                  }}
-                >
-                  <MenuItem value="">All</MenuItem>
-                  <MenuItem value="memory">Memory</MenuItem>
-                  <MenuItem value="low_value">Low Value</MenuItem>
-                  <MenuItem value="unreviewed">Unreviewed</MenuItem>
                 </Select>
               </FormControl>
             </Grid>
