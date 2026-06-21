@@ -324,6 +324,7 @@ export class MediaService {
         sourceDeviceName,
         missingGeo,
         noFaces,
+        excludeArchived: true,
       }),
       ...(effectivePersonIds.length > 0 ? wherePeople(effectivePersonIds, effectiveMode) : {}),
     };
@@ -396,8 +397,9 @@ export class MediaService {
       // Must have coordinates
       takenLat: { not: null },
       takenLng: { not: null },
-      // Exclude soft-deleted items
+      // Exclude soft-deleted and archived items
       deletedAt: null,
+      archivedAt: null,
       // Optional type filter
       ...(type && { type }),
       // Date range
@@ -773,6 +775,7 @@ export class MediaService {
       where: { id },
       include: {
         items: {
+          where: { mediaItem: { deletedAt: null, archivedAt: null } },
           include: { mediaItem: true },
           orderBy: { addedAt: 'asc' },
         },
@@ -942,6 +945,7 @@ export class MediaService {
         sourceDeviceName,
         missingGeo,
         noFaces,
+        excludeArchived: true,
       }),
       ...(() => {
         const effectivePersonIds =
@@ -1292,6 +1296,7 @@ export class MediaService {
         SELECT id FROM media_items
         WHERE circle_id = ${circleId}::uuid
           AND deleted_at IS NULL
+          AND archived_at IS NULL
           AND captured_at IS NOT NULL
           AND EXTRACT(MONTH FROM (captured_at AT TIME ZONE 'UTC')) = ${month}
           AND EXTRACT(DAY FROM (captured_at AT TIME ZONE 'UTC')) = ${day}
@@ -1320,18 +1325,18 @@ export class MediaService {
             })
           : Promise.resolve([]),
         this.prisma.mediaItem.findMany({
-          where: { circleId, deletedAt: null },
+          where: { circleId, deletedAt: null, archivedAt: null },
           orderBy: { importedAt: 'desc' },
           take: 12,
         }),
         this.prisma.mediaItem.findMany({
-          where: { circleId, deletedAt: null, favorite: true },
+          where: { circleId, deletedAt: null, archivedAt: null, favorite: true },
           orderBy: { capturedAt: 'desc' },
           take: 12,
         }),
-        this.prisma.mediaItem.count({ where: { circleId, deletedAt: null } }),
+        this.prisma.mediaItem.count({ where: { circleId, deletedAt: null, archivedAt: null } }),
         this.prisma.mediaItem.count({
-          where: { circleId, deletedAt: null, takenLat: null },
+          where: { circleId, deletedAt: null, archivedAt: null, takenLat: null },
         }),
         this.prisma.burstGroup.count({
           where: {
@@ -1833,6 +1838,7 @@ export class MediaService {
       where: {
         circleId,
         deletedAt: null,
+        archivedAt: null,
         OR: [
           { geoLocality: { not: null } },
           { geoPlaceName: { not: null } },
@@ -1900,7 +1906,7 @@ export class MediaService {
           take: 1,
           include: {
             mediaItem: {
-              select: { metadata: true, deletedAt: true },
+              select: { metadata: true, deletedAt: true, archivedAt: true },
             },
           },
         },
@@ -1919,7 +1925,7 @@ export class MediaService {
       sorted.map(async (tag) => {
         const coverMedia = tag.mediaTags[0]?.mediaItem;
         const coverMeta =
-          coverMedia && !coverMedia.deletedAt ? coverMedia.metadata : null;
+          coverMedia && !coverMedia.deletedAt && !coverMedia.archivedAt ? coverMedia.metadata : null;
         return {
           name: tag.name,
           count: tag._count.mediaTags,

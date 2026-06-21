@@ -68,7 +68,10 @@ export const systemSettingsSchema = z.object({
     insights: z.object({
       refreshIntervalHours: z.number().int().min(1).max(168).default(4),
     }).default({ refreshIntervalHours: 4 }),
-  }).optional().default({ insights: { refreshIntervalHours: 4 } }),
+    trash: z.object({
+      retentionDays: z.number().int().min(1).max(365).default(30),
+    }).default({ retentionDays: 30 }),
+  }).optional().default({ insights: { refreshIntervalHours: 4 }, trash: { retentionDays: 30 } }),
   burst: z.object({
     timeGapSeconds: z.number().int().min(1).max(300).default(10),
     hashDistance: z.number().int().min(0).max(32).default(10),
@@ -111,6 +114,9 @@ export const systemSettingsPatchSchema = z.object({
   storage: z.object({
     insights: z.object({
       refreshIntervalHours: z.number().int().min(1).max(168).optional(),
+    }).optional(),
+    trash: z.object({
+      retentionDays: z.number().int().min(1).max(365).optional(),
     }).optional(),
   }).optional(),
   burst: z.object({

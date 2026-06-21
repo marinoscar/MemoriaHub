@@ -79,7 +79,7 @@ export class PeopleService {
           },
           // Fetch a small set of faces for cover-fallback resolution
           faces: {
-            where: { mediaItem: { deletedAt: null } },
+            where: { mediaItem: { deletedAt: null, archivedAt: null } },
             orderBy: [{ confidence: 'desc' }, { createdAt: 'desc' }],
             take: 1,
             select: {
@@ -141,7 +141,7 @@ export class PeopleService {
     const where = {
       personId: null,
       circleId,
-      mediaItem: { deletedAt: null },
+      mediaItem: { deletedAt: null, archivedAt: null },
     };
 
     const [faces, totalItems] = await Promise.all([

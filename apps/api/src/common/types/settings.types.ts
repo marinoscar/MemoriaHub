@@ -55,6 +55,9 @@ export interface SystemSettingsValue {
     insights: {
       refreshIntervalHours: number;
     };
+    trash: {
+      retentionDays: number;
+    };
   };
   burst?: {
     timeGapSeconds: number;
@@ -99,6 +102,9 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
   storage: {
     insights: {
       refreshIntervalHours: 4,
+    },
+    trash: {
+      retentionDays: 30,
     },
   },
   burst: {
