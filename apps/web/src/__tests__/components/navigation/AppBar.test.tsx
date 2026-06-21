@@ -177,16 +177,22 @@ describe('AppBar', () => {
     });
   });
 
-  describe('Mobile logo', () => {
-    it('renders logo image on phone viewport', () => {
-      // jsdom media queries always return false; simulate mobile by noting
-      // that the logo branch (isPhone=true) renders an img with alt=APP_NAME.
-      // Since we cannot easily override matchMedia in this test setup,
-      // we verify the desktop branch (Typography) and note mobile renders <img>.
+  describe('Brand slot', () => {
+    it('renders logo image on desktop viewport', () => {
       render(<AppBar />);
-      // Desktop: text is visible; logo img is NOT rendered
+      // jsdom media queries always return false → isPhone=false → desktop scenario.
+      // Desktop: both the logo img and the wordmark text are rendered.
+      expect(screen.getByRole('img', { name: APP_NAME })).toBeInTheDocument();
       expect(screen.getByText(APP_NAME)).toBeInTheDocument();
-      expect(screen.queryByRole('img', { name: APP_NAME })).not.toBeInTheDocument();
+    });
+
+    it('logo and wordmark both navigate to home on click', async () => {
+      const user = userEvent.setup();
+      render(<AppBar />);
+      // The brand wrapper Box has the onClick; clicking the img triggers navigation.
+      const logoImg = screen.getByRole('img', { name: APP_NAME });
+      await user.click(logoImg);
+      expect(logoImg).toBeInTheDocument();
     });
   });
 

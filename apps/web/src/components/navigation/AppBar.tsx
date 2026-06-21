@@ -75,30 +75,30 @@ export function AppBar({ onMenuClick }: AppBarProps) {
             <MenuIcon />
           </IconButton>
 
-          {/* Brand — desktop: text; mobile: logo image (~983KB, consider optimizing/downscaling in future) */}
-          {isPhone ? (
+          {/* Brand — logo always shown; wordmark added on tablet/desktop */}
+          <Box
+            onClick={() => navigate('/')}
+            sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer', flexShrink: 0 }}
+          >
             <Box
               component="img"
               src={appLogo}
               alt={APP_NAME}
-              onClick={() => navigate('/')}
-              sx={{ height: 32, width: 'auto', cursor: 'pointer', flexShrink: 0, display: 'block', objectFit: 'contain' }}
+              sx={{ height: 32, width: 'auto', display: 'block', objectFit: 'contain' }}
             />
-          ) : (
-            <Typography
-              variant="h6"
-              component="div"
-              sx={{
-                cursor: 'pointer',
-                fontWeight: 600,
-                flexShrink: 0,
-                whiteSpace: 'nowrap',
-              }}
-              onClick={() => navigate('/')}
-            >
-              {APP_NAME}
-            </Typography>
-          )}
+            {!isPhone && (
+              <Typography
+                variant="h6"
+                component="div"
+                sx={{
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {APP_NAME}
+              </Typography>
+            )}
+          </Box>
 
           {/* Central search pill — takes available space */}
           <TopbarSearch />
