@@ -342,7 +342,7 @@ An admin dashboard at `/admin/jobs` provides monitoring and control over the gen
 - `DELETE /api/admin/jobs/:id` (jobs:write) - Delete a job row (400 if running, 404 if not found)
 
 ### Media — Bulk Operations (circle-scoped, collaborator role required)
-- `PATCH /api/media/bulk` - Bulk update location / classification / favorite on 1–500 items
+- `PATCH /api/media/bulk` - Bulk update location / favorite on 1–500 items
 - `POST /api/media/bulk/tags` - Bulk add/remove tags on 1–500 items
 - `POST /api/media/bulk/delete` - Bulk soft-delete 1–500 items
 

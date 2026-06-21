@@ -63,7 +63,6 @@ function makeMediaRow(overrides: Record<string, any> = {}) {
     capturedAt: new Date('2024-06-15T10:30:00.000Z'),
     capturedAtOffset: -360,
     importedAt: new Date('2024-07-01T12:00:00.000Z'),
-    classification: 'unreviewed',
     width: 4032,
     height: 3024,
     durationMs: null,
@@ -267,7 +266,6 @@ describe('MediaService.streamExport', () => {
       expect(record).toHaveProperty('capturedAt');
       expect(record).toHaveProperty('importedAt');
       expect(record).toHaveProperty('source');
-      expect(record).toHaveProperty('classification');
       expect(record).toHaveProperty('width');
       expect(record).toHaveProperty('height');
       expect(record).toHaveProperty('durationMs');
@@ -328,7 +326,7 @@ describe('MediaService.streamExport', () => {
   describe('CSV export (format: csv)', () => {
     const CSV_COLUMNS = [
       'id', 'originalFilename', 'type', 'capturedAt', 'importedAt',
-      'source', 'classification', 'width', 'height', 'durationMs',
+      'source', 'width', 'height', 'durationMs',
       'takenLat', 'takenLng', 'cameraMake', 'cameraModel', 'contentHash',
       'storage_provider', 'storage_key', 'storage_size', 'metadata',
     ];
@@ -360,7 +358,7 @@ describe('MediaService.streamExport', () => {
       expect(headers['Content-Disposition']).toMatch(/attachment;\s*filename="memoriahub-export-\d{4}-\d{2}-\d{2}\.csv"/);
     });
 
-    it('should output a header row containing all 19 columns', async () => {
+    it('should output a header row containing all 18 columns', async () => {
       const { fakeRes, finished } = makeFakeReply();
 
       await service.streamExport({ format: 'csv' } as any, CALLER_ID, OWN_PERMS, fakeRes as any);

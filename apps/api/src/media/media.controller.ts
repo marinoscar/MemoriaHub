@@ -212,11 +212,11 @@ export class MediaController {
 
   /**
    * PATCH /api/media/bulk
-   * Bulk update location, classification, or favorite on a set of media items.
+   * Bulk update location or favorite on a set of media items.
    */
   @Patch('bulk')
   @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
-  @ApiOperation({ summary: 'Bulk update media items (location, classification, favorite)' })
+  @ApiOperation({ summary: 'Bulk update media items (location, favorite)' })
   @ApiResponse({ status: 200, description: 'Items updated' })
   async bulkUpdateMedia(
     @Body() dto: BulkUpdateMediaDto,
@@ -503,7 +503,6 @@ export class MediaController {
   @ApiQuery({ name: 'type', required: false, enum: ['photo', 'video'] })
   @ApiQuery({ name: 'capturedAtFrom', required: false, type: String, description: 'ISO 8601 date' })
   @ApiQuery({ name: 'capturedAtTo', required: false, type: String, description: 'ISO 8601 date' })
-  @ApiQuery({ name: 'classification', required: false, enum: ['memory', 'low_value', 'unreviewed'] })
   @ApiQuery({ name: 'albumId', required: false, type: String, format: 'uuid' })
   @ApiQuery({ name: 'favorite', required: false, type: Boolean })
   @ApiQuery({ name: 'tag', required: false, type: String, description: 'Exact tag name (case-insensitive)' })
@@ -555,7 +554,7 @@ export class MediaController {
   @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({
     summary: 'Update mutable fields on a MediaItem',
-    description: 'Mutable: capturedAt, capturedAtOffset, classification, metadata, caption, description, favorite.',
+    description: 'Mutable: capturedAt, capturedAtOffset, metadata, caption, description, favorite.',
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'MediaItem updated' })

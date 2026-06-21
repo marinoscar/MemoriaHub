@@ -433,11 +433,6 @@ enum MediaSource {
   sync
 }
 
-enum MediaClassification {
-  memory
-  low_value
-  unreviewed
-}
 
 model MediaItem {
   // --- Identity and storage ---
@@ -460,7 +455,7 @@ model MediaItem {
   importedAt       DateTime            @default(now()) @map("imported_at") @db.Timestamptz
   source           MediaSource
   contentHash      String?             @map("content_hash")
-  classification   MediaClassification @default(unreviewed)
+
   width            Int?
   height           Int?
   durationMs       Int?                @map("duration_ms")
@@ -526,7 +521,7 @@ model MediaItem {
   @@index([addedById])
   @@index([capturedAt])
   @@index([contentHash])
-  @@index([classification])
+
   @@index([type])
   @@index([deletedAt])
   @@index([favorite])

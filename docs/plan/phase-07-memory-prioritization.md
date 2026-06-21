@@ -3,7 +3,9 @@
 **Roadmap:** [ROADMAP.md](ROADMAP.md)
 **Previous Phase:** [Phase 02 — Metadata Extraction](phase-02-metadata-extraction.md) · [Phase 03 — Web Media Library](phase-03-web-library.md)
 **Next Phase:** [Phase 08 — Android Sync](phase-08-android-sync.md)
-**Status:** Not Started
+**Status:** Removed
+
+> **This feature has been removed.** The `MediaClassification` enum (`memory | low_value | unreviewed`) and the `media_items.classification` column that were partially implemented (Phase 01 schema, bulk-edit and review-queue UI surfaces) have been dropped from the codebase. The automatic heuristic processors, dedicated review endpoint, and full review mode described below were never built. This document is retained as historical reference only.
 
 ---
 

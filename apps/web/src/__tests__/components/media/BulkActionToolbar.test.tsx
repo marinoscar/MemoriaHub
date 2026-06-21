@@ -2,7 +2,7 @@
  * BulkActionToolbar — unit tests.
  *
  * Mocks the media service so we don't need a real API.
- * Covers: render, cancel, select all, set location, tags, classify,
+ * Covers: render, cancel, select all, set location, tags,
  *         favorite, delete flows, and viewer role restrictions.
  *
  * UI shape (Immich-style icon bar):
@@ -11,8 +11,7 @@
  *   Right: Select all icon button (always visible, even for viewer)
  *   Right (non-viewer): Add to favorites icon button
  *   Right (non-viewer): More actions icon button → overflow Menu
- *     Menu items: Set location, Edit tags, [Classification subheader],
- *                 Mark as Memory / Low Value / Unreviewed, [Divider],
+ *     Menu items: Set location, Edit tags, [Divider],
  *                 Remove from favorites, [optional Remove from album],
  *                 [Divider], Delete
  *   Delete opens a confirmation Dialog (Cancel / Delete buttons).
@@ -100,7 +99,6 @@ describe('BulkActionToolbar', () => {
       await user.click(screen.getByRole('button', { name: /more actions/i }));
       expect(screen.getByText(/set location/i)).toBeInTheDocument();
       expect(screen.getByText(/edit tags/i)).toBeInTheDocument();
-      expect(screen.getByText(/mark as memory/i)).toBeInTheDocument();
       expect(screen.getByText(/delete/i)).toBeInTheDocument();
     });
 
@@ -172,92 +170,6 @@ describe('BulkActionToolbar', () => {
       await user.click(screen.getByRole('button', { name: /more actions/i }));
       await user.click(screen.getByText(/edit tags/i));
       expect(defaultProps.onOpenTags).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Classification menu (items live in the overflow menu)
-  // -------------------------------------------------------------------------
-  describe('Classification menu', () => {
-    it('opens classification items in overflow menu when More actions is clicked', async () => {
-      const user = userEvent.setup();
-      render(<BulkActionToolbar {...defaultProps} />);
-
-      await user.click(screen.getByRole('button', { name: /more actions/i }));
-      expect(screen.getByText(/mark as memory/i)).toBeInTheDocument();
-      expect(screen.getByText(/mark as low value/i)).toBeInTheDocument();
-      expect(screen.getByText(/mark as unreviewed/i)).toBeInTheDocument();
-    });
-
-    it('calls bulkUpdateMedia with "memory" when Mark as Memory is selected', async () => {
-      const user = userEvent.setup();
-      render(<BulkActionToolbar {...defaultProps} />);
-
-      await user.click(screen.getByRole('button', { name: /more actions/i }));
-      await user.click(screen.getByText(/mark as memory/i));
-
-      await waitFor(() => {
-        expect(mockBulkUpdateMedia).toHaveBeenCalledWith({
-          circleId: 'circle-1',
-          ids: expect.arrayContaining(['item-1', 'item-2']),
-          set: { classification: 'memory' },
-        });
-      });
-    });
-
-    it('calls bulkUpdateMedia with "low_value" when Mark as Low Value is selected', async () => {
-      const user = userEvent.setup();
-      render(<BulkActionToolbar {...defaultProps} />);
-
-      await user.click(screen.getByRole('button', { name: /more actions/i }));
-      await user.click(screen.getByText(/mark as low value/i));
-
-      await waitFor(() => {
-        expect(mockBulkUpdateMedia).toHaveBeenCalledWith(
-          expect.objectContaining({ set: { classification: 'low_value' } }),
-        );
-      });
-    });
-
-    it('calls bulkUpdateMedia with "unreviewed" when Mark as Unreviewed is selected', async () => {
-      const user = userEvent.setup();
-      render(<BulkActionToolbar {...defaultProps} />);
-
-      await user.click(screen.getByRole('button', { name: /more actions/i }));
-      await user.click(screen.getByText(/mark as unreviewed/i));
-
-      await waitFor(() => {
-        expect(mockBulkUpdateMedia).toHaveBeenCalledWith(
-          expect.objectContaining({ set: { classification: 'unreviewed' } }),
-        );
-      });
-    });
-
-    it('calls onSuccess after successful classify', async () => {
-      const user = userEvent.setup();
-      render(<BulkActionToolbar {...defaultProps} />);
-
-      await user.click(screen.getByRole('button', { name: /more actions/i }));
-      await user.click(screen.getByText(/mark as memory/i));
-
-      await waitFor(() => {
-        expect(defaultProps.onSuccess).toHaveBeenCalledWith(
-          expect.stringMatching(/updated classification/i),
-        );
-      });
-    });
-
-    it('calls onError when classify fails', async () => {
-      mockBulkUpdateMedia.mockRejectedValueOnce(new Error('API error'));
-      const user = userEvent.setup();
-      render(<BulkActionToolbar {...defaultProps} />);
-
-      await user.click(screen.getByRole('button', { name: /more actions/i }));
-      await user.click(screen.getByText(/mark as memory/i));
-
-      await waitFor(() => {
-        expect(defaultProps.onError).toHaveBeenCalledWith('API error');
-      });
     });
   });
 

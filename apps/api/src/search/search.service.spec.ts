@@ -39,7 +39,6 @@ const mockMediaItem = {
   mimeType: 'image/jpeg',
   fileSize: 1024,
   storageObjectId: 'obj-1',
-  classification: null,
   geoCountry: null,
   geoCountryCode: null,
   geoAdmin1: null,

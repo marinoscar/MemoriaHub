@@ -23,7 +23,6 @@ const MediaLibraryPage = lazy(() => import('./pages/MediaLibrary'));
 const MediaMapPage = lazy(() => import('./pages/MediaMapPage'));
 const CircleListPage = lazy(() => import('./pages/Circles/CircleListPage'));
 const CircleDetailPage = lazy(() => import('./pages/Circles/CircleDetailPage'));
-const AdminCirclesPage = lazy(() => import('./pages/Admin/AdminCirclesPage'));
 const BackupPage = lazy(() => import('./pages/Admin/BackupPage'));
 const AiSettingsPage = lazy(() => import('./pages/Admin/AiSettingsPage'));
 const FaceSettingsPage = lazy(() => import('./pages/Admin/FaceSettingsPage'));
@@ -75,7 +74,6 @@ function AppRoutes() {
                 <Route path="/circles/:id" element={<CircleDetailPage />} />
                 <Route path="/admin/users" element={<UserManagementPage />} />
                 <Route path="/admin/settings" element={<SystemSettingsPage />} />
-                <Route path="/admin/circles" element={<AdminCirclesPage />} />
                 <Route path="/admin/backup" element={<BackupPage />} />
                 <Route path="/admin/ai-settings" element={<AiSettingsPage />} />
                 <Route path="/admin/face-settings" element={<FaceSettingsPage />} />

@@ -61,7 +61,6 @@ const mockMediaItem: MediaItem = {
   importedAt: new Date().toISOString(),
   source: 'web',
   contentHash: null,
-  classification: 'unreviewed',
   width: null,
   height: null,
   durationMs: null,
@@ -99,7 +98,7 @@ const mockDashboard: DashboardResponse = {
   onThisDay: [mockMediaItem],
   recent: [mockMediaItem],
   favorites: [],
-  counts: { total: 10, unreviewed: 3, lowValue: 2, missingGeo: 1 },
+  counts: { total: 10, missingGeo: 1 },
 };
 
 const mockAlbum: Album = {
@@ -166,11 +165,6 @@ describe('listMedia', () => {
   it('includes type filter', async () => {
     await listMedia({ type: 'video' });
     expect(capturedUrl!.searchParams.get('type')).toBe('video');
-  });
-
-  it('includes classification filter', async () => {
-    await listMedia({ classification: 'unreviewed' });
-    expect(capturedUrl!.searchParams.get('classification')).toBe('unreviewed');
   });
 
   it('includes favorite filter', async () => {
@@ -521,7 +515,7 @@ describe('bulkUpdateMedia', () => {
     const result = await bulkUpdateMedia({
       circleId: 'circle-1',
       ids: ['item-1', 'item-2'],
-      set: { classification: 'memory' },
+      set: { favorite: true },
     });
 
     expect(result.updated).toBe(2);

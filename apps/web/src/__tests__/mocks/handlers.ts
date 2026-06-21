@@ -302,7 +302,6 @@ export const handlers = [
       importedAt: new Date().toISOString(),
       source: 'web',
       contentHash: null,
-      classification: 'unreviewed',
       width: null,
       height: null,
       durationMs: null,

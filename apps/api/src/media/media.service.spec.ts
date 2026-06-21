@@ -69,7 +69,6 @@ function makeMediaItem(overrides: Partial<any> = {}) {
     capturedAt: null,
     capturedAtOffset: null,
     importedAt: new Date(),
-    classification: 'unreviewed' as const,
     width: null,
     height: null,
     durationMs: null,
@@ -576,17 +575,6 @@ describe('MediaService', () => {
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
       expect(call[0].where.capturedAt).toMatchObject({ gte: from, lte: to });
-    });
-
-    it('filters by classification', async () => {
-      await service.listMedia(
-        { ...defaultMediaQuery, classification: 'memory' },
-        'user-1',
-        ownPerms,
-      );
-
-      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({ classification: 'memory' });
     });
 
     it('filters by albumId via AlbumItem join', async () => {
@@ -1729,14 +1717,14 @@ describe('MediaService', () => {
       return {
         circleId: CIRCLE_ID,
         ids: makeIds(2),
-        set: { classification: 'memory' as const },
+        set: { favorite: true },
         ...overrides,
       };
     }
 
     it('assertAllInCircle rejects (NotFoundException) when not all ids belong to circle', async () => {
       const ids = makeIds(3);
-      const dto = makeBulkUpdateDto({ ids, set: { classification: 'memory' as const } });
+      const dto = makeBulkUpdateDto({ ids, set: { favorite: true } });
       // findMany returns only 2 out of 3 ids
       mockPrisma.mediaItem.findMany.mockResolvedValue([
         { id: ids[0] },
@@ -1821,11 +1809,11 @@ describe('MediaService', () => {
       });
     });
 
-    it('updates classification and favorite only (no location)', async () => {
+    it('updates favorite only (no location)', async () => {
       const ids = makeIds(2);
       const dto = makeBulkUpdateDto({
         ids,
-        set: { classification: 'memory' as const, favorite: true },
+        set: { favorite: true },
       });
 
       mockPrisma.mediaItem.findMany.mockResolvedValue(
@@ -1838,14 +1826,13 @@ describe('MediaService', () => {
       expect(mockGeoProvider.reverseGeocode).not.toHaveBeenCalled();
       const [updateCall] = (mockPrisma.mediaItem.updateMany as jest.Mock).mock.calls;
       expect(updateCall[0].data).toMatchObject({
-        classification: 'memory',
         favorite: true,
       });
     });
 
     it('returns { updated: count }', async () => {
       const ids = makeIds(3);
-      const dto = makeBulkUpdateDto({ ids, set: { classification: 'memory' as const } });
+      const dto = makeBulkUpdateDto({ ids, set: { favorite: false } });
 
       mockPrisma.mediaItem.findMany.mockResolvedValue(
         ids.map((id) => ({ id })) as any,
@@ -2254,16 +2241,18 @@ describe('MediaService', () => {
     it('returns shape { onThisDay, recent, favorites, counts }', async () => {
       // $queryRaw returns empty — no onThisDay items to hydrate
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+      // systemSettings for burst config
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(null);
       // Promise.all: onThisDay hydration skipped (empty ids), recent, favorites
       mockPrisma.mediaItem.findMany
         .mockResolvedValueOnce([]) // recent
         .mockResolvedValueOnce([]); // favorites
-      // count calls: total, unreviewed, lowValue, missingGeo
+      // count calls: total, missingGeo
       mockPrisma.mediaItem.count
         .mockResolvedValueOnce(100)
-        .mockResolvedValueOnce(20)
-        .mockResolvedValueOnce(5)
         .mockResolvedValueOnce(10);
+      // burstGroup count
+      mockPrisma.burstGroup.count.mockResolvedValue(0);
 
       const result = await service.getDashboard(dashboardQuery, 'user-1', ownPerms);
 
@@ -2273,22 +2262,20 @@ describe('MediaService', () => {
       expect(result).toHaveProperty('counts');
       expect(result.counts).toMatchObject({
         total: 100,
-        unreviewed: 20,
-        lowValue: 5,
         missingGeo: 10,
       });
     });
 
     it('getDashboard passes correct where to count queries', async () => {
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(null);
       mockPrisma.mediaItem.findMany
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([]);
       mockPrisma.mediaItem.count
         .mockResolvedValueOnce(50)  // total
-        .mockResolvedValueOnce(10)  // unreviewed
-        .mockResolvedValueOnce(3)   // low_value
         .mockResolvedValueOnce(7);  // missingGeo
+      mockPrisma.burstGroup.count.mockResolvedValue(0);
 
       await service.getDashboard(dashboardQuery, 'user-1', ownPerms);
 
@@ -2302,20 +2289,12 @@ describe('MediaService', () => {
         });
       }
 
-      // Verify specific classification filters
+      // Verify missingGeo filter
       const allWheres = countCalls.map((c: any) => c[0].where);
-      const unreviewedWhere = allWheres.find(
-        (w: any) => w.classification === 'unreviewed',
-      );
-      const lowValueWhere = allWheres.find(
-        (w: any) => w.classification === 'low_value',
-      );
       const missingGeoWhere = allWheres.find(
         (w: any) => w.takenLat === null,
       );
 
-      expect(unreviewedWhere).toBeDefined();
-      expect(lowValueWhere).toBeDefined();
       expect(missingGeoWhere).toBeDefined();
     });
 
@@ -2324,16 +2303,16 @@ describe('MediaService', () => {
       const item = makeMediaItem({ id: mediaId });
 
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([{ id: mediaId }]);
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(null);
       // First findMany call is for onThisDay hydration, then recent, then favorites
       mockPrisma.mediaItem.findMany
         .mockResolvedValueOnce([item] as any) // onThisDay hydration
         .mockResolvedValueOnce([])            // recent
         .mockResolvedValueOnce([]);           // favorites
       mockPrisma.mediaItem.count
-        .mockResolvedValueOnce(1)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0);
+        .mockResolvedValueOnce(1)  // total
+        .mockResolvedValueOnce(0); // missingGeo
+      mockPrisma.burstGroup.count.mockResolvedValue(0);
 
       const result = await service.getDashboard(dashboardQuery, 'user-1', ownPerms);
 
@@ -2350,14 +2329,14 @@ describe('MediaService', () => {
 
     it('recent ordered by importedAt desc take 12', async () => {
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(null);
       mockPrisma.mediaItem.findMany
         .mockResolvedValueOnce([])  // recent
         .mockResolvedValueOnce([]); // favorites
       mockPrisma.mediaItem.count
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0);
+        .mockResolvedValueOnce(0)  // total
+        .mockResolvedValueOnce(0); // missingGeo
+      mockPrisma.burstGroup.count.mockResolvedValue(0);
 
       await service.getDashboard(dashboardQuery, 'user-1', ownPerms);
 
@@ -2371,14 +2350,14 @@ describe('MediaService', () => {
 
     it('favorites filtered by favorite:true take 12', async () => {
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(null);
       mockPrisma.mediaItem.findMany
         .mockResolvedValueOnce([])  // recent
         .mockResolvedValueOnce([]); // favorites
       mockPrisma.mediaItem.count
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0);
+        .mockResolvedValueOnce(0)  // total
+        .mockResolvedValueOnce(0); // missingGeo
+      mockPrisma.burstGroup.count.mockResolvedValue(0);
 
       await service.getDashboard(dashboardQuery, 'user-1', ownPerms);
 

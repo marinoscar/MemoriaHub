@@ -4,7 +4,6 @@ export interface MediaFilters {
   type?: string;
   capturedAtFrom?: Date;
   capturedAtTo?: Date;
-  classification?: string;
   albumId?: string;
   favorite?: boolean;
   tag?: string;
@@ -24,10 +23,6 @@ export interface MediaFilters {
 
 export function whereType(value: string): Prisma.MediaItemWhereInput {
   return { type: value as any };
-}
-
-export function whereClassification(value: string): Prisma.MediaItemWhereInput {
-  return { classification: value as any };
 }
 
 export function whereFavorite(value: boolean): Prisma.MediaItemWhereInput {
@@ -137,7 +132,6 @@ export function buildMediaWhere(
     type,
     capturedAtFrom,
     capturedAtTo,
-    classification,
     albumId,
     favorite,
     tag,
@@ -159,7 +153,6 @@ export function buildMediaWhere(
     circleId,
     deletedAt: null,
     ...(type && whereType(type)),
-    ...(classification && whereClassification(classification)),
     ...(favorite !== undefined && whereFavorite(favorite)),
     ...(contentHash && { contentHash }),
     ...(capturedAtFrom || capturedAtTo ? whereDateRange(capturedAtFrom, capturedAtTo) : {}),

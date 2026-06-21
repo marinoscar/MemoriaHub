@@ -15,7 +15,6 @@ import { BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
   whereType,
-  whereClassification,
   whereFavorite,
   whereDateRange,
   whereAlbum,
@@ -55,15 +54,6 @@ export const SEARCHABLE_FIELDS: SearchableField[] = [
     enumValues: ['photo', 'video'],
     description: 'Filter by media type. Accepts "photo" or "video".',
     buildWhere: (v) => whereType(String(v)),
-  },
-  {
-    key: 'classification',
-    label: 'Classification',
-    type: 'enum',
-    enumValues: ['memory', 'low_value', 'unreviewed'],
-    description:
-      'Filter by content classification. "memory" = keepers, "low_value" = not worth keeping, "unreviewed" = not yet reviewed.',
-    buildWhere: (v) => whereClassification(String(v)),
   },
   {
     key: 'favorite',
