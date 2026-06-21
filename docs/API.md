@@ -1620,7 +1620,8 @@ Returns aggregated dashboard data for a circle: On This Day (same month/day acro
     "lowValue": 92,
     "missingGeo": 517
   },
-  "pendingBurstGroups": 3
+  "pendingBurstGroups": 3,
+  "pendingSimilarityGroups": 2
 }
 ```
 
@@ -1634,6 +1635,7 @@ Returns aggregated dashboard data for a circle: On This Day (same month/day acro
 | `counts.total` | Non-deleted items in the circle |
 | `counts.missingGeo` | Items with `takenLat IS NULL` |
 | `pendingBurstGroups` | Count of burst groups with `status = 'pending'` and `mediaCount >= burst.minGroupSize`; present only when burst detection is enabled for the circle (0 otherwise) |
+| `pendingSimilarityGroups` | Count of similarity groups with `status = 'pending'` and `mediaCount >= similarity.minGroupSize`; present only when visual deduplication is enabled for the circle (0 otherwise) |
 
 All items include a freshly signed `thumbnailUrl`.
 
@@ -3766,6 +3768,213 @@ Enable or disable burst detection for a circle. Emits `circle:burst_settings_upd
 **Response:** 200 OK
 ```json
 { "data": { "burstDetectionEnabled": true } }
+```
+
+---
+
+## Media — Similar Photos (media:read / media:write / media:delete + per-circle roles)
+
+Similar Photos groups near-duplicate photos across the **entire circle library** using dHash perceptual-hash Hamming distance only — with no temporal window and no same-device requirement. This is the key distinction from Burst Detection. Per-circle opt-in (default off). No photo is ever deleted automatically — the system surfaces groups as a review queue and a human confirms which copies to keep. Groups below `similarity.minGroupSize` (default 2) are stored but not surfaced in the review queue. `GET /api/media/dashboard` gains a `pendingSimilarityGroups` count for the review-queue section.
+
+The default Hamming threshold (6 bits of 64) is stricter than burst detection's default (10 bits) because library-wide matching has no temporal-proximity or same-device corroboration. See [docs/specs/visual-dedup.md](specs/visual-dedup.md) for the full accuracy trade-off.
+
+No new RBAC permissions are introduced — the feature reuses `media:read`, `media:write`, and `media:delete` combined with the existing per-circle viewer / collaborator roles.
+
+---
+
+### GET /media/similar
+
+**Permissions:** `media:read` + circle viewer role (or `media:read_any` for admin bypass)
+
+List similarity groups for a circle, filtered by status. Only groups with `mediaCount >= similarity.minGroupSize` are returned.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `circleId` | UUID | required | Circle to query |
+| `status` | enum | `pending` | `pending` \| `resolved` \| `dismissed` |
+| `page` | number | 1 | Page number (1-indexed) |
+| `pageSize` | number | 20 | Items per page (max 100) |
+
+**Response:** 200 OK
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "circleId": "uuid",
+      "status": "pending",
+      "mediaCount": 4,
+      "createdAt": "2026-06-20T10:00:00.000Z",
+      "suggestedBestItemId": "uuid",
+      "suggestedBestThumbnailUrl": "https://...",
+      "coverThumbnailUrls": ["https://...", "https://...", "https://..."]
+    }
+  ],
+  "meta": { "total": 8, "page": 1, "pageSize": 20 }
+}
+```
+
+`coverThumbnailUrls` contains up to 4 signed thumbnail URLs for the first 4 group members (sorted by `importedAt ASC`), used as a stack preview. `suggestedBestThumbnailUrl` is the signed thumbnail for `suggestedBestItemId`. Groups are ordered by `createdAt ASC`.
+
+**Error Cases:**
+- 403 — Caller is not a member of the circle
+
+---
+
+### GET /media/similar/:id
+
+**Permissions:** `media:read` + circle viewer role
+
+Get full detail for a single similarity group: all members in import order with their scores and thumbnail URLs.
+
+**Response:** 200 OK
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "circleId": "uuid",
+    "status": "pending",
+    "mediaCount": 4,
+    "createdAt": "2026-06-20T10:00:00.000Z",
+    "suggestedBestItemId": "uuid",
+    "resolvedById": null,
+    "resolvedAt": null,
+    "members": [
+      {
+        "id": "uuid",
+        "similarityScore": 0.91,
+        "sharpnessScore": 412.3,
+        "thumbnailUrl": "https://...",
+        "width": 4032,
+        "height": 3024,
+        "capturedAt": "2024-07-15T14:30:00.000Z",
+        "importedAt": "2026-06-20T09:00:00.000Z",
+        "isSuggestedBest": true
+      }
+    ]
+  }
+}
+```
+
+Members are ordered by `importedAt ASC`. `thumbnailUrl` is a signed URL.
+
+**Error Cases:**
+- 404 — Group not found or caller is not a member of the circle
+
+---
+
+### POST /media/similar/:id/resolve
+
+**Permissions:** `media:delete` + circle collaborator role
+
+Keep the specified members and soft-delete all other members of the group, then mark the group `resolved`. The entire operation runs in a single database transaction.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `keepIds` | UUID[] | Yes | IDs of members to keep; must be non-empty and all belong to this group. The caller may keep all members (zero deletions). |
+
+**Example:**
+```json
+{ "keepIds": ["uuid-1", "uuid-2"] }
+```
+
+**Response:** 200 OK
+```json
+{ "data": { "deleted": 3, "kept": 1, "groupStatus": "resolved" } }
+```
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | `keepIds` contains IDs not in this group, or group is not `pending` |
+| 404 | Group not found |
+
+---
+
+### POST /media/similar/:id/dismiss
+
+**Permissions:** `media:write` + circle collaborator role
+
+Mark a similarity group dismissed — the reviewer considers these items to not be duplicates. Clears `similarityGroupId` and `similarityScore` on all members; no items are deleted.
+
+**Response:** 200 OK
+```json
+{ "data": { "groupStatus": "dismissed", "ungrouped": 4 } }
+```
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | Group is not in `pending` status |
+| 404 | Group not found |
+
+---
+
+### POST /media/similar/backfill
+
+**Permissions:** `media:write` + circle collaborator role
+
+Bulk-enqueue `similarity_detection` enrichment jobs for photos in a circle that have not yet been processed. Requires `circle.visualDedupEnabled = true`.
+
+For each enqueued photo that lacks a `perceptualHash`, the enrichment job downloads the image via the storage provider, computes the dHash and sharpness score using the shared `computeVisualHash` utility (`apps/api/src/storage/processing/visual-hash.util.ts`), and persists the results before running the grouping logic. This retroactive on-demand fingerprinting means the backfill endpoint works correctly on libraries that were uploaded before the visual deduplication feature was introduced.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `circleId` | UUID | Yes | Circle to backfill |
+| `from` | ISO-8601 datetime | No | Inclusive lower bound on `capturedAt`; only photos captured at or after this timestamp are enqueued |
+| `to` | ISO-8601 datetime | No | Inclusive upper bound on `capturedAt`; only photos captured at or before this timestamp are enqueued |
+| `force` | boolean | No | When `true`, re-enqueue all non-deleted photos in the scope (including already-processed ones). Useful after changing `similarity.hashDistance` or to regroup the library from scratch. Default `false`. |
+
+`from` and `to` may be used independently or together. `from > to` returns 400. When omitted, the scope covers all photos in the circle (subject to the `force` flag).
+
+**Response:** 201 Created
+```json
+{ "data": { "enqueued": 287 } }
+```
+
+**Error Cases:**
+- 400 — `circle.visualDedupEnabled` is `false`
+- 400 — `from` is later than `to`
+
+---
+
+### GET /circles/:id/dedup-settings
+
+**Permissions:** `circles:read` + circle viewer role
+
+Get the per-circle visual deduplication opt-in flag.
+
+**Response:** 200 OK
+```json
+{ "visualDedupEnabled": false }
+```
+
+---
+
+### PUT /circles/:id/dedup-settings
+
+**Permissions:** `circles:write` + circle_admin role (or `circles:manage_any` for admin bypass)
+
+Enable or disable visual deduplication for a circle. Emits `circle:dedup_settings_update` audit event.
+
+**Request Body:**
+```json
+{ "enabled": true }
+```
+
+**Response:** 200 OK
+```json
+{ "visualDedupEnabled": true }
 ```
 
 ---
