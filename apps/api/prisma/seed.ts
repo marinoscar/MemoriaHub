@@ -79,6 +79,10 @@ const PERMISSIONS = [
   // Job queue dashboard (Admin only)
   { name: 'jobs:read', description: 'Admin: read enrichment job queue stats and list' },
   { name: 'jobs:write', description: 'Admin: retry, reset, or delete enrichment jobs' },
+
+  // Geo Provider Settings (Admin only)
+  { name: 'geo_settings:read', description: 'Read geo provider settings and status' },
+  { name: 'geo_settings:write', description: 'Configure geo provider credentials and active reverse-geocoding provider' },
 ] as const;
 
 // Role to permissions mapping
@@ -120,6 +124,9 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     // Job queue dashboard: admin-only
     'jobs:read',
     'jobs:write',
+    // Geo Provider Settings: admin-only
+    'geo_settings:read',
+    'geo_settings:write',
   ],
   contributor: [
     'user_settings:read',

@@ -70,6 +70,10 @@ export const PERMISSIONS = {
   // Job queue dashboard (Admin only)
   JOBS_READ: 'jobs:read',
   JOBS_WRITE: 'jobs:write',
+
+  // Geo Provider Settings (Admin only)
+  GEO_SETTINGS_READ: 'geo_settings:read',
+  GEO_SETTINGS_WRITE: 'geo_settings:write',
 } as const;
 
 export type PermissionName = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
