@@ -28,6 +28,9 @@ interface SyncFileDao {
     @Query("SELECT * FROM sync_files WHERE status = :status ORDER BY updatedAt DESC")
     fun observeByStatus(status: SyncStatus): Flow<List<SyncFileEntity>>
 
+    @Query("SELECT * FROM sync_files WHERE status IN ('FAILED', 'BLOCKED') ORDER BY updatedAt DESC")
+    fun observeFailures(): Flow<List<SyncFileEntity>>
+
     /** Next batch of queued work, newest capture first. */
     @Query(
         """

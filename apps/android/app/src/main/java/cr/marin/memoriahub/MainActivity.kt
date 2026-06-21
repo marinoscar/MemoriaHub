@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -19,6 +18,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cr.marin.memoriahub.ui.RootDestination
 import cr.marin.memoriahub.ui.RootViewModel
 import cr.marin.memoriahub.ui.auth.DeviceAuthScreen
+import cr.marin.memoriahub.ui.main.MainShell
 import cr.marin.memoriahub.ui.serverurl.ServerUrlScreen
 import cr.marin.memoriahub.ui.theme.MemoriaHubTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -48,12 +48,9 @@ private fun AppRoot(viewModel: RootViewModel = hiltViewModel()) {
             RootDestination.Loading -> Box(contentModifier, contentAlignment = Alignment.Center) {}
             RootDestination.ServerUrl -> ServerUrlScreen(modifier = contentModifier)
             RootDestination.Auth -> DeviceAuthScreen(modifier = contentModifier)
-            // The bottom-nav main shell (photos / sync / settings) is wired in a later milestone.
             RootDestination.Main -> {
                 LaunchedEffect(Unit) { viewModel.onMainVisible() }
-                Box(contentModifier, contentAlignment = Alignment.Center) {
-                    Text("Signed in — sync UI coming next")
-                }
+                MainShell(modifier = contentModifier)
             }
         }
     }

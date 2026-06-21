@@ -3,6 +3,9 @@ package cr.marin.memoriahub
 import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.decode.VideoFrameDecoder
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
@@ -15,7 +18,7 @@ import javax.inject.Inject
  * sync engine, the API client).
  */
 @HiltAndroidApp
-class MemoriaHubApp : Application(), Configuration.Provider {
+class MemoriaHubApp : Application(), Configuration.Provider, ImageLoaderFactory {
 
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
@@ -23,5 +26,12 @@ class MemoriaHubApp : Application(), Configuration.Provider {
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
+            .build()
+
+    // Adds video-frame decoding so the photo grid can thumbnail local videos.
+    override fun newImageLoader(): ImageLoader =
+        ImageLoader.Builder(this)
+            .components { add(VideoFrameDecoder.Factory()) }
+            .crossfade(true)
             .build()
 }

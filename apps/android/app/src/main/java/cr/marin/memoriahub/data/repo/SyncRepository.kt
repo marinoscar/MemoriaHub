@@ -34,6 +34,8 @@ class SyncRepository @Inject constructor(
     fun observeByStatus(status: SyncStatus): Flow<List<SyncFileEntity>> =
         syncFileDao.observeByStatus(status)
 
+    fun observeFailures(): Flow<List<SyncFileEntity>> = syncFileDao.observeFailures()
+
     /**
      * Reconciles MediaStore against the local state table — the idempotent diff that
      * guarantees completeness. New items are queued; edited items (changed size/mtime)
