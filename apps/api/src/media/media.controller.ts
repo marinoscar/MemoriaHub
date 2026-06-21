@@ -554,7 +554,7 @@ export class MediaController {
   @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({
     summary: 'Update mutable fields on a MediaItem',
-    description: 'Mutable: capturedAt, capturedAtOffset, metadata, caption, description, favorite.',
+    description: 'Mutable: capturedAt, capturedAtOffset, metadata, description, favorite.',
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'MediaItem updated' })
