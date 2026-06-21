@@ -44,7 +44,7 @@ The feature identifies these "burst groups" automatically and surfaces them as a
 
 - The system does not auto-delete any photo. It suggests; the human confirms.
 - The system does not detect semantically similar photos taken at different times or from different devices (that is a separate dedup problem).
-- The existing 1536-d text embeddings (caption + tags + people names) are explicitly not used here — they are semantic, not visual, and are the wrong tool for near-duplicate detection.
+- The existing 1536-d text embeddings (description + tags + people names) are explicitly not used here — they are semantic, not visual, and are the wrong tool for near-duplicate detection.
 - Video burst detection is out of scope. Only `MediaType.photo` items are processed.
 - Cross-circle burst detection is out of scope. Groups are strictly circle-scoped.
 
@@ -83,7 +83,7 @@ Two items are visual near-duplicates when their Hamming distance is **≤ D bits
 
 The perceptual hash is computed by the `visual-hash` storage processor (see §5.1) from the orientation-corrected image, ensuring that portrait photos rotated by EXIF orientation are compared right-side-up.
 
-The existing 1536-d text embedding stored in `media_item_embedding` is **not used** for burst detection. That embedding encodes caption, description, tags, and people names — it is a semantic signal, not a visual one, and would incorrectly group unrelated photos that happen to share the same scene description.
+The existing 1536-d text embedding stored in `media_item_embedding` is **not used** for burst detection. That embedding encodes description, tags, and people names — it is a semantic signal, not a visual one, and would incorrectly group unrelated photos that happen to share the same scene description.
 
 ### 2.4 Grouping Rule
 

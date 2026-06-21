@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `counts.unreviewed` and `counts.lowValue` from `GET /api/media/dashboard` response
   - All classification UI: filter controls, `ClassificationBadge` component, classification selects in `MediaDetailDrawer` and `BulkActionToolbar`, and review-queue card filtering
 
+- **Media `caption` field** — The `caption` column has been removed from `media_items`; `description` is retained and unchanged. Removed surface area:
+  - `media_items.caption` DB column and the migration that drops it
+  - `caption` from `POST /api/media` create body and `PATCH /api/media/:id` mutable fields
+  - AI auto-tagging caption generation — the vision prompt now returns a JSON object with two keys (`tags`, `description`) instead of three; parse and persist logic updated accordingly
+  - Caption term in the semantic-search embedding text composition — embeddings are now built from `description + tags + people names`
+  - Caption UI field in `MediaDetailDrawer`
+  - Existing embeddings are intentionally left as-is; no re-embed backfill is required
+
 ## [1.3.0] - 2026-06-15
 
 ### Added

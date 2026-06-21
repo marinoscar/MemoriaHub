@@ -401,7 +401,7 @@ Using the existing `Face` model means all downstream features work unchanged: `G
 
 **Preserved across reruns:** Face-detection reruns delete only rows where `manuallyAssigned=false`. Manual rows are left intact. If the provider subsequently detects the same person's face in the photo, both a detected face row and the manual face row may coexist; the person will appear in the gallery through either row.
 
-**Auto-tagging re-enqueue:** Adding or removing a manual association re-enqueues an `auto_tagging` enrichment job for the media item (priority 0). This ensures the vision model's caption, description, and embedding reflect the updated person context.
+**Auto-tagging re-enqueue:** Adding or removing a manual association re-enqueues an `auto_tagging` enrichment job for the media item (priority 0). This ensures the vision model's description and embedding reflect the updated person context.
 
 **Endpoints:**
 

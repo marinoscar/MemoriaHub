@@ -1337,7 +1337,6 @@ Register an uploaded `StorageObject` as a `MediaItem`.
 | `capturedAt` | ISO 8601 datetime | No | When the photo/video was taken |
 | `capturedAtOffset` | integer (minutes) | No | UTC offset of `capturedAt` |
 | `title` | string (max 512) | No | |
-| `caption` | string (max 2048) | No | |
 | `description` | string (max 8192) | No | |
 | `favorite` | boolean | No | Defaults to `false` |
 | `metadata` | object | No | Arbitrary JSONB metadata |
@@ -1501,7 +1500,7 @@ Get a single `MediaItem` by ID. Returns fresh signed URLs for the thumbnail and 
 
 Update mutable fields on a `MediaItem`. Only supplied fields are updated.
 
-**Mutable fields:** `capturedAt`, `capturedAtOffset`, `metadata`, `title`, `caption`, `description`, `favorite`.
+**Mutable fields:** `capturedAt`, `capturedAtOffset`, `metadata`, `title`, `description`, `favorite`.
 
 **Error Cases:**
 - 404 Not Found

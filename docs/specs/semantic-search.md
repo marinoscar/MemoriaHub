@@ -27,7 +27,7 @@
 
 Semantic search lets users find photos by describing their visual content in natural language — "birthday cake with candles", "kids laughing in the garden", "sunset over the ocean" — rather than specifying exact metadata. It works by comparing a vector embedding of the user's query against pre-computed embeddings stored for each photo.
 
-Embeddings are generated at the end of every successful [auto-tagging](auto-tagging.md) job. The embedding text combines the photo's AI-generated `caption`, `description`, `tags`, and any assigned people names into a single string that is fed to an embedding model (currently OpenAI only).
+Embeddings are generated at the end of every successful [auto-tagging](auto-tagging.md) job. The embedding text combines the photo's AI-generated `description`, `tags`, and any assigned people names into a single string that is fed to an embedding model (currently OpenAI only).
 
 Semantic search is **optional and additive**:
 
@@ -80,7 +80,7 @@ Set via `PUT /api/ai/features/embedding` (Admin, `ai_settings:write`). The same 
 
 The `media_item_embedding` table is created with `vector(1536)` so only 1536-d models are usable without a schema change.
 
-**Admin UI — AI Captions & Description Search:** The AI Settings page exposes a dedicated "AI Captions & Description Search" section where an admin can enable the embedding feature, select the OpenAI model, and click "Test" to verify connectivity. The Test button calls `POST /api/ai/test/embedding` and surfaces a dimension-mismatch warning (dimensions != 1536) inline before the admin saves the configuration. Embeddings require OpenAI credentials (`PUT /api/ai/credentials/openai`) — no other provider supports `embedText`. The embedding model list is retrieved via `GET /api/ai/models?provider=openai&capability=embedding`.
+**Admin UI — AI Description Search:** The AI Settings page exposes a dedicated "AI Description Search" section where an admin can enable the embedding feature, select the OpenAI model, and click "Test" to verify connectivity. The Test button calls `POST /api/ai/test/embedding` and surfaces a dimension-mismatch warning (dimensions != 1536) inline before the admin saves the configuration. Embeddings require OpenAI credentials (`PUT /api/ai/credentials/openai`) — no other provider supports `embedText`. The embedding model list is retrieved via `GET /api/ai/models?provider=openai&capability=embedding`.
 
 ---
 
@@ -106,16 +106,15 @@ CREATE INDEX ON media_item_embedding USING hnsw (embedding vector_cosine_ops);
 
 An additional `btree` index on `circle_id` allows the KNN query to filter by circle efficiently.
 
-### `media_items.caption` and `media_items.description`
+### `media_items.description`
 
-Two nullable text columns on `media_items` written by the auto-tagging handler:
+A nullable text column on `media_items` written by the auto-tagging handler:
 
 | Column | Max length | Notes |
 |--------|-----------|-------|
-| `caption` | 2 048 chars | Single-sentence caption; always overwritten on successful parse |
 | `description` | 8 192 chars | 1–3 sentence description; always overwritten on successful parse |
 
-There is no `title` column on `media_items` — it was removed when caption and description were introduced.
+There is no `title` column on `media_items`.
 
 ---
 
@@ -124,7 +123,7 @@ There is no `title` column on `media_items` — it was removed when caption and 
 Embedding is the final step of every successful `auto_tagging` enrichment job, implemented in `AutoTaggingService.embedAndStore`.
 
 ```
-caption + description + tag names + people names
+description + tag names + people names
          ↓ joined with ". "
     embedding text string
          ↓ embedText(creds, model, text)
@@ -136,12 +135,12 @@ caption + description + tag names + people names
 **Embedding text construction:**
 
 ```typescript
-const text = [caption, description, ...tagNames, ...peopleNames]
+const text = [description, ...tagNames, ...peopleNames]
   .filter(Boolean)
   .join('. ');
 ```
 
-If the resulting string is empty (e.g. no caption, no description, no tags, no people), `embedAndStore` returns early without making an API call.
+If the resulting string is empty (e.g. no description, no tags, no people), `embedAndStore` returns early without making an API call.
 
 **Best-effort semantics:** `embedAndStore` wraps all logic in a try/catch. Any failure — provider not configured, credential error, `embedText` not implemented, API error, SQL error — is logged as a warning and swallowed. Embedding failures **never** flip `media_tag_status` to `failed` and **never** cause the enrichment job to retry.
 
@@ -228,7 +227,7 @@ Items that have already been tagged but have no embedding (e.g. photos tagged be
 
 ### Re-Embed on People Change
 
-When face assignments change for a media item — via assign, unassign, merge, or soft-delete in the People API — the `PeopleService` automatically re-enqueues an `auto_tagging` job (priority 0, reason `rerun`) for each affected item, gated on the circle's `autoTaggingEnabled`. This refreshes the caption, description, and embedding to incorporate the updated people names.
+When face assignments change for a media item — via assign, unassign, merge, or soft-delete in the People API — the `PeopleService` automatically re-enqueues an `auto_tagging` job (priority 0, reason `rerun`) for each affected item, gated on the circle's `autoTaggingEnabled`. This refreshes the description and embedding to incorporate the updated people names.
 
 See [auto-tagging.md — People-Change Re-Enqueue](auto-tagging.md#people-change-re-enqueue) for details.
 
