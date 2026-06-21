@@ -24,7 +24,7 @@ import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { whereDateRange } from '../search/media-where.builder';
+import { MetadataBackfillService } from './metadata-backfill.service';
 
 // ---------------------------------------------------------------------------
 // DTOs
@@ -57,6 +57,7 @@ export class MetadataController {
     private readonly prisma: PrismaService,
     private readonly circleMembershipService: CircleMembershipService,
     private readonly enrichmentJobService: EnrichmentJobService,
+    private readonly metadataBackfillService: MetadataBackfillService,
   ) {}
 
   // --------------------------------------------------------------------------
@@ -160,57 +161,11 @@ export class MetadataController {
       'collaborator' as CircleRole,
     );
 
-    // No per-circle opt-in check — metadata extraction has no feature flag
-
-    const from = dto.from ? new Date(dto.from) : undefined;
-    const to = dto.to ? new Date(dto.to) : undefined;
-    const dateWhere = whereDateRange(from, to);
-
-    const mediaItems = await this.prisma.mediaItem.findMany({
-      where: {
-        circleId,
-        deletedAt: null,
-        ...dateWhere,
-        ...(force
-          ? {}
-          : {
-              OR: [
-                { metadataStatus: null },
-                {
-                  metadataStatus: {
-                    status: { notIn: [MediaMetadataStatusType.processed] },
-                  },
-                },
-              ],
-            }),
-      },
-      select: { id: true, circleId: true },
+    const enqueued = await this.metadataBackfillService.backfillCircle(circleId, {
+      from: dto.from,
+      to: dto.to,
+      force,
     });
-
-    let enqueued = 0;
-    for (const item of mediaItems) {
-      await this.enrichmentJobService.enqueue({
-        type: 'metadata_extraction',
-        mediaItemId: item.id,
-        circleId: item.circleId,
-        reason: JobReason.backfill,
-        priority: 100,
-      });
-
-      await this.prisma.mediaMetadataStatus.upsert({
-        where: { mediaItemId: item.id },
-        create: {
-          mediaItemId: item.id,
-          circleId: item.circleId,
-          status: MediaMetadataStatusType.pending,
-        },
-        update: {
-          status: MediaMetadataStatusType.pending,
-        },
-      });
-
-      enqueued++;
-    }
 
     this.logger.log(
       `Backfill: queued ${enqueued} metadata extraction job(s) for circle ${circleId} by user ${user.id}`,

@@ -14,10 +14,12 @@ import { PeopleService } from './people.service';
 import { PeopleController } from './people.controller';
 import { FaceDetectionHandler } from './face-detection.handler';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
+import { FaceBackfillService } from './face-backfill.service';
+import { AdminFaceBackfillController } from './admin-face-backfill.controller';
 
 @Module({
   imports: [SettingsModule, StorageProvidersModule, CirclesModule, EnrichmentModule],
-  controllers: [FaceSettingsController, FaceDetectionController, PeopleController],
+  controllers: [FaceSettingsController, FaceDetectionController, PeopleController, AdminFaceBackfillController],
   providers: [
     FaceSettingsService,
     FaceProviderRegistry,
@@ -27,6 +29,7 @@ import { EnrichmentModule } from '../enrichment/enrichment.module';
     FaceClusteringService,
     PeopleService,
     FaceDetectionHandler,
+    FaceBackfillService,
   ],
   exports: [FaceSettingsService, FaceProviderRegistry, FaceMatchingService, FaceClusteringService],
 })

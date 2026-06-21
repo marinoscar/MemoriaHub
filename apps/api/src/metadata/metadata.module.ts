@@ -13,6 +13,8 @@ import { VideoProbeProcessor } from '../storage/processing/processors/video-prob
 import { MetadataExtractionHandler } from './metadata.handler';
 import { MetadataExtractionService } from './metadata.service';
 import { MetadataController } from './metadata.controller';
+import { MetadataBackfillService } from './metadata-backfill.service';
+import { AdminMetadataController } from './admin-metadata.controller';
 
 @Module({
   imports: [
@@ -23,7 +25,7 @@ import { MetadataController } from './metadata.controller';
     GeoLocationModule,
     MediaModule, // provides MediaMetadataSyncService (now exported)
   ],
-  controllers: [MetadataController],
+  controllers: [MetadataController, AdminMetadataController],
   providers: [
     // Individual processor classes (same pattern as MediaModule re-registering processors)
     ExifProcessor,
@@ -45,6 +47,7 @@ import { MetadataController } from './metadata.controller';
 
     MetadataExtractionHandler,
     MetadataExtractionService,
+    MetadataBackfillService,
   ],
 })
 export class MetadataModule {}

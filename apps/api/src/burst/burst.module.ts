@@ -9,10 +9,11 @@ import { BurstService } from './burst.service';
 import { BurstDetectionHandler } from './burst-detection.handler';
 import { BurstDetectionService } from './burst-detection.service';
 import { BurstEnqueueListener } from './burst-enqueue.listener';
+import { AdminBurstController } from './admin-burst.controller';
 
 @Module({
   imports: [EnrichmentModule, StorageProvidersModule, PrismaModule, CirclesModule, SettingsModule],
-  controllers: [BurstController],
+  controllers: [BurstController, AdminBurstController],
   providers: [BurstService, BurstDetectionHandler, BurstDetectionService, BurstEnqueueListener],
 })
 export class BurstModule {}

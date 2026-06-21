@@ -331,28 +331,14 @@ export class BurstService {
   }
 
   // ---------------------------------------------------------------------------
-  // Backfill burst detection
+  // Backfill burst detection (internal — no membership check, no per-circle opt-in gate)
   // ---------------------------------------------------------------------------
 
-  async backfillBurstDetection(dto: BurstBackfillDto, userId: string, perms: string[]) {
-    const { circleId, force, from, to } = dto;
-
-    await this.membership.assertCircleAccess(userId, circleId, perms, CircleRole.collaborator);
-
-    const circle = await this.prisma.circle.findUnique({
-      where: { id: circleId },
-      select: { burstDetectionEnabled: true },
-    });
-
-    if (!circle) {
-      throw new NotFoundException(`Circle ${circleId} not found`);
-    }
-
-    if (!circle.burstDetectionEnabled) {
-      throw new BadRequestException(
-        `Circle ${circleId} does not have burst detection enabled. Enable it first via PUT /api/circles/${circleId}/burst-settings`,
-      );
-    }
+  private async backfillCircleInternal(
+    circleId: string,
+    opts: { from?: string; to?: string; force?: boolean },
+  ): Promise<number> {
+    const { force = false, from, to } = opts;
 
     // Build optional capturedAt range filter from the from/to bounds
     const capturedAtFilter =
@@ -392,7 +378,7 @@ export class BurstService {
       this.logger.log(
         `Backfilled burst detection for circle ${circleId}: enqueued ${enqueued} items (force=true${from || to ? `, from=${from ?? '*'}, to=${to ?? '*'}` : ''})`,
       );
-      return { data: { enqueued } };
+      return enqueued;
     } else {
       // Only enqueue items without an existing burstGroupId and without a succeeded burst_detection job
       const succeededJobMediaIds = await this.prisma.enrichmentJob.findMany({
@@ -434,7 +420,63 @@ export class BurstService {
       this.logger.log(
         `Backfilled burst detection for circle ${circleId}: enqueued ${enqueued} items (force=false${from || to ? `, from=${from ?? '*'}, to=${to ?? '*'}` : ''})`,
       );
-      return { data: { enqueued } };
+      return enqueued;
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Backfill burst detection (per-circle, with membership check)
+  // ---------------------------------------------------------------------------
+
+  async backfillBurstDetection(dto: BurstBackfillDto, userId: string, perms: string[]) {
+    const { circleId, force, from, to } = dto;
+
+    await this.membership.assertCircleAccess(userId, circleId, perms, CircleRole.collaborator);
+
+    const circle = await this.prisma.circle.findUnique({
+      where: { id: circleId },
+      select: { burstDetectionEnabled: true },
+    });
+
+    if (!circle) {
+      throw new NotFoundException(`Circle ${circleId} not found`);
+    }
+
+    if (!circle.burstDetectionEnabled) {
+      throw new BadRequestException(
+        `Circle ${circleId} does not have burst detection enabled. Enable it first via PUT /api/circles/${circleId}/burst-settings`,
+      );
+    }
+
+    const enqueued = await this.backfillCircleInternal(circleId, { from, to, force });
+    return { data: { enqueued } };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Backfill burst detection across ALL circles (Admin)
+  // ---------------------------------------------------------------------------
+
+  async backfillAllCircles(opts: {
+    from?: string;
+    to?: string;
+    force?: boolean;
+  }): Promise<{ enqueued: number; circles: number }> {
+    const allCircles = await this.prisma.circle.findMany({
+      select: { id: true },
+    });
+
+    let totalEnqueued = 0;
+    const circleCount = allCircles.length;
+
+    for (const circle of allCircles) {
+      const count = await this.backfillCircleInternal(circle.id, opts);
+      totalEnqueued += count;
+    }
+
+    this.logger.log(
+      `Global burst backfill complete: ${totalEnqueued} job(s) enqueued across ${circleCount} circle(s)`,
+    );
+
+    return { enqueued: totalEnqueued, circles: circleCount };
   }
 }
