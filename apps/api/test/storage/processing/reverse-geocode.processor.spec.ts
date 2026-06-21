@@ -16,10 +16,9 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import {
-  GEO_LOCATION_PROVIDER,
-  GeoLocationProvider,
   GeoLocationResult,
 } from '../../../src/media/geo/geo-location-provider.interface';
+import { GeoLocationService } from '../../../src/media/geo/geo-location.service';
 import { ReverseGeocodeProcessor } from '../../../src/storage/processing/processors/reverse-geocode.processor';
 import { getPlainJpegBuffer, makeGetStream } from '../../fixtures/media/image-fixtures';
 
@@ -79,10 +78,10 @@ const FIXTURE_LNG = -84.703;
 
 describe('ReverseGeocodeProcessor', () => {
   let processor: ReverseGeocodeProcessor;
-  let mockGeoProvider: jest.Mocked<GeoLocationProvider>;
+  let mockGeoService: jest.Mocked<Pick<GeoLocationService, 'reverseGeocode'>>;
 
   async function buildModule() {
-    mockGeoProvider = {
+    mockGeoService = {
       reverseGeocode: jest.fn(),
     };
 
@@ -90,8 +89,8 @@ describe('ReverseGeocodeProcessor', () => {
       providers: [
         ReverseGeocodeProcessor,
         {
-          provide: GEO_LOCATION_PROVIDER,
-          useValue: mockGeoProvider,
+          provide: GeoLocationService,
+          useValue: mockGeoService,
         },
       ],
     }).compile();
@@ -103,6 +102,11 @@ describe('ReverseGeocodeProcessor', () => {
     mockExifrParseResult = undefined;
     processor = await buildModule();
     jest.clearAllMocks();
+    // Reset mock to the standard resolved value after clearAllMocks wipes it
+    mockGeoService.reverseGeocode.mockResolvedValue({
+      result: MOCK_GEO_RESULT,
+      source: 'geonames-offline',
+    });
   });
 
   describe('processor identity', () => {
@@ -147,7 +151,10 @@ describe('ReverseGeocodeProcessor', () => {
         latitude: FIXTURE_LAT,
         longitude: FIXTURE_LNG,
       };
-      mockGeoProvider.reverseGeocode.mockResolvedValue(MOCK_GEO_RESULT);
+      mockGeoService.reverseGeocode.mockResolvedValue({
+        result: MOCK_GEO_RESULT,
+        source: 'geonames-offline',
+      });
     });
 
     it('should return success:true', async () => {
@@ -159,8 +166,8 @@ describe('ReverseGeocodeProcessor', () => {
     it('should call reverseGeocode with the correct lat/lng', async () => {
       const buf = await getPlainJpegBuffer();
       await processor.process(makeObject(), makeGetStream(buf));
-      expect(mockGeoProvider.reverseGeocode).toHaveBeenCalledTimes(1);
-      expect(mockGeoProvider.reverseGeocode).toHaveBeenCalledWith(FIXTURE_LAT, FIXTURE_LNG);
+      expect(mockGeoService.reverseGeocode).toHaveBeenCalledTimes(1);
+      expect(mockGeoService.reverseGeocode).toHaveBeenCalledWith(FIXTURE_LAT, FIXTURE_LNG);
     });
 
     it('should write country to metadata', async () => {
@@ -234,7 +241,7 @@ describe('ReverseGeocodeProcessor', () => {
     it('should NOT call the geo provider', async () => {
       const buf = await getPlainJpegBuffer();
       await processor.process(makeObject(), makeGetStream(buf));
-      expect(mockGeoProvider.reverseGeocode).not.toHaveBeenCalled();
+      expect(mockGeoService.reverseGeocode).not.toHaveBeenCalled();
     });
   });
 
@@ -249,14 +256,17 @@ describe('ReverseGeocodeProcessor', () => {
       const result = await processor.process(makeObject(), makeGetStream(buf));
       expect(result.success).toBe(true);
       expect(result.metadata).toEqual({});
-      expect(mockGeoProvider.reverseGeocode).not.toHaveBeenCalled();
+      expect(mockGeoService.reverseGeocode).not.toHaveBeenCalled();
     });
   });
 
   describe('process — geo provider returns null', () => {
     beforeEach(() => {
       mockExifrParseResult = { latitude: 0, longitude: 0 };
-      mockGeoProvider.reverseGeocode.mockResolvedValue(null);
+      mockGeoService.reverseGeocode.mockResolvedValue({
+        result: null,
+        source: 'geonames-offline',
+      });
     });
 
     it('should return success:true with empty metadata when provider returns null', async () => {
