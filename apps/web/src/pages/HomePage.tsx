@@ -9,6 +9,7 @@ import {
 import {
   PhotoLibrary as PhotoLibraryIcon,
   BurstMode as BurstModeIcon,
+  FilterNone as SimilarIcon,
 } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
 import { useCircle } from '../hooks/useCircle';
@@ -71,6 +72,22 @@ export default function HomePage() {
           sx={{ mx: { xs: 2, md: 3 }, mt: 2 }}
         >
           {data.counts.pendingBurstGroups} burst group{data.counts.pendingBurstGroups !== 1 ? 's' : ''} ready to review
+        </Alert>
+      )}
+
+      {/* Pending similar photo groups banner */}
+      {data?.counts?.pendingSimilarityGroups != null && data.counts.pendingSimilarityGroups > 0 && (
+        <Alert
+          severity="info"
+          icon={<SimilarIcon />}
+          action={
+            <Button size="small" component={RouterLink} to="/similar">
+              Review
+            </Button>
+          }
+          sx={{ mx: { xs: 2, md: 3 }, mt: 2 }}
+        >
+          {data.counts.pendingSimilarityGroups} similar photo group{data.counts.pendingSimilarityGroups !== 1 ? 's' : ''} ready to review
         </Alert>
       )}
 
