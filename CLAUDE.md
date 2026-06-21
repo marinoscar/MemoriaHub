@@ -346,8 +346,20 @@ An admin dashboard at `/admin/jobs` provides monitoring and control over the gen
 - `POST /api/media/bulk/tags` - Bulk add/remove tags on 1–500 items
 - `POST /api/media/bulk/delete` - Bulk soft-delete 1–500 items
 
+### Geo / Reverse-Geocoding Settings (Admin only — geo_settings:read / geo_settings:write)
+The active reverse-geocoding provider is chosen in the Admin Geo Settings page and persisted in `system_settings` under `geo.reverseProvider` (values: `offline` | `nominatim` | `google`). The selection takes effect immediately on the next geocode call without a restart. When `google` is active but the credential is missing or disabled, the service falls back to `offline` transparently.
+- `GET /api/geo/settings` - Get configured providers (masked credential `last4`, `enabled`) and the active reverse provider (geo_settings:read)
+- `PUT /api/geo/credentials/:provider` - Upsert provider credentials encrypted at rest; body `{ apiKey, baseUrl?, enabled? }`; only `google` is currently supported (geo_settings:write)
+- `DELETE /api/geo/credentials/:provider` - Remove provider credentials; returns 404 if none configured (geo_settings:write)
+- `PUT /api/geo/features/reverse` body `{ provider }` - Set the active reverse provider (`offline`|`nominatim`|`google`); returns 400 if `google` is chosen but no enabled credential exists (geo_settings:write)
+- `POST /api/geo/test` body `{ provider, lat?, lng? }` - Test provider connectivity; defaults to San José, Costa Rica if no coordinates supplied; returns `{ ok, sample?, error? }` (geo_settings:read)
+
+### Admin: Geocode Backfill (Admin role + geo_settings:write)
+App-wide geocode backfill across all circles (not circle-scoped). Processes items where `takenLat` and `takenLng` are non-null.
+- `POST /api/admin/geocode/backfill` body `{ from?, to?, force? }` - Bulk-enqueue `geocode` enrichment jobs for all media items with GPS across every circle; `from`/`to` (optional ISO-8601) bound `capturedAt`; when `force` is false (default) only items whose `media_geocode_status` is absent or not `processed` are enqueued; returns `{ enqueued }` (geo_settings:write)
+
 ### Media — Geo Services
-- `GET /api/media/geo/reverse?lat=&lng=` - On-demand reverse geocoding (offline provider by default)
+- `GET /api/media/geo/reverse?lat=&lng=` - On-demand reverse geocoding (uses the active reverse provider selected in Geo Settings; see `geo.reverseProvider` system setting)
 - `GET /api/media/geo/search?q=&limit=` - Forward geocoding via Nominatim (requires `GEO_FORWARD_SEARCH_ENABLED=true`)
 
 ### Media — Circle Dashboard
@@ -368,6 +380,11 @@ Metadata re-run re-extracts EXIF, dimensions, geocode, and video-probe data on d
 - `POST /api/metadata/backfill` body `{ circleId, from?, to?, force? }` - Bulk-enqueue `metadata_extraction` jobs for non-deleted media in a circle; `from`/`to` (optional ISO-8601) bound `capturedAt`; when `force` is false (default) only items whose `media_metadata_status` is absent or not `processed` are enqueued; returns `{ enqueued }` (media:write + collaborator)
 
 > **UI:** A "Re-run metadata extraction" button appears in the media properties pane (MediaDetailDrawer) and calls `POST /api/media/:id/metadata/rerun`. The circle Settings tab exposes a "Re-extract metadata" backfill panel where a `circle_admin` can choose an optional `capturedAt` range and force flag before calling `POST /api/metadata/backfill`.
+
+### Media — Geocode Rerun (media:read / media:write + per-circle roles)
+Per-item geocoding rerun via the `geocode` enrichment job type. Reads stored `takenLat`/`takenLng` — no image download. Writes geo columns (`geoCountry`, `geoAdmin1`, etc.) and `geoSource` using the active reverse provider configured in Geo Settings. Status is tracked in `media_geocode_status`.
+- `POST /api/media/:id/geocode/rerun` - Re-enqueue a `geocode` enrichment job at priority 0; upserts `media_geocode_status` to `pending`; returns `{ jobId, status }` (media:write + collaborator)
+- `GET /api/media/:id/geocode/status` - Get per-item geocode status: `{ status, processedAt, lastError }` (status `not_processed|pending|processing|processed|failed`); returns `not_processed` with null fields when no status row exists (media:read + viewer)
 
 ### Media — Explore
 - `GET /api/media/explore/places?circleId=` - List distinct places with item counts and cover thumbnails; returns `Array<{ name: string; count: number; coverThumbnailUrl: string | null }>` (media:read + viewer)
@@ -488,6 +505,8 @@ Agentic search is **stateless** — no conversation rows are stored server-side.
 - `search:use` - Use deterministic search and conversational (agentic) search (all roles)
 - `face_settings:read` - View face provider config, test connectivity, list models (Admin only)
 - `face_settings:write` - Configure face provider credentials and set active detection provider/model (Admin only)
+- `geo_settings:read` - View geo provider config, test provider connectivity (Admin only)
+- `geo_settings:write` - Configure geo provider credentials, set active reverse provider, run app-wide geocode backfill (Admin only)
 - `jobs:read` - View enrichment job queue stats and list jobs (Admin only)
 - `jobs:write` - Retry, reset, and delete enrichment jobs (Admin only)
 
@@ -537,6 +556,8 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `media_item_embedding` - One row per media item; stores a 1536-d pgvector embedding of the item's description + tags + people names; written via raw SQL (Prisma cannot handle the `vector(1536)` column type); circle_id is denormalized for circle-scoped KNN filtering; requires the `vector` pgvector Postgres extension and a `pgvector/pgvector:pg16` database image; HNSW cosine index on `embedding`; upserted by the auto-tagging handler as a best-effort final step — embedding failures never fail the tagging job
 - `burst_groups` - Circle-scoped burst review groups; one row per detected burst cluster; status `pending` | `resolved` | `dismissed`; `suggestedBestItemId` FK → `media_items` (SetNull on delete); `mediaCount` denormalized member count (updated whenever a member joins or leaves); `capturedAt` of the earliest member used for chronological queue sorting; `resolvedById` / `resolvedAt` track who resolved or dismissed the group
 - `media_metadata_status` - Per-media-item metadata extraction re-run status (one row per item); statuses: `not_processed`, `pending`, `processing`, `processed`, `failed`; records `processed_at` and `last_error`; unique on `media_item_id`; cascade delete on both `media_items` and `circles`
+- `geo_provider_credentials` - Reverse-geocoding provider API keys (AES-256-GCM encrypted via `SECRETS_ENCRYPTION_KEY`); one row per provider; currently only `google` is supported; `last4` exposed for display; `enabled` flag allows disabling without deleting; plaintext key never stored or returned
+- `media_geocode_status` - Per-media-item geocoding status (one row per item); reuses `MediaMetadataStatusType` enum (`not_processed`, `pending`, `processing`, `processed`, `failed`); tracks `processed_at` and `last_error`; unique on `media_item_id`; cascade delete on both `media_items` and `circles`
 
 **Note:** `media_items` has `description` (nullable, max 8 192 chars) written by the auto-tagging handler on each successful vision call. There is no `title` column. `media_items`, `albums`, and `tags` use `added_by_id` (not `owner_id`) to track the uploading user. Dedup uniqueness for `media_items` is `(circle_id, content_hash)`. Tag names are unique per `(circle_id, name)`. The `media_tags` join table has a `source` column (`manual` | `ai`, default `manual`) that tracks whether a tag was applied by the AI auto-tagging service or by a user manually; AI re-runs are authoritative over `source='ai'` rows only and never modify `source='manual'` rows. `media_items` also carries burst detection columns: `perceptual_hash` (**TEXT?**, unsigned 64-bit dHash stored as a decimal string — see storage rationale below), `sharpness_score` (Float?, variance-of-Laplacian sharpness measure), `burst_uuid` (String?, Apple BurstUUID from EXIF MakerNote — null for non-Apple cameras), `burst_score` (Float?, composite quality score within the group — null when not in a group), and `burst_group_id` (FK → `burst_groups`, SetNull on delete). The `perceptual_hash` column is omitted from default API responses via a Prisma global `omit` because it is an internal computation value; the burst matcher parses it with `BigInt(string)` only when computing Hamming distance. **Why TEXT and not `bigint`:** Postgres `bigint` is a signed 64-bit integer (max 2^63-1); a dHash is an unsigned 64-bit value and hashes with the high bit set overflow, producing a "value out of range for type bigint" error. Additionally, Prisma maps `BigInt` to JavaScript's `BigInt` primitive, which throws "Do not know how to serialize a BigInt" on `JSON.stringify`, crashing any endpoint that returns the column. Storing the value as a decimal string avoids both problems.
 
@@ -618,9 +639,11 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 - `UPTRACE_DSN` - Uptrace connection string
 
 **Geo Services:**
-- `GEO_PROVIDER` - Reverse geocoding provider: `offline` (default, on-server GeoNames dataset) or `nominatim` (HTTP, sends GPS off-server)
+- `GEO_PROVIDER` - Default reverse-geocoding provider used when `system_settings.geo.reverseProvider` is not set: `offline` (default, on-server GeoNames dataset) or `nominatim` (HTTP, sends GPS off-server). **Note:** the active provider is now primarily managed in the Admin Geo Settings page and persisted in `system_settings.geo.reverseProvider`. Google Maps is also available as a provider once a Google API key is configured via `PUT /api/geo/credentials/google`. `GEO_PROVIDER` acts as the startup fallback only.
 - `NOMINATIM_BASE_URL` - Nominatim endpoint (default: `https://nominatim.openstreetmap.org`)
 - `GEO_FORWARD_SEARCH_ENABLED` - Enable `GET /api/media/geo/search` forward geocoding (default: `false`; only typed query leaves server, never GPS)
+- `GEO_FORWARD_PROVIDER` - Forward geocoding provider: `nominatim` (default, OSM) or `google`; Google option requires `GOOGLE_MAPS_API_KEY`
+- `GOOGLE_MAPS_API_KEY` - Google Maps API key for forward geocoding via `GEO_FORWARD_PROVIDER=google`; server-side only, never exposed to clients. For **reverse** geocoding the Google API key is stored encrypted in the `geo_provider_credentials` table and configured via the Admin UI — this env var does not affect reverse geocoding.
 
 **Face Recognition:**
 - `FACE_COMPREFACE_URL` - Base URL of the CompreFace core sidecar (default: `http://compreface-core:3000`); used as the default `baseUrl` for the CompreFace provider. The provider is keyless — no API key is required.
@@ -701,6 +724,7 @@ Detailed specs live under `docs/specs/`:
 - [Storage Insights](docs/specs/storage-insights.md) — precomputed global storage metrics, snapshot lifecycle, interval-gated cron, admin dashboard
 - [Burst Photo Detection](docs/specs/burst-detection.md) — on-server dHash + temporal proximity grouping, best-shot scoring, non-destructive review queue, per-circle opt-in, backfill with optional capturedAt range and on-demand retroactive perceptual hashing
 - [Metadata Extraction Re-run](docs/specs/metadata-rerun.md) — on-demand rerun and backfill of EXIF/dimensions/geocode/video-probe processors via enrichment queue; no per-circle opt-in; direct column sync without cascading to tagging, face, or burst
+- [Geocoding](docs/specs/geocoding.md) — three-provider reverse-geocoding model (offline/nominatim/google), dynamic provider resolution via system setting, encrypted Google credential store, geocode enrichment job type, media_geocode_status lifecycle, app-wide admin backfill
 
 ## Specialized Subagents (MANDATORY)
 
