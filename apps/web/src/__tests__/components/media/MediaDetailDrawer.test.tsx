@@ -150,8 +150,7 @@ function makeMediaItem(overrides: Partial<MediaItem> = {}): MediaItem {
     cameraMake: 'Apple',
     cameraModel: 'iPhone 15 Pro',
     originalFilename: 'DSC_0001.jpg',
-    caption: 'Beautiful sunset at Arenal',
-    description: null,
+    description: 'Beautiful sunset at Arenal',
     favorite: false,
     geoCountry: 'Costa Rica',
     geoCountryCode: 'CR',
@@ -539,19 +538,19 @@ describe('MediaDetailDrawer', () => {
       });
     });
 
-    it('should pre-populate the Caption field with the item caption', async () => {
+    it('should pre-populate the Description field with the item description', async () => {
       const user = userEvent.setup();
       render(<MediaDetailDrawer {...defaultProps()} />);
       await user.click(screen.getByRole('button', { name: 'Edit' }));
       await waitFor(() => {
-        const captionInput = screen.getByLabelText(/caption/i);
-        expect(captionInput).toHaveValue('Beautiful sunset at Arenal');
+        const descriptionInput = screen.getByLabelText(/description/i);
+        expect(descriptionInput).toHaveValue('Beautiful sunset at Arenal');
       });
     });
 
     it('should call onItemUpdated with the API response after save', async () => {
       const onItemUpdated = vi.fn();
-      const updatedItem = makeMediaItem({ caption: 'New Caption' });
+      const updatedItem = makeMediaItem({ description: 'New Description' });
       mockPatchMedia.mockResolvedValue(updatedItem);
 
       const user = userEvent.setup();

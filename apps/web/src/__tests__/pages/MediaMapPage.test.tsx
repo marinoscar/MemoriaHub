@@ -173,7 +173,6 @@ function makeFullItem(id: string): MediaItem {
     cameraMake: null,
     cameraModel: null,
     originalFilename: 'photo.jpg',
-    caption: null,
     description: null,
     favorite: false,
     geoCountry: 'Costa Rica',

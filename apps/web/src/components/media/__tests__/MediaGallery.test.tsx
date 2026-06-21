@@ -104,7 +104,6 @@ function makeItem(id: string, overrides: Partial<MediaItem> = {}): MediaItem {
     cameraMake: null,
     cameraModel: null,
     originalFilename: `file-${id}.jpg`,
-    caption: null,
     description: null,
     favorite: false,
     geoCountry: null,
