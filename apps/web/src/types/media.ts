@@ -17,7 +17,6 @@ export interface MediaLocation {
 
 export type MediaType = 'photo' | 'video';
 export type MediaSource = 'web' | 'cli' | 'android' | 'import' | 'sync';
-export type MediaClassification = 'memory' | 'low_value' | 'unreviewed';
 export type MediaSortBy = 'capturedAt' | 'importedAt' | 'createdAt';
 export type SortOrder = 'asc' | 'desc';
 
@@ -32,7 +31,6 @@ export interface MediaItem {
   importedAt: string | null;
   source: MediaSource;
   contentHash: string | null;
-  classification: MediaClassification;
   width: number | null;
   height: number | null;
   durationMs: number | null;
@@ -91,7 +89,6 @@ export interface MediaQueryParams {
   type?: MediaType;
   capturedAtFrom?: string;
   capturedAtTo?: string;
-  classification?: MediaClassification;
   albumId?: string;
   favorite?: boolean;
   tag?: string;
@@ -126,7 +123,6 @@ export interface MediaQueryParams {
 
 export interface PatchMediaDto {
   capturedAt?: string | null;
-  classification?: MediaClassification;
   caption?: string | null;
   description?: string | null;
   favorite?: boolean;
@@ -144,7 +140,6 @@ export interface RegisterMediaDto {
   circleId: string;
   capturedAt?: string;
   capturedAtOffset?: number;
-  classification?: MediaClassification;
   caption?: string;
   description?: string;
   favorite?: boolean;
@@ -263,7 +258,6 @@ export interface BulkUpdateDto {
   ids: string[];
   set: {
     location?: { lat: number; lng: number; altitude?: number } | null;
-    classification?: MediaClassification;
     favorite?: boolean;
   };
 }
@@ -309,8 +303,6 @@ export interface DashboardResponse {
   favorites: MediaItem[];
   counts: {
     total: number;
-    unreviewed: number;
-    lowValue: number;
     missingGeo: number;
     pendingBurstGroups?: number;
   };
