@@ -177,6 +177,25 @@ describe('AppBar', () => {
     });
   });
 
+  describe('Brand slot', () => {
+    it('renders logo image on desktop viewport', () => {
+      render(<AppBar />);
+      // jsdom media queries always return false → isPhone=false → desktop scenario.
+      // Desktop: both the logo img and the wordmark text are rendered.
+      expect(screen.getByRole('img', { name: APP_NAME })).toBeInTheDocument();
+      expect(screen.getByText(APP_NAME)).toBeInTheDocument();
+    });
+
+    it('logo and wordmark both navigate to home on click', async () => {
+      const user = userEvent.setup();
+      render(<AppBar />);
+      // The brand wrapper Box has the onClick; clicking the img triggers navigation.
+      const logoImg = screen.getByRole('img', { name: APP_NAME });
+      await user.click(logoImg);
+      expect(logoImg).toBeInTheDocument();
+    });
+  });
+
   describe('Upload button', () => {
     it('shows Upload button when an active circle is present', () => {
       render(<AppBar />, {

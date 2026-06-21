@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import {
   AppBar as MuiAppBar,
+  Box,
   Toolbar,
   Typography,
   IconButton,
@@ -25,6 +26,7 @@ import { CircleSwitcher } from '../circles/CircleSwitcher';
 import { TopbarSearch } from '../search/TopbarSearch';
 import { MediaUploadDialog } from '../media/MediaUploadDialog';
 import { APP_NAME } from '../../constants/app';
+import appLogo from '../../assets/app_logo.png';
 
 interface AppBarProps {
   onMenuClick?: () => void;
@@ -73,22 +75,30 @@ export function AppBar({ onMenuClick }: AppBarProps) {
             <MenuIcon />
           </IconButton>
 
-          {/* Logo — hide text on phones to save space */}
-          {!isPhone && (
-            <Typography
-              variant="h6"
-              component="div"
-              sx={{
-                cursor: 'pointer',
-                fontWeight: 600,
-                flexShrink: 0,
-                whiteSpace: 'nowrap',
-              }}
-              onClick={() => navigate('/')}
-            >
-              {APP_NAME}
-            </Typography>
-          )}
+          {/* Brand — logo always shown; wordmark added on tablet/desktop */}
+          <Box
+            onClick={() => navigate('/')}
+            sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer', flexShrink: 0 }}
+          >
+            <Box
+              component="img"
+              src={appLogo}
+              alt={APP_NAME}
+              sx={{ height: 32, width: 'auto', display: 'block', objectFit: 'contain' }}
+            />
+            {!isPhone && (
+              <Typography
+                variant="h6"
+                component="div"
+                sx={{
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {APP_NAME}
+              </Typography>
+            )}
+          </Box>
 
           {/* Central search pill — takes available space */}
           <TopbarSearch />
