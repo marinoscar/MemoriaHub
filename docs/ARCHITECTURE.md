@@ -1198,7 +1198,6 @@ Before OAuth authentication completes:
 | **System Settings** | `/api/system-settings/*` | Yes (Admin) | App configuration |
 | **Allowlist** | `/api/allowlist/*` | Yes (Admin) | Access control |
 | **Circles** | `/api/circles/*` | Yes | Circle CRUD, members, invites |
-| **Admin Circles** | `/api/admin/circles` | Yes (Admin) | Cross-circle admin view |
 | **Admin Backup** | `/api/admin/backup/*` | Yes (Admin) | Local-drive backup/replication |
 | **Media Bulk** | `/api/media/bulk*` | Yes (`media:write` / `media:delete`) | Bulk update/tag/delete media items |
 | **Geo** | `/api/media/geo/*` | Yes (`media:read`) | Reverse and forward geocoding |
@@ -1375,7 +1374,6 @@ Before OAuth authentication completes:
 | Circle Detail | `/circles/:id` | Required | Any | Members, invites, and content for one circle |
 | System Settings | `/admin/settings` | Required | Admin | App configuration |
 | User Management | `/admin/users` | Required | Admin | User/allowlist mgmt |
-| Admin Circles | `/admin/circles` | Required | Admin | Cross-circle admin view |
 | Admin Backup | `/admin/backup` | Required | Admin | Trigger and monitor backup runs |
 | Device Activation | `/device` | Required | Any | Device auth approval |
 | Test Login | `/testing/login` | Public | - | Test auth bypass (dev only) |

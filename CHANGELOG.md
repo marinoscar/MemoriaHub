@@ -43,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Two-layer authorization: system RBAC guard (`circles:read` / `circles:write`) followed by per-circle role check (`CircleMembershipService.assertCircleAccess`); Admins holding `circles:manage_any` bypass per-circle checks
   - New permissions: `circles:read`, `circles:write`, `circles:manage_any`
   - `activeCircleId` in user settings JSONB for UX circle persistence (not trusted for authz)
-  - Web UI: `CircleContext`, `CircleSwitcher` in AppBar, `/circles`, `/circles/:id`, `/admin/circles` pages
+  - Web UI: `CircleContext`, `CircleSwitcher` in AppBar, `/circles`, `/circles/:id` pages
   - CLI: `circles list`, `circles use <id>` commands; per-folder circle binding in SQLite sync state v3; `--circle <id>` flag on `sync` and `backup` commands
 
 - **Backup Job**: Local-disk backup for circle media via `LocalDiskStorageProvider`.
