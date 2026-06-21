@@ -171,6 +171,12 @@ export class SystemSettingsService {
             (current as any).storage?.insights?.refreshIntervalHours ??
             4,
         },
+        trash: {
+          retentionDays:
+            (dto as any).storage?.trash?.retentionDays ??
+            (current as any).storage?.trash?.retentionDays ??
+            30,
+        },
       },
     };
 
