@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 3.0 |
+| **Version** | 3.1 |
 | **Last Updated** | June 2026 |
 | **Status** | All phases implemented |
 
@@ -31,11 +31,11 @@
 
 ## 1. Overview and Product Goal
 
-Face detection and recognition enables users to organize their photo library by the people in it. A user can ask "find all photos of Lucia" or confirm that every family member appears in a given photo. The feature delivers this through a background enrichment pipeline with pluggable provider support and per-circle biometric opt-in.
+Face detection and recognition enables users to organize their photo library by the people in it. A user can ask "find all photos of Lucia" or confirm that every family member appears in a given photo. The feature delivers this through a background enrichment pipeline with pluggable provider support and a global on/off toggle.
 
 **Core capabilities:**
 
-- Detect faces in photos automatically on upload (when enabled per circle).
+- Detect faces in photos automatically on upload when enabled globally (system setting `features.faceRecognition`, default off). Previously a per-circle opt-in; as of migration `20260621050000_drop_circle_feature_flags` this is a global toggle. **Note:** this migration dropped the per-circle `face_recognition_enabled` column — any previously-enabled circles lost that setting and an Admin must re-enable the feature globally.
 - Generate embedding vectors that encode each face's identity.
 - Recognize the same person across many photos by comparing embeddings.
 - Allow users to label people by name.
@@ -54,7 +54,7 @@ Face enrichment is deliberately decoupled from the synchronous upload path. Uplo
 ```mermaid
 flowchart TD
     A[File uploaded and processed] -->|OBJECT_PROCESSED_EVENT| B[FaceEnqueueListener]
-    B -->|circle.faceRecognitionEnabled AND FACE_AUTO_DETECT != false| C[EnrichmentJobService.enqueue]
+    B -->|SystemSettings features.faceRecognition AND FACE_AUTO_DETECT != false| C[EnrichmentJobService.enqueue]
     C -->|INSERT enrichment_jobs type=face_detection| D[(enrichment_jobs table)]
     C --> E[Upsert MediaFaceStatus → pending]
     D -->|poll every ENRICHMENT_JOB_POLL_MS| F[EnrichmentJobWorker]
@@ -210,9 +210,9 @@ The active provider and model are persisted in the `system_settings` table under
 |---------|-----|----------|
 | Upload (automatic) | `FaceEnqueueListener` on `OBJECT_PROCESSED_EVENT` | 10 |
 | Per-photo rerun (user) | `POST /api/media/:id/faces/rerun` | 0 (highest) |
-| Backfill (admin) | `POST /api/face/backfill { circleId, force? }` | 100 (lowest) |
+| Backfill (admin) | `POST /api/admin/face/backfill { force? }` | 100 (lowest) |
 
-The listener only enqueues when `MediaType` is `photo` (not video), `mediaItem.deletedAt` is null, `FACE_AUTO_DETECT` is not `'false'`, and `circle.faceRecognitionEnabled` is `true`.
+The listener only enqueues when `MediaType` is `photo` (not video), `mediaItem.deletedAt` is null, `FACE_AUTO_DETECT` is not `'false'`, and `features.faceRecognition` is `true` in system settings.
 
 Backfill skips items already in `processed` or `no_faces` status unless `force: true` is passed.
 
@@ -305,7 +305,7 @@ When the active provider is `rekognition`, embeddings are not stored in the appl
 
 ### Clustering Unknown Faces
 
-`POST /api/people/cluster { circleId }` triggers `FaceClusteringService` (requires `circle_admin` role and `faceRecognitionEnabled=true`).
+`POST /api/people/cluster { circleId }` triggers `FaceClusteringService` (requires `circle_admin` role and `features.faceRecognition=true` in system settings).
 
 **Algorithm: greedy union-find**
 
@@ -463,17 +463,19 @@ Every enrichment handler that reads image pixels MUST call `prepareImageForProce
 
 ---
 
-## 10. Per-Circle Opt-In and Biometric Privacy
+## 10. Global Feature Toggle and Biometric Privacy
 
 ### Default Off
 
-`circles.face_recognition_enabled` defaults to `false`. Auto-enqueue on upload, backfill, and clustering all check this flag before operating. A circle must explicitly opt in before any biometric data is collected or processed.
+The `features.faceRecognition` system setting defaults to `false`. Auto-enqueue on upload, backfill, and clustering all gate on this flag before operating. The feature must be explicitly enabled by an Admin before any biometric data is collected or processed.
 
-### Three Ways to Enable
+Previously, face recognition was a per-circle opt-in controlled by the `circles.face_recognition_enabled` column. That column was dropped in migration `20260621050000_drop_circle_feature_flags`. The `FaceEnqueueListener` now calls `SystemSettingsService.isFeatureEnabled('faceRecognition')` instead.
 
-1. **Circle Settings via API:** `PUT /api/circles/:id/face-settings { faceRecognitionEnabled: true }` — requires `circles:write` and `circle_admin` per-circle role. Emits audit event `circle:face_settings_update`.
-2. **People Page toggle:** The UI people page shows an enable button when the feature is off for the active circle.
-3. **Backfill panel:** The admin backfill panel in Face Settings requires the circle to already have `faceRecognitionEnabled=true`; it does not enable it automatically.
+### How to Enable
+
+1. **Admin Settings UI:** Go to `/admin/settings/face` and toggle "Enable face recognition globally". This writes `features.faceRecognition = true` to system settings.
+2. **People Page:** The UI people page shows an enable prompt when the feature is globally off.
+3. **Global Backfill:** `POST /api/admin/face/backfill` requires `features.faceRecognition=true` before enqueuing; it does not enable the feature automatically.
 
 ### Biometric Erase
 
@@ -484,8 +486,9 @@ Inside a single database transaction:
 2. Delete all `Person` rows for the circle.
 3. Delete all `MediaFaceStatus` rows for media items in the circle.
 4. Delete all `enrichment_jobs` rows of type `face_detection` for the circle.
-5. Set `circle.faceRecognitionEnabled = false`.
-6. Emit audit event `face:biometrics_delete`.
+5. Emit audit event `face:biometrics_delete`.
+
+Note: this endpoint no longer sets `circle.faceRecognitionEnabled = false` (that column no longer exists). Biometric data for the circle is erased, but the global feature toggle is not changed.
 
 This action is irreversible. Face embeddings are biometric data; operators should document this erasure capability in their privacy policies as the designated GDPR right-to-erasure action.
 
@@ -496,7 +499,6 @@ This action is irreversible. Face embeddings are biometric data; operators shoul
 | `person:merge` | `POST /api/people/merge` |
 | `person:delete` | `DELETE /api/people/:id` |
 | `face:biometrics_delete` | `DELETE /api/face/biometrics` |
-| `circle:face_settings_update` | `PUT /api/circles/:id/face-settings` |
 
 All events are written to the `audit_events` table with `actorUserId`, `action`, `targetType`, `targetId`, and `meta` (JSONB).
 
@@ -601,13 +603,9 @@ The generic job queue. Face detection uses `type = 'face_detection'`. Full schem
 
 Indices: `[status, priority, createdAt]`, `[mediaItemId]`, `[type, status]`.
 
-### circles.faceRecognitionEnabled
+### features.faceRecognition — System Setting
 
-```
-faceRecognitionEnabled  Boolean  @default(false)  @map("face_recognition_enabled")
-```
-
-Added to the `circles` table. All face operations check this column before proceeding.
+The per-circle `faceRecognitionEnabled` column was dropped from the `circles` table in migration `20260621050000_drop_circle_feature_flags`. Enablement is now the global system setting at path `.features.faceRecognition` (Boolean, default `false`) in the `system_settings` JSONB. All face operations check this setting via `SystemSettingsService.isFeatureEnabled('faceRecognition')` before proceeding.
 
 ---
 
@@ -623,7 +621,7 @@ Added to the `circles` table. All face operations check this column before proce
 | `POST` | `/api/face/test` | `face_settings:read` | — | Test provider connectivity |
 | `GET` | `/api/face/models` | `face_settings:read` | — | List models for a provider |
 | `PUT` | `/api/face/features/detection` | `face_settings:write` | — | Set active detection provider/model |
-| `POST` | `/api/face/backfill` | `face_settings:write` | — | Bulk-enqueue circle photos; requires circle opt-in |
+| `POST` | `/api/admin/face/backfill` | `face_settings:write` | — | Bulk-enqueue photos across all circles; requires global feature enabled; body `{ force? }`; returns `{ enqueued, circles }` |
 | `DELETE` | `/api/face/biometrics` | `face_settings:write` | `circle_admin` | Permanently erase all biometric data for a circle |
 
 ### Face Detection (media:read / media:write)
@@ -645,16 +643,9 @@ Added to the `circles` table. All face operations check this column before proce
 | `PATCH` | `/api/people/:id` | `media:write` | collaborator | Rename or set cover face |
 | `POST` | `/api/people/:id/faces` | `media:write` | collaborator | Assign faces (sets manuallyAssigned=true) |
 | `DELETE` | `/api/people/:id/faces/:faceId` | `media:write` | collaborator | Unassign face; returns to unknown pool |
-| `POST` | `/api/people/cluster` | `media:write` | circle_admin | Cluster unknown faces; requires opt-in |
+| `POST` | `/api/people/cluster` | `media:write` | circle_admin | Cluster unknown faces; requires global feature enabled |
 | `POST` | `/api/people/merge` | `media:write` | collaborator | Merge source into target person |
 | `DELETE` | `/api/people/:id` | `media:write` | collaborator | Soft-delete person; faces return to unknown pool |
-
-### Circle Face Settings
-
-| Method | Path | Permission | Per-circle Role | Description |
-|--------|------|------------|-----------------|-------------|
-| `GET` | `/api/circles/:id/face-settings` | `circles:read` | viewer | Get faceRecognitionEnabled for circle |
-| `PUT` | `/api/circles/:id/face-settings` | `circles:write` | circle_admin | Enable/disable face recognition; emits audit event |
 
 ### Media Filter
 
@@ -684,7 +675,7 @@ The `noFaces` filter is also available in `POST /api/search` (as the `noFaces: t
 |----------|---------|-------------|
 | `SECRETS_ENCRYPTION_KEY` | (required) | Base64-encoded 32-byte AES key for credential encryption. Generate: `openssl rand -base64 32`. API fails to start if absent or wrong size. |
 | `FACE_COMPREFACE_URL` | `http://compreface-core:3000` | Base URL for the CompreFace core sidecar. Keyless — no API key. |
-| `FACE_AUTO_DETECT` | `'true'` | Global kill-switch. Set to `'false'` to disable auto-enqueue on upload for all circles. Per-circle opt-in still applies when `'true'`. |
+| `FACE_AUTO_DETECT` | `'true'` | Environment kill-switch. Set to `'false'` to disable auto-enqueue on upload regardless of system settings. The system setting `features.faceRecognition` is the runtime on/off toggle; this env var is a hard override for CI/test environments. |
 | `FACE_MAX_IMAGE_DIM` | `'2000'` | Maximum pixel dimension (longest side) before sending to the provider. Parsed as integer. |
 | `FACE_MATCH_THRESHOLD` | `0.38` | Cosine similarity threshold for assigning a detected face to a known person. |
 | `FACE_CLUSTER_THRESHOLD` | `0.45` | Cosine similarity threshold for grouping unknown faces during clustering (stricter than match threshold). |
@@ -704,12 +695,12 @@ The `noFaces` filter is also available in `POST /api/search` (as the `noFaces: t
 
 ### Backfill Workflow
 
-Use when face recognition was enabled for a circle after photos were already imported, or when switching to a different provider.
+Use when face recognition was enabled after photos were already imported, or when switching to a different provider.
 
-1. Ensure the circle has `faceRecognitionEnabled=true` (via People page or `PUT /circles/:id/face-settings`).
-2. Navigate to Admin → Face Settings → Backfill panel, select the circle, optionally check "Force re-process already processed items".
-3. `POST /api/face/backfill { circleId, force? }` enqueues all eligible photos at priority 100.
-4. Monitor progress at Admin → Jobs (`/admin/jobs`), filtering by `type = face_detection`.
+1. Ensure `features.faceRecognition` is enabled globally (Admin → `/admin/settings/face`).
+2. Navigate to Admin → Settings → Face → Backfill panel, optionally check "Force re-process already processed items".
+3. `POST /api/admin/face/backfill { force? }` enqueues all eligible photos across all circles at priority 100.
+4. Monitor progress at Admin → Jobs (`/admin/settings/jobs`), filtering by `type = face_detection`.
 
 The backfill endpoint skips items already in `processed` or `no_faces` status unless `force=true`. It also skips items where `MediaType` is not photo or `deletedAt` is set.
 
@@ -789,3 +780,4 @@ A job stuck in `running` status indicates the worker crashed or the container re
 | 2.0 | June 2026 | AI Assistant | Updated to reflect all phases implemented |
 | 3.0 | June 2026 | AI Assistant | Complete rewrite as end-to-end reference; replaces phase-based structure |
 | 3.1 | June 2026 | AI Assistant | Added Manual People Association subsection (§7) and `noFaces` filter documentation (§12) |
+| 3.2 | June 2026 | AI Assistant | Per-circle opt-in removed — face recognition is now a global system setting (`features.faceRecognition`); per-circle backfill replaced by global admin endpoint; circle face-settings endpoints removed; biometrics erase no longer clears per-circle flag |

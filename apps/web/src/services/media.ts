@@ -21,6 +21,13 @@ import type {
   BulkUpdateDto,
   BulkTagsDto,
   BulkDeleteDto,
+  BulkArchiveDto,
+  ListArchivedParams,
+  ListTrashParams,
+  RestoreFromTrashDto,
+  RestoreFromTrashResponse,
+  DeleteForeverDto,
+  EmptyTrashDto,
   GeoSearchResult,
   GeoReverseResult,
   DashboardResponse,
@@ -236,6 +243,42 @@ export async function bulkTags(dto: BulkTagsDto): Promise<{ added: number; remov
 
 export async function bulkDelete(dto: BulkDeleteDto): Promise<{ deleted: number }> {
   return api.post<{ deleted: number }>('/media/bulk/delete', dto);
+}
+
+export async function bulkArchive(dto: BulkArchiveDto): Promise<{ archived: number }> {
+  return api.patch<{ archived: number }>('/media/bulk/archive', dto);
+}
+
+export async function bulkUnarchive(dto: BulkArchiveDto): Promise<{ unarchived: number }> {
+  return api.patch<{ unarchived: number }>('/media/bulk/unarchive', dto);
+}
+
+export async function listArchived(params: ListArchivedParams): Promise<MediaListResponse> {
+  const searchParams = new URLSearchParams();
+  searchParams.set('circleId', params.circleId);
+  if (params.page) searchParams.set('page', String(params.page));
+  if (params.pageSize) searchParams.set('pageSize', String(params.pageSize));
+  return api.get<MediaListResponse>(`/media/archived?${searchParams.toString()}`);
+}
+
+export async function listTrash(params: ListTrashParams): Promise<MediaListResponse> {
+  const searchParams = new URLSearchParams();
+  searchParams.set('circleId', params.circleId);
+  if (params.page) searchParams.set('page', String(params.page));
+  if (params.pageSize) searchParams.set('pageSize', String(params.pageSize));
+  return api.get<MediaListResponse>(`/media/trash?${searchParams.toString()}`);
+}
+
+export async function restoreFromTrash(dto: RestoreFromTrashDto): Promise<RestoreFromTrashResponse> {
+  return api.post<RestoreFromTrashResponse>('/media/trash/restore', dto);
+}
+
+export async function deleteForever(dto: DeleteForeverDto): Promise<{ deleted: number }> {
+  return api.post<{ deleted: number }>('/media/trash/delete-forever', dto);
+}
+
+export async function emptyTrash(dto: EmptyTrashDto): Promise<{ deleted: number }> {
+  return api.post<{ deleted: number }>('/media/trash/empty', dto);
 }
 
 // ---------------------------------------------------------------------------

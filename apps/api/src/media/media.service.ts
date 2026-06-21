@@ -35,6 +35,12 @@ import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
 import { BulkTagsDto } from './dto/bulk-tags.dto';
 import { BulkDeleteDto } from './dto/bulk-delete.dto';
+import { BulkArchiveDto } from './dto/bulk-archive.dto';
+import { ListArchivedQueryDto } from './dto/list-archived-query.dto';
+import { ListTrashQueryDto } from './dto/list-trash-query.dto';
+import { RestoreFromTrashDto } from './dto/restore-from-trash.dto';
+import { DeleteForeverDto } from './dto/delete-forever.dto';
+import { EmptyTrashDto } from './dto/empty-trash.dto';
 import { geoResultToMediaColumns, GEO_CLEAR_COLUMNS } from './geo/geo-result.mapper';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 
@@ -318,6 +324,7 @@ export class MediaService {
         sourceDeviceName,
         missingGeo,
         noFaces,
+        excludeArchived: true,
       }),
       ...(effectivePersonIds.length > 0 ? wherePeople(effectivePersonIds, effectiveMode) : {}),
     };
@@ -390,8 +397,9 @@ export class MediaService {
       // Must have coordinates
       takenLat: { not: null },
       takenLng: { not: null },
-      // Exclude soft-deleted items
+      // Exclude soft-deleted and archived items
       deletedAt: null,
+      archivedAt: null,
       // Optional type filter
       ...(type && { type }),
       // Date range
@@ -767,6 +775,7 @@ export class MediaService {
       where: { id },
       include: {
         items: {
+          where: { mediaItem: { deletedAt: null, archivedAt: null } },
           include: { mediaItem: true },
           orderBy: { addedAt: 'asc' },
         },
@@ -936,6 +945,7 @@ export class MediaService {
         sourceDeviceName,
         missingGeo,
         noFaces,
+        excludeArchived: true,
       }),
       ...(() => {
         const effectivePersonIds =
@@ -1286,6 +1296,7 @@ export class MediaService {
         SELECT id FROM media_items
         WHERE circle_id = ${circleId}::uuid
           AND deleted_at IS NULL
+          AND archived_at IS NULL
           AND captured_at IS NOT NULL
           AND EXTRACT(MONTH FROM (captured_at AT TIME ZONE 'UTC')) = ${month}
           AND EXTRACT(DAY FROM (captured_at AT TIME ZONE 'UTC')) = ${day}
@@ -1314,18 +1325,18 @@ export class MediaService {
             })
           : Promise.resolve([]),
         this.prisma.mediaItem.findMany({
-          where: { circleId, deletedAt: null },
+          where: { circleId, deletedAt: null, archivedAt: null },
           orderBy: { importedAt: 'desc' },
           take: 12,
         }),
         this.prisma.mediaItem.findMany({
-          where: { circleId, deletedAt: null, favorite: true },
+          where: { circleId, deletedAt: null, archivedAt: null, favorite: true },
           orderBy: { capturedAt: 'desc' },
           take: 12,
         }),
-        this.prisma.mediaItem.count({ where: { circleId, deletedAt: null } }),
+        this.prisma.mediaItem.count({ where: { circleId, deletedAt: null, archivedAt: null } }),
         this.prisma.mediaItem.count({
-          where: { circleId, deletedAt: null, takenLat: null },
+          where: { circleId, deletedAt: null, archivedAt: null, takenLat: null },
         }),
         this.prisma.burstGroup.count({
           where: {
@@ -1494,6 +1505,236 @@ export class MediaService {
   }
 
   // ---------------------------------------------------------------------------
+  // Archive / Trash methods
+  // ---------------------------------------------------------------------------
+
+  async bulkArchive(dto: BulkArchiveDto, userId: string, perms: string[]): Promise<{ archived: number }> {
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
+
+    const { count } = await this.prisma.mediaItem.updateMany({
+      where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: null, archivedAt: null },
+      data: { archivedAt: new Date() },
+    });
+
+    this.logger.log(`bulkArchive: archived ${count} items in circle ${dto.circleId} by user ${userId}`);
+    return { archived: count };
+  }
+
+  async bulkUnarchive(dto: BulkArchiveDto, userId: string, perms: string[]): Promise<{ unarchived: number }> {
+    await this.circleMembershipService.assertCircleAccess(userId, dto.circleId, perms, 'collaborator' as CircleRole);
+
+    const { count } = await this.prisma.mediaItem.updateMany({
+      where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: null, archivedAt: { not: null } },
+      data: { archivedAt: null },
+    });
+
+    this.logger.log(`bulkUnarchive: unarchived ${count} items in circle ${dto.circleId} by user ${userId}`);
+    return { unarchived: count };
+  }
+
+  async listArchived(query: ListArchivedQueryDto, userId: string, userPermissions: string[]) {
+    const { circleId, page, pageSize } = query;
+    const skip = (page - 1) * pageSize;
+
+    await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
+
+    const where: Prisma.MediaItemWhereInput = {
+      circleId,
+      deletedAt: null,
+      archivedAt: { not: null },
+    };
+
+    const [items, totalItems] = await Promise.all([
+      this.prisma.mediaItem.findMany({
+        where,
+        orderBy: { archivedAt: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.mediaItem.count({ where }),
+    ]);
+
+    const itemsWithUrls = await Promise.all(
+      items.map(async (item) => ({
+        ...item,
+        thumbnailUrl: await this.signThumb(item.metadata),
+      })),
+    );
+
+    return {
+      items: itemsWithUrls,
+      meta: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.ceil(totalItems / pageSize),
+      },
+    };
+  }
+
+  async listTrash(query: ListTrashQueryDto, userId: string, userPermissions: string[]) {
+    const { circleId, page, pageSize } = query;
+    const skip = (page - 1) * pageSize;
+
+    await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
+
+    const where: Prisma.MediaItemWhereInput = {
+      circleId,
+      deletedAt: { not: null },
+    };
+
+    const [items, totalItems] = await Promise.all([
+      this.prisma.mediaItem.findMany({
+        where,
+        orderBy: { deletedAt: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.mediaItem.count({ where }),
+    ]);
+
+    const itemsWithUrls = await Promise.all(
+      items.map(async (item) => ({
+        ...item,
+        thumbnailUrl: await this.signThumb(item.metadata),
+      })),
+    );
+
+    return {
+      items: itemsWithUrls,
+      meta: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.ceil(totalItems / pageSize),
+      },
+    };
+  }
+
+  async restoreFromTrash(
+    dto: RestoreFromTrashDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ restored: number; conflicts: string[] }> {
+    await this.circleMembershipService.assertCircleAccess(userId, dto.circleId, perms, 'collaborator' as CircleRole);
+
+    let restored = 0;
+    const conflicts: string[] = [];
+
+    for (const id of dto.ids) {
+      const item = await this.prisma.mediaItem.findFirst({
+        where: { id, circleId: dto.circleId, deletedAt: { not: null } },
+        select: { id: true, contentHash: true },
+      });
+      if (!item) continue;
+
+      try {
+        await this.prisma.mediaItem.update({
+          where: { id },
+          data: { deletedAt: null },
+        });
+        restored++;
+      } catch (err: unknown) {
+        if (err && typeof err === 'object' && 'code' in err && (err as { code: string }).code === 'P2002') {
+          conflicts.push(id);
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    this.logger.log(
+      `restoreFromTrash: restored=${restored} conflicts=${conflicts.length} in circle ${dto.circleId} by user ${userId}`,
+    );
+    return { restored, conflicts };
+  }
+
+  /**
+   * Hard-delete a list of MediaItem IDs: deletes the DB row, removes the blob
+   * from object storage, and removes the StorageObject row.
+   * Each item is processed independently — failures are logged and skipped
+   * rather than aborting the entire batch.
+   */
+  async purgeMediaItems(ids: string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+
+    const items = await this.prisma.mediaItem.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        storageObjectId: true,
+        storageObject: { select: { id: true, storageKey: true } },
+      },
+    });
+
+    let purged = 0;
+    for (const item of items) {
+      try {
+        await this.prisma.mediaItem.delete({ where: { id: item.id } });
+
+        if (item.storageObject?.storageKey) {
+          try {
+            await this.storageProvider.delete(item.storageObject.storageKey);
+          } catch (blobErr) {
+            const msg = blobErr instanceof Error ? blobErr.message : String(blobErr);
+            this.logger.warn(`purgeMediaItems: blob delete failed for key=${item.storageObject.storageKey}: ${msg}`);
+          }
+        }
+
+        if (item.storageObjectId) {
+          try {
+            await this.prisma.storageObject.delete({ where: { id: item.storageObjectId } });
+          } catch (soErr) {
+            const msg = soErr instanceof Error ? soErr.message : String(soErr);
+            this.logger.warn(`purgeMediaItems: StorageObject delete failed for id=${item.storageObjectId}: ${msg}`);
+          }
+        }
+
+        purged++;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`purgeMediaItems: failed to purge item ${item.id}: ${msg}`);
+      }
+    }
+
+    return purged;
+  }
+
+  async deleteForever(
+    dto: DeleteForeverDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ deleted: number }> {
+    await this.circleMembershipService.assertCircleAccess(userId, dto.circleId, perms, 'collaborator' as CircleRole);
+
+    const items = await this.prisma.mediaItem.findMany({
+      where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: { not: null } },
+      select: { id: true },
+    });
+
+    const deleted = await this.purgeMediaItems(items.map((i) => i.id));
+    this.logger.log(`deleteForever: purged ${deleted} items in circle ${dto.circleId} by user ${userId}`);
+    return { deleted };
+  }
+
+  async emptyTrash(
+    dto: EmptyTrashDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ deleted: number }> {
+    await this.circleMembershipService.assertCircleAccess(userId, dto.circleId, perms, 'circle_admin' as CircleRole);
+
+    const items = await this.prisma.mediaItem.findMany({
+      where: { circleId: dto.circleId, deletedAt: { not: null } },
+      select: { id: true },
+    });
+
+    const deleted = await this.purgeMediaItems(items.map((i) => i.id));
+    this.logger.log(`emptyTrash: purged ${deleted} items in circle ${dto.circleId} by user ${userId}`);
+    return { deleted };
+  }
+
+  // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
 
@@ -1597,6 +1838,7 @@ export class MediaService {
       where: {
         circleId,
         deletedAt: null,
+        archivedAt: null,
         OR: [
           { geoLocality: { not: null } },
           { geoPlaceName: { not: null } },
@@ -1664,7 +1906,7 @@ export class MediaService {
           take: 1,
           include: {
             mediaItem: {
-              select: { metadata: true, deletedAt: true },
+              select: { metadata: true, deletedAt: true, archivedAt: true },
             },
           },
         },
@@ -1683,7 +1925,7 @@ export class MediaService {
       sorted.map(async (tag) => {
         const coverMedia = tag.mediaTags[0]?.mediaItem;
         const coverMeta =
-          coverMedia && !coverMedia.deletedAt ? coverMedia.metadata : null;
+          coverMedia && !coverMedia.deletedAt && !coverMedia.archivedAt ? coverMedia.metadata : null;
         return {
           name: tag.name,
           count: tag._count.mediaTags,

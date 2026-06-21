@@ -180,12 +180,36 @@ export class SystemSettingsService {
             (current as any).storage?.insights?.refreshIntervalHours ??
             4,
         },
+        trash: {
+          retentionDays:
+            (dto as any).storage?.trash?.retentionDays ??
+            (current as any).storage?.trash?.retentionDays ??
+            30,
+        },
+      },
+      burst: {
+        timeGapSeconds:
+          (dto as any).burst?.timeGapSeconds ??
+          (current as any).burst?.timeGapSeconds ??
+          10,
+        hashDistance:
+          (dto as any).burst?.hashDistance ??
+          (current as any).burst?.hashDistance ??
+          10,
+        minGroupSize:
+          (dto as any).burst?.minGroupSize ??
+          (current as any).burst?.minGroupSize ??
+          3,
       },
       geo: {
         reverseProvider:
           (dto as any).geo?.reverseProvider ??
           (current as any).geo?.reverseProvider ??
-          'offline',
+          (process.env['GEO_PROVIDER'] === 'nominatim' ? 'nominatim' : 'offline'),
+        forwardSearchEnabled:
+          (dto as any).geo?.forwardSearchEnabled ??
+          (current as any).geo?.forwardSearchEnabled ??
+          (process.env['GEO_FORWARD_SEARCH_ENABLED'] === 'true'),
       },
     };
 

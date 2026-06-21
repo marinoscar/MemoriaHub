@@ -297,7 +297,7 @@ function GeoSettingsContent() {
                       ? 'Uses the bundled GeoNames dataset on-server.'
                       : 'Uses the Nominatim OpenStreetMap API.'}
                   </Alert>
-                  <Stack direction="row" spacing={1} alignItems="center">
+                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                     <Button
                       variant="outlined"
                       size="small"
@@ -441,7 +441,7 @@ function GeoSettingsContent() {
               label="From (capture date)"
               type="date"
               size="small"
-              InputLabelProps={{ shrink: true }}
+              slotProps={{ inputLabel: { shrink: true } }}
               value={backfillFrom}
               onChange={(e) => setBackfillFrom(e.target.value)}
               sx={{ flex: 1 }}
@@ -450,7 +450,7 @@ function GeoSettingsContent() {
               label="To (capture date)"
               type="date"
               size="small"
-              InputLabelProps={{ shrink: true }}
+              slotProps={{ inputLabel: { shrink: true } }}
               value={backfillTo}
               onChange={(e) => setBackfillTo(e.target.value)}
               sx={{ flex: 1 }}

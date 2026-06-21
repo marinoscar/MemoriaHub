@@ -15,19 +15,13 @@ vi.mock('../../hooks/useFaceSettings', () => ({
   useFaceSettings: vi.fn(),
 }));
 
-vi.mock('../../hooks/useCircles', () => ({
-  useCircles: vi.fn(),
+vi.mock('../../hooks/useSystemSettings', () => ({
+  useSystemSettings: vi.fn(),
 }));
 
-vi.mock('../../services/face', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../services/face')>();
-  return {
-    ...actual,
-    runFaceBackfill: vi.fn(),
-    getCircleFaceSettings: vi.fn(),
-    updateCircleFaceSettings: vi.fn(),
-  };
-});
+vi.mock('../../services/adminBackfill', () => ({
+  runGlobalFaceBackfill: vi.fn(),
+}));
 
 // ---------------------------------------------------------------------------
 // Import after mocks
@@ -36,14 +30,13 @@ vi.mock('../../services/face', async (importOriginal) => {
 import FaceSettingsPage from '../../pages/Admin/FaceSettingsPage';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useFaceSettings } from '../../hooks/useFaceSettings';
-import { useCircles } from '../../hooks/useCircles';
-import { getCircleFaceSettings, updateCircleFaceSettings } from '../../services/face';
+import { useSystemSettings } from '../../hooks/useSystemSettings';
+import { runGlobalFaceBackfill } from '../../services/adminBackfill';
 
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseFaceSettings = vi.mocked(useFaceSettings);
-const mockUseCircles = vi.mocked(useCircles);
-const mockGetCircleFaceSettings = vi.mocked(getCircleFaceSettings);
-const mockUpdateCircleFaceSettings = vi.mocked(updateCircleFaceSettings);
+const mockUseSystemSettings = vi.mocked(useSystemSettings);
+const mockRunGlobalFaceBackfill = vi.mocked(runGlobalFaceBackfill);
 
 // ---------------------------------------------------------------------------
 // Default mock values
@@ -62,19 +55,24 @@ function defaultPermissionsMock() {
   };
 }
 
-function defaultCirclesMock() {
+function defaultSystemSettingsMock(faceRecognition = false) {
+  const updateSettings = vi.fn().mockResolvedValue(undefined);
   return {
-    circles: [{ id: 'circle-1', name: 'Family Circle' }],
-    loading: false,
+    settings: {
+      features: {
+        faceRecognition,
+        autoTagging: false,
+        burstDetection: false,
+      },
+    },
+    isSaving: false,
     error: null,
-    fetchCircles: vi.fn().mockResolvedValue(undefined),
-    addCircle: vi.fn(),
-    editCircle: vi.fn(),
-    removeCircle: vi.fn(),
+    updateSettings,
+    fetchSettings: vi.fn().mockResolvedValue(undefined),
   };
 }
 
-function defaultSettingsMock() {
+function defaultFaceSettingsMock() {
   return {
     settings: {
       providers: [
@@ -121,10 +119,9 @@ describe('FaceSettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUsePermissions.mockReturnValue(defaultPermissionsMock() as any);
-    mockUseFaceSettings.mockReturnValue(defaultSettingsMock() as any);
-    mockUseCircles.mockReturnValue(defaultCirclesMock() as any);
-    mockGetCircleFaceSettings.mockResolvedValue({ faceRecognitionEnabled: false });
-    mockUpdateCircleFaceSettings.mockResolvedValue({ faceRecognitionEnabled: true });
+    mockUseFaceSettings.mockReturnValue(defaultFaceSettingsMock() as any);
+    mockUseSystemSettings.mockReturnValue(defaultSystemSettingsMock() as any);
+    mockRunGlobalFaceBackfill.mockResolvedValue({ enqueued: 0, circles: 0 });
   });
 
   // -------------------------------------------------------------------------
@@ -152,7 +149,7 @@ describe('FaceSettingsPage', () => {
   describe('Loading state', () => {
     it('shows a circular progress spinner when loading with no settings yet', () => {
       mockUseFaceSettings.mockReturnValue({
-        ...defaultSettingsMock(),
+        ...defaultFaceSettingsMock(),
         loading: true,
         settings: null,
       } as any);
@@ -165,7 +162,7 @@ describe('FaceSettingsPage', () => {
 
     it('still shows the page when loading is true but settings are already present', () => {
       mockUseFaceSettings.mockReturnValue({
-        ...defaultSettingsMock(),
+        ...defaultFaceSettingsMock(),
         loading: true,
         // settings is NOT null — previous load succeeded
       } as any);
@@ -181,7 +178,7 @@ describe('FaceSettingsPage', () => {
   describe('Error state', () => {
     it('shows an alert with the error message when error and no settings', () => {
       mockUseFaceSettings.mockReturnValue({
-        ...defaultSettingsMock(),
+        ...defaultFaceSettingsMock(),
         loading: false,
         settings: null,
         error: 'Failed to load face settings',
@@ -196,7 +193,7 @@ describe('FaceSettingsPage', () => {
 
     it('does not show the Face Settings heading when there is an error and no settings', () => {
       mockUseFaceSettings.mockReturnValue({
-        ...defaultSettingsMock(),
+        ...defaultFaceSettingsMock(),
         loading: false,
         settings: null,
         error: 'Something went wrong',
@@ -205,6 +202,105 @@ describe('FaceSettingsPage', () => {
       render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
 
       expect(screen.queryByRole('heading', { name: /face settings/i })).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('Global face recognition toggle', () => {
+    it('renders the global face recognition switch', () => {
+      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByText(/enable face recognition globally/i)).toBeInTheDocument();
+    });
+
+    it('switch reflects false when faceRecognition is disabled in sysSettings', () => {
+      mockUseSystemSettings.mockReturnValue(defaultSystemSettingsMock(false) as any);
+
+      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      // The global toggle switch should be unchecked
+      const switches = screen.getAllByRole('switch');
+      const globalSwitch = switches.find((s) =>
+        s.closest('label')?.textContent?.match(/enable face recognition globally/i),
+      ) as HTMLInputElement | undefined;
+      expect(globalSwitch).toBeDefined();
+      expect(globalSwitch?.checked).toBe(false);
+    });
+
+    it('switch reflects true when faceRecognition is enabled in sysSettings', () => {
+      mockUseSystemSettings.mockReturnValue(defaultSystemSettingsMock(true) as any);
+
+      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const switches = screen.getAllByRole('switch');
+      const globalSwitch = switches.find((s) =>
+        s.closest('label')?.textContent?.match(/enable face recognition globally/i),
+      ) as HTMLInputElement | undefined;
+      expect(globalSwitch).toBeDefined();
+      expect(globalSwitch?.checked).toBe(true);
+    });
+
+    it('calls updateSettings with faceRecognition:true when switch is toggled on', async () => {
+      const mockUpdateSettings = vi.fn().mockResolvedValue(undefined);
+      mockUseSystemSettings.mockReturnValue({
+        ...defaultSystemSettingsMock(false),
+        updateSettings: mockUpdateSettings,
+      } as any);
+
+      const user = userEvent.setup();
+      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      // Find and click the global face recognition switch
+      const globalToggleLabel = screen.getByText(/enable face recognition globally/i);
+      await user.click(globalToggleLabel);
+
+      await waitFor(() => {
+        expect(mockUpdateSettings).toHaveBeenCalledWith(
+          expect.objectContaining({
+            features: expect.objectContaining({ faceRecognition: true }),
+          }),
+        );
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('Global backfill button', () => {
+    it('renders the Run Global Backfill button', () => {
+      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByRole('button', { name: /run global backfill/i })).toBeInTheDocument();
+    });
+
+    it('disables Run Global Backfill button when faceRecognition is globally off', () => {
+      mockUseSystemSettings.mockReturnValue(defaultSystemSettingsMock(false) as any);
+
+      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByRole('button', { name: /run global backfill/i })).toBeDisabled();
+    });
+
+    it('enables Run Global Backfill button when faceRecognition is globally on', () => {
+      mockUseSystemSettings.mockReturnValue(defaultSystemSettingsMock(true) as any);
+
+      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByRole('button', { name: /run global backfill/i })).not.toBeDisabled();
+    });
+
+    it('calls runGlobalFaceBackfill when button clicked', async () => {
+      mockUseSystemSettings.mockReturnValue(defaultSystemSettingsMock(true) as any);
+      mockRunGlobalFaceBackfill.mockResolvedValue({ enqueued: 12, circles: 3 });
+
+      const user = userEvent.setup();
+      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const btn = screen.getByRole('button', { name: /run global backfill/i });
+      await user.click(btn);
+
+      await waitFor(() => {
+        expect(mockRunGlobalFaceBackfill).toHaveBeenCalledTimes(1);
+      });
     });
   });
 
@@ -280,7 +376,7 @@ describe('FaceSettingsPage', () => {
       const mockGetModels = vi.fn().mockResolvedValue(['arcface-r100-v1']);
 
       mockUseFaceSettings.mockReturnValue({
-        ...defaultSettingsMock(),
+        ...defaultFaceSettingsMock(),
         testProvider: mockTestProvider,
         getModels: mockGetModels,
       } as any);
@@ -313,7 +409,7 @@ describe('FaceSettingsPage', () => {
       const mockGetModels = vi.fn().mockResolvedValue(['arcface-r100-v1']);
 
       mockUseFaceSettings.mockReturnValue({
-        ...defaultSettingsMock(),
+        ...defaultFaceSettingsMock(),
         testProvider: mockTestProvider,
         getModels: mockGetModels,
       } as any);
@@ -344,9 +440,9 @@ describe('FaceSettingsPage', () => {
 
     it('renders a Remove button for configured credentialed providers', () => {
       mockUseFaceSettings.mockReturnValue({
-        ...defaultSettingsMock(),
+        ...defaultFaceSettingsMock(),
         settings: {
-          ...defaultSettingsMock().settings,
+          ...defaultFaceSettingsMock().settings,
           providers: [
             {
               provider: 'rekognition',
@@ -383,83 +479,10 @@ describe('FaceSettingsPage', () => {
   });
 
   // -------------------------------------------------------------------------
-  describe('Backfill panel — per-circle face recognition opt-in', () => {
-    it('Run Backfill button is disabled when no circle is selected', async () => {
-      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      await waitFor(() => {
-        const btn = screen.getByRole('button', { name: /run backfill/i });
-        expect(btn).toBeDisabled();
-      });
-    });
-
-    it('shows enable switch and disables Run Backfill button when circle is not opted in', async () => {
-      mockGetCircleFaceSettings.mockResolvedValue({ faceRecognitionEnabled: false });
-
-      const user = userEvent.setup();
-      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // MUI Select comboboxes do not expose their label as accessible name in jsdom.
-      // The page renders: [0] Provider, [1] Model (disabled), [2] Circle.
-      // Pick the last combobox which is the Circle select.
-      const comboboxes = screen.getAllByRole('combobox');
-      const circleSelect = comboboxes[comboboxes.length - 1];
-      await user.click(circleSelect);
-      const option = await screen.findByRole('option', { name: /family circle/i });
-      await user.click(option);
-
-      // Wait for face settings to be fetched
-      await waitFor(() => {
-        expect(mockGetCircleFaceSettings).toHaveBeenCalledWith('circle-1');
-      });
-
-      // Enable switch should appear
-      await waitFor(() => {
-        expect(screen.getByText(/enable face recognition for this circle/i)).toBeInTheDocument();
-      });
-
-      // Run Backfill button should be disabled
-      const backfillBtn = screen.getByRole('button', { name: /run backfill/i });
-      expect(backfillBtn).toBeDisabled();
-    });
-
-    it('calls updateCircleFaceSettings when enable switch is toggled', async () => {
-      mockGetCircleFaceSettings.mockResolvedValue({ faceRecognitionEnabled: false });
-      mockUpdateCircleFaceSettings.mockResolvedValue({ faceRecognitionEnabled: true });
-
-      const user = userEvent.setup();
-      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // Select circle — last combobox on page is the Circle select
-      const comboboxes = screen.getAllByRole('combobox');
-      const circleSelect = comboboxes[comboboxes.length - 1];
-      await user.click(circleSelect);
-      const option = await screen.findByRole('option', { name: /family circle/i });
-      await user.click(option);
-
-      // Wait for face settings to be fetched and switch to appear
-      await waitFor(() => {
-        expect(screen.getByText(/enable face recognition for this circle/i)).toBeInTheDocument();
-      });
-
-      // Click the enable switch — find the FormControlLabel whose text contains the
-      // enable label, then click it to trigger the onChange handler.
-      // MUI Switch renders an input[type=checkbox] that may be visually hidden;
-      // clicking the label text itself reliably triggers the switch.
-      const enableLabel = screen.getByText(/enable face recognition for this circle/i);
-      await user.click(enableLabel);
-
-      await waitFor(() => {
-        expect(mockUpdateCircleFaceSettings).toHaveBeenCalledWith('circle-1', true);
-      });
-    });
-  });
-
-  // -------------------------------------------------------------------------
   describe('Empty/no-providers state', () => {
     it('renders without crashing when providers array is empty', () => {
       mockUseFaceSettings.mockReturnValue({
-        ...defaultSettingsMock(),
+        ...defaultFaceSettingsMock(),
         settings: {
           providers: [],
           knownProviders: [
@@ -498,9 +521,9 @@ describe('FaceSettingsPage', () => {
 
     it('shows "No configuration required" alert and no API key input for keyless provider', () => {
       mockUseFaceSettings.mockReturnValue({
-        ...defaultSettingsMock(),
+        ...defaultFaceSettingsMock(),
         settings: {
-          ...defaultSettingsMock().settings,
+          ...defaultFaceSettingsMock().settings,
           providers: [humanProvider],
           knownProviders: [],
         },
@@ -515,9 +538,9 @@ describe('FaceSettingsPage', () => {
 
     it('does not render Remove credential button for keyless provider', () => {
       mockUseFaceSettings.mockReturnValue({
-        ...defaultSettingsMock(),
+        ...defaultFaceSettingsMock(),
         settings: {
-          ...defaultSettingsMock().settings,
+          ...defaultFaceSettingsMock().settings,
           providers: [humanProvider],
           knownProviders: [],
           features: { detection: { provider: null, model: null } },
@@ -534,9 +557,9 @@ describe('FaceSettingsPage', () => {
 
     it('shows "Human (in-process)" label for human provider in detection feature Select', async () => {
       mockUseFaceSettings.mockReturnValue({
-        ...defaultSettingsMock(),
+        ...defaultFaceSettingsMock(),
         settings: {
-          ...defaultSettingsMock().settings,
+          ...defaultFaceSettingsMock().settings,
           providers: [humanProvider],
           knownProviders: [],
           features: { detection: { provider: null, model: null } },
@@ -552,9 +575,9 @@ describe('FaceSettingsPage', () => {
     it('credentialed providers (rekognition) still show their API key input', () => {
       // Both human (keyless) and rekognition (credentialed) visible simultaneously
       mockUseFaceSettings.mockReturnValue({
-        ...defaultSettingsMock(),
+        ...defaultFaceSettingsMock(),
         settings: {
-          ...defaultSettingsMock().settings,
+          ...defaultFaceSettingsMock().settings,
           providers: [
             humanProvider,
             {

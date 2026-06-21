@@ -24,6 +24,12 @@ export interface SystemSettingsValue {
   ui: {
     allowUserThemeOverride: boolean;
   };
+  /**
+   * Well-known global feature flag keys (system-wide on/off, Admin-managed):
+   *   - autoTagging: AI auto-tagging + description generation
+   *   - faceRecognition: face detection / recognition
+   *   - burstDetection: burst photo (similar pictures) detection
+   */
   features: {
     [key: string]: boolean;
   };
@@ -56,6 +62,9 @@ export interface SystemSettingsValue {
     insights: {
       refreshIntervalHours: number;
     };
+    trash: {
+      retentionDays: number;
+    };
   };
   burst?: {
     timeGapSeconds: number;
@@ -64,8 +73,18 @@ export interface SystemSettingsValue {
   };
   geo?: {
     reverseProvider: 'offline' | 'nominatim' | 'google';
+    forwardSearchEnabled: boolean;
   };
 }
+
+/**
+ * Constants for the well-known feature flag keys stored in SystemSettingsValue.features.
+ */
+export const FEATURE_KEYS = {
+  AUTO_TAGGING: 'autoTagging',
+  FACE_RECOGNITION: 'faceRecognition',
+  BURST_DETECTION: 'burstDetection',
+} as const;
 
 /**
  * Default user settings
@@ -87,7 +106,11 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
   ui: {
     allowUserThemeOverride: true,
   },
-  features: {},
+  features: {
+    [FEATURE_KEYS.AUTO_TAGGING]: false,
+    [FEATURE_KEYS.FACE_RECOGNITION]: false,
+    [FEATURE_KEYS.BURST_DETECTION]: false,
+  },
   ai: {
     features: {
       search: { provider: null, model: null },
@@ -105,6 +128,9 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     insights: {
       refreshIntervalHours: 4,
     },
+    trash: {
+      retentionDays: 30,
+    },
   },
   burst: {
     timeGapSeconds: 10,
@@ -112,6 +138,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     minGroupSize: 3,
   },
   geo: {
-    reverseProvider: 'offline',
+    reverseProvider: process.env['GEO_PROVIDER'] === 'nominatim' ? 'nominatim' : 'offline',
+    forwardSearchEnabled: process.env['GEO_FORWARD_SEARCH_ENABLED'] === 'true',
   },
 };

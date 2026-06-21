@@ -3,7 +3,6 @@ import {
   Post,
   Get,
   Param,
-  Body,
   NotFoundException,
   Logger,
 } from '@nestjs/common';
@@ -14,8 +13,6 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
 import { CircleRole, JobReason, MediaMetadataStatusType } from '@prisma/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -24,24 +21,6 @@ import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { whereDateRange } from '../search/media-where.builder';
-
-// ---------------------------------------------------------------------------
-// DTOs
-// ---------------------------------------------------------------------------
-
-const flexibleDate = z
-  .string()
-  .refine((v) => !Number.isNaN(Date.parse(v)), { message: 'Invalid date' });
-
-const backfillMetadataSchema = z.object({
-  circleId: z.string().uuid(),
-  from: flexibleDate.optional(),
-  to: flexibleDate.optional(),
-  force: z.boolean().optional().default(false),
-});
-
-class BackfillMetadataDto extends createZodDto(backfillMetadataSchema) {}
 
 // ---------------------------------------------------------------------------
 // Controller
@@ -135,88 +114,6 @@ export class MetadataController {
     }
 
     return { data: { status: status.status, processedAt: status.processedAt, lastError: status.lastError } };
-  }
-
-  // --------------------------------------------------------------------------
-  // POST /api/metadata/backfill
-  // --------------------------------------------------------------------------
-
-  @Post('metadata/backfill')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
-  @ApiOperation({
-    summary: 'Backfill metadata extraction for unprocessed media items in a circle',
-  })
-  @ApiResponse({ status: 201, description: 'Backfill jobs queued' })
-  async backfillMetadata(
-    @Body() dto: BackfillMetadataDto,
-    @CurrentUser() user: RequestUser,
-  ) {
-    const { circleId, force = false } = dto;
-
-    await this.circleMembershipService.assertCircleAccess(
-      user.id,
-      circleId,
-      user.permissions,
-      'collaborator' as CircleRole,
-    );
-
-    // No per-circle opt-in check — metadata extraction has no feature flag
-
-    const from = dto.from ? new Date(dto.from) : undefined;
-    const to = dto.to ? new Date(dto.to) : undefined;
-    const dateWhere = whereDateRange(from, to);
-
-    const mediaItems = await this.prisma.mediaItem.findMany({
-      where: {
-        circleId,
-        deletedAt: null,
-        ...dateWhere,
-        ...(force
-          ? {}
-          : {
-              OR: [
-                { metadataStatus: null },
-                {
-                  metadataStatus: {
-                    status: { notIn: [MediaMetadataStatusType.processed] },
-                  },
-                },
-              ],
-            }),
-      },
-      select: { id: true, circleId: true },
-    });
-
-    let enqueued = 0;
-    for (const item of mediaItems) {
-      await this.enrichmentJobService.enqueue({
-        type: 'metadata_extraction',
-        mediaItemId: item.id,
-        circleId: item.circleId,
-        reason: JobReason.backfill,
-        priority: 100,
-      });
-
-      await this.prisma.mediaMetadataStatus.upsert({
-        where: { mediaItemId: item.id },
-        create: {
-          mediaItemId: item.id,
-          circleId: item.circleId,
-          status: MediaMetadataStatusType.pending,
-        },
-        update: {
-          status: MediaMetadataStatusType.pending,
-        },
-      });
-
-      enqueued++;
-    }
-
-    this.logger.log(
-      `Backfill: queued ${enqueued} metadata extraction job(s) for circle ${circleId} by user ${user.id}`,
-    );
-
-    return { data: { enqueued } };
   }
 
   // --------------------------------------------------------------------------

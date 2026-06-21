@@ -5,7 +5,6 @@
  *   - skips non-photo media items
  *   - skips soft-deleted media items
  *   - skips when AUTO_TAG_ENABLED=false
- *   - skips when circle.autoTaggingEnabled=false
  *   - enqueues and upserts status to pending when all gates pass
  *   - never rethrows on internal errors
  */
@@ -14,6 +13,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { TaggingEnqueueListener } from './tagging-enqueue.listener';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import {
   createMockPrismaService,
   MockPrismaService,
@@ -41,10 +41,6 @@ function makeMediaItem(overrides: Partial<{
   };
 }
 
-function makeCircle(autoTaggingEnabled = true) {
-  return { autoTaggingEnabled };
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -53,6 +49,7 @@ describe('TaggingEnqueueListener', () => {
   let listener: TaggingEnqueueListener;
   let mockPrisma: MockPrismaService;
   let mockEnrichmentJobService: { enqueue: jest.Mock };
+  let mockSystemSettings: { isFeatureEnabled: jest.Mock };
 
   const originalEnv = process.env;
 
@@ -69,15 +66,11 @@ describe('TaggingEnqueueListener', () => {
         status: JobStatus.pending,
       }),
     };
+    mockSystemSettings = { isFeatureEnabled: jest.fn().mockResolvedValue(true) };
 
     // Default: mediaItem found, is a photo, not deleted
     (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
       makeMediaItem(),
-    );
-
-    // Default: circle has autoTaggingEnabled=true
-    (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(
-      makeCircle(true),
     );
 
     (mockPrisma.mediaTagStatus.upsert as jest.Mock).mockResolvedValue({});
@@ -87,6 +80,7 @@ describe('TaggingEnqueueListener', () => {
         TaggingEnqueueListener,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
+        { provide: SystemSettingsService, useValue: mockSystemSettings },
       ],
     }).compile();
 
@@ -213,14 +207,12 @@ describe('TaggingEnqueueListener', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Skip: circle.autoTaggingEnabled=false
+  // isFeatureEnabled global system-settings gate
   // -------------------------------------------------------------------------
 
-  describe('skip: circle.autoTaggingEnabled=false', () => {
-    it('skips when circle has autoTaggingEnabled=false', async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(
-        makeCircle(false),
-      );
+  describe('isFeatureEnabled (system settings gate)', () => {
+    it('skips enqueue when isFeatureEnabled returns false', async () => {
+      mockSystemSettings.isFeatureEnabled.mockResolvedValue(false);
 
       await listener.handleObjectProcessed({ storageObjectId: STORAGE_OBJECT_ID });
 
@@ -228,12 +220,12 @@ describe('TaggingEnqueueListener', () => {
       expect(mockPrisma.mediaTagStatus.upsert).not.toHaveBeenCalled();
     });
 
-    it('skips when circle is not found (null)', async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(null);
+    it('proceeds when isFeatureEnabled returns true', async () => {
+      mockSystemSettings.isFeatureEnabled.mockResolvedValue(true);
 
       await listener.handleObjectProcessed({ storageObjectId: STORAGE_OBJECT_ID });
 
-      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalled();
     });
   });
 

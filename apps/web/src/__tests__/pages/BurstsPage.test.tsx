@@ -6,9 +6,7 @@
  *   - Renders "Review Bursts" heading when a circle is active
  *   - Renders empty state when no groups are returned
  *   - Renders list of burst groups when items exist
- *   - Shows "Scan for bursts" button for collaborator/circle_admin roles
  *   - Shows "Select a circle" alert when no active circle
- *   - Calls runBurstBackfill and shows success snackbar on click
  *
  *  BurstGroupPage:
  *   - Shows loading spinner while fetching
@@ -17,6 +15,10 @@
  *   - Pre-selects the suggested best member
  *   - "Keep selected, delete rest" button calls resolve with correct keepIds
  *   - "Not a burst — dismiss" button calls dismiss
+ *
+ * Note: The "Scan for bursts" per-circle backfill button was removed in the
+ * settings refactor. Burst detection is now a global setting managed from
+ * the admin settings hub (/admin/settings/bursts).
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -42,7 +44,6 @@ vi.mock('../../hooks/useBursts', () => ({
 }));
 
 vi.mock('../../services/bursts', () => ({
-  runBurstBackfill: vi.fn(),
   listBurstGroups: vi.fn(),
   getBurstGroup: vi.fn(),
   resolveBurstGroup: vi.fn(),
@@ -69,14 +70,12 @@ import BurstGroupPage from '../../pages/Bursts/BurstGroupPage';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useCircle } from '../../hooks/useCircle';
 import { useBurstGroups, useBurstGroupDetail } from '../../hooks/useBursts';
-import { runBurstBackfill } from '../../services/bursts';
 import type { BurstGroupSummary, BurstGroupDetail } from '../../services/bursts';
 
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseCircle = vi.mocked(useCircle);
 const mockUseBurstGroups = vi.mocked(useBurstGroups);
 const mockUseBurstGroupDetail = vi.mocked(useBurstGroupDetail);
-const mockRunBurstBackfill = vi.mocked(runBurstBackfill);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -204,7 +203,6 @@ describe('BurstsPage', () => {
     mockUsePermissions.mockReturnValue(makePermissions(false));
     mockUseCircle.mockReturnValue(makeCircleContext());
     mockUseBurstGroups.mockReturnValue(makeBurstGroupsHook());
-    mockRunBurstBackfill.mockResolvedValue({ enqueued: 5 });
   });
 
   describe('when no active circle', () => {
@@ -267,77 +265,6 @@ describe('BurstsPage', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Network error loading bursts')).toBeInTheDocument();
-      });
-    });
-  });
-
-  describe('Scan for bursts button', () => {
-    it('shows Scan for bursts button for collaborator role', async () => {
-      render(<BurstsPage />);
-
-      await waitFor(() => {
-        // There may be multiple (header + empty state), but at least one must exist
-        const buttons = screen.getAllByRole('button', { name: /scan for bursts/i });
-        expect(buttons.length).toBeGreaterThan(0);
-      });
-    });
-
-    it('shows Scan for bursts button for circle_admin role', async () => {
-      mockUseCircle.mockReturnValue(makeCircleContext({ activeCircleRole: 'circle_admin' }));
-
-      render(<BurstsPage />);
-
-      await waitFor(() => {
-        const buttons = screen.getAllByRole('button', { name: /scan for bursts/i });
-        expect(buttons.length).toBeGreaterThan(0);
-      });
-    });
-
-    it('calls runBurstBackfill on click and shows success snackbar', async () => {
-      const user = userEvent.setup();
-      mockRunBurstBackfill.mockResolvedValue({ enqueued: 42 });
-
-      render(<BurstsPage />);
-
-      // The header button is always rendered for collaborator; click the first one
-      const btns = await screen.findAllByRole('button', { name: /scan for bursts/i });
-      await user.click(btns[0]);
-
-      await waitFor(() => {
-        expect(mockRunBurstBackfill).toHaveBeenCalledWith(CIRCLE_ID);
-        expect(screen.getByText(/42 items queued/i)).toBeInTheDocument();
-      });
-    });
-
-    it('shows error alert when runBurstBackfill fails', async () => {
-      const user = userEvent.setup();
-      mockRunBurstBackfill.mockRejectedValue(new Error('Burst detection not enabled'));
-
-      render(<BurstsPage />);
-
-      const btns = await screen.findAllByRole('button', { name: /scan for bursts/i });
-      await user.click(btns[0]);
-
-      await waitFor(() => {
-        expect(screen.getByText('Burst detection not enabled')).toBeInTheDocument();
-      });
-    });
-
-    it('disables button while scan is in progress', async () => {
-      const user = userEvent.setup();
-      // Never resolves during the test
-      mockRunBurstBackfill.mockReturnValue(new Promise(() => {}));
-
-      render(<BurstsPage />);
-
-      const btns = await screen.findAllByRole('button', { name: /scan for bursts/i });
-      await user.click(btns[0]);
-
-      await waitFor(() => {
-        // There may be multiple scanning buttons (header + empty state both disable)
-        const scanningBtns = screen.getAllByRole('button', { name: /scanning/i });
-        expect(scanningBtns.length).toBeGreaterThan(0);
-        expect(scanningBtns[0]).toBeDisabled();
       });
     });
   });

@@ -11,6 +11,7 @@ import { Readable } from 'stream';
 import { ObjectsService } from './objects.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { STORAGE_PROVIDER } from '../providers/storage-provider.interface';
+import { StorageProviderResolver } from '../providers/storage-provider.resolver';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
 import { createMockStorageProvider } from '../../../test/mocks/storage-provider.mock';
 import { OBJECT_UPLOADED_EVENT } from '../processing/events/object-uploaded.event';
@@ -23,6 +24,7 @@ describe('ObjectsService', () => {
   let mockConfig: jest.Mocked<ConfigService>;
   let mockEventEmitter: jest.Mocked<EventEmitter2>;
   let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
+  let mockStorageProviderResolver: { getActiveProvider: jest.Mock; getProviderFor: jest.Mock; invalidate: jest.Mock };
 
   const testUserId = 'user-123';
   const otherUserId = 'user-456';
@@ -56,6 +58,11 @@ describe('ObjectsService', () => {
     mockCircleMembershipService = {
       assertCircleAccess: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
     };
+    mockStorageProviderResolver = {
+      getActiveProvider: jest.fn().mockResolvedValue({ id: 's3', provider: mockStorageProvider }),
+      getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider),
+      invalidate: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -65,6 +72,7 @@ describe('ObjectsService', () => {
         { provide: ConfigService, useValue: mockConfig },
         { provide: EventEmitter2, useValue: mockEventEmitter },
         { provide: CircleMembershipService, useValue: mockCircleMembershipService },
+        { provide: StorageProviderResolver, useValue: mockStorageProviderResolver },
       ],
     }).compile();
 

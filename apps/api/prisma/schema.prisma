@@ -353,9 +353,6 @@ model Circle {
   description            String?
   ownerId                String   @map("owner_id") @db.Uuid
   isPersonal             Boolean  @default(false) @map("is_personal")
-  faceRecognitionEnabled Boolean  @default(false) @map("face_recognition_enabled")
-  autoTaggingEnabled     Boolean  @default(false) @map("auto_tagging_enabled")
-  burstDetectionEnabled  Boolean  @default(false) @map("burst_detection_enabled")
   createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -476,8 +473,9 @@ model MediaItem {
   description String?
   favorite    Boolean @default(false)
 
-  // --- Lifecycle / soft-delete ---
-  deletedAt DateTime? @map("deleted_at") @db.Timestamptz // soft-delete / trash; null = active
+  // --- Lifecycle / soft-delete / archive ---
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz  // soft-delete / trash; null = active
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz // archive state; null = not archived (active), non-null = archived
 
   // --- Import / sync provenance ---
   originalCreatedAt DateTime? @map("original_created_at") @db.Timestamptz // file creation date, distinct from capturedAt
@@ -532,6 +530,7 @@ model MediaItem {
 
   @@index([type])
   @@index([deletedAt])
+  @@index([archivedAt])
   @@index([favorite])
   @@index([geoCountryCode])
   @@index([geoAdmin1])

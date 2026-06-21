@@ -34,10 +34,8 @@ vi.mock('../../hooks/usePermissions', () => ({
   usePermissions: vi.fn(),
 }));
 
-vi.mock('../../services/face', () => ({
-  getCircleFaceSettings: vi.fn().mockResolvedValue({ faceRecognitionEnabled: false }),
-  updateCircleFaceSettings: vi.fn().mockResolvedValue({ faceRecognitionEnabled: true }),
-}));
+// services/face mock not needed after the settings refactor removed per-circle
+// face settings from CircleDetailPage (face recognition is now a global admin setting)
 
 // Route params
 vi.mock('react-router-dom', async () => {
@@ -53,14 +51,12 @@ import { useCircleInvites } from '../../hooks/useCircleInvites';
 import { useCircleContext } from '../../contexts/CircleContext';
 import { getCircle } from '../../services/circles';
 import { usePermissions } from '../../hooks/usePermissions';
-import { getCircleFaceSettings } from '../../services/face';
 
 const mockUseCircleMembers = vi.mocked(useCircleMembers);
 const mockUseCircleInvites = vi.mocked(useCircleInvites);
 const mockUseCircleContext = vi.mocked(useCircleContext);
 const mockGetCircle = vi.mocked(getCircle);
 const mockUsePermissions = vi.mocked(usePermissions);
-const mockGetCircleFaceSettings = vi.mocked(getCircleFaceSettings);
 
 // ------------------------------------------------------------------
 // Factories
@@ -147,7 +143,6 @@ describe('CircleDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetCircle.mockResolvedValue(mockCircle);
-    mockGetCircleFaceSettings.mockResolvedValue({ faceRecognitionEnabled: false });
     mockUseCircleMembers.mockReturnValue(makeMembersDefaults([mockMember]));
     mockUseCircleInvites.mockReturnValue(makeInvitesDefaults([mockInvite]));
     mockUseCircleContext.mockReturnValue({
@@ -257,57 +252,7 @@ describe('CircleDetailPage', () => {
     });
   });
 
-  describe('settings tab — face recognition', () => {
-    it('renders the Settings tab', async () => {
-      const user = userEvent.setup();
-      render(<CircleDetailPage />);
-      await waitFor(() => expect(screen.queryByText(/loading/i)).not.toBeInTheDocument());
-      const settingsTab = screen.getByRole('tab', { name: /settings/i });
-      await user.click(settingsTab);
-      expect(screen.getByRole('heading', { name: /face recognition/i })).toBeInTheDocument();
-    });
-
-    it('shows interactive toggle for circle_admin', async () => {
-      const user = userEvent.setup();
-      render(<CircleDetailPage />);
-      await waitFor(() => expect(screen.queryByText(/loading/i)).not.toBeInTheDocument());
-      await user.click(screen.getByRole('tab', { name: /settings/i }));
-      await waitFor(() => {
-        expect(screen.getByRole('switch')).toBeInTheDocument();
-      });
-    });
-
-    it('shows read-only text for non-admin viewer', async () => {
-      mockUseCircleContext.mockReturnValue({
-        circles: [mockCircle],
-        activeCircle: mockCircle,
-        activeCircleId: 'circle-1',
-        activeCircleRole: 'viewer',
-        loading: false,
-        setActiveCircle: vi.fn().mockResolvedValue(undefined),
-        refreshCircles: vi.fn().mockResolvedValue(undefined),
-      });
-      const user = userEvent.setup();
-      render(<CircleDetailPage />, {
-        wrapperOptions: {
-          user: {
-            id: 'viewer-user-id',
-            email: 'viewer@example.com',
-            displayName: 'Viewer',
-            profileImageUrl: null,
-            roles: [{ name: 'viewer' }],
-            permissions: [],
-            isActive: true,
-            createdAt: new Date().toISOString(),
-          },
-        },
-      });
-      await waitFor(() => expect(screen.queryByText(/loading/i)).not.toBeInTheDocument());
-      await user.click(screen.getByRole('tab', { name: /settings/i }));
-      await waitFor(() => {
-        expect(screen.queryByRole('switch')).not.toBeInTheDocument();
-        expect(screen.getByText(/face recognition is currently/i)).toBeInTheDocument();
-      });
-    });
-  });
 });
+// Note: the "settings tab — face recognition" describe block was removed in the
+// settings refactor. Face recognition is now a global admin feature (controlled
+// from /admin/settings → FaceSettingsPage), not a per-circle toggle on this page.

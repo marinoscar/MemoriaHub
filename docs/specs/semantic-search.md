@@ -219,15 +219,17 @@ In all fall-back cases, the search endpoint returns a valid (non-error) response
 
 ## 8. Backfill and Re-Embed
 
-### Backfill via `POST /api/tagging/backfill`
+### Backfill via `POST /api/admin/tagging/backfill`
 
-The existing backfill endpoint enqueues `auto_tagging` jobs for photos in a circle. Because embedding is the final step of every successful tagging job, backfilling also produces embeddings for all processed items — no separate embedding backfill endpoint exists.
+The global admin backfill endpoint enqueues `auto_tagging` jobs for photos across all circles. Because embedding is the final step of every successful tagging job, backfilling also produces embeddings for all processed items — no separate embedding backfill endpoint exists.
 
 Items that have already been tagged but have no embedding (e.g. photos tagged before the embedding feature was enabled) can be re-embedded by running backfill with `"force": true`, which re-processes all items regardless of their current `processed` status.
 
+The former per-circle `POST /api/tagging/backfill` endpoint has been removed.
+
 ### Re-Embed on People Change
 
-When face assignments change for a media item — via assign, unassign, merge, or soft-delete in the People API — the `PeopleService` automatically re-enqueues an `auto_tagging` job (priority 0, reason `rerun`) for each affected item, gated on the circle's `autoTaggingEnabled`. This refreshes the description and embedding to incorporate the updated people names.
+When face assignments change for a media item — via assign, unassign, merge, or soft-delete in the People API — the `PeopleService` automatically re-enqueues an `auto_tagging` job (priority 0, reason `rerun`) for each affected item, gated on the global `features.autoTagging` system setting. This refreshes the description and embedding to incorporate the updated people names.
 
 See [auto-tagging.md — People-Change Re-Enqueue](auto-tagging.md#people-change-re-enqueue) for details.
 

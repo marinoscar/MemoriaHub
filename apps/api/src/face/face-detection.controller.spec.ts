@@ -340,78 +340,6 @@ describe('FaceDetectionController', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // POST face/backfill
-  // -------------------------------------------------------------------------
-
-  describe('backfillFaceDetection', () => {
-    beforeEach(() => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: true });
-    });
-
-    it('returns { data: { queued: N } } for N media items found', async () => {
-      const mediaItems = [
-        { id: 'media-1', circleId: 'circle-1' },
-        { id: 'media-2', circleId: 'circle-1' },
-      ];
-
-      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue(mediaItems);
-      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-1', status: JobStatus.pending });
-      (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
-
-      const result = await controller.backfillFaceDetection(
-        { circleId: 'circle-1' },
-        makeUser(),
-      );
-
-      expect(result.data.queued).toBe(2);
-    });
-
-    it('returns { data: { queued: 0 } } when no media items need processing', async () => {
-      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
-
-      const result = await controller.backfillFaceDetection(
-        { circleId: 'circle-1' },
-        makeUser(),
-      );
-
-      expect(result.data.queued).toBe(0);
-      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
-    });
-
-    it('calls enrichmentJobService.enqueue with backfill reason for each item', async () => {
-      const mediaItems = [{ id: 'media-1', circleId: 'circle-1' }];
-      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue(mediaItems);
-      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-1', status: JobStatus.pending });
-      (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
-
-      await controller.backfillFaceDetection({ circleId: 'circle-1' }, makeUser());
-
-      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: 'face_detection',
-          mediaItemId: 'media-1',
-          reason: JobReason.backfill,
-        }),
-      );
-    });
-
-    it('only queries photos with deletedAt=null when force is false (default)', async () => {
-      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
-
-      await controller.backfillFaceDetection({ circleId: 'circle-1' }, makeUser());
-
-      expect(mockPrisma.mediaItem.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            circleId: 'circle-1',
-            type: MediaType.photo,
-            deletedAt: null,
-          }),
-        }),
-      );
-    });
-  });
 
   // -------------------------------------------------------------------------
   // DELETE face/biometrics
@@ -462,26 +390,6 @@ describe('FaceDetectionController', () => {
       });
     });
 
-    it('sets faceRecognitionEnabled=false on the circle', async () => {
-      const user = makeUser();
-      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb: any) => {
-        (mockPrisma.face.count as jest.Mock).mockResolvedValue(0);
-        (mockPrisma.person.count as jest.Mock).mockResolvedValue(0);
-        (mockPrisma.face.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
-        (mockPrisma.person.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
-        (mockPrisma.enrichmentJob.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
-        (mockPrisma.mediaFaceStatus.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
-        (mockPrisma.circle.update as jest.Mock).mockResolvedValue({});
-        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
-        return cb(mockPrisma);
-      });
-      await controller.deleteAllBiometrics('circle-1', user);
-      expect(mockPrisma.circle.update).toHaveBeenCalledWith({
-        where: { id: 'circle-1' },
-        data: { faceRecognitionEnabled: false },
-      });
-    });
-
     it('writes a face:biometrics_delete audit event', async () => {
       const user = makeUser();
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb: any) => {
@@ -521,30 +429,4 @@ describe('FaceDetectionController', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // backfillFaceDetection — opt-in gate
-  // -------------------------------------------------------------------------
-
-  describe('backfillFaceDetection — opt-in gate', () => {
-    it('throws NotFoundException when circle does not exist', async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(null);
-      await expect(
-        controller.backfillFaceDetection({ circleId: 'circle-1' }, makeUser())
-      ).rejects.toThrow(NotFoundException);
-    });
-
-    it('throws BadRequestException when circle faceRecognitionEnabled is false', async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: false });
-      await expect(
-        controller.backfillFaceDetection({ circleId: 'circle-1' }, makeUser())
-      ).rejects.toThrow(BadRequestException);
-    });
-
-    it('proceeds when circle faceRecognitionEnabled is true', async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue({ faceRecognitionEnabled: true });
-      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
-      const result = await controller.backfillFaceDetection({ circleId: 'circle-1' }, makeUser());
-      expect(result.data.queued).toBe(0);
-    });
-  });
 });

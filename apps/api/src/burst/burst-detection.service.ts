@@ -370,28 +370,19 @@ export class BurstDetectionService {
 
     if (members.length === 0) return;
 
-    // Check if face recognition is enabled for the circle
-    const circle = await this.prisma.circle.findUnique({
-      where: { id: circleId },
-      select: { faceRecognitionEnabled: true },
-    });
-
-    // Optionally load face data
+    // Load face data for best-shot scoring
     interface FaceGroupResult {
       mediaItemId: string;
       _count: { id: number };
       _avg: { confidence: number | null };
     }
 
-    let faceData: FaceGroupResult[] = [];
-    if (circle?.faceRecognitionEnabled) {
-      faceData = await this.prisma.face.groupBy({
-        by: ['mediaItemId'],
-        where: { mediaItemId: { in: members.map((m) => m.id) } },
-        _count: { id: true },
-        _avg: { confidence: true },
-      }) as unknown as FaceGroupResult[];
-    }
+    const faceData = await this.prisma.face.groupBy({
+      by: ['mediaItemId'],
+      where: { mediaItemId: { in: members.map((m) => m.id) } },
+      _count: { id: true },
+      _avg: { confidence: true },
+    }) as unknown as FaceGroupResult[];
 
     const faceMap = new Map(
       faceData.map((f) => [

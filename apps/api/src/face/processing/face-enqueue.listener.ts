@@ -7,6 +7,8 @@ import {
   ObjectProcessedEvent,
 } from '../../storage/processing/events/object-processed.event';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
+import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
+import { FEATURE_KEYS } from '../../common/types/settings.types';
 
 @Injectable()
 export class FaceEnqueueListener {
@@ -15,6 +17,7 @@ export class FaceEnqueueListener {
   constructor(
     private readonly prisma: PrismaService,
     private readonly enrichmentJobService: EnrichmentJobService,
+    private readonly systemSettings: SystemSettingsService,
   ) {}
 
   @OnEvent(OBJECT_PROCESSED_EVENT, { async: true })
@@ -62,14 +65,11 @@ export class FaceEnqueueListener {
       return;
     }
 
-    // 3. Check per-circle opt-in flag (default: false — biometric data requires explicit consent)
-    const circle = await this.prisma.circle.findUnique({
-      where: { id: mediaItem.circleId },
-      select: { faceRecognitionEnabled: true },
-    });
-    if (!circle?.faceRecognitionEnabled) {
+    // 3. Check global system-settings feature flag
+    const faceRecognitionGloballyEnabled = await this.systemSettings.isFeatureEnabled(FEATURE_KEYS.FACE_RECOGNITION);
+    if (!faceRecognitionGloballyEnabled) {
       this.logger.debug(
-        `Circle ${mediaItem.circleId} has faceRecognitionEnabled=false; skipping face enqueue for MediaItem ${mediaItem.id}`,
+        `Face recognition disabled globally; skipping face enqueue for MediaItem ${mediaItem.id}`,
       );
       return;
     }

@@ -7,6 +7,8 @@ import {
   ObjectProcessedEvent,
 } from '../storage/processing/events/object-processed.event';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { FEATURE_KEYS } from '../common/types/settings.types';
 
 @Injectable()
 export class TaggingEnqueueListener {
@@ -15,6 +17,7 @@ export class TaggingEnqueueListener {
   constructor(
     private readonly prisma: PrismaService,
     private readonly enrichmentJobService: EnrichmentJobService,
+    private readonly systemSettings: SystemSettingsService,
   ) {}
 
   @OnEvent(OBJECT_PROCESSED_EVENT, { async: true })
@@ -61,14 +64,11 @@ export class TaggingEnqueueListener {
       return;
     }
 
-    // 3. Check per-circle opt-in flag
-    const circle = await this.prisma.circle.findUnique({
-      where: { id: mediaItem.circleId },
-      select: { autoTaggingEnabled: true },
-    });
-    if (!circle?.autoTaggingEnabled) {
+    // 3. Check global system-settings feature flag
+    const autoTaggingGloballyEnabled = await this.systemSettings.isFeatureEnabled(FEATURE_KEYS.AUTO_TAGGING);
+    if (!autoTaggingGloballyEnabled) {
       this.logger.debug(
-        `Circle ${mediaItem.circleId} has autoTaggingEnabled=false; skipping auto-tagging enqueue for MediaItem ${mediaItem.id}`,
+        `Auto-tagging disabled globally; skipping auto-tagging enqueue for MediaItem ${mediaItem.id}`,
       );
       return;
     }

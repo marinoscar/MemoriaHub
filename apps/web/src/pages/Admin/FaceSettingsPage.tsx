@@ -18,7 +18,6 @@ import {
   CircularProgress,
   Alert,
   Snackbar,
-  Tooltip,
 } from '@mui/material';
 import {
   CheckCircle as CheckCircleIcon,
@@ -27,9 +26,8 @@ import {
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useFaceSettings } from '../../hooks/useFaceSettings';
-import { useCircles } from '../../hooks/useCircles';
-import { runFaceBackfill, getCircleFaceSettings, updateCircleFaceSettings } from '../../services/face';
-import type { CircleFaceSettings } from '../../services/face';
+import { useSystemSettings } from '../../hooks/useSystemSettings';
+import { runGlobalFaceBackfill } from '../../services/adminBackfill';
 
 function FaceSettingsContent() {
   const {
@@ -44,20 +42,14 @@ function FaceSettingsContent() {
     saveDetectionFeature,
   } = useFaceSettings();
 
-  const { circles, fetchCircles } = useCircles();
+  const { settings: sysSettings, isSaving: sysSaving, updateSettings: updateSysSettings } = useSystemSettings();
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  // Backfill state
-  const [backfillCircleId, setBackfillCircleId] = useState('');
-  const [backfillForce, setBackfillForce] = useState(false);
-  const [backfillLoading, setBackfillLoading] = useState(false);
-
-  // Per-circle face settings for the backfill panel
-  const [circleFaceSettings, setCircleFaceSettings] = useState<CircleFaceSettings | null>(null);
-  const [circleFaceSettingsLoading, setCircleFaceSettingsLoading] = useState(false);
-  const [enablingFaceForCircle, setEnablingFaceForCircle] = useState(false);
+  // Global backfill state
+  const [globalBackfillForce, setGlobalBackfillForce] = useState(false);
+  const [globalBackfillLoading, setGlobalBackfillLoading] = useState(false);
 
   // Per-provider form state
   const [providerKeys, setProviderKeys] = useState<Record<string, string>>({});
@@ -82,10 +74,6 @@ function FaceSettingsContent() {
   useEffect(() => {
     void fetchSettings();
   }, [fetchSettings]);
-
-  useEffect(() => {
-    void fetchCircles();
-  }, [fetchCircles]);
 
   // Sync enabled toggles and URLs from settings
   useEffect(() => {
@@ -130,19 +118,6 @@ function FaceSettingsContent() {
       .catch(() => setAvailableModels([]))
       .finally(() => setModelsLoading(false));
   }, [detectionProvider, getModels]);
-
-  // Fetch per-circle face settings when circle selection changes
-  useEffect(() => {
-    if (!backfillCircleId) {
-      setCircleFaceSettings(null);
-      return;
-    }
-    setCircleFaceSettingsLoading(true);
-    getCircleFaceSettings(backfillCircleId)
-      .then(setCircleFaceSettings)
-      .catch(() => setCircleFaceSettings(null))
-      .finally(() => setCircleFaceSettingsLoading(false));
-  }, [backfillCircleId]);
 
   const handleSaveCredentials = async (provider: string) => {
     try {
@@ -215,44 +190,6 @@ function FaceSettingsContent() {
     }
   };
 
-  const handleEnableCircleFaceRecognition = async () => {
-    if (!backfillCircleId) return;
-    setEnablingFaceForCircle(true);
-    try {
-      const updated = await updateCircleFaceSettings(backfillCircleId, true);
-      setCircleFaceSettings(updated);
-      setSuccessMessage('Face recognition enabled for this circle');
-    } catch (err) {
-      setLocalError(err instanceof Error ? err.message : 'Failed to enable face recognition');
-    } finally {
-      setEnablingFaceForCircle(false);
-    }
-  };
-
-  const handleRunBackfill = async () => {
-    if (!backfillCircleId) return;
-    if (
-      !window.confirm(
-        `Queue face detection for all unprocessed photos in the selected circle${backfillForce ? ' (force reprocess all)' : ''}? This may take a while.`,
-      )
-    )
-      return;
-    setBackfillLoading(true);
-    try {
-      const result = await runFaceBackfill(backfillCircleId, backfillForce || undefined);
-      setSuccessMessage(`Backfill queued: ${result.queued} item(s) scheduled`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '';
-      if (msg.toLowerCase().includes('not enabled') || msg.toLowerCase().includes('face recognition is not enabled')) {
-        setLocalError("Face recognition isn't enabled for this circle — enable it above.");
-      } else {
-        setLocalError(msg || 'Failed to queue backfill');
-      }
-    } finally {
-      setBackfillLoading(false);
-    }
-  };
-
   if (loading && !settings) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
@@ -281,6 +218,69 @@ function FaceSettingsContent() {
         <Typography color="text.secondary" sx={{ mb: 3 }}>
           Configure face detection provider credentials and detection settings
         </Typography>
+
+        {/* Global face recognition section */}
+        <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>
+            Face Recognition (Global)
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Master switch for face recognition across all circles. Per-circle opt-in still applies.
+          </Typography>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={sysSettings?.features?.faceRecognition ?? false}
+                onChange={(e) => {
+                  void updateSysSettings({
+                    features: { ...(sysSettings?.features ?? {}), faceRecognition: e.target.checked },
+                  });
+                }}
+                disabled={sysSaving || !sysSettings}
+              />
+            }
+            label="Enable face recognition globally"
+            sx={{ mb: 2, display: 'block' }}
+          />
+
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            Run Global Face Backfill
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Queue face detection for existing photos across all circles that have face recognition
+            enabled.
+          </Typography>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={globalBackfillForce}
+                onChange={(e) => setGlobalBackfillForce(e.target.checked)}
+              />
+            }
+            label="Force (reprocess already-processed photos)"
+            sx={{ mb: 2, display: 'block' }}
+          />
+          <Button
+            variant="contained"
+            disabled={globalBackfillLoading || !(sysSettings?.features?.faceRecognition)}
+            startIcon={globalBackfillLoading ? <CircularProgress size={16} /> : undefined}
+            onClick={() => {
+              setGlobalBackfillLoading(true);
+              runGlobalFaceBackfill({ force: globalBackfillForce || undefined })
+                .then((result) =>
+                  setSuccessMessage(
+                    `${result.enqueued} jobs queued across ${result.circles} circle(s).`,
+                  ),
+                )
+                .catch((err: unknown) =>
+                  setLocalError(err instanceof Error ? err.message : 'Global backfill failed'),
+                )
+                .finally(() => setGlobalBackfillLoading(false));
+            }}
+          >
+            Run Global Backfill
+          </Button>
+        </Paper>
 
         {/* Provider sections */}
         {[...(settings?.providers ?? []), ...(settings?.knownProviders ?? [])].map((providerConfig) => (
@@ -632,100 +632,6 @@ function FaceSettingsContent() {
           </Stack>
         </Paper>
 
-        {/* Backfill section */}
-        <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
-          <Typography variant="h6" sx={{ mb: 1 }}>
-            Run Backfill
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Queue face detection for existing photos that have not yet been processed (or all photos
-            if Force is enabled). Admin only.
-          </Typography>
-
-          <FormControl size="small" fullWidth sx={{ mb: 2 }}>
-            <InputLabel>Circle</InputLabel>
-            <Select
-              label="Circle"
-              value={backfillCircleId}
-              onChange={(e) => {
-                setBackfillCircleId(e.target.value);
-                setCircleFaceSettings(null);
-              }}
-            >
-              <MenuItem value="">Select circle</MenuItem>
-              {circles.map((c) => (
-                <MenuItem key={c.id} value={c.id}>
-                  {c.name}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          {/* Per-circle face recognition opt-in */}
-          {backfillCircleId && (
-            circleFaceSettingsLoading ? (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                <CircularProgress size={16} />
-                <Typography variant="body2" color="text.secondary">Checking face recognition status…</Typography>
-              </Box>
-            ) : circleFaceSettings && !circleFaceSettings.faceRecognitionEnabled ? (
-              <Alert severity="info" sx={{ mb: 2 }}>
-                <Typography variant="body2" sx={{ mb: 1 }}>
-                  Face recognition is a per-circle opt-in (biometric data). Enable it for this circle before running backfill.
-                </Typography>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={false}
-                      onChange={() => void handleEnableCircleFaceRecognition()}
-                      disabled={enablingFaceForCircle}
-                      color="primary"
-                    />
-                  }
-                  label={enablingFaceForCircle ? 'Enabling…' : 'Enable face recognition for this circle'}
-                />
-              </Alert>
-            ) : circleFaceSettings?.faceRecognitionEnabled ? (
-              <Box sx={{ mb: 2 }}>
-                <Chip label="Face recognition enabled" color="success" size="small" />
-              </Box>
-            ) : null
-          )}
-
-          <FormControlLabel
-            control={
-              <Switch
-                checked={backfillForce}
-                onChange={(e) => setBackfillForce(e.target.checked)}
-              />
-            }
-            label="Force (reprocess already-processed photos)"
-            sx={{ mb: 2, display: 'block' }}
-          />
-
-          <Tooltip
-            title={
-              backfillCircleId && circleFaceSettings && !circleFaceSettings.faceRecognitionEnabled
-                ? 'Enable face recognition first'
-                : ''
-            }
-          >
-            <span>
-              <Button
-                variant="contained"
-                disabled={
-                  !backfillCircleId ||
-                  backfillLoading ||
-                  (circleFaceSettings !== null && !circleFaceSettings.faceRecognitionEnabled)
-                }
-                startIcon={backfillLoading ? <CircularProgress size={16} /> : undefined}
-                onClick={() => void handleRunBackfill()}
-              >
-                Run Backfill
-              </Button>
-            </span>
-          </Tooltip>
-        </Paper>
       </Box>
 
       {/* Success Snackbar */}

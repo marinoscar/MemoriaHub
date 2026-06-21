@@ -39,6 +39,10 @@ export const systemSettingsSchema = z.object({
   ui: z.object({
     allowUserThemeOverride: z.boolean(),
   }),
+  // Well-known global feature flag keys stored in this map (system-wide on/off, Admin-managed):
+  //   - autoTagging: AI auto-tagging + description generation
+  //   - faceRecognition: face detection / recognition
+  //   - burstDetection: burst photo (similar pictures) detection
   features: z.record(z.string(), z.boolean()),
   ai: z.object({
     features: z.object({
@@ -69,7 +73,10 @@ export const systemSettingsSchema = z.object({
     insights: z.object({
       refreshIntervalHours: z.number().int().min(1).max(168).default(4),
     }).default({ refreshIntervalHours: 4 }),
-  }).optional().default({ activeProvider: 's3', insights: { refreshIntervalHours: 4 } }),
+    trash: z.object({
+      retentionDays: z.number().int().min(1).max(365).default(30),
+    }).default({ retentionDays: 30 }),
+  }).optional().default({ activeProvider: 's3', insights: { refreshIntervalHours: 4 }, trash: { retentionDays: 30 } }),
   burst: z.object({
     timeGapSeconds: z.number().int().min(1).max(300).default(10),
     hashDistance: z.number().int().min(0).max(32).default(10),
@@ -77,7 +84,8 @@ export const systemSettingsSchema = z.object({
   }).optional().default({ timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3 }),
   geo: z.object({
     reverseProvider: z.enum(['offline', 'nominatim', 'google']).default('offline'),
-  }).optional().default({ reverseProvider: 'offline' }),
+    forwardSearchEnabled: z.boolean().default(false),
+  }).optional().default({ reverseProvider: 'offline', forwardSearchEnabled: false }),
 });
 
 export type SystemSettingsDto = z.infer<typeof systemSettingsSchema>;
@@ -117,6 +125,9 @@ export const systemSettingsPatchSchema = z.object({
     insights: z.object({
       refreshIntervalHours: z.number().int().min(1).max(168).optional(),
     }).optional(),
+    trash: z.object({
+      retentionDays: z.number().int().min(1).max(365).optional(),
+    }).optional(),
   }).optional(),
   burst: z.object({
     timeGapSeconds: z.number().int().min(1).max(300).optional(),
@@ -125,5 +136,6 @@ export const systemSettingsPatchSchema = z.object({
   }).optional(),
   geo: z.object({
     reverseProvider: z.enum(['offline', 'nominatim', 'google']).optional(),
+    forwardSearchEnabled: z.boolean().optional(),
   }).optional(),
 });

@@ -19,8 +19,6 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Switch,
-  FormControlLabel,
   Checkbox,
   Autocomplete,
   Tooltip,
@@ -50,8 +48,6 @@ import { FaceCrop } from '../../components/people/FaceCrop';
 import { PersonAvatar } from '../../components/people/PersonAvatar';
 import type { PersonListItem, PersonDetail } from '../../services/face';
 import {
-  getCircleFaceSettings,
-  updateCircleFaceSettings,
   deleteCircleBiometrics,
   mergePeople,
   deletePerson,
@@ -60,7 +56,6 @@ import {
   updatePerson,
   setPersonFavorite,
 } from '../../services/face';
-import type { CircleFaceSettings } from '../../services/face';
 import { listMedia, getMedia } from '../../services/media';
 import type { MediaItem } from '../../types/media';
 import { useUnassignedFaces } from '../../hooks/useUnassignedFaces';
@@ -713,50 +708,6 @@ function PersonDetailDrawer({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Face recognition opt-in gate (when disabled)
-// ---------------------------------------------------------------------------
-
-interface FaceOptInGateProps {
-  circleRole: string | null;
-  onEnable: () => void;
-  enabling: boolean;
-}
-
-function FaceOptInGate({ circleRole, onEnable, enabling }: FaceOptInGateProps) {
-  const isAdmin = circleRole === 'circle_admin';
-
-  if (isAdmin) {
-    return (
-      <Paper variant="outlined" sx={{ p: 3, textAlign: 'center', maxWidth: 480, mx: 'auto' }}>
-        <Typography variant="h6" sx={{ mb: 1 }}>
-          Face Recognition is not enabled for this circle
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          Face recognition uses biometric data (face embeddings) to identify people across your
-          photos. This is opt-in per circle.
-        </Typography>
-        <FormControlLabel
-          control={
-            <Switch
-              checked={false}
-              onChange={onEnable}
-              disabled={enabling}
-              color="primary"
-            />
-          }
-          label={enabling ? 'Enabling…' : 'Enable face recognition'}
-        />
-      </Paper>
-    );
-  }
-
-  return (
-    <Alert severity="info">
-      Face recognition is not enabled for this circle. Ask a circle admin to enable it.
-    </Alert>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Unassigned Faces Section (lone faces not yet in any Person)
@@ -1069,12 +1020,6 @@ export default function PeoplePage() {
   // Optimistic favorite overrides: maps personId -> boolean
   const [pendingFavorites, setPendingFavorites] = useState<Record<string, boolean>>({});
 
-  // Face settings state
-  const [faceSettings, setFaceSettings] = useState<CircleFaceSettings | null>(null);
-  const [settingsLoading, setSettingsLoading] = useState(false);
-  const [settingsError, setSettingsError] = useState<string | null>(null);
-  const [enablingFace, setEnablingFace] = useState(false);
-
   // Settings menu state
   const [settingsAnchorEl, setSettingsAnchorEl] = useState<null | HTMLElement>(null);
   const settingsMenuOpen = Boolean(settingsAnchorEl);
@@ -1119,63 +1064,9 @@ export default function PeoplePage() {
   );
   const allPeople = [...labeledPeople, ...unlabeledPeople];
 
-  // Load face settings when circle changes
-  useEffect(() => {
-    if (!activeCircleId) {
-      setFaceSettings(null);
-      return;
-    }
-    setSettingsLoading(true);
-    setSettingsError(null);
-    getCircleFaceSettings(activeCircleId)
-      .then(setFaceSettings)
-      .catch((err) =>
-        setSettingsError(err instanceof Error ? err.message : 'Failed to load face settings'),
-      )
-      .finally(() => setSettingsLoading(false));
-  }, [activeCircleId]);
-
-  const refreshFaceSettings = async () => {
-    if (!activeCircleId) return;
-    try {
-      const settings = await getCircleFaceSettings(activeCircleId);
-      setFaceSettings(settings);
-    } catch {
-      // ignore refresh errors
-    }
-  };
-
-  const handleEnableFaceRecognition = async () => {
-    if (!activeCircleId) return;
-    setEnablingFace(true);
-    try {
-      const updated = await updateCircleFaceSettings(activeCircleId, true);
-      setFaceSettings(updated);
-    } catch (err) {
-      setSettingsError(
-        err instanceof Error ? err.message : 'Failed to enable face recognition',
-      );
-    } finally {
-      setEnablingFace(false);
-    }
-  };
-
-  const handleDisableFaceRecognition = async () => {
-    if (!activeCircleId) return;
-    setSettingsAnchorEl(null);
-    try {
-      const updated = await updateCircleFaceSettings(activeCircleId, false);
-      setFaceSettings(updated);
-    } catch (err) {
-      setSettingsError(
-        err instanceof Error ? err.message : 'Failed to disable face recognition',
-      );
-    }
-  };
-
   const handleBiometricsDeleted = async (deletedFaces: number, deletedPeople: number) => {
     setBiometricsResult({ deletedFaces, deletedPeople });
-    await Promise.all([refreshLabeled(), refreshUnlabeled(), refreshFaceSettings()]);
+    await Promise.all([refreshLabeled(), refreshUnlabeled()]);
   };
 
   const handlePersonClick = (person: PersonListItem) => {
@@ -1234,51 +1125,15 @@ export default function PeoplePage() {
     );
   }
 
-  // While loading face settings, show a spinner
-  if (settingsLoading) {
-    return (
-      <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-          <CircularProgress />
-        </Box>
-      </Container>
-    );
-  }
-
-  // Settings load error
-  if (settingsError && !faceSettings) {
-    return (
-      <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Alert severity="error">{settingsError}</Alert>
-      </Container>
-    );
-  }
-
-  // Opt-in gate — face recognition not enabled
-  if (faceSettings && !faceSettings.faceRecognitionEnabled) {
-    return (
-      <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Stack direction="row" sx={{ mb: 3, alignItems: 'center', justifyContent: 'space-between' }}>
-          <Typography variant="h4">People</Typography>
-        </Stack>
-        <FaceOptInGate
-          circleRole={activeCircleRole}
-          onEnable={() => void handleEnableFaceRecognition()}
-          enabling={enablingFace}
-        />
-      </Container>
-    );
-  }
-
-  // Normal People UI (face recognition enabled)
+  // People UI
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
       {/* Header */}
       <Stack direction="row" sx={{ mb: 3, alignItems: 'center', justifyContent: 'space-between' }}>
         <Typography variant="h4">People</Typography>
 
-        {/* Settings menu — circle_admin only, when face recognition is enabled */}
-        {activeCircleRole === 'circle_admin' && faceSettings?.faceRecognitionEnabled && (
+        {/* Settings menu — circle_admin only */}
+        {activeCircleRole === 'circle_admin' && (
           <>
             <IconButton
               onClick={(e) => setSettingsAnchorEl(e.currentTarget)}
@@ -1295,9 +1150,6 @@ export default function PeoplePage() {
               open={settingsMenuOpen}
               onClose={() => setSettingsAnchorEl(null)}
             >
-              <MenuItem onClick={() => void handleDisableFaceRecognition()}>
-                Disable face recognition
-              </MenuItem>
               <MenuItem
                 onClick={() => {
                   setSettingsAnchorEl(null);
@@ -1311,12 +1163,6 @@ export default function PeoplePage() {
           </>
         )}
       </Stack>
-
-      {settingsError && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {settingsError}
-        </Alert>
-      )}
 
       {biometricsResult && (
         <Alert

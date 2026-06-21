@@ -8,10 +8,6 @@ import {
   Stack,
   TextField,
   Button,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   CircularProgress,
   Alert,
   Table,
@@ -21,7 +17,6 @@ import {
   TableHead,
   TableRow,
   Switch,
-  FormControlLabel,
   IconButton,
   Collapse,
 } from '@mui/material';
@@ -36,7 +31,6 @@ import {
   ExpandLess as ExpandLessIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
-import { useCircles } from '../../hooks/useCircles';
 import {
   listTagLabels,
   createTagLabel,
@@ -46,13 +40,12 @@ import {
   importTagLabels,
 } from '../../services/tagLabels';
 import type { TagLabel, ImportResult } from '../../services/tagLabels';
-import { runTaggingBackfill } from '../../services/tagging';
 
 // ---------------------------------------------------------------------------
 // Inner content (only rendered when user is admin)
 // ---------------------------------------------------------------------------
 
-function TagsContent() {
+export function TagsContent() {
   // ---- Tag label vocabulary state ----
   const [labels, setLabels] = useState<TagLabel[]>([]);
   const [labelsLoading, setLabelsLoading] = useState(false);
@@ -77,16 +70,6 @@ function TagsContent() {
   const [importErrorsOpen, setImportErrorsOpen] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
 
-  // ---- Backfill state ----
-  const { circles, fetchCircles } = useCircles();
-  const [backfillCircleId, setBackfillCircleId] = useState('');
-  const [backfillFrom, setBackfillFrom] = useState('');
-  const [backfillTo, setBackfillTo] = useState('');
-  const [backfillForce, setBackfillForce] = useState(false);
-  const [backfillLoading, setBackfillLoading] = useState(false);
-  const [backfillResult, setBackfillResult] = useState<string | null>(null);
-  const [backfillError, setBackfillError] = useState<string | null>(null);
-
   // ---- Load on mount ----
   const loadLabels = () => {
     setLabelsLoading(true);
@@ -101,10 +84,6 @@ function TagsContent() {
   useEffect(() => {
     loadLabels();
   }, []);
-
-  useEffect(() => {
-    void fetchCircles();
-  }, [fetchCircles]);
 
   // ---- Handlers ----
 
@@ -211,28 +190,6 @@ function TagsContent() {
       setLabelsError(err instanceof Error ? err.message : 'Import failed');
     } finally {
       setImporting(false);
-    }
-  };
-
-  // ---- Backfill ----
-
-  const handleRunBackfill = async () => {
-    if (!backfillCircleId) return;
-    setBackfillLoading(true);
-    setBackfillResult(null);
-    setBackfillError(null);
-    try {
-      const result = await runTaggingBackfill({
-        circleId: backfillCircleId,
-        from: backfillFrom || undefined,
-        to: backfillTo || undefined,
-        force: backfillForce,
-      });
-      setBackfillResult(`Enqueued ${result.enqueued} photos for tagging.`);
-    } catch (err) {
-      setBackfillError(err instanceof Error ? err.message : 'Failed to run backfill');
-    } finally {
-      setBackfillLoading(false);
     }
   };
 
@@ -462,84 +419,6 @@ function TagsContent() {
           )}
         </Paper>
 
-        {/* ---- Tagging Backfill ---- */}
-        <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
-          <Typography variant="h6" sx={{ mb: 1 }}>
-            Run Tagging Backfill
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Queue AI tagging for existing photos. Requires auto-tagging to be enabled on the circle.
-          </Typography>
-
-          <FormControl size="small" fullWidth sx={{ mb: 2 }}>
-            <InputLabel>Circle</InputLabel>
-            <Select
-              label="Circle"
-              value={backfillCircleId}
-              onChange={(e) => setBackfillCircleId(e.target.value)}
-            >
-              <MenuItem value="">Select circle</MenuItem>
-              {circles.map((c) => (
-                <MenuItem key={c.id} value={c.id}>
-                  {c.name}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
-            <TextField
-              label="From date"
-              type="date"
-              size="small"
-              value={backfillFrom}
-              onChange={(e) => setBackfillFrom(e.target.value)}
-              slotProps={{ inputLabel: { shrink: true } }}
-              sx={{ flex: 1 }}
-            />
-            <TextField
-              label="To date"
-              type="date"
-              size="small"
-              value={backfillTo}
-              onChange={(e) => setBackfillTo(e.target.value)}
-              slotProps={{ inputLabel: { shrink: true } }}
-              sx={{ flex: 1 }}
-            />
-          </Stack>
-
-          <FormControlLabel
-            control={
-              <Switch
-                checked={backfillForce}
-                onChange={(e) => setBackfillForce(e.target.checked)}
-              />
-            }
-            label="Force (reprocess already-tagged photos)"
-            sx={{ mb: 2, display: 'block' }}
-          />
-
-          {backfillResult && (
-            <Alert severity="success" sx={{ mb: 2 }}>
-              {backfillResult}
-            </Alert>
-          )}
-          {backfillError && (
-            <Alert severity="error" sx={{ mb: 2 }} onClose={() => setBackfillError(null)}>
-              {backfillError}
-            </Alert>
-          )}
-
-          <Button
-            variant="contained"
-            disabled={!backfillCircleId || backfillLoading}
-            onClick={() => void handleRunBackfill()}
-            startIcon={backfillLoading ? <CircularProgress size={16} /> : undefined}
-            sx={{ minHeight: 44 }}
-          >
-            Run Backfill
-          </Button>
-        </Paper>
       </Box>
     </Container>
   );

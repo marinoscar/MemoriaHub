@@ -3,9 +3,7 @@ import {
   Post,
   Get,
   Param,
-  Body,
   NotFoundException,
-  BadRequestException,
   Logger,
 } from '@nestjs/common';
 import {
@@ -15,9 +13,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
-import { CircleRole, JobReason, MediaTagStatusType, MediaType } from '@prisma/client';
+import { CircleRole, JobReason, MediaTagStatusType } from '@prisma/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
@@ -25,24 +21,6 @@ import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { whereDateRange } from '../search/media-where.builder';
-
-// ---------------------------------------------------------------------------
-// DTOs
-// ---------------------------------------------------------------------------
-
-const flexibleDate = z
-  .string()
-  .refine((v) => !Number.isNaN(Date.parse(v)), { message: 'Invalid date' });
-
-const backfillTaggingSchema = z.object({
-  circleId: z.string().uuid(),
-  from: flexibleDate.optional(),
-  to: flexibleDate.optional(),
-  force: z.boolean().optional().default(false),
-});
-
-class BackfillTaggingDto extends createZodDto(backfillTaggingSchema) {}
 
 // ---------------------------------------------------------------------------
 // Controller
@@ -140,99 +118,6 @@ export class TaggingController {
     }
 
     return { data: status };
-  }
-
-  // --------------------------------------------------------------------------
-  // POST /api/tagging/backfill
-  // --------------------------------------------------------------------------
-
-  @Post('tagging/backfill')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
-  @ApiOperation({
-    summary: 'Backfill auto-tagging for unprocessed photos in a circle',
-  })
-  @ApiResponse({ status: 201, description: 'Backfill jobs queued' })
-  async backfillTagging(
-    @Body() dto: BackfillTaggingDto,
-    @CurrentUser() user: RequestUser,
-  ) {
-    const { circleId, force = false } = dto;
-
-    await this.circleMembershipService.assertCircleAccess(
-      user.id,
-      circleId,
-      user.permissions,
-      'collaborator' as CircleRole,
-    );
-
-    const circle = await this.prisma.circle.findUnique({
-      where: { id: circleId },
-      select: { autoTaggingEnabled: true },
-    });
-
-    if (!circle || !circle.autoTaggingEnabled) {
-      throw new BadRequestException(
-        'Auto-tagging is not enabled for this circle',
-      );
-    }
-
-    const from = dto.from ? new Date(dto.from) : undefined;
-    const to = dto.to ? new Date(dto.to) : undefined;
-    const dateWhere = whereDateRange(from, to);
-
-    const mediaItems = await this.prisma.mediaItem.findMany({
-      where: {
-        circleId,
-        type: MediaType.photo,
-        deletedAt: null,
-        ...dateWhere,
-        ...(force
-          ? {}
-          : {
-              OR: [
-                { tagStatus: null },
-                {
-                  tagStatus: {
-                    status: { notIn: [MediaTagStatusType.processed] },
-                  },
-                },
-              ],
-            }),
-      },
-      select: { id: true, circleId: true },
-    });
-
-    let enqueued = 0;
-    for (const item of mediaItems) {
-      await this.enrichmentJobService.enqueue({
-        type: 'auto_tagging',
-        mediaItemId: item.id,
-        circleId: item.circleId,
-        reason: JobReason.backfill,
-        priority: 100,
-      });
-
-      await this.prisma.mediaTagStatus.upsert({
-        where: { mediaItemId: item.id },
-        create: {
-          mediaItemId: item.id,
-          circleId: item.circleId,
-          status: MediaTagStatusType.pending,
-          tagCount: 0,
-        },
-        update: {
-          status: MediaTagStatusType.pending,
-        },
-      });
-
-      enqueued++;
-    }
-
-    this.logger.log(
-      `Backfill: queued ${enqueued} auto-tagging job(s) for circle ${circleId} by user ${user.id}`,
-    );
-
-    return { data: { enqueued } };
   }
 
   // --------------------------------------------------------------------------
