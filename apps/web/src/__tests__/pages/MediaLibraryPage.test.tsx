@@ -105,7 +105,6 @@ function makeMediaItem(id: string, overrides: Partial<MediaItem> = {}): MediaIte
     importedAt: null,
     source: 'web',
     contentHash: null,
-    classification: 'unreviewed',
     width: 1920,
     height: 1080,
     durationMs: null,
@@ -350,8 +349,7 @@ describe('MediaLibraryPage', () => {
       await user.click(screen.getByRole('button', { name: /filters/i }));
       const favoritesBtn = await screen.findByRole('button', { name: /favorites only/i });
       await user.click(favoritesBtn); // enable
-      // Use getAllByRole because MUI Select (Classification) also renders as role="button"
-      // with name "All" when its current value is the "All" option (empty string).
+      // Use getAllByRole because multiple elements with role="button" and name "All" may exist.
       const allBtns = screen.getAllByRole('button', { name: /^all$/i });
       await user.click(allBtns[0]); // first match is the ToggleButton inside the Favorites group
 

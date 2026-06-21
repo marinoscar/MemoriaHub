@@ -163,7 +163,6 @@ function makeFullItem(id: string): MediaItem {
     importedAt: '2024-06-16T08:00:00.000Z',
     source: 'web',
     contentHash: null,
-    classification: 'memory',
     width: 4032,
     height: 3024,
     durationMs: null,

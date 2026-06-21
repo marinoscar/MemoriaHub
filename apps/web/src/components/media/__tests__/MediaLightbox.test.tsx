@@ -75,7 +75,6 @@ function makeMediaItem(id: string, overrides: Partial<MediaItem> = {}): MediaIte
     importedAt: null,
     source: 'web',
     contentHash: null,
-    classification: 'unreviewed',
     width: 1920,
     height: 1080,
     durationMs: null,

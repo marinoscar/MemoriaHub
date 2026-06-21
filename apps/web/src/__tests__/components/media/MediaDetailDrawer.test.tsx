@@ -140,7 +140,6 @@ function makeMediaItem(overrides: Partial<MediaItem> = {}): MediaItem {
     importedAt: '2024-06-16T08:00:00.000Z',
     source: 'web',
     contentHash: 'abc123def456',
-    classification: 'memory',
     width: 4032,
     height: 3024,
     durationMs: null,
@@ -288,11 +287,6 @@ describe('MediaDetailDrawer', () => {
         <MediaDetailDrawer {...defaultProps({ takenLat: null, takenLng: null })} />,
       );
       expect(screen.queryByText(/GPS/i)).not.toBeInTheDocument();
-    });
-
-    it('should render the classification chip', () => {
-      render(<MediaDetailDrawer {...defaultProps()} />);
-      expect(screen.getByText('memory')).toBeInTheDocument();
     });
 
     it('should show toggle favorite button', () => {
