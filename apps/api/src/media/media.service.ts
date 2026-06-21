@@ -154,7 +154,6 @@ export class MediaService {
           originalFilename: dto.originalFilename,
           capturedAt: dto.capturedAt ?? null,
           capturedAtOffset: dto.capturedAtOffset ?? null,
-          classification: dto.classification ?? 'unreviewed',
           caption: dto.caption ?? null,
           description: dto.description ?? null,
           favorite: dto.favorite ?? false,
@@ -265,7 +264,6 @@ export class MediaService {
       type,
       capturedAtFrom,
       capturedAtTo,
-      classification,
       albumId,
       favorite,
       tag,
@@ -306,7 +304,6 @@ export class MediaService {
         type,
         capturedAtFrom,
         capturedAtTo,
-        classification,
         albumId,
         favorite,
         tag,
@@ -562,9 +559,6 @@ export class MediaService {
         ...(dto.capturedAt !== undefined && { capturedAt: dto.capturedAt }),
         ...(dto.capturedAtOffset !== undefined && {
           capturedAtOffset: dto.capturedAtOffset,
-        }),
-        ...(dto.classification !== undefined && {
-          classification: dto.classification,
         }),
         ...(dto.metadata !== undefined && {
           metadata:
@@ -1093,7 +1087,6 @@ export class MediaService {
       capturedAt: Date | null;
       importedAt: Date;
       source: string;
-      classification: string;
       width: number | null;
       height: number | null;
       durationMs: number | null;
@@ -1115,7 +1108,6 @@ export class MediaService {
       capturedAt: item.capturedAt?.toISOString() ?? null,
       importedAt: item.importedAt.toISOString(),
       source: item.source,
-      classification: item.classification,
       width: item.width,
       height: item.height,
       durationMs: item.durationMs,
@@ -1185,7 +1177,6 @@ export class MediaService {
         'capturedAt',
         'importedAt',
         'source',
-        'classification',
         'width',
         'height',
         'durationMs',
@@ -1240,7 +1231,6 @@ export class MediaService {
             capturedAt: record.capturedAt,
             importedAt: record.importedAt,
             source: record.source,
-            classification: record.classification,
             width: record.width,
             height: record.height,
             durationMs: record.durationMs,
@@ -1400,9 +1390,6 @@ export class MediaService {
 
     const data: Record<string, unknown> = {};
 
-    if (dto.set.classification !== undefined) {
-      data['classification'] = dto.set.classification;
-    }
     if (dto.set.favorite !== undefined) {
       data['favorite'] = dto.set.favorite;
     }
