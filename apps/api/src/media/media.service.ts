@@ -154,7 +154,6 @@ export class MediaService {
           originalFilename: dto.originalFilename,
           capturedAt: dto.capturedAt ?? null,
           capturedAtOffset: dto.capturedAtOffset ?? null,
-          caption: dto.caption ?? null,
           description: dto.description ?? null,
           favorite: dto.favorite ?? false,
           metadata: dto.metadata ? (dto.metadata as Prisma.InputJsonValue) : Prisma.JsonNull,
@@ -566,7 +565,6 @@ export class MediaService {
               ? (dto.metadata as Prisma.InputJsonValue)
               : Prisma.JsonNull,
         }),
-        ...(dto.caption !== undefined && { caption: dto.caption }),
         ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.favorite !== undefined && { favorite: dto.favorite }),
       },
