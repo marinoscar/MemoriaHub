@@ -469,8 +469,9 @@ model MediaItem {
   description String?
   favorite    Boolean @default(false)
 
-  // --- Lifecycle / soft-delete ---
-  deletedAt DateTime? @map("deleted_at") @db.Timestamptz // soft-delete / trash; null = active
+  // --- Lifecycle / soft-delete / archive ---
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz  // soft-delete / trash; null = active
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz // archive state; null = not archived (active), non-null = archived
 
   // --- Import / sync provenance ---
   originalCreatedAt DateTime? @map("original_created_at") @db.Timestamptz // file creation date, distinct from capturedAt
@@ -523,6 +524,7 @@ model MediaItem {
 
   @@index([type])
   @@index([deletedAt])
+  @@index([archivedAt])
   @@index([favorite])
   @@index([geoCountryCode])
   @@index([geoAdmin1])
