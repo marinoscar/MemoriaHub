@@ -3,9 +3,7 @@ import {
   Post,
   Get,
   Param,
-  Body,
   NotFoundException,
-  BadRequestException,
   Logger,
 } from '@nestjs/common';
 import {
@@ -15,8 +13,6 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
 import { CircleRole, JobReason, MediaTagStatusType } from '@prisma/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -25,24 +21,6 @@ import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { TaggingBackfillService } from './tagging-backfill.service';
-
-// ---------------------------------------------------------------------------
-// DTOs
-// ---------------------------------------------------------------------------
-
-const flexibleDate = z
-  .string()
-  .refine((v) => !Number.isNaN(Date.parse(v)), { message: 'Invalid date' });
-
-const backfillTaggingSchema = z.object({
-  circleId: z.string().uuid(),
-  from: flexibleDate.optional(),
-  to: flexibleDate.optional(),
-  force: z.boolean().optional().default(false),
-});
-
-class BackfillTaggingDto extends createZodDto(backfillTaggingSchema) {}
 
 // ---------------------------------------------------------------------------
 // Controller
@@ -58,7 +36,6 @@ export class TaggingController {
     private readonly prisma: PrismaService,
     private readonly circleMembershipService: CircleMembershipService,
     private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly tagBackfillService: TaggingBackfillService,
   ) {}
 
   // --------------------------------------------------------------------------
@@ -141,42 +118,6 @@ export class TaggingController {
     }
 
     return { data: status };
-  }
-
-  // --------------------------------------------------------------------------
-  // POST /api/tagging/backfill
-  // --------------------------------------------------------------------------
-
-  @Post('tagging/backfill')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
-  @ApiOperation({
-    summary: 'Backfill auto-tagging for unprocessed photos in a circle',
-  })
-  @ApiResponse({ status: 201, description: 'Backfill jobs queued' })
-  async backfillTagging(
-    @Body() dto: BackfillTaggingDto,
-    @CurrentUser() user: RequestUser,
-  ) {
-    const { circleId, force = false } = dto;
-
-    await this.circleMembershipService.assertCircleAccess(
-      user.id,
-      circleId,
-      user.permissions,
-      'collaborator' as CircleRole,
-    );
-
-    const enqueued = await this.tagBackfillService.backfillCircle(circleId, {
-      from: dto.from,
-      to: dto.to,
-      force,
-    });
-
-    this.logger.log(
-      `Backfill: queued ${enqueued} auto-tagging job(s) for circle ${circleId} by user ${user.id}`,
-    );
-
-    return { data: { enqueued } };
   }
 
   // --------------------------------------------------------------------------

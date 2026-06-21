@@ -3,7 +3,6 @@ import {
   Post,
   Get,
   Param,
-  Body,
   NotFoundException,
   Logger,
 } from '@nestjs/common';
@@ -14,8 +13,6 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
 import { CircleRole, JobReason, MediaMetadataStatusType } from '@prisma/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -24,24 +21,6 @@ import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { MetadataBackfillService } from './metadata-backfill.service';
-
-// ---------------------------------------------------------------------------
-// DTOs
-// ---------------------------------------------------------------------------
-
-const flexibleDate = z
-  .string()
-  .refine((v) => !Number.isNaN(Date.parse(v)), { message: 'Invalid date' });
-
-const backfillMetadataSchema = z.object({
-  circleId: z.string().uuid(),
-  from: flexibleDate.optional(),
-  to: flexibleDate.optional(),
-  force: z.boolean().optional().default(false),
-});
-
-class BackfillMetadataDto extends createZodDto(backfillMetadataSchema) {}
 
 // ---------------------------------------------------------------------------
 // Controller
@@ -57,7 +36,6 @@ export class MetadataController {
     private readonly prisma: PrismaService,
     private readonly circleMembershipService: CircleMembershipService,
     private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly metadataBackfillService: MetadataBackfillService,
   ) {}
 
   // --------------------------------------------------------------------------
@@ -136,42 +114,6 @@ export class MetadataController {
     }
 
     return { data: { status: status.status, processedAt: status.processedAt, lastError: status.lastError } };
-  }
-
-  // --------------------------------------------------------------------------
-  // POST /api/metadata/backfill
-  // --------------------------------------------------------------------------
-
-  @Post('metadata/backfill')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
-  @ApiOperation({
-    summary: 'Backfill metadata extraction for unprocessed media items in a circle',
-  })
-  @ApiResponse({ status: 201, description: 'Backfill jobs queued' })
-  async backfillMetadata(
-    @Body() dto: BackfillMetadataDto,
-    @CurrentUser() user: RequestUser,
-  ) {
-    const { circleId, force = false } = dto;
-
-    await this.circleMembershipService.assertCircleAccess(
-      user.id,
-      circleId,
-      user.permissions,
-      'collaborator' as CircleRole,
-    );
-
-    const enqueued = await this.metadataBackfillService.backfillCircle(circleId, {
-      from: dto.from,
-      to: dto.to,
-      force,
-    });
-
-    this.logger.log(
-      `Backfill: queued ${enqueued} metadata extraction job(s) for circle ${circleId} by user ${user.id}`,
-    );
-
-    return { data: { enqueued } };
   }
 
   // --------------------------------------------------------------------------

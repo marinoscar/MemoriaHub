@@ -15,7 +15,6 @@ import {
 } from '../storage/providers/storage-provider.interface';
 import { BurstQueryDto } from './dto/burst-query.dto';
 import { ResolveBurstDto } from './dto/resolve-burst.dto';
-import { BurstBackfillDto } from './dto/burst-backfill.dto';
 
 @Injectable()
 export class BurstService {
@@ -422,34 +421,6 @@ export class BurstService {
       );
       return enqueued;
     }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Backfill burst detection (per-circle, with membership check)
-  // ---------------------------------------------------------------------------
-
-  async backfillBurstDetection(dto: BurstBackfillDto, userId: string, perms: string[]) {
-    const { circleId, force, from, to } = dto;
-
-    await this.membership.assertCircleAccess(userId, circleId, perms, CircleRole.collaborator);
-
-    const circle = await this.prisma.circle.findUnique({
-      where: { id: circleId },
-      select: { burstDetectionEnabled: true },
-    });
-
-    if (!circle) {
-      throw new NotFoundException(`Circle ${circleId} not found`);
-    }
-
-    if (!circle.burstDetectionEnabled) {
-      throw new BadRequestException(
-        `Circle ${circleId} does not have burst detection enabled. Enable it first via PUT /api/circles/${circleId}/burst-settings`,
-      );
-    }
-
-    const enqueued = await this.backfillCircleInternal(circleId, { from, to, force });
-    return { data: { enqueued } };
   }
 
   // ---------------------------------------------------------------------------

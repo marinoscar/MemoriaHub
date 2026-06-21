@@ -14,6 +14,8 @@ import { CircleMembershipService } from '../circles/circle-membership.service';
 import { FaceClusteringService } from './face-clustering.service';
 import { FaceMatchingService } from './face-matching.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { FEATURE_KEYS } from '../common/types/settings.types';
 import {
   ListPeopleQueryDto,
   CreatePersonDto,
@@ -33,6 +35,7 @@ export class PeopleService {
     private readonly clusteringService: FaceClusteringService,
     private readonly matchingService: FaceMatchingService,
     private readonly enrichmentJobService: EnrichmentJobService,
+    private readonly systemSettings: SystemSettingsService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -487,17 +490,9 @@ export class PeopleService {
     });
 
     // Re-enqueue auto-tagging — the person name is no longer in this media item's context
-    {
-      const circle = await this.prisma.circle.findUnique({
-        where: { id: person.circleId },
-        select: { autoTaggingEnabled: true },
-      });
-      if (circle?.autoTaggingEnabled) {
-        await this.enqueueAutoTaggingForMediaItems([
-          { mediaItemId: face.mediaItemId, circleId: person.circleId },
-        ]);
-      }
-    }
+    await this.enqueueAutoTaggingForMediaItems([
+      { mediaItemId: face.mediaItemId, circleId: person.circleId },
+    ]);
 
     this.logger.log(
       `Unassigned face ${faceId} from person ${personId} by user ${userId}`,
@@ -520,15 +515,8 @@ export class PeopleService {
       'circle_admin' as CircleRole,
     );
 
-    // Require circle to have faceRecognitionEnabled
-    const circle = await this.prisma.circle.findUnique({
-      where: { id: circleId },
-      select: { faceRecognitionEnabled: true },
-    });
-    if (!circle?.faceRecognitionEnabled) {
-      throw new BadRequestException(
-        'Face recognition is not enabled for this circle. Enable it via PUT /api/circles/:id/face-settings.',
-      );
+    if (!(await this.systemSettings.isFeatureEnabled(FEATURE_KEYS.FACE_RECOGNITION))) {
+      throw new BadRequestException('Face recognition is disabled globally.');
     }
 
     const result = await this.clusteringService.clusterUnknownFaces(
@@ -827,14 +815,8 @@ export class PeopleService {
       },
     });
 
-    // 6. Enqueue auto-tagging if circle has autoTaggingEnabled
-    const circle = await this.prisma.circle.findUnique({
-      where: { id: mediaItem.circleId },
-      select: { autoTaggingEnabled: true },
-    });
-    if (circle?.autoTaggingEnabled) {
-      await this.enqueueAutoTaggingForMediaItems([{ mediaItemId, circleId: mediaItem.circleId }]);
-    }
+    // 6. Enqueue auto-tagging rerun so description/embedding reflect the new person
+    await this.enqueueAutoTaggingForMediaItems([{ mediaItemId, circleId: mediaItem.circleId }]);
 
     this.logger.log(
       `Manual person association created: person ${person.id} → media ${mediaItemId} by user ${userId}`,
@@ -882,14 +864,8 @@ export class PeopleService {
       );
     }
 
-    // 5. Enqueue auto-tagging if circle has autoTaggingEnabled
-    const circle = await this.prisma.circle.findUnique({
-      where: { id: mediaItem.circleId },
-      select: { autoTaggingEnabled: true },
-    });
-    if (circle?.autoTaggingEnabled) {
-      await this.enqueueAutoTaggingForMediaItems([{ mediaItemId, circleId: mediaItem.circleId }]);
-    }
+    // 5. Enqueue auto-tagging rerun so description/embedding reflect the removed person
+    await this.enqueueAutoTaggingForMediaItems([{ mediaItemId, circleId: mediaItem.circleId }]);
 
     this.logger.log(
       `Manual person association removed: person ${personId} → media ${mediaItemId} by user ${userId}`,
@@ -949,13 +925,16 @@ export class PeopleService {
   }
 
   /**
-   * For each affected mediaItemId → circleId pair where autoTaggingEnabled is true,
-   * enqueue an auto_tagging rerun. Failures are logged and swallowed — they must
-   * never propagate to the caller.
+   * For each affected mediaItemId → circleId pair, enqueue an auto_tagging rerun
+   * when auto-tagging is enabled globally. Failures are logged and swallowed —
+   * they must never propagate to the caller.
    */
   private async enqueueAutoTaggingForMediaItems(
     mediaItems: Array<{ mediaItemId: string; circleId: string }>,
   ): Promise<void> {
+    if (!(await this.systemSettings.isFeatureEnabled(FEATURE_KEYS.AUTO_TAGGING))) {
+      return;
+    }
     for (const { mediaItemId, circleId } of mediaItems) {
       try {
         await this.enrichmentJobService.enqueue({
@@ -974,9 +953,8 @@ export class PeopleService {
   }
 
   /**
-   * Given a set of face IDs, return the distinct {mediaItemId, circleId} pairs
-   * where autoTaggingEnabled is true. Used to collect what needs re-tagging after
-   * face→person assignment changes.
+   * Given a set of face IDs, return the distinct {mediaItemId, circleId} pairs.
+   * Used to collect what needs re-tagging after face→person assignment changes.
    */
   private async fetchAffectedMediaItems(
     faceIds: string[],
@@ -990,17 +968,15 @@ export class PeopleService {
         mediaItem: {
           select: {
             circleId: true,
-            circle: { select: { autoTaggingEnabled: true } },
           },
         },
       },
     });
 
-    // Deduplicate by mediaItemId, filter to circles with autoTaggingEnabled
+    // Deduplicate by mediaItemId
     const seen = new Set<string>();
     const result: Array<{ mediaItemId: string; circleId: string }> = [];
     for (const f of faces) {
-      if (!f.mediaItem.circle.autoTaggingEnabled) continue;
       if (seen.has(f.mediaItemId)) continue;
       seen.add(f.mediaItemId);
       result.push({ mediaItemId: f.mediaItemId, circleId: f.mediaItem.circleId });
@@ -1010,8 +986,8 @@ export class PeopleService {
 
   /**
    * Fetch distinct {mediaItemId, circleId} pairs for all faces currently assigned
-   * to a person, gating on autoTaggingEnabled. Used before faces are unlinked
-   * (merge source / delete-person) so the IDs are captured before the transaction.
+   * to a person. Used before faces are unlinked (merge source / delete-person)
+   * so the IDs are captured before the transaction.
    */
   private async fetchAffectedMediaItemsByPersonId(
     personId: string,
@@ -1023,7 +999,6 @@ export class PeopleService {
         mediaItem: {
           select: {
             circleId: true,
-            circle: { select: { autoTaggingEnabled: true } },
           },
         },
       },
@@ -1032,7 +1007,6 @@ export class PeopleService {
     const seen = new Set<string>();
     const result: Array<{ mediaItemId: string; circleId: string }> = [];
     for (const f of faces) {
-      if (!f.mediaItem.circle.autoTaggingEnabled) continue;
       if (seen.has(f.mediaItemId)) continue;
       seen.add(f.mediaItemId);
       result.push({ mediaItemId: f.mediaItemId, circleId: f.mediaItem.circleId });

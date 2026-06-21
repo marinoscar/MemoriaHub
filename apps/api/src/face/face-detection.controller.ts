@@ -21,7 +21,7 @@ import {
   ApiProperty,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { IsString, IsOptional, IsBoolean, IsUUID } from 'class-validator';
+import { IsString, IsOptional, IsUUID } from 'class-validator';
 import { CircleRole } from '@prisma/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -32,7 +32,6 @@ import { CircleMembershipService } from '../circles/circle-membership.service';
 import {
   JobReason,
   MediaFaceStatusType,
-  MediaType,
 } from '@prisma/client';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PeopleService } from './people.service';
@@ -40,21 +39,6 @@ import { PeopleService } from './people.service';
 // ---------------------------------------------------------------------------
 // DTOs
 // ---------------------------------------------------------------------------
-
-class BackfillFaceDetectionDto {
-  @ApiProperty({ description: 'Circle ID to backfill face detection for' })
-  @IsString()
-  circleId!: string;
-
-  @ApiProperty({
-    description: 'Force reprocess even items already marked as processed or no_faces',
-    required: false,
-    default: false,
-  })
-  @IsOptional()
-  @IsBoolean()
-  force?: boolean;
-}
 
 class AddPersonToMediaDto {
   @ApiProperty({
@@ -240,101 +224,6 @@ export class FaceDetectionController {
   }
 
   // --------------------------------------------------------------------------
-  // POST /api/face/backfill
-  // --------------------------------------------------------------------------
-
-  @Post('face/backfill')
-  @Auth({ permissions: [PERMISSIONS.FACE_SETTINGS_WRITE] })
-  @ApiOperation({
-    summary: 'Backfill face detection for all unprocessed photos in a circle (Admin)',
-  })
-  @ApiResponse({ status: 201, description: 'Backfill jobs queued' })
-  async backfillFaceDetection(
-    @Body() dto: BackfillFaceDetectionDto,
-    @CurrentUser() user: RequestUser,
-  ) {
-    const { circleId, force = false } = dto;
-
-    // Require circle to have faceRecognitionEnabled before accepting a backfill
-    const circle = await this.prisma.circle.findUnique({
-      where: { id: circleId },
-      select: { faceRecognitionEnabled: true },
-    });
-    if (!circle) {
-      throw new NotFoundException(`Circle ${circleId} not found`);
-    }
-    if (!circle.faceRecognitionEnabled) {
-      throw new BadRequestException(
-        'Face recognition is not enabled for this circle. Enable it via PUT /api/circles/:id/face-settings before running backfill.',
-      );
-    }
-
-    // Find media items that need (re-)processing
-    const mediaItems = await this.prisma.mediaItem.findMany({
-      where: {
-        circleId,
-        type: MediaType.photo,
-        deletedAt: null,
-        ...(force
-          ? {}
-          : {
-              OR: [
-                { faceStatus: null },
-                {
-                  faceStatus: {
-                    status: {
-                      notIn: [
-                        MediaFaceStatusType.processed,
-                        MediaFaceStatusType.no_faces,
-                      ],
-                    },
-                  },
-                },
-              ],
-            }),
-      },
-      select: { id: true, circleId: true },
-    });
-
-    if (mediaItems.length === 0) {
-      return { data: { queued: 0 } };
-    }
-
-    // Enqueue via EnrichmentJobService (priority 100 = low priority, processed last)
-    let queued = 0;
-    for (const item of mediaItems) {
-      await this.enrichmentJobService.enqueue({
-        type: 'face_detection',
-        mediaItemId: item.id,
-        circleId: item.circleId,
-        reason: JobReason.backfill,
-        priority: 100,
-      });
-
-      // Upsert MediaFaceStatus rows to pending
-      await this.prisma.mediaFaceStatus.upsert({
-        where: { mediaItemId: item.id },
-        create: {
-          mediaItemId: item.id,
-          status: MediaFaceStatusType.pending,
-          faceCount: 0,
-        },
-        update: {
-          status: MediaFaceStatusType.pending,
-        },
-      });
-
-      queued++;
-    }
-
-    this.logger.log(
-      `Backfill: queued ${queued} face detection job(s) for circle ${circleId} by user ${user.id}`,
-    );
-
-    return { data: { queued } };
-  }
-
-  // --------------------------------------------------------------------------
   // DELETE /api/face/biometrics?circleId=
   // --------------------------------------------------------------------------
 
@@ -345,7 +234,7 @@ export class FaceDetectionController {
     summary: 'Delete ALL biometric data for a circle (GDPR right to erase)',
     description:
       'Permanently deletes all Face rows, Person rows, MediaFaceStatus rows, and EnrichmentJob rows ' +
-      'for the specified circle. Also sets faceRecognitionEnabled=false. ' +
+      'for the specified circle. ' +
       'Requires system Admin OR circle_admin role. THIS ACTION IS IRREVERSIBLE.',
   })
   @ApiQuery({ name: 'circleId', required: true, type: String, description: 'Circle ID' })
@@ -395,13 +284,7 @@ export class FaceDetectionController {
         },
       });
 
-      // 5. Set faceRecognitionEnabled = false
-      await tx.circle.update({
-        where: { id: circleId },
-        data: { faceRecognitionEnabled: false },
-      });
-
-      // 6. Audit
+      // 5. Audit
       await tx.auditEvent.create({
         data: {
           actorUserId: user.id,
