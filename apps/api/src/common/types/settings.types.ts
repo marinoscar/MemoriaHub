@@ -52,6 +52,7 @@ export interface SystemSettingsValue {
     };
   };
   storage?: {
+    activeProvider?: string;
     insights: {
       refreshIntervalHours: number;
     };
@@ -97,6 +98,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     },
   },
   storage: {
+    activeProvider: process.env['STORAGE_PROVIDER'] ?? 's3',
     insights: {
       refreshIntervalHours: 4,
     },

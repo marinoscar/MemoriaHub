@@ -233,6 +233,66 @@ describe('EnrichmentJobService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // skipDedup: true — bypass idempotency for batch global jobs
+  // -------------------------------------------------------------------------
+
+  describe('skipDedup: true', () => {
+    it('does NOT call findFirst when skipDedup is true', async () => {
+      (mockPrisma.enrichmentJob.create as jest.Mock).mockResolvedValue(makeJob({ id: 'new-job-1' }));
+
+      await service.enqueue(baseInput({ mediaItemId: null, skipDedup: true }));
+
+      expect(mockPrisma.enrichmentJob.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('always calls create even when a global job of the same type already exists', async () => {
+      const existingJob = makeJob({ id: 'existing-global', type: 'storage_migration', mediaItemId: null, status: JobStatus.pending });
+      const newJob = makeJob({ id: 'new-job-2', type: 'storage_migration', mediaItemId: null });
+
+      // findFirst would return the existing job, but with skipDedup it should never be called
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(existingJob);
+      (mockPrisma.enrichmentJob.create as jest.Mock).mockResolvedValue(newJob);
+
+      const result = await service.enqueue(baseInput({
+        type: 'storage_migration',
+        mediaItemId: null,
+        reason: JobReason.backfill,
+        skipDedup: true,
+      }));
+
+      expect(mockPrisma.enrichmentJob.create).toHaveBeenCalledTimes(1);
+      // Returns the newly created job, not the existing one
+      expect(result.id).toBe('new-job-2');
+    });
+
+    it('can enqueue multiple distinct global jobs of the same type without collapsing them', async () => {
+      const job1 = makeJob({ id: 'migration-job-1', type: 'storage_migration', mediaItemId: null });
+      const job2 = makeJob({ id: 'migration-job-2', type: 'storage_migration', mediaItemId: null });
+
+      (mockPrisma.enrichmentJob.create as jest.Mock)
+        .mockResolvedValueOnce(job1)
+        .mockResolvedValueOnce(job2);
+
+      const r1 = await service.enqueue(baseInput({ type: 'storage_migration', mediaItemId: null, skipDedup: true, payload: { itemId: 'item-1' } }));
+      const r2 = await service.enqueue(baseInput({ type: 'storage_migration', mediaItemId: null, skipDedup: true, payload: { itemId: 'item-2' } }));
+
+      expect(mockPrisma.enrichmentJob.create).toHaveBeenCalledTimes(2);
+      expect(r1.id).toBe('migration-job-1');
+      expect(r2.id).toBe('migration-job-2');
+    });
+
+    it('with skipDedup false (default), dedup check IS performed for a global job', async () => {
+      // Baseline: confirm the normal path still calls findFirst
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.enrichmentJob.create as jest.Mock).mockResolvedValue(makeJob({ mediaItemId: null }));
+
+      await service.enqueue(baseInput({ mediaItemId: null, skipDedup: false }));
+
+      expect(mockPrisma.enrichmentJob.findFirst).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // recordModel
   // -------------------------------------------------------------------------
 
