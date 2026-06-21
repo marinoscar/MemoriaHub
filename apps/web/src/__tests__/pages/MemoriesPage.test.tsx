@@ -1,13 +1,15 @@
 /**
- * Component tests — HomePage (memories-page refactor)
+ * Component tests — MemoriesPage
  *
- * After the memories-page refactor, HomePage is a minimal page that:
+ * MemoriesPage is the gallery page that:
  *   - Shows a "Select or create a circle" alert when no circle is active
- *   - Shows a pending-burst-groups banner when there are burst groups to review
- *   - Does NOT render MediaGallery (that moved to MemoriesPage)
+ *   - Renders <MediaGallery> when a circle is active
+ *   - Passes an emptyState prop containing "No memories here yet" and
+ *     a reference to the "Upload button in the toolbar"
  *
- * MediaGallery is still mocked here (imported via useCircle mock scaffolding)
- * so any accidental re-introduction of the gallery import would be caught.
+ * MediaGallery is mocked to isolate MemoriesPage chrome tests from gallery
+ * internals. The mock renders its emptyState child so empty-state assertions
+ * can be checked without a real gallery implementation.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -22,20 +24,22 @@ vi.mock('../../hooks/useCircle', () => ({
   useCircle: vi.fn(),
 }));
 
-vi.mock('../../hooks/useDashboard', () => ({
-  useDashboard: vi.fn(),
+// Mock MediaGallery so its internal useInfiniteMedia / listMedia calls never fire.
+// The mock renders emptyState so empty-state text assertions work.
+vi.mock('../../components/media/MediaGallery', () => ({
+  MediaGallery: vi.fn(({ emptyState }: { emptyState?: React.ReactNode }) => (
+    <div data-testid="media-gallery">{emptyState}</div>
+  )),
 }));
 
 // ---------------------------------------------------------------------------
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import HomePage from '../../pages/HomePage';
+import MemoriesPage from '../../pages/MemoriesPage';
 import { useCircle } from '../../hooks/useCircle';
-import { useDashboard } from '../../hooks/useDashboard';
 
 const mockUseCircle = vi.mocked(useCircle);
-const mockUseDashboard = vi.mocked(useDashboard);
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -87,24 +91,13 @@ function setupCircleLoading() {
   });
 }
 
-function setupDashboard(pendingBurstGroups: number | null = null) {
-  mockUseDashboard.mockReturnValue({
-    data: pendingBurstGroups != null
-      ? { counts: { pendingBurstGroups } }
-      : null,
-    isLoading: false,
-    error: null,
-  } as ReturnType<typeof useDashboard>);
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('HomePage', () => {
+describe('MemoriesPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    setupDashboard();
   });
 
   // -------------------------------------------------------------------------
@@ -113,24 +106,30 @@ describe('HomePage', () => {
   describe('No active circle', () => {
     it('shows "Select or create a circle" alert when no circle is active', () => {
       setupNoCircle();
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+      render(<MemoriesPage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
       expect(
         screen.getByText(/select or create a circle to get started/i),
       ).toBeInTheDocument();
     });
 
+    it('renders a "Go to Circles" link in the no-circle alert', () => {
+      setupNoCircle();
+      render(<MemoriesPage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      expect(screen.getByRole('link', { name: /go to circles/i })).toBeInTheDocument();
+    });
+
     it('does NOT render MediaGallery when no circle is active', () => {
       setupNoCircle();
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+      render(<MemoriesPage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      // HomePage never renders the gallery — it lives on MemoriesPage
       expect(screen.queryByTestId('media-gallery')).not.toBeInTheDocument();
     });
 
     it('does NOT show no-circle alert when circle is loading', () => {
       setupCircleLoading();
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+      render(<MemoriesPage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
       // While loading, the alert is suppressed
       expect(
@@ -140,20 +139,19 @@ describe('HomePage', () => {
   });
 
   // -------------------------------------------------------------------------
-  // b) Active circle
+  // b) Active circle — gallery rendered
   // -------------------------------------------------------------------------
   describe('Active circle', () => {
-    it('does NOT render MediaGallery even when a circle is active', () => {
+    it('renders MediaGallery when a circle is active', () => {
       setupActiveCircle();
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+      render(<MemoriesPage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      // Gallery lives on MemoriesPage, not HomePage
-      expect(screen.queryByTestId('media-gallery')).not.toBeInTheDocument();
+      expect(screen.getByTestId('media-gallery')).toBeInTheDocument();
     });
 
     it('does NOT show the no-circle alert when a circle is active', () => {
       setupActiveCircle();
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+      render(<MemoriesPage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
       expect(
         screen.queryByText(/select or create a circle to get started/i),
@@ -162,44 +160,23 @@ describe('HomePage', () => {
   });
 
   // -------------------------------------------------------------------------
-  // c) "Go to Circles" link in no-circle alert
+  // c) Empty state inside MediaGallery
   // -------------------------------------------------------------------------
-  describe('Go to Circles link', () => {
-    it('renders a "Go to Circles" link in the no-circle alert', () => {
-      setupNoCircle();
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(screen.getByRole('link', { name: /go to circles/i })).toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // d) Pending burst groups banner
-  // -------------------------------------------------------------------------
-  describe('Pending burst groups banner', () => {
-    it('shows burst-groups banner when pendingBurstGroups > 0', () => {
+  describe('Empty state', () => {
+    it('passes an emptyState prop to MediaGallery that includes "No memories here yet"', () => {
       setupActiveCircle();
-      setupDashboard(3);
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+      render(<MemoriesPage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      expect(screen.getByText(/3 burst groups? ready to review/i)).toBeInTheDocument();
-      expect(screen.getByText(/^review$/i)).toBeInTheDocument();
+      // The mock renders children (emptyState) inside the data-testid element.
+      expect(screen.getByText(/no memories here yet/i)).toBeInTheDocument();
     });
 
-    it('does NOT show burst-groups banner when pendingBurstGroups is 0', () => {
+    it('mentions the Upload button in the toolbar in the empty state text', () => {
       setupActiveCircle();
-      setupDashboard(0);
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+      render(<MemoriesPage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      expect(screen.queryByText(/burst group/i)).not.toBeInTheDocument();
-    });
-
-    it('does NOT show burst-groups banner when dashboard data is null', () => {
-      setupActiveCircle();
-      setupDashboard(null);
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(screen.queryByText(/burst group/i)).not.toBeInTheDocument();
+      // Empty state refers to "Upload button in the toolbar"
+      expect(screen.getByText(/upload button in the toolbar/i)).toBeInTheDocument();
     });
   });
 });

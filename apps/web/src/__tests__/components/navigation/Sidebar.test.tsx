@@ -107,8 +107,9 @@ describe('Sidebar', () => {
 
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
-      // Non-admin users should see Photos, Explore, Map, and User Settings
+      // Non-admin users should see Photos, Memories, Explore, Map, and User Settings
       expect(container.textContent).toContain('Photos');
+      expect(container.textContent).toContain('Memories');
       expect(container.textContent).toContain('Explore');
       expect(container.textContent).toContain('Map');
       expect(container.textContent).toContain('User Settings');
@@ -216,9 +217,11 @@ describe('Sidebar', () => {
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
       // Only items with visible: true should be rendered
-      // Non-admin: Photos, Explore, Map, Sharing, People, Review Bursts, User Settings
+      // Non-admin: Photos, Memories, Explore, Map, Sharing,
+      //            People, Review Bursts, Archive, Trash,
+      //            User Settings (pinned)
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(menuButtons).toHaveLength(7);
+      expect(menuButtons).toHaveLength(10);
     });
 
     it('should show all menu items when user is admin', () => {
@@ -237,14 +240,12 @@ describe('Sidebar', () => {
         wrapperOptions: { user: mockAdminUser },
       });
 
-      // After the settings refactor the admin section collapses from many individual links
-      // to a single "Settings" hub entry.
-      // Admin layout (no albums in test): Photos, Explore, Map, Sharing,
-      //                                   People, Review Bursts,
+      // Admin layout (no albums in test): Photos, Memories, Explore, Map, Sharing,
+      //                                   People, Review Bursts, Archive, Trash,
       //                                   Settings (admin hub),
-      //                                   User Settings
+      //                                   User Settings (pinned)
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(menuButtons).toHaveLength(8);
+      expect(menuButtons).toHaveLength(11);
     });
 
     it('should dynamically update menu items when isAdmin changes', () => {
@@ -375,6 +376,30 @@ describe('Sidebar', () => {
       });
     });
 
+    it('should navigate to /memories when Memories menu item is clicked', async () => {
+      vi.mocked(usePermissions).mockReturnValue({
+        permissions: new Set(),
+        roles: new Set(),
+        hasPermission: vi.fn(),
+        hasAnyPermission: vi.fn(),
+        hasAllPermissions: vi.fn(),
+        hasRole: vi.fn(),
+        hasAnyRole: vi.fn(),
+        isAdmin: false,
+      });
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      // primaryItems order: Photos(0), Memories(1), Explore(2), Map(3), Sharing(4)
+      const buttons = container.querySelectorAll('.MuiListItemButton-root');
+      const memoriesButton = buttons[1] as HTMLElement; // Memories is the second item
+      fireEvent.click(memoriesButton);
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/memories');
+      });
+    });
+
     it('should navigate to /search when Explore is clicked', async () => {
       vi.mocked(usePermissions).mockReturnValue({
         permissions: new Set(),
@@ -390,8 +415,9 @@ describe('Sidebar', () => {
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
       // Use container query + fireEvent to bypass MUI modal aria-hidden wrapping
+      // primaryItems order: Photos(0), Memories(1), Explore(2), Map(3), Sharing(4)
       const buttons = container.querySelectorAll('.MuiListItemButton-root');
-      const exploreButton = buttons[1] as HTMLElement; // Explore is the second item
+      const exploreButton = buttons[2] as HTMLElement; // Explore is the third item
       fireEvent.click(exploreButton);
 
       await waitFor(() => {
@@ -414,8 +440,9 @@ describe('Sidebar', () => {
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
       // Use container query + fireEvent to bypass MUI modal aria-hidden wrapping
+      // primaryItems order: Photos(0), Memories(1), Explore(2), Map(3), Sharing(4)
       const buttons = container.querySelectorAll('.MuiListItemButton-root');
-      const mapButton = buttons[2] as HTMLElement; // Map is the third item
+      const mapButton = buttons[3] as HTMLElement; // Map is the fourth item
       fireEvent.click(mapButton);
 
       await waitFor(() => {
@@ -440,13 +467,12 @@ describe('Sidebar', () => {
       });
 
       // Use container query + fireEvent to bypass MUI modal aria-hidden wrapping
-      // After the settings refactor the admin section is a single "Settings" entry.
-      // Admin layout (no albums): Photos(0), Explore(1), Map(2), Sharing(3),
-      //                           People(4), Review Bursts(5),
-      //                           Settings — admin hub(6),
-      //                           User Settings(7)
+      // Admin layout (no albums): Photos(0), Memories(1), Explore(2), Map(3), Sharing(4),
+      //                           People(5), Review Bursts(6), Archive(7), Trash(8),
+      //                           Settings — admin hub(9),
+      //                           User Settings(10)
       const buttons = container.querySelectorAll('.MuiListItemButton-root');
-      const adminSettingsButton = buttons[6] as HTMLElement;
+      const adminSettingsButton = buttons[9] as HTMLElement;
       fireEvent.click(adminSettingsButton);
 
       await waitFor(() => {
@@ -516,9 +542,12 @@ describe('Sidebar', () => {
         wrapperOptions: { user: mockAdminUser },
       });
 
-      // Find the admin Settings button (index 6 in admin layout) and verify it is selected
+      // Find the admin Settings button (index 9 in admin layout) and verify it is selected
+      // Admin layout (no albums): Photos(0), Memories(1), Explore(2), Map(3), Sharing(4),
+      //                           People(5), Review Bursts(6), Archive(7), Trash(8),
+      //                           Settings — admin hub(9), User Settings(10)
       const buttons = container.querySelectorAll('.MuiListItemButton-root');
-      const adminSettingsButton = buttons[6] as HTMLElement;
+      const adminSettingsButton = buttons[9] as HTMLElement;
       expect(adminSettingsButton.classList.contains('Mui-selected')).toBe(true);
     });
   });
@@ -591,10 +620,11 @@ describe('Sidebar', () => {
         wrapperOptions: { user: mockAdminUser },
       });
 
-      // After the settings refactor, admin sees: Photos, Explore, Map, Sharing,
-      //   People, Review Bursts, Settings (admin hub), User Settings — 8 total
+      // Admin sees: Photos, Memories, Explore, Map, Sharing,
+      //   People, Review Bursts, Archive, Trash,
+      //   Settings (admin hub), User Settings — 11 total
       const icons = container.querySelectorAll('.MuiListItemIcon-root');
-      expect(icons).toHaveLength(8);
+      expect(icons).toHaveLength(11);
     });
 
     it('should highlight icon for selected menu item', () => {
