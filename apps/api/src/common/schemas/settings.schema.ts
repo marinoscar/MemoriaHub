@@ -74,6 +74,11 @@ export const systemSettingsSchema = z.object({
     hashDistance: z.number().int().min(0).max(32).default(10),
     minGroupSize: z.number().int().min(2).max(20).default(3),
   }).optional().default({ timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3 }),
+  similarity: z.object({
+    hashDistance: z.number().int().min(0).max(32).default(6),
+    minGroupSize: z.number().int().min(2).max(20).default(2),
+    maxGroupSize: z.number().int().min(2).max(200).default(50),
+  }).optional().default({ hashDistance: 6, minGroupSize: 2, maxGroupSize: 50 }),
 });
 
 export type SystemSettingsDto = z.infer<typeof systemSettingsSchema>;
@@ -117,5 +122,10 @@ export const systemSettingsPatchSchema = z.object({
     timeGapSeconds: z.number().int().min(1).max(300).optional(),
     hashDistance: z.number().int().min(0).max(32).optional(),
     minGroupSize: z.number().int().min(2).max(20).optional(),
+  }).optional(),
+  similarity: z.object({
+    hashDistance: z.number().int().min(0).max(32).optional(),
+    minGroupSize: z.number().int().min(2).max(20).optional(),
+    maxGroupSize: z.number().int().min(2).max(200).optional(),
   }).optional(),
 });
