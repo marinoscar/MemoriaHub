@@ -46,7 +46,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
       runId: 'run-1',
       itemId: 'item-1',
       objectId: 'obj-1',
-    } as unknown,
+    },
     attempts: 0,
     lastError: null,
     startedAt: new Date(),
