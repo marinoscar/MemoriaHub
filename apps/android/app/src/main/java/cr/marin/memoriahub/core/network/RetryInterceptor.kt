@@ -51,7 +51,7 @@ class RetryInterceptor(
     }
 
     private fun shouldRetry(response: Response): Boolean =
-        isRetryableStatus(response.code) || isThrottleBody(response)
+        isRetryableStatus(response.code) || (!response.isSuccessful && isThrottleBody(response))
 
     private fun retryAfterMs(response: Response): Long? {
         val header = response.header("Retry-After") ?: return null
