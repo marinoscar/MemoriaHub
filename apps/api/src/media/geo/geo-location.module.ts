@@ -3,21 +3,17 @@ import { ConfigService } from '@nestjs/config';
 import { GEO_LOCATION_PROVIDER } from './geo-location-provider.interface';
 import { OfflineGeoLocationProvider } from './offline-geo-location.provider';
 import { NominatimGeoLocationProvider } from './nominatim-geo-location.provider';
+import { GoogleGeoLocationProvider } from './google-geo-location.provider';
+import { GeoLocationService } from './geo-location.service';
+import { SettingsModule } from '../../settings/settings.module';
 
-/**
- * GeoLocationModule — selects the active reverse-geocoding provider based on
- * the `GEO_PROVIDER` environment variable (default: `offline`).
- *
- * Supported values:
- *   offline    — local-reverse-geocoder (GeoNames dataset, no network calls)
- *   nominatim  — OSM Nominatim HTTP API (WARNING: sends GPS off-server)
- *
- * Mirror of StorageProvidersModule pattern.
- */
 @Module({
+  imports: [SettingsModule],
   providers: [
     OfflineGeoLocationProvider,
     NominatimGeoLocationProvider,
+    GoogleGeoLocationProvider,
+    GeoLocationService,
     {
       provide: GEO_LOCATION_PROVIDER,
       inject: [ConfigService, OfflineGeoLocationProvider, NominatimGeoLocationProvider],
@@ -27,13 +23,11 @@ import { NominatimGeoLocationProvider } from './nominatim-geo-location.provider'
         nominatim: NominatimGeoLocationProvider,
       ) => {
         const provider = config.get<string>('GEO_PROVIDER', 'offline');
-        if (provider === 'nominatim') {
-          return nominatim;
-        }
+        if (provider === 'nominatim') return nominatim;
         return offline;
       },
     },
   ],
-  exports: [GEO_LOCATION_PROVIDER],
+  exports: [GEO_LOCATION_PROVIDER, GoogleGeoLocationProvider, GeoLocationService, OfflineGeoLocationProvider, NominatimGeoLocationProvider],
 })
 export class GeoLocationModule {}
