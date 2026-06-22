@@ -12,7 +12,7 @@
  * to the BulkActionToolbar and wires onRemoveFromAlbum accordingly.
  */
 
-import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
+import { useState, useRef, useMemo, useCallback, useEffect, memo } from 'react';
 import {
   Box,
   Typography,
@@ -63,7 +63,7 @@ const APP_BAR_HEIGHT = 64;
 
 interface GalleryTileProps {
   item: MediaItem;
-  onSelect: () => void;
+  onSelect: (item: MediaItem) => void;
   onToggleFavorite: (item: MediaItem) => void;
   isSelected: boolean;
   anySelected: boolean;
@@ -71,7 +71,7 @@ interface GalleryTileProps {
   selectionMode: boolean;
 }
 
-function GalleryTile({
+const GalleryTile = memo(function GalleryTile({
   item,
   onSelect,
   onToggleFavorite,
@@ -90,7 +90,7 @@ function GalleryTile({
         if (selectionMode || anySelected) {
           onToggleSelect(item.id);
         } else {
-          onSelect();
+          onSelect(item);
         }
       }}
       sx={{
@@ -254,7 +254,7 @@ function GalleryTile({
       />
     </ImageListItem>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // MediaGalleryProps
@@ -369,6 +369,13 @@ export function MediaGallery({
 
   const grouped = useMemo(() => groupByDay(mergedItems), [mergedItems]);
 
+  // O(1) id→index map so each tile doesn't do an O(n) indexOf scan
+  const indexById = useMemo(() => {
+    const m = new Map<string, number>();
+    mergedItems.forEach((it, i) => m.set(it.id, i));
+    return m;
+  }, [mergedItems]);
+
   // -------------------------------------------------------------------------
   // Lightbox + detail drawer
   // -------------------------------------------------------------------------
@@ -380,6 +387,14 @@ export function MediaGallery({
   const handleItemUpdated = useCallback((updated: MediaItem) => {
     setLocalPatches((prev) => ({ ...prev, [updated.id]: updated }));
   }, []);
+
+  // Stable tile-select handler — avoids fresh closures per tile on each render
+  const handleSelectTile = useCallback(
+    (item: MediaItem) => {
+      setLightboxIndex(indexById.get(item.id) ?? 0);
+    },
+    [indexById],
+  );
 
   // -------------------------------------------------------------------------
   // Favorite toggle (optimistic)
@@ -663,21 +678,18 @@ export function MediaGallery({
                   containIntrinsicSize: `auto ${Math.ceil(group.items.length / 6) * 120}px`,
                 }}
               >
-                {group.items.map((item) => {
-                  const globalIndex = mergedItems.indexOf(item);
-                  return (
-                    <GalleryTile
-                      key={item.id}
-                      item={item}
-                      onSelect={() => setLightboxIndex(globalIndex !== -1 ? globalIndex : 0)}
-                      onToggleFavorite={handleToggleFavorite}
-                      isSelected={selected.has(item.id)}
-                      anySelected={selected.size > 0}
-                      onToggleSelect={handleToggleSelect}
-                      selectionMode={selectionMode}
-                    />
-                  );
-                })}
+                {group.items.map((item) => (
+                  <GalleryTile
+                    key={item.id}
+                    item={item}
+                    onSelect={handleSelectTile}
+                    onToggleFavorite={handleToggleFavorite}
+                    isSelected={selected.has(item.id)}
+                    anySelected={selected.size > 0}
+                    onToggleSelect={handleToggleSelect}
+                    selectionMode={selectionMode}
+                  />
+                ))}
               </Box>
             </Box>
           ))}
