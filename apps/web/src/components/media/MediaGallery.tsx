@@ -659,6 +659,8 @@ export function MediaGallery({
                     md: 'repeat(6, 1fr)',
                   },
                   gap: '2px',
+                  contentVisibility: 'auto',
+                  containIntrinsicSize: `auto ${Math.ceil(group.items.length / 6) * 120}px`,
                 }}
               >
                 {group.items.map((item) => {
