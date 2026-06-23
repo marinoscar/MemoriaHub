@@ -18,6 +18,7 @@ import { randomUUID } from 'crypto';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
+import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 
 // ---------------------------------------------------------------------------
 // Helper: build a Prisma P2002 error the way Prisma actually throws it
@@ -170,6 +171,7 @@ describe('MediaService', () => {
   let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
   let mockGeoProvider: { reverseGeocode: jest.Mock };
   let mockForwardGeocodeService: { searchPlaces: jest.Mock };
+  let mockResolver: { getProviderFor: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -194,6 +196,7 @@ describe('MediaService', () => {
     };
     mockGeoProvider = { reverseGeocode: jest.fn().mockResolvedValue(null) };
     mockForwardGeocodeService = { searchPlaces: jest.fn().mockResolvedValue([]) };
+    mockResolver = { getProviderFor: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -204,6 +207,7 @@ describe('MediaService', () => {
         { provide: CircleMembershipService, useValue: mockCircleMembershipService },
         { provide: GEO_LOCATION_PROVIDER, useValue: mockGeoProvider },
         { provide: ForwardGeocodeService, useValue: mockForwardGeocodeService },
+        { provide: StorageProviderResolver, useValue: mockResolver },
       ],
     }).compile();
 
@@ -2493,6 +2497,79 @@ describe('MediaService', () => {
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
       expect(call[0].where.faces).toBeUndefined();
       expect(call[0].where.AND).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // signThumb — via getMedia so we can exercise the private method
+  // -------------------------------------------------------------------------
+
+  describe('signThumb (via getMedia thumbnailUrl)', () => {
+    it('routes signing through resolver.getProviderFor when the thumbnail StorageObject row exists', async () => {
+      const item = makeMediaItem({
+        metadata: { thumbnailStorageKey: 'thumbnails/obj-1.jpg' },
+      });
+      const r2MockProvider = { getSignedDownloadUrl: jest.fn().mockResolvedValue('https://r2.example.com/signed') };
+
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({
+        ...item,
+        mediaTags: [],
+      } as any);
+      // getMedia calls storageObject.findUnique twice:
+      //   1. to get the original object's storageKey (for downloadUrl)
+      //   2. inside signThumb to look up the thumbnail object's provider+bucket
+      // We use mockResolvedValueOnce for the first call and mockResolvedValue for subsequent calls.
+      mockPrisma.storageObject.findUnique
+        .mockResolvedValueOnce({ storageKey: 'uploads/photo.jpg' } as any)   // original object
+        .mockResolvedValue({ storageProvider: 'r2', bucket: 'r2-bucket' } as any); // thumbnail lookup
+
+      mockResolver.getProviderFor.mockResolvedValue(r2MockProvider);
+
+      const result = await service.getMedia(item.id, 'user-1', anyPerms);
+
+      expect(mockResolver.getProviderFor).toHaveBeenCalledWith('r2', 'r2-bucket');
+      expect(r2MockProvider.getSignedDownloadUrl).toHaveBeenCalledWith('thumbnails/obj-1.jpg');
+      expect(result.thumbnailUrl).toBe('https://r2.example.com/signed');
+    });
+
+    it('falls back to the static storageProvider when the thumbnail StorageObject row does not exist', async () => {
+      const item = makeMediaItem({
+        metadata: { thumbnailStorageKey: 'thumbnails/obj-missing.jpg' },
+      });
+
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({
+        ...item,
+        mediaTags: [],
+      } as any);
+      // First findUnique: original object (for downloadUrl); second: thumbnail lookup returns null
+      mockPrisma.storageObject.findUnique
+        .mockResolvedValueOnce({ storageKey: 'uploads/photo.jpg' } as any)
+        .mockResolvedValue(null); // thumbnail row not found
+
+      mockStorageProvider.getSignedDownloadUrl.mockResolvedValue('https://s3.example.com/fallback');
+
+      const result = await service.getMedia(item.id, 'user-1', anyPerms);
+
+      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledWith(
+        'thumbnails/obj-missing.jpg',
+      );
+      expect(result.thumbnailUrl).toBe('https://s3.example.com/fallback');
+    });
+
+    it('returns null thumbnailUrl when metadata has no thumbnailStorageKey', async () => {
+      const item = makeMediaItem({ metadata: null });
+
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({
+        ...item,
+        mediaTags: [],
+      } as any);
+      mockPrisma.storageObject.findUnique.mockResolvedValue({ storageKey: 'uploads/photo.jpg' } as any);
+
+      const result = await service.getMedia(item.id, 'user-1', anyPerms);
+
+      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(result.thumbnailUrl).toBeNull();
     });
   });
 });
