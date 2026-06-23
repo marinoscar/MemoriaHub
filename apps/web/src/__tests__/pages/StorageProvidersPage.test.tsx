@@ -634,6 +634,112 @@ describe('StorageProvidersPage', () => {
   });
 
   // -------------------------------------------------------------------------
+  describe('Test button guard: unconfigured provider requiring credentials', () => {
+    function unconfiguredR2Settings() {
+      return {
+        providers: [],
+        knownProviders: [
+          makeProviderRow({
+            provider: 'r2',
+            label: 'Cloudflare R2',
+            configured: false,
+            enabled: false,
+            last4: null,
+            accessKeyId: null,
+            region: null,
+            bucket: null,
+          }),
+        ],
+        activeProvider: 's3',
+      };
+    }
+
+    it('disables Test button and shows caption when unconfigured requiresCredentials provider has empty secret field', () => {
+      mockUseStorageProviders.mockReturnValue({
+        ...defaultStorageProvidersMock(),
+        settings: unconfiguredR2Settings(),
+      } as any);
+
+      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      // The Test connection button for R2 must be disabled
+      const testButtons = screen.getAllByRole('button', { name: /test connection/i });
+      // Only one provider card (R2)
+      expect(testButtons[0]).toBeDisabled();
+
+      // The instructional caption must be visible
+      expect(
+        screen.getByText(/enter the secret access key to test before saving/i),
+      ).toBeInTheDocument();
+    });
+
+    it('enables Test button and hides caption once the user types a secret', async () => {
+      mockUseStorageProviders.mockReturnValue({
+        ...defaultStorageProvidersMock(),
+        settings: unconfiguredR2Settings(),
+      } as any);
+
+      const user = userEvent.setup();
+      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      // Before typing: button is disabled
+      const testButtons = screen.getAllByRole('button', { name: /test connection/i });
+      expect(testButtons[0]).toBeDisabled();
+
+      // Type a secret into the New Secret Access Key field
+      const secretField = screen.getByLabelText(/new secret access key/i);
+      await user.type(secretField, 'my-r2-secret');
+
+      // After typing: button should be enabled
+      await waitFor(() => {
+        const buttons = screen.getAllByRole('button', { name: /test connection/i });
+        expect(buttons[0]).not.toBeDisabled();
+      });
+
+      // Caption must no longer be shown
+      expect(
+        screen.queryByText(/enter the secret access key to test before saving/i),
+      ).not.toBeInTheDocument();
+    });
+
+    it('shows secret field helper text and keeps Test button enabled for a configured provider with empty secret', () => {
+      // Configured = true means a secret is already saved; empty field means "use saved"
+      mockUseStorageProviders.mockReturnValue({
+        ...defaultStorageProvidersMock(),
+        settings: {
+          providers: [
+            makeProviderRow({
+              provider: 's3',
+              label: 'AWS S3',
+              configured: true,
+              enabled: true,
+              last4: 'wxyz',
+            }),
+          ],
+          knownProviders: [],
+          activeProvider: 's3',
+        },
+      } as any);
+
+      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      // Helper text for the secret field must be present (explains blank = use saved)
+      expect(
+        screen.getByText(/leave blank to use the saved secret when testing or saving/i),
+      ).toBeInTheDocument();
+
+      // Test button must be enabled (no guard fires for configured provider)
+      const testButtons = screen.getAllByRole('button', { name: /test connection/i });
+      expect(testButtons[0]).not.toBeDisabled();
+
+      // The "enter secret to test" caption must NOT appear (guard only fires when !configured)
+      expect(
+        screen.queryByText(/enter the secret access key to test before saving/i),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   describe('Empty providers state', () => {
     it('renders without crashing when providers and knownProviders are both empty', () => {
       mockUseStorageProviders.mockReturnValue({
