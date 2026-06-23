@@ -9,7 +9,9 @@
  *  - upsertCredential(): encrypts secret, stores last4, preserves existing key on partial
  *    update, rejects r2 without endpoint, rejects requiresCredentials without secret
  *  - deleteCredential(): BadRequest when active; 404 when missing; success invalidates cache
- *  - testConnection(): success round-trip; failure returns ok:false; never throws
+ *  - testConnection(): success round-trip; failure returns ok:false; never throws;
+ *    partial override resolves stored secret; half-filled DTO with no row → clean error;
+ *    full DTO override works without stored row; no-overrides regressions
  *  - setActiveProvider(): patches system settings; unknown provider → BadRequest;
  *    missing credential (non-s3) → BadRequest
  */
@@ -519,6 +521,124 @@ describe('StorageSettingsService', () => {
 
       expect(result.ok).toBe(true);
       expect(mockResolver.getProviderFor).toHaveBeenCalledWith('local');
+    });
+
+    // -----------------------------------------------------------------------
+    // New cases: partial-override / credential-merge behaviour (R2 fix)
+    // -----------------------------------------------------------------------
+
+    it('partial override resolves stored secret: DTO has accessKeyId but no secret and a stored row exists', async () => {
+      // Arrange: stored credential with a known plaintext secret ("real-secret-key-1234")
+      // makeCredRow() encrypts that plaintext via encryptSecret() in its definition.
+      const cred = makeCredRow({
+        accessKeyId: 'STORED-AKI',
+        bucket: 'stored-bucket',
+        region: 'us-west-2',
+      });
+      mockPrisma.storageProviderCredential.findUnique.mockResolvedValue(cred as any);
+
+      const fakeProvider = makeStorageProvider();
+      mockResolver.buildEphemeral.mockReturnValue(fakeProvider);
+
+      // Act: supply accessKeyId override but omit secretAccessKey
+      const result = await service.testConnection({
+        provider: 's3',
+        accessKeyId: 'OVERRIDE-AKI',
+        bucket: 'override-bucket',
+        // secretAccessKey intentionally absent
+      });
+
+      // Assert: connection succeeds and the round-trip was exercised
+      expect(result.ok).toBe(true);
+
+      // buildEphemeral must have been called (not skipped), meaning the stored
+      // secret was decrypted and used to fill the gap.
+      expect(mockResolver.buildEphemeral).toHaveBeenCalledTimes(1);
+
+      // The config passed to buildEphemeral must use the OVERRIDE accessKeyId
+      // and the DECRYPTED stored secret, not an empty/undefined value.
+      const builtConfig = mockResolver.buildEphemeral.mock.calls[0][0];
+      expect(builtConfig.accessKeyId).toBe('OVERRIDE-AKI');
+      expect(builtConfig.secretAccessKey).toBeTruthy();
+      // 'real-secret-key-1234' is the plaintext encrypted by makeCredRow()
+      expect(builtConfig.secretAccessKey).toBe('real-secret-key-1234');
+
+      // S3 round-trip must have been performed
+      expect(fakeProvider.upload).toHaveBeenCalledTimes(1);
+      expect(fakeProvider.getMetadata).toHaveBeenCalledTimes(1);
+      expect(fakeProvider.delete).toHaveBeenCalledTimes(1);
+    });
+
+    it('half-filled override with NO stored row returns clean error and never constructs S3 client', async () => {
+      // Arrange: no credential row exists for the provider
+      mockPrisma.storageProviderCredential.findUnique.mockResolvedValue(null as any);
+
+      // Act: DTO has accessKeyId but no secret and no stored row to fall back to
+      const result = await service.testConnection({
+        provider: 's3',
+        accessKeyId: 'SOME-AKI',
+        bucket: 'some-bucket',
+        // secretAccessKey absent
+      });
+
+      // Assert: clean error mentioning the secret is required
+      expect(result.ok).toBe(false);
+      expect(result.error).toBeDefined();
+      expect(result.error!.toLowerCase()).toMatch(/secret/);
+
+      // buildEphemeral must NOT have been called — no S3 client should be built
+      expect(mockResolver.buildEphemeral).not.toHaveBeenCalled();
+    });
+
+    it('full override (both key and secret in DTO) succeeds using DTO values only (regression)', async () => {
+      // Even if no stored row exists, a full DTO should work independently
+      mockPrisma.storageProviderCredential.findUnique.mockResolvedValue(null as any);
+
+      const fakeProvider = makeStorageProvider();
+      mockResolver.buildEphemeral.mockReturnValue(fakeProvider);
+
+      const result = await service.testConnection({
+        provider: 's3',
+        accessKeyId: 'DTO-AKI',
+        secretAccessKey: 'DTO-SECRET',
+        bucket: 'dto-bucket',
+        region: 'eu-central-1',
+      });
+
+      expect(result.ok).toBe(true);
+
+      const builtConfig = mockResolver.buildEphemeral.mock.calls[0][0];
+      expect(builtConfig.accessKeyId).toBe('DTO-AKI');
+      expect(builtConfig.secretAccessKey).toBe('DTO-SECRET');
+
+      expect(fakeProvider.upload).toHaveBeenCalledTimes(1);
+    });
+
+    it('no-overrides path with stored enabled row loads from DB as before (regression)', async () => {
+      const cred = makeCredRow({ enabled: true });
+      mockPrisma.storageProviderCredential.findUnique.mockResolvedValue(cred as any);
+
+      const fakeProvider = makeStorageProvider();
+      mockResolver.buildEphemeral.mockReturnValue(fakeProvider);
+
+      // Empty DTO — only provider key supplied
+      const result = await service.testConnection({ provider: 's3' });
+
+      expect(result.ok).toBe(true);
+      expect(mockResolver.buildEphemeral).toHaveBeenCalledTimes(1);
+      expect(fakeProvider.upload).toHaveBeenCalledTimes(1);
+    });
+
+    it('no-overrides path with stored DISABLED row still returns disabled error (regression)', async () => {
+      const cred = makeCredRow({ enabled: false });
+      mockPrisma.storageProviderCredential.findUnique.mockResolvedValue(cred as any);
+
+      const result = await service.testConnection({ provider: 's3' });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/disabled/i);
+      // Should not even attempt to build the provider
+      expect(mockResolver.buildEphemeral).not.toHaveBeenCalled();
     });
   });
 
