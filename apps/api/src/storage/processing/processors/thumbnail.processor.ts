@@ -8,6 +8,7 @@ import { promises as fs } from 'fs';
 import ffmpeg from 'fluent-ffmpeg';
 import { ObjectProcessor, ObjectProcessorResult } from '../object-processor.interface';
 import { STORAGE_PROVIDER, StorageProvider } from '../../providers/storage-provider.interface';
+import { StorageProviderResolver } from '../../providers/storage-provider.resolver';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { streamToBuffer } from './stream-utils';
 
@@ -62,6 +63,7 @@ export class ThumbnailProcessor implements ObjectProcessor {
     @Inject(STORAGE_PROVIDER)
     private readonly storageProvider: StorageProvider,
     private readonly prisma: PrismaService,
+    private readonly resolver: StorageProviderResolver,
   ) {
     this.maxDim = parseInt(process.env.THUMBNAIL_MAX_DIM ?? '800', 10);
     this.quality = parseInt(process.env.THUMBNAIL_QUALITY ?? '85', 10);
@@ -221,9 +223,14 @@ export class ThumbnailProcessor implements ObjectProcessor {
   ): Promise<ObjectProcessorResult> {
     const thumbKey = `thumbnails/${object.id}.jpg`;
 
+    // Resolve the currently active storage provider so the thumbnail lands in
+    // the same provider/bucket that new uploads are routed to.
+    const { id: activeProviderId, provider: activeProvider } =
+      await this.resolver.getActiveProvider();
+
     // Upload to storage
     const thumbStream = Readable.from(thumbBuffer);
-    await this.storageProvider.upload(thumbKey, thumbStream, {
+    await activeProvider.upload(thumbKey, thumbStream, {
       mimeType: 'image/jpeg',
       contentLength: thumbBuffer.length,
     });
@@ -248,8 +255,8 @@ export class ThumbnailProcessor implements ObjectProcessor {
         size: BigInt(thumbBuffer.length),
         mimeType: 'image/jpeg',
         storageKey: thumbKey,
-        storageProvider: 's3',
-        bucket: this.storageProvider.getBucket(),
+        storageProvider: activeProviderId,
+        bucket: activeProvider.getBucket(),
         status: 'ready',
         uploadedById: object.uploadedById ?? null,
         metadata: { thumbnailOf: object.id },

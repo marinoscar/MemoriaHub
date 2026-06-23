@@ -16,6 +16,7 @@ import {
   STORAGE_PROVIDER,
   StorageProvider,
 } from '../storage/providers/storage-provider.interface';
+import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { CreateMediaDto } from './dto/create-media.dto';
 import { UpdateMediaDto } from './dto/update-media.dto';
 import { MediaQueryDto } from './dto/media-query.dto';
@@ -66,6 +67,7 @@ export class MediaService {
     private readonly circleMembershipService: CircleMembershipService,
     @Inject(GEO_LOCATION_PROVIDER) private readonly geoProvider: GeoLocationProvider,
     private readonly forwardGeocodeService: ForwardGeocodeService,
+    private readonly resolver: StorageProviderResolver,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -1812,6 +1814,24 @@ export class MediaService {
       return null;
     }
     try {
+      // Look up the StorageObject row for the thumbnail to route signing
+      // through the correct provider (the active provider may have changed
+      // since the thumbnail was created).
+      const thumbObject = await this.prisma.storageObject.findUnique({
+        where: { storageKey: key },
+        select: { storageProvider: true, bucket: true },
+      });
+
+      if (thumbObject) {
+        const provider = await this.resolver.getProviderFor(
+          thumbObject.storageProvider,
+          thumbObject.bucket,
+        );
+        return await provider.getSignedDownloadUrl(key);
+      }
+
+      // Row not yet created (thumbnail still in-flight) — fall back to the
+      // legacy static provider to preserve existing behaviour.
       return await this.storageProvider.getSignedDownloadUrl(key);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
