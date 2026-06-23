@@ -246,6 +246,11 @@ export class ThumbnailProcessor implements ObjectProcessor {
         name: `thumb-${object.name}`,
         size: BigInt(thumbBuffer.length),
         mimeType: 'image/jpeg',
+        // Refresh provider/bucket too: a reprocess after the active provider
+        // changed uploads the new bytes to the new provider, so the row must
+        // point at it or signing would route to the old (now-empty) provider.
+        storageProvider: activeProviderId,
+        bucket: activeProvider.getBucket(),
         status: 'ready',
         metadata: { thumbnailOf: object.id },
         updatedAt: new Date(),
