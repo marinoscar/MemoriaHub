@@ -338,51 +338,64 @@ export class StorageSettingsService {
       // S3 / R2 path
       let cfg: S3ProviderConfig;
 
+      // Always load the stored credential row so we can fill in any fields the
+      // DTO omits (e.g. the secret key that the UI never sends back).
+      const storedCred = await this.prisma.storageProviderCredential.findUnique({
+        where: { provider: providerKey },
+      });
+
+      // "No overrides" means the form was completely empty — all credential
+      // fields are absent.  Only in that case do we enforce the enabled flag.
       const hasOverrides = !!(
         dto.accessKeyId ||
         dto.secretAccessKey ||
         dto.bucket
       );
 
-      if (hasOverrides) {
-        // Build an ephemeral provider from supplied overrides (not yet persisted)
-        cfg = {
-          accessKeyId: dto.accessKeyId,
-          secretAccessKey: dto.secretAccessKey,
-          bucket: dto.bucket,
-          region: dto.region,
-          endpoint: dto.endpoint,
-          forcePathStyle: !!dto.endpoint,
-        };
-      } else {
-        // Load from DB
-        const cred = await this.prisma.storageProviderCredential.findUnique({
-          where: { provider: providerKey },
-        });
-        if (!cred) {
+      if (!hasOverrides) {
+        // Empty form — test the saved provider as-is.
+        if (!storedCred) {
           return {
             ok: false,
             provider: providerKey,
             error: `Provider "${providerKey}" is not configured`,
           };
         }
-        if (!cred.enabled) {
+        if (!storedCred.enabled) {
           return {
             ok: false,
             provider: providerKey,
             error: `Provider "${providerKey}" is disabled`,
           };
         }
+      }
 
-        const secretAccessKey = decryptSecret(cred.encryptedKey);
-        cfg = {
-          accessKeyId: cred.accessKeyId ?? undefined,
-          secretAccessKey,
-          bucket: cred.bucket ?? undefined,
-          region: cred.region ?? undefined,
-          endpoint: cred.endpoint ?? undefined,
-          forcePathStyle: !!cred.endpoint,
-        };
+      // Merge: DTO fields take precedence; fall back to stored values.
+      // For the secret, only use the DTO value when it is non-empty; otherwise
+      // decrypt whatever is stored in DB.
+      const effectiveSecret =
+        dto.secretAccessKey ||
+        (storedCred?.encryptedKey ? decryptSecret(storedCred.encryptedKey) : undefined);
+
+      cfg = {
+        accessKeyId: dto.accessKeyId ?? storedCred?.accessKeyId ?? undefined,
+        secretAccessKey: effectiveSecret,
+        bucket: dto.bucket ?? storedCred?.bucket ?? undefined,
+        region: dto.region ?? storedCred?.region ?? undefined,
+        endpoint: dto.endpoint ?? storedCred?.endpoint ?? undefined,
+        forcePathStyle: !!(dto.endpoint ?? storedCred?.endpoint),
+      };
+
+      // Validate that required credentials are present before attempting to
+      // build the provider — gives a clean error instead of an AWS SDK failure.
+      if (descriptor.requiresCredentials) {
+        if (!cfg.accessKeyId || !cfg.secretAccessKey) {
+          return {
+            ok: false,
+            provider: providerKey,
+            error: `Secret access key is required to test provider "${providerKey}". Save credentials first or enter the secret key.`,
+          };
+        }
       }
 
       const storageProvider = this.resolver.buildEphemeral(cfg);

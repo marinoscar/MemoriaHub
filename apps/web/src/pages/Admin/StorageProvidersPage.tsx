@@ -197,6 +197,7 @@ function ProviderCard({
             value={formState.secretAccessKey ?? ''}
             onChange={(e) => onFormChange(key, 'secretAccessKey', e.target.value)}
             placeholder={providerConfig.configured ? 'Leave blank to keep current secret' : 'Enter Secret Access Key'}
+            helperText={providerConfig.configured ? 'Leave blank to use the saved secret when testing or saving.' : undefined}
             sx={{ mb: 2 }}
           />
 
@@ -255,6 +256,13 @@ function ProviderCard({
             sx={{ mb: 2, display: 'block' }}
           />
 
+          {/* Guard: provider requires credentials, not yet saved, and secret is blank */}
+          {providerConfig.requiresCredentials && !providerConfig.configured && !formState.secretAccessKey && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              Enter the Secret Access Key to test before saving.
+            </Typography>
+          )}
+
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <Button
               variant="contained"
@@ -276,7 +284,15 @@ function ProviderCard({
             <Button
               variant="outlined"
               size="small"
-              disabled={testLoading}
+              disabled={
+                testLoading ||
+                (providerConfig.requiresCredentials && !providerConfig.configured && !formState.secretAccessKey)
+              }
+              title={
+                providerConfig.requiresCredentials && !providerConfig.configured && !formState.secretAccessKey
+                  ? 'Enter the Secret Access Key to test before saving'
+                  : undefined
+              }
               startIcon={testLoading ? <CircularProgress size={14} /> : undefined}
               onClick={() => void onTest(key)}
             >
