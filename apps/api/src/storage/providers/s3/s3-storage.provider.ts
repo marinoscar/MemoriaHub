@@ -100,6 +100,14 @@ export class S3StorageProvider implements StorageProvider {
         forcePathStyle: forcePathStyle ?? !!endpoint,
         maxAttempts,
         retryMode,
+        // Since SDK v3.729 the default is 'WHEN_SUPPORTED', which adds CRC32
+        // streaming-trailer checksums (aws-chunked) to server-side PutObject /
+        // Upload requests.  Cloudflare R2 (and other S3-compatible stores)
+        // reject these with a 400.  'WHEN_REQUIRED' restores pre-3.729 behaviour:
+        // checksums are only sent when the specific operation mandates one, which
+        // is compatible with both R2 and real AWS S3.
+        requestChecksumCalculation: 'WHEN_REQUIRED',
+        responseChecksumValidation: 'WHEN_REQUIRED',
       });
 
       this.logger.log(
@@ -131,6 +139,14 @@ export class S3StorageProvider implements StorageProvider {
         forcePathStyle: !!endpoint,
         maxAttempts: this.configService.get<number>('storage.s3.maxAttempts', 5),
         retryMode: this.configService.get<string>('storage.s3.retryMode', 'adaptive') as 'standard' | 'adaptive' | 'legacy',
+        // Since SDK v3.729 the default is 'WHEN_SUPPORTED', which adds CRC32
+        // streaming-trailer checksums (aws-chunked) to server-side PutObject /
+        // Upload requests.  Cloudflare R2 (and other S3-compatible stores)
+        // reject these with a 400.  'WHEN_REQUIRED' restores pre-3.729 behaviour:
+        // checksums are only sent when the specific operation mandates one, which
+        // is compatible with both R2 and real AWS S3.
+        requestChecksumCalculation: 'WHEN_REQUIRED',
+        responseChecksumValidation: 'WHEN_REQUIRED',
       });
 
       this.logger.log(
