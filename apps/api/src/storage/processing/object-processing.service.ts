@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { STORAGE_PROVIDER, StorageProvider } from '../providers';
+import { StorageProviderResolver } from '../providers/storage-provider.resolver';
 import { OBJECT_UPLOADED_EVENT, ObjectUploadedEvent } from './events/object-uploaded.event';
 import { OBJECT_PROCESSED_EVENT, ObjectProcessedEvent } from './events/object-processed.event';
 import { OBJECT_PROCESSOR, ObjectProcessor } from './object-processor.interface';
@@ -17,6 +18,7 @@ export class ObjectProcessingService {
     private readonly prisma: PrismaService,
     @Inject(STORAGE_PROVIDER)
     private readonly storageProvider: StorageProvider,
+    private readonly resolver: StorageProviderResolver,
     private readonly eventEmitter: EventEmitter2,
     @Optional()
     @Inject(OBJECT_PROCESSOR)
@@ -68,7 +70,13 @@ export class ObjectProcessingService {
 
         const result = await processor.process(
           object,
-          () => this.storageProvider.download(object.storageKey),
+          async () => {
+            const provider = await this.resolver.getProviderFor(
+              object.storageProvider,
+              object.bucket,
+            );
+            return provider.download(object.storageKey);
+          },
         );
 
         if (result.success && result.metadata) {

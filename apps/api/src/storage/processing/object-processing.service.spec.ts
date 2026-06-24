@@ -5,6 +5,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ObjectProcessingService } from './object-processing.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { STORAGE_PROVIDER } from '../providers/storage-provider.interface';
+import { StorageProviderResolver } from '../providers/storage-provider.resolver';
 import { OBJECT_PROCESSOR, ObjectProcessor } from './object-processor.interface';
 import { ObjectUploadedEvent } from './events/object-uploaded.event';
 import { OBJECT_PROCESSED_EVENT } from './events/object-processed.event';
@@ -16,6 +17,7 @@ describe('ObjectProcessingService', () => {
   let mockPrisma: MockPrismaService;
   let mockStorageProvider: ReturnType<typeof createMockStorageProvider>;
   let mockEventEmitter: jest.Mocked<Pick<EventEmitter2, 'emit' | 'emitAsync'>>;
+  let mockResolver: jest.Mocked<Pick<StorageProviderResolver, 'getProviderFor'>>;
 
   const mockStorageObject = {
     id: 'obj-123',
@@ -40,6 +42,10 @@ describe('ObjectProcessingService', () => {
       emit: jest.fn().mockReturnValue(true),
       emitAsync: jest.fn().mockResolvedValue([]),
     };
+    // Resolver returns the same mock storage provider so download calls are tracked.
+    mockResolver = {
+      getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider),
+    };
   });
 
   afterEach(() => {
@@ -53,6 +59,7 @@ describe('ObjectProcessingService', () => {
           ObjectProcessingService,
           { provide: PrismaService, useValue: mockPrisma },
           { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
+          { provide: StorageProviderResolver, useValue: mockResolver },
           { provide: EventEmitter2, useValue: mockEventEmitter },
         ],
       }).compile();
@@ -121,6 +128,7 @@ describe('ObjectProcessingService', () => {
           ObjectProcessingService,
           { provide: PrismaService, useValue: mockPrisma },
           { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
+          { provide: StorageProviderResolver, useValue: mockResolver },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           {
             provide: OBJECT_PROCESSOR,
@@ -478,6 +486,7 @@ describe('ObjectProcessingService', () => {
           ObjectProcessingService,
           { provide: PrismaService, useValue: mockPrisma },
           { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
+          { provide: StorageProviderResolver, useValue: mockResolver },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           {
             provide: OBJECT_PROCESSOR,
