@@ -20,6 +20,7 @@ import { MediaReprocessService } from './media-reprocess.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ThumbnailProcessor } from '../storage/processing/processors/thumbnail.processor';
 import { ImageDimensionsProcessor } from '../storage/processing/processors/image-dimensions.processor';
+import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { OBJECT_PROCESSED_EVENT } from '../storage/processing/events/object-processed.event';
 
 // ---------------------------------------------------------------------------
@@ -72,6 +73,10 @@ describe('MediaReprocessService', () => {
   let mockDimensionsCanProcess: jest.Mock;
   let mockDimensionsProcess: jest.Mock;
 
+  // StorageProviderResolver mock
+  let mockResolverDownload: jest.Mock;
+  let mockGetProviderFor: jest.Mock;
+
   beforeEach(async () => {
     mockFindUnique = jest.fn();
     mockUpdate = jest.fn().mockResolvedValue({});
@@ -91,6 +96,10 @@ describe('MediaReprocessService', () => {
       success: true,
       metadata: { width: 100, height: 200 },
     });
+
+    // Resolver returns a stub storage provider whose download resolves to a stream.
+    mockResolverDownload = jest.fn().mockResolvedValue({ pipe: jest.fn() });
+    mockGetProviderFor = jest.fn().mockResolvedValue({ download: mockResolverDownload });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -132,6 +141,10 @@ describe('MediaReprocessService', () => {
             process: mockDimensionsProcess,
           },
         },
+        {
+          provide: StorageProviderResolver,
+          useValue: { getProviderFor: mockGetProviderFor },
+        },
       ],
     }).compile();
 
@@ -167,7 +180,7 @@ describe('MediaReprocessService', () => {
       expect(mockDimensionsProcess).not.toHaveBeenCalled();
     });
 
-    it('should skip non-ready objects', async () => {
+    it('should skip objects whose status is not ready or failed (e.g. pending)', async () => {
       mockFindUnique.mockResolvedValue(
         makeStorageObject({ mimeType: 'image/jpeg', status: 'pending' }),
       );
@@ -176,6 +189,29 @@ describe('MediaReprocessService', () => {
 
       expect(mockThumbnailProcess).not.toHaveBeenCalled();
       expect(mockDimensionsProcess).not.toHaveBeenCalled();
+    });
+
+    it('should skip objects whose status is "processing"', async () => {
+      mockFindUnique.mockResolvedValue(
+        makeStorageObject({ mimeType: 'image/jpeg', status: 'processing' }),
+      );
+
+      await service.reprocessImageObject('obj-001');
+
+      expect(mockThumbnailProcess).not.toHaveBeenCalled();
+      expect(mockDimensionsProcess).not.toHaveBeenCalled();
+    });
+
+    it('should NOT skip objects whose status is "failed" (recovery path)', async () => {
+      mockFindUnique.mockResolvedValue(
+        makeStorageObject({ mimeType: 'image/jpeg', status: 'failed' }),
+      );
+
+      await service.reprocessImageObject('obj-001');
+
+      // Processors should run so the object can be recovered
+      expect(mockDimensionsProcess).toHaveBeenCalledTimes(1);
+      expect(mockThumbnailProcess).toHaveBeenCalledTimes(1);
     });
 
     it('should return without error when the object does not exist', async () => {
@@ -200,7 +236,7 @@ describe('MediaReprocessService', () => {
       expect(mockThumbnailProcess).toHaveBeenCalledTimes(1);
     });
 
-    it('should call storageObject.update exactly once with merged metadata', async () => {
+    it('should call storageObject.update exactly once with merged metadata and status ready', async () => {
       mockFindUnique.mockResolvedValue(makeStorageObject());
 
       await service.reprocessImageObject('obj-001');
@@ -208,12 +244,23 @@ describe('MediaReprocessService', () => {
       expect(mockUpdate).toHaveBeenCalledTimes(1);
       const updateArg = mockUpdate.mock.calls[0][0];
       expect(updateArg.where).toEqual({ id: 'obj-001' });
+      expect(updateArg.data.status).toBe('ready');
       expect(updateArg.data.metadata).toMatchObject({
         _processing: expect.objectContaining({
           thumbnail: { thumbnailObjectId: 'new-thumb-id', thumbnailStorageKey: 'thumbnails/new.jpg' },
           dimensions: { width: 100, height: 200 },
         }),
       });
+    });
+
+    it('should set status to ready even when recovering a previously failed object', async () => {
+      mockFindUnique.mockResolvedValue(makeStorageObject({ status: 'failed' }));
+
+      await service.reprocessImageObject('obj-001');
+
+      expect(mockUpdate).toHaveBeenCalledTimes(1);
+      const updateArg = mockUpdate.mock.calls[0][0];
+      expect(updateArg.data.status).toBe('ready');
     });
 
     it('should emit OBJECT_PROCESSED_EVENT after update', async () => {
@@ -227,13 +274,13 @@ describe('MediaReprocessService', () => {
       );
     });
 
-    it('should use thumbnailProcessor.download as the getStream provider for all processors', async () => {
-      mockFindUnique.mockResolvedValue(makeStorageObject());
+    it('should use resolver.getProviderFor to download originals via the per-object provider', async () => {
+      const obj = makeStorageObject();
+      mockFindUnique.mockResolvedValue(obj);
 
       await service.reprocessImageObject('obj-001');
 
-      // Both processors received a getStream callback that resolves via thumbnailProcessor.download
-      // Verify by checking download was called for each processor invocation
+      // Both processors received a getStream callback
       expect(mockDimensionsProcess).toHaveBeenCalledWith(
         expect.anything(),
         expect.any(Function),
@@ -241,6 +288,13 @@ describe('MediaReprocessService', () => {
       expect(mockThumbnailProcess).toHaveBeenCalledWith(
         expect.anything(),
         expect.any(Function),
+      );
+
+      // resolver.getProviderFor was called with the object's own provider/bucket,
+      // not the legacy static STORAGE_PROVIDER token.
+      expect(mockGetProviderFor).toHaveBeenCalledWith(
+        obj.storageProvider,
+        obj.bucket,
       );
     });
   });

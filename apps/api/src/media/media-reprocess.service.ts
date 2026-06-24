@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { OBJECT_PROCESSED_EVENT, ObjectProcessedEvent } from '../storage/processing/events/object-processed.event';
 import { ThumbnailProcessor } from '../storage/processing/processors/thumbnail.processor';
 import { ImageDimensionsProcessor } from '../storage/processing/processors/image-dimensions.processor';
+import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 
 @Injectable()
 export class MediaReprocessService {
@@ -14,6 +15,7 @@ export class MediaReprocessService {
     private readonly eventEmitter: EventEmitter2,
     private readonly thumbnailProcessor: ThumbnailProcessor,
     private readonly dimensionsProcessor: ImageDimensionsProcessor,
+    private readonly resolver: StorageProviderResolver,
   ) {}
 
   /**
@@ -34,8 +36,11 @@ export class MediaReprocessService {
       return;
     }
 
-    // Skip non-images, non-ready objects, and thumbnail objects (recursion guard)
-    if (!object.mimeType.startsWith('image/') || object.status !== 'ready' || object.storageKey.startsWith('thumbnails/')) {
+    // Skip non-images, objects not in a processable state, and thumbnail objects (recursion guard).
+    // Allow both 'ready' and 'failed' so that objects that failed processing (e.g. because the
+    // original was in R2 while the processor used the wrong provider) can be recovered here.
+    const processableStatus = object.status === 'ready' || object.status === 'failed';
+    if (!object.mimeType.startsWith('image/') || !processableStatus || object.storageKey.startsWith('thumbnails/')) {
       this.logger.debug(`reprocessImageObject: skipping object ${objectId} (mimeType=${object.mimeType}, status=${object.status}, key=${object.storageKey})`);
       return;
     }
@@ -54,7 +59,13 @@ export class MediaReprocessService {
       try {
         const result = await processor.process(
           object,
-          () => this.thumbnailProcessor.download(object.storageKey),
+          async () => {
+            const provider = await this.resolver.getProviderFor(
+              object.storageProvider,
+              object.bucket,
+            );
+            return provider.download(object.storageKey);
+          },
         );
         if (result.success && result.metadata) {
           allMetadata[processor.name] = result.metadata;
@@ -81,7 +92,7 @@ export class MediaReprocessService {
 
     await this.prisma.storageObject.update({
       where: { id: objectId },
-      data: { metadata: mergedMetadata },
+      data: { metadata: mergedMetadata, status: 'ready' },
     });
 
     // Emit so MediaMetadataSyncService picks up new dims + thumbnail
