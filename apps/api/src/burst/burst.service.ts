@@ -13,6 +13,7 @@ import {
   STORAGE_PROVIDER,
   StorageProvider,
 } from '../storage/providers/storage-provider.interface';
+import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { BurstQueryDto } from './dto/burst-query.dto';
 import { ResolveBurstDto } from './dto/resolve-burst.dto';
 
@@ -26,6 +27,7 @@ export class BurstService {
     private readonly enrichmentJobService: EnrichmentJobService,
     @Inject(STORAGE_PROVIDER)
     private readonly storageProvider: StorageProvider,
+    private readonly resolver: StorageProviderResolver,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -42,7 +44,17 @@ export class BurstService {
       return null;
     }
     try {
-      return await this.storageProvider.getSignedDownloadUrl(key);
+      // Look up the thumbnail StorageObject row to find which provider+bucket it lives on.
+      // This handles the case where thumbnails were uploaded to R2 (or any non-default provider)
+      // while the static STORAGE_PROVIDER token still points at the legacy S3 bucket.
+      const thumbObj = await this.prisma.storageObject.findFirst({
+        where: { storageKey: key },
+        select: { storageProvider: true, bucket: true },
+      });
+      const provider = thumbObj
+        ? await this.resolver.getProviderFor(thumbObj.storageProvider, thumbObj.bucket)
+        : this.storageProvider; // fallback: row not found, use static provider
+      return await provider.getSignedDownloadUrl(key);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(`Failed to sign thumbnail URL for key ${key}: ${msg}`);

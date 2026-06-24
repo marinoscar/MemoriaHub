@@ -20,6 +20,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
+import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { BurstGroupStatus, CircleRole, MediaType } from '@prisma/client';
 import { BurstQueryDto } from './dto/burst-query.dto';
@@ -145,6 +146,7 @@ describe('BurstService', () => {
   let mockMembership: { assertCircleAccess: jest.Mock };
   let mockEnrichmentJobService: { enqueue: jest.Mock };
   let mockStorageProvider: { getSignedDownloadUrl: jest.Mock };
+  let mockResolver: { getProviderFor: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -153,6 +155,8 @@ describe('BurstService', () => {
     mockStorageProvider = {
       getSignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/signed-url'),
     };
+    // Resolver returns mockStorageProvider so getSignedDownloadUrl assertions are unchanged.
+    mockResolver = { getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider) };
 
     // Default: $transaction executes array operations
     (mockPrisma.$transaction as jest.Mock).mockImplementation((ops: Promise<unknown>[]) =>
@@ -165,6 +169,12 @@ describe('BurstService', () => {
       value: { burst: { minGroupSize: 3 } },
     });
 
+    // Default storageObject.findFirst for signThumb: return a row so resolver is used.
+    (mockPrisma.storageObject.findFirst as jest.Mock).mockResolvedValue({
+      storageProvider: 's3',
+      bucket: 'test-bucket',
+    });
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BurstService,
@@ -172,6 +182,7 @@ describe('BurstService', () => {
         { provide: CircleMembershipService, useValue: mockMembership },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
+        { provide: StorageProviderResolver, useValue: mockResolver },
       ],
     }).compile();
 
