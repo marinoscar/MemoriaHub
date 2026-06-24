@@ -8,6 +8,7 @@ import {
   STORAGE_PROVIDER,
   StorageProvider,
 } from '../storage/providers/storage-provider.interface';
+import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import { detectImageMime } from './image-mime.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -37,6 +38,7 @@ export class AutoTaggingService {
     private readonly aiSettingsService: AiSettingsService,
     private readonly aiProviderRegistry: AiProviderRegistry,
     @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
+    private readonly resolver: StorageProviderResolver,
     private readonly enrichmentJobService: EnrichmentJobService,
   ) {}
 
@@ -56,7 +58,7 @@ export class AutoTaggingService {
         deletedAt: true,
         addedById: true,
         storageObject: {
-          select: { storageKey: true },
+          select: { storageKey: true, storageProvider: true, bucket: true },
         },
       },
     });
@@ -162,8 +164,12 @@ export class AutoTaggingService {
     }
 
     try {
-      // i. Download image and prepare it
-      const stream = await this.storageProvider.download(mediaItem.storageObject.storageKey);
+      // i. Download image and prepare it (resolved via the object's own provider+bucket)
+      const objectProvider = await this.resolver.getProviderFor(
+        mediaItem.storageObject.storageProvider,
+        mediaItem.storageObject.bucket,
+      );
+      const stream = await objectProvider.download(mediaItem.storageObject.storageKey);
       const buffer = await streamToBuffer(stream);
 
       const prepared = await prepareImageForProcessing(buffer, { maxDim: TAG_MAX_DIM });

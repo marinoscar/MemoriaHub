@@ -6,6 +6,7 @@ import {
   STORAGE_PROVIDER,
   StorageProvider,
 } from '../storage/providers/storage-provider.interface';
+import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 import { computeVisualHash } from '../storage/processing/visual-hash.util';
 
@@ -48,6 +49,7 @@ export class BurstDetectionService {
     private readonly enrichmentJobService: EnrichmentJobService,
     @Inject(STORAGE_PROVIDER)
     private readonly storageProvider: StorageProvider,
+    private readonly resolver: StorageProviderResolver,
   ) {}
 
   /**
@@ -69,7 +71,7 @@ export class BurstDetectionService {
     // Fetch the StorageObject to get the storageKey
     const storageObject = await this.prisma.storageObject.findUnique({
       where: { id: storageObjectId },
-      select: { storageKey: true },
+      select: { storageKey: true, storageProvider: true, bucket: true },
     });
 
     if (!storageObject?.storageKey) {
@@ -79,9 +81,13 @@ export class BurstDetectionService {
       return null;
     }
 
-    // Stream the object bytes from storage.
+    // Stream the object bytes from the object's own provider+bucket.
     // Transient errors (network, throttle) propagate so the worker retries.
-    const stream = await this.storageProvider.download(storageObject.storageKey);
+    const objectProvider = await this.resolver.getProviderFor(
+      storageObject.storageProvider,
+      storageObject.bucket,
+    );
+    const stream = await objectProvider.download(storageObject.storageKey);
     const buffer = await streamToBuffer(stream);
 
     const result = await computeVisualHash(buffer);

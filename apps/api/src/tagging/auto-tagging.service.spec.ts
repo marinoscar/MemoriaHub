@@ -32,6 +32,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AiSettingsService } from '../ai/ai-settings.service';
 import { AiProviderRegistry } from '../ai/providers/ai-provider.registry';
 import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
+import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import {
   createMockPrismaService,
   MockPrismaService,
@@ -80,7 +81,7 @@ function makeMediaItem(overrides: Partial<{
   type: MediaType;
   deletedAt: Date | null;
   addedById: string;
-  storageObject: { storageKey: string } | null;
+  storageObject: { storageKey: string; storageProvider: string; bucket: string } | null;
 }> = {}) {
   return {
     id: 'media-1',
@@ -88,7 +89,7 @@ function makeMediaItem(overrides: Partial<{
     type: MediaType.photo,
     deletedAt: null,
     addedById: 'user-1',
-    storageObject: { storageKey: 'images/photo.jpg' },
+    storageObject: { storageKey: 'images/photo.jpg', storageProvider: 's3', bucket: 'test-bucket' },
     ...overrides,
   };
 }
@@ -121,6 +122,7 @@ describe('AutoTaggingService', () => {
   let mockRegistry: { get: jest.Mock };
   let mockProvider: { analyzeImage: jest.Mock };
   let mockStorageProvider: { download: jest.Mock };
+  let mockResolver: { getProviderFor: jest.Mock };
   let mockDetectImageMime: jest.Mock;
   let mockEnrichmentJobService: { recordModel: jest.Mock };
   let mockAiProviderForEmbedding: { embedText: jest.Mock };
@@ -156,6 +158,8 @@ describe('AutoTaggingService', () => {
     mockStorageProvider = {
       download: jest.fn().mockResolvedValue(makeReadable()),
     };
+    // Resolver returns mockStorageProvider so download assertions are unchanged.
+    mockResolver = { getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider) };
     mockEnrichmentJobService = { recordModel: jest.fn().mockResolvedValue(undefined) };
 
     // Default system settings: tagging configured
@@ -203,6 +207,7 @@ describe('AutoTaggingService', () => {
         { provide: AiSettingsService, useValue: mockAiSettingsService },
         { provide: AiProviderRegistry, useValue: mockRegistry },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
+        { provide: StorageProviderResolver, useValue: mockResolver },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
       ],
     }).compile();

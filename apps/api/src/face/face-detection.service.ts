@@ -8,6 +8,7 @@ import {
   STORAGE_PROVIDER,
   StorageProvider,
 } from '../storage/providers/storage-provider.interface';
+import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { DetectedFace } from './providers/face-provider.interface';
 import { FaceMatchingService } from './face-matching.service';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
@@ -23,6 +24,7 @@ export class FaceDetectionService {
     private readonly faceSettingsService: FaceSettingsService,
     private readonly registry: FaceProviderRegistry,
     @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
+    private readonly resolver: StorageProviderResolver,
     private readonly matchingService: FaceMatchingService,
     private readonly enrichmentJobService: EnrichmentJobService,
   ) {}
@@ -82,7 +84,7 @@ export class FaceDetectionService {
           width: true,
           height: true,
           storageObject: {
-            select: { storageKey: true },
+            select: { storageKey: true, storageProvider: true, bucket: true },
           },
         },
       });
@@ -94,8 +96,12 @@ export class FaceDetectionService {
         throw new Error(errMsg);
       }
 
-      // 5. Download image → buffer
-      const stream = await this.storageProvider.download(mediaItem.storageObject.storageKey);
+      // 5. Download image → buffer (resolved via the object's own provider+bucket)
+      const objectProvider = await this.resolver.getProviderFor(
+        mediaItem.storageObject.storageProvider,
+        mediaItem.storageObject.bucket,
+      );
+      const stream = await objectProvider.download(mediaItem.storageObject.storageKey);
       const buffer = await streamToBuffer(stream);
 
       // 5.5. Apply EXIF orientation + downscale before detection

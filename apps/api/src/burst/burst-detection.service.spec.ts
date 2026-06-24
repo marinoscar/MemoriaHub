@@ -30,6 +30,7 @@ import { BurstDetectionService } from './burst-detection.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
+import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { BurstGroupStatus, EnrichmentJob, JobReason, JobStatus, MediaType } from '@prisma/client';
 import { computeVisualHash } from '../storage/processing/visual-hash.util';
@@ -124,11 +125,14 @@ describe('BurstDetectionService', () => {
   let mockPrisma: MockPrismaService;
   let mockEnrichmentJobService: { enqueue: jest.Mock };
   let mockStorageProvider: { download: jest.Mock };
+  let mockResolver: { getProviderFor: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
     mockEnrichmentJobService = { enqueue: jest.fn() };
     mockStorageProvider = { download: jest.fn() };
+    // Resolver returns mockStorageProvider so download assertions are unchanged.
+    mockResolver = { getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider) };
 
     // Default system settings: standard burst config
     (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue({
@@ -147,6 +151,7 @@ describe('BurstDetectionService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
+        { provide: StorageProviderResolver, useValue: mockResolver },
       ],
     }).compile();
 
@@ -485,6 +490,8 @@ describe('BurstDetectionService', () => {
       // StorageObject lookup inside computeAndPersistHashOnDemand
       (mockPrisma.storageObject.findUnique as jest.Mock).mockResolvedValue({
         storageKey: STORAGE_KEY,
+        storageProvider: 's3',
+        bucket: 'test-bucket',
       });
       // Storage download returns a readable stream
       mockStorageProvider.download.mockResolvedValue(makeStream());

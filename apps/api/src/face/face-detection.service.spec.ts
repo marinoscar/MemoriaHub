@@ -47,6 +47,7 @@ import { FaceSettingsService } from './face-settings.service';
 import { FaceProviderRegistry } from './providers/face-provider.registry';
 import { FaceMatchingService } from './face-matching.service';
 import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
+import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { EnrichmentJob, JobReason, JobStatus, MediaFaceStatusType } from '@prisma/client';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -84,14 +85,14 @@ function makeMediaItem(overrides: Partial<{
   circleId: string;
   width: number | null;
   height: number | null;
-  storageObject: { storageKey: string } | null;
+  storageObject: { storageKey: string; storageProvider: string; bucket: string } | null;
 }> = {}) {
   return {
     id: 'media-1',
     circleId: 'circle-1',
     width: 500,
     height: 400,
-    storageObject: { storageKey: 'storage/key.jpg' },
+    storageObject: { storageKey: 'storage/key.jpg', storageProvider: 's3', bucket: 'test-bucket' },
     ...overrides,
   };
 }
@@ -113,6 +114,7 @@ describe('FaceDetectionService', () => {
   let mockRegistry: { get: jest.Mock };
   let mockProvider: { detect: jest.Mock; capabilities: { delegatedRecognize: boolean } };
   let mockStorageProvider: { download: jest.Mock };
+  let mockResolver: { getProviderFor: jest.Mock };
   let mockMatchingService: {
     matchFaceToPerson: jest.Mock;
     matchFaceByExternalId: jest.Mock;
@@ -131,6 +133,8 @@ describe('FaceDetectionService', () => {
     mockRegistry = { get: jest.fn().mockReturnValue(mockProvider) };
     mockFaceSettingsService = { resolveCredentials: jest.fn().mockResolvedValue({ apiKey: 'test-key' }) };
     mockStorageProvider = { download: jest.fn().mockResolvedValue(makeReadable()) };
+    // Resolver returns mockStorageProvider so download assertions are unchanged.
+    mockResolver = { getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider) };
     mockMatchingService = {
       matchFaceToPerson: jest.fn().mockResolvedValue(null),
       matchFaceByExternalId: jest.fn().mockResolvedValue(null),
@@ -173,6 +177,7 @@ describe('FaceDetectionService', () => {
         { provide: FaceSettingsService, useValue: mockFaceSettingsService },
         { provide: FaceProviderRegistry, useValue: mockRegistry },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
+        { provide: StorageProviderResolver, useValue: mockResolver },
         { provide: FaceMatchingService, useValue: mockMatchingService },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
       ],
