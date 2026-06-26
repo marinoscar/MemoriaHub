@@ -32,6 +32,7 @@ import {
 import { PERMISSIONS } from '../../src/common/constants/roles.constants';
 import { GEO_LOCATION_PROVIDER } from '../../src/media/geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from '../../src/media/geo/forward-geocode.service';
+import { StorageProviderResolver } from '../../src/storage/providers/storage-provider.resolver';
 import { randomUUID } from 'crypto';
 
 // ---------------------------------------------------------------------------
@@ -187,6 +188,7 @@ describe('MediaService.streamExport', () => {
         { provide: CircleMembershipService, useValue: mockCircleMembership },
         { provide: GEO_LOCATION_PROVIDER, useValue: { reverseGeocode: jest.fn() } },
         { provide: ForwardGeocodeService, useValue: { searchPlaces: jest.fn() } },
+        { provide: StorageProviderResolver, useValue: { getProviderFor: jest.fn() } },
       ],
     }).compile();
 

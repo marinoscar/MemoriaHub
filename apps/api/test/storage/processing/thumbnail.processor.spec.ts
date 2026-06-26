@@ -31,6 +31,7 @@
 
 import { ThumbnailProcessor } from '../../../src/storage/processing/processors/thumbnail.processor';
 import { STORAGE_PROVIDER } from '../../../src/storage/providers/storage-provider.interface';
+import { StorageProviderResolver } from '../../../src/storage/providers/storage-provider.resolver';
 import { PrismaService } from '../../../src/prisma/prisma.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getPlainJpegBuffer, makeGetStream } from '../../fixtures/media/image-fixtures';
@@ -202,6 +203,16 @@ describe('ThumbnailProcessor', () => {
             storageObject: {
               upsert: mockStorageObjectUpsert,
             },
+          },
+        },
+        {
+          provide: StorageProviderResolver,
+          useValue: {
+            getActiveProvider: jest.fn().mockResolvedValue({
+              id: 's3',
+              provider: { upload: mockUpload, getBucket: mockGetBucket },
+            }),
+            getProviderFor: jest.fn(),
           },
         },
       ],
@@ -471,6 +482,13 @@ describe('ThumbnailProcessor', () => {
               },
             },
           },
+          {
+            provide: StorageProviderResolver,
+            useValue: {
+              getActiveProvider: jest.fn(),
+              getProviderFor: jest.fn(),
+            },
+          },
         ],
       }).compile();
 
@@ -506,6 +524,16 @@ describe('ThumbnailProcessor', () => {
             provide: PrismaService,
             useValue: {
               storageObject: { upsert: customUpsert },
+            },
+          },
+          {
+            provide: StorageProviderResolver,
+            useValue: {
+              getActiveProvider: jest.fn().mockResolvedValue({
+                id: 's3',
+                provider: { upload: customUpload, getBucket: jest.fn().mockReturnValue(BUCKET_NAME) },
+              }),
+              getProviderFor: jest.fn(),
             },
           },
         ],

@@ -278,6 +278,13 @@ describe('MediaReprocessService', () => {
       const obj = makeStorageObject();
       mockFindUnique.mockResolvedValue(obj);
 
+      // Override the dimensions processor to actually invoke the getStream callback
+      // so the resolver.getProviderFor call inside it is exercised.
+      mockDimensionsProcess.mockImplementationOnce(async (_obj: unknown, getStream: () => Promise<unknown>) => {
+        await getStream();
+        return { success: true, metadata: { width: 100, height: 200 } };
+      });
+
       await service.reprocessImageObject('obj-001');
 
       // Both processors received a getStream callback
