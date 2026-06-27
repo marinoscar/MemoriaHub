@@ -59,17 +59,12 @@ class MediaStoreScanner @Inject constructor(
             COL_BUCKET,
         )
 
-        val selection = StringBuilder("$COL_BUCKET = ?")
-        val args = ArrayList<String>().apply { add(CAMERA_BUCKET) }
-        if (sinceDateAddedSec > 0) {
-            selection.append(" AND ${MediaStore.MediaColumns.DATE_ADDED} >= ?")
-            args.add(sinceDateAddedSec.toString())
-        }
+        val (selection, args) = buildBucketSelection(CAMERA_BUCKETS, sinceDateAddedSec)
         val sortOrder = "${MediaStore.MediaColumns.DATE_ADDED} ASC"
 
         val resolver: ContentResolver = context.contentResolver
         val out = ArrayList<ScannedMedia>()
-        resolver.query(collection, projection, selection.toString(), args.toTypedArray(), sortOrder)
+        resolver.query(collection, projection, selection, args, sortOrder)
             ?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
                 val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
@@ -107,10 +102,36 @@ class MediaStoreScanner @Inject constructor(
     private fun defaultMime(type: MediaType): String =
         if (type == MediaType.VIDEO) "video/*" else "image/*"
 
-    private companion object {
-        const val CAMERA_BUCKET = "Camera"
+    companion object {
+        /**
+         * MediaStore buckets scanned for backup. Different cameras/devices save
+         * captures to different folders: stock Android cameras use DCIM/Camera
+         * (bucket "Camera"), some OEMs and the Android emulator save to Pictures
+         * or DCIM root. Scanning all three catches the common cases instead of
+         * silently missing photos that aren't under DCIM/Camera.
+         */
+        val CAMERA_BUCKETS = listOf("Camera", "DCIM", "Pictures")
+
         // Raw column names work across API 26+, avoiding API-gated MediaColumns constants.
         const val COL_DATE_TAKEN = "datetaken"
         const val COL_BUCKET = "bucket_display_name"
+
+        /**
+         * Build the MediaStore selection clause and args for the given buckets,
+         * optionally bounded by a DATE_ADDED high-water mark. Extracted for unit testing.
+         */
+        internal fun buildBucketSelection(
+            buckets: List<String>,
+            sinceDateAddedSec: Long,
+        ): Pair<String, Array<String>> {
+            val placeholders = buckets.joinToString(", ") { "?" }
+            val selection = StringBuilder("$COL_BUCKET IN ($placeholders)")
+            val args = ArrayList(buckets)
+            if (sinceDateAddedSec > 0) {
+                selection.append(" AND ${MediaStore.MediaColumns.DATE_ADDED} >= ?")
+                args.add(sinceDateAddedSec.toString())
+            }
+            return selection.toString() to args.toTypedArray()
+        }
     }
 }
