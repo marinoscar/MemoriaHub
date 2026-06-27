@@ -384,10 +384,14 @@ export class SyncEngine extends TypedEmitter {
         }
 
         // --- Dedup check ---
+        // GET /api/media requires circleId, and dedup uniqueness is scoped to
+        // (circle_id, content_hash) — so always pass the resolved circle. Omitting
+        // it makes the list endpoint reject the request with 400 "Validation failed".
         let dedupMediaId: string | null = null;
         {
           const mediaList = await api.get<MediaListResponse>(
-            `/api/media?contentHash=${encodeURIComponent(sha256)}&pageSize=1`,
+            `/api/media?circleId=${encodeURIComponent(resolvedCircleId)}` +
+              `&contentHash=${encodeURIComponent(sha256)}&pageSize=1`,
           );
           if (mediaList.items.length > 0) {
             dedupMediaId = mediaList.items[0].id;

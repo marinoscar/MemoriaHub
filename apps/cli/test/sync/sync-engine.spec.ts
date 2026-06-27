@@ -267,6 +267,26 @@ describe('SyncEngine', () => {
       expect(rec.status).toBe('skipped');
       expect(rec.media_item_id).toBe('existing-media');
     });
+
+    it('scopes the dedup GET to the resolved circle (GET /api/media requires circleId)', async () => {
+      writeTmpJpeg(tmpDir, 'scoped.jpg');
+
+      const getMock = mockResolving({ items: [] });
+      const ctx = makeEngine(db, { get: getMock }, makeUploadFn());
+
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'circle-xyz' });
+
+      await ctx.engine.run({ trigger: 'cli', folderIds: [folder.id] });
+
+      // The dedup lookup is the GET call against /api/media; it MUST carry the
+      // circleId or the API rejects it with 400 "Validation failed".
+      const dedupCall = getMock.mock.calls.find(
+        (args) => typeof args[0] === 'string' && args[0].includes('/api/media?'),
+      );
+      expect(dedupCall).toBeDefined();
+      expect(dedupCall![0]).toContain('circleId=circle-xyz');
+      expect(dedupCall![0]).toContain('contentHash=');
+    });
   });
 
   // -------------------------------------------------------------------------
