@@ -181,6 +181,80 @@ describe('DeviceAuthService', () => {
       expect(new Date(expiresAt).getTime()).toBeGreaterThanOrEqual(beforeTime.getTime());
       expect(new Date(expiresAt).getTime()).toBeLessThanOrEqual(afterTime.getTime());
     });
+
+    // -----------------------------------------------------------------------
+    // returnUri sanitization (defense-in-depth inside the service layer)
+    // -----------------------------------------------------------------------
+
+    it('should preserve a valid memoriahub:// returnUri in stored clientInfo', async () => {
+      const clientInfo = {
+        deviceName: 'MemoriaHub CLI',
+        returnUri: 'memoriahub://auth/device-complete',
+      };
+
+      mockPrisma.deviceCode.create.mockResolvedValue({} as any);
+
+      await service.generateDeviceCode(clientInfo);
+
+      const stored = mockPrisma.deviceCode.create.mock.calls[0][0].data.clientInfo;
+      expect(stored).toHaveProperty('returnUri', 'memoriahub://auth/device-complete');
+    });
+
+    it('should preserve a valid https:// returnUri in stored clientInfo', async () => {
+      const clientInfo = {
+        returnUri: 'https://app.example.com/callback',
+      };
+
+      mockPrisma.deviceCode.create.mockResolvedValue({} as any);
+
+      await service.generateDeviceCode(clientInfo);
+
+      const stored = mockPrisma.deviceCode.create.mock.calls[0][0].data.clientInfo;
+      expect(stored).toHaveProperty('returnUri', 'https://app.example.com/callback');
+    });
+
+    it('should strip a returnUri with a disallowed scheme (http://) from stored clientInfo', async () => {
+      const clientInfo = {
+        deviceName: 'Bad Client',
+        returnUri: 'http://evil.com/steal-token',
+      };
+
+      mockPrisma.deviceCode.create.mockResolvedValue({} as any);
+
+      await service.generateDeviceCode(clientInfo);
+
+      const stored = mockPrisma.deviceCode.create.mock.calls[0][0].data.clientInfo;
+      expect(stored).not.toHaveProperty('returnUri');
+      // Other clientInfo fields should be preserved
+      expect(stored).toHaveProperty('deviceName', 'Bad Client');
+    });
+
+    it('should strip a returnUri with javascript: scheme from stored clientInfo', async () => {
+      const clientInfo = {
+        returnUri: 'javascript:alert(1)',
+      };
+
+      mockPrisma.deviceCode.create.mockResolvedValue({} as any);
+
+      await service.generateDeviceCode(clientInfo);
+
+      const stored = mockPrisma.deviceCode.create.mock.calls[0][0].data.clientInfo;
+      expect(stored).not.toHaveProperty('returnUri');
+    });
+
+    it('should store clientInfo unchanged when returnUri is absent', async () => {
+      const clientInfo = {
+        deviceName: 'Smart TV',
+        userAgent: 'Mozilla/5.0',
+      };
+
+      mockPrisma.deviceCode.create.mockResolvedValue({} as any);
+
+      await service.generateDeviceCode(clientInfo);
+
+      const stored = mockPrisma.deviceCode.create.mock.calls[0][0].data.clientInfo;
+      expect(stored).toEqual(clientInfo);
+    });
   });
 
   // ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@ This guide covers the Device Authorization Flow implementation in the Enterprise
 - [Configuration](#configuration)
 - [Device Session Management](#device-session-management)
 - [Security Considerations](#security-considerations)
+- [Android Deep-Link Return Flow](#android-deep-link-return-flow)
 - [Error Handling](#error-handling)
 
 ---
@@ -231,6 +232,7 @@ Generate a new device code pair to initiate the device authorization flow.
 | `clientInfo.name` | string | No | Application name |
 | `clientInfo.version` | string | No | Application version |
 | `clientInfo.platform` | string | No | Platform (linux, windows, macos, etc.) |
+| `clientInfo.returnUri` | string | No | Deep link URI the web activation page should open after a successful approval, returning the user to the requesting app. Accepted schemes: `memoriahub:` or `https:`. Maximum 512 characters. Values that do not match these schemes are silently stripped and the activation page behaves as if no `returnUri` was provided. |
 
 **Response (200 OK):**
 ```json
@@ -344,12 +346,15 @@ Authorization: Bearer <token>
     "clientInfo": {
       "name": "My CLI Tool",
       "version": "1.0.0",
-      "platform": "linux"
+      "platform": "linux",
+      "returnUri": "memoriahub://auth/device-complete"
     },
-    "expiresAt": "2024-01-01T12:15:00.000Z"
+    "expiresAt": "2026-06-27T12:15:00.000Z"
   }
 }
 ```
+
+`clientInfo.returnUri` is included only when the device supplied it in `POST /api/auth/device/code`. The activation page uses this value to navigate back to the requesting app after approval (see [Android deep-link return flow](#android-deep-link-return-flow) below).
 
 **Error Responses:**
 - **404 Not Found** - Invalid user code
@@ -859,6 +864,49 @@ Authorization: Bearer <token>
 - Device codes stored as SHA-256 hashes
 - Foreign key constraints prevent orphaned records
 - Indexes optimize lookup performance
+
+---
+
+## Android Deep-Link Return Flow
+
+Native Android apps (and other apps that register a custom URI scheme) can be returned to automatically after the user approves a device — without the user having to manually switch back from the browser.
+
+### How It Works
+
+1. **App requests a device code** and sets `clientInfo.returnUri` to its deep-link URI:
+
+   ```json
+   {
+     "clientInfo": {
+       "name": "MemoriaHub Android",
+       "version": "1.0.0",
+       "platform": "android",
+       "returnUri": "memoriahub://auth/device-complete"
+     }
+   }
+   ```
+
+2. **App opens the activation URL in a Custom Tab** instead of an external browser. The Custom Tab keeps the app in focus so the OS can hand control back when the deep link fires.
+
+3. **User logs in** (if not already authenticated). Because the user may not be logged into the web app, the verification URI passes `returnTo=/activate?code=ABCD-1234` to `GET /api/auth/google` so the post-login redirect lands on the activation page with the code pre-filled:
+
+   ```
+   GET /api/auth/google?returnTo=%2Factivate%3Fcode%3DABCD-1234
+   ```
+
+   After OAuth completes, the callback redirects the browser to `/auth/callback?token=...&returnTo=%2Factivate%3Fcode%3DABCD-1234`, and the frontend forwards the user to `/activate?code=ABCD-1234`.
+
+4. **User approves the device** on the activation page. The page calls `POST /api/auth/device/authorize` and, on success, reads `clientInfo.returnUri` from the `GET /api/auth/device/activate` response and navigates the Custom Tab to `memoriahub://auth/device-complete`.
+
+5. **Android intercepts the deep link** via an intent-filter registered for `memoriahub://auth/device-complete`. The app is brought back to the foreground.
+
+6. **App completes login** via its out-of-band `POST /api/auth/device/token` poll, which succeeds immediately because the device code was just approved.
+
+### Security Notes
+
+- `returnUri` is validated server-side: only `memoriahub:` and `https:` schemes are accepted; anything else is silently stripped.
+- `returnTo` on the Google OAuth leg is HMAC-signed into the OAuth `state` parameter and re-validated on the callback to prevent open-redirect attacks.
+- Neither value is stored in the database; `returnUri` travels only in memory for the duration of the activation page session.
 
 ---
 

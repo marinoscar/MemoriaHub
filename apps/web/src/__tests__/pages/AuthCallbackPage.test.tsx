@@ -460,4 +460,93 @@ describe('AuthCallbackPage', () => {
       }
     });
   });
+
+  // -------------------------------------------------------------------------
+  // returnTo query param (new: survives Google OAuth round-trip)
+  // -------------------------------------------------------------------------
+
+  describe('returnTo query param — open-redirect protection', () => {
+    it('navigates to a valid returnTo relative path echoed in the callback URL', async () => {
+      const mockToken = 'test-access-token-returnto';
+      mockSearchParams.set('token', mockToken);
+      mockSearchParams.set('returnTo', '/activate?code=ABCD-1234');
+      mockRefreshUser.mockResolvedValue(undefined);
+
+      render(<AuthCallbackPage />, {
+        wrapperOptions: { authenticated: false },
+      });
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/activate?code=ABCD-1234', { replace: true });
+      });
+    });
+
+    it('returnTo takes precedence over sessionStorage auth_return_url', async () => {
+      const mockToken = 'test-access-token-returnto2';
+      mockSearchParams.set('token', mockToken);
+      mockSearchParams.set('returnTo', '/activate?code=WXYZ-5678');
+      sessionStorage.setItem('auth_return_url', '/settings');
+      mockRefreshUser.mockResolvedValue(undefined);
+
+      render(<AuthCallbackPage />, {
+        wrapperOptions: { authenticated: false },
+      });
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/activate?code=WXYZ-5678', { replace: true });
+      });
+    });
+
+    it('rejects a protocol-relative returnTo (//evil.com) and falls back to sessionStorage', async () => {
+      const mockToken = 'test-access-token-unsafe';
+      mockSearchParams.set('token', mockToken);
+      mockSearchParams.set('returnTo', '//evil.com');
+      sessionStorage.setItem('auth_return_url', '/safe-fallback');
+      mockRefreshUser.mockResolvedValue(undefined);
+
+      render(<AuthCallbackPage />, {
+        wrapperOptions: { authenticated: false },
+      });
+
+      await waitFor(() => {
+        // Must NOT navigate to //evil.com
+        expect(mockNavigate).not.toHaveBeenCalledWith('//evil.com', expect.anything());
+        // Should fall back to sessionStorage value
+        expect(mockNavigate).toHaveBeenCalledWith('/safe-fallback', { replace: true });
+      });
+    });
+
+    it('rejects an absolute URL as returnTo (https://evil.com) and falls back to /', async () => {
+      const mockToken = 'test-access-token-abs';
+      mockSearchParams.set('token', mockToken);
+      mockSearchParams.set('returnTo', 'https://evil.com');
+      // No sessionStorage set — should fall back to /
+      mockRefreshUser.mockResolvedValue(undefined);
+
+      render(<AuthCallbackPage />, {
+        wrapperOptions: { authenticated: false },
+      });
+
+      await waitFor(() => {
+        expect(mockNavigate).not.toHaveBeenCalledWith('https://evil.com', expect.anything());
+        expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true });
+      });
+    });
+
+    it('rejects a returnTo starting with // and falls back to /', async () => {
+      const mockToken = 'test-access-token-protorel';
+      mockSearchParams.set('token', mockToken);
+      mockSearchParams.set('returnTo', '//evil.com/steal');
+      mockRefreshUser.mockResolvedValue(undefined);
+
+      render(<AuthCallbackPage />, {
+        wrapperOptions: { authenticated: false },
+      });
+
+      await waitFor(() => {
+        expect(mockNavigate).not.toHaveBeenCalledWith('//evil.com/steal', expect.anything());
+        expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true });
+      });
+    });
+  });
 });

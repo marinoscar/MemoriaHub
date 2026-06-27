@@ -11,9 +11,11 @@ import cr.marin.memoriahub.core.network.dto.DeviceCodeResponse
 import cr.marin.memoriahub.core.network.dto.DeviceTokenRequest
 import cr.marin.memoriahub.core.network.parseApiError
 import cr.marin.memoriahub.core.util.TimeProvider
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -33,8 +35,22 @@ class DeviceAuthRepository @Inject constructor(
     private val json: Json,
 ) {
     /**
+     * Signals an out-of-band request to poll immediately instead of waiting for the
+     * next interval — fired when the app is reopened via the device-complete deep link
+     * so authorization is detected the instant the user approves in the browser.
+     * Buffered (capacity 1) so a poke that arrives mid-poll is not lost.
+     */
+    private val pokeFlow = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    /** Wake any in-flight polling loop to poll right away. Safe to call from any thread. */
+    fun pokeNow() {
+        pokeFlow.tryEmit(Unit)
+    }
+
+    /**
      * Requests a device code, then polls until the user approves/denies in the
-     * browser or the code expires. Honors the server's `interval` and `slow_down`.
+     * browser or the code expires. Honors the server's `interval` and `slow_down`,
+     * but wakes early when [pokeNow] is called (e.g. on deep-link return).
      * On success, persists tokens and emits the authenticated user.
      */
     fun authorize(): Flow<DeviceAuthEvent> = flow {
@@ -43,6 +59,7 @@ class DeviceAuthRepository @Inject constructor(
                 clientInfo = ClientInfo(
                     deviceName = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
                     userAgent = "MemoriaHub-Android/${BuildConfig.VERSION_NAME}",
+                    returnUri = DEVICE_COMPLETE_DEEP_LINK,
                 ),
             ),
         ).data
@@ -52,7 +69,8 @@ class DeviceAuthRepository @Inject constructor(
         val deadline = time.nowMillis() + code.expiresIn * 1000L
 
         while (time.nowMillis() < deadline) {
-            delay(intervalSeconds * 1000L)
+            // Wait up to the interval, but return early if a poke arrives.
+            withTimeoutOrNull(intervalSeconds * 1000L) { pokeFlow.first() }
 
             val response = authApi.pollDeviceToken(DeviceTokenRequest(code.deviceCode))
             if (response.isSuccessful) {
@@ -94,5 +112,14 @@ class DeviceAuthRepository @Inject constructor(
             }
         }
         emit(DeviceAuthEvent.Failed("The code expired. Please try again."))
+    }
+
+    companion object {
+        /**
+         * Deep link the web activation page redirects to after the user approves, to bring
+         * this app back to the foreground. Must stay in sync with the `memoriahub`/`auth`
+         * intent-filter on MainActivity in AndroidManifest.xml.
+         */
+        const val DEVICE_COMPLETE_DEEP_LINK = "memoriahub://auth/device-complete"
     }
 }

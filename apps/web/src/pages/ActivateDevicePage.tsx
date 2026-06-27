@@ -17,7 +17,7 @@ import type { DeviceActivationInfo } from '../types';
 type PageState =
   | { step: 'input' }
   | { step: 'review'; deviceInfo: DeviceActivationInfo }
-  | { step: 'complete'; success: boolean; message: string };
+  | { step: 'complete'; success: boolean; message: string; returnUri?: string };
 
 export default function ActivateDevicePage() {
   const [searchParams] = useSearchParams();
@@ -59,6 +59,9 @@ export default function ActivateDevicePage() {
   const handleApprove = async () => {
     if (state.step !== 'review') return;
 
+    // Capture returnUri before the state transition; only used on approval success
+    const returnUri = state.deviceInfo.clientInfo.returnUri;
+
     setError(null);
     try {
       const response = await authorizeDevice(state.deviceInfo.userCode, true);
@@ -66,6 +69,7 @@ export default function ActivateDevicePage() {
         step: 'complete',
         success: response.success,
         message: response.message || 'Device authorized successfully!',
+        returnUri,
       });
     } catch (err) {
       if (err instanceof ApiError) {
@@ -149,6 +153,7 @@ export default function ActivateDevicePage() {
             <ActivationSuccess
               success={state.success}
               message={state.message}
+              returnUri={state.success ? state.returnUri : undefined}
             />
           )}
         </CardContent>

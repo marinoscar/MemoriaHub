@@ -98,7 +98,18 @@ Endpoints returning lists support pagination with the following query parameters
 #### GET /auth/google
 **Public endpoint** - Initiate Google OAuth flow. Redirects to Google consent screen.
 
+**Query Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `returnTo` | string | No | Same-site relative path to redirect to after successful login (e.g. `/activate?code=ABCD-1234`). Must start with a single `/` and must not start with `//` or contain a scheme. The value is HMAC-signed into the OAuth `state` to prevent tampering. |
+
 **Response:** HTTP 302 redirect to Google
+
+**Example (device activation deep-link):**
+```
+GET /api/auth/google?returnTo=%2Factivate%3Fcode%3DABCD-1234
+```
+After login, the callback redirects to `/auth/callback?token=...&expiresIn=...&returnTo=%2Factivate%3Fcode%3DABCD-1234`.
 
 ---
 
@@ -107,11 +118,14 @@ Endpoints returning lists support pagination with the following query parameters
 
 **Query Parameters:**
 - `code` (string) - Authorization code from Google
-- `state` (string, optional) - CSRF protection state
+- `state` (string, optional) - HMAC-signed state containing CSRF token and optional `returnTo` path
 
-**Response:** HTTP 302 redirect to frontend with access token in query parameter
+**Response:** HTTP 302 redirect to frontend with access token in query parameters
 - Sets HttpOnly refresh token cookie
-- Redirects to `/auth/callback?accessToken=<token>`
+- Redirects to `/auth/callback?token=<token>&expiresIn=<seconds>` when no `returnTo` is present
+- Redirects to `/auth/callback?token=<token>&expiresIn=<seconds>&returnTo=<encoded-path>` when a valid `returnTo` was carried through the OAuth `state`
+
+**Security:** `returnTo` is validated as a same-site relative path on both the initiation leg and the callback leg. Invalid or tampered values are silently discarded and the default redirect is used.
 
 **Error Cases:**
 - Email not in allowlist → Redirects to `/auth/error?error=not_authorized`
@@ -214,6 +228,7 @@ The Device Authorization Flow enables input-constrained devices (CLI tools, IoT 
 | `clientInfo.version` | string | No | Application version |
 | `clientInfo.platform` | string | No | Platform identifier |
 | `clientInfo.tokenType` | string | No | Set to `"pat"` to request a long-lived Personal Access Token on approval instead of a short-lived JWT. The CLI uses this to obtain a 90-day PAT (lifetime controlled by `DEVICE_PAT_TTL_DAYS`, default 90). The PAT is visible and revocable from the web app's Personal Access Tokens screen. |
+| `clientInfo.returnUri` | string | No | Deep link URI the web activation page should redirect to after successful approval, so the requesting app is automatically reopened. Accepted schemes: `memoriahub:` (custom app scheme) or `https:`. Maximum 512 characters. Values that do not match the allowed schemes are silently stripped. The URI is echoed back in `GET /auth/device/activate` so the activation page can perform the redirect without storing any additional state. |
 
 **Response:**
 ```json
@@ -354,12 +369,15 @@ Authorization: Bearer <token>
     "clientInfo": {
       "name": "My CLI Tool",
       "version": "1.0.0",
-      "platform": "linux"
+      "platform": "linux",
+      "returnUri": "memoriahub://auth/device-complete"
     },
-    "expiresAt": "2024-01-01T12:15:00.000Z"
+    "expiresAt": "2026-06-27T12:15:00.000Z"
   }
 }
 ```
+
+`clientInfo.returnUri` is present only when the device supplied it in `POST /auth/device/code`. The activation page uses this value to deep-link back to the requesting app after the user approves the device — the app is reopened automatically without the user needing to switch back manually.
 
 **Error Cases:**
 - 404 Not Found - Invalid user code

@@ -106,6 +106,8 @@ export interface DeviceActivationInfo {
     deviceName?: string;
     userAgent?: string;
     ipAddress?: string;
+    /** Deep-link URI the device wants the browser to call after approval (e.g. memoriahub://auth/device-complete). */
+    returnUri?: string;
   };
   expiresAt: string;
 }
