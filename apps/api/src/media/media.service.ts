@@ -6,8 +6,6 @@ import {
   BadRequestException,
   Inject,
 } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { OBJECT_PROCESSED_EVENT, ObjectProcessedEvent } from '../storage/processing/events/object-processed.event';
 import { Prisma, BurstGroupStatus } from '@prisma/client';
 import { CircleRole } from '@prisma/client';
 import { FastifyReply } from 'fastify';
@@ -46,6 +44,7 @@ import { DeleteForeverDto } from './dto/delete-forever.dto';
 import { EmptyTrashDto } from './dto/empty-trash.dto';
 import { geoResultToMediaColumns, GEO_CLEAR_COLUMNS } from './geo/geo-result.mapper';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
+import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 
 /** Shape of each element returned by listLocations. */
 export interface MediaLocation {
@@ -70,7 +69,7 @@ export class MediaService {
     @Inject(GEO_LOCATION_PROVIDER) private readonly geoProvider: GeoLocationProvider,
     private readonly forwardGeocodeService: ForwardGeocodeService,
     private readonly resolver: StorageProviderResolver,
-    private readonly eventEmitter: EventEmitter2,
+    private readonly mediaEnrichmentService: MediaEnrichmentService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -226,15 +225,17 @@ export class MediaService {
       // Never fail createMedia because of a sync issue
     }
 
-    // The CLI registers the MediaItem AFTER completing the upload, so the
-    // OBJECT_PROCESSED_EVENT that drives face/tagging/burst enqueue (and metadata
-    // sync) may have already fired and no-op'd because no MediaItem existed yet.
-    // Re-emit it now that the item exists so enrichment listeners run. Idempotent:
-    // enqueue dedups and metadata sync is present-only.
-    this.eventEmitter.emit(
-      OBJECT_PROCESSED_EVENT,
-      new ObjectProcessedEvent(mediaItem.storageObjectId),
-    );
+    // Synchronously enqueue all upload-time enrichment jobs (auto_tagging,
+    // face_detection, burst_detection) before returning. This is the single
+    // authoritative trigger — job rows exist before createMedia returns,
+    // regardless of client (CLI, web, Android) or timing. The service reads
+    // feature flags and env kill-switches internally and never rethrows.
+    await this.mediaEnrichmentService.enqueueUploadEnrichment({
+      id: mediaItem.id,
+      type: mediaItem.type,
+      circleId: mediaItem.circleId,
+      deletedAt: mediaItem.deletedAt,
+    });
 
     return { ...mediaItem, deduplicated: false as const };
   }

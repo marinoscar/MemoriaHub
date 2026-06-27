@@ -5,7 +5,6 @@ import { FaceProviderRegistry } from './providers/face-provider.registry';
 import { SettingsModule } from '../settings/settings.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 import { CirclesModule } from '../circles/circles.module';
-import { FaceEnqueueListener } from './processing/face-enqueue.listener';
 import { FaceDetectionService } from './face-detection.service';
 import { FaceDetectionController } from './face-detection.controller';
 import { FaceMatchingService } from './face-matching.service';
@@ -23,7 +22,6 @@ import { AdminFaceBackfillController } from './admin-face-backfill.controller';
   providers: [
     FaceSettingsService,
     FaceProviderRegistry,
-    FaceEnqueueListener,
     FaceDetectionService,
     FaceMatchingService,
     FaceClusteringService,

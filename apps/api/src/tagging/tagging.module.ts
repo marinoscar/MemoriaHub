@@ -7,7 +7,6 @@ import { CirclesModule } from '../circles/circles.module';
 import { SettingsModule } from '../settings/settings.module';
 import { AutoTaggingHandler } from './auto-tagging.handler';
 import { AutoTaggingService } from './auto-tagging.service';
-import { TaggingEnqueueListener } from './tagging-enqueue.listener';
 import { TaggingController } from './tagging.controller';
 import { TagLabelsController } from './tag-labels.controller';
 import { TagLabelsService } from './tag-labels.service';
@@ -17,6 +16,6 @@ import { AdminTaggingController } from './admin-tagging.controller';
 @Module({
   imports: [EnrichmentModule, AiModule, StorageProvidersModule, PrismaModule, CirclesModule, SettingsModule],
   controllers: [TaggingController, TagLabelsController, AdminTaggingController],
-  providers: [AutoTaggingHandler, AutoTaggingService, TaggingEnqueueListener, TagLabelsService, TaggingBackfillService],
+  providers: [AutoTaggingHandler, AutoTaggingService, TagLabelsService, TaggingBackfillService],
 })
 export class TaggingModule {}

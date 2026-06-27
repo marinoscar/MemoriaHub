@@ -19,8 +19,7 @@ import { CircleMembershipService } from '../circles/circle-membership.service';
 import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { OBJECT_PROCESSED_EVENT } from '../storage/processing/events/object-processed.event';
+import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 
 // ---------------------------------------------------------------------------
 // Helper: build a Prisma P2002 error the way Prisma actually throws it
@@ -174,7 +173,7 @@ describe('MediaService', () => {
   let mockGeoProvider: { reverseGeocode: jest.Mock };
   let mockForwardGeocodeService: { searchPlaces: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
-  let mockEventEmitter: { emit: jest.Mock };
+  let mockMediaEnrichmentService: { enqueueUploadEnrichment: jest.Mock; enqueueForStorageObject: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -206,7 +205,10 @@ describe('MediaService', () => {
         getSignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/signed'),
       }),
     };
-    mockEventEmitter = { emit: jest.fn() };
+    mockMediaEnrichmentService = {
+      enqueueUploadEnrichment: jest.fn().mockResolvedValue(undefined),
+      enqueueForStorageObject: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -218,7 +220,7 @@ describe('MediaService', () => {
         { provide: GEO_LOCATION_PROVIDER, useValue: mockGeoProvider },
         { provide: ForwardGeocodeService, useValue: mockForwardGeocodeService },
         { provide: StorageProviderResolver, useValue: mockResolver },
-        { provide: EventEmitter2, useValue: mockEventEmitter },
+        { provide: MediaEnrichmentService, useValue: mockMediaEnrichmentService },
       ],
     }).compile();
 
@@ -2619,11 +2621,11 @@ describe('MediaService', () => {
   });
 
   // -------------------------------------------------------------------------
-  // createMedia — OBJECT_PROCESSED_EVENT emission (FIX 2)
+  // createMedia — upload enrichment trigger (direct service call replacing event emission)
   // -------------------------------------------------------------------------
 
-  describe('createMedia — OBJECT_PROCESSED_EVENT emission', () => {
-    it('emits OBJECT_PROCESSED_EVENT with the storageObjectId after a successful create', async () => {
+  describe('createMedia — upload enrichment enqueue', () => {
+    it('calls enqueueUploadEnrichment with the created item fields after a successful create', async () => {
       const storageObject = makeStorageObject({ uploadedById: 'user-1' });
       const createdItem = makeMediaItem({ storageObjectId: storageObject.id });
 
@@ -2643,14 +2645,17 @@ describe('MediaService', () => {
         ownPerms,
       );
 
-      expect(mockEventEmitter.emit).toHaveBeenCalledTimes(1);
-      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
-        OBJECT_PROCESSED_EVENT,
-        expect.objectContaining({ storageObjectId: createdItem.storageObjectId }),
+      expect(mockMediaEnrichmentService.enqueueUploadEnrichment).toHaveBeenCalledTimes(1);
+      expect(mockMediaEnrichmentService.enqueueUploadEnrichment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: createdItem.id,
+          type: createdItem.type,
+          circleId: createdItem.circleId,
+        }),
       );
     });
 
-    it('does NOT emit OBJECT_PROCESSED_EVENT on the dedup path (pre-check finds an existing item)', async () => {
+    it('does NOT call enqueueUploadEnrichment on the dedup path (pre-check finds an existing item)', async () => {
       const storageObject = makeStorageObject({ uploadedById: 'user-1', storageKey: 'uploads/dup.jpg' });
       const existingItem = makeMediaItem({ addedById: 'user-1', contentHash: TEST_HASH });
 
@@ -2676,8 +2681,8 @@ describe('MediaService', () => {
       // Dedup hit must be returned
       expect(result.deduplicated).toBe(true);
       expect(result.id).toBe(existingItem.id);
-      // Event must NOT be emitted on the dedup path
-      expect(mockEventEmitter.emit).not.toHaveBeenCalled();
+      // Enrichment must NOT be triggered on the dedup path
+      expect(mockMediaEnrichmentService.enqueueUploadEnrichment).not.toHaveBeenCalled();
     });
   });
 });

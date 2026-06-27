@@ -15,6 +15,8 @@ import { ThumbnailProcessor } from '../storage/processing/processors/thumbnail.p
 import { ImageDimensionsProcessor } from '../storage/processing/processors/image-dimensions.processor';
 import { TrashPurgeHandler } from './trash-purge.handler';
 import { TrashPurgeTask } from './trash-purge.task';
+import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
+import { MediaEnrichmentEnqueueListener } from './enrichment/media-enrichment-enqueue.listener';
 
 /**
  * MediaModule
@@ -25,16 +27,19 @@ import { TrashPurgeTask } from './trash-purge.task';
  * Imports CirclesModule so that CircleMembershipService resolves inside
  * MediaService (used for circle-scoped access checks).
  *
- * Imports SettingsModule so TrashPurgeHandler can read storage.trash.retentionDays.
+ * Imports SettingsModule so TrashPurgeHandler can read storage.trash.retentionDays
+ * and MediaEnrichmentService can call SystemSettingsService.isFeatureEnabled.
  *
  * Imports EnrichmentModule so TrashPurgeHandler can register with the handler
- * registry and TrashPurgeTask can enqueue jobs.
+ * registry, TrashPurgeTask can enqueue jobs, and MediaEnrichmentService can
+ * call EnrichmentJobService.enqueue.
  *
  * TrashPurgeTask @Cron decorators work via ScheduleModule.forRoot() in AppModule.
  *
  * Circular-dependency note:
  *   StorageProvidersModule only provides S3StorageProvider — it has no
  *   dependency on MediaModule — so there is no cycle.
+ *   EnrichmentModule and SettingsModule do not import MediaModule.
  *
  * ThumbnailProcessor and ImageDimensionsProcessor are registered directly here
  * (not imported from ObjectProcessingModule, which does not export them) so
@@ -60,7 +65,9 @@ import { TrashPurgeTask } from './trash-purge.task';
     ImageDimensionsProcessor,
     TrashPurgeHandler,
     TrashPurgeTask,
+    MediaEnrichmentService,
+    MediaEnrichmentEnqueueListener,
   ],
-  exports: [MediaService, MediaReprocessService, MediaMetadataSyncService],
+  exports: [MediaService, MediaReprocessService, MediaMetadataSyncService, MediaEnrichmentService],
 })
 export class MediaModule {}
