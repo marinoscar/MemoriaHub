@@ -19,6 +19,8 @@ import { CircleMembershipService } from '../circles/circle-membership.service';
 import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { OBJECT_PROCESSED_EVENT } from '../storage/processing/events/object-processed.event';
 
 // ---------------------------------------------------------------------------
 // Helper: build a Prisma P2002 error the way Prisma actually throws it
@@ -172,6 +174,7 @@ describe('MediaService', () => {
   let mockGeoProvider: { reverseGeocode: jest.Mock };
   let mockForwardGeocodeService: { searchPlaces: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
+  let mockEventEmitter: { emit: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -196,7 +199,14 @@ describe('MediaService', () => {
     };
     mockGeoProvider = { reverseGeocode: jest.fn().mockResolvedValue(null) };
     mockForwardGeocodeService = { searchPlaces: jest.fn().mockResolvedValue([]) };
-    mockResolver = { getProviderFor: jest.fn() };
+    // Default: getProviderFor resolves to a provider so existing tests that reach
+    // the download-URL routing path (FIX 1) do not throw on .then().
+    mockResolver = {
+      getProviderFor: jest.fn().mockResolvedValue({
+        getSignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/signed'),
+      }),
+    };
+    mockEventEmitter = { emit: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -208,6 +218,7 @@ describe('MediaService', () => {
         { provide: GEO_LOCATION_PROVIDER, useValue: mockGeoProvider },
         { provide: ForwardGeocodeService, useValue: mockForwardGeocodeService },
         { provide: StorageProviderResolver, useValue: mockResolver },
+        { provide: EventEmitter2, useValue: mockEventEmitter },
       ],
     }).compile();
 
@@ -2541,10 +2552,11 @@ describe('MediaService', () => {
         ...item,
         mediaTags: [],
       } as any);
-      // First findUnique: original object (for downloadUrl); second: thumbnail lookup returns null
+      // First findUnique: download-URL object not found (null → downloadUrl=null, resolver skipped);
+      // second: thumbnail lookup also returns null → falls back to storageProvider.
       mockPrisma.storageObject.findUnique
-        .mockResolvedValueOnce({ storageKey: 'uploads/photo.jpg' } as any)
-        .mockResolvedValue(null); // thumbnail row not found
+        .mockResolvedValueOnce(null)   // download-URL object absent
+        .mockResolvedValue(null);       // thumbnail row not found
 
       mockStorageProvider.getSignedDownloadUrl.mockResolvedValue('https://s3.example.com/fallback');
 
@@ -2568,8 +2580,104 @@ describe('MediaService', () => {
 
       const result = await service.getMedia(item.id, 'user-1', anyPerms);
 
-      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      // resolver.getProviderFor IS called for the download-URL path (FIX 1); we only
+      // assert on the thumbnail outcome here.
       expect(result.thumbnailUrl).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getMedia — downloadUrl per-object provider routing (FIX 1)
+  // -------------------------------------------------------------------------
+
+  describe('getMedia — downloadUrl provider routing', () => {
+    it('routes the download URL through resolver.getProviderFor using the per-object storageProvider and bucket', async () => {
+      const item = makeMediaItem({ addedById: 'user-1' });
+      const routedProvider = {
+        getSignedDownloadUrl: jest.fn().mockResolvedValue('https://r2.example/signed'),
+      };
+
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({ ...item, mediaTags: [] } as any);
+      // Return a storage object that belongs to the 'r2' provider in bucket 'my-r2-bucket'
+      mockPrisma.storageObject.findUnique.mockResolvedValue({
+        storageKey: 'uploads/photo.jpg',
+        storageProvider: 'r2',
+        bucket: 'my-r2-bucket',
+      } as any);
+      mockResolver.getProviderFor.mockResolvedValue(routedProvider);
+
+      const result = await service.getMedia(item.id, 'user-1', ownPerms);
+
+      // resolver.getProviderFor must be called with the per-object provider and bucket
+      expect(mockResolver.getProviderFor).toHaveBeenCalledWith('r2', 'my-r2-bucket');
+      // the returned downloadUrl comes from the routed provider, not the default injected one
+      expect(result.downloadUrl).toBe('https://r2.example/signed');
+      // the default injected storageProvider.getSignedDownloadUrl was NOT used for the download key
+      // (item.metadata is null so signThumb is a no-op and the fallback is also not triggered)
+      expect(mockStorageProvider.getSignedDownloadUrl).not.toHaveBeenCalledWith('uploads/photo.jpg');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // createMedia — OBJECT_PROCESSED_EVENT emission (FIX 2)
+  // -------------------------------------------------------------------------
+
+  describe('createMedia — OBJECT_PROCESSED_EVENT emission', () => {
+    it('emits OBJECT_PROCESSED_EVENT with the storageObjectId after a successful create', async () => {
+      const storageObject = makeStorageObject({ uploadedById: 'user-1' });
+      const createdItem = makeMediaItem({ storageObjectId: storageObject.id });
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue(storageObject as any);
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(null); // not already linked
+      mockPrisma.mediaItem.create.mockResolvedValue(createdItem as any);
+
+      await service.createMedia(
+        {
+          storageObjectId: storageObject.id,
+          type: 'photo',
+          source: 'web',
+          originalFilename: 'photo.jpg',
+          circleId: CIRCLE_ID,
+        },
+        'user-1',
+        ownPerms,
+      );
+
+      expect(mockEventEmitter.emit).toHaveBeenCalledTimes(1);
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        OBJECT_PROCESSED_EVENT,
+        expect.objectContaining({ storageObjectId: createdItem.storageObjectId }),
+      );
+    });
+
+    it('does NOT emit OBJECT_PROCESSED_EVENT on the dedup path (pre-check finds an existing item)', async () => {
+      const storageObject = makeStorageObject({ uploadedById: 'user-1', storageKey: 'uploads/dup.jpg' });
+      const existingItem = makeMediaItem({ addedById: 'user-1', contentHash: TEST_HASH });
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue(storageObject as any);
+      // not already linked by storageObjectId
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
+      // dedup pre-check: existing item with same hash found → short-circuits before create
+      mockPrisma.mediaItem.findFirst.mockResolvedValue(existingItem as any);
+
+      const result = await service.createMedia(
+        {
+          storageObjectId: storageObject.id,
+          type: 'photo',
+          source: 'web',
+          originalFilename: 'dup.jpg',
+          contentHash: TEST_HASH,
+          circleId: CIRCLE_ID,
+        },
+        'user-1',
+        ownPerms,
+      );
+
+      // Dedup hit must be returned
+      expect(result.deduplicated).toBe(true);
+      expect(result.id).toBe(existingItem.id);
+      // Event must NOT be emitted on the dedup path
+      expect(mockEventEmitter.emit).not.toHaveBeenCalled();
     });
   });
 });
