@@ -56,6 +56,11 @@ export interface SystemSettingsValue {
         model: string | null;
       };
     };
+    video?: {
+      enabled: boolean;
+      sampleIntervalSeconds: number;
+      maxFramesPerVideo: number;
+    };
   };
   storage?: {
     activeProvider?: string;
@@ -122,6 +127,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     features: {
       detection: { provider: null, model: null },
     },
+    video: { enabled: true, sampleIntervalSeconds: 5, maxFramesPerVideo: 60 },
   },
   storage: {
     activeProvider: process.env['STORAGE_PROVIDER'] ?? 's3',
