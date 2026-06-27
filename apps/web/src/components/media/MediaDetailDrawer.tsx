@@ -245,6 +245,13 @@ export function MediaDetailDrawer({
     };
   }, [item?.id, open]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Reset the image-error latch when a new item is shown or when the full item
+  // (with freshly re-signed URLs) loads, so a stale/expired first URL doesn't
+  // permanently stick on the "Image not available" fallback.
+  useEffect(() => {
+    setImgError(false);
+  }, [item?.id, fullItem]);
+
   const handleStartEdit = useCallback(() => {
     if (!item) return;
     setEditCapturedAt(item.capturedAt ? item.capturedAt.slice(0, 16) : '');

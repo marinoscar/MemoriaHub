@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
 import { MediaDetailDrawer } from '../../../components/media/MediaDetailDrawer';
@@ -682,6 +682,115 @@ describe('MediaDetailDrawer', () => {
         <MediaDetailDrawer item={null} open={true} onClose={vi.fn()} onItemUpdated={vi.fn()} />,
       );
       expect(screen.queryByText(/details/i)).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // imgError latch reset — ensures a stale/expired URL doesn't permanently
+  // show the "Image not available" fallback after the item or full item changes
+  // -------------------------------------------------------------------------
+
+  describe('image error latch reset', () => {
+    it('clears the image-error fallback when the item id changes after an error', async () => {
+      const itemA = makeMediaItem({
+        id: 'item-a',
+        thumbnailUrl: 'https://cdn.example.com/thumb-a.jpg',
+        downloadUrl: null,
+      });
+      const itemB = makeMediaItem({
+        id: 'item-b',
+        thumbnailUrl: 'https://cdn.example.com/thumb-b.jpg',
+        downloadUrl: null,
+      });
+
+      const { rerender } = render(
+        <MediaDetailDrawer
+          item={itemA}
+          open={true}
+          onClose={vi.fn()}
+          onItemUpdated={vi.fn()}
+        />,
+      );
+
+      // The image should be in the document initially.
+      const img = screen.getByRole('img', { name: itemA.originalFilename });
+      expect(img).toBeInTheDocument();
+      expect(screen.queryByText(/image not available/i)).not.toBeInTheDocument();
+
+      // Simulate a load failure (e.g. expired signed URL).
+      fireEvent.error(img);
+
+      // The fallback should appear and the img should be gone.
+      await waitFor(() => {
+        expect(screen.getByText(/image not available/i)).toBeInTheDocument();
+        expect(screen.queryByRole('img', { name: itemA.originalFilename })).not.toBeInTheDocument();
+      });
+
+      // Switch to a different item — this should reset imgError.
+      rerender(
+        <MediaDetailDrawer
+          item={itemB}
+          open={true}
+          onClose={vi.fn()}
+          onItemUpdated={vi.fn()}
+        />,
+      );
+
+      // The img for item B should now be visible; the fallback should be gone.
+      await waitFor(() => {
+        expect(screen.queryByText(/image not available/i)).not.toBeInTheDocument();
+        expect(screen.getByRole('img', { name: itemB.originalFilename })).toBeInTheDocument();
+      });
+    });
+
+    it('clears the image-error fallback when fullItem changes (save updates the stored item)', async () => {
+      const user = userEvent.setup();
+
+      // Item has both thumbnailUrl and downloadUrl so the component short-circuits
+      // to setFullItem(item) immediately — no async getMedia call needed.
+      const item = makeMediaItem({
+        thumbnailUrl: 'https://cdn.example.com/thumb.jpg',
+        downloadUrl: 'https://cdn.example.com/download.jpg',
+      });
+      // After save, patchMedia returns an updated item; setFullItem will be
+      // called with { ...fullItem, ...updated }, changing the fullItem reference.
+      const updatedItem = makeMediaItem({
+        thumbnailUrl: 'https://cdn.example.com/thumb-updated.jpg',
+        downloadUrl: 'https://cdn.example.com/download-updated.jpg',
+        description: 'Updated description',
+      });
+      mockPatchMedia.mockResolvedValue(updatedItem);
+
+      render(
+        <MediaDetailDrawer
+          item={item}
+          open={true}
+          onClose={vi.fn()}
+          onItemUpdated={vi.fn()}
+        />,
+      );
+
+      // Img renders from item.thumbnailUrl (via fullItem = item).
+      const img = await screen.findByRole('img', { name: item.originalFilename });
+      expect(img).toBeInTheDocument();
+
+      // Simulate a URL expiry / transient load failure.
+      fireEvent.error(img);
+
+      await waitFor(() => {
+        expect(screen.getByText(/image not available/i)).toBeInTheDocument();
+        expect(screen.queryByRole('img', { name: item.originalFilename })).not.toBeInTheDocument();
+      });
+
+      // User saves an edit → patchMedia resolves → setFullItem(updated) is called
+      // → our effect fires → imgError resets to false.
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
+      await user.click(screen.getByRole('button', { name: /save/i }));
+
+      await waitFor(() => {
+        expect(screen.queryByText(/image not available/i)).not.toBeInTheDocument();
+        expect(screen.getByRole('img', { name: item.originalFilename })).toBeInTheDocument();
+      });
     });
   });
 });
