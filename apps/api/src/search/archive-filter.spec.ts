@@ -13,6 +13,16 @@ import { buildWhereFromFields, SEARCHABLE_FIELDS } from './searchable-fields.reg
 const CIRCLE_ID = 'circle-archive-test-001';
 
 // ---------------------------------------------------------------------------
+// AND-composition helper (mirrors the one in media-where.builder.spec.ts)
+// ---------------------------------------------------------------------------
+
+/** Returns the first entry in where.AND that owns the given key. */
+function inAnd(where: any, key: string): any {
+  const and = where.AND as any[] | undefined;
+  return and?.find((c: any) => key in c) ?? {};
+}
+
+// ---------------------------------------------------------------------------
 // whereExcludeArchived helper
 // ---------------------------------------------------------------------------
 
@@ -37,8 +47,9 @@ describe('buildMediaWhere — excludeArchived filter', () => {
   });
 
   it('adds archivedAt: null when excludeArchived is true', () => {
-    const where = buildMediaWhere(CIRCLE_ID, { excludeArchived: true }) as any;
-    expect(where.archivedAt).toBeNull();
+    const where = buildMediaWhere(CIRCLE_ID, { excludeArchived: true });
+    // AND-composition: archivedAt lives inside where.AND[0]
+    expect(inAnd(where, 'archivedAt').archivedAt).toBeNull();
   });
 
   it('does NOT add archivedAt when excludeArchived is false', () => {
@@ -70,8 +81,9 @@ describe('buildWhereFromFields — excludeArchived filter', () => {
   });
 
   it('adds archivedAt: null when excludeArchived: true is passed', () => {
-    const where = buildWhereFromFields(CIRCLE_ID, { excludeArchived: true }) as any;
-    expect(where.archivedAt).toBeNull();
+    const where = buildWhereFromFields(CIRCLE_ID, { excludeArchived: true });
+    // AND-composition: archivedAt lives inside where.AND[0]
+    expect(inAnd(where, 'archivedAt').archivedAt).toBeNull();
   });
 
   it('does NOT add archivedAt when excludeArchived: false is passed', () => {

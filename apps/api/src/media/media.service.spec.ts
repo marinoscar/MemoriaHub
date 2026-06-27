@@ -22,6 +22,30 @@ import { StorageProviderResolver } from '../storage/providers/storage-provider.r
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 
 // ---------------------------------------------------------------------------
+// AND-composition query helpers
+//
+// listMedia calls buildMediaWhere which now collects every filter contribution
+// into a shared `where.AND = [...]` array. These helpers locate contributions
+// without rewriting every assertion.
+// ---------------------------------------------------------------------------
+
+/** Returns the first entry in `where.AND` that owns the given top-level key. */
+function inAnd(where: any, key: string): any {
+  const and = where.AND as any[] | undefined;
+  return and?.find((c: any) => key in c) ?? {};
+}
+
+/** Returns the first entry in `where.AND` whose `OR` array contains an element with the given key. */
+function orInAnd(where: any, key: string): any {
+  const and = where.AND as any[] | undefined;
+  return (
+    and?.find(
+      (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => key in e),
+    ) ?? {}
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Helper: build a Prisma P2002 error the way Prisma actually throws it
 // ---------------------------------------------------------------------------
 function makeP2002Error(): Prisma.PrismaClientKnownRequestError {
@@ -576,7 +600,8 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({ type: 'photo' });
+      // AND-composition: type lives inside where.AND[n]
+      expect(inAnd(call[0].where, 'type')).toMatchObject({ type: 'photo' });
     });
 
     it('filters by capturedAt date range', async () => {
@@ -590,7 +615,8 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where.capturedAt).toMatchObject({ gte: from, lte: to });
+      // AND-composition: capturedAt lives inside where.AND[n]
+      expect(inAnd(call[0].where, 'capturedAt').capturedAt).toMatchObject({ gte: from, lte: to });
     });
 
     it('filters by albumId via AlbumItem join', async () => {
@@ -603,7 +629,8 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where.albumItems).toMatchObject({ some: { albumId } });
+      // AND-composition: albumItems lives inside where.AND[n]
+      expect(inAnd(call[0].where, 'albumItems').albumItems).toMatchObject({ some: { albumId } });
     });
 
     it('filters by favorite', async () => {
@@ -614,7 +641,8 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({ favorite: true });
+      // AND-composition: favorite lives inside where.AND[n]
+      expect(inAnd(call[0].where, 'favorite')).toMatchObject({ favorite: true });
     });
 
     it('filters by tag name via MediaTag join (case-insensitive)', async () => {
@@ -625,7 +653,8 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where.mediaTags).toMatchObject({
+      // AND-composition: mediaTags lives inside where.AND[n]
+      expect(inAnd(call[0].where, 'mediaTags').mediaTags).toMatchObject({
         some: {
           tag: { name: { equals: 'nature', mode: 'insensitive' } },
         },
@@ -640,7 +669,8 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where.OR).toEqual(
+      // AND-composition: country OR clause lives inside where.AND[n].OR
+      expect(orInAnd(call[0].where, 'geoCountry').OR).toEqual(
         expect.arrayContaining([
           { geoCountry: { contains: 'CR', mode: 'insensitive' } },
           { geoCountryCode: { equals: 'CR', mode: 'insensitive' } },
@@ -656,7 +686,8 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({
+      // AND-composition: geoAdmin1 lives inside where.AND[n]
+      expect(inAnd(call[0].where, 'geoAdmin1')).toMatchObject({
         geoAdmin1: { contains: 'California', mode: 'insensitive' },
       });
     });
@@ -669,7 +700,8 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({
+      // AND-composition: geoLocality lives inside where.AND[n]
+      expect(inAnd(call[0].where, 'geoLocality')).toMatchObject({
         geoLocality: { contains: 'San Jose', mode: 'insensitive' },
       });
     });
@@ -682,7 +714,8 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({
+      // AND-composition: geoPlaceName lives inside where.AND[n]
+      expect(inAnd(call[0].where, 'geoPlaceName')).toMatchObject({
         geoPlaceName: { contains: 'Yosemite', mode: 'insensitive' },
       });
     });
@@ -695,7 +728,8 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where.OR).toEqual(
+      // AND-composition: location OR clause lives inside where.AND[n].OR
+      expect(orInAnd(call[0].where, 'geoCountry').OR).toEqual(
         expect.arrayContaining([
           { geoCountry: { contains: 'California', mode: 'insensitive' } },
           { geoCountryCode: { contains: 'California', mode: 'insensitive' } },
@@ -2179,7 +2213,8 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({
+      // AND-composition: cameraMake lives inside where.AND[n]
+      expect(inAnd(call[0].where, 'cameraMake')).toMatchObject({
         cameraMake: { contains: 'Canon', mode: 'insensitive' },
       });
     });
@@ -2192,7 +2227,8 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({
+      // AND-composition: cameraModel lives inside where.AND[n]
+      expect(inAnd(call[0].where, 'cameraModel')).toMatchObject({
         cameraModel: { contains: 'EOS R5', mode: 'insensitive' },
       });
     });
@@ -2205,7 +2241,8 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({
+      // AND-composition: sourceDeviceName lives inside where.AND[n]
+      expect(inAnd(call[0].where, 'sourceDeviceName')).toMatchObject({
         sourceDeviceName: { contains: 'iPhone', mode: 'insensitive' },
       });
     });
@@ -2218,9 +2255,11 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({ sourceDeviceId: 'dev-123' });
+      // AND-composition: sourceDeviceId lives inside where.AND[n]
+      const entry = inAnd(call[0].where, 'sourceDeviceId');
+      expect(entry).toMatchObject({ sourceDeviceId: 'dev-123' });
       // Exact match — NOT wrapped in { contains: ... }
-      expect(call[0].where.sourceDeviceId).toBe('dev-123');
+      expect(entry.sourceDeviceId).toBe('dev-123');
     });
 
     it('missingGeo:true → { takenLat: null, takenLng: null } in where', async () => {
@@ -2231,7 +2270,8 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({ takenLat: null, takenLng: null });
+      // AND-composition: takenLat/takenLng live inside where.AND[n]
+      expect(inAnd(call[0].where, 'takenLat')).toMatchObject({ takenLat: null, takenLng: null });
     });
 
     it('missingGeo:false → { takenLat: { not: null }, takenLng: { not: null } } in where', async () => {
@@ -2242,7 +2282,8 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({
+      // AND-composition: takenLat/takenLng live inside where.AND[n]
+      expect(inAnd(call[0].where, 'takenLat')).toMatchObject({
         takenLat: { not: null },
         takenLng: { not: null },
       });
@@ -2571,7 +2612,10 @@ describe('MediaService', () => {
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
       expect(call[0].where.faces).toBeUndefined();
-      expect(call[0].where.AND).toBeUndefined();
+      // listMedia always adds { archivedAt: null } to AND (browse surfaces exclude archived by default).
+      // Verify that no AND entry adds a faces filter.
+      const and = (call[0].where.AND as any[]) ?? [];
+      expect(and.some((c: any) => 'faces' in c)).toBe(false);
     });
   });
 
