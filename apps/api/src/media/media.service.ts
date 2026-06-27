@@ -1425,6 +1425,10 @@ export class MediaService {
       });
     }
 
+    if (dto.set.capturedAt !== undefined) {
+      data['capturedAt'] = dto.set.capturedAt; // Date | null (coerced by the DTO)
+    }
+
     const { count } = await this.prisma.mediaItem.updateMany({
       where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: null },
       data,

@@ -1873,6 +1873,68 @@ describe('MediaService', () => {
 
       expect(mockGeoProvider.reverseGeocode).not.toHaveBeenCalled();
     });
+
+    it('sets capturedAt in updateMany data when set.capturedAt is a Date', async () => {
+      const ids = makeIds(2);
+      const capturedAt = new Date('2024-06-15T10:00:00.000Z');
+      const dto = makeBulkUpdateDto({ ids, set: { capturedAt } });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+      mockPrisma.mediaItem.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.bulkUpdateMedia(dto, 'user-1', ownPerms);
+
+      const [updateCall] = (mockPrisma.mediaItem.updateMany as jest.Mock).mock.calls;
+      expect(updateCall[0].data).toMatchObject({ capturedAt });
+    });
+
+    it('sets capturedAt: null in updateMany data when set.capturedAt is null (clear)', async () => {
+      const ids = makeIds(2);
+      const dto = makeBulkUpdateDto({ ids, set: { capturedAt: null } });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+      mockPrisma.mediaItem.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.bulkUpdateMedia(dto, 'user-1', ownPerms);
+
+      const [updateCall] = (mockPrisma.mediaItem.updateMany as jest.Mock).mock.calls;
+      expect(updateCall[0].data).toHaveProperty('capturedAt', null);
+    });
+
+    it('includes both favorite and capturedAt in updateMany data when both are set', async () => {
+      const ids = makeIds(2);
+      const capturedAt = new Date('2023-12-25T08:30:00.000Z');
+      const dto = makeBulkUpdateDto({ ids, set: { favorite: true, capturedAt } });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+      mockPrisma.mediaItem.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.bulkUpdateMedia(dto, 'user-1', ownPerms);
+
+      const [updateCall] = (mockPrisma.mediaItem.updateMany as jest.Mock).mock.calls;
+      expect(updateCall[0].data).toMatchObject({ favorite: true, capturedAt });
+    });
+
+    it('does not include capturedAt key in updateMany data when set.capturedAt is absent', async () => {
+      const ids = makeIds(2);
+      const dto = makeBulkUpdateDto({ ids, set: { favorite: true } });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+      mockPrisma.mediaItem.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.bulkUpdateMedia(dto, 'user-1', ownPerms);
+
+      const [updateCall] = (mockPrisma.mediaItem.updateMany as jest.Mock).mock.calls;
+      expect(updateCall[0].data).not.toHaveProperty('capturedAt');
+    });
   });
 
   // -------------------------------------------------------------------------

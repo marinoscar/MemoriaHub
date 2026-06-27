@@ -1,5 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { isoDateTimeInput } from '../../common/schemas/iso-date';
 
 const locationSchema = z.object({
   lat: z.number().min(-90).max(90),
@@ -13,8 +14,9 @@ export const bulkUpdateMediaSchema = z.object({
   set: z.object({
     location: locationSchema.nullable().optional(),
     favorite: z.boolean().optional(),
+    capturedAt: isoDateTimeInput.nullable().optional(),
   }).refine(
-    (s) => s.location !== undefined || s.favorite !== undefined,
+    (s) => s.location !== undefined || s.favorite !== undefined || s.capturedAt !== undefined,
     { message: 'set must contain at least one field' },
   ),
 });
