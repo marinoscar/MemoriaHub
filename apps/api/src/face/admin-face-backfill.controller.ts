@@ -10,23 +10,24 @@ import {
 import {
   ApiBearerAuth,
   ApiOperation,
-  ApiProperty,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { IsBoolean, IsOptional } from 'class-validator';
+import { createZodDto } from 'nestjs-zod';
+import { z } from 'zod';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { FEATURE_KEYS } from '../common/types/settings.types';
 import { FaceBackfillService } from './face-backfill.service';
 
-class AdminFaceBackfillDto {
-  @ApiProperty({ required: false, default: false })
-  @IsOptional()
-  @IsBoolean()
-  force?: boolean;
-}
+const flexibleDate = z.string().refine((v) => !Number.isNaN(Date.parse(v)), { message: 'Invalid date' });
+const adminFaceBackfillSchema = z.object({
+  from: flexibleDate.optional(),
+  to: flexibleDate.optional(),
+  force: z.boolean().optional().default(false),
+});
+class AdminFaceBackfillDto extends createZodDto(adminFaceBackfillSchema) {}
 
 @ApiTags('Admin — Face Recognition')
 @ApiBearerAuth('JWT-auth')
@@ -51,6 +52,8 @@ export class AdminFaceBackfillController {
       throw new BadRequestException('Face recognition is disabled globally');
     }
     const result = await this.faceBackfillService.backfillAllCircles({
+      from: dto.from,
+      to: dto.to,
       force: dto.force,
     });
     return { data: result };

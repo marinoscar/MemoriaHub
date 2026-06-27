@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { JobReason, MediaFaceStatusType, MediaType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { whereDateRange } from '../search/media-where.builder';
 
 @Injectable()
 export class FaceBackfillService {
@@ -17,12 +18,19 @@ export class FaceBackfillService {
    * No per-circle opt-in gate — the global toggle is the only gate (checked in the controller).
    * No membership check — intended for admin/internal usage.
    */
-  async backfillCircle(circleId: string, force: boolean): Promise<number> {
+  async backfillCircle(circleId: string, opts: { from?: string; to?: string; force?: boolean }): Promise<number> {
+    const { force = false } = opts;
+
+    const from = opts.from ? new Date(opts.from) : undefined;
+    const to = opts.to ? new Date(opts.to) : undefined;
+    const dateWhere = whereDateRange(from, to);
+
     const mediaItems = await this.prisma.mediaItem.findMany({
       where: {
         circleId,
         type: MediaType.photo,
         deletedAt: null,
+        ...dateWhere,
         ...(force
           ? {}
           : {
@@ -82,10 +90,10 @@ export class FaceBackfillService {
    * Returns the total number of enqueued jobs and the number of circles processed.
    */
   async backfillAllCircles(opts: {
+    from?: string;
+    to?: string;
     force?: boolean;
   }): Promise<{ enqueued: number; circles: number }> {
-    const { force = false } = opts;
-
     const allCircles = await this.prisma.circle.findMany({
       select: { id: true },
     });
@@ -94,7 +102,7 @@ export class FaceBackfillService {
     const circleCount = allCircles.length;
 
     for (const circle of allCircles) {
-      const count = await this.backfillCircle(circle.id, force);
+      const count = await this.backfillCircle(circle.id, { from: opts.from, to: opts.to, force: opts.force });
       totalEnqueued += count;
     }
 
