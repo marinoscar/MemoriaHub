@@ -831,4 +831,147 @@ describe('EnrichmentAdminService', () => {
       expect(findManyCall.where).not.toHaveProperty('scheduledFor');
     });
   });
+
+  // =========================================================================
+  // listJobs — processedWithin filter
+  // =========================================================================
+
+  describe('listJobs — processedWithin filter', () => {
+    const TOLERANCE_MS = 60_000; // 60-second tolerance for cutoff assertions
+
+    function getWhere() {
+      return (mockPrisma.enrichmentJob.findMany as jest.Mock).mock.calls[0][0].where;
+    }
+
+    beforeEach(() => {
+      (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
+    });
+
+    it('omitting processedWithin produces no OR key in where clause', async () => {
+      await service.listJobs({ page: 1, pageSize: 20 });
+
+      expect(getWhere()).not.toHaveProperty('OR');
+    });
+
+    it('processedWithin: "all" produces no OR key in where clause', async () => {
+      await service.listJobs({ processedWithin: 'all', page: 1, pageSize: 20 });
+
+      expect(getWhere()).not.toHaveProperty('OR');
+    });
+
+    it('processedWithin: "24h" adds a two-clause OR with cutoff ~= now - 24h', async () => {
+      const before = Date.now();
+      await service.listJobs({ processedWithin: '24h', page: 1, pageSize: 20 });
+      const after = Date.now();
+
+      const where = getWhere();
+      expect(where).toHaveProperty('OR');
+      expect(where.OR).toHaveLength(2);
+
+      // First clause: finishedAt >= cutoff
+      expect(where.OR[0]).toEqual({ finishedAt: { gte: expect.any(Date) } });
+      // Second clause: finishedAt null, createdAt >= cutoff
+      expect(where.OR[1]).toEqual({ finishedAt: null, createdAt: { gte: expect.any(Date) } });
+
+      // Both clauses should use the same cutoff date (within tolerance)
+      const cutoff1: Date = where.OR[0].finishedAt.gte;
+      const cutoff2: Date = where.OR[1].createdAt.gte;
+      expect(cutoff1.getTime()).toBe(cutoff2.getTime());
+
+      // Cutoff should be approximately now - 24h
+      const expectedMs = 24 * 3_600_000;
+      const expectedLower = before - expectedMs - TOLERANCE_MS;
+      const expectedUpper = after - expectedMs + TOLERANCE_MS;
+      expect(cutoff1.getTime()).toBeGreaterThanOrEqual(expectedLower);
+      expect(cutoff1.getTime()).toBeLessThanOrEqual(expectedUpper);
+    });
+
+    it('processedWithin: "7d" adds a two-clause OR with cutoff ~= now - 7d', async () => {
+      const before = Date.now();
+      await service.listJobs({ processedWithin: '7d', page: 1, pageSize: 20 });
+      const after = Date.now();
+
+      const where = getWhere();
+      expect(where).toHaveProperty('OR');
+      expect(where.OR).toHaveLength(2);
+
+      const cutoff: Date = where.OR[0].finishedAt.gte;
+      expect(cutoff).toBeInstanceOf(Date);
+
+      const expectedMs = 7 * 86_400_000;
+      const expectedLower = before - expectedMs - TOLERANCE_MS;
+      const expectedUpper = after - expectedMs + TOLERANCE_MS;
+      expect(cutoff.getTime()).toBeGreaterThanOrEqual(expectedLower);
+      expect(cutoff.getTime()).toBeLessThanOrEqual(expectedUpper);
+    });
+
+    it('processedWithin: "4h" combined with status: "failed" includes both filters', async () => {
+      const before = Date.now();
+      await service.listJobs({ processedWithin: '4h', status: JobStatus.failed, page: 1, pageSize: 20 });
+      const after = Date.now();
+
+      const where = getWhere();
+
+      // Status filter must be present
+      expect(where.status).toBe(JobStatus.failed);
+
+      // OR time clause must also be present
+      expect(where).toHaveProperty('OR');
+      expect(where.OR).toHaveLength(2);
+
+      const cutoff: Date = where.OR[0].finishedAt.gte;
+      expect(cutoff).toBeInstanceOf(Date);
+
+      const expectedMs = 4 * 3_600_000;
+      const expectedLower = before - expectedMs - TOLERANCE_MS;
+      const expectedUpper = after - expectedMs + TOLERANCE_MS;
+      expect(cutoff.getTime()).toBeGreaterThanOrEqual(expectedLower);
+      expect(cutoff.getTime()).toBeLessThanOrEqual(expectedUpper);
+    });
+
+    it('scheduled: true combined with processedWithin: "7d" includes status=pending, scheduledFor>now, and OR clause', async () => {
+      const before = Date.now();
+      await service.listJobs({ scheduled: true, processedWithin: '7d', page: 1, pageSize: 20 });
+      const after = Date.now();
+
+      const where = getWhere();
+
+      // scheduled=true forces status=pending
+      expect(where.status).toBe(JobStatus.pending);
+
+      // scheduled=true forces scheduledFor > now
+      expect(where).toHaveProperty('scheduledFor');
+      const gtDate: Date = where.scheduledFor.gt;
+      expect(gtDate).toBeInstanceOf(Date);
+      expect(gtDate.getTime()).toBeGreaterThanOrEqual(before - 100);
+      expect(gtDate.getTime()).toBeLessThanOrEqual(after + 100);
+
+      // processedWithin: '7d' adds the OR time clause
+      expect(where).toHaveProperty('OR');
+      expect(where.OR).toHaveLength(2);
+
+      const cutoff: Date = where.OR[0].finishedAt.gte;
+      expect(cutoff).toBeInstanceOf(Date);
+
+      const expectedMs = 7 * 86_400_000;
+      const expectedLower = before - expectedMs - TOLERANCE_MS;
+      const expectedUpper = after - expectedMs + TOLERANCE_MS;
+      expect(cutoff.getTime()).toBeGreaterThanOrEqual(expectedLower);
+      expect(cutoff.getTime()).toBeLessThanOrEqual(expectedUpper);
+    });
+
+    it('same OR clause is applied to both findMany and count queries', async () => {
+      await service.listJobs({ processedWithin: '24h', page: 1, pageSize: 20 });
+
+      const findManyWhere = (mockPrisma.enrichmentJob.findMany as jest.Mock).mock.calls[0][0].where;
+      const countWhere = (mockPrisma.enrichmentJob.count as jest.Mock).mock.calls[0][0].where;
+
+      expect(findManyWhere.OR).toBeDefined();
+      expect(countWhere.OR).toBeDefined();
+      // Both cutoffs should be identical (same where object reference is shared)
+      expect(findManyWhere.OR[0].finishedAt.gte.getTime())
+        .toBe(countWhere.OR[0].finishedAt.gte.getTime());
+    });
+  });
 });
