@@ -74,6 +74,12 @@ function FaceSettingsContent() {
   const [perProviderTestResult, setPerProviderTestResult] = useState<Record<string, { ok: boolean; error?: string } | null>>({});
   const [perProviderTestLoading, setPerProviderTestLoading] = useState<Record<string, boolean>>({});
 
+  // Video face detection settings
+  const [videoEnabled, setVideoEnabled] = useState<boolean>(false);
+  const [videoSampleInterval, setVideoSampleInterval] = useState<number>(5);
+  const [videoMaxFrames, setVideoMaxFrames] = useState<number>(60);
+  const [videoSettingsSaving, setVideoSettingsSaving] = useState(false);
+
   useEffect(() => {
     void fetchSettings();
   }, [fetchSettings]);
@@ -110,6 +116,15 @@ function FaceSettingsContent() {
       setDetectionModel(settings.features.detection.model ?? '');
     }
   }, [settings]);
+
+  // Sync video face detection settings from sysSettings
+  useEffect(() => {
+    if (!sysSettings) return;
+    const v = sysSettings.face?.video;
+    setVideoEnabled(v?.enabled ?? false);
+    setVideoSampleInterval(v?.sampleIntervalSeconds ?? 5);
+    setVideoMaxFrames(v?.maxFramesPerVideo ?? 60);
+  }, [sysSettings]);
 
   // Load models when detection provider changes
   useEffect(() => {
@@ -190,6 +205,26 @@ function FaceSettingsContent() {
       setTestResult({ ok: false, error: err instanceof Error ? err.message : 'Test failed' });
     } finally {
       setTestLoading(false);
+    }
+  };
+
+  const handleSaveVideoSettings = async () => {
+    setVideoSettingsSaving(true);
+    try {
+      await updateSysSettings({
+        face: {
+          video: {
+            enabled: videoEnabled,
+            sampleIntervalSeconds: videoSampleInterval,
+            maxFramesPerVideo: videoMaxFrames,
+          },
+        },
+      });
+      setSuccessMessage('Video face detection settings saved');
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to save video settings');
+    } finally {
+      setVideoSettingsSaving(false);
     }
   };
 
@@ -673,6 +708,71 @@ function FaceSettingsContent() {
               Test
             </Button>
           </Stack>
+        </Paper>
+
+        {/* Video Face Detection settings */}
+        <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>
+            Video Face Detection
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Configure how face detection runs on videos. Frames are sampled at regular intervals;
+            more frames increase recall but use more CPU — and, for AWS Rekognition, incur a
+            per-frame API cost. Example: a 1-hour video at a cap of 60 frames = one frame sampled
+            every ~60 s.
+          </Typography>
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={videoEnabled}
+                onChange={(e) => setVideoEnabled(e.target.checked)}
+                disabled={sysSaving || videoSettingsSaving || !sysSettings}
+              />
+            }
+            label="Enable video face detection"
+            sx={{ mb: 2, display: 'block' }}
+          />
+
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
+            <TextField
+              label="Sample interval (seconds)"
+              type="number"
+              size="small"
+              value={videoSampleInterval}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                if (!isNaN(v) && v >= 1 && v <= 60) setVideoSampleInterval(v);
+              }}
+              slotProps={{ htmlInput: { min: 1, max: 60 } }}
+              helperText="1–60 s. Lower = more frames, better recall, more cost."
+              sx={{ flex: 1 }}
+              disabled={!videoEnabled || videoSettingsSaving}
+            />
+            <TextField
+              label="Max frames per video"
+              type="number"
+              size="small"
+              value={videoMaxFrames}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                if (!isNaN(v) && v >= 1 && v <= 300) setVideoMaxFrames(v);
+              }}
+              slotProps={{ htmlInput: { min: 1, max: 300 } }}
+              helperText="1–300. Caps total frames regardless of duration."
+              sx={{ flex: 1 }}
+              disabled={!videoEnabled || videoSettingsSaving}
+            />
+          </Stack>
+
+          <Button
+            variant="contained"
+            onClick={() => void handleSaveVideoSettings()}
+            disabled={!sysSettings || sysSaving || videoSettingsSaving}
+            startIcon={videoSettingsSaving ? <CircularProgress size={16} /> : undefined}
+          >
+            Save
+          </Button>
         </Paper>
 
       </Box>
