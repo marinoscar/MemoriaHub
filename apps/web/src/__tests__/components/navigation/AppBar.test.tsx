@@ -24,9 +24,9 @@ vi.mock('../../../contexts/SearchContext', () => ({
   SearchProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-// AdvancedSearchDialog is heavy — stub it out for AppBar tests
-vi.mock('../../../components/search/AdvancedSearchDialog', () => ({
-  AdvancedSearchDialog: vi.fn(() => null),
+// SearchPanel is heavy — stub it out for AppBar tests
+vi.mock('../../../components/search/SearchPanel', () => ({
+  SearchPanel: vi.fn(() => null),
 }));
 
 // MediaUploadDialog — stub to avoid upload service calls

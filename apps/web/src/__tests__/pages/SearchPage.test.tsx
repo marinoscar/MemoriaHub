@@ -42,8 +42,8 @@ vi.mock('../../components/media/MediaGallery', () => ({
   MediaGallery: vi.fn(() => <div data-testid="media-gallery" />),
 }));
 
-vi.mock('../../components/search/AdvancedSearchDialog', () => ({
-  AdvancedSearchDialog: vi.fn(() => null),
+vi.mock('../../components/search/SearchPanel', () => ({
+  SearchPanel: vi.fn(() => null),
 }));
 
 // ---------------------------------------------------------------------------

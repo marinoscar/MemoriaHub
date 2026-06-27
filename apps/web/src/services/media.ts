@@ -408,3 +408,29 @@ export async function getExplorePlaces(circleId: string): Promise<ExploreItem[]>
 export async function getExploreTags(circleId: string): Promise<ExploreItem[]> {
   return api.get<ExploreItem[]>(`/media/explore/tags?circleId=${encodeURIComponent(circleId)}`);
 }
+
+// ---------------------------------------------------------------------------
+// Location facets (for SearchPanel cascading pick-lists)
+// ---------------------------------------------------------------------------
+
+export interface LocationLocality {
+  name: string;
+  count: number;
+}
+
+export interface LocationRegion {
+  name: string;
+  count: number;
+  localities: LocationLocality[];
+}
+
+export interface LocationCountry {
+  country: string;
+  countryCode: string | null;
+  count: number;
+  regions: LocationRegion[];
+}
+
+export async function getLocationFacets(circleId: string): Promise<LocationCountry[]> {
+  return api.get<LocationCountry[]>(`/media/facets/locations?circleId=${encodeURIComponent(circleId)}`);
+}

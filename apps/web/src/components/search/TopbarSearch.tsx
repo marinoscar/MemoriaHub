@@ -2,7 +2,7 @@
  * TopbarSearch — Immich-style inline search pill for the AppBar.
  *
  * sm+ (tablet/desktop): rounded pill with SearchIcon, InputBase, clear button,
- *   and TuneIcon that opens AdvancedSearchDialog.
+ *   and TuneIcon that opens SearchPanel.
  * xs (phone): a single SearchIcon IconButton; tapping expands a full-width
  *   overlay row with a back button, InputBase, clear and Tune buttons.
  *   Pressing Escape or clicking the back arrow collapses it.
@@ -25,7 +25,7 @@ import {
 import { useTheme } from '@mui/material/styles';
 import { useCircle } from '../../hooks/useCircle';
 import { useSearch } from '../../contexts/SearchContext';
-import { AdvancedSearchDialog } from './AdvancedSearchDialog';
+import { SearchPanel } from './SearchPanel';
 
 export function TopbarSearch() {
   const theme = useTheme();
@@ -205,7 +205,7 @@ export function TopbarSearch() {
 
         {/* Advanced dialog */}
         {circleId && (
-          <AdvancedSearchDialog
+          <SearchPanel
             open={advancedOpen}
             onClose={() => setAdvancedOpen(false)}
             circleId={circleId}
@@ -239,7 +239,7 @@ export function TopbarSearch() {
       </Box>
 
       {circleId && (
-        <AdvancedSearchDialog
+        <SearchPanel
           open={advancedOpen}
           onClose={() => setAdvancedOpen(false)}
           circleId={circleId}

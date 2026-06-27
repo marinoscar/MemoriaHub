@@ -17,9 +17,16 @@ export interface SearchFilters {
   [key: string]: unknown;
 }
 
+export interface NearFilter {
+  lat: number;
+  lng: number;
+  radiusKm: number;
+}
+
 export interface SearchRequest {
   circleId: string;
   filters: SearchFilters;
+  semanticQuery?: string;
   page?: number;
   pageSize?: number;
   sortBy?: string;

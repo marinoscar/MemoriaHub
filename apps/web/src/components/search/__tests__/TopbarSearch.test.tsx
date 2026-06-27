@@ -36,10 +36,10 @@ vi.mock('../../../hooks/useCircle', () => ({
   useCircle: vi.fn(),
 }));
 
-// Stub AdvancedSearchDialog: renders an "Apply" button that calls onResults
+// Stub SearchPanel: renders an "Apply" button that calls onResults
 // when clicked, so we can test the wiring.
-vi.mock('../AdvancedSearchDialog', () => ({
-  AdvancedSearchDialog: vi.fn(
+vi.mock('../SearchPanel', () => ({
+  SearchPanel: vi.fn(
     ({
       open,
       onResults,
