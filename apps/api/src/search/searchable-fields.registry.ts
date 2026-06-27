@@ -34,9 +34,10 @@ import {
   whereNoFaces,
   whereExcludeArchived,
   wherePeople,
+  whereNear,
 } from './media-where.builder';
 
-export type SearchFieldType = 'string' | 'enum' | 'date-range' | 'boolean' | 'geo' | 'person-set';
+export type SearchFieldType = 'string' | 'enum' | 'date-range' | 'boolean' | 'geo' | 'person-set' | 'geo-radius';
 
 export interface SearchableField {
   key: string;
@@ -223,6 +224,28 @@ export const SEARCHABLE_FIELDS: SearchableField[] = [
       return wherePeople(ids, mode);
     },
   },
+  {
+    key: 'near',
+    label: 'Near location (map radius)',
+    type: 'geo-radius',
+    description:
+      'Filter to items taken within a radius of a GPS point. Pass { lat, lng, radiusKm }. ' +
+      'Uses a bounding-box approximation suitable for photo search. ' +
+      'lat: -90 to 90, lng: -180 to 180, radiusKm: >0 up to 20000.',
+    buildWhere: (value) => {
+      const v = value as { lat?: unknown; lng?: unknown; radiusKm?: unknown } | undefined;
+      if (
+        !v ||
+        typeof v.lat !== 'number' ||
+        typeof v.lng !== 'number' ||
+        typeof v.radiusKm !== 'number' ||
+        v.radiusKm <= 0
+      ) {
+        return {};
+      }
+      return whereNear(v.lat, v.lng, v.radiusKm);
+    },
+  },
 ];
 
 /** Map for O(1) key lookup */
@@ -255,13 +278,19 @@ export function buildWhereFromFields(
     deletedAt: null,
   };
 
-  // AND-compose each field's contribution
+  // AND-compose each field's contribution so that two fragments that both emit
+  // a top-level `OR` key (e.g. whereCountry + whereLocation) never overwrite
+  // each other.  Skip empty contributions ({}) so the AND array stays clean.
+  const and: Prisma.MediaItemWhereInput[] = [];
   for (const [key, value] of Object.entries(filters)) {
     if (value === undefined || value === null) continue;
     const field = FIELD_MAP.get(key)!;
     const contribution = field.buildWhere(value);
-    Object.assign(where, contribution);
+    if (contribution && Object.keys(contribution).length > 0) {
+      and.push(contribution);
+    }
   }
+  if (and.length > 0) where.AND = and;
 
   return where;
 }

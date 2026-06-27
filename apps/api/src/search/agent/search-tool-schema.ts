@@ -7,10 +7,7 @@ type JsonSchemaProperty =
   | {
       type: 'object';
       description: string;
-      properties: {
-        from: { type: 'string'; description: string };
-        to: { type: 'string'; description: string };
-      };
+      properties: Record<string, { type: string; description: string }>;
     }
   | {
       type: 'array';
@@ -81,6 +78,18 @@ export function buildSearchMediaToolDef(): AiToolDef {
           properties: {
             from: { type: 'string', description: 'ISO 8601 date-time' },
             to: { type: 'string', description: 'ISO 8601 date-time' },
+          },
+        };
+        break;
+
+      case 'geo-radius':
+        properties[field.key] = {
+          type: 'object',
+          description: field.description,
+          properties: {
+            lat: { type: 'number', description: 'Latitude in decimal degrees (-90 to 90)' },
+            lng: { type: 'number', description: 'Longitude in decimal degrees (-180 to 180)' },
+            radiusKm: { type: 'number', description: 'Search radius in kilometres (max 20 000)' },
           },
         };
         break;

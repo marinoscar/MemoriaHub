@@ -136,6 +136,28 @@ export function whereExcludeArchived(value: boolean): Prisma.MediaItemWhereInput
 }
 
 /**
+ * Bounding-box geographic radius filter.
+ *
+ * Approximates a circle using a lat/lng bounding box:
+ *   latDelta  = radiusKm / 111.32
+ *   lngDelta  = radiusKm / (111.32 * cos(lat))   — clamped to 180 near poles
+ *
+ * This is an intentional v1 approximation: accurate enough for typical radii and
+ * well within the margin of error for photo GPS coordinates.
+ */
+export function whereNear(lat: number, lng: number, radiusKm: number): Prisma.MediaItemWhereInput {
+  const latDelta = radiusKm / 111.32;
+  const cosLat = Math.cos((lat * Math.PI) / 180);
+  // Guard against division-by-zero / extreme values near poles
+  const lngDelta = cosLat > 0.0001 ? Math.min(radiusKm / (111.32 * cosLat), 180) : 180;
+
+  return {
+    takenLat: { gte: lat - latDelta, lte: lat + latDelta },
+    takenLng: { gte: lng - lngDelta, lte: lng + lngDelta },
+  };
+}
+
+/**
  * Filter media items by people who appear in them (via face recognition).
  *
  * @param ids    Array of Person UUIDs to filter by.
@@ -180,32 +202,39 @@ export function buildMediaWhere(
     excludeArchived,
   } = filters;
 
-  const where: Prisma.MediaItemWhereInput = {
-    circleId,
-    deletedAt: null,
-    ...(type && whereType(type)),
-    ...(favorite !== undefined && whereFavorite(favorite)),
-    ...(contentHash && { contentHash }),
-    ...(capturedAtFrom || capturedAtTo ? whereDateRange(capturedAtFrom, capturedAtTo) : {}),
-    ...(albumId ? whereAlbum(albumId) : {}),
-    ...(tag ? whereTag(tag) : {}),
-    ...(country ? whereCountry(country) : {}),
-    ...(region ? whereRegion(region) : {}),
-    ...(locality ? whereLocality(locality) : {}),
-    ...(place ? wherePlace(place) : {}),
-    ...(location ? whereLocation(location) : {}),
-    ...(cameraMake ? whereCameraMake(cameraMake) : {}),
-    ...(cameraModel ? whereCameraModel(cameraModel) : {}),
-    ...(sourceDeviceName ? whereSourceDeviceName(sourceDeviceName) : {}),
-    ...(sourceDeviceId ? whereSourceDeviceId(sourceDeviceId) : {}),
-    ...(missingGeo !== undefined ? whereMissingGeo(missingGeo) : {}),
-    ...(missingCapturedAt !== undefined ? whereMissingCapturedAt(missingCapturedAt) : {}),
-    ...(missingCamera !== undefined ? whereMissingCamera(missingCamera) : {}),
-    ...(noFaces !== undefined ? whereNoFaces(noFaces) : {}),
-    // Only add archivedAt: null when caller explicitly opts in (browse surfaces).
-    // Omitting this keeps archived items visible in search by default.
-    ...(excludeArchived === true ? whereExcludeArchived(true) : {}),
+  // Collect non-empty filter fragments into an AND array so that two fragments
+  // that both emit a top-level `OR` key (e.g. whereCountry + whereLocation)
+  // never overwrite each other.
+  const and: Prisma.MediaItemWhereInput[] = [];
+
+  const add = (frag: Prisma.MediaItemWhereInput) => {
+    if (frag && Object.keys(frag).length > 0) and.push(frag);
   };
 
+  if (type) add(whereType(type));
+  if (favorite !== undefined) add(whereFavorite(favorite));
+  if (contentHash) add({ contentHash });
+  if (capturedAtFrom || capturedAtTo) add(whereDateRange(capturedAtFrom, capturedAtTo));
+  if (albumId) add(whereAlbum(albumId));
+  if (tag) add(whereTag(tag));
+  if (country) add(whereCountry(country));
+  if (region) add(whereRegion(region));
+  if (locality) add(whereLocality(locality));
+  if (place) add(wherePlace(place));
+  if (location) add(whereLocation(location));
+  if (cameraMake) add(whereCameraMake(cameraMake));
+  if (cameraModel) add(whereCameraModel(cameraModel));
+  if (sourceDeviceName) add(whereSourceDeviceName(sourceDeviceName));
+  if (sourceDeviceId) add(whereSourceDeviceId(sourceDeviceId));
+  if (missingGeo !== undefined) add(whereMissingGeo(missingGeo));
+  if (missingCapturedAt !== undefined) add(whereMissingCapturedAt(missingCapturedAt));
+  if (missingCamera !== undefined) add(whereMissingCamera(missingCamera));
+  if (noFaces !== undefined) add(whereNoFaces(noFaces));
+  // Only add archivedAt: null when caller explicitly opts in (browse surfaces).
+  // Omitting this keeps archived items visible in search by default.
+  if (excludeArchived === true) add(whereExcludeArchived(true));
+
+  const where: Prisma.MediaItemWhereInput = { circleId, deletedAt: null };
+  if (and.length > 0) where.AND = and;
   return where;
 }

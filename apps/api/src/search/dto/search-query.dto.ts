@@ -13,6 +13,17 @@ export const peopleFilterValueSchema = z.object({
 
 export type PeopleFilterValue = z.infer<typeof peopleFilterValueSchema>;
 
+/**
+ * Shape of the `near` filter value: a GPS point plus a radius in kilometres.
+ */
+export const nearFilterValueSchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  radiusKm: z.number().positive().max(20000),
+});
+
+export type NearFilterValue = z.infer<typeof nearFilterValueSchema>;
+
 export const searchQuerySchema = z.object({
   circleId: z.string().uuid(),
   semanticQuery: z.string().min(1).max(512).optional(),
@@ -27,6 +38,16 @@ export const searchQuerySchema = z.object({
             code: z.ZodIssueCode.custom,
             path: ['people'],
             message: `Invalid people filter: ${result.error.issues.map((i) => i.message).join('; ')}`,
+          });
+        }
+      }
+      if ('near' in filters && filters['near'] !== undefined && filters['near'] !== null) {
+        const result = nearFilterValueSchema.safeParse(filters['near']);
+        if (!result.success) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['near'],
+            message: `Invalid near filter: ${result.error.issues.map((i) => i.message).join('; ')}`,
           });
         }
       }
