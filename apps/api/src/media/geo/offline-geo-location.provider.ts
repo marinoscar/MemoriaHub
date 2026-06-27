@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import type { GeoLocationProvider, GeoLocationResult } from './geo-location-provider.interface';
+import { resolveUsState } from './us-state-codes';
 
 // local-reverse-geocoder has no official @types package; use require to avoid
 // strict-mode issues with the CommonJS default export.
@@ -105,10 +106,21 @@ export class OfflineGeoLocationProvider implements GeoLocationProvider, OnModule
             return;
           }
 
+          // local-reverse-geocoder does not reliably expand admin1Name for every
+          // GeoNames record — California returns null while Texas is populated.
+          // Fallback chain: use admin1Name when present; for US records look up
+          // the full state name from admin1Code (USPS 2-letter abbrev); for all
+          // other countries use admin1Code as-is rather than returning null.
+          const admin1 =
+            result.admin1Name ??
+            (result.countryCode === 'US'
+              ? resolveUsState(result.admin1Code)
+              : result.admin1Code ?? undefined);
+
           resolve({
             country: result.countryName ?? undefined,
             countryCode: result.countryCode ?? undefined,
-            admin1: result.admin1Name ?? undefined,
+            admin1,
             admin2: result.admin2Name ?? undefined,
             locality: result.name ?? result.asciiName ?? undefined,
             // Offline provider cannot reliably resolve POI/landmark names
