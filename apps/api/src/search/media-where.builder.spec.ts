@@ -168,6 +168,45 @@ describe('buildMediaWhere', () => {
     });
   });
 
+  describe('missingCapturedAt filter', () => {
+    it('produces capturedAt:null when missingCapturedAt is true', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { missingCapturedAt: true });
+      expect((where as any).capturedAt).toBeNull();
+    });
+
+    it('produces capturedAt:{not:null} when missingCapturedAt is false', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { missingCapturedAt: false });
+      expect((where as any).capturedAt).toEqual({ not: null });
+    });
+
+    it('adds no capturedAt key when missingCapturedAt is omitted', () => {
+      const where = buildMediaWhere(CIRCLE_ID, {});
+      // capturedAt must be absent when neither date-range nor missingCapturedAt is supplied
+      expect((where as any).capturedAt).toBeUndefined();
+    });
+  });
+
+  describe('missingCamera filter', () => {
+    it('produces {cameraMake:null, cameraModel:null} when missingCamera is true', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { missingCamera: true });
+      expect((where as any).cameraMake).toBeNull();
+      expect((where as any).cameraModel).toBeNull();
+    });
+
+    it('produces OR clause [{cameraMake:{not:null}}, {cameraModel:{not:null}}] when missingCamera is false', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { missingCamera: false });
+      const or = (where as any).OR as unknown[];
+      expect(Array.isArray(or)).toBe(true);
+      expect(or).toEqual([{ cameraMake: { not: null } }, { cameraModel: { not: null } }]);
+    });
+
+    it('adds no cameraMake or cameraModel key when missingCamera is omitted', () => {
+      const where = buildMediaWhere(CIRCLE_ID, {});
+      expect((where as any).cameraMake).toBeUndefined();
+      expect((where as any).cameraModel).toBeUndefined();
+    });
+  });
+
   describe('helper functions directly', () => {
     it('whereTag returns the correct Prisma fragment', () => {
       const fragment = whereTag('nature');
@@ -261,6 +300,29 @@ describe('buildWhereFromFields', () => {
     expect((where as any).mediaTags).toBeUndefined();
   });
 
+  it('applies missingCapturedAt:true filter via registry', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { missingCapturedAt: true });
+    expect((where as any).capturedAt).toBeNull();
+  });
+
+  it('applies missingCapturedAt:false filter via registry', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { missingCapturedAt: false });
+    expect((where as any).capturedAt).toEqual({ not: null });
+  });
+
+  it('applies missingCamera:true filter via registry', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { missingCamera: true });
+    expect((where as any).cameraMake).toBeNull();
+    expect((where as any).cameraModel).toBeNull();
+  });
+
+  it('applies missingCamera:false filter via registry (OR clause)', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { missingCamera: false });
+    const or = (where as any).OR as unknown[];
+    expect(Array.isArray(or)).toBe(true);
+    expect(or).toEqual([{ cameraMake: { not: null } }, { cameraModel: { not: null } }]);
+  });
+
   describe('non-drift guarantee: buildMediaWhere and buildWhereFromFields agree', () => {
     it('tag filter produces identical output from both functions', () => {
       const fromBuilder = buildMediaWhere(CIRCLE_ID, { tag: 'landscape' });
@@ -291,6 +353,30 @@ describe('buildWhereFromFields', () => {
       const fromRegistry = buildWhereFromFields(CIRCLE_ID, { locality: 'Heredia' });
       expect(fromRegistry).toEqual(fromBuilder);
     });
+
+    it('missingCapturedAt:true produces identical output from both functions', () => {
+      const fromBuilder = buildMediaWhere(CIRCLE_ID, { missingCapturedAt: true });
+      const fromRegistry = buildWhereFromFields(CIRCLE_ID, { missingCapturedAt: true });
+      expect(fromRegistry).toEqual(fromBuilder);
+    });
+
+    it('missingCapturedAt:false produces identical output from both functions', () => {
+      const fromBuilder = buildMediaWhere(CIRCLE_ID, { missingCapturedAt: false });
+      const fromRegistry = buildWhereFromFields(CIRCLE_ID, { missingCapturedAt: false });
+      expect(fromRegistry).toEqual(fromBuilder);
+    });
+
+    it('missingCamera:true produces identical output from both functions', () => {
+      const fromBuilder = buildMediaWhere(CIRCLE_ID, { missingCamera: true });
+      const fromRegistry = buildWhereFromFields(CIRCLE_ID, { missingCamera: true });
+      expect(fromRegistry).toEqual(fromBuilder);
+    });
+
+    it('missingCamera:false produces identical output from both functions', () => {
+      const fromBuilder = buildMediaWhere(CIRCLE_ID, { missingCamera: false });
+      const fromRegistry = buildWhereFromFields(CIRCLE_ID, { missingCamera: false });
+      expect(fromRegistry).toEqual(fromBuilder);
+    });
   });
 
   describe('SEARCHABLE_FIELDS registry integrity', () => {
@@ -302,6 +388,8 @@ describe('buildWhereFromFields', () => {
       expect(keys).toContain('favorite');
       expect(keys).toContain('locality');
       expect(keys).toContain('cameraMake');
+      expect(keys).toContain('missingCapturedAt');
+      expect(keys).toContain('missingCamera');
     });
 
     it('every field has key, label, type, description, and buildWhere', () => {
@@ -337,6 +425,108 @@ describe('whereNoFaces', () => {
 
   it('returns {} when value is false', () => {
     expect(whereNoFaces(false)).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// whereMissingCapturedAt — standalone helper
+// ---------------------------------------------------------------------------
+import { whereMissingCapturedAt, whereMissingCamera } from './media-where.builder';
+
+describe('whereMissingCapturedAt', () => {
+  it('returns { capturedAt: null } when value is true', () => {
+    expect(whereMissingCapturedAt(true)).toEqual({ capturedAt: null });
+  });
+
+  it('returns { capturedAt: { not: null } } when value is false', () => {
+    expect(whereMissingCapturedAt(false)).toEqual({ capturedAt: { not: null } });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// whereMissingCamera — standalone helper
+// ---------------------------------------------------------------------------
+describe('whereMissingCamera', () => {
+  it('returns { cameraMake: null, cameraModel: null } when value is true', () => {
+    expect(whereMissingCamera(true)).toEqual({ cameraMake: null, cameraModel: null });
+  });
+
+  it('returns OR clause with not-null entries when value is false', () => {
+    expect(whereMissingCamera(false)).toEqual({
+      OR: [{ cameraMake: { not: null } }, { cameraModel: { not: null } }],
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// missingCapturedAt field in SEARCHABLE_FIELDS registry
+// ---------------------------------------------------------------------------
+describe('SEARCHABLE_FIELDS — missingCapturedAt field', () => {
+  function getField() {
+    return SEARCHABLE_FIELDS.find((f) => f.key === 'missingCapturedAt')!;
+  }
+
+  it('contains the missingCapturedAt key', () => {
+    const keys = SEARCHABLE_FIELDS.map((f) => f.key);
+    expect(keys).toContain('missingCapturedAt');
+  });
+
+  it('has label "Missing capture date"', () => {
+    const field = getField();
+    expect(field.label).toBe('Missing capture date');
+  });
+
+  it('has type "boolean"', () => {
+    const field = getField();
+    expect(field).toBeDefined();
+    expect(field.type).toBe('boolean');
+  });
+
+  it('buildWhere(true) returns { capturedAt: null }', () => {
+    const field = getField();
+    expect(field.buildWhere(true)).toEqual({ capturedAt: null });
+  });
+
+  it('buildWhere(false) returns { capturedAt: { not: null } }', () => {
+    const field = getField();
+    expect(field.buildWhere(false)).toEqual({ capturedAt: { not: null } });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// missingCamera field in SEARCHABLE_FIELDS registry
+// ---------------------------------------------------------------------------
+describe('SEARCHABLE_FIELDS — missingCamera field', () => {
+  function getField() {
+    return SEARCHABLE_FIELDS.find((f) => f.key === 'missingCamera')!;
+  }
+
+  it('contains the missingCamera key', () => {
+    const keys = SEARCHABLE_FIELDS.map((f) => f.key);
+    expect(keys).toContain('missingCamera');
+  });
+
+  it('has label "Missing camera info"', () => {
+    const field = getField();
+    expect(field.label).toBe('Missing camera info');
+  });
+
+  it('has type "boolean"', () => {
+    const field = getField();
+    expect(field).toBeDefined();
+    expect(field.type).toBe('boolean');
+  });
+
+  it('buildWhere(true) returns { cameraMake: null, cameraModel: null }', () => {
+    const field = getField();
+    expect(field.buildWhere(true)).toEqual({ cameraMake: null, cameraModel: null });
+  });
+
+  it('buildWhere(false) returns the OR clause', () => {
+    const field = getField();
+    expect(field.buildWhere(false)).toEqual({
+      OR: [{ cameraMake: { not: null } }, { cameraModel: { not: null } }],
+    });
   });
 });
 
