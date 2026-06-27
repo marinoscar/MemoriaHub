@@ -14,7 +14,7 @@ class CircleRepository @Inject constructor(
     private val appConfigStore: AppConfigStore,
 ) {
     suspend fun getCircles(): List<Circle> = withContext(Dispatchers.IO) {
-        circleApi.getCircles().data
+        circleApi.getCircles().data.items
     }
 
     /**
