@@ -66,6 +66,19 @@ When `google` is the active provider, the service fetches the encrypted API key 
 
 Uses the `local-reverse-geocoder` npm package with a bundled GeoNames dataset. Processing is entirely in-process; no network call is made and GPS coordinates never leave the server. This is the privacy-safe default.
 
+#### Admin1 (state/region) resolution
+
+The `local-reverse-geocoder` library does not always expand the admin1 code into a human-readable name — some US states (e.g., California) were stored with a null `geoAdmin1` while others the library happened to resolve natively (e.g., Texas) were populated correctly. The provider in `apps/api/src/media/geo/offline-geo-location.provider.ts` applies a deterministic fallback using a bundled 56-entry map in `apps/api/src/media/geo/us-state-codes.ts` (50 US states + DC + 5 territories, keyed by USPS abbreviation):
+
+1. Use `admin1Name` if the library populated it.
+2. If `admin1Name` is absent and the country code is `US`, resolve `admin1Code` (e.g., `"CA"`) to the full state name via the map (e.g., `"California"`).
+3. If the item is not US-based, fall back to the raw `admin1Code` string rather than null.
+4. If `admin1Code` is also absent, `geoAdmin1` remains null.
+
+This ensures consistent `geoAdmin1` values across all US media regardless of which states the GeoNames dataset resolves natively.
+
+> **Operational note — items geocoded before this fix:** Existing records keep their stored `geoAdmin1` (which may be null for affected US states) until they are re-geocoded. To repopulate region data across the full library, run `POST /api/admin/geocode/backfill` with `{ "force": true }`. You may also clear the GeoNames cache directory (`GEONAMES_CACHE_DIR`, default `/tmp/geonames-cache`) and restart the API to ensure the in-process dataset is refreshed before the backfill runs.
+
 ### `nominatim` Provider
 
 Sends GPS coordinates to the OSM Nominatim HTTP API. The default endpoint is `https://nominatim.openstreetmap.org`, overridable with `NOMINATIM_BASE_URL`. GPS leaves the server on each request.
