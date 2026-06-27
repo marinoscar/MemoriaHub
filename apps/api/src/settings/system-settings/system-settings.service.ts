@@ -15,17 +15,57 @@ import { systemSettingsSchema } from '../../common/schemas/settings.schema';
 
 const SETTINGS_KEY = 'global';
 
+/** TTL for the in-memory settings cache in milliseconds. */
+const SETTINGS_CACHE_TTL_MS = 5000;
+
+/** Shape of the resolved settings object returned by getSettings(). */
+export interface ResolvedSettings {
+  ui: SystemSettingsValue['ui'];
+  features: SystemSettingsValue['features'];
+  ai: SystemSettingsValue['ai'];
+  face: SystemSettingsValue['face'];
+  storage: SystemSettingsValue['storage'];
+  burst: SystemSettingsValue['burst'];
+  geo: SystemSettingsValue['geo'];
+  updatedAt: Date;
+  updatedBy: { id: string; email: string } | null;
+  version: number;
+}
+
 @Injectable()
 export class SystemSettingsService {
   private readonly logger = new Logger(SystemSettingsService.name);
 
+  /** In-process TTL cache — avoids repeated DB reads during bulk imports. */
+  private settingsCache: {
+    value: ResolvedSettings;
+    cachedAt: number;
+  } | null = null;
+
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Get system settings
-   * Creates default if not found (should exist from seed)
+   * Invalidate the in-memory settings cache.
+   * Call after any write so that the next read fetches fresh data.
+   */
+  private invalidateSettingsCache(): void {
+    this.settingsCache = null;
+  }
+
+  /**
+   * Get system settings.
+   * Results are cached in-process for SETTINGS_CACHE_TTL_MS (5 s) to avoid
+   * a DB round-trip on every isFeatureEnabled call during bulk imports.
+   * The cache is invalidated immediately on any write (replaceSettings /
+   * patchSettings) so flag changes take effect on the very next read.
+   * Creates default if not found (should exist from seed).
    */
   async getSettings() {
+    const now = Date.now();
+    if (this.settingsCache && now - this.settingsCache.cachedAt < SETTINGS_CACHE_TTL_MS) {
+      return this.settingsCache.value;
+    }
+
     let settings = await this.prisma.systemSettings.findUnique({
       where: { key: SETTINGS_KEY },
       include: {
@@ -53,7 +93,7 @@ export class SystemSettingsService {
 
     const value = settings.value as unknown as SystemSettingsValue;
 
-    return {
+    const result = {
       ui: value.ui,
       features: value.features,
       ai: value.ai,
@@ -65,6 +105,11 @@ export class SystemSettingsService {
       updatedBy: settings.updatedByUser,
       version: settings.version,
     };
+
+    // Store in cache for fast subsequent reads within the TTL window.
+    this.settingsCache = { value: result, cachedAt: Date.now() };
+
+    return result;
   }
 
   /**
@@ -92,6 +137,9 @@ export class SystemSettingsService {
         },
       },
     });
+
+    // Invalidate cache so the next read fetches the new value immediately.
+    this.invalidateSettingsCache();
 
     // Create audit event
     await this.createAuditEvent(userId, 'system_settings:replace', settings.id, {
@@ -229,6 +277,9 @@ export class SystemSettingsService {
         },
       },
     });
+
+    // Invalidate cache so the next read fetches the new value immediately.
+    this.invalidateSettingsCache();
 
     // Create audit event
     await this.createAuditEvent(userId, 'system_settings:patch', settings.id, {

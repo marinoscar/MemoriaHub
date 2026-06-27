@@ -672,4 +672,108 @@ describe('SystemSettingsService', () => {
       expect(result).toBe(false);
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // In-memory settings cache
+  // ---------------------------------------------------------------------------
+  describe('settings cache', () => {
+    it('serves the second getSettings() call from cache without a second DB read', async () => {
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(
+        mockSystemSettings as any,
+      );
+
+      await service.getSettings();
+      await service.getSettings();
+
+      // DB should only have been hit once despite two calls
+      expect(mockPrisma.systemSettings.findUnique).toHaveBeenCalledTimes(1);
+    });
+
+    it('serves isFeatureEnabled from cache on consecutive calls within the TTL', async () => {
+      mockPrisma.systemSettings.findUnique.mockResolvedValue({
+        ...mockSystemSettings,
+        value: {
+          ...DEFAULT_SYSTEM_SETTINGS,
+          features: { autoTagging: true },
+        } as any,
+      } as any);
+
+      const first = await service.isFeatureEnabled('autoTagging');
+      const second = await service.isFeatureEnabled('autoTagging');
+
+      expect(first).toBe(true);
+      expect(second).toBe(true);
+      // getSettings() is called by each isFeatureEnabled, but cache is warm after the 1st
+      expect(mockPrisma.systemSettings.findUnique).toHaveBeenCalledTimes(1);
+    });
+
+    it('invalidates the cache after replaceSettings so the next getSettings re-reads the DB', async () => {
+      // Populate the cache
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(
+        mockSystemSettings as any,
+      );
+      await service.getSettings();
+      expect(mockPrisma.systemSettings.findUnique).toHaveBeenCalledTimes(1);
+
+      // replaceSettings writes via upsert and must invalidate the cache
+      const newSettings: SystemSettingsValue = {
+        ui: { allowUserThemeOverride: true },
+        features: {},
+        ai: {
+          features: {
+            search: { provider: null, model: null },
+            tagging: { provider: null, model: null },
+            embedding: { provider: null, model: null },
+          },
+        },
+      };
+      mockPrisma.systemSettings.upsert.mockResolvedValue({
+        ...mockSystemSettings,
+        value: newSettings as any,
+        version: 2,
+      } as any);
+      mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+      await service.replaceSettings(newSettings, mockUserId);
+
+      // upsert does not trigger findUnique — still 1 call so far
+      expect(mockPrisma.systemSettings.findUnique).toHaveBeenCalledTimes(1);
+
+      // The next getSettings() must go to DB because the cache was invalidated
+      mockPrisma.systemSettings.findUnique.mockResolvedValue({
+        ...mockSystemSettings,
+        value: newSettings as any,
+        version: 2,
+      } as any);
+      await service.getSettings();
+
+      expect(mockPrisma.systemSettings.findUnique).toHaveBeenCalledTimes(2);
+    });
+
+    it('invalidates the cache after patchSettings so the next getSettings re-reads the DB', async () => {
+      // patchSettings internally calls getSettings() — that is the 1st DB read
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(
+        mockSystemSettings as any,
+      );
+      mockPrisma.systemSettings.update.mockResolvedValue({
+        ...mockSystemSettings,
+        value: DEFAULT_SYSTEM_SETTINGS as any,
+        version: 2,
+      } as any);
+      mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+      await service.patchSettings(
+        { ui: { allowUserThemeOverride: true } },
+        mockUserId,
+      );
+
+      // findUnique called once (inside patchSettings → getSettings())
+      expect(mockPrisma.systemSettings.findUnique).toHaveBeenCalledTimes(1);
+
+      // After patchSettings the cache must be invalidated; next getSettings re-reads DB
+      await service.getSettings();
+
+      expect(mockPrisma.systemSettings.findUnique).toHaveBeenCalledTimes(2);
+    });
+  });
 });
