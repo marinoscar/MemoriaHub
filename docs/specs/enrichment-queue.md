@@ -18,11 +18,13 @@
 7. [EnrichmentJobService.enqueue](#7-enrichmentjobserviceenqueue)
 8. [EnrichmentJobWorker](#8-enrichmentjobworker)
 9. [Priority Conventions](#9-priority-conventions)
-10. [Admin Jobs Dashboard](#10-admin-jobs-dashboard)
-11. [How to Add a New Enrichment Capability](#11-how-to-add-a-new-enrichment-capability)
-12. [Configuration](#12-configuration)
-13. [Operational Notes](#13-operational-notes)
-14. [Future Extension Ideas](#14-future-extension-ideas)
+10. [Upload Enrichment Trigger Model](#10-upload-enrichment-trigger-model)
+11. [Admin Jobs Dashboard](#11-admin-jobs-dashboard)
+12. [How to Add a New Enrichment Capability](#12-how-to-add-a-new-enrichment-capability)
+13. [Configuration](#13-configuration)
+14. [Operational Notes](#14-operational-notes)
+15. [Registered Handlers Reference](#15-registered-handlers-reference)
+16. [Future Extension Ideas](#16-future-extension-ideas)
 
 ---
 
@@ -386,7 +388,53 @@ Within the same priority level, jobs are processed FIFO (oldest `createdAt` firs
 
 ---
 
-## 10. Admin Jobs Dashboard
+## 10. Upload Enrichment Trigger Model
+
+When a `MediaItem` is successfully created via `POST /api/media` (non-dedup path), `MediaService.createMedia` calls `MediaEnrichmentService.enqueueUploadEnrichment(...)` synchronously — awaited before the 201 response is returned. The `face_detection`, `auto_tagging`, and `burst_detection` job rows therefore exist in the database before the client receives its response, making enrichment scheduling reliable regardless of client type (CLI, web, Android) or upload timing.
+
+### Single Source of Truth
+
+`MediaEnrichmentService.enqueueUploadEnrichment` in `apps/api/src/media/enrichment/media-enrichment.service.ts` is the sole authoritative place where upload-time enrichment is scheduled. The previous design used three separate `@OnEvent(OBJECT_PROCESSED_EVENT)` listeners (`TaggingEnqueueListener`, `FaceEnqueueListener`, `BurstEnqueueListener`), which silently produced no jobs for CLI uploads because the storage-processing event fired before the `MediaItem` row existed. Those listeners have been removed.
+
+### Backstop Event Listener
+
+A single `MediaEnrichmentEnqueueListener` still listens for `OBJECT_PROCESSED_EVENT`. It resolves the `MediaItem` from the `storageObjectId` and calls the same `MediaEnrichmentService.enqueueUploadEnrichment` method. This covers any path where storage processing completes after `MediaItem` registration (re-processing, edge-case ordering). Because `EnrichmentJobService.enqueue` is idempotent (see [Section 7](#7-enrichmentjobserviceenqueue)), the synchronous call and the backstop event are safe to fire in any order — the second call finds an existing `pending` or `running` job and returns without creating a duplicate.
+
+### Gating
+
+`enqueueUploadEnrichment` applies the following gates before enqueuing any job:
+
+- **Media type:** Photos only. Video and other types are skipped.
+- **Soft-delete:** Skipped if `deletedAt` is non-null.
+- **Per-type feature flags and env kill-switches:**
+
+| Job type | System setting | Env kill-switch | Default |
+|----------|---------------|-----------------|---------|
+| `face_detection` | `features.faceRecognition` | `FACE_AUTO_DETECT=false` | off |
+| `auto_tagging` | `features.autoTagging` | `AUTO_TAG_ENABLED=false` | off |
+| `burst_detection` | `features.burstDetection` | `BURST_DETECTION_ENABLED=false` | off |
+
+If a feature flag is off or its env kill-switch is `false`, that job type is not enqueued; other types are still evaluated independently.
+
+- **Priorities:** face detection = 10, burst detection = 10, auto_tagging = 20 (within the standard upload priority band; see [Section 9](#9-priority-conventions)).
+
+When a job is enqueued, its per-item status row is also upserted to `pending` (`MediaFaceStatus` for face detection, `MediaTagStatus` for auto-tagging), so status endpoints reflect the queued state immediately.
+
+### Feature Flag Caching
+
+`SystemSettingsService.getSettings()` maintains a 5-second in-memory TTL cache, invalidated on any `replaceSettings` or `patchSettings` call. This prevents bulk imports (many concurrent `createMedia` calls) from hammering the database on every feature-flag read.
+
+### Metadata Sync Is Separate
+
+EXIF extraction and typed-column sync (`capturedAt`, dimensions, geo) are **not** part of the upload enrichment trigger. They run in the storage object-processing chain: `MediaService.createMedia` calls `MediaMetadataSyncService.syncFromStorageObject(...)` immediately after creating the `MediaItem`, and `MediaMetadataSyncService` also listens on `OBJECT_PROCESSED_EVENT` to handle the case where processing completes after registration. The `metadata_extraction` enrichment job type exists only for on-demand rerun and admin backfill — it is never enqueued at upload time. See [metadata-rerun.md](metadata-rerun.md) for details.
+
+### Client Responsibility
+
+Enrichment is entirely server-side. Clients (CLI, web, Android) never call `EnrichmentJobService.enqueue` directly. The canonical moment for scheduling upload enrichment is `MediaItem` creation in `createMedia`.
+
+---
+
+## 11. Admin Jobs Dashboard
 
 The `/admin/jobs` page provides full visibility and control over the queue. All endpoints require Admin role.
 
@@ -453,7 +501,7 @@ The `/admin/jobs` dashboard surfaces a per-row "backing off" badge when `schedul
 
 ---
 
-## 11. How to Add a New Enrichment Capability
+## 12. How to Add a New Enrichment Capability
 
 This section is the primary reference for developers adding a new AI or processing capability to the system. Follow these steps in order. Use `face_detection` as the worked example.
 
@@ -631,7 +679,7 @@ No dashboard code changes are needed.
 
 ---
 
-## 12. Configuration
+## 13. Configuration
 
 ### Worker lifecycle
 
@@ -666,7 +714,7 @@ For variables specific to the `face_detection` handler (thresholds, providers, i
 
 ---
 
-## 13. Operational Notes
+## 14. Operational Notes
 
 **Stuck-running recovery.** If the worker process crashes or the container restarts while a job is in `running` status, that job will never transition out of `running` on its own. Use `POST /api/admin/jobs/reset-stuck { olderThanMinutes: 10 }` to return stale running jobs to `pending`. The default 10-minute threshold is conservative; adjust `olderThanMinutes` if your handlers are expected to take longer.
 
@@ -680,7 +728,7 @@ For variables specific to the `face_detection` handler (thresholds, providers, i
 
 ---
 
-## 14. Registered Handlers Reference
+## 15. Registered Handlers Reference
 
 The following handlers are registered in the current production codebase. Each implements `EnrichmentHandler`, self-registers via `onModuleInit`, and appears automatically in the `/admin/jobs` dashboard.
 
@@ -703,7 +751,7 @@ The following handlers are registered in the current production codebase. Each i
 
 ---
 
-## 15. Future Extension Ideas
+## 16. Future Extension Ideas
 
 The following capabilities would each become one new handler on the existing queue infrastructure:
 
@@ -725,3 +773,4 @@ Each of these would: implement `EnrichmentHandler`, self-register via `onModuleI
 |---------|------|--------|---------|
 | 1.0 | June 2026 | AI Assistant | Initial reference document |
 | 1.1 | June 2026 | AI Assistant | Rate-limit & scheduled backoff: new `scheduledFor`, `rateLimitedAt`, `rateLimitHits` columns; two-path retry model; `RateLimitError` detection; new env knobs; updated claim query; admin stats `scheduled` field; job list `scheduled=true` filter and new item fields |
+| 1.2 | June 2026 | AI Assistant | Upload enrichment trigger model (Section 10): synchronous enqueue in `createMedia` via `MediaEnrichmentService`; single backstop `MediaEnrichmentEnqueueListener`; gating table with feature flags and env kill-switches; feature-flag caching; metadata sync separation; client-never-enqueues principle |
