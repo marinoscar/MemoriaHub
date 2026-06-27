@@ -185,7 +185,12 @@ export class ApiClient {
   }
 
   async listCircles(): Promise<Circle[]> {
-    return this.get<Circle[]>('/api/circles');
+    // GET /api/circles returns a paginated envelope: { data: { items, total, … } }.
+    // parseOk() unwraps `data`, leaving the pagination object — so pull `items`.
+    // Tolerate a bare array too, in case the endpoint is ever simplified.
+    const res = await this.get<Circle[] | { items?: Circle[] }>('/api/circles');
+    if (Array.isArray(res)) return res;
+    return res?.items ?? [];
   }
 
   async triggerBackup(body: { circleId?: string; all?: boolean }): Promise<BackupRunResult> {

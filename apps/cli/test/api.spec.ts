@@ -114,6 +114,41 @@ describe('ApiClient putRaw', () => {
   });
 });
 
+describe('ApiClient listCircles', () => {
+  it('unwraps the paginated { data: { items } } envelope to an array', async () => {
+    mockFetchSequence([
+      () =>
+        new Response(
+          JSON.stringify({
+            data: { items: [{ id: 'c1' }, { id: 'c2' }], total: 2 },
+          }),
+          { status: 200 },
+        ),
+    ]);
+    const api = makeClient();
+    const circles = await api.listCircles();
+    expect(Array.isArray(circles)).toBe(true);
+    expect(circles.map((c) => c.id)).toEqual(['c1', 'c2']);
+  });
+
+  it('tolerates a bare array response', async () => {
+    mockFetchSequence([
+      () => new Response(JSON.stringify({ data: [{ id: 'c1' }] }), { status: 200 }),
+    ]);
+    const api = makeClient();
+    const circles = await api.listCircles();
+    expect(circles.map((c) => c.id)).toEqual(['c1']);
+  });
+
+  it('returns an empty array when items is absent', async () => {
+    mockFetchSequence([
+      () => new Response(JSON.stringify({ data: { total: 0 } }), { status: 200 }),
+    ]);
+    const api = makeClient();
+    await expect(api.listCircles()).resolves.toEqual([]);
+  });
+});
+
 describe('ApiClient + cooldown gate', () => {
   it('trips the shared gate on a throttle response', async () => {
     const gate = new CooldownGate({ cooldownMs: 50, maxCooldownMs: 100 });
