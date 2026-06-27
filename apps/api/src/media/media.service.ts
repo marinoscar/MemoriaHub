@@ -6,6 +6,8 @@ import {
   BadRequestException,
   Inject,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { OBJECT_PROCESSED_EVENT, ObjectProcessedEvent } from '../storage/processing/events/object-processed.event';
 import { Prisma, BurstGroupStatus } from '@prisma/client';
 import { CircleRole } from '@prisma/client';
 import { FastifyReply } from 'fastify';
@@ -68,6 +70,7 @@ export class MediaService {
     @Inject(GEO_LOCATION_PROVIDER) private readonly geoProvider: GeoLocationProvider,
     private readonly forwardGeocodeService: ForwardGeocodeService,
     private readonly resolver: StorageProviderResolver,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -222,6 +225,16 @@ export class MediaService {
       );
       // Never fail createMedia because of a sync issue
     }
+
+    // The CLI registers the MediaItem AFTER completing the upload, so the
+    // OBJECT_PROCESSED_EVENT that drives face/tagging/burst enqueue (and metadata
+    // sync) may have already fired and no-op'd because no MediaItem existed yet.
+    // Re-emit it now that the item exists so enrichment listeners run. Idempotent:
+    // enqueue dedups and metadata sync is present-only.
+    this.eventEmitter.emit(
+      OBJECT_PROCESSED_EVENT,
+      new ObjectProcessedEvent(mediaItem.storageObjectId),
+    );
 
     return { ...mediaItem, deduplicated: false as const };
   }
@@ -522,17 +535,20 @@ export class MediaService {
 
     await this.circleMembershipService.assertCircleAccess(userId, item.circleId, userPermissions, 'viewer' as CircleRole);
 
-    // Fetch only the storageKey of the linked StorageObject to avoid spreading
-    // a BigInt `size` field into the response.
+    // Fetch only the fields needed to sign the download URL (avoids spreading
+    // BigInt `size` into the response; storageProvider + bucket are needed to
+    // route signing through the correct per-object provider).
     const storageObj = await this.prisma.storageObject.findUnique({
       where: { id: item.storageObjectId },
-      select: { storageKey: true },
+      select: { storageKey: true, storageProvider: true, bucket: true },
     });
 
     const [thumbnailUrl, downloadUrl] = await Promise.all([
       this.signThumb(item.metadata),
       storageObj
-        ? this.storageProvider.getSignedDownloadUrl(storageObj.storageKey)
+        ? this.resolver
+            .getProviderFor(storageObj.storageProvider, storageObj.bucket)
+            .then((p) => p.getSignedDownloadUrl(storageObj.storageKey))
         : Promise.resolve(null),
     ]);
 
