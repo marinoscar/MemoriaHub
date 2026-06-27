@@ -49,6 +49,8 @@ function FaceSettingsContent() {
   const [localError, setLocalError] = useState<string | null>(null);
 
   // Global backfill state
+  const [globalBackfillFrom, setGlobalBackfillFrom] = useState('');
+  const [globalBackfillTo, setGlobalBackfillTo] = useState('');
   const [globalBackfillForce, setGlobalBackfillForce] = useState(false);
   const [globalBackfillLoading, setGlobalBackfillLoading] = useState(false);
 
@@ -262,6 +264,31 @@ function FaceSettingsContent() {
             Queue face detection for existing photos across all circles that have face recognition
             enabled.
           </Typography>
+
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 1 }}>
+            <TextField
+              label="From date"
+              type="date"
+              size="small"
+              value={globalBackfillFrom}
+              onChange={(e) => setGlobalBackfillFrom(e.target.value)}
+              slotProps={{ inputLabel: { shrink: true } }}
+              sx={{ flex: 1 }}
+            />
+            <TextField
+              label="To date"
+              type="date"
+              size="small"
+              value={globalBackfillTo}
+              onChange={(e) => setGlobalBackfillTo(e.target.value)}
+              slotProps={{ inputLabel: { shrink: true } }}
+              sx={{ flex: 1 }}
+            />
+          </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+            Optionally limit by capture date. Leave blank to process all photos.
+          </Typography>
+
           <FormControlLabel
             control={
               <Switch
@@ -278,7 +305,11 @@ function FaceSettingsContent() {
             startIcon={globalBackfillLoading ? <CircularProgress size={16} /> : undefined}
             onClick={() => {
               setGlobalBackfillLoading(true);
-              runGlobalFaceBackfill({ force: globalBackfillForce || undefined })
+              runGlobalFaceBackfill({
+                from: globalBackfillFrom || undefined,
+                to: globalBackfillTo || undefined,
+                force: globalBackfillForce || undefined,
+              })
                 .then((result) =>
                   setSuccessMessage(
                     `${result.enqueued} jobs queued across ${result.circles} circle(s).`,

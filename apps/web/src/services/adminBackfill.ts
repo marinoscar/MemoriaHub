@@ -30,6 +30,8 @@ export async function runGlobalMetadataBackfill(body?: {
 }
 
 export async function runGlobalFaceBackfill(body?: {
+  from?: string;
+  to?: string;
   force?: boolean;
 }): Promise<GlobalBackfillResult> {
   return api.post<GlobalBackfillResult>('/admin/face/backfill', body ?? {});
