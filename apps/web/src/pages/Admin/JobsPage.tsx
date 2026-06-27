@@ -48,7 +48,7 @@ import {
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useJobs } from '../../hooks/useJobs';
-import type { EnrichmentJobDto, JobStatus } from '../../services/jobs';
+import type { EnrichmentJobDto, JobStatus, JobProcessedWindow } from '../../services/jobs';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -177,13 +177,21 @@ function JobsPageContent() {
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [typeFilter, setTypeFilter] = useState<string>('');
   const [scheduledFilter, setScheduledFilter] = useState<boolean>(false);
+  const [processedFilter, setProcessedFilter] = useState<JobProcessedWindow>('all');
 
-  const applyFilters = (newStatus: string, newType: string, newScheduled: boolean, page = 1) => {
+  const applyFilters = (
+    newStatus: string,
+    newType: string,
+    newScheduled: boolean,
+    page = 1,
+    processed: JobProcessedWindow = processedFilter,
+  ) => {
     setFilters({
       // When scheduled=true the API forces status=pending; don't also send status
       status: newScheduled ? undefined : ((newStatus as JobStatus) || undefined),
       type: newType || undefined,
       scheduled: newScheduled || undefined,
+      processedWithin: processed === 'all' ? undefined : processed,
       page,
       pageSize: filters.pageSize ?? 20,
     });
@@ -193,23 +201,28 @@ function JobsPageContent() {
     // Switching the status dropdown clears the scheduled toggle
     setStatusFilter(value);
     setScheduledFilter(false);
-    applyFilters(value, typeFilter, false);
+    applyFilters(value, typeFilter, false, 1, processedFilter);
   };
 
   const handleTypeChange = (value: string) => {
     setTypeFilter(value);
-    applyFilters(statusFilter, value, scheduledFilter);
+    applyFilters(statusFilter, value, scheduledFilter, 1, processedFilter);
   };
 
   const handleScheduledToggle = (checked: boolean) => {
     setScheduledFilter(checked);
     // When activating scheduled filter, clear the status dropdown (API will lock to pending)
     if (checked) setStatusFilter('');
-    applyFilters(checked ? '' : statusFilter, typeFilter, checked);
+    applyFilters(checked ? '' : statusFilter, typeFilter, checked, 1, processedFilter);
+  };
+
+  const handleProcessedChange = (value: JobProcessedWindow) => {
+    setProcessedFilter(value);
+    applyFilters(statusFilter, typeFilter, scheduledFilter, 1, value);
   };
 
   const handlePageChange = (_: unknown, newPage: number) => {
-    applyFilters(statusFilter, typeFilter, scheduledFilter, newPage + 1); // MUI is 0-based
+    applyFilters(statusFilter, typeFilter, scheduledFilter, newPage + 1, processedFilter); // MUI is 0-based
   };
 
   const handleRowsPerPageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -218,6 +231,7 @@ function JobsPageContent() {
       // When scheduled filter is active, don't send a conflicting status
       status: scheduledFilter ? undefined : filters.status,
       scheduled: scheduledFilter || undefined,
+      processedWithin: processedFilter === 'all' ? undefined : processedFilter,
       pageSize: Number(e.target.value),
       page: 1,
     });
@@ -447,6 +461,21 @@ function JobsPageContent() {
                   {t}
                 </MenuItem>
               ))}
+            </Select>
+          </FormControl>
+
+          <FormControl size="small" sx={{ minWidth: 160 }}>
+            <InputLabel>Processed</InputLabel>
+            <Select
+              label="Processed"
+              value={processedFilter}
+              onChange={(e) => handleProcessedChange(e.target.value as JobProcessedWindow)}
+            >
+              <MenuItem value="all">All time</MenuItem>
+              <MenuItem value="4h">Last 4 hours</MenuItem>
+              <MenuItem value="24h">Last 24 hours</MenuItem>
+              <MenuItem value="7d">Last 7 days</MenuItem>
+              <MenuItem value="30d">Last 30 days</MenuItem>
             </Select>
           </FormControl>
 

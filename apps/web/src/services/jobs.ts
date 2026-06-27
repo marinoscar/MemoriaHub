@@ -6,6 +6,8 @@ import { api } from './api';
 
 export type JobStatus = 'pending' | 'running' | 'succeeded' | 'failed';
 
+export type JobProcessedWindow = '4h' | '24h' | '7d' | '30d' | 'all';
+
 export interface JobStats {
   total: number;
   byStatus: {
@@ -68,6 +70,8 @@ export interface ListJobsParams {
   pageSize?: number;
   /** When true, returns only pending jobs currently in backoff (scheduledFor > now). */
   scheduled?: boolean;
+  /** Filter jobs by activity time window. Omitted or 'all' = no time filter. */
+  processedWithin?: JobProcessedWindow;
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +93,9 @@ export async function listJobs(params: ListJobsParams = {}): Promise<JobsListRes
   if (params.type) qs.set('type', params.type);
   if (params.page != null) qs.set('page', String(params.page));
   if (params.pageSize != null) qs.set('pageSize', String(params.pageSize));
+  if (params.processedWithin && params.processedWithin !== 'all') {
+    qs.set('processedWithin', params.processedWithin);
+  }
 
   const query = qs.toString();
   return api.get<JobsListResponse>(`/admin/jobs${query ? `?${query}` : ''}`);
