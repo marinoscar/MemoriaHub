@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Link as RouterLink } from 'react-router-dom';
 import {
   Container,
   Box,
@@ -35,6 +35,7 @@ import {
   Menu,
   ListItemIcon,
   ListItemText,
+  Link,
 } from '@mui/material';
 import {
   WorkHistory as WorkHistoryIcon,
@@ -283,6 +284,17 @@ function JobsPageContent() {
   return (
     <Container maxWidth="xl">
       <Box sx={{ py: 4 }}>
+        {/* Back link */}
+        <Link
+          component={RouterLink}
+          to="/admin/settings"
+          underline="hover"
+          variant="body2"
+          sx={{ display: 'inline-block', mb: 2 }}
+        >
+          &larr; Back to Settings
+        </Link>
+
         {/* Page header */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
           <WorkHistoryIcon color="primary" />

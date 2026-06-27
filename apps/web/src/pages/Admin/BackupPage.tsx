@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Link as RouterLink } from 'react-router-dom';
 import {
   Container,
   Typography,
@@ -18,6 +18,7 @@ import {
   Select,
   MenuItem,
   Button,
+  Link,
 } from '@mui/material';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useCircles } from '../../hooks/useCircles';
@@ -52,6 +53,17 @@ function BackupPageContent() {
 
   return (
     <Container maxWidth="lg" sx={{ py: 3 }}>
+      {/* Back link */}
+      <Link
+        component={RouterLink}
+        to="/admin/settings"
+        underline="hover"
+        variant="body2"
+        sx={{ display: 'inline-block', mb: 2 }}
+      >
+        &larr; Back to Settings
+      </Link>
+
       <Typography variant="h5" component="h1" sx={{ mb: 3 }}>
         Admin Backup
       </Typography>

@@ -11,6 +11,7 @@ import {
   Chip,
   Divider,
   useTheme,
+  Link,
 } from '@mui/material';
 import {
   Storage as StorageIcon,
@@ -23,7 +24,7 @@ import {
   HourglassEmpty as QueuedIcon,
   QueryStats as ComputingIcon,
 } from '@mui/icons-material';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Link as RouterLink } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useInsights } from '../../hooks/useInsights';
 import { KpiCard } from '../../components/insights/KpiCard';
@@ -180,6 +181,17 @@ function StorageInsightsPageContent() {
   return (
     <Container maxWidth="xl">
       <Box sx={{ py: 4 }}>
+        {/* Back link */}
+        <Link
+          component={RouterLink}
+          to="/admin/settings"
+          underline="hover"
+          variant="body2"
+          sx={{ display: 'inline-block', mb: 2 }}
+        >
+          &larr; Back to Settings
+        </Link>
+
         {/* Header */}
         <Box
           sx={{

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Link as RouterLink } from 'react-router-dom';
 import {
   Container,
   Box,
@@ -18,6 +18,7 @@ import {
   CircularProgress,
   Alert,
   Snackbar,
+  Link,
 } from '@mui/material';
 import {
   CheckCircle as CheckCircleIcon,
@@ -209,6 +210,17 @@ function FaceSettingsContent() {
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: 4 }}>
+        {/* Back link */}
+        <Link
+          component={RouterLink}
+          to="/admin/settings"
+          underline="hover"
+          variant="body2"
+          sx={{ display: 'inline-block', mb: 2 }}
+        >
+          &larr; Back to Settings
+        </Link>
+
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
           <FaceIcon color="primary" />
           <Typography variant="h4" component="h1">

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Link as RouterLink } from 'react-router-dom';
 import {
   Container,
   Box,
@@ -18,6 +18,7 @@ import {
   CircularProgress,
   Alert,
   Snackbar,
+  Link,
 } from '@mui/material';
 import { CheckCircle as CheckCircleIcon, Error as ErrorIcon, Info as InfoIcon, Warning as WarningIcon } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -280,6 +281,17 @@ function AiSettingsContent() {
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: 4 }}>
+        {/* Back link */}
+        <Link
+          component={RouterLink}
+          to="/admin/settings"
+          underline="hover"
+          variant="body2"
+          sx={{ display: 'inline-block', mb: 2 }}
+        >
+          &larr; Back to Settings
+        </Link>
+
         <Typography variant="h4" component="h1" gutterBottom>
           AI Settings
         </Typography>
