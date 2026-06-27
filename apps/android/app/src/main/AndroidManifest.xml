@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -63,13 +64,22 @@
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
             android:exported="false"
-            tools:node="merge"
-            xmlns:tools="http://schemas.android.com/tools">
+            tools:node="merge">
             <meta-data
                 android:name="androidx.work.WorkManagerInitializer"
                 android:value="androidx.startup"
                 tools:node="remove" />
         </provider>
+
+        <!-- SyncWorker runs as a FOREGROUND_SERVICE_TYPE_DATA_SYNC foreground service.
+             On Android 14+ (API 34+) the foregroundServiceType requested at runtime must
+             be declared on the service element, otherwise startForeground() throws
+             "foregroundServiceType 0x1 is not a subset of ... 0x0" and the app crashes.
+             Merge the dataSync type onto WorkManager's foreground service. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
 
     </application>
 
