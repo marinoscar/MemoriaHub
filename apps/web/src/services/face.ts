@@ -92,6 +92,12 @@ export interface DetectedFaceDto {
   modelVersion: string;
   manuallyAssigned: boolean;
   createdAt: string;
+  /** Representative timestamp within the video (ms from start). Null for photos. */
+  videoTimestampMs: number | null;
+  /** All sampled timestamps where this face appears (ms from start). Empty for photos. */
+  videoTimestamps: number[];
+  /** Signed URL of the representative video frame JPEG used for face crops. Null for photos. */
+  faceThumbnailUrl: string | null;
 }
 
 export type MediaFaceStatusType =
