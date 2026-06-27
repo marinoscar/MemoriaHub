@@ -56,7 +56,7 @@ private enum class Outcome { UPLOADED, SKIPPED, FAILED }
  */
 @Singleton
 class SyncEngine @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val storageApi: StorageApi,
     private val mediaApi: MediaApi,
     private val uploader: S3PartUploader,

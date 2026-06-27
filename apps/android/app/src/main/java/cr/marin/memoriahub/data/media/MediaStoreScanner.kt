@@ -30,7 +30,7 @@ data class ScannedMedia(
  */
 @Singleton
 class MediaStoreScanner @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
 ) {
     fun scanCamera(sinceDateAddedSec: Long = 0): List<ScannedMedia> {
         val results = ArrayList<ScannedMedia>()

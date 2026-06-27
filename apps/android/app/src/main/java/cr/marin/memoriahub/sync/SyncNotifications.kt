@@ -15,7 +15,7 @@ import javax.inject.Singleton
 /** Builds the ongoing notification shown while a foreground sync run is active. */
 @Singleton
 class SyncNotifications @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
 ) {
     fun ensureChannel() {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return

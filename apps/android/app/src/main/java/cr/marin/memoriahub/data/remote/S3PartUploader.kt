@@ -20,8 +20,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class S3PartUploader @Inject constructor(
-    @ApplicationContext private val context: Context,
-    @UploadClient private val client: OkHttpClient,
+    @param:ApplicationContext private val context: Context,
+    @param:UploadClient private val client: OkHttpClient,
 ) {
     suspend fun putPart(
         url: String,
