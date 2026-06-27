@@ -18,9 +18,10 @@ import { AdminFaceBackfillController } from './admin-face-backfill.controller';
 import { FaceDetectionCore } from './face-detection-core.service';
 import { VideoFrameExtractionService } from './video-frame-extraction.service';
 import { VideoFaceDetectionHandler } from './video-face-detection.handler';
+import { MediaModule } from '../media/media.module';
 
 @Module({
-  imports: [SettingsModule, StorageProvidersModule, CirclesModule, EnrichmentModule],
+  imports: [SettingsModule, StorageProvidersModule, CirclesModule, EnrichmentModule, MediaModule],
   controllers: [FaceSettingsController, FaceDetectionController, PeopleController, AdminFaceBackfillController],
   providers: [
     FaceSettingsService,
