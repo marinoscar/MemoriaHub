@@ -18,6 +18,8 @@ export interface MediaFilters {
   sourceDeviceId?: string;
   sourceDeviceName?: string;
   missingGeo?: boolean;
+  missingCapturedAt?: boolean;
+  missingCamera?: boolean;
   noFaces?: boolean;
   /**
    * When true, only return items where archivedAt IS NULL (not archived).
@@ -109,6 +111,18 @@ export function whereMissingGeo(value: boolean): Prisma.MediaItemWhereInput {
   return { takenLat: { not: null }, takenLng: { not: null } };
 }
 
+export function whereMissingCapturedAt(value: boolean): Prisma.MediaItemWhereInput {
+  return value === true ? { capturedAt: null } : { capturedAt: { not: null } };
+}
+
+export function whereMissingCamera(value: boolean): Prisma.MediaItemWhereInput {
+  // "Missing camera info" = no make AND no model.
+  // "Has camera" = at least one present.
+  return value === true
+    ? { cameraMake: null, cameraModel: null }
+    : { OR: [{ cameraMake: { not: null } }, { cameraModel: { not: null } }] };
+}
+
 export function whereNoFaces(value: boolean): Prisma.MediaItemWhereInput {
   return value === true ? { faces: { none: {} } } : {};
 }
@@ -160,6 +174,8 @@ export function buildMediaWhere(
     sourceDeviceId,
     sourceDeviceName,
     missingGeo,
+    missingCapturedAt,
+    missingCamera,
     noFaces,
     excludeArchived,
   } = filters;
@@ -183,6 +199,8 @@ export function buildMediaWhere(
     ...(sourceDeviceName ? whereSourceDeviceName(sourceDeviceName) : {}),
     ...(sourceDeviceId ? whereSourceDeviceId(sourceDeviceId) : {}),
     ...(missingGeo !== undefined ? whereMissingGeo(missingGeo) : {}),
+    ...(missingCapturedAt !== undefined ? whereMissingCapturedAt(missingCapturedAt) : {}),
+    ...(missingCamera !== undefined ? whereMissingCamera(missingCamera) : {}),
     ...(noFaces !== undefined ? whereNoFaces(noFaces) : {}),
     // Only add archivedAt: null when caller explicitly opts in (browse surfaces).
     // Omitting this keeps archived items visible in search by default.

@@ -29,6 +29,8 @@ import {
   whereSourceDeviceId,
   whereSourceDeviceName,
   whereMissingGeo,
+  whereMissingCapturedAt,
+  whereMissingCamera,
   whereNoFaces,
   whereExcludeArchived,
   wherePeople,
@@ -171,6 +173,22 @@ export const SEARCHABLE_FIELDS: SearchableField[] = [
     description:
       'When true, returns only items without GPS coordinates. When false, returns only items that have GPS coordinates.',
     buildWhere: (v) => whereMissingGeo(Boolean(v)),
+  },
+  {
+    key: 'missingCapturedAt',
+    label: 'Missing capture date',
+    type: 'boolean',
+    description:
+      'When true, returns only items with no capture date (missing EXIF DateTimeOriginal) — useful for finding photos whose date was not extracted. When false, returns only items that have a capture date.',
+    buildWhere: (v) => whereMissingCapturedAt(v === true),
+  },
+  {
+    key: 'missingCamera',
+    label: 'Missing camera info',
+    type: 'boolean',
+    description:
+      'When true, returns only items with no camera make or model (missing EXIF camera identification). When false, returns only items that have camera make or model.',
+    buildWhere: (v) => whereMissingCamera(v === true),
   },
   {
     key: 'noFaces',
