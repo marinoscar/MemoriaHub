@@ -15,7 +15,7 @@ import { Box, Text } from 'ink';
 import SelectInput from 'ink-select-input';
 import type { CliConfig } from '../config.js';
 import { dbPath } from '../paths.js';
-import { BOX_BORDER, banner, dim } from './theme.js';
+import { BOX_BORDER, brandColorize, dim } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -73,6 +73,9 @@ const BANNER = [
   '|_|  |_|\\___|_| |_| |_|\\___/|_|  |_|\\__,_|_| |_|\\__,_|_.__/ ',
 ];
 
+// Pre-tinted with the brand palette so the wordmark matches the app logo.
+const BRANDED_BANNER = brandColorize(BANNER);
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -97,8 +100,8 @@ export function HomeMenu({
     <Box flexDirection="column" gap={1}>
       {/* Banner */}
       <Box flexDirection="column">
-        {BANNER.map((line, i) => (
-          <Text key={i}>{banner(line)}</Text>
+        {BRANDED_BANNER.map((line, i) => (
+          <Text key={i}>{line}</Text>
         ))}
         <Text dimColor>  Import and sync photos/videos to your MemoriaHub server</Text>
       </Box>

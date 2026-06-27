@@ -14,6 +14,7 @@ import chalk from 'chalk';
 import ora, { Ora } from 'ora';
 import boxen from 'boxen';
 import Table from 'cli-table3';
+import { brandColorize } from './tui/theme.js';
 
 // ---------------------------------------------------------------------------
 // TTY / color detection
@@ -55,7 +56,7 @@ export function printBanner(version: string): void {
     return;
   }
 
-  const art = BANNER_ART.map((line) => chalk.cyan(line)).join('\n');
+  const art = brandColorize(BANNER_ART).join('\n');
   const versionBadge = chalk.dim(`v${version}`);
   const tagline = chalk.dim(TAGLINE);
 
