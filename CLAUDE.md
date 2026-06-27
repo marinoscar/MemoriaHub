@@ -254,17 +254,17 @@ cd apps/api && npm run prisma:migrate
 
 ### Authentication
 - `GET /api/auth/providers` - List enabled OAuth providers
-- `GET /api/auth/google` - Initiate Google OAuth
-- `GET /api/auth/google/callback` - OAuth callback
+- `GET /api/auth/google` - Initiate Google OAuth; optional `?returnTo=<same-site-path>` query param carries a destination through the OAuth `state` (HMAC-signed; must start with `/`, no `//`, no scheme) — used by the device activation page to land the user on `/activate?code=…` after login
+- `GET /api/auth/google/callback` - OAuth callback; when a valid `returnTo` was carried in `state`, appends it to the post-login redirect: `/auth/callback?token=…&expiresIn=…&returnTo=<encoded-path>`
 - `POST /api/auth/refresh` - Refresh access token
 - `POST /api/auth/logout` - Logout and invalidate session
 - `POST /api/auth/logout-all` - Logout from all devices
 - `GET /api/auth/me` - Get current user
 
 ### Device Authorization (RFC 8628)
-- `POST /api/auth/device/code` - Generate device code (Public)
+- `POST /api/auth/device/code` - Generate device code (Public); optional `clientInfo.returnUri` — deep-link URI (`memoriahub:` or `https:` scheme only, max 512 chars) the activation page redirects to after approval, returning the user to the requesting app (e.g. Android Custom Tab flow)
 - `POST /api/auth/device/token` - Poll for authorization (Public)
-- `GET /api/auth/device/activate` - Get activation info
+- `GET /api/auth/device/activate` - Get activation info; when `?code=` is supplied and `clientInfo.returnUri` was set, the response includes `clientInfo.returnUri` so the page can deep-link back to the app after approval
 - `POST /api/auth/device/authorize` - Approve/deny device
 - `GET /api/auth/device/sessions` - List device sessions
 - `DELETE /api/auth/device/sessions/{id}` - Revoke device session
