@@ -28,7 +28,7 @@ export class FaceBackfillService {
     const mediaItems = await this.prisma.mediaItem.findMany({
       where: {
         circleId,
-        type: MediaType.photo,
+        type: { in: [MediaType.photo, MediaType.video] },
         deletedAt: null,
         ...dateWhere,
         ...(force
@@ -49,13 +49,14 @@ export class FaceBackfillService {
               ],
             }),
       },
-      select: { id: true, circleId: true },
+      select: { id: true, circleId: true, type: true },
     });
 
     let enqueued = 0;
     for (const item of mediaItems) {
+      const jobType = item.type === MediaType.video ? 'video_face_detection' : 'face_detection';
       await this.enrichmentJobService.enqueue({
-        type: 'face_detection',
+        type: jobType,
         mediaItemId: item.id,
         circleId: item.circleId,
         reason: JobReason.backfill,
