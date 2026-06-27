@@ -133,11 +133,16 @@ describe('SearchAgentService', () => {
 
       await collectEvents(gen);
 
+      // runSearch signature: (userId, circleId, permissions, filters, paging?, semanticQuery?)
+      // The agent passes circleId from params (never from model output), paging as undefined,
+      // and semanticQuery extracted from the tool input (undefined when not present).
       expect(mockSearchService.runSearch).toHaveBeenCalledWith(
         'user-test',
-        'circle-from-params', // from params, never from model output
+        'circle-from-params', // from params, never from model output ('model-injected')
         ['circles:read'],
-        expect.any(Object),
+        expect.any(Object), // filters/toolInput
+        undefined,           // paging — agent does not override pagination
+        undefined,           // semanticQuery — not present in this tool input
       );
     });
 

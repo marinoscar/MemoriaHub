@@ -1,5 +1,9 @@
 /**
  * Unit tests for SearchService.
+ *
+ * NOTE: SearchService now injects MediaThumbnailService, which was added in the
+ * search overhaul.  This file was updated to include that mock so that the
+ * NestJS testing module can compile.
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenException } from '@nestjs/common';
@@ -7,6 +11,7 @@ import { SearchService } from './search.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { SemanticSearchService } from './semantic-search.service';
+import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 const CIRCLE_ID = 'circle-search-test';
@@ -24,6 +29,7 @@ function makeDto(overrides: Record<string, unknown> = {}) {
   };
 }
 
+// Raw DB row (no thumbnailUrl — that's what attachThumbnailUrls adds)
 const mockMediaItem = {
   id: 'media-1',
   circleId: CIRCLE_ID,
@@ -39,6 +45,7 @@ const mockMediaItem = {
   mimeType: 'image/jpeg',
   fileSize: 1024,
   storageObjectId: 'obj-1',
+  metadata: null,
   geoCountry: null,
   geoCountryCode: null,
   geoAdmin1: null,
@@ -56,11 +63,15 @@ const mockMediaItem = {
   originalFilename: 'photo.jpg',
 };
 
+// After attachThumbnailUrls — same item plus thumbnailUrl
+const mockMediaItemWithThumb = { ...mockMediaItem, thumbnailUrl: null };
+
 describe('SearchService', () => {
   let service: SearchService;
   let mockPrisma: MockPrismaService;
   let mockCircleMembership: { assertCircleAccess: jest.Mock };
   let mockSemanticSearch: { embedQuery: jest.Mock; knnMediaIds: jest.Mock };
+  let mockMediaThumbnail: { attachThumbnailUrls: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -71,6 +82,12 @@ describe('SearchService', () => {
       embedQuery: jest.fn().mockResolvedValue(null), // default: no embedding
       knnMediaIds: jest.fn().mockResolvedValue([]),
     };
+    // Default: pass items through, adding thumbnailUrl: null
+    mockMediaThumbnail = {
+      attachThumbnailUrls: jest.fn().mockImplementation(async (items: any[]) =>
+        items.map((item) => ({ ...item, thumbnailUrl: null })),
+      ),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -78,6 +95,7 @@ describe('SearchService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CircleMembershipService, useValue: mockCircleMembership },
         { provide: SemanticSearchService, useValue: mockSemanticSearch },
+        { provide: MediaThumbnailService, useValue: mockMediaThumbnail },
       ],
     }).compile();
 
@@ -89,7 +107,6 @@ describe('SearchService', () => {
       mockCircleMembership.assertCircleAccess.mockRejectedValue(
         new ForbiddenException('You are not a member of this circle'),
       );
-      // These won't be reached, but set them so they're not an unrelated failure
       mockPrisma.mediaItem.findMany.mockResolvedValue([]);
       mockPrisma.mediaItem.count.mockResolvedValue(0);
 
@@ -109,7 +126,7 @@ describe('SearchService', () => {
       const result = await service.search(dto as any, USER_ID, []);
 
       expect(result).toEqual({
-        items: [mockMediaItem],
+        items: [mockMediaItemWithThumb],
         meta: {
           page: 1,
           pageSize: 20,
@@ -214,6 +231,77 @@ describe('SearchService', () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // Thumbnail URL attachment — new behavior added in search overhaul
+  // -------------------------------------------------------------------------
+
+  describe('runSearch — thumbnail enrichment via MediaThumbnailService', () => {
+    function setupMember() {
+      mockCircleMembership.assertCircleAccess.mockResolvedValue({
+        role: 'viewer',
+        isSuperAdmin: false,
+      });
+    }
+
+    it('calls attachThumbnailUrls on the filter-only path', async () => {
+      setupMember();
+      mockPrisma.mediaItem.findMany.mockResolvedValue([mockMediaItem] as any);
+      mockPrisma.mediaItem.count.mockResolvedValue(1);
+
+      await service.runSearch(USER_ID, CIRCLE_ID, [], {});
+
+      expect(mockMediaThumbnail.attachThumbnailUrls).toHaveBeenCalledWith([mockMediaItem]);
+    });
+
+    it('items returned by filter-only path have thumbnailUrl field', async () => {
+      setupMember();
+      mockPrisma.mediaItem.findMany.mockResolvedValue([mockMediaItem] as any);
+      mockPrisma.mediaItem.count.mockResolvedValue(1);
+
+      const result = await service.runSearch(USER_ID, CIRCLE_ID, [], {});
+
+      expect(result.items[0]).toHaveProperty('thumbnailUrl');
+    });
+
+    it('thumbnailUrl from attachThumbnailUrls is preserved on items', async () => {
+      setupMember();
+      const SIGNED_URL = 'https://cdn.example.com/thumb.jpg?sig=abc';
+      mockPrisma.mediaItem.findMany.mockResolvedValue([mockMediaItem] as any);
+      mockPrisma.mediaItem.count.mockResolvedValue(1);
+      mockMediaThumbnail.attachThumbnailUrls.mockResolvedValue([
+        { ...mockMediaItem, thumbnailUrl: SIGNED_URL },
+      ]);
+
+      const result = await service.runSearch(USER_ID, CIRCLE_ID, [], {});
+
+      expect(result.items[0].thumbnailUrl).toBe(SIGNED_URL);
+    });
+
+    it('attachThumbnailUrls is called with all raw items from findMany', async () => {
+      setupMember();
+      const item1 = { ...mockMediaItem, id: 'media-1' };
+      const item2 = { ...mockMediaItem, id: 'media-2' };
+      mockPrisma.mediaItem.findMany.mockResolvedValue([item1, item2] as any);
+      mockPrisma.mediaItem.count.mockResolvedValue(2);
+
+      await service.runSearch(USER_ID, CIRCLE_ID, [], {});
+
+      expect(mockMediaThumbnail.attachThumbnailUrls).toHaveBeenCalledWith([item1, item2]);
+    });
+
+    it('zero items → attachThumbnailUrls called with empty array, result items is []', async () => {
+      setupMember();
+      mockPrisma.mediaItem.findMany.mockResolvedValue([] as any);
+      mockPrisma.mediaItem.count.mockResolvedValue(0);
+      mockMediaThumbnail.attachThumbnailUrls.mockResolvedValue([]);
+
+      const result = await service.runSearch(USER_ID, CIRCLE_ID, [], {});
+
+      expect(mockMediaThumbnail.attachThumbnailUrls).toHaveBeenCalledWith([]);
+      expect(result.items).toHaveLength(0);
+    });
+  });
+
   describe('getFields', () => {
     it('returns an array with known field keys', () => {
       const fields = service.getFields();
@@ -272,10 +360,8 @@ describe('SearchService', () => {
         USER_ID, CIRCLE_ID, [], {}, { page: 1, pageSize: 20 }, 'find beach photos',
       );
 
-      // Falls back to normal path: findMany and count are called
       expect(mockPrisma.mediaItem.findMany).toHaveBeenCalled();
       expect(mockPrisma.mediaItem.count).toHaveBeenCalled();
-      // knnMediaIds must NOT be called
       expect(mockSemanticSearch.knnMediaIds).not.toHaveBeenCalled();
       expect(result.items).toHaveLength(1);
     });
@@ -313,7 +399,6 @@ describe('SearchService', () => {
         items: [],
         meta: { page: 1, pageSize: 20, totalItems: 0, totalPages: 0 },
       });
-      // findMany must NOT be called (early return)
       expect(mockPrisma.mediaItem.findMany).not.toHaveBeenCalled();
     });
 
@@ -391,7 +476,6 @@ describe('SearchService', () => {
 
       const result = await service.runSearch(USER_ID, CIRCLE_ID, [], {});
 
-      // embedQuery must NOT have been called
       expect(mockSemanticSearch.embedQuery).not.toHaveBeenCalled();
       expect(result.meta.totalItems).toBe(1);
     });
@@ -404,6 +488,21 @@ describe('SearchService', () => {
       await service.runSearch(USER_ID, CIRCLE_ID, [], {}, { page: 1, pageSize: 20 }, '');
 
       expect(mockSemanticSearch.embedQuery).not.toHaveBeenCalled();
+    });
+
+    it('semantic path also calls attachThumbnailUrls on the page items', async () => {
+      setupMemberAccess();
+      mockSemanticSearch.embedQuery.mockResolvedValue(vectorResult);
+      mockSemanticSearch.knnMediaIds.mockResolvedValue([
+        { id: 'media-1', distance: 0.1 },
+      ]);
+      mockPrisma.mediaItem.findMany.mockResolvedValue([mockMediaItem] as any);
+
+      await service.runSearch(
+        USER_ID, CIRCLE_ID, [], {}, { page: 1, pageSize: 20 }, 'beach',
+      );
+
+      expect(mockMediaThumbnail.attachThumbnailUrls).toHaveBeenCalled();
     });
   });
 });

@@ -18,6 +18,40 @@ import { buildWhereFromFields, SEARCHABLE_FIELDS } from './searchable-fields.reg
 const CIRCLE_ID = 'circle-abc-123';
 
 // ---------------------------------------------------------------------------
+// Helpers for AND-composition assertions
+//
+// Both buildMediaWhere and buildWhereFromFields now collect every filter
+// contribution into a shared `where.AND = [...]` array so that two filters
+// that each emit a top-level OR key don't overwrite each other.
+//
+// These helpers let the existing single-filter tests target the contribution
+// without rewriting every assertion.
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the first entry in `where.AND` that owns the given top-level key.
+ * Falls back to `{}` when the key is absent so callers get a clean miss.
+ */
+function inAnd(where: any, key: string): any {
+  const and = where.AND as any[] | undefined;
+  return and?.find((c: any) => key in c) ?? {};
+}
+
+/**
+ * Returns the first entry in `where.AND` whose `OR` array contains an
+ * element with the given top-level key.  Used for OR-emitting filter helpers
+ * (country, missingCamera:false) where the entry itself is `{ OR: [...] }`.
+ */
+function orInAnd(where: any, key: string): any {
+  const and = where.AND as any[] | undefined;
+  return (
+    and?.find(
+      (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => key in e),
+    ) ?? {}
+  );
+}
+
+// ---------------------------------------------------------------------------
 // buildMediaWhere
 // ---------------------------------------------------------------------------
 describe('buildMediaWhere', () => {
@@ -39,9 +73,9 @@ describe('buildMediaWhere', () => {
   describe('tag filter', () => {
     it('produces mediaTags.some.tag.name.equals for tag filter', () => {
       const where = buildMediaWhere(CIRCLE_ID, { tag: 'vacation' });
-      expect(where).toMatchObject({
-        circleId: CIRCLE_ID,
-        deletedAt: null,
+      expect(where).toMatchObject({ circleId: CIRCLE_ID, deletedAt: null });
+      // AND-composition: the tag clause lives inside where.AND[0]
+      expect(inAnd(where, 'mediaTags')).toMatchObject({
         mediaTags: {
           some: {
             tag: {
@@ -59,7 +93,8 @@ describe('buildMediaWhere', () => {
     it('produces OR clause covering geoCountry and geoCountryCode', () => {
       const where = buildMediaWhere(CIRCLE_ID, { country: 'CR' });
       expect(where).toMatchObject({ circleId: CIRCLE_ID });
-      const or = (where as any).OR as unknown[];
+      // AND-composition: the OR clause lives inside where.AND[0]
+      const or = orInAnd(where, 'geoCountry').OR as unknown[];
       expect(Array.isArray(or)).toBe(true);
       expect(or).toEqual(
         expect.arrayContaining([
@@ -73,7 +108,8 @@ describe('buildMediaWhere', () => {
   describe('locality filter', () => {
     it('produces geoLocality contains clause', () => {
       const where = buildMediaWhere(CIRCLE_ID, { locality: 'San José' });
-      expect(where).toMatchObject({
+      // AND-composition: geoLocality lives inside where.AND[0]
+      expect(inAnd(where, 'geoLocality')).toMatchObject({
         geoLocality: { contains: 'San José', mode: 'insensitive' },
       });
     });
@@ -87,7 +123,8 @@ describe('buildMediaWhere', () => {
         capturedAtFrom: from,
         capturedAtTo: to,
       });
-      expect(where).toMatchObject({
+      // AND-composition: capturedAt lives inside where.AND[0]
+      expect(inAnd(where, 'capturedAt')).toMatchObject({
         capturedAt: { gte: from, lte: to },
       });
     });
@@ -95,39 +132,43 @@ describe('buildMediaWhere', () => {
     it('produces only gte when only from is provided', () => {
       const from = new Date('2023-06-01');
       const where = buildMediaWhere(CIRCLE_ID, { capturedAtFrom: from });
-      expect((where as any).capturedAt).toMatchObject({ gte: from });
-      expect((where as any).capturedAt.lte).toBeUndefined();
+      const clause = inAnd(where, 'capturedAt');
+      expect(clause.capturedAt).toMatchObject({ gte: from });
+      expect(clause.capturedAt.lte).toBeUndefined();
     });
 
     it('produces only lte when only to is provided', () => {
       const to = new Date('2023-06-01');
       const where = buildMediaWhere(CIRCLE_ID, { capturedAtTo: to });
-      expect((where as any).capturedAt).toMatchObject({ lte: to });
-      expect((where as any).capturedAt.gte).toBeUndefined();
+      const clause = inAnd(where, 'capturedAt');
+      expect(clause.capturedAt).toMatchObject({ lte: to });
+      expect(clause.capturedAt.gte).toBeUndefined();
     });
   });
 
   describe('type filter', () => {
     it('sets type to the provided value', () => {
       const where = buildMediaWhere(CIRCLE_ID, { type: 'photo' });
-      expect((where as any).type).toBe('photo');
+      // AND-composition: type lives inside where.AND[0]
+      expect(inAnd(where, 'type').type).toBe('photo');
     });
 
     it('sets type to video', () => {
       const where = buildMediaWhere(CIRCLE_ID, { type: 'video' });
-      expect((where as any).type).toBe('video');
+      expect(inAnd(where, 'type').type).toBe('video');
     });
   });
 
   describe('favorite filter', () => {
     it('sets favorite:true when true', () => {
       const where = buildMediaWhere(CIRCLE_ID, { favorite: true });
-      expect((where as any).favorite).toBe(true);
+      // AND-composition: favorite lives inside where.AND[0]
+      expect(inAnd(where, 'favorite').favorite).toBe(true);
     });
 
     it('sets favorite:false when false', () => {
       const where = buildMediaWhere(CIRCLE_ID, { favorite: false });
-      expect((where as any).favorite).toBe(false);
+      expect(inAnd(where, 'favorite').favorite).toBe(false);
     });
   });
 
@@ -143,18 +184,20 @@ describe('buildMediaWhere', () => {
       };
       const where = buildMediaWhere(CIRCLE_ID, filters);
       expect(where).toMatchObject({ circleId: CIRCLE_ID, deletedAt: null });
-      expect((where as any).type).toBe('photo');
-      expect((where as any).favorite).toBe(true);
-      expect((where as any).mediaTags).toBeDefined();
-      expect(Array.isArray((where as any).OR)).toBe(true);
-      expect((where as any).capturedAt?.gte).toEqual(from);
+      // AND-composition: every filter contribution lives in where.AND[]
+      expect(inAnd(where, 'type').type).toBe('photo');
+      expect(inAnd(where, 'favorite').favorite).toBe(true);
+      expect(inAnd(where, 'mediaTags').mediaTags).toBeDefined();
+      expect(Array.isArray(orInAnd(where, 'geoCountry').OR)).toBe(true);
+      expect(inAnd(where, 'capturedAt').capturedAt?.gte).toEqual(from);
     });
   });
 
   describe('noFaces filter', () => {
     it('produces faces.none clause when noFaces is true', () => {
       const where = buildMediaWhere(CIRCLE_ID, { noFaces: true });
-      expect((where as any).faces).toEqual({ none: {} });
+      // AND-composition: faces clause lives inside where.AND[0]
+      expect(inAnd(where, 'faces').faces).toEqual({ none: {} });
     });
 
     it('adds nothing extra when noFaces is false', () => {
@@ -171,12 +214,13 @@ describe('buildMediaWhere', () => {
   describe('missingCapturedAt filter', () => {
     it('produces capturedAt:null when missingCapturedAt is true', () => {
       const where = buildMediaWhere(CIRCLE_ID, { missingCapturedAt: true });
-      expect((where as any).capturedAt).toBeNull();
+      // AND-composition: capturedAt lives inside where.AND[0]
+      expect(inAnd(where, 'capturedAt').capturedAt).toBeNull();
     });
 
     it('produces capturedAt:{not:null} when missingCapturedAt is false', () => {
       const where = buildMediaWhere(CIRCLE_ID, { missingCapturedAt: false });
-      expect((where as any).capturedAt).toEqual({ not: null });
+      expect(inAnd(where, 'capturedAt').capturedAt).toEqual({ not: null });
     });
 
     it('adds no capturedAt key when missingCapturedAt is omitted', () => {
@@ -189,13 +233,16 @@ describe('buildMediaWhere', () => {
   describe('missingCamera filter', () => {
     it('produces {cameraMake:null, cameraModel:null} when missingCamera is true', () => {
       const where = buildMediaWhere(CIRCLE_ID, { missingCamera: true });
-      expect((where as any).cameraMake).toBeNull();
-      expect((where as any).cameraModel).toBeNull();
+      // AND-composition: cameraMake/cameraModel live inside where.AND[0]
+      const clause = inAnd(where, 'cameraMake');
+      expect(clause.cameraMake).toBeNull();
+      expect(clause.cameraModel).toBeNull();
     });
 
     it('produces OR clause [{cameraMake:{not:null}}, {cameraModel:{not:null}}] when missingCamera is false', () => {
       const where = buildMediaWhere(CIRCLE_ID, { missingCamera: false });
-      const or = (where as any).OR as unknown[];
+      // AND-composition: the OR clause lives inside where.AND[0]
+      const or = orInAnd(where, 'cameraMake').OR as unknown[];
       expect(Array.isArray(or)).toBe(true);
       expect(or).toEqual([{ cameraMake: { not: null } }, { cameraModel: { not: null } }]);
     });
@@ -269,29 +316,31 @@ describe('buildWhereFromFields', () => {
 
   it('applies tag filter via registry', () => {
     const where = buildWhereFromFields(CIRCLE_ID, { tag: 'sunset' });
-    expect(where).toMatchObject({
+    // AND-composition: contribution lives in where.AND[0]
+    expect(inAnd(where, 'mediaTags')).toMatchObject({
       mediaTags: { some: { tag: { name: { equals: 'sunset', mode: 'insensitive' } } } },
     });
   });
 
   it('applies country filter via registry', () => {
     const where = buildWhereFromFields(CIRCLE_ID, { country: 'CR' });
-    expect(Array.isArray((where as any).OR)).toBe(true);
+    // AND-composition: the OR clause lives inside where.AND[0]
+    expect(Array.isArray(orInAnd(where, 'geoCountry').OR)).toBe(true);
   });
 
   it('applies locality filter via registry', () => {
     const where = buildWhereFromFields(CIRCLE_ID, { locality: 'San José' });
-    expect((where as any).geoLocality).toBeDefined();
+    expect(inAnd(where, 'geoLocality').geoLocality).toBeDefined();
   });
 
   it('applies type filter via registry', () => {
     const where = buildWhereFromFields(CIRCLE_ID, { type: 'video' });
-    expect((where as any).type).toBe('video');
+    expect(inAnd(where, 'type').type).toBe('video');
   });
 
   it('applies favorite filter via registry', () => {
     const where = buildWhereFromFields(CIRCLE_ID, { favorite: true });
-    expect((where as any).favorite).toBe(true);
+    expect(inAnd(where, 'favorite').favorite).toBe(true);
   });
 
   it('skips null/undefined filter values', () => {
@@ -302,23 +351,27 @@ describe('buildWhereFromFields', () => {
 
   it('applies missingCapturedAt:true filter via registry', () => {
     const where = buildWhereFromFields(CIRCLE_ID, { missingCapturedAt: true });
-    expect((where as any).capturedAt).toBeNull();
+    // AND-composition: capturedAt lives inside where.AND[0]
+    expect(inAnd(where, 'capturedAt').capturedAt).toBeNull();
   });
 
   it('applies missingCapturedAt:false filter via registry', () => {
     const where = buildWhereFromFields(CIRCLE_ID, { missingCapturedAt: false });
-    expect((where as any).capturedAt).toEqual({ not: null });
+    expect(inAnd(where, 'capturedAt').capturedAt).toEqual({ not: null });
   });
 
   it('applies missingCamera:true filter via registry', () => {
     const where = buildWhereFromFields(CIRCLE_ID, { missingCamera: true });
-    expect((where as any).cameraMake).toBeNull();
-    expect((where as any).cameraModel).toBeNull();
+    // AND-composition: cameraMake/cameraModel live inside where.AND[0]
+    const clause = inAnd(where, 'cameraMake');
+    expect(clause.cameraMake).toBeNull();
+    expect(clause.cameraModel).toBeNull();
   });
 
   it('applies missingCamera:false filter via registry (OR clause)', () => {
     const where = buildWhereFromFields(CIRCLE_ID, { missingCamera: false });
-    const or = (where as any).OR as unknown[];
+    // AND-composition: the OR clause lives inside where.AND[0]
+    const or = orInAnd(where, 'cameraMake').OR as unknown[];
     expect(Array.isArray(or)).toBe(true);
     expect(or).toEqual([{ cameraMake: { not: null } }, { cameraModel: { not: null } }]);
   });
@@ -410,6 +463,245 @@ describe('buildWhereFromFields', () => {
       expect(peopleField.type).toBe('person-set');
       expect(peopleField.optionsSource).toBe('people');
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// whereNear — bounding-box radius filter
+// ---------------------------------------------------------------------------
+import { whereNear } from './media-where.builder';
+
+describe('whereNear', () => {
+  // Equator: cos(0) = 1, so lngDelta === latDelta
+  it('latDelta equals radiusKm / 111.32', () => {
+    const result = whereNear(0, 0, 100) as any;
+    const expectedDelta = 100 / 111.32;
+    expect(result.takenLat.gte).toBeCloseTo(-expectedDelta, 4);
+    expect(result.takenLat.lte).toBeCloseTo(expectedDelta, 4);
+  });
+
+  it('at the equator lngDelta equals latDelta (cos(0)=1)', () => {
+    const result = whereNear(0, 0, 100) as any;
+    const delta = 100 / 111.32;
+    expect(result.takenLng.lte).toBeCloseTo(delta, 4);
+    expect(result.takenLng.gte).toBeCloseTo(-delta, 4);
+  });
+
+  // San José, Costa Rica ≈ (9.93°, -84.09°), 50 km radius
+  it('returns correct gte/lte bounds for typical coordinates (San José, 50 km)', () => {
+    const lat = 9.93;
+    const lng = -84.09;
+    const radiusKm = 50;
+    const result = whereNear(lat, lng, radiusKm) as any;
+
+    const latDelta = radiusKm / 111.32;
+    const cosLat = Math.cos((lat * Math.PI) / 180);
+    const lngDelta = radiusKm / (111.32 * cosLat);
+
+    expect(result.takenLat.gte).toBeCloseTo(lat - latDelta, 4);
+    expect(result.takenLat.lte).toBeCloseTo(lat + latDelta, 4);
+    expect(result.takenLng.gte).toBeCloseTo(lng - lngDelta, 4);
+    expect(result.takenLng.lte).toBeCloseTo(lng + lngDelta, 4);
+  });
+
+  it('lngDelta is larger than latDelta for latitudes closer to poles (higher cos adjustment)', () => {
+    // At lat=60°, cos(60°)=0.5, so lngDelta = 2 × latDelta
+    const lat = 60;
+    const result = whereNear(lat, 0, 100) as any;
+    const latDelta = 100 / 111.32;
+    const cosLat = Math.cos((lat * Math.PI) / 180); // ~0.5
+    const lngDelta = 100 / (111.32 * cosLat); // ~2 × latDelta
+
+    // Compare the half-widths (deltas), not the absolute gte/lte values
+    const computedLatDelta = result.takenLat.lte - lat;
+    const computedLngDelta = result.takenLng.lte - 0; // lng centered at 0
+
+    expect(computedLatDelta).toBeCloseTo(latDelta, 3);
+    expect(computedLngDelta).toBeCloseTo(lngDelta, 3);
+
+    // At 60° lat, lngDelta ≈ 2× latDelta
+    expect(computedLngDelta).toBeGreaterThan(computedLatDelta);
+  });
+
+  it('clamps lngDelta to 180 when cosLat approaches 0 (near-pole lat=89.9)', () => {
+    const result = whereNear(89.9, 0, 50) as any;
+    // Without clamping, radiusKm / (111.32 * cos(89.9°)) would be astronomical
+    const lngMin = result.takenLng.gte;
+    const lngMax = result.takenLng.lte;
+    const lngDelta = (lngMax - lngMin) / 2;
+    expect(lngDelta).toBeLessThanOrEqual(180);
+    // The gte/lte should be symmetric: 0 - 180 and 0 + 180
+    expect(lngMin).toBeCloseTo(-180, 1);
+    expect(lngMax).toBeCloseTo(180, 1);
+  });
+
+  it('returned object shape has takenLat and takenLng with gte and lte', () => {
+    const result = whereNear(20, 40, 10) as any;
+    expect(result).toHaveProperty('takenLat.gte');
+    expect(result).toHaveProperty('takenLat.lte');
+    expect(result).toHaveProperty('takenLng.gte');
+    expect(result).toHaveProperty('takenLng.lte');
+  });
+
+  it('lte > gte for both lat and lng', () => {
+    const result = whereNear(20, 40, 25) as any;
+    expect(result.takenLat.lte).toBeGreaterThan(result.takenLat.gte);
+    expect(result.takenLng.lte).toBeGreaterThan(result.takenLng.gte);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AND-composition survival: buildWhereFromFields
+// ---------------------------------------------------------------------------
+
+describe('buildWhereFromFields — AND-composition collision survival', () => {
+  it('two OR-emitting fields produce AND array with both entries', () => {
+    // country emits { OR: [geoCountry, geoCountryCode] }
+    // missingCamera:false emits { OR: [cameraMake not null, cameraModel not null] }
+    // Old Object.assign would collapse these — the AND array prevents that
+    const where = buildWhereFromFields(CIRCLE_ID, { country: 'Costa Rica', missingCamera: false });
+
+    const and = (where as any).AND as any[];
+    expect(Array.isArray(and)).toBe(true);
+    expect(and).toHaveLength(2);
+
+    // Country clause: OR with geoCountry and geoCountryCode
+    const countryClause = and.find(
+      (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => 'geoCountry' in e),
+    );
+    expect(countryClause).toBeDefined();
+    expect(countryClause.OR).toHaveLength(2);
+
+    // missingCamera:false clause: OR with cameraMake/cameraModel not-null checks
+    const cameraClause = and.find(
+      (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => 'cameraMake' in e),
+    );
+    expect(cameraClause).toBeDefined();
+    expect(cameraClause.OR).toHaveLength(2);
+  });
+
+  it('neither clause overwrites the other (both OR arrays have correct lengths)', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { country: 'Costa Rica', missingCamera: false });
+    const and = (where as any).AND as any[];
+
+    // country OR must have exactly 2 entries
+    const countryClause = and.find(
+      (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => 'geoCountry' in e),
+    );
+    expect(countryClause.OR).toHaveLength(2);
+
+    // camera OR must have exactly 2 entries
+    const cameraClause = and.find(
+      (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => 'cameraMake' in e),
+    );
+    expect(cameraClause.OR).toHaveLength(2);
+  });
+
+  it('two geo OR-emitting filters (country + location) both survive', () => {
+    // country: { OR: [geoCountry, geoCountryCode] }        — 2 entries
+    // location: { OR: [geoCountry, geoCountryCode, geoAdmin1, geoLocality, geoPlaceName] } — 5 entries
+    const where = buildWhereFromFields(CIRCLE_ID, { country: 'CR', location: 'San José' });
+    const and = (where as any).AND as any[];
+    expect(Array.isArray(and)).toBe(true);
+    expect(and).toHaveLength(2);
+
+    const countryClause = and.find(
+      (c: any) =>
+        Array.isArray(c.OR) &&
+        c.OR.length === 2 &&
+        c.OR.some((e: any) => 'geoCountry' in e) &&
+        c.OR.some((e: any) => 'geoCountryCode' in e),
+    );
+    expect(countryClause).toBeDefined();
+
+    const locationClause = and.find(
+      (c: any) => Array.isArray(c.OR) && c.OR.length === 5,
+    );
+    expect(locationClause).toBeDefined();
+  });
+
+  it('single filter still works — AND array has exactly one entry', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { country: 'CR' });
+    const and = (where as any).AND as any[];
+    expect(Array.isArray(and)).toBe(true);
+    expect(and).toHaveLength(1);
+    expect((and[0] as any).OR).toBeDefined();
+  });
+
+  it('empty filters object has no AND key (baseline only)', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, {});
+    expect((where as any).AND).toBeUndefined();
+    expect(Object.keys(where).sort()).toEqual(['circleId', 'deletedAt'].sort());
+  });
+
+  it('baseline circleId + deletedAt are always present alongside AND', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { country: 'CR', location: 'San José' });
+    expect(where).toMatchObject({ circleId: CIRCLE_ID, deletedAt: null });
+  });
+
+  it('null/undefined filter values are skipped (no empty AND entries)', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, {
+      country: null as any,
+      location: undefined as any,
+    });
+    expect((where as any).AND).toBeUndefined();
+    expect(Object.keys(where).sort()).toEqual(['circleId', 'deletedAt'].sort());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AND-composition survival: buildMediaWhere
+// ---------------------------------------------------------------------------
+
+describe('buildMediaWhere — AND-composition collision survival', () => {
+  it('country + location both survive in AND array', () => {
+    const where = buildMediaWhere(CIRCLE_ID, { country: 'CR', location: 'San José' });
+    const and = (where as any).AND as any[];
+    expect(Array.isArray(and)).toBe(true);
+
+    const countryClause = and.find(
+      (c: any) =>
+        Array.isArray(c.OR) &&
+        c.OR.length === 2 &&
+        c.OR.some((e: any) => 'geoCountry' in e),
+    );
+    expect(countryClause).toBeDefined();
+
+    const locationClause = and.find(
+      (c: any) => Array.isArray(c.OR) && c.OR.length === 5,
+    );
+    expect(locationClause).toBeDefined();
+  });
+
+  it('country + missingCamera:false produce AND array with exactly two entries', () => {
+    const where = buildMediaWhere(CIRCLE_ID, { country: 'CR', missingCamera: false });
+    const and = (where as any).AND as any[];
+    expect(Array.isArray(and)).toBe(true);
+    expect(and).toHaveLength(2);
+  });
+
+  it('empty filters object has no AND key', () => {
+    const where = buildMediaWhere(CIRCLE_ID, {});
+    expect((where as any).AND).toBeUndefined();
+    expect(Object.keys(where).sort()).toEqual(['circleId', 'deletedAt'].sort());
+  });
+
+  it('single filter goes into AND[0]', () => {
+    const where = buildMediaWhere(CIRCLE_ID, { tag: 'beach' });
+    const and = (where as any).AND as any[];
+    expect(Array.isArray(and)).toBe(true);
+    expect(and).toHaveLength(1);
+    expect((and[0] as any).mediaTags).toBeDefined();
+  });
+
+  it('three filters produce AND array of length 3', () => {
+    const where = buildMediaWhere(CIRCLE_ID, {
+      country: 'CR',
+      location: 'San José',
+      favorite: true,
+    });
+    const and = (where as any).AND as any[];
+    expect(and).toHaveLength(3);
   });
 });
 
