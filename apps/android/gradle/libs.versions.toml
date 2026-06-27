@@ -1,16 +1,17 @@
 [versions]
 agp = "9.2.1"
 kotlin = "2.2.10"
-ksp = "2.3.2"
+ksp = "2.2.10-2.0.2"
 coreKtx = "1.15.0"
 lifecycle = "2.8.7"
 activityCompose = "1.9.3"
 composeBom = "2024.12.01"
 navigationCompose = "2.8.5"
-hilt = "2.54"
+hilt = "2.60"
 hiltNavigationCompose = "1.2.0"
 androidxHilt = "1.2.0"
-room = "2.6.1"
+room = "2.8.4"
+errorProneAnnotations = "2.50.0"
 workManager = "2.10.0"
 retrofit = "2.11.0"
 okhttp = "4.12.0"
@@ -46,6 +47,7 @@ hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", v
 androidx-hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hiltNavigationCompose" }
 androidx-hilt-work = { group = "androidx.hilt", name = "hilt-work", version.ref = "androidxHilt" }
 androidx-hilt-compiler = { group = "androidx.hilt", name = "hilt-compiler", version.ref = "androidxHilt" }
+errorprone-annotations = { group = "com.google.errorprone", name = "error_prone_annotations", version.ref = "errorProneAnnotations" }
 
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }

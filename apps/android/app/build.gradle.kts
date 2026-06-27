@@ -83,6 +83,8 @@ dependencies {
     // DI
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+    // Hilt-generated code references @CanIgnoreReturnValue; no longer pulled in transitively
+    compileOnly(libs.errorprone.annotations)
     implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.androidx.hilt.work)
     ksp(libs.androidx.hilt.compiler)
