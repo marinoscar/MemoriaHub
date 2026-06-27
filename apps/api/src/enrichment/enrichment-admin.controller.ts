@@ -45,6 +45,7 @@ const listJobsQuerySchema = z.object({
     .string()
     .optional()
     .transform((v) => (v === 'true' ? true : undefined)),
+  processedWithin: z.enum(['4h', '24h', '7d', '30d', 'all']).optional(),
 });
 
 export class ListJobsQueryDto extends createZodDto(listJobsQuerySchema) {}
@@ -142,6 +143,14 @@ export class EnrichmentAdminController {
       'When "true", return only pending jobs currently deferred via backoff (scheduledFor > now). ' +
       'Forces status=pending; the status filter is ignored when this param is set.',
   })
+  @ApiQuery({
+    name: 'processedWithin',
+    required: false,
+    enum: ['4h', '24h', '7d', '30d', 'all'],
+    description:
+      'Filter jobs by activity time: COALESCE(finishedAt, createdAt) >= now - window. ' +
+      '"all" (or omitted) applies no time filter.',
+  })
   @ApiResponse({ status: 200, description: 'Paginated list of enrichment jobs' })
   async listJobs(@Query() query: ListJobsQueryDto) {
     return this.adminService.listJobs({
@@ -150,6 +159,7 @@ export class EnrichmentAdminController {
       page: query.page,
       pageSize: query.pageSize,
       scheduled: query.scheduled,
+      processedWithin: query.processedWithin,
     });
   }
 

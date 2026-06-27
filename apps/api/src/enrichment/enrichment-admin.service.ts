@@ -70,6 +70,8 @@ export interface JobListResult {
   };
 }
 
+export type ProcessedWithinWindow = '4h' | '24h' | '7d' | '30d' | 'all';
+
 export interface ListJobsFilter {
   status?: JobStatus;
   type?: string;
@@ -77,6 +79,11 @@ export interface ListJobsFilter {
   pageSize: number;
   /** When true, restrict to pending jobs with scheduledFor > now (backoff/deferred). */
   scheduled?: boolean;
+  /**
+   * Filter by activity time: COALESCE(finishedAt, createdAt) >= cutoff.
+   * When omitted or 'all', no time filter is applied.
+   */
+  processedWithin?: ProcessedWithinWindow;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,24 +174,59 @@ export class EnrichmentAdminService {
   }
 
   // -------------------------------------------------------------------------
+  // Activity-time window helper
+  // -------------------------------------------------------------------------
+
+  /**
+   * Maps a processedWithin window string to the cutoff Date for the query.
+   * Returns null when no filter should be applied ('all' or undefined).
+   */
+  private windowCutoff(window: ProcessedWithinWindow | undefined): Date | null {
+    if (!window || window === 'all') return null;
+    const msMap: Record<Exclude<ProcessedWithinWindow, 'all'>, number> = {
+      '4h':  4  * 3_600_000,
+      '24h': 24 * 3_600_000,
+      '7d':  7  * 86_400_000,
+      '30d': 30 * 86_400_000,
+    };
+    return new Date(Date.now() - msMap[window]);
+  }
+
+  // -------------------------------------------------------------------------
   // listJobs
   // -------------------------------------------------------------------------
 
   async listJobs(filter: ListJobsFilter): Promise<JobListResult> {
-    const { status, type, page, pageSize, scheduled } = filter;
+    const { status, type, page, pageSize, scheduled, processedWithin } = filter;
     const skip = (page - 1) * pageSize;
+
+    const cutoff = this.windowCutoff(processedWithin);
+
+    // Build the optional time-window OR clause:
+    // COALESCE(finishedAt, createdAt) >= cutoff
+    const timeFilter: Prisma.EnrichmentJobWhereInput | undefined = cutoff
+      ? {
+          OR: [
+            { finishedAt: { gte: cutoff } },
+            { finishedAt: null, createdAt: { gte: cutoff } },
+          ],
+        }
+      : undefined;
 
     // When scheduled=true, force status=pending and require scheduledFor > now.
     // Otherwise compose status/type filters as-is.
+    // In both branches, spread timeFilter to AND with the base where clause.
     const where: Prisma.EnrichmentJobWhereInput = scheduled === true
       ? {
           status: JobStatus.pending,
           scheduledFor: { gt: new Date() },
           ...(type !== undefined ? { type } : {}),
+          ...timeFilter,
         }
       : {
           ...(status !== undefined ? { status } : {}),
           ...(type !== undefined ? { type } : {}),
+          ...timeFilter,
         };
 
     const [items, totalItems] = await Promise.all([
