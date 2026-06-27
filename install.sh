@@ -102,6 +102,21 @@ APP_DIR="$MEMORIAHUB_HOME/app"
 BIN_SHIM="$MEMORIAHUB_BIN_DIR/memoriahub"
 
 # ---------------------------------------------------------------------------
+# Read the "version" field from a package.json using node (a hard dependency).
+# Falls back to a grep/sed parse if node is unavailable for any reason.
+# ---------------------------------------------------------------------------
+read_pkg_version() {
+  local pkg_file="$1"
+  [[ -f "$pkg_file" ]] || { printf 'unknown'; return; }
+  if command -v node &>/dev/null; then
+    node -p "require('$pkg_file').version" 2>/dev/null && return
+  fi
+  grep -m1 '"version"' "$pkg_file" 2>/dev/null \
+    | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' \
+    || printf 'unknown'
+}
+
+# ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
 ACTION="install"
@@ -193,9 +208,13 @@ else
 fi
 printf '\n'
 
-# Detect update vs fresh install
+# Detect update vs fresh install, and capture the currently-installed version
+# (if any) so we can show an old → new transition at the end.
+PREV_VERSION=""
 if [[ -d "$APP_DIR" ]]; then
+  PREV_VERSION="$(read_pkg_version "$APP_DIR/package.json")"
   info "Updating existing installation at $APP_DIR"
+  [[ -n "$PREV_VERSION" && "$PREV_VERSION" != "unknown" ]] && dim "Currently installed: v$PREV_VERSION"
 else
   info "Installing MemoriaHub CLI to $APP_DIR"
 fi
@@ -204,6 +223,11 @@ fi
 # Step 1: Dependency checks
 # ---------------------------------------------------------------------------
 step "Checking dependencies"
+
+# Report platform so native-module (better-sqlite3) issues are easier to triage.
+UNAME_S="$(uname -s 2>/dev/null || echo unknown)"
+UNAME_M="$(uname -m 2>/dev/null || echo unknown)"
+info "Platform  $(_c $DIM "${UNAME_S} ${UNAME_M}")"
 
 check_tool() {
   local name="$1"
@@ -256,6 +280,20 @@ if ! command -v cc &>/dev/null && ! command -v gcc &>/dev/null && ! command -v c
   dim "  Or force source build: npm_config_build_from_source=true bash install.sh"
 fi
 
+# Warn (don't fail) if the install target looks low on free space. The CLI plus
+# its node_modules (better-sqlite3, ink, react, …) needs roughly 150 MB.
+if command -v df &>/dev/null; then
+  avail_kb="$(df -Pk "$MEMORIAHUB_HOME" 2>/dev/null || df -Pk "$HOME" 2>/dev/null)"
+  avail_kb="$(printf '%s\n' "$avail_kb" | awk 'NR==2 {print $4}')"
+  if [[ -n "${avail_kb:-}" && "$avail_kb" =~ ^[0-9]+$ ]]; then
+    if (( avail_kb < 204800 )); then
+      warn "Low disk space at install target ($(( avail_kb / 1024 )) MB free; ~150 MB needed)"
+    else
+      ok "Disk space  $(_c $DIM "$(( avail_kb / 1024 )) MB free")"
+    fi
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # Step 2: Get source (clone or use local)
 # ---------------------------------------------------------------------------
@@ -298,6 +336,23 @@ else
     exit 1
   }
   ok "Cloned repository"
+fi
+
+# ---------------------------------------------------------------------------
+# Announce the version we are about to install (read from the source manifest),
+# and classify the transition relative to any currently-installed version.
+# ---------------------------------------------------------------------------
+SRC_VERSION="$(read_pkg_version "$TMP_DIR/apps/cli/package.json")"
+if [[ -n "$SRC_VERSION" && "$SRC_VERSION" != "unknown" ]]; then
+  if [[ -z "$PREV_VERSION" || "$PREV_VERSION" == "unknown" ]]; then
+    ok "Installing MemoriaHub CLI $(_c $BOLD "v$SRC_VERSION")"
+  elif [[ "$PREV_VERSION" == "$SRC_VERSION" ]]; then
+    ok "Reinstalling MemoriaHub CLI $(_c $BOLD "v$SRC_VERSION") (same version)"
+  else
+    ok "Updating MemoriaHub CLI $(_c $BOLD "v$PREV_VERSION") → $(_c $BOLD "v$SRC_VERSION")"
+  fi
+else
+  warn "Could not determine the version from the source manifest"
 fi
 
 # ---------------------------------------------------------------------------
@@ -424,8 +479,18 @@ fi
 # ---------------------------------------------------------------------------
 step "Verifying installation"
 
-INSTALLED_VERSION="$("$BIN_SHIM" --version 2>/dev/null || echo "unknown")"
-ok "Installed version: $INSTALLED_VERSION"
+INSTALLED_VERSION="$("$BIN_SHIM" --version 2>/dev/null | head -1 || echo "unknown")"
+if [[ "$INSTALLED_VERSION" == "unknown" || -z "$INSTALLED_VERSION" ]]; then
+  err "Installed binary did not report a version — the install may be broken."
+  dim "  Try running: $BIN_SHIM --version"
+  exit 1
+fi
+ok "Installed version: $(_c $BOLD "v$INSTALLED_VERSION")"
+
+# Sanity check: the running binary should report the version we just built.
+if [[ -n "$SRC_VERSION" && "$SRC_VERSION" != "unknown" && "$INSTALLED_VERSION" != "$SRC_VERSION" ]]; then
+  warn "Version mismatch: expected v$SRC_VERSION from source but binary reports v$INSTALLED_VERSION"
+fi
 
 INSTALL_SIZE="unknown"
 if command -v du &>/dev/null; then
@@ -433,8 +498,13 @@ if command -v du &>/dev/null; then
 fi
 ok "Install size: $INSTALL_SIZE"
 
+VERSION_LINE="CLI version : v$INSTALLED_VERSION"
+if [[ -n "$PREV_VERSION" && "$PREV_VERSION" != "unknown" && "$PREV_VERSION" != "$INSTALLED_VERSION" ]]; then
+  VERSION_LINE="CLI version : v$PREV_VERSION -> v$INSTALLED_VERSION"
+fi
+
 print_box "Installation Complete" \
-  "CLI version : $INSTALLED_VERSION" \
+  "$VERSION_LINE" \
   "Install size: $INSTALL_SIZE" \
   "Location    : $APP_DIR" \
   "Shim        : $BIN_SHIM" \
