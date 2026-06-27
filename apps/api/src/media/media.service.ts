@@ -1995,4 +1995,118 @@ export class MediaService {
 
     return album;
   }
+
+  // ---------------------------------------------------------------------------
+  // Facets
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Return the distinct geo hierarchy (Country → Region → Locality) present in
+   * a circle's non-deleted, geocoded media items.
+   *
+   * Built via a single Prisma groupBy over the four geo columns so no extra
+   * round-trips are needed.  Results are folded into a nested structure in
+   * application code and sorted by count descending at every level.
+   *
+   * Response shape:
+   *   Array<{
+   *     country: string;
+   *     countryCode: string | null;
+   *     count: number;            // total items for this country
+   *     regions: Array<{
+   *       name: string;
+   *       count: number;
+   *       localities: Array<{ name: string; count: number }>;
+   *     }>;
+   *   }>
+   */
+  async facetsLocations(
+    circleId: string,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<
+    Array<{
+      country: string;
+      countryCode: string | null;
+      count: number;
+      regions: Array<{
+        name: string;
+        count: number;
+        localities: Array<{ name: string; count: number }>;
+      }>;
+    }>
+  > {
+    await this.circleMembershipService.assertCircleAccess(
+      userId,
+      circleId,
+      userPermissions,
+      'viewer' as CircleRole,
+    );
+
+    const rows = await this.prisma.mediaItem.groupBy({
+      by: ['geoCountry', 'geoCountryCode', 'geoAdmin1', 'geoLocality'],
+      where: {
+        circleId,
+        deletedAt: null,
+        geoCountry: { not: null },
+      },
+      _count: { _all: true },
+    });
+
+    type LocalityEntry = { name: string; count: number };
+    type RegionEntry = { name: string; count: number; localities: LocalityEntry[] };
+    type CountryEntry = {
+      country: string;
+      countryCode: string | null;
+      count: number;
+      regions: RegionEntry[];
+    };
+
+    const countryMap = new Map<string, CountryEntry>();
+
+    for (const row of rows) {
+      const country = row.geoCountry as string; // filtered NOT NULL above
+      const countryCode = (row.geoCountryCode as string | null) ?? null;
+      const region = (row.geoAdmin1 as string | null) ?? null;
+      const locality = (row.geoLocality as string | null) ?? null;
+      const count = row._count._all;
+
+      let countryEntry = countryMap.get(country);
+      if (!countryEntry) {
+        countryEntry = { country, countryCode, count: 0, regions: [] };
+        countryMap.set(country, countryEntry);
+      }
+      countryEntry.count += count;
+
+      if (region) {
+        let regionEntry = countryEntry.regions.find((r) => r.name === region);
+        if (!regionEntry) {
+          regionEntry = { name: region, count: 0, localities: [] };
+          countryEntry.regions.push(regionEntry);
+        }
+        regionEntry.count += count;
+
+        if (locality) {
+          let localityEntry = regionEntry.localities.find((l) => l.name === locality);
+          if (!localityEntry) {
+            localityEntry = { name: locality, count: 0 };
+            regionEntry.localities.push(localityEntry);
+          }
+          localityEntry.count += count;
+        }
+      }
+    }
+
+    // Sort all levels by count descending
+    const result = Array.from(countryMap.values());
+    result.sort((a, b) => b.count - a.count);
+    for (const country of result) {
+      country.regions.sort((a, b) => b.count - a.count);
+      for (const region of country.regions) {
+        region.localities.sort((a, b) => b.count - a.count);
+      }
+    }
+
+    return result;
+  }
 }

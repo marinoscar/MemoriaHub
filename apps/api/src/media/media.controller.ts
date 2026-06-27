@@ -120,6 +120,66 @@ export class MediaController {
   }
 
   /**
+   * GET /api/media/facets/locations
+   *
+   * Returns the distinct geo hierarchy (Country → Region → Locality) present
+   * in the circle's non-deleted, geocoded media items.  Intended for cascading
+   * pick-lists in the search UI so users see only real values from their library.
+   */
+  @Get('facets/locations')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({
+    summary: 'Geo facets: Country → Region → Locality hierarchy with item counts',
+    description:
+      'Returns every country (with optional region and locality breakdowns) that has ' +
+      'at least one non-deleted, geocoded media item in the circle. ' +
+      'All levels are sorted by item count descending. ' +
+      'Null region / locality tiers are omitted.',
+  })
+  @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
+  @ApiResponse({
+    status: 200,
+    description: 'Nested geo facets sorted by count descending',
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          country: { type: 'string' },
+          countryCode: { type: 'string', nullable: true },
+          count: { type: 'number' },
+          regions: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                count: { type: 'number' },
+                localities: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      name: { type: 'string' },
+                      count: { type: 'number' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+  async facetsLocations(
+    @Query('circleId') circleId: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.facetsLocations(circleId, user.id, user.permissions);
+  }
+
+  /**
    * GET /api/media/tags
    */
   @Get('tags')
