@@ -19,6 +19,14 @@ import { BOX_BORDER } from './theme.js';
 
 interface CircleManagerProps {
   config: CliConfig;
+  /**
+   * Called after the active circle is changed and persisted, with the updated
+   * config. The parent MUST use this to refresh its in-memory config so that
+   * downstream screens (sync dashboard, home) see the new activeCircleId —
+   * otherwise the change persists to disk but the running session stays stale
+   * and a subsequent sync fails with "No target circle".
+   */
+  onConfigChange?: (config: CliConfig) => void;
   onBack: () => void;
 }
 
@@ -28,7 +36,7 @@ type LoadState = 'loading' | 'ready' | 'error';
 // Component
 // ---------------------------------------------------------------------------
 
-export function CircleManager({ config, onBack }: CircleManagerProps): React.ReactElement {
+export function CircleManager({ config, onConfigChange, onBack }: CircleManagerProps): React.ReactElement {
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [circles, setCircles]     = useState<Circle[]>([]);
   const [errorMsg, setErrorMsg]   = useState('');
@@ -80,6 +88,9 @@ export function CircleManager({ config, onBack }: CircleManagerProps): React.Rea
       const newConfig = { ...config, activeCircleId: circle.id };
       saveConfig(newConfig);
       setActiveCircleId(circle.id);
+      // Propagate to the parent so the in-memory session config matches what we
+      // just wrote to disk; otherwise the sync dashboard keeps the stale config.
+      onConfigChange?.(newConfig);
       setStatusMsg(`Active circle set to: ${circle.name}`);
       return;
     }

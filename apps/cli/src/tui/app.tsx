@@ -218,6 +218,7 @@ function App(): React.ReactElement {
       return (
         <CircleManager
           config={appState.config}
+          onConfigChange={(cfg) => setAppState((prev) => ({ ...prev, config: cfg }))}
           onBack={() => {
             // Refresh circles after returning (user may have changed active circle)
             const cfg = appState.config;
