@@ -474,7 +474,7 @@ These endpoints replace the former per-circle backfill endpoints. Each iterates 
 - `POST /api/admin/tagging/backfill` body `{ from?, to?, force? }` - Bulk-enqueue auto-tagging jobs across all circles; 400 if `features.autoTagging` is disabled (Admin + system_settings:write)
 - `POST /api/admin/bursts/backfill` body `{ from?, to?, force? }` - Bulk-enqueue burst_detection jobs across all circles; includes on-demand perceptual hashing for legacy photos; 400 if `features.burstDetection` is disabled (Admin + system_settings:write)
 - `POST /api/admin/metadata/backfill` body `{ from?, to?, force? }` - Bulk-enqueue metadata_extraction jobs across all circles; no feature gate (Admin + system_settings:write)
-- `POST /api/admin/face/backfill` body `{ force? }` - Bulk-enqueue face_detection jobs across all circles; 400 if `features.faceRecognition` is disabled (Admin + face_settings:write)
+- `POST /api/admin/face/backfill` body `{ from?, to?, force? }` - Bulk-enqueue face_detection jobs across all circles; `from`/`to` (optional ISO-8601) bound `capturedAt` to control how far back detection is recreated; 400 if `features.faceRecognition` is disabled (Admin + face_settings:write)
 
 ### Admin: Settings UI (`/admin/settings/*`)
 The admin settings UI is organized as a hub at `/admin/settings` with URL-addressable sub-pages. Old flat `/admin/*` routes redirect to the new nested paths. The sidebar shows a single "Settings" entry. Per-circle feature toggles and per-circle backfill panels have been removed from the circle detail page.
