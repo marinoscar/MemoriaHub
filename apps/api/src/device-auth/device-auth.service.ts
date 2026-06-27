@@ -61,7 +61,7 @@ export class DeviceAuthService {
     // Build sanitized clientInfo: Zod validates at the controller layer, but we
     // re-sanitize returnUri here as defense-in-depth so the service is safe
     // regardless of how it is called.
-    const sanitizedClientInfo: Record<string, unknown> = clientInfo
+    const sanitizedClientInfo: Record<string, any> = clientInfo
       ? { ...clientInfo }
       : {};
     if ('returnUri' in sanitizedClientInfo) {
