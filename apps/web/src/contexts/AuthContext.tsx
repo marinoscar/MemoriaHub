@@ -90,15 +90,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const login = useCallback((provider: string) => {
-    // Store return URL for redirect after login (including query params)
+    // Compute the same-site relative path to return to after OAuth
     const fromLocation = location.state?.from;
-    const returnUrl = fromLocation
+    const returnPath = fromLocation
       ? `${fromLocation.pathname}${fromLocation.search || ''}`
       : '/';
-    sessionStorage.setItem('auth_return_url', returnUrl);
 
-    // Redirect to OAuth provider
-    window.location.href = `/api/auth/${provider}`;
+    // Keep sessionStorage as a fallback (unreliable in some in-app browsers, but harmless)
+    sessionStorage.setItem('auth_return_url', returnPath);
+
+    // Pass returnTo as a query param on the OAuth init URL — this survives the Google
+    // OAuth round-trip reliably in Android Custom Tabs (sessionStorage does not).
+    // Only append when returnPath is a non-root same-site relative path.
+    const oauthUrl =
+      returnPath !== '/' && returnPath.startsWith('/')
+        ? `/api/auth/${provider}?returnTo=${encodeURIComponent(returnPath)}`
+        : `/api/auth/${provider}`;
+
+    window.location.href = oauthUrl;
   }, [location.state]);
 
   const logout = useCallback(async () => {

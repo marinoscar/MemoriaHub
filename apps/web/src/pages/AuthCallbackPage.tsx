@@ -4,6 +4,14 @@ import { Box, Typography, CircularProgress, Alert } from '@mui/material';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
+/**
+ * Guard that accepts only same-site relative paths (starts with '/', not '//').
+ * Prevents open-redirect attacks if the returnTo param is tampered with.
+ */
+function isSafeRelativePath(p: string): boolean {
+  return typeof p === 'string' && p.startsWith('/') && !p.startsWith('//');
+}
+
 export default function AuthCallbackPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -32,8 +40,16 @@ export default function AuthCallbackPage() {
         // Fetch user data
         await refreshUser();
 
-        // Get return URL and clear it
-        const returnUrl = sessionStorage.getItem('auth_return_url') || '/';
+        // Prefer the returnTo query param echoed back by the API — it survives the
+        // Google OAuth round-trip in Android Custom Tabs where sessionStorage does not.
+        const returnToParam = searchParams.get('returnTo');
+        const returnUrl =
+          (returnToParam !== null && isSafeRelativePath(returnToParam)
+            ? returnToParam
+            : null) ??
+          sessionStorage.getItem('auth_return_url') ??
+          '/';
+
         sessionStorage.removeItem('auth_return_url');
 
         // Navigate to return URL
