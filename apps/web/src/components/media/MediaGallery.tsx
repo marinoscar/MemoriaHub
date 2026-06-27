@@ -45,6 +45,7 @@ import { MediaDetailDrawer } from './MediaDetailDrawer';
 import { MediaLightbox } from './MediaLightbox';
 import { BulkActionToolbar } from './BulkActionToolbar';
 import { BulkLocationDialog } from './BulkLocationDialog';
+import { BulkDateDialog } from './BulkDateDialog';
 import { BulkTagsDialog } from './BulkTagsDialog';
 import { AddToAlbumDialog } from '../album/AddToAlbumDialog';
 import { patchMedia as patchMediaApi, removeAlbumItem } from '../../services/media';
@@ -454,6 +455,7 @@ export function MediaGallery({
   // -------------------------------------------------------------------------
 
   const [bulkLocationOpen, setBulkLocationOpen] = useState(false);
+  const [bulkDateOpen, setBulkDateOpen] = useState(false);
   const [bulkTagsOpen, setBulkTagsOpen] = useState(false);
   const [addToAlbumOpen, setAddToAlbumOpen] = useState(false);
 
@@ -597,6 +599,7 @@ export function MediaGallery({
         onClear={handleClearSelection}
         onSelectAll={handleSelectAll}
         onOpenLocation={() => setBulkLocationOpen(true)}
+        onOpenDate={() => setBulkDateOpen(true)}
         onOpenTags={() => setBulkTagsOpen(true)}
         onOpenAlbum={() => setAddToAlbumOpen(true)}
         albumMode={Boolean(albumId)}
@@ -747,6 +750,18 @@ export function MediaGallery({
         ids={Array.from(selected)}
         onSuccess={(msg) => {
           setBulkLocationOpen(false);
+          handleBulkSuccess(msg);
+        }}
+      />
+
+      {/* Bulk date dialog */}
+      <BulkDateDialog
+        open={bulkDateOpen}
+        onClose={() => setBulkDateOpen(false)}
+        circleId={circleId}
+        ids={Array.from(selected)}
+        onSuccess={(msg) => {
+          setBulkDateOpen(false);
           handleBulkSuccess(msg);
         }}
       />

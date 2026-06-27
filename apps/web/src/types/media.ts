@@ -259,6 +259,7 @@ export interface BulkUpdateDto {
   set: {
     location?: { lat: number; lng: number; altitude?: number } | null;
     favorite?: boolean;
+    capturedAt?: string | null;
   };
 }
 

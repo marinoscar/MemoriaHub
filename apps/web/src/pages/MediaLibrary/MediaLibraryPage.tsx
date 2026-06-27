@@ -61,6 +61,7 @@ import { MediaDetailDrawer } from '../../components/media/MediaDetailDrawer';
 import { MediaLightbox } from '../../components/media/MediaLightbox';
 import { BulkActionToolbar } from '../../components/media/BulkActionToolbar';
 import { BulkLocationDialog } from '../../components/media/BulkLocationDialog';
+import { BulkDateDialog } from '../../components/media/BulkDateDialog';
 import { BulkTagsDialog } from '../../components/media/BulkTagsDialog';
 import { AddToAlbumDialog } from '../../components/album/AddToAlbumDialog';
 import type { MediaItem, MediaQueryParams, TagItem, MediaType } from '../../types/media';
@@ -408,6 +409,7 @@ export default function MediaLibraryPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const [bulkLocationOpen, setBulkLocationOpen] = useState(false);
+  const [bulkDateOpen, setBulkDateOpen] = useState(false);
   const [bulkTagsOpen, setBulkTagsOpen] = useState(false);
   const [snackbar, setSnackbar] = useState<{ message: string; severity: 'success' | 'error' } | null>(null);
 
@@ -1315,6 +1317,7 @@ export default function MediaLibraryPage() {
         onClear={handleClearSelection}
         onSelectAll={handleSelectAll}
         onOpenLocation={() => setBulkLocationOpen(true)}
+        onOpenDate={() => setBulkDateOpen(true)}
         onOpenTags={() => setBulkTagsOpen(true)}
         onOpenAlbum={() => setAddToAlbumOpen(true)}
         onSuccess={handleBulkSuccess}
@@ -1328,6 +1331,15 @@ export default function MediaLibraryPage() {
         circleId={activeCircle.id}
         ids={Array.from(selected)}
         onSuccess={(msg) => { setBulkLocationOpen(false); handleBulkSuccess(msg); }}
+      />
+
+      {/* Bulk date dialog */}
+      <BulkDateDialog
+        open={bulkDateOpen}
+        onClose={() => setBulkDateOpen(false)}
+        circleId={activeCircle.id}
+        ids={Array.from(selected)}
+        onSuccess={(msg) => { setBulkDateOpen(false); handleBulkSuccess(msg); }}
       />
 
       {/* Bulk tags dialog */}

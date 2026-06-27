@@ -29,6 +29,7 @@ import {
   StarBorder as StarBorderIcon,
   Archive as ArchiveIcon,
   Unarchive as UnarchiveIcon,
+  EditCalendar as EditCalendarIcon,
 } from '@mui/icons-material';
 import type { CircleRole } from '../../types/circles';
 import { bulkUpdateMedia, bulkDelete, bulkArchive, bulkUnarchive } from '../../services/media';
@@ -48,6 +49,7 @@ interface BulkActionToolbarProps {
   onClear: () => void;
   onSelectAll: () => void;
   onOpenLocation: () => void;
+  onOpenDate: () => void;
   onOpenTags: () => void;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
@@ -65,6 +67,7 @@ export function BulkActionToolbar({
   onClear,
   onSelectAll,
   onOpenLocation,
+  onOpenDate,
   onOpenTags,
   onSuccess,
   onError,
@@ -214,6 +217,10 @@ export function BulkActionToolbar({
         <MenuItem onClick={() => { setMoreAnchor(null); onOpenLocation(); }}>
           <ListItemIcon><LocationOnIcon fontSize="small" /></ListItemIcon>
           <ListItemText>Set location</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => { setMoreAnchor(null); onOpenDate(); }}>
+          <ListItemIcon><EditCalendarIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Set date taken</ListItemText>
         </MenuItem>
         <MenuItem onClick={() => { setMoreAnchor(null); onOpenTags(); }}>
           <ListItemIcon><LabelIcon fontSize="small" /></ListItemIcon>
