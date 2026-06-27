@@ -17,6 +17,7 @@ import { TrashPurgeHandler } from './trash-purge.handler';
 import { TrashPurgeTask } from './trash-purge.task';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaEnrichmentEnqueueListener } from './enrichment/media-enrichment-enqueue.listener';
+import { MediaThumbnailService } from './media-thumbnail.service';
 
 /**
  * MediaModule
@@ -67,7 +68,8 @@ import { MediaEnrichmentEnqueueListener } from './enrichment/media-enrichment-en
     TrashPurgeTask,
     MediaEnrichmentService,
     MediaEnrichmentEnqueueListener,
+    MediaThumbnailService,
   ],
-  exports: [MediaService, MediaReprocessService, MediaMetadataSyncService, MediaEnrichmentService],
+  exports: [MediaService, MediaReprocessService, MediaMetadataSyncService, MediaEnrichmentService, MediaThumbnailService],
 })
 export class MediaModule {}

@@ -9,6 +9,7 @@ import {
 } from './searchable-fields.registry';
 import { SemanticSearchService } from './semantic-search.service';
 import { SearchQueryDto } from './dto/search-query.dto';
+import { MediaThumbnailService } from '../media/media-thumbnail.service';
 
 // Re-export for controller convenience
 export type SearchFieldDescriptor = Pick<
@@ -24,7 +25,7 @@ export interface SearchPaging {
 }
 
 export interface SearchResult {
-  items: Prisma.MediaItemGetPayload<Record<string, never>>[];
+  items: (Prisma.MediaItemGetPayload<Record<string, never>> & { thumbnailUrl: string | null })[];
   meta: {
     page: number;
     pageSize: number;
@@ -55,6 +56,7 @@ export class SearchService {
     private readonly prisma: PrismaService,
     private readonly circleMembershipService: CircleMembershipService,
     private readonly semanticSearch: SemanticSearchService,
+    private readonly mediaThumbnail: MediaThumbnailService,
   ) {}
 
   async runSearch(
@@ -124,12 +126,14 @@ export class SearchService {
 
         const totalItems = allItems.length;
         const start = (page - 1) * pageSize;
-        const items = allItems.slice(start, start + pageSize);
+        const pageItems = allItems.slice(start, start + pageSize);
 
         this.logger.log(
           `SearchService: semantic search circleId=${circleId} query="${semanticQuery}" ` +
             `knn=${knn.length} intersect=${totalItems} page=${page}`,
         );
+
+        const items = await this.mediaThumbnail.attachThumbnailUrls(pageItems);
 
         return {
           items,
@@ -150,7 +154,7 @@ export class SearchService {
       [sortBy]: sortOrder as Prisma.SortOrder,
     };
 
-    const [items, totalItems] = await Promise.all([
+    const [rawItems, totalItems] = await Promise.all([
       this.prisma.mediaItem.findMany({ where, orderBy, skip, take: pageSize }),
       this.prisma.mediaItem.count({ where }),
     ]);
@@ -158,6 +162,8 @@ export class SearchService {
     this.logger.log(
       `Search: circleId=${circleId} filters=${JSON.stringify(filters)} page=${page} total=${totalItems}`,
     );
+
+    const items = await this.mediaThumbnail.attachThumbnailUrls(rawItems);
 
     return {
       items,
