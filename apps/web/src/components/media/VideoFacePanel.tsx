@@ -283,7 +283,7 @@ export function VideoFacePanel({
 
                   {/* Name + sub-info */}
                   <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography variant="body2" noWrap fontWeight={500}>
+                    <Typography variant="body2" noWrap sx={{ fontWeight: 500 }}>
                       {face.personName ?? 'Unassigned'}
                     </Typography>
                     {face.confidence !== null && (
