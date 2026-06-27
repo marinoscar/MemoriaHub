@@ -1,5 +1,6 @@
 package cr.marin.memoriahub
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -20,18 +21,43 @@ import cr.marin.memoriahub.ui.RootViewModel
 import cr.marin.memoriahub.ui.auth.DeviceAuthScreen
 import cr.marin.memoriahub.ui.main.MainShell
 import cr.marin.memoriahub.ui.serverurl.ServerUrlScreen
+import cr.marin.memoriahub.data.repo.DeviceAuthRepository
 import cr.marin.memoriahub.ui.theme.MemoriaHubTheme
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject
+    lateinit var deviceAuthRepository: DeviceAuthRepository
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        handleDeviceCompleteDeepLink(intent)
         setContent {
             MemoriaHubTheme {
                 AppRoot()
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleDeviceCompleteDeepLink(intent)
+    }
+
+    /**
+     * When the web activation page returns us via memoriahub://auth/device-complete after
+     * approval, wake the device-auth polling loop so login completes immediately instead of
+     * waiting for the next poll interval.
+     */
+    private fun handleDeviceCompleteDeepLink(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme == "memoriahub" && data.host == "auth") {
+            deviceAuthRepository.pokeNow()
         }
     }
 }

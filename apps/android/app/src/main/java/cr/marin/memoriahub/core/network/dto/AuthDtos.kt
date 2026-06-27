@@ -11,6 +11,8 @@ data class DeviceCodeRequest(
 data class ClientInfo(
     val deviceName: String? = null,
     val userAgent: String? = null,
+    /** Custom-scheme deep link the web activation page uses to return to this app after approval. */
+    val returnUri: String? = null,
 )
 
 @Serializable

@@ -30,10 +30,21 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.MemoriaHub">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Device-authorization return: the web /activate page redirects here
+                 (memoriahub://auth/device-complete) after the user approves, bringing
+                 the app back to the foreground. Keep in sync with
+                 DeviceAuthRepository.DEVICE_COMPLETE_DEEP_LINK. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="memoriahub" android:host="auth" />
             </intent-filter>
         </activity>
 
