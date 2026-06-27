@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { PatService } from '../pat/pat.service';
 import { DeviceCodeStatus } from '@prisma/client';
+import { sanitizeReturnUri } from './dto/device-code-request.dto';
 
 /**
  * Service for handling Device Authorization Flow (RFC 8628)
@@ -57,13 +58,28 @@ export class DeviceAuthService {
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + expiryMinutes);
 
+    // Build sanitized clientInfo: Zod validates at the controller layer, but we
+    // re-sanitize returnUri here as defense-in-depth so the service is safe
+    // regardless of how it is called.
+    const sanitizedClientInfo: Record<string, unknown> = clientInfo
+      ? { ...clientInfo }
+      : {};
+    if ('returnUri' in sanitizedClientInfo) {
+      const sanitized = sanitizeReturnUri(sanitizedClientInfo['returnUri']);
+      if (sanitized !== null) {
+        sanitizedClientInfo['returnUri'] = sanitized;
+      } else {
+        delete sanitizedClientInfo['returnUri'];
+      }
+    }
+
     // Store in database
     await this.prisma.deviceCode.create({
       data: {
         deviceCode: deviceCodeHash,
         userCode,
         status: DeviceCodeStatus.pending,
-        clientInfo: clientInfo || {},
+        clientInfo: sanitizedClientInfo,
         scopes: [], // Future extension for scoped permissions
         expiresAt,
       },

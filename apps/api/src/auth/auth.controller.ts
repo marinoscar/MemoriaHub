@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Query,
   UseGuards,
   Req,
   Res,
@@ -15,6 +16,7 @@ import { DatabaseSeedException } from '../common/exceptions/database-seed.except
 import {
   ApiTags,
   ApiOperation,
+  ApiQuery,
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
@@ -31,6 +33,7 @@ import {
   AuthProviderDto,
 } from './dto/auth-provider.dto';
 import { CurrentUserDto } from './dto/auth-user.dto';
+import { decodeOAuthState, sanitizeReturnTo } from './utils/oauth-state.util';
 
 const REFRESH_TOKEN_COOKIE = 'refresh_token';
 const COOKIE_OPTIONS = {
@@ -84,13 +87,28 @@ export class AuthController {
   @UseGuards(GoogleOAuthGuard)
   @ApiOperation({
     summary: 'Initiate Google OAuth',
-    description: 'Redirects to Google OAuth consent screen',
+    description:
+      'Redirects to Google OAuth consent screen. An optional `returnTo` same-site ' +
+      'relative path (e.g. `/activate?code=ABCD-1234`) is encoded into the signed OAuth ' +
+      '`state` parameter and surfaced in the post-login redirect as `returnTo=<path>`.',
+  })
+  @ApiQuery({
+    name: 'returnTo',
+    required: false,
+    description:
+      'Same-site relative path to redirect the user to after login (e.g. `/activate?code=ABCD-1234`). ' +
+      'Must start with "/" and must not be a protocol-relative URL or contain backslashes.',
+    example: '/activate?code=ABCD-1234',
   })
   @ApiResponse({
     status: 302,
     description: 'Redirects to Google OAuth',
   })
-  async googleAuth() {
+  async googleAuth(
+    // The guard's getAuthenticateOptions reads this from context; the parameter
+    // declaration here is for OpenAPI documentation and NestJS binding only.
+    @Query('returnTo') _returnTo?: string,  // eslint-disable-line @typescript-eslint/no-unused-vars
+  ) {
     // Guard handles the redirect to Google
   }
 
@@ -111,6 +129,7 @@ export class AuthController {
   })
   async googleAuthCallback(
     @Req() req: FastifyRequest & { user?: GoogleProfile },
+    @Query('state') oauthState: string | undefined,
     @Res() res: FastifyReply,
   ) {
     try {
@@ -132,11 +151,21 @@ export class AuthController {
       this.logger.log(`Setting refresh token cookie with options: ${JSON.stringify(COOKIE_OPTIONS)}`);
       res.setCookie(REFRESH_TOKEN_COOKIE, tokens.refreshToken!, COOKIE_OPTIONS);
 
+      // Decode the signed OAuth state to recover the intended post-login destination.
+      // sanitizeReturnTo is applied again inside decodeOAuthState as defense in depth.
+      const jwtSecret = this.configService.get<string>('jwt.secret') ?? '';
+      const { returnTo: decodedReturnTo } = decodeOAuthState(oauthState, jwtSecret);
+      // Re-sanitize outside the decoder as an additional layer of defense.
+      const returnTo = sanitizeReturnTo(decodedReturnTo);
+
       // Redirect to frontend with access token only
       const appUrl = this.configService.get<string>('appUrl');
       const redirectUrl = new URL('/auth/callback', appUrl);
       redirectUrl.searchParams.set('token', tokens.accessToken);
       redirectUrl.searchParams.set('expiresIn', tokens.expiresIn.toString());
+      if (returnTo) {
+        redirectUrl.searchParams.set('returnTo', returnTo);
+      }
 
       this.logger.log(`Redirecting to: ${redirectUrl.toString()}`);
       return res.status(302).redirect(redirectUrl.toString());

@@ -8,6 +8,7 @@ import { PatModule } from '../pat/pat.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { GoogleStrategy } from './strategies/google.strategy';
+import { GoogleOAuthGuard } from './guards/google-oauth.guard';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { TokenCleanupTask } from './tasks/token-cleanup.task';
 
@@ -37,7 +38,7 @@ import { TokenCleanupTask } from './tasks/token-cleanup.task';
     PatModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService, GoogleStrategy, JwtStrategy, TokenCleanupTask],
+  providers: [AuthService, GoogleStrategy, GoogleOAuthGuard, JwtStrategy, TokenCleanupTask],
   exports: [AuthService, JwtModule],
 })
 export class AuthModule {}
