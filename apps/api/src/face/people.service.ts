@@ -22,6 +22,7 @@ import {
   UpdatePersonDto,
   AssignFacesDto,
   ListUnassignedFacesQueryDto,
+  BulkPeopleDto,
 } from './dto/people.dto';
 import { MergePeopleDto } from './dto/merge-people.dto';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
@@ -49,7 +50,7 @@ export class PeopleService {
     userId: string,
     userPermissions: string[],
   ) {
-    const { circleId, includeUnlabeled, page, pageSize } = query;
+    const { circleId, includeUnlabeled, hidden, page, pageSize } = query;
 
     await this.circleMembershipService.assertCircleAccess(
       userId,
@@ -64,6 +65,9 @@ export class PeopleService {
       circleId,
       deletedAt: null,
       mergedIntoId: null,
+      ...(hidden
+        ? { hiddenAt: { not: null } }
+        : { hiddenAt: null }),
       ...(includeUnlabeled ? {} : { name: { not: null } }),
     };
 
@@ -111,6 +115,7 @@ export class PeopleService {
         coverFace: await this.resolveCoverFace(p.coverFace, p.faces ?? []),
         profileMediaItemId: p.profileMediaItemId ?? null,
         profileCrop: p.profileCrop ?? null,
+        hiddenAt: p.hiddenAt,
         createdAt: p.createdAt,
         updatedAt: p.updatedAt,
       })),
@@ -746,6 +751,149 @@ export class PeopleService {
     this.logger.log(
       `Person ${personId} soft-deleted by user ${userId}; faces returned to unknown pool`,
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // hidePeople
+  // ---------------------------------------------------------------------------
+
+  async hidePeople(
+    dto: BulkPeopleDto,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{ hidden: number }> {
+    const { circleId, ids } = dto;
+
+    await this.circleMembershipService.assertCircleAccess(
+      userId,
+      circleId,
+      userPermissions,
+      'collaborator' as CircleRole,
+    );
+
+    const { count } = await this.prisma.person.updateMany({
+      where: {
+        id: { in: ids },
+        circleId,
+        deletedAt: null,
+        hiddenAt: null,
+      },
+      data: { hiddenAt: new Date() },
+    });
+
+    this.logger.log(
+      `hidePeople: ${count} person(s) hidden in circle ${circleId} by user ${userId}`,
+    );
+
+    return { hidden: count };
+  }
+
+  // ---------------------------------------------------------------------------
+  // unhidePeople
+  // ---------------------------------------------------------------------------
+
+  async unhidePeople(
+    dto: BulkPeopleDto,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{ unhidden: number }> {
+    const { circleId, ids } = dto;
+
+    await this.circleMembershipService.assertCircleAccess(
+      userId,
+      circleId,
+      userPermissions,
+      'collaborator' as CircleRole,
+    );
+
+    const { count } = await this.prisma.person.updateMany({
+      where: {
+        id: { in: ids },
+        circleId,
+        deletedAt: null,
+        hiddenAt: { not: null },
+      },
+      data: { hiddenAt: null },
+    });
+
+    this.logger.log(
+      `unhidePeople: ${count} person(s) unhidden in circle ${circleId} by user ${userId}`,
+    );
+
+    return { unhidden: count };
+  }
+
+  // ---------------------------------------------------------------------------
+  // purgePeople
+  // ---------------------------------------------------------------------------
+
+  async purgePeople(
+    dto: BulkPeopleDto,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{ deleted: number }> {
+    const { circleId, ids } = dto;
+
+    await this.circleMembershipService.assertCircleAccess(
+      userId,
+      circleId,
+      userPermissions,
+      'collaborator' as CircleRole,
+    );
+
+    // Capture affected media items BEFORE deleting faces (so we can re-enqueue tagging)
+    const affectedMediaItems = await this.prisma.face.findMany({
+      where: { personId: { in: ids }, circleId },
+      select: {
+        mediaItemId: true,
+        mediaItem: { select: { circleId: true } },
+      },
+      distinct: ['mediaItemId'],
+    });
+
+    const dedupedMedia: Array<{ mediaItemId: string; circleId: string }> = [];
+    const seen = new Set<string>();
+    for (const f of affectedMediaItems) {
+      if (!seen.has(f.mediaItemId)) {
+        seen.add(f.mediaItemId);
+        dedupedMedia.push({ mediaItemId: f.mediaItemId, circleId: f.mediaItem.circleId });
+      }
+    }
+
+    let deleted = 0;
+
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Hard-delete all Face rows for these people
+      await tx.face.deleteMany({
+        where: { personId: { in: ids }, circleId },
+      });
+
+      // 2. Hard-delete the Person rows
+      const result = await tx.person.deleteMany({
+        where: { id: { in: ids }, circleId },
+      });
+      deleted = result.count;
+
+      // 3. Audit
+      await tx.auditEvent.create({
+        data: {
+          actorUserId: userId,
+          action: 'person:purge',
+          targetType: 'person',
+          targetId: ids[0],
+          meta: { circleId, ids, count: deleted } as any,
+        },
+      });
+    });
+
+    // Re-enqueue auto-tagging for all affected media items (people removed from context)
+    await this.enqueueAutoTaggingForMediaItems(dedupedMedia);
+
+    this.logger.log(
+      `purgePeople: ${deleted} person(s) permanently deleted in circle ${circleId} by user ${userId}`,
+    );
+
+    return { deleted };
   }
 
   // ---------------------------------------------------------------------------
