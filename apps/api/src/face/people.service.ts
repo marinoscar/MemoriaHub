@@ -781,6 +781,16 @@ export class PeopleService {
       data: { hiddenAt: new Date() },
     });
 
+    await this.prisma.auditEvent.create({
+      data: {
+        actorUserId: userId,
+        action: 'person:hide',
+        targetType: 'person',
+        targetId: ids[0],
+        meta: { circleId, ids, count } as any,
+      },
+    });
+
     this.logger.log(
       `hidePeople: ${count} person(s) hidden in circle ${circleId} by user ${userId}`,
     );
@@ -814,6 +824,16 @@ export class PeopleService {
         hiddenAt: { not: null },
       },
       data: { hiddenAt: null },
+    });
+
+    await this.prisma.auditEvent.create({
+      data: {
+        actorUserId: userId,
+        action: 'person:unhide',
+        targetType: 'person',
+        targetId: ids[0],
+        meta: { circleId, ids, count } as any,
+      },
     });
 
     this.logger.log(

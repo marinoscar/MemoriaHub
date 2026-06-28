@@ -2185,6 +2185,10 @@ describe('PeopleService', () => {
   describe('hidePeople', () => {
     const dto = { circleId: CIRCLE_ID, ids: [PERSON_ID] } as any;
 
+    beforeEach(() => {
+      (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({ id: 'audit-1' });
+    });
+
     it('calls assertCircleAccess with collaborator role', async () => {
       (mockPrisma.person.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
@@ -2240,6 +2244,24 @@ describe('PeopleService', () => {
       expect(call.where.circleId).toBe(CIRCLE_ID);
       expect(call.where.id).toEqual({ in: ['p1', 'p2'] });
     });
+
+    it('writes a person:hide audit event with correct fields', async () => {
+      (mockPrisma.person.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+
+      await service.hidePeople(dto, USER_ID, PERMS);
+
+      expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            actorUserId: USER_ID,
+            action: 'person:hide',
+            targetType: 'person',
+            targetId: PERSON_ID,
+            meta: expect.objectContaining({ circleId: CIRCLE_ID, ids: [PERSON_ID], count: 2 }),
+          }),
+        }),
+      );
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -2248,6 +2270,10 @@ describe('PeopleService', () => {
 
   describe('unhidePeople', () => {
     const dto = { circleId: CIRCLE_ID, ids: [PERSON_ID] } as any;
+
+    beforeEach(() => {
+      (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({ id: 'audit-1' });
+    });
 
     it('calls assertCircleAccess with collaborator role', async () => {
       (mockPrisma.person.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
@@ -2283,6 +2309,24 @@ describe('PeopleService', () => {
       const result = await service.unhidePeople(dto, USER_ID, PERMS);
 
       expect(result).toEqual({ unhidden: 2 });
+    });
+
+    it('writes a person:unhide audit event with correct fields', async () => {
+      (mockPrisma.person.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+
+      await service.unhidePeople(dto, USER_ID, PERMS);
+
+      expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            actorUserId: USER_ID,
+            action: 'person:unhide',
+            targetType: 'person',
+            targetId: PERSON_ID,
+            meta: expect.objectContaining({ circleId: CIRCLE_ID, ids: [PERSON_ID], count: 2 }),
+          }),
+        }),
+      );
     });
   });
 
