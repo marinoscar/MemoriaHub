@@ -124,7 +124,9 @@ export default function SystemSettingsPage() {
               <TabPanel value={tabIndex} index={2}>
                 <StorageSettings
                   settings={settings.storage}
+                  jobsSettings={settings.jobs}
                   onSave={(storage) => handleSave('storage', storage)}
+                  onSaveJobs={(jobs) => handleSave('jobs', jobs)}
                   disabled={!canWrite || isSaving}
                 />
               </TabPanel>

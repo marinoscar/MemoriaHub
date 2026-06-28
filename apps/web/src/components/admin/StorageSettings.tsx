@@ -3,6 +3,9 @@ import {
   Typography,
   TextField,
   Button,
+  Divider,
+  FormControlLabel,
+  Switch,
 } from '@mui/material';
 import { useState, useEffect } from 'react';
 
@@ -13,6 +16,10 @@ const MAX_REFRESH_HOURS = 168; // 1 week
 const DEFAULT_RETENTION_DAYS = 30;
 const MIN_RETENTION_DAYS = 1;
 const MAX_RETENTION_DAYS = 365;
+
+const DEFAULT_JOB_RETENTION_DAYS = 30;
+const MIN_JOB_RETENTION_DAYS = 1;
+const MAX_JOB_RETENTION_DAYS = 365;
 
 interface StorageInsightsConfig {
   refreshIntervalHours?: number;
@@ -27,13 +34,24 @@ interface StorageConfig {
   trash?: StorageTrashConfig;
 }
 
+interface JobsHistoryConfig {
+  retentionDays?: number;
+  purgeEnabled?: boolean;
+}
+
+interface JobsConfig {
+  history?: JobsHistoryConfig;
+}
+
 interface StorageSettingsProps {
   settings: StorageConfig | undefined;
+  jobsSettings?: JobsConfig;
   onSave: (storage: StorageConfig) => Promise<void>;
+  onSaveJobs?: (jobs: JobsConfig) => Promise<void>;
   disabled?: boolean;
 }
 
-export function StorageSettings({ settings, onSave, disabled }: StorageSettingsProps) {
+export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, disabled }: StorageSettingsProps) {
   const initialHours = settings?.insights?.refreshIntervalHours ?? DEFAULT_REFRESH_HOURS;
   const initialRetentionDays = settings?.trash?.retentionDays ?? DEFAULT_RETENTION_DAYS;
 
@@ -45,10 +63,25 @@ export function StorageSettings({ settings, onSave, disabled }: StorageSettingsP
 
   const [isSaving, setIsSaving] = useState(false);
 
+  // Job history state
+  const [jobRetentionDays, setJobRetentionDays] = useState<number>(
+    jobsSettings?.history?.retentionDays ?? DEFAULT_JOB_RETENTION_DAYS,
+  );
+  const [jobRetentionError, setJobRetentionError] = useState<string | null>(null);
+  const [jobPurgeEnabled, setJobPurgeEnabled] = useState<boolean>(
+    jobsSettings?.history?.purgeEnabled ?? true,
+  );
+  const [isSavingJobs, setIsSavingJobs] = useState(false);
+
   useEffect(() => {
     setRefreshHours(settings?.insights?.refreshIntervalHours ?? DEFAULT_REFRESH_HOURS);
     setRetentionDays(settings?.trash?.retentionDays ?? DEFAULT_RETENTION_DAYS);
   }, [settings]);
+
+  useEffect(() => {
+    setJobRetentionDays(jobsSettings?.history?.retentionDays ?? DEFAULT_JOB_RETENTION_DAYS);
+    setJobPurgeEnabled(jobsSettings?.history?.purgeEnabled ?? true);
+  }, [jobsSettings]);
 
   const hasInsightsChanges =
     refreshHours !== (settings?.insights?.refreshIntervalHours ?? DEFAULT_REFRESH_HOURS);
@@ -56,6 +89,12 @@ export function StorageSettings({ settings, onSave, disabled }: StorageSettingsP
     retentionDays !== (settings?.trash?.retentionDays ?? DEFAULT_RETENTION_DAYS);
   const hasChanges = hasInsightsChanges || hasTrashChanges;
   const hasErrors = !!refreshError || !!retentionError;
+
+  const hasJobRetentionChanges =
+    jobRetentionDays !== (jobsSettings?.history?.retentionDays ?? DEFAULT_JOB_RETENTION_DAYS);
+  const hasJobPurgeChanges =
+    jobPurgeEnabled !== (jobsSettings?.history?.purgeEnabled ?? true);
+  const hasJobChanges = hasJobRetentionChanges || hasJobPurgeChanges;
 
   const handleRefreshChange = (raw: string) => {
     const val = parseInt(raw, 10);
@@ -77,6 +116,16 @@ export function StorageSettings({ settings, onSave, disabled }: StorageSettingsP
     }
   };
 
+  const handleJobRetentionChange = (raw: string) => {
+    const val = parseInt(raw, 10);
+    setJobRetentionDays(isNaN(val) ? 0 : val);
+    if (isNaN(val) || val < MIN_JOB_RETENTION_DAYS || val > MAX_JOB_RETENTION_DAYS) {
+      setJobRetentionError(`Must be between ${MIN_JOB_RETENTION_DAYS} and ${MAX_JOB_RETENTION_DAYS}`);
+    } else {
+      setJobRetentionError(null);
+    }
+  };
+
   const handleSave = async () => {
     if (hasErrors || !hasChanges) return;
     setIsSaving(true);
@@ -87,6 +136,21 @@ export function StorageSettings({ settings, onSave, disabled }: StorageSettingsP
       });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSaveJobs = async () => {
+    if (jobRetentionError || !hasJobChanges || !onSaveJobs) return;
+    setIsSavingJobs(true);
+    try {
+      await onSaveJobs({
+        history: {
+          retentionDays: jobRetentionDays,
+          purgeEnabled: jobPurgeEnabled,
+        },
+      });
+    } finally {
+      setIsSavingJobs(false);
     }
   };
 
@@ -142,6 +206,62 @@ export function StorageSettings({ settings, onSave, disabled }: StorageSettingsP
           {isSaving ? 'Saving...' : 'Save Changes'}
         </Button>
       </Box>
+
+      {/* Job History section — only rendered when the callback is provided */}
+      {onSaveJobs && (
+        <>
+          <Divider sx={{ my: 4 }} />
+
+          <Typography variant="h6" gutterBottom>
+            Job History
+          </Typography>
+
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+            Retention
+          </Typography>
+
+          <TextField
+            label="Job history retention (days)"
+            type="number"
+            value={jobRetentionDays}
+            onChange={(e) => handleJobRetentionChange(e.target.value)}
+            disabled={disabled}
+            error={!!jobRetentionError}
+            helperText={
+              jobRetentionError ??
+              `How long completed job records are kept before automatic deletion. Default: ${DEFAULT_JOB_RETENTION_DAYS} days.`
+            }
+            slotProps={{ htmlInput: { min: MIN_JOB_RETENTION_DAYS, max: MAX_JOB_RETENTION_DAYS, step: 1 } }}
+            sx={{ width: 320 }}
+          />
+
+          <Box sx={{ mt: 2 }}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={jobPurgeEnabled}
+                  onChange={(e) => setJobPurgeEnabled(e.target.checked)}
+                  disabled={disabled}
+                />
+              }
+              label="Auto-purge old job records"
+            />
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+              When enabled, job records older than the retention period are automatically deleted.
+            </Typography>
+          </Box>
+
+          <Box sx={{ mt: 3 }}>
+            <Button
+              variant="contained"
+              onClick={() => void handleSaveJobs()}
+              disabled={disabled || !hasJobChanges || isSavingJobs || !!jobRetentionError}
+            >
+              {isSavingJobs ? 'Saving...' : 'Save Job Settings'}
+            </Button>
+          </Box>
+        </>
+      )}
     </Box>
   );
 }
