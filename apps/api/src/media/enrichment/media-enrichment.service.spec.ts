@@ -315,7 +315,7 @@ describe('MediaEnrichmentService', () => {
     // Social media detection — video path (new)
     // =========================================================================
     describe('social_media_detection — video item', () => {
-      it('enqueues social_media_detection with priority 30 when flag is ON and item is a video', async () => {
+      it('enqueues social_media_detection with priority 15 when flag is ON and item is a video', async () => {
         mockSystemSettings.getSettings.mockResolvedValue(
           makeSettings({ socialMediaDetection: true }),
         );
@@ -327,7 +327,7 @@ describe('MediaEnrichmentService', () => {
           mediaItemId: videoItem.id,
           circleId: videoItem.circleId,
           reason: JobReason.upload,
-          priority: 30,
+          priority: 15,
         });
       });
 
@@ -382,19 +382,110 @@ describe('MediaEnrichmentService', () => {
         expect(enqueuedTypes()).not.toContain('social_media_detection');
       });
 
-      it('video item also gets video_face_detection when faceRecognition is ON', async () => {
+      it('video + social ON: does NOT enqueue video_face_detection at upload (social gate defers it)', async () => {
         mockSystemSettings.getSettings.mockResolvedValue(
           makeSettings({ socialMediaDetection: true }),
         );
 
         await service.enqueueUploadEnrichment(videoItem);
 
-        expect(enqueuedTypes()).toContain('video_face_detection');
+        // social gate is active → video_face_detection is DEFERRED
+        expect(enqueuedTypes()).not.toContain('video_face_detection');
         expect(enqueuedTypes()).toContain('social_media_detection');
         // auto_tagging and burst_detection are photo-only
         expect(enqueuedTypes()).not.toContain('auto_tagging');
         expect(enqueuedTypes()).not.toContain('burst_detection');
       });
+
+      it('video + social OFF: enqueues video_face_detection immediately at upload', async () => {
+        // socialMediaDetection=false (default settings), faceRecognition=true
+        // → social gate is NOT active → video_face_detection enqueued immediately
+        await service.enqueueUploadEnrichment(videoItem);
+
+        expect(enqueuedTypes()).toContain('video_face_detection');
+        expect(enqueuedTypes()).not.toContain('social_media_detection');
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // enqueueVideoFaceIfEligible
+  // ---------------------------------------------------------------------------
+  describe('enqueueVideoFaceIfEligible', () => {
+    const videoItem = {
+      id: 'media-v2',
+      type: MediaType.video,
+      circleId: 'circle-1',
+      deletedAt: null,
+    };
+
+    it('enqueues video_face_detection and upserts MediaFaceStatus when all conditions met', async () => {
+      // Default settings: faceRecognition=true, face.video.enabled=true
+      await service.enqueueVideoFaceIfEligible(videoItem);
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith({
+        type: 'video_face_detection',
+        mediaItemId: videoItem.id,
+        circleId: videoItem.circleId,
+        reason: JobReason.upload,
+        priority: 20,
+      });
+
+      expect(mockPrisma.mediaFaceStatus.upsert).toHaveBeenCalledWith({
+        where: { mediaItemId: videoItem.id },
+        create: {
+          mediaItemId: videoItem.id,
+          status: MediaFaceStatusType.pending,
+          faceCount: 0,
+        },
+        update: {
+          status: MediaFaceStatusType.pending,
+        },
+      });
+    });
+
+    it('does nothing for a photo item (type guard)', async () => {
+      const photoItem = { id: 'media-p', type: MediaType.photo, circleId: 'circle-1', deletedAt: null };
+
+      await service.enqueueVideoFaceIfEligible(photoItem);
+
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('does nothing for a soft-deleted item', async () => {
+      const deletedVideo = { ...videoItem, deletedAt: new Date() };
+
+      await service.enqueueVideoFaceIfEligible(deletedVideo);
+
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when faceRecognition feature flag is OFF', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeSettings({ faceRecognition: false }),
+      );
+
+      await service.enqueueVideoFaceIfEligible(videoItem);
+
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when FACE_AUTO_DETECT=false (env kill-switch)', async () => {
+      process.env['FACE_AUTO_DETECT'] = 'false';
+
+      await service.enqueueVideoFaceIfEligible(videoItem);
+
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when face.video.enabled=false in settings', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeSettings({}, false /* faceVideoEnabled = false */),
+      );
+
+      await service.enqueueVideoFaceIfEligible(videoItem);
+
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
     });
   });
 
