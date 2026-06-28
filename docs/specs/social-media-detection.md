@@ -17,12 +17,13 @@
 5. [System-Tag Protection Matrix](#5-system-tag-protection-matrix)
 6. [Data Model](#6-data-model)
 7. [Processing and Enrichment Flow](#7-processing-and-enrichment-flow)
-8. [Configuration](#8-configuration)
-9. [API Endpoints](#9-api-endpoints)
-10. [UI](#10-ui)
-11. [Security and Privacy](#11-security-and-privacy)
-12. [Testing Notes](#12-testing-notes)
-13. [How to Add a New Platform](#13-how-to-add-a-new-platform)
+8. [Gate / Control Flow (Phase 2)](#8-gate--control-flow-phase-2)
+9. [Configuration](#9-configuration)
+10. [API Endpoints](#10-api-endpoints)
+11. [UI](#11-ui)
+12. [Security and Privacy](#12-security-and-privacy)
+13. [Testing Notes](#13-testing-notes)
+14. [How to Add a New Platform](#14-how-to-add-a-new-platform)
 
 ---
 
@@ -45,7 +46,6 @@ Social media detection identifies these clips and labels them with **protected s
 
 - Detection does not apply to photos. Only `MediaType.video` items are processed.
 - Detection does not download or decode full video frames for anything except the optional OCR tier. The primary tiers read only metadata and the filename — no pixel data moves unless OCR is configured.
-- The feature does not expose a UI to remove system tags. Users who disagree with a detection should move the clip to a separate circle or delete it entirely.
 - Detection does not scan audio tracks for music or voice watermarks.
 
 ---
@@ -230,21 +230,34 @@ WhatsApp relies heavily on filename (the `VID-YYYYMMDD-WA\d+.mp4` convention is 
 
 ## 5. System-Tag Protection Matrix
 
-System tags differ from user tags and AI tags in one critical property: **they cannot be removed by any user action**. The table below lists every delete/remove code path and how it is guarded.
+System tags differ from user tags and AI tags in several properties. **They cannot be fabricated by users** (the add-side reserved-name guard blocks creating tag names that match `ALL_SYSTEM_TAG_NAMES`). **They cannot be renamed or managed via the tag-label vocabulary UI.** However, since Phase 2, **users CAN manually remove a system tag from an individual item** — this acts as a not-sticky override of the enrichment gate (see §8.2).
+
+The table below lists every delete/remove code path and how it is guarded.
 
 | Path | Guard |
 |------|-------|
-| `DELETE /api/tag-labels/:id` (admin deletes a tag label) | Only deletes `media_tags` rows where `source='ai'`; `source='system'` rows are skipped. |
-| `POST /api/media/bulk/tags` with `remove` action | Refuses to remove any tag where the `tags.is_system` flag is true; returns `400` with a list of rejected tag names. |
-| `DELETE /api/media/:id/tags/:tagId` (if such a per-item endpoint exists) | Same `is_system` check; `403 Forbidden`. |
+| `DELETE /api/tag-labels/:id` (admin deletes a tag label) | Only deletes `media_tags` rows where `source='ai'`; `source='system'` rows are skipped entirely. |
+| `POST /api/media/bulk/tags` with `remove` action | **Allowed** for system tags — removes the `media_tags` row(s) for the specified item(s). This is the Phase 2 manual override path. |
+| `DELETE /api/media/:id/tags/:tagId` (per-item tag remove) | **Allowed** for system tags — removes the single `media_tags` row. This is the Phase 2 manual override path. |
 | Auto-tagging re-run | Re-run is authoritative only over `source='ai'` rows; never touches `source='system'` rows. |
-| `social_media_detection` re-run | Idempotently upserts `source='system'` rows; does not delete existing `source='system'` rows for other platforms. |
+| `social_media_detection` re-run | Idempotently upserts `source='system'` rows; does not delete existing `source='system'` rows for other platforms. A re-run on an item where the user previously removed the tag will re-apply it if the item still matches the detector. |
 | `DELETE /api/tag-labels/:id` cascade | `tag_labels` rows for system-defined tag names are not present in `tag_labels` (system tags are not in the tag vocabulary table); cascade has no effect. |
+| Fabricating / applying system tag names via add-tag paths | Blocked — the add-side reserved-name guard returns `400` if the requested tag name appears in `ALL_SYSTEM_TAG_NAMES`. |
 | Circle deletion (cascade) | `media_tags` rows cascade-delete with the circle — this is expected and correct. |
 
 `Tag.is_system` is a non-nullable Boolean column added to the `tags` table. It defaults to `false`. System tags are seeded (upserted) at API startup by `SocialDetectorBootstrapService.onModuleInit`, which calls `prisma.tag.upsert` for each name in `ALL_SYSTEM_TAG_NAMES` with `is_system: true`. This ensures the rows exist before any enrichment job runs, even in a fresh database.
 
 Because system tags live in the `tags` table (circle-scoped), each circle gets its own `Tag` rows for `Social Media`, `TikTok`, etc. seeded on first use. The `is_system` flag is set on every row regardless of circle.
+
+### 5.1 Override (Manual, Not-Sticky)
+
+A user with collaborator or higher circle role can remove the `Social Media` (and/or platform) system tag from a video item. The removal:
+
+1. Deletes the `media_tags` row(s) for that item (single-item or bulk remove endpoint).
+2. Opens the enrichment gate — `video_face_detection` (and any future video enrichment) is no longer blocked for this item.
+3. Does NOT automatically trigger any downstream enrichment. The user must explicitly call the desired rerun endpoint (e.g. `POST /api/media/:id/faces/rerun`) to kick off processing.
+
+The override is **not sticky**: if the user later calls `POST /api/media/:id/social/rerun`, or if the item falls within a future backfill run's scope, and the detector still matches the video, the `Social Media` tag will be re-applied and the gate will re-close. This is intentional — the source of truth is the detector, not the user's removal action.
 
 ---
 
@@ -356,9 +369,54 @@ On any uncaught error, mark status `failed` with `lastError` and re-throw so the
 
 ---
 
-## 8. Configuration
+## 8. Gate / Control Flow (Phase 2)
 
-### 8.1 System Settings (Admin-Editable)
+### 8.1 Upload-Time Gate Ordering
+
+When `features.socialMediaDetection` is enabled, the video upload pipeline enqueues `social_media_detection` **first** and withholds `video_face_detection`. The gate resolves as follows:
+
+```
+Video upload
+    │
+    ▼
+features.socialMediaDetection enabled?
+    │
+    ├─ YES → enqueue social_media_detection (priority 10)
+    │             │
+    │             ▼  (handler runs asynchronously)
+    │         detected = true?
+    │             ├─ YES → STOP. No further video enrichment enqueued.
+    │             │         Gate is closed for this item.
+    │             └─ NO  → chain video_face_detection
+    │                       (if features.faceRecognition is eligible)
+    │
+    └─ NO  → enqueue video_face_detection directly (if features.faceRecognition eligible)
+```
+
+This gate applies only to videos. Photos follow their own enrichment path (`face_detection`, `auto_tagging`, `burst_detection`) which is not affected by social media detection.
+
+### 8.2 Defense-in-Depth: Handler Guard and Backfill Skip
+
+The upload-time gate prevents `video_face_detection` from being enqueued in the normal path, but additional guards cover reruns and backfills:
+
+- **Handler guard:** The `video_face_detection` handler checks whether the media item carries the `Social Media` system tag at execution time. If the tag is present, the handler marks the job `no_faces` immediately and exits without processing. This ensures face reruns initiated manually (`POST /api/media/:id/faces/rerun`) also respect the gate.
+- **Backfill skip:** `POST /api/admin/face/backfill` excludes videos that carry the `Social Media` system tag from its enqueue query, so a global face backfill run does not re-process already-classified social clips.
+
+### 8.3 Manual Override (Not-Sticky)
+
+A user may disagree with a detection result and remove the `Social Media` tag manually (see §5.1). Once the tag is removed:
+
+1. The handler guard and backfill skip no longer apply — the item is treated as a regular video.
+2. The user must explicitly trigger the desired enrichment (e.g. `POST /api/media/:id/faces/rerun`).
+3. The override is not sticky: a future social re-run or backfill that matches the video will re-apply the tag and re-close the gate.
+
+This design keeps the detector as the authoritative source of truth while giving users a practical escape hatch for misclassified items.
+
+---
+
+## 9. Configuration
+
+### 9.1 System Settings (Admin-Editable)
 
 | Setting key | Type | Range | Default | Description |
 |-------------|------|-------|---------|-------------|
@@ -368,7 +426,7 @@ On any uncaught error, mark status `failed` with `lastError` and re-throw so the
 
 Settings are stored in the `system_settings` JSONB column and are editable via `/admin/settings/social`.
 
-### 8.2 Environment Variables
+### 9.2 Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -376,11 +434,11 @@ Settings are stored in the `system_settings` JSONB column and are editable via `
 
 ---
 
-## 9. API Endpoints
+## 10. API Endpoints
 
 All endpoints require JWT Bearer authentication. No new RBAC permissions are introduced — the feature reuses `media:read` and `media:write` combined with per-circle viewer and collaborator roles.
 
-### 9.1 Per-Item Rerun
+### 10.1 Per-Item Rerun
 
 #### `POST /api/media/:id/social/rerun`
 
@@ -402,7 +460,7 @@ Re-enqueue social media detection for a single video.
 - **Response `404`:** Item not found or soft-deleted.
 - **Response `403`:** Caller is not a `collaborator` in the item's circle.
 
-### 9.2 Per-Item Status
+### 10.2 Per-Item Status
 
 #### `GET /api/media/:id/social/status`
 
@@ -425,7 +483,7 @@ Get the current social media detection status for a single item.
   When no `media_social_status` row exists, `status` is `"not_processed"` and all other fields are `null`.
 - **Response `404`:** Item not found or soft-deleted.
 
-### 9.3 Global Backfill (Admin)
+### 10.3 Global Backfill (Admin)
 
 #### `POST /api/admin/social/backfill`
 
@@ -452,7 +510,7 @@ Bulk-enqueue `social_media_detection` jobs for videos across **all circles**.
   - `400` — `features.socialMediaDetection` is `false`
   - `400` — `from` is later than `to`
 
-### 9.4 Platform Registry (Admin)
+### 10.4 Platform Registry (Admin)
 
 #### `GET /api/admin/social/detectors`
 
@@ -476,9 +534,9 @@ Return the read-only platform registry. Useful for auditing which platforms are 
 
 ---
 
-## 10. UI
+## 11. UI
 
-### 10.1 Admin Settings — Social Media Detection (`/admin/settings/social`)
+### 11.1 Admin Settings — Social Media Detection (`/admin/settings/social`)
 
 The admin settings sub-page at `/admin/settings/social` provides:
 
@@ -487,11 +545,11 @@ The admin settings sub-page at `/admin/settings/social` provides:
 - **Platform registry:** a read-only table showing the detector list returned by `GET /api/admin/social/detectors`. This helps admins understand what platforms are covered without reading source code.
 - **Global backfill panel:** optional `from`/`to` date range pickers, a `force` checkbox, and a Run button that calls `POST /api/admin/social/backfill` and displays `{ enqueued, circles }`.
 
-### 10.2 Media Properties Pane
+### 11.2 Media Properties Pane
 
-The media detail drawer (for videos) shows the detection status from `GET /api/media/:id/social/status`. When `detected = true`, the applied system tags appear in the tag list with a lock icon to indicate they cannot be removed. A "Re-run detection" button is visible to collaborators and calls `POST /api/media/:id/social/rerun`.
+The media detail drawer (for videos) shows the detection status from `GET /api/media/:id/social/status`. When `detected = true`, the applied system tags appear in the tag list. A "Re-run detection" button is visible to collaborators and calls `POST /api/media/:id/social/rerun`. Users with collaborator or higher role can remove the `Social Media` / platform system tags from the item via the normal tag-remove UI (Phase 2 override path — see §8.3 and §5.1).
 
-### 10.3 Tag Filter Integration
+### 11.3 Tag Filter Integration
 
 Because system tags are stored as regular `media_tags` rows, all existing tag-filter surfaces work without modification:
 
@@ -503,7 +561,7 @@ Because system tags are stored as regular `media_tags` rows, all existing tag-fi
 
 ---
 
-## 11. Security and Privacy
+## 12. Security and Privacy
 
 ### All Processing Is On-Server
 
@@ -513,9 +571,9 @@ Tier 1 reads metadata that is already in the database (no new I/O). Tier 2 reads
 
 `tesseract.js` is keyless. The `eng.traineddata` file is bundled in the Docker image at build time. The feature introduces no new third-party service dependency.
 
-### System Tag Immutability
+### System Tag Fabrication Guard
 
-System tags are protected at the application layer (see §5). Even an Admin cannot remove a `source='system'` tag via the API — the guard is enforced in the service layer, not just the UI. The only way to remove a system tag is to delete the media item itself, which is an intentional and auditable action.
+System tag names are reserved at the application layer (see §5). Users cannot create, rename, or apply system tag names via the tag-label vocabulary UI or the add-tag endpoints — the reserved-name guard returns `400`. Users can, however, remove a system tag from an individual item as a manual override (see §5.1 and §8.3); this is the intended escape hatch for misclassified items.
 
 ### Feature Gating
 
@@ -523,7 +581,7 @@ System tags are protected at the application layer (see §5). Even an Admin cann
 
 ---
 
-## 12. Testing Notes
+## 13. Testing Notes
 
 ### Unit Tests
 
@@ -539,7 +597,14 @@ System tags are protected at the application layer (see §5). Even an Admin cann
 - **Full pipeline:** upload a mock video with TikTok container metadata; run the `social_media_detection` job; verify `media_social_status` transitions `pending → processing → processed` with `detected = true`, `platform = 'tiktok'`; verify `media_tags` has rows for both `Social Media` and `TikTok` with `source = 'system'`.
 - **Idempotency:** run the handler twice for the same item; verify no duplicate `media_tags` rows are created.
 - **Non-video early exit:** seed a photo item; run the job; verify `detected = false`, `status = processed`, no tags applied.
-- **`is_system` protection — bulk remove:** call `POST /api/media/bulk/tags` to remove `TikTok`; verify `400` response with rejection list.
+- **Gate — detected suppresses face:** upload a mock video, run `social_media_detection` with `detected = true`; verify no `video_face_detection` job is enqueued for the item.
+- **Gate — not-detected chains face:** upload a mock video, run `social_media_detection` with `detected = false` and `features.faceRecognition = true`; verify a `video_face_detection` job is enqueued.
+- **Gate — handler guard:** seed a video item that carries the `Social Media` system tag; enqueue and run `video_face_detection` for it; verify the job completes with `no_faces` without invoking the face provider.
+- **Gate — backfill excludes social-tagged:** seed one social-tagged and one untagged video; call `POST /api/admin/face/backfill`; verify only the untagged video receives a `video_face_detection` job.
+- **Manual override — remove and rerun:** remove the `Social Media` tag from a detected video; call `POST /api/media/:id/faces/rerun`; verify the face job runs normally (handler guard does not trigger).
+- **Manual override — re-flag on rerun:** remove the `Social Media` tag; call `POST /api/media/:id/social/rerun` with a TikTok video; verify the tag is re-applied.
+- **System tag removal — bulk remove allowed:** call `POST /api/media/bulk/tags` with `remove` action on the `Social Media` tag; verify `200` and the `media_tags` row is removed (Phase 2 — removal no longer returns `400`).
+- **System tag fabrication — add blocked:** call the add-tag endpoint with tag name `Social Media` or `TikTok`; verify `400` response.
 - **`is_system` protection — tag-label cascade:** call `DELETE /api/tag-labels/:id` for a system tag name; verify `media_tags` rows with `source = 'system'` are not deleted.
 - **Backfill — basic:** call `POST /api/admin/social/backfill` with `force: false`; verify already-processed items are not re-enqueued.
 - **Backfill — 400 when disabled:** verify `400` when `features.socialMediaDetection = false`.
@@ -554,7 +619,7 @@ System tags are protected at the application layer (see §5). Even an Admin cann
 
 ---
 
-## 13. How to Add a New Platform
+## 14. How to Add a New Platform
 
 Adding support for a new social media platform (e.g. Twitter/X) requires **one code change** and no database migration.
 
@@ -621,3 +686,4 @@ That is the entire change. No new endpoints, no migration, no new service wiring
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | June 2026 | AI Assistant | Initial specification |
+| 1.1 | June 2026 | AI Assistant | Phase 2: enrichment gate, defense-in-depth handler guard and backfill skip, manual not-sticky override, system-tag protection matrix updated to allow per-item removal |
