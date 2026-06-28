@@ -558,7 +558,8 @@ export class MediaService {
 
     return {
       ...rest,
-      tags: mediaTags.map((mt) => mt.tag.name),
+      tags: mediaTags.filter((mt) => !mt.tag.isSystem).map((mt) => mt.tag.name),
+      systemTags: mediaTags.filter((mt) => mt.tag.isSystem).map((mt) => mt.tag.name),
       thumbnailUrl,
       downloadUrl,
     };
