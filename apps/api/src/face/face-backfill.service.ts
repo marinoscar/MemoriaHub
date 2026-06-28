@@ -3,6 +3,7 @@ import { JobReason, MediaFaceStatusType, MediaType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { whereDateRange } from '../search/media-where.builder';
+import { SOCIAL_MAIN_TAG } from '../social/social-detectors';
 
 @Injectable()
 export class FaceBackfillService {
@@ -31,6 +32,16 @@ export class FaceBackfillService {
         type: { in: [MediaType.photo, MediaType.video] },
         deletedAt: null,
         ...dateWhere,
+        // Always skip videos that are flagged as social media — the social gate
+        // suppresses face detection on those items, even during backfill.
+        NOT: {
+          mediaTags: {
+            some: {
+              source: 'system',
+              tag: { is: { name: SOCIAL_MAIN_TAG } },
+            },
+          },
+        },
         ...(force
           ? {}
           : {

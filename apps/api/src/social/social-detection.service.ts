@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { EnrichmentJob, MediaSocialStatusType } from '@prisma/client';
+import { EnrichmentJob, JobReason, MediaSocialStatusType, MediaType } from '@prisma/client';
 import { Readable } from 'stream';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
@@ -7,6 +7,7 @@ import { VideoProbeProcessor } from '../storage/processing/processors/video-prob
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { SocialOcrService } from './social-ocr.service';
 import { detectSocial, SocialSignals, ALL_SYSTEM_TAG_NAMES } from './social-detectors';
+import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 
 @Injectable()
 export class SocialDetectionService {
@@ -18,6 +19,7 @@ export class SocialDetectionService {
     private readonly videoProbeProcessor: VideoProbeProcessor,
     private readonly systemSettings: SystemSettingsService,
     private readonly socialOcrService: SocialOcrService,
+    private readonly mediaEnrichmentService: MediaEnrichmentService,
   ) {}
 
   async processMediaItem(job: EnrichmentJob): Promise<void> {
@@ -262,6 +264,24 @@ export class SocialDetectionService {
       this.logger.log(
         `social_media_detection job ${job.id}: completed — detected=${result.detected} platform=${result.platform ?? 'none'} score=${result.score} for MediaItem ${mediaItemId}`,
       );
+
+      // Social gate: if this was an upload job and the item was NOT flagged as
+      // social media, release the gate and enqueue video_face_detection now.
+      if (job.reason === JobReason.upload && !result.detected) {
+        try {
+          await this.mediaEnrichmentService.enqueueVideoFaceIfEligible({
+            id: mediaItem.id,
+            circleId: mediaItem.circleId,
+            type: mediaItem.type as MediaType,
+            deletedAt: mediaItem.deletedAt ?? null,
+          });
+        } catch (chainErr) {
+          const chainMsg = chainErr instanceof Error ? chainErr.message : String(chainErr);
+          this.logger.warn(
+            `social_media_detection job ${job.id}: failed to chain video_face_detection for MediaItem ${mediaItemId} — ${chainMsg}`,
+          );
+        }
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await this.markFailed(mediaItemId, circleId, msg);

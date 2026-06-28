@@ -4,6 +4,7 @@ import { StorageProvidersModule } from '../storage/providers/storage-providers.m
 import { PrismaModule } from '../prisma/prisma.module';
 import { CirclesModule } from '../circles/circles.module';
 import { SettingsModule } from '../settings/settings.module';
+import { MediaModule } from '../media/media.module';
 import { VideoProbeProcessor } from '../storage/processing/processors/video-probe.processor';
 import { SocialDetectionHandler } from './social-detection.handler';
 import { SocialDetectionService } from './social-detection.service';
@@ -23,6 +24,9 @@ import { AdminSocialController } from './admin-social.controller';
  *   - PrismaModule: database access
  *   - CirclesModule: provides CircleMembershipService for access checks in controller
  *   - SettingsModule: provides SystemSettingsService for feature flag + OCR config
+ *   - MediaModule: provides MediaEnrichmentService so SocialDetectionService can
+ *     chain video_face_detection after social gate clears (not-detected path).
+ *     No circular dependency: MediaModule does not import SocialModule.
  *
  * VideoProbeProcessor is registered directly here (not via MetadataModule) so it
  * can be used as a legacy fallback re-prober without pulling in the full metadata
@@ -35,6 +39,7 @@ import { AdminSocialController } from './admin-social.controller';
     PrismaModule,
     CirclesModule,
     SettingsModule,
+    MediaModule,
   ],
   controllers: [SocialController, AdminSocialController],
   providers: [
