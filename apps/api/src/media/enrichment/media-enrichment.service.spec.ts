@@ -9,17 +9,28 @@ import {
   MediaTagStatusType,
   MediaFaceStatusType,
 } from '@prisma/client';
-import { FEATURE_KEYS } from '../../common/types/settings.types';
 import {
   createMockPrismaService,
   MockPrismaService,
 } from '../../../test/mocks/prisma.mock';
 
+/** Minimal settings object with all three feature flags ON and video face enabled. */
+function makeSettingsAllOn() {
+  return {
+    features: {
+      autoTagging: true,
+      faceRecognition: true,
+      burstDetection: true,
+    },
+    face: { video: { enabled: true } },
+  };
+}
+
 describe('MediaEnrichmentService', () => {
   let service: MediaEnrichmentService;
   let mockPrisma: MockPrismaService;
   let mockEnrichmentJobService: { enqueue: jest.Mock };
-  let mockSystemSettings: { isFeatureEnabled: jest.Mock };
+  let mockSystemSettings: { getSettings: jest.Mock };
 
   const photoItem = {
     id: 'media-1',
@@ -37,17 +48,10 @@ describe('MediaEnrichmentService', () => {
     mockEnrichmentJobService = {
       enqueue: jest.fn().mockResolvedValue({ id: 'job-x' }),
     };
-    mockSystemSettings = { isFeatureEnabled: jest.fn() };
+    mockSystemSettings = { getSettings: jest.fn() };
 
-    // Default: all three features enabled
-    mockSystemSettings.isFeatureEnabled.mockImplementation(
-      (key: string): Promise<boolean> => {
-        if (key === FEATURE_KEYS.AUTO_TAGGING) return Promise.resolve(true);
-        if (key === FEATURE_KEYS.FACE_RECOGNITION) return Promise.resolve(true);
-        if (key === FEATURE_KEYS.BURST_DETECTION) return Promise.resolve(true);
-        return Promise.resolve(false);
-      },
-    );
+    // Default: all three features enabled, video face enabled
+    mockSystemSettings.getSettings.mockResolvedValue(makeSettingsAllOn());
 
     mockPrisma.mediaTagStatus.upsert.mockResolvedValue({} as any);
     mockPrisma.mediaFaceStatus.upsert.mockResolvedValue({} as any);
@@ -162,12 +166,10 @@ describe('MediaEnrichmentService', () => {
     // -------------------------------------------------------------------------
     describe('feature flag gating', () => {
       it('omits auto_tagging and its status upsert when autoTagging is OFF, others still enqueue', async () => {
-        mockSystemSettings.isFeatureEnabled.mockImplementation(
-          (key: string): Promise<boolean> => {
-            if (key === FEATURE_KEYS.AUTO_TAGGING) return Promise.resolve(false);
-            return Promise.resolve(true);
-          },
-        );
+        mockSystemSettings.getSettings.mockResolvedValueOnce({
+          features: { autoTagging: false, faceRecognition: true, burstDetection: true },
+          face: { video: { enabled: true } },
+        });
 
         await service.enqueueUploadEnrichment(photoItem);
 
@@ -179,13 +181,10 @@ describe('MediaEnrichmentService', () => {
       });
 
       it('omits face_detection and its status upsert when faceRecognition is OFF, others still enqueue', async () => {
-        mockSystemSettings.isFeatureEnabled.mockImplementation(
-          (key: string): Promise<boolean> => {
-            if (key === FEATURE_KEYS.FACE_RECOGNITION)
-              return Promise.resolve(false);
-            return Promise.resolve(true);
-          },
-        );
+        mockSystemSettings.getSettings.mockResolvedValueOnce({
+          features: { autoTagging: true, faceRecognition: false, burstDetection: true },
+          face: { video: { enabled: true } },
+        });
 
         await service.enqueueUploadEnrichment(photoItem);
 
@@ -197,13 +196,10 @@ describe('MediaEnrichmentService', () => {
       });
 
       it('omits burst_detection when burstDetection is OFF, tagging and face still enqueue', async () => {
-        mockSystemSettings.isFeatureEnabled.mockImplementation(
-          (key: string): Promise<boolean> => {
-            if (key === FEATURE_KEYS.BURST_DETECTION)
-              return Promise.resolve(false);
-            return Promise.resolve(true);
-          },
-        );
+        mockSystemSettings.getSettings.mockResolvedValueOnce({
+          features: { autoTagging: true, faceRecognition: true, burstDetection: false },
+          face: { video: { enabled: true } },
+        });
 
         await service.enqueueUploadEnrichment(photoItem);
 
@@ -218,15 +214,19 @@ describe('MediaEnrichmentService', () => {
     // -------------------------------------------------------------------------
     // Non-photo / deleted guards
     // -------------------------------------------------------------------------
-    it('skips everything for a non-photo media item (e.g. video)', async () => {
+    it('enqueues video_face_detection (not auto_tagging or burst_detection) for a video item', async () => {
       const videoItem = { ...photoItem, type: MediaType.video };
 
       await service.enqueueUploadEnrichment(videoItem);
 
-      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
-      expect(mockSystemSettings.isFeatureEnabled).not.toHaveBeenCalled();
+      expect(enqueuedTypes()).not.toContain('auto_tagging');
+      expect(enqueuedTypes()).not.toContain('face_detection');
+      expect(enqueuedTypes()).not.toContain('burst_detection');
+      expect(enqueuedTypes()).toContain('video_face_detection');
+      // getSettings IS called for video items (no early exit for video type)
+      expect(mockSystemSettings.getSettings).toHaveBeenCalledTimes(1);
       expect(mockPrisma.mediaTagStatus.upsert).not.toHaveBeenCalled();
-      expect(mockPrisma.mediaFaceStatus.upsert).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaFaceStatus.upsert).toHaveBeenCalledTimes(1);
     });
 
     it('skips everything for a soft-deleted item', async () => {
@@ -235,27 +235,19 @@ describe('MediaEnrichmentService', () => {
       await service.enqueueUploadEnrichment(deletedItem);
 
       expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
-      expect(mockSystemSettings.isFeatureEnabled).not.toHaveBeenCalled();
+      // getSettings is NOT called — early return before settings read
+      expect(mockSystemSettings.getSettings).not.toHaveBeenCalled();
       expect(mockPrisma.mediaTagStatus.upsert).not.toHaveBeenCalled();
       expect(mockPrisma.mediaFaceStatus.upsert).not.toHaveBeenCalled();
     });
 
     // -------------------------------------------------------------------------
-    // Single-read design: each feature key read exactly once per call
+    // Single-read design: getSettings called exactly once per enqueue call
     // -------------------------------------------------------------------------
-    it('calls isFeatureEnabled exactly once per feature key (3 total)', async () => {
+    it('reads settings once via getSettings per call (single DB round-trip, not per-feature-key)', async () => {
       await service.enqueueUploadEnrichment(photoItem);
 
-      expect(mockSystemSettings.isFeatureEnabled).toHaveBeenCalledTimes(3);
-      expect(mockSystemSettings.isFeatureEnabled).toHaveBeenCalledWith(
-        FEATURE_KEYS.AUTO_TAGGING,
-      );
-      expect(mockSystemSettings.isFeatureEnabled).toHaveBeenCalledWith(
-        FEATURE_KEYS.FACE_RECOGNITION,
-      );
-      expect(mockSystemSettings.isFeatureEnabled).toHaveBeenCalledWith(
-        FEATURE_KEYS.BURST_DETECTION,
-      );
+      expect(mockSystemSettings.getSettings).toHaveBeenCalledTimes(1);
     });
 
     // -------------------------------------------------------------------------
