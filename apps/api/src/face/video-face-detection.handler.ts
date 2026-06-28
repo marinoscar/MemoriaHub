@@ -305,12 +305,36 @@ export class VideoFaceDetectionHandler implements EnrichmentHandler, OnModuleIni
             videoTimestamps: [...cluster.allTimestampsMs].sort((a, b) => a - b),
             // frameThumbnailKey omitted — upload failed
           });
-          // Suppress unused variable warning from activeProviderId
-          void activeProviderId;
           continue;
         }
 
-        void activeProviderId; // used indirectly through getActiveProvider context
+        // Register a StorageObject row so MediaThumbnailService.signThumb()
+        // can look up the provider/bucket and produce a signed URL.
+        // status='ready' keeps it out of the processing pipeline.
+        // Upsert (keyed on storageKey) makes re-detection idempotent.
+        await this.prisma.storageObject.upsert({
+          where: { storageKey: frameThumbnailKey },
+          update: {
+            size: BigInt(thumbBuffer.length),
+            mimeType: 'image/jpeg',
+            storageProvider: activeProviderId,
+            bucket: activeStorageProvider.getBucket(),
+            status: 'ready',
+            metadata: { videoFaceFrameOf: job.mediaItemId },
+            updatedAt: new Date(),
+          },
+          create: {
+            name: `video-face-${frameThumbId}.jpg`,
+            size: BigInt(thumbBuffer.length),
+            mimeType: 'image/jpeg',
+            storageKey: frameThumbnailKey,
+            storageProvider: activeProviderId,
+            bucket: activeStorageProvider.getBucket(),
+            status: 'ready',
+            uploadedById: null,
+            metadata: { videoFaceFrameOf: job.mediaItemId },
+          },
+        });
 
         facesWithVideoFields.push({
           ...rep.normalizedFace,
