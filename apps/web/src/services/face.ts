@@ -150,6 +150,8 @@ export interface PersonCoverFace {
   faceId: string;
   mediaItemId: string;
   boundingBox: BoundingBox;
+  /** Signed URL of the representative video frame JPEG used for face crops. Null for photos. */
+  faceThumbnailUrl: string | null;
 }
 
 export interface PersonListItem {
@@ -182,6 +184,8 @@ export interface PersonFace {
   confidence: number | null;
   manuallyAssigned: boolean;
   createdAt: string;
+  /** Signed URL of the representative video frame JPEG used for face crops. Null for photos. */
+  faceThumbnailUrl: string | null;
 }
 
 export interface PersonDetail {
@@ -315,6 +319,8 @@ export interface UnassignedFaceDto {
   boundingBox: BoundingBox;
   confidence: number | null;
   createdAt: string;
+  /** Signed URL of the representative video frame JPEG used for face crops. Null for photos. */
+  faceThumbnailUrl: string | null;
 }
 
 export interface UnassignedFacesResponse {

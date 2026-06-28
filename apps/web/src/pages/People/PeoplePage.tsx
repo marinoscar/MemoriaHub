@@ -666,7 +666,13 @@ function PersonDetailDrawer({
           const imgUrl = mediaMap[face.mediaItemId];
           return (
             <Grid key={face.faceId}>
-              {imgUrl ? (
+              {face.faceThumbnailUrl ? (
+                <Box
+                  component="img"
+                  src={face.faceThumbnailUrl}
+                  sx={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 1, display: 'block' }}
+                />
+              ) : imgUrl ? (
                 <FaceCrop imageUrl={imgUrl} boundingBox={face.boundingBox} size={72} />
               ) : (
                 <Box sx={{ width: 72, height: 72, bgcolor: 'grey.200', borderRadius: 1 }} />
@@ -933,7 +939,13 @@ function UnassignedFacesSection({
                   '&:hover': { borderColor: 'primary.light' },
                 }}
               >
-                {imgUrl ? (
+                {face.faceThumbnailUrl ? (
+                  <Box
+                    component="img"
+                    src={face.faceThumbnailUrl}
+                    sx={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 1, display: 'block' }}
+                  />
+                ) : imgUrl ? (
                   <FaceCrop imageUrl={imgUrl} boundingBox={face.boundingBox} size={72} />
                 ) : (
                   <Box
