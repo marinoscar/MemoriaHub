@@ -16,6 +16,7 @@ import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.r
 import { PrismaService } from '../../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
 import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
+import { ProviderThrottleService } from '../../enrichment/provider-throttle.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -85,6 +86,10 @@ describe('EnrichmentJobWorker', () => {
         EnrichmentJobWorker,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
+        // ProviderThrottleService gained a dependency on this branch; provide
+        // a real no-clock instance so acquire/trip/recordSuccess are genuine
+        // no-ops during these tests.
+        { provide: ProviderThrottleService, useValue: new ProviderThrottleService() },
       ],
     }).compile();
 
@@ -140,6 +145,7 @@ describe('EnrichmentJobWorker', () => {
           EnrichmentJobWorker,
           { provide: PrismaService, useValue: mockPrisma },
           { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
+          { provide: ProviderThrottleService, useValue: new ProviderThrottleService() },
         ],
       }).compile();
 

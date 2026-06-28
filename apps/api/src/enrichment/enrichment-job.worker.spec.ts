@@ -29,6 +29,7 @@ import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
 import { RateLimitError } from './rate-limit.error';
 // Import with a regular import; for the isolated-module tests we re-import below.
 import { EnrichmentJobWorker } from './enrichment-job.worker';
+import { ProviderThrottleService } from './provider-throttle.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -75,6 +76,10 @@ async function buildWorker(
       WorkerClass,
       { provide: PrismaService, useValue: mockPrisma },
       { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
+      // ProviderThrottleService has no required NestJS DI deps (constructor takes
+      // optional hooks); provide a real no-clock instance so throttle calls are
+      // genuine no-ops during these tests.
+      { provide: ProviderThrottleService, useValue: new ProviderThrottleService() },
     ],
   }).compile();
 
@@ -186,6 +191,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
           EnrichmentJobWorker,
           { provide: PrismaService, useValue: mockPrisma },
           { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
+          { provide: ProviderThrottleService, useValue: new ProviderThrottleService() },
         ],
       }).compile();
       const w2 = module.get<EnrichmentJobWorker>(EnrichmentJobWorker);

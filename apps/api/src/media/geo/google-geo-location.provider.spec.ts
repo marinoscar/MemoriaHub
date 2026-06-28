@@ -8,6 +8,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { GoogleGeoLocationProvider } from './google-geo-location.provider';
+import { RateLimitError } from '../../enrichment/rate-limit.error';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -214,15 +215,116 @@ describe('GoogleGeoLocationProvider', () => {
     });
   });
 
-  describe('non-OK status (e.g. OVER_QUERY_LIMIT)', () => {
-    it('returns null', async () => {
+  // -------------------------------------------------------------------------
+  // Rate-limit statuses — must throw RateLimitError (not return null)
+  // -------------------------------------------------------------------------
+
+  describe('OVER_QUERY_LIMIT (API quota exhaustion)', () => {
+    it('throws RateLimitError', async () => {
       fetchSpy = jest
         .spyOn(global, 'fetch')
         .mockResolvedValue(makeResponse({ status: 'OVER_QUERY_LIMIT', results: [] }));
 
-      const result = await provider.reverseGeocodeWithKey(9.9, -84.0, 'key');
+      await expect(
+        provider.reverseGeocodeWithKey(9.9, -84.0, 'key'),
+      ).rejects.toBeInstanceOf(RateLimitError);
+    });
 
-      expect(result).toBeNull();
+    it('thrown RateLimitError carries the status in the message', async () => {
+      fetchSpy = jest
+        .spyOn(global, 'fetch')
+        .mockResolvedValue(makeResponse({ status: 'OVER_QUERY_LIMIT', results: [] }));
+
+      await expect(
+        provider.reverseGeocodeWithKey(9.9, -84.0, 'key'),
+      ).rejects.toMatchObject({ message: expect.stringContaining('OVER_QUERY_LIMIT') });
+    });
+  });
+
+  describe('RESOURCE_EXHAUSTED (API-level rate limit)', () => {
+    it('throws RateLimitError', async () => {
+      fetchSpy = jest
+        .spyOn(global, 'fetch')
+        .mockResolvedValue(makeResponse({ status: 'RESOURCE_EXHAUSTED', results: [] }));
+
+      await expect(
+        provider.reverseGeocodeWithKey(9.9, -84.0, 'key'),
+      ).rejects.toBeInstanceOf(RateLimitError);
+    });
+  });
+
+  describe('HTTP-level throttle / server error', () => {
+    function makeHttpResponse(status: number, retryAfter?: string): Response {
+      const headers = new Map<string, string>();
+      if (retryAfter) headers.set('retry-after', retryAfter);
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        headers: {
+          get: (key: string) => headers.get(key.toLowerCase()) ?? null,
+        },
+        json: jest.fn().mockResolvedValue({}),
+      } as unknown as Response;
+    }
+
+    it('throws RateLimitError on HTTP 429', async () => {
+      fetchSpy = jest
+        .spyOn(global, 'fetch')
+        .mockResolvedValue(makeHttpResponse(429));
+
+      await expect(
+        provider.reverseGeocodeWithKey(9.9, -84.0, 'key'),
+      ).rejects.toBeInstanceOf(RateLimitError);
+    });
+
+    it('thrown RateLimitError on 429 has "google" providerKey', async () => {
+      fetchSpy = jest
+        .spyOn(global, 'fetch')
+        .mockResolvedValue(makeHttpResponse(429));
+
+      await expect(
+        provider.reverseGeocodeWithKey(9.9, -84.0, 'key'),
+      ).rejects.toMatchObject({ providerKey: 'google' });
+    });
+
+    it('throws RateLimitError on HTTP 503', async () => {
+      fetchSpy = jest
+        .spyOn(global, 'fetch')
+        .mockResolvedValue(makeHttpResponse(503));
+
+      await expect(
+        provider.reverseGeocodeWithKey(9.9, -84.0, 'key'),
+      ).rejects.toBeInstanceOf(RateLimitError);
+    });
+
+    it('throws RateLimitError on HTTP 500', async () => {
+      fetchSpy = jest
+        .spyOn(global, 'fetch')
+        .mockResolvedValue(makeHttpResponse(500));
+
+      await expect(
+        provider.reverseGeocodeWithKey(9.9, -84.0, 'key'),
+      ).rejects.toBeInstanceOf(RateLimitError);
+    });
+
+    it('parses Retry-After header into retryAfterMs on HTTP 429', async () => {
+      fetchSpy = jest
+        .spyOn(global, 'fetch')
+        .mockResolvedValue(makeHttpResponse(429, '60'));
+
+      const err = await provider.reverseGeocodeWithKey(9.9, -84.0, 'key').catch((e) => e);
+      expect(err).toBeInstanceOf(RateLimitError);
+      expect((err as RateLimitError).retryAfterMs).toBe(60_000);
+    });
+
+    it('retryAfterMs is undefined when Retry-After header is absent', async () => {
+      fetchSpy = jest
+        .spyOn(global, 'fetch')
+        .mockResolvedValue(makeHttpResponse(429));
+
+      const err = await provider.reverseGeocodeWithKey(9.9, -84.0, 'key').catch((e) => e);
+      expect(err).toBeInstanceOf(RateLimitError);
+      expect((err as RateLimitError).retryAfterMs).toBeUndefined();
     });
   });
 

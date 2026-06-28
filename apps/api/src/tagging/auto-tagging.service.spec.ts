@@ -46,6 +46,7 @@ import {
 } from '@prisma/client';
 import { detectImageMime } from './image-mime.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { RateLimitError } from '../enrichment/rate-limit.error';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1032,6 +1033,50 @@ describe('AutoTaggingService', () => {
       // Tags are empty, description null from parse failure, no people
       // embedAndStore should bail early (no text to embed)
       expect(mockPrisma.$executeRaw).not.toHaveBeenCalled();
+    });
+
+    // -------------------------------------------------------------------------
+    // RateLimitError is rethrown (not swallowed) — the enrichment worker
+    // must see it so it can apply backoff and retry.
+    //
+    // embedAndStore signature: (mediaItemId, circleId, description, tagNames, peopleNames)
+    // -------------------------------------------------------------------------
+
+    it('rethrows RateLimitError from embedText — embedding rate-limits must propagate', async () => {
+      // Arrange: configure embedding so embedAndStore reaches the embedText call
+      mockAiSettingsService.resolveEmbeddingConfig.mockResolvedValue({
+        provider: 'openai',
+        model: 'text-embedding-3-small',
+      });
+      mockAiSettingsService.resolveCredentials.mockResolvedValue({ apiKey: 'embedding-key' });
+      mockRegistry.get.mockReturnValue(mockAiProviderForEmbedding);
+
+      const rl = new RateLimitError('Embedding rate limited', 30_000, 'openai');
+      mockAiProviderForEmbedding.embedText.mockRejectedValue(rl);
+
+      // Act + Assert: embedAndStore must rethrow the RateLimitError
+      await expect(
+        (service as any).embedAndStore('media-1', 'circle-1', 'Sand.', ['Beach'], []),
+      ).rejects.toBeInstanceOf(RateLimitError);
+    });
+
+    it('rethrows a classifyRateLimit-detected 429-shaped error as RateLimitError', async () => {
+      // Arrange
+      mockAiSettingsService.resolveEmbeddingConfig.mockResolvedValue({
+        provider: 'openai',
+        model: 'text-embedding-3-small',
+      });
+      mockAiSettingsService.resolveCredentials.mockResolvedValue({ apiKey: 'embedding-key' });
+      mockRegistry.get.mockReturnValue(mockAiProviderForEmbedding);
+
+      // A 429-shaped error that classifyRateLimit detects (not already a RateLimitError)
+      const http429 = Object.assign(new Error('Too Many Requests'), { status: 429 });
+      mockAiProviderForEmbedding.embedText.mockRejectedValue(http429);
+
+      // Act + Assert
+      await expect(
+        (service as any).embedAndStore('media-1', 'circle-1', 'Waves.', ['Ocean'], []),
+      ).rejects.toBeInstanceOf(RateLimitError);
     });
   });
 });

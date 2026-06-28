@@ -75,6 +75,21 @@ describe('classifyRateLimit', () => {
       expect(result).toBeInstanceOf(RateLimitError);
     });
 
+    it('returns a RateLimitError for { status: 529 } (Anthropic Overloaded)', () => {
+      const result = classifyRateLimit({ status: 529, message: 'Overloaded' });
+      expect(result).toBeInstanceOf(RateLimitError);
+    });
+
+    it('message is taken from err.message for 529', () => {
+      const result = classifyRateLimit({ status: 529, message: 'Service overloaded' });
+      expect(result!.message).toBe('Service overloaded');
+    });
+
+    it('uses a default message containing 529 when err.message is absent', () => {
+      const result = classifyRateLimit({ status: 529 });
+      expect(result!.message).toContain('529');
+    });
+
     it('message is taken from err.message when present', () => {
       const result = classifyRateLimit({ status: 429, message: 'custom msg' });
       expect(result!.message).toBe('custom msg');
