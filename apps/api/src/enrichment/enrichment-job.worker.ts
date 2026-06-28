@@ -4,6 +4,7 @@ import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
 import { EnrichmentJob, JobStatus } from '@prisma/client';
 import { RateLimitError, classifyRateLimit } from './rate-limit.error';
 import { computeQueueBackoffMs } from './backoff.util';
+import { ProviderThrottleService } from './provider-throttle.service';
 
 // ---------------------------------------------------------------------------
 // Config helpers — read from env at startup (same pattern as existing worker)
@@ -35,6 +36,7 @@ export class EnrichmentJobWorker implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly registry: EnrichmentHandlerRegistry,
+    private readonly throttle: ProviderThrottleService,
   ) {}
 
   onModuleInit(): void {
@@ -144,8 +146,23 @@ export class EnrichmentJobWorker implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    // Resolve a coarse provider key for the shared throttle gate.
+    // null = job type does not need provider-level throttling.
+    const throttleKey = ProviderThrottleService.resolveKey(job.type);
+
     try {
+      // Wait out any active cooldown window before hitting the remote API.
+      // No-op (zero cost) when the gate is idle or key is null.
+      if (throttleKey) {
+        await this.throttle.acquire(throttleKey);
+      }
+
       await handler.process(job);
+
+      // Successful call — decay the exponential ramp toward baseline.
+      if (throttleKey) {
+        this.throttle.recordSuccess(throttleKey);
+      }
 
       await this.prisma.enrichmentJob.update({
         where: { id: job.id },
@@ -164,6 +181,11 @@ export class EnrichmentJobWorker implements OnModuleInit, OnModuleDestroy {
 
       if (rl) {
         // ── Rate-limit deferral path ──────────────────────────────────────
+        // Also trip the shared throttle gate so sibling jobs back off together.
+        if (throttleKey) {
+          this.throttle.trip(throttleKey, rl.retryAfterMs ?? null);
+        }
+
         const hits = job.rateLimitHits + 1;
         const delayMs = computeQueueBackoffMs(hits, {
           baseMs: RL_BASE_MS,
