@@ -1,0 +1,554 @@
+/**
+ * Unit tests for VideoFaceDetectionHandler.
+ *
+ * Focus: the storageObject.upsert call added to register a StorageObject row
+ * for every successfully uploaded representative-frame JPEG (so that
+ * MediaThumbnailService.signThumb() can resolve a signed URL).
+ *
+ * What is mocked:
+ *  - sharp              — dynamic import inside the handler; returns a small JPEG
+ *  - fluent-ffmpeg      — never reached (VideoFrameExtractionService is fully mocked)
+ *  - image-orientation  — prepareImageForProcessing returns the buffer unchanged
+ *
+ * Collaborators replaced with plain jest mocks (no NestJS testing module needed):
+ *  - EnrichmentHandlerRegistry  — register()
+ *  - PrismaService              — mediaItem.findUnique, systemSettings.findUnique,
+ *                                 storageObject.upsert, face.deleteMany, face.create,
+ *                                 face.update, mediaFaceStatus.upsert
+ *  - FaceDetectionCore          — markProcessing, resolveProviderAndCreds,
+ *                                 detectWithThrottleMapping, normalizeFace,
+ *                                 persistAndMatchFaces, markStatus, markFailed,
+ *                                 recordModel (via EnrichmentJobService)
+ *  - VideoFrameExtractionService — extractFrames (returns one fake frame)
+ *  - FaceMatchingService        — cosineSimilarity, clusterThreshold
+ *  - StorageProviderResolver    — getActiveProvider(), getProviderFor()
+ *  - EnrichmentJobService       — recordModel
+ *
+ * Architecture note:
+ *   The handler's process() path calls `await import('sharp')` dynamically for
+ *   thumbnail downscaling. We mock sharp before importing the handler so Jest
+ *   intercepts the ESM-style default export and each test controls behaviour
+ *   through the mock factory returned by jest.requireMock('sharp').
+ */
+
+// ---------------------------------------------------------------------------
+// Module-level mocks — must come before any import of the handler
+// ---------------------------------------------------------------------------
+
+// Mock sharp so the dynamic `await import('sharp')` in the handler resolves.
+// The factory returns a chainable mock whose toBuffer() resolves to a
+// fake JPEG buffer; each test can override with mockReturnValueOnce.
+jest.mock('sharp', () => {
+  const mockPipeline = {
+    resize: jest.fn().mockReturnThis(),
+    jpeg: jest.fn().mockReturnThis(),
+    toBuffer: jest.fn().mockResolvedValue(Buffer.from('fake-thumb-jpeg')),
+  };
+  return jest.fn().mockReturnValue(mockPipeline);
+});
+
+// Mock prepareImageForProcessing — applied orientation upright, returns the
+// buffer as-is with non-zero dimensions so the handler continues normally.
+jest.mock('../storage/processing/image-orientation.util', () => ({
+  prepareImageForProcessing: jest.fn().mockResolvedValue({
+    buffer: Buffer.from('frame-prepared'),
+    width: 640,
+    height: 480,
+  }),
+}));
+
+// Mock fluent-ffmpeg (required transitively by VideoFrameExtractionService
+// even though the service itself is replaced; importing the class loads the
+// module, so the mock prevents native binary lookup failures).
+jest.mock('fluent-ffmpeg', () => {
+  const chain = {
+    seekInput: jest.fn().mockReturnThis(),
+    frames: jest.fn().mockReturnThis(),
+    output: jest.fn().mockReturnThis(),
+    on: jest.fn().mockImplementation((event: string, cb: () => void) => {
+      if (event === 'end') cb();
+      return chain;
+    }),
+    run: jest.fn().mockReturnThis(),
+  };
+  const ffmpegMock = jest.fn().mockReturnValue(chain);
+  return { default: ffmpegMock, __esModule: true, ...ffmpegMock };
+});
+
+// ---------------------------------------------------------------------------
+// Imports — after mocks so jest intercepts module loading
+// ---------------------------------------------------------------------------
+
+import { Readable } from 'stream';
+import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
+import { VideoFaceDetectionHandler } from './video-face-detection.handler';
+import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
+
+// ---------------------------------------------------------------------------
+// Test-scoped factory helpers
+// ---------------------------------------------------------------------------
+
+function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
+  return {
+    id: 'job-video-1',
+    type: 'video_face_detection',
+    mediaItemId: 'media-video-1',
+    circleId: 'circle-1',
+    status: JobStatus.running,
+    reason: JobReason.upload,
+    priority: 0,
+    providerKey: null,
+    modelVersion: null,
+    payload: null,
+    attempts: 1,
+    lastError: null,
+    startedAt: new Date(),
+    finishedAt: null,
+    scheduledFor: null,
+    rateLimitedAt: null,
+    rateLimitHits: 0,
+    createdAt: new Date(),
+    ...overrides,
+  };
+}
+
+/** Build a minimal MediaItem row with one StorageObject. */
+function makeMediaItem(overrides: Partial<{
+  id: string;
+  circleId: string;
+  type: string;
+  durationMs: number | null;
+  width: number | null;
+  height: number | null;
+  storageObject: { storageKey: string; storageProvider: string; bucket: string; name: string } | null;
+}> = {}) {
+  return {
+    id: 'media-video-1',
+    circleId: 'circle-1',
+    type: 'video',
+    durationMs: 30000, // 30 s → 6 frames at 5 s interval
+    width: 1280,
+    height: 720,
+    storageObject: {
+      storageKey: 'uploads/video.mp4',
+      storageProvider: 's3',
+      bucket: 'my-bucket',
+      name: 'video.mp4',
+    },
+    ...overrides,
+  };
+}
+
+/** A fake detected face as returned by a mocked FaceProvider. */
+const FAKE_FACE = {
+  boundingBox: { x: 0.1, y: 0.1, w: 0.2, h: 0.3 },
+  confidence: 0.95,
+  embedding: [0.6, 0.8], // pre-normalized; L2 norm = 1
+  landmarks: null,
+  externalFaceId: null,
+};
+
+/** Normalized version of FAKE_FACE (as returned by core.normalizeFace). */
+const FAKE_NORMALIZED_FACE = {
+  ...FAKE_FACE,
+  embedding: [0.6, 0.8],
+};
+
+// ---------------------------------------------------------------------------
+// Test suite
+// ---------------------------------------------------------------------------
+
+describe('VideoFaceDetectionHandler', () => {
+  // -------------------------------------------------------------------------
+  // Shared mocks — rebuilt in beforeEach so each test starts clean
+  // -------------------------------------------------------------------------
+
+  let mockRegistry: { register: jest.Mock };
+  let mockPrisma: {
+    mediaItem: { findUnique: jest.Mock };
+    systemSettings: { findUnique: jest.Mock };
+    storageObject: { upsert: jest.Mock };
+    face: { deleteMany: jest.Mock; create: jest.Mock; update: jest.Mock };
+    mediaFaceStatus: { upsert: jest.Mock };
+  };
+  let mockCore: {
+    markProcessing: jest.Mock;
+    resolveProviderAndCreds: jest.Mock;
+    detectWithThrottleMapping: jest.Mock;
+    normalizeFace: jest.Mock;
+    persistAndMatchFaces: jest.Mock;
+    markStatus: jest.Mock;
+    markFailed: jest.Mock;
+  };
+  let mockFrameExtractor: { extractFrames: jest.Mock };
+  let mockMatchingService: { cosineSimilarity: jest.Mock; clusterThreshold: number };
+  let mockResolver: { getActiveProvider: jest.Mock; getProviderFor: jest.Mock };
+  let mockActiveStorageProvider: { upload: jest.Mock; getBucket: jest.Mock };
+  let mockObjectStorageProvider: { download: jest.Mock };
+  let mockEnrichmentJobService: { recordModel: jest.Mock };
+
+  let handler: VideoFaceDetectionHandler;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    // Reset sharp mock pipeline so toBuffer returns a consistent small buffer
+    const sharpMock = jest.requireMock('sharp') as jest.Mock;
+    sharpMock.mockReturnValue({
+      resize: jest.fn().mockReturnThis(),
+      jpeg: jest.fn().mockReturnThis(),
+      toBuffer: jest.fn().mockResolvedValue(Buffer.from('fake-thumb-jpeg')),
+    });
+
+    // Reset prepareImageForProcessing mock
+    (prepareImageForProcessing as jest.Mock).mockResolvedValue({
+      buffer: Buffer.from('frame-prepared'),
+      width: 640,
+      height: 480,
+    });
+
+    // -----------------------------------------------------------------------
+    // Prisma mock — every table method starts as jest.fn()
+    // -----------------------------------------------------------------------
+    mockPrisma = {
+      mediaItem: { findUnique: jest.fn() },
+      systemSettings: { findUnique: jest.fn() },
+      storageObject: { upsert: jest.fn().mockResolvedValue({ id: 'so-1' }) },
+      face: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        create: jest.fn().mockResolvedValue({ id: 'face-1', embedding: [0.6, 0.8], externalFaceId: null }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      mediaFaceStatus: { upsert: jest.fn().mockResolvedValue({}) },
+    };
+
+    // -----------------------------------------------------------------------
+    // FaceDetectionCore mock — all helpers that VideoFaceDetectionHandler calls
+    // -----------------------------------------------------------------------
+    mockCore = {
+      markProcessing: jest.fn().mockResolvedValue(undefined),
+      resolveProviderAndCreds: jest.fn().mockResolvedValue({
+        providerKey: 'compreface',
+        modelVersion: 'arcface-r100-v1',
+        provider: {
+          detect: jest.fn(),
+          capabilities: { delegatedRecognize: false },
+        },
+        creds: { apiKey: 'test-key' },
+      }),
+      detectWithThrottleMapping: jest.fn().mockResolvedValue([FAKE_FACE]),
+      normalizeFace: jest.fn().mockReturnValue(FAKE_NORMALIZED_FACE),
+      persistAndMatchFaces: jest.fn().mockResolvedValue(1),
+      markStatus: jest.fn().mockResolvedValue(undefined),
+      markFailed: jest.fn().mockResolvedValue(undefined),
+    };
+
+    // -----------------------------------------------------------------------
+    // VideoFrameExtractionService mock — returns exactly one fake frame
+    // -----------------------------------------------------------------------
+    mockFrameExtractor = {
+      extractFrames: jest.fn().mockResolvedValue([
+        {
+          timestampMs: 2500,
+          buffer: Buffer.from('fake-frame-jpeg'),
+        },
+      ]),
+    };
+
+    // -----------------------------------------------------------------------
+    // FaceMatchingService mock — clusterThreshold drives dedup in handler
+    // -----------------------------------------------------------------------
+    mockMatchingService = {
+      cosineSimilarity: jest.fn().mockReturnValue(0.99), // same identity always
+      clusterThreshold: 0.45,
+    };
+
+    // -----------------------------------------------------------------------
+    // Storage provider mocks
+    // -----------------------------------------------------------------------
+    mockObjectStorageProvider = {
+      download: jest.fn().mockResolvedValue(Readable.from(Buffer.from('fake-video-bytes'))),
+    };
+
+    mockActiveStorageProvider = {
+      upload: jest.fn().mockResolvedValue(undefined),
+      getBucket: jest.fn().mockReturnValue('active-bucket'),
+    };
+
+    mockResolver = {
+      getProviderFor: jest.fn().mockResolvedValue(mockObjectStorageProvider),
+      getActiveProvider: jest.fn().mockResolvedValue({
+        id: 'active-s3',
+        provider: mockActiveStorageProvider,
+      }),
+    };
+
+    mockEnrichmentJobService = {
+      recordModel: jest.fn().mockResolvedValue(undefined),
+    };
+
+    // -----------------------------------------------------------------------
+    // Prisma: default media item and system settings
+    // -----------------------------------------------------------------------
+    mockPrisma.mediaItem.findUnique.mockResolvedValue(makeMediaItem());
+    mockPrisma.systemSettings.findUnique.mockResolvedValue({
+      key: 'global',
+      value: {
+        face: {
+          video: {
+            enabled: true,
+            sampleIntervalSeconds: 5,
+            maxFramesPerVideo: 60,
+          },
+        },
+      },
+    });
+
+    // -----------------------------------------------------------------------
+    // Registry mock
+    // -----------------------------------------------------------------------
+    mockRegistry = { register: jest.fn() };
+
+    // -----------------------------------------------------------------------
+    // Instantiate the handler directly
+    // -----------------------------------------------------------------------
+    handler = new VideoFaceDetectionHandler(
+      mockRegistry as any,
+      mockPrisma as any,
+      mockCore as any,
+      mockFrameExtractor as any,
+      mockMatchingService as any,
+      mockResolver as any,
+      mockEnrichmentJobService as any,
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // Boilerplate: type & registration
+  // -------------------------------------------------------------------------
+
+  describe('type', () => {
+    it('has type === "video_face_detection"', () => {
+      expect(handler.type).toBe('video_face_detection');
+    });
+  });
+
+  describe('onModuleInit()', () => {
+    it('registers itself with the handler registry', () => {
+      handler.onModuleInit();
+      expect(mockRegistry.register).toHaveBeenCalledWith(handler);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Key behaviour: storageObject.upsert on successful frame upload
+  // -------------------------------------------------------------------------
+
+  describe('StorageObject row registration on successful upload', () => {
+    it('calls prisma.storageObject.upsert once for the single representative face', async () => {
+      await handler.process(makeJob());
+
+      expect(mockPrisma.storageObject.upsert).toHaveBeenCalledTimes(1);
+    });
+
+    it('upserts with status "ready"', async () => {
+      await handler.process(makeJob());
+
+      const call = mockPrisma.storageObject.upsert.mock.calls[0][0];
+      expect(call.update.status).toBe('ready');
+      expect(call.create.status).toBe('ready');
+    });
+
+    it('upserts with mimeType "image/jpeg"', async () => {
+      await handler.process(makeJob());
+
+      const call = mockPrisma.storageObject.upsert.mock.calls[0][0];
+      expect(call.update.mimeType).toBe('image/jpeg');
+      expect(call.create.mimeType).toBe('image/jpeg');
+    });
+
+    it('upserts with storageProvider matching the active provider id', async () => {
+      await handler.process(makeJob());
+
+      const call = mockPrisma.storageObject.upsert.mock.calls[0][0];
+      // 'active-s3' is what getActiveProvider().id returns in the mock
+      expect(call.update.storageProvider).toBe('active-s3');
+      expect(call.create.storageProvider).toBe('active-s3');
+    });
+
+    it('upserts with bucket matching activeStorageProvider.getBucket()', async () => {
+      await handler.process(makeJob());
+
+      const call = mockPrisma.storageObject.upsert.mock.calls[0][0];
+      expect(call.update.bucket).toBe('active-bucket');
+      expect(call.create.bucket).toBe('active-bucket');
+    });
+
+    it('upserts where.storageKey matches the frameThumbnailKey pattern', async () => {
+      await handler.process(makeJob());
+
+      const call = mockPrisma.storageObject.upsert.mock.calls[0][0];
+      const key: string = call.where.storageKey;
+
+      // Key format: video-faces/<mediaItemId>/<uuid>.jpg
+      expect(key).toMatch(/^video-faces\/media-video-1\/[0-9a-f-]+\.jpg$/);
+    });
+
+    it('passes the frameThumbnailKey through to persistAndMatchFaces', async () => {
+      await handler.process(makeJob());
+
+      // Capture the storageKey used in the upsert
+      const upsertCall = mockPrisma.storageObject.upsert.mock.calls[0][0];
+      const upsertedKey: string = upsertCall.where.storageKey;
+
+      // The faces array passed to core.persistAndMatchFaces must contain the same key
+      expect(mockCore.persistAndMatchFaces).toHaveBeenCalledWith(
+        expect.objectContaining({
+          faces: expect.arrayContaining([
+            expect.objectContaining({ frameThumbnailKey: upsertedKey }),
+          ]),
+        }),
+      );
+    });
+
+    it('includes metadata.videoFaceFrameOf set to the mediaItemId', async () => {
+      await handler.process(makeJob());
+
+      const call = mockPrisma.storageObject.upsert.mock.calls[0][0];
+      expect(call.create.metadata).toEqual(
+        expect.objectContaining({ videoFaceFrameOf: 'media-video-1' }),
+      );
+      expect(call.update.metadata).toEqual(
+        expect.objectContaining({ videoFaceFrameOf: 'media-video-1' }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Failure path: upload throws → no upsert, face still pushed without key
+  // -------------------------------------------------------------------------
+
+  describe('StorageObject row NOT created when upload fails', () => {
+    beforeEach(() => {
+      mockActiveStorageProvider.upload.mockRejectedValue(new Error('S3 upload failed'));
+    });
+
+    it('does NOT call prisma.storageObject.upsert when the upload throws', async () => {
+      await handler.process(makeJob());
+
+      expect(mockPrisma.storageObject.upsert).not.toHaveBeenCalled();
+    });
+
+    it('still calls persistAndMatchFaces (face is persisted without frameThumbnailKey)', async () => {
+      await handler.process(makeJob());
+
+      expect(mockCore.persistAndMatchFaces).toHaveBeenCalled();
+      const [input] = mockCore.persistAndMatchFaces.mock.calls[0];
+      // The face must NOT have a frameThumbnailKey (key omitted, not null)
+      expect(input.faces[0]).not.toHaveProperty('frameThumbnailKey');
+    });
+
+    it('still completes without throwing (upload failure is non-fatal)', async () => {
+      await expect(handler.process(makeJob())).resolves.toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Multiple clusters → one upsert per cluster
+  // -------------------------------------------------------------------------
+
+  describe('multiple distinct face clusters', () => {
+    beforeEach(() => {
+      // Two frames, each with a different face and a low inter-cluster similarity
+      // so the greedy dedup produces TWO clusters, not one.
+      const FACE_A = { ...FAKE_FACE, confidence: 0.95, embedding: [1, 0] };
+      const FACE_B = { ...FAKE_FACE, confidence: 0.90, embedding: [0, 1] };
+      const FACE_A_NORM = { ...FACE_A, embedding: [1, 0] };
+      const FACE_B_NORM = { ...FACE_B, embedding: [0, 1] };
+
+      // Two frames
+      mockFrameExtractor.extractFrames.mockResolvedValue([
+        { timestampMs: 2500, buffer: Buffer.from('frame-a') },
+        { timestampMs: 7500, buffer: Buffer.from('frame-b') },
+      ]);
+
+      // detectWithThrottleMapping returns one face per frame in order
+      mockCore.detectWithThrottleMapping
+        .mockResolvedValueOnce([FACE_A])
+        .mockResolvedValueOnce([FACE_B]);
+
+      // normalizeFace returns respective normalized faces
+      mockCore.normalizeFace
+        .mockReturnValueOnce(FACE_A_NORM)
+        .mockReturnValueOnce(FACE_B_NORM);
+
+      // cosineSimilarity returns 0 → FACE_A and FACE_B are distinct clusters
+      mockMatchingService.cosineSimilarity.mockReturnValue(0);
+
+      mockCore.persistAndMatchFaces.mockResolvedValue(2);
+    });
+
+    it('calls storageObject.upsert once per cluster (two upserts)', async () => {
+      await handler.process(makeJob());
+
+      expect(mockPrisma.storageObject.upsert).toHaveBeenCalledTimes(2);
+    });
+
+    it('each upsert uses a distinct storageKey', async () => {
+      await handler.process(makeJob());
+
+      const keys = mockPrisma.storageObject.upsert.mock.calls.map(
+        (c: any[]) => c[0].where.storageKey,
+      );
+      expect(keys[0]).not.toBe(keys[1]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // face.video.enabled === false → no frames, no upsert
+  // -------------------------------------------------------------------------
+
+  describe('face.video.enabled = false', () => {
+    beforeEach(() => {
+      mockPrisma.systemSettings.findUnique.mockResolvedValue({
+        key: 'global',
+        value: { face: { video: { enabled: false } } },
+      });
+    });
+
+    it('skips frame extraction and does not call storageObject.upsert', async () => {
+      await handler.process(makeJob());
+
+      expect(mockFrameExtractor.extractFrames).not.toHaveBeenCalled();
+      expect(mockPrisma.storageObject.upsert).not.toHaveBeenCalled();
+    });
+
+    it('marks status as no_faces', async () => {
+      await handler.process(makeJob());
+
+      expect(mockCore.markStatus).toHaveBeenCalledWith(
+        'media-video-1',
+        'no_faces',
+        0,
+        expect.any(String),
+        expect.any(String),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Missing mediaItemId guard
+  // -------------------------------------------------------------------------
+
+  describe('missing mediaItemId', () => {
+    it('throws immediately without touching storage when mediaItemId is null', async () => {
+      const job = makeJob({ mediaItemId: null });
+
+      await expect(handler.process(job)).rejects.toThrow(
+        'video_face_detection job missing mediaItemId',
+      );
+
+      expect(mockPrisma.storageObject.upsert).not.toHaveBeenCalled();
+    });
+  });
+});
