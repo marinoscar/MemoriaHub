@@ -51,6 +51,13 @@ export interface SystemSettings {
     reverseProvider?: 'offline' | 'nominatim' | 'google';
     forwardSearchEnabled?: boolean;
   };
+  face?: {
+    video?: {
+      enabled?: boolean;
+      sampleIntervalSeconds?: number;
+      maxFramesPerVideo?: number;
+    };
+  };
   updatedAt: string;
   updatedBy: { id: string; email: string } | null;
   version: number;

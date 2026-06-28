@@ -67,7 +67,12 @@ export const systemSettingsSchema = z.object({
         model: z.string().nullable().default(null),
       }).default({ provider: null, model: null }),
     }).default({ detection: { provider: null, model: null } }),
-  }).optional().default({ features: { detection: { provider: null, model: null } } }),
+    video: z.object({
+      enabled: z.boolean().default(true),
+      sampleIntervalSeconds: z.number().int().min(1).max(60).default(5),
+      maxFramesPerVideo: z.number().int().min(1).max(300).default(60),
+    }).optional().default({ enabled: true, sampleIntervalSeconds: 5, maxFramesPerVideo: 60 }),
+  }).optional().default({ features: { detection: { provider: null, model: null } }, video: { enabled: true, sampleIntervalSeconds: 5, maxFramesPerVideo: 60 } }),
   storage: z.object({
     activeProvider: z.string().default('s3'),
     insights: z.object({
@@ -118,6 +123,11 @@ export const systemSettingsPatchSchema = z.object({
         provider: z.string().nullable().optional(),
         model: z.string().nullable().optional(),
       }).optional(),
+    }).optional(),
+    video: z.object({
+      enabled: z.boolean().optional(),
+      sampleIntervalSeconds: z.number().int().min(1).max(60).optional(),
+      maxFramesPerVideo: z.number().int().min(1).max(300).optional(),
     }).optional(),
   }).optional(),
   storage: z.object({

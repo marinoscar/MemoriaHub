@@ -1,19 +1,11 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { EnrichmentJob, MediaFaceStatusType } from '@prisma/client';
 import { Readable } from 'stream';
 import { PrismaService } from '../prisma/prisma.service';
-import { FaceSettingsService } from './face-settings.service';
-import { FaceProviderRegistry } from './providers/face-provider.registry';
-import {
-  STORAGE_PROVIDER,
-  StorageProvider,
-} from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { DetectedFace } from './providers/face-provider.interface';
-import { FaceMatchingService } from './face-matching.service';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { RateLimitError } from '../enrichment/rate-limit.error';
+import { FaceDetectionCore } from './face-detection-core.service';
 
 @Injectable()
 export class FaceDetectionService {
@@ -21,12 +13,9 @@ export class FaceDetectionService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly faceSettingsService: FaceSettingsService,
-    private readonly registry: FaceProviderRegistry,
-    @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
-    private readonly matchingService: FaceMatchingService,
     private readonly enrichmentJobService: EnrichmentJobService,
+    private readonly core: FaceDetectionCore,
   ) {}
 
   async processMediaItem(job: EnrichmentJob): Promise<void> {
@@ -36,46 +25,28 @@ export class FaceDetectionService {
     }
 
     // 1. Set MediaFaceStatus → processing
-    await this.prisma.mediaFaceStatus.upsert({
-      where: { mediaItemId: job.mediaItemId },
-      create: {
-        mediaItemId: job.mediaItemId,
-        status: MediaFaceStatusType.processing,
-        faceCount: 0,
-      },
-      update: {
-        status: MediaFaceStatusType.processing,
-        lastError: null,
-      },
-    });
+    await this.core.markProcessing(job.mediaItemId);
 
-    // 2. Load face detection config from raw DB
-    const row = await this.prisma.systemSettings.findUnique({
-      where: { key: 'global' },
-    });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const faceConfig = (row?.value as any)?.face?.features?.detection as
-      | { provider?: string; model?: string }
-      | undefined;
+    // 2. Load face detection config + resolve credentials
+    let providerKey: string;
+    let modelVersion: string;
 
-    const providerKey = faceConfig?.provider;
-    const modelVersion = faceConfig?.model ?? 'unknown';
-
-    if (!providerKey) {
-      const errMsg = 'Face detection provider not configured in system settings';
+    let resolved: Awaited<ReturnType<FaceDetectionCore['resolveProviderAndCreds']>>;
+    try {
+      resolved = await this.core.resolveProviderAndCreds();
+      providerKey = resolved.providerKey;
+      modelVersion = resolved.modelVersion;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.error(`FaceJob ${job.id}: ${errMsg}`);
-      await this.markFailed(job.mediaItemId, null, modelVersion, errMsg);
-      throw new Error(errMsg);
+      await this.core.markFailed(job.mediaItemId, null, 'unknown', errMsg);
+      throw err;
     }
 
     await this.enrichmentJobService.recordModel(job.id, providerKey, modelVersion);
 
-    // 3. Resolve credentials
-    const creds = await this.faceSettingsService.resolveCredentials(providerKey);
-    const provider = this.registry.get(providerKey);
-
     try {
-      // 4. Load MediaItem with storageObject
+      // 3. Load MediaItem with storageObject
       const mediaItem = await this.prisma.mediaItem.findUnique({
         where: { id: job.mediaItemId },
         select: {
@@ -92,11 +63,11 @@ export class FaceDetectionService {
       if (!mediaItem || !mediaItem.storageObject) {
         const errMsg = `MediaItem ${job.mediaItemId} or its StorageObject not found`;
         this.logger.error(`FaceJob ${job.id}: ${errMsg}`);
-        await this.markFailed(job.mediaItemId, providerKey, modelVersion, errMsg);
+        await this.core.markFailed(job.mediaItemId, providerKey, modelVersion, errMsg);
         throw new Error(errMsg);
       }
 
-      // 5. Download image → buffer (resolved via the object's own provider+bucket)
+      // 4. Download image → buffer (resolved via the object's own provider+bucket)
       const objectProvider = await this.resolver.getProviderFor(
         mediaItem.storageObject.storageProvider,
         mediaItem.storageObject.bucket,
@@ -104,7 +75,7 @@ export class FaceDetectionService {
       const stream = await objectProvider.download(mediaItem.storageObject.storageKey);
       const buffer = await streamToBuffer(stream);
 
-      // 5.5. Apply EXIF orientation + downscale before detection
+      // 5. Apply EXIF orientation + downscale before detection
       const MAX = parseInt(process.env.FACE_MAX_IMAGE_DIM ?? '2000', 10);
       let uprightBuffer = buffer;
       let uprightWidth = mediaItem.width ?? 0;
@@ -120,36 +91,13 @@ export class FaceDetectionService {
         );
       }
 
-      // 6. Detect faces (using upright buffer).
-      //    For the Rekognition provider, map AWS throttle errors to RateLimitError
-      //    so the worker routes them through the rate-limit deferral path.
-      //    Keyless providers (human, compreface) have no remote rate limit.
-      let detectedFaces: DetectedFace[];
-      try {
-        detectedFaces = await provider.detect(creds, uprightBuffer);
-      } catch (detectErr) {
-        if (providerKey === 'rekognition') {
-          const e = detectErr as Record<string, unknown> | null;
-          const name = typeof e?.['name'] === 'string' ? e['name'] : undefined;
-          const awsThrottleNames = new Set([
-            'ThrottlingException',
-            'ProvisionedThroughputExceededException',
-            'TooManyRequestsException',
-            'RequestLimitExceeded',
-            'SlowDown',
-          ]);
-          if (name && awsThrottleNames.has(name)) {
-            throw new RateLimitError(
-              typeof e?.['message'] === 'string'
-                ? e['message']
-                : `Rekognition throttled: ${name}`,
-              undefined,
-              providerKey,
-            );
-          }
-        }
-        throw detectErr;
-      }
+      // 6. Detect faces
+      const detectedFaces = await this.core.detectWithThrottleMapping(
+        resolved.provider,
+        resolved.creds,
+        uprightBuffer,
+        providerKey,
+      );
 
       // 7. Delete existing non-manual Face rows (idempotency)
       await this.prisma.face.deleteMany({
@@ -161,163 +109,44 @@ export class FaceDetectionService {
 
       if (detectedFaces.length > 0) {
         // 8. Normalize bounding boxes and L2-normalize embeddings
-        const normalized = detectedFaces.map((face) => {
-          const bb = face.boundingBox;
-          let normalizedBb = bb;
+        const logCtx = `FaceJob ${job.id} MediaItem ${mediaItem.id}`;
+        const normalized = detectedFaces.map((face) =>
+          this.core.normalizeFace(face, uprightWidth, uprightHeight, logCtx),
+        );
 
-          // Detect absolute pixel coords: if any coordinate > 1.0
-          if (bb.x > 1.0 || bb.y > 1.0 || bb.w > 1.0 || bb.h > 1.0) {
-            if (!uprightWidth || !uprightHeight) {
-              this.logger.warn(
-                `MediaItem ${mediaItem.id} has no dimensions; storing raw bounding box for FaceJob ${job.id}`,
-              );
-              normalizedBb = bb; // store raw, best effort
-            } else {
-              normalizedBb = {
-                x: bb.x / uprightWidth,
-                y: bb.y / uprightHeight,
-                w: bb.w / uprightWidth,
-                h: bb.h / uprightHeight,
-              };
-            }
-          }
-          // else: already normalized (0–1 fractions), store as-is
-
-          // 9. L2-normalize embedding if present
-          let embedding: number[] = [];
-          if (face.embedding && face.embedding.length > 0) {
-            embedding = l2Normalize(face.embedding);
-          }
-
-          return { ...face, boundingBox: normalizedBb, embedding };
+        // 9. Persist Face rows + run person-matching loop
+        await this.core.persistAndMatchFaces({
+          mediaItemId: job.mediaItemId,
+          circleId: mediaItem.circleId,
+          providerKey,
+          modelVersion,
+          faces: normalized,
+          isVideo: false,
         });
-
-        // 10. Create Face rows individually (loop instead of createMany) so we
-        //     have the returned IDs for matching in step 11.
-        //     Typical face count per photo is 1–10, so the loop is acceptable.
-        const createdFaces: Array<{
-          id: string;
-          embedding: number[];
-          externalFaceId: string | null;
-        }> = [];
-
-        for (const face of normalized) {
-          const created = await this.prisma.face.create({
-            data: {
-              mediaItemId: job.mediaItemId,
-              circleId: mediaItem.circleId,
-              boundingBox: face.boundingBox,
-              confidence: face.confidence ?? null,
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              landmarks: (face.landmarks ?? null) as any,
-              embedding: face.embedding ?? [],
-              externalFaceId: face.externalFaceId ?? null,
-              providerKey,
-              modelVersion,
-              manuallyAssigned: false,
-            },
-            select: { id: true, embedding: true, externalFaceId: true },
-          });
-          createdFaces.push(created);
-        }
-
-        // 11. Match each new face to a Person (or leave unknown)
-        for (const face of createdFaces) {
-          try {
-            let matchResult: { personId: string } | null = null;
-
-            if (face.externalFaceId && provider.capabilities.delegatedRecognize) {
-              // Delegated path: look up by external face ID
-              matchResult = await this.matchingService.matchFaceByExternalId(
-                mediaItem.circleId,
-                face.externalFaceId,
-              );
-            } else if (face.embedding.length > 0) {
-              // In-app cosine path
-              matchResult = await this.matchingService.matchFaceToPerson(
-                mediaItem.circleId,
-                face.embedding,
-              );
-            }
-
-            if (matchResult) {
-              await this.prisma.face.update({
-                where: { id: face.id },
-                data: { personId: matchResult.personId },
-              });
-              this.logger.debug(
-                `FaceJob ${job.id}: face ${face.id} matched to person ${matchResult.personId}`,
-              );
-            }
-          } catch (err) {
-            // Non-fatal: matching failure should not abort the detection job
-            const msg = err instanceof Error ? err.message : String(err);
-            this.logger.warn(
-              `FaceJob ${job.id}: face matching failed for face ${face.id}: ${msg}`,
-            );
-          }
-        }
       }
 
-      // 12. Upsert MediaFaceStatus
+      // 10. Upsert MediaFaceStatus
       const finalStatus =
         detectedFaces.length > 0
           ? MediaFaceStatusType.processed
           : MediaFaceStatusType.no_faces;
 
-      await this.prisma.mediaFaceStatus.upsert({
-        where: { mediaItemId: job.mediaItemId },
-        create: {
-          mediaItemId: job.mediaItemId,
-          status: finalStatus,
-          faceCount: detectedFaces.length,
-          providerKey,
-          modelVersion,
-          processedAt: new Date(),
-        },
-        update: {
-          status: finalStatus,
-          faceCount: detectedFaces.length,
-          providerKey,
-          modelVersion,
-          processedAt: new Date(),
-          lastError: null,
-        },
-      });
+      await this.core.markStatus(
+        job.mediaItemId,
+        finalStatus,
+        detectedFaces.length,
+        providerKey,
+        modelVersion,
+      );
 
       this.logger.log(
         `FaceJob ${job.id}: detected ${detectedFaces.length} face(s) in MediaItem ${job.mediaItemId} using ${providerKey}/${modelVersion}`,
       );
     } catch (err) {
-      // On any unexpected error after the initial status→processing upsert,
-      // mark the item as failed so the status row is never left as "processing".
       const errMsg = err instanceof Error ? err.message : String(err);
-      await this.markFailed(job.mediaItemId, providerKey, modelVersion, errMsg);
+      await this.core.markFailed(job.mediaItemId, providerKey, modelVersion, errMsg);
       throw err;
     }
-  }
-
-  private async markFailed(
-    mediaItemId: string,
-    providerKey: string | null,
-    modelVersion: string,
-    error: string,
-  ): Promise<void> {
-    await this.prisma.mediaFaceStatus.upsert({
-      where: { mediaItemId },
-      create: {
-        mediaItemId,
-        status: MediaFaceStatusType.failed,
-        faceCount: 0,
-        lastError: error,
-        ...(providerKey ? { providerKey, modelVersion } : {}),
-      },
-      update: {
-        status: MediaFaceStatusType.failed,
-        lastError: error,
-        ...(providerKey ? { providerKey, modelVersion } : {}),
-      },
-    });
   }
 }
 
@@ -332,10 +161,4 @@ async function streamToBuffer(stream: Readable): Promise<Buffer> {
     stream.on('end', () => resolve(Buffer.concat(chunks)));
     stream.on('error', reject);
   });
-}
-
-function l2Normalize(vec: number[]): number[] {
-  const norm = Math.sqrt(vec.reduce((acc, v) => acc + v * v, 0));
-  if (norm === 0) return vec;
-  return vec.map((v) => v / norm);
 }

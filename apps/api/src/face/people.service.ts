@@ -24,6 +24,7 @@ import {
   ListUnassignedFacesQueryDto,
 } from './dto/people.dto';
 import { MergePeopleDto } from './dto/merge-people.dto';
+import { MediaThumbnailService } from '../media/media-thumbnail.service';
 
 @Injectable()
 export class PeopleService {
@@ -36,6 +37,7 @@ export class PeopleService {
     private readonly matchingService: FaceMatchingService,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly systemSettings: SystemSettingsService,
+    private readonly mediaThumbnailService: MediaThumbnailService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -78,6 +80,7 @@ export class PeopleService {
               id: true,
               mediaItemId: true,
               boundingBox: true,
+              frameThumbnailKey: true,
             },
           },
           // Fetch a small set of faces for cover-fallback resolution
@@ -90,6 +93,7 @@ export class PeopleService {
               mediaItemId: true,
               boundingBox: true,
               confidence: true,
+              frameThumbnailKey: true,
             },
           },
         },
@@ -97,18 +101,20 @@ export class PeopleService {
       this.prisma.person.count({ where }),
     ]);
 
-    const items = persons.map((p) => ({
-      id: p.id,
-      name: p.name,
-      isUnlabeled: p.name === null,
-      favorite: p.favorite,
-      faceCount: p._count.faces,
-      coverFace: this.resolveCoverFace(p.coverFace, p.faces ?? []),
-      profileMediaItemId: p.profileMediaItemId ?? null,
-      profileCrop: p.profileCrop ?? null,
-      createdAt: p.createdAt,
-      updatedAt: p.updatedAt,
-    }));
+    const items = await Promise.all(
+      persons.map(async (p) => ({
+        id: p.id,
+        name: p.name,
+        isUnlabeled: p.name === null,
+        favorite: p.favorite,
+        faceCount: p._count.faces,
+        coverFace: await this.resolveCoverFace(p.coverFace, p.faces ?? []),
+        profileMediaItemId: p.profileMediaItemId ?? null,
+        profileCrop: p.profileCrop ?? null,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+      })),
+    );
 
     return {
       items,
@@ -203,6 +209,7 @@ export class PeopleService {
             confidence: true,
             manuallyAssigned: true,
             createdAt: true,
+            frameThumbnailKey: true,
           },
           orderBy: [{ confidence: 'desc' }, { createdAt: 'desc' }],
         },
@@ -211,6 +218,7 @@ export class PeopleService {
             id: true,
             mediaItemId: true,
             boundingBox: true,
+            frameThumbnailKey: true,
           },
         },
       },
@@ -233,7 +241,7 @@ export class PeopleService {
       isUnlabeled: person.name === null,
       favorite: person.favorite,
       circleId: person.circleId,
-      coverFace: this.resolveCoverFace(person.coverFace, person.faces),
+      coverFace: await this.resolveCoverFace(person.coverFace, person.faces),
       profileMediaItemId: person.profileMediaItemId ?? null,
       profileCrop: person.profileCrop ?? null,
       faces: person.faces.map((f) => ({
@@ -884,25 +892,25 @@ export class PeopleService {
    * Otherwise fall back to the most relevant face from the provided list
    * (already sorted by confidence DESC, createdAt DESC by the caller).
    * The fallback is NOT persisted — it is purely for the response payload.
+   *
+   * Returns faceThumbnailUrl (signed from frameThumbnailKey) so the frontend
+   * can render video-sourced cover faces without cropping the full media image.
+   * Photo cover faces return faceThumbnailUrl: null (no frameThumbnailKey).
    */
-  private resolveCoverFace(
-    coverFace: { id: string; mediaItemId: string; boundingBox: unknown } | null,
-    faces: Array<{ id: string; mediaItemId: string; boundingBox: unknown; confidence?: number | null }>,
-  ): { faceId: string; mediaItemId: string; boundingBox: unknown } | null {
-    if (coverFace) {
-      return {
-        faceId: coverFace.id,
-        mediaItemId: coverFace.mediaItemId,
-        boundingBox: coverFace.boundingBox,
-      };
-    }
-    // Fallback: pick the first face (caller must provide them sorted by relevance)
-    const fallback = faces[0];
-    if (!fallback) return null;
+  private async resolveCoverFace(
+    coverFace: { id: string; mediaItemId: string; boundingBox: unknown; frameThumbnailKey?: string | null } | null,
+    faces: Array<{ id: string; mediaItemId: string; boundingBox: unknown; confidence?: number | null; frameThumbnailKey?: string | null }>,
+  ): Promise<{ faceId: string; mediaItemId: string; boundingBox: unknown; faceThumbnailUrl: string | null } | null> {
+    const resolved = coverFace ?? faces[0] ?? null;
+    if (!resolved) return null;
+    const faceThumbnailUrl = resolved.frameThumbnailKey
+      ? await this.mediaThumbnailService.signThumb({ thumbnailStorageKey: resolved.frameThumbnailKey })
+      : null;
     return {
-      faceId: fallback.id,
-      mediaItemId: fallback.mediaItemId,
-      boundingBox: fallback.boundingBox,
+      faceId: resolved.id,
+      mediaItemId: resolved.mediaItemId,
+      boundingBox: resolved.boundingBox,
+      faceThumbnailUrl,
     };
   }
 

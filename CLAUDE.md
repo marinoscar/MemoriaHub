@@ -446,9 +446,9 @@ Three providers: `human` (keyless WASM, in-process, 1024-d), `compreface` (keyle
 - `DELETE /api/face/biometrics?circleId=` - Permanently erase all Face, Person, MediaFaceStatus, and FaceJob rows for a circle (face_settings:write + circle_admin); does NOT change any global feature toggle
 
 ### Face Recognition — Detection (media:read / media:write + per-circle viewer/collaborator role)
-- `GET /api/media/:id/faces` - List detected faces on a media item: id, boundingBox (normalized 0–1), confidence, landmarks, personId, providerKey, modelVersion, manuallyAssigned (media:read + viewer)
+- `GET /api/media/:id/faces` - List detected faces on a media item: id, boundingBox (normalized 0–1), confidence, landmarks, personId, providerKey, modelVersion, manuallyAssigned; for video faces also returns `videoTimestampMs` (Int?, representative appearance time in ms), `videoTimestamps` (Int[], all sampled appearance timestamps), and `faceThumbnailUrl` (signed URL of the representative frame JPEG; null for photos) (media:read + viewer)
 - `GET /api/media/:id/faces/status` - Get per-item detection status: status, faceCount, providerKey, modelVersion, processedAt, lastError (media:read + viewer)
-- `POST /api/media/:id/faces/rerun` - Re-enqueue face detection for a media item; returns `{jobId, status}` (media:write + collaborator)
+- `POST /api/media/:id/faces/rerun` - Re-enqueue face detection for a media item; for photos enqueues `face_detection`, for videos enqueues `video_face_detection`; returns `{jobId, status}` (media:write + collaborator)
 
 ### Face Recognition — People (media:read / media:write + per-circle viewer/collaborator/circle_admin role)
 - `GET /api/people?circleId=&includeUnlabeled=&page=&pageSize=` - List person records in a circle; paginated (media:read + viewer)
@@ -589,8 +589,8 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `ai_provider_credentials` - AI provider API keys (AES-256-GCM encrypted); one row per provider; `last4` exposed for display; plaintext never stored or returned
 - `face_provider_credentials` - Face provider API keys/config (AES-256-GCM encrypted via same key as AI); one row per provider; `last4` exposed; plaintext never stored or returned. For keyless providers (`human`, `compreface`), the credential row (if present) stores only a `baseUrl` override — no API key is set or required.
 - `people` - Per-circle identity records for recognized individuals; supports `mergedIntoId` self-FK for cluster merge audit; `deletedAt` soft-delete
-- `faces` - Individual detected face records with bounding box, confidence, variable-dimension embedding (`Float[]` fallback or pgvector column; 128-d for `compreface` mobilenet, 1024-d for `human` WASM), and `externalFaceId` for Rekognition delegated path; keyed to `mediaItemId` + `circleId`; `manuallyAssigned` flag protects user-labeled faces from re-clustering
-- `enrichment_jobs` - Generic background job queue for all enrichment handlers (face detection, storage insights, etc.); statuses: `pending`, `running`, `succeeded`, `failed`; reasons: `upload`, `rerun`, `backfill`; `media_item_id` and `circle_id` are **NULLABLE** — null values indicate a global/system job that is not scoped to a single media item or circle (e.g. the `storage_insights` handler); idempotency for global jobs deduplicates on `(type, media_item_id IS NULL)`; three backoff columns: `scheduled_for` (DateTime?, when the job becomes eligible again — null = eligible now; the worker claim query skips jobs where `scheduled_for > now`), `rate_limited_at` (DateTime?, timestamp of the most recent rate-limit hit), `rate_limit_hits` (Int default 0, count of rate-limit deferrals tracked separately from `attempts`); `storage_migration` copies a single object from source to target provider (copy→verify→repoint→leave source; one job per object; `skipDedup` option prevents the `(type, mediaItemId IS NULL)` dedup from collapsing per-object jobs)
+- `faces` - Individual detected face records with bounding box, confidence, variable-dimension embedding (`Float[]` fallback or pgvector column; 128-d for `compreface` mobilenet, 1024-d for `human` WASM), and `externalFaceId` for Rekognition delegated path; keyed to `mediaItemId` + `circleId`; `manuallyAssigned` flag protects user-labeled faces from re-clustering; video-specific columns added in migration `20260627000000_face_video_columns`: `videoTimestampMs` (Int?, representative appearance time in ms from video start; null for photos), `videoTimestamps` (Int[], all frame timestamps where this identity was observed; empty for photos), `frameThumbnailKey` (Text?, storage key of the saved representative-frame JPEG; null for photos)
+- `enrichment_jobs` - Generic background job queue for all enrichment handlers (face detection, video face detection, storage insights, etc.); statuses: `pending`, `running`, `succeeded`, `failed`; reasons: `upload`, `rerun`, `backfill`; `media_item_id` and `circle_id` are **NULLABLE** — null values indicate a global/system job that is not scoped to a single media item or circle (e.g. the `storage_insights` handler); idempotency for global jobs deduplicates on `(type, media_item_id IS NULL)`; three backoff columns: `scheduled_for` (DateTime?, when the job becomes eligible again — null = eligible now; the worker claim query skips jobs where `scheduled_for > now`), `rate_limited_at` (DateTime?, timestamp of the most recent rate-limit hit), `rate_limit_hits` (Int default 0, count of rate-limit deferrals tracked separately from `attempts`); `storage_migration` copies a single object from source to target provider (copy→verify→repoint→leave source; one job per object; `skipDedup` option prevents the `(type, mediaItemId IS NULL)` dedup from collapsing per-object jobs); `video_face_detection` samples frames from a video via ffmpeg, runs the active face provider on each frame, deduplicates faces across frames by embedding similarity, and writes one `Face` row per identity cluster per video
 - `face_jobs` - Async face-detection job queue (no BullMQ); statuses: `pending`, `running`, `succeeded`, `failed`; reasons: `upload`, `rerun`, `backfill`
 - `media_face_status` - Per-media-item detection status tracking (one row per item); records which provider/model processed the item and when; statuses: `not_processed`, `pending`, `processing`, `processed`, `failed`, `no_faces`
 - `tag_labels` - Global AI tag vocabulary managed by admins; unique `name`; `enabled` flag controls whether a label is included in vision model prompts; labels are not circle-scoped; supports CSV export/import
@@ -740,6 +740,13 @@ These boolean system settings replace the former per-circle feature columns drop
 - `features.faceRecognition` — boolean, default false; global on/off for face detection and recognition; env `FACE_AUTO_DETECT=false` overrides this
 - `features.burstDetection` — boolean, default false; global on/off for burst photo detection; env `BURST_DETECTION_ENABLED=false` overrides this
 
+**Video Face Detection Settings (System Settings):**
+
+Controlled via `face.video.*` in system settings, editable in Admin Settings → Face (`/admin/settings/face`). All three settings require `features.faceRecognition=true` to have any effect.
+- `face.video.enabled` — boolean, default true; when false, video uploads are skipped (job marks `no_faces` immediately)
+- `face.video.sampleIntervalSeconds` — integer, 1–60, default 5; desired gap between sampled frames in seconds; the actual interval expands automatically when the video is long enough that `durationSec / maxFramesPerVideo` exceeds this value
+- `face.video.maxFramesPerVideo` — integer, 1–300, default 60; hard cap on frames extracted per video; combined with `sampleIntervalSeconds` this bounds compute per video (e.g. a 1-hour video at cap 60 produces one frame every ~60 s)
+
 **Geo Settings (System Settings):**
 
 The geo provider is now configurable at runtime in addition to the env vars (env vars remain as fallback defaults):
@@ -783,7 +790,7 @@ The refresh cadence for the precomputed storage metrics snapshot is controlled v
 
 Detailed specs live under `docs/specs/`:
 - [Enrichment Queue](docs/specs/enrichment-queue.md) — worker lifecycle, retry, priority, adding new handlers
-- [Face Recognition](docs/specs/face-recognition.md) — face detection, recognition, clustering, people management, global feature toggle, global admin backfill
+- [Face Recognition](docs/specs/face-recognition.md) — face detection (photos + videos), video frame sampling, cross-frame dedup, recognition, clustering, people management, global feature toggle, global admin backfill
 - [AI Auto-Tagging](docs/specs/auto-tagging.md) — vocabulary-driven vision model tagging, description generation, global feature toggle, global admin backfill, embedding step
 - [Semantic Search](docs/specs/semantic-search.md) — pgvector embedding storage, KNN-then-filter algorithm, `semanticQuery` param, graceful degradation, backfill and re-embed on people change
 - [Agentic Search](docs/specs/agentic-search.md) — stateless agentic search, SSE streaming, tool-call protocol

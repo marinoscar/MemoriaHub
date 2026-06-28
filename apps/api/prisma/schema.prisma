@@ -727,6 +727,9 @@ model Face {
   providerKey      String   @map("provider_key")
   modelVersion     String   @map("model_version")
   manuallyAssigned Boolean  @default(false) @map("manually_assigned")
+  videoTimestampMs Int?     @map("video_timestamp_ms")
+  videoTimestamps  Int[]    @map("video_timestamps")
+  frameThumbnailKey String? @map("frame_thumbnail_key")
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   // Relations

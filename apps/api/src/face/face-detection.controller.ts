@@ -35,6 +35,7 @@ import {
 } from '@prisma/client';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PeopleService } from './people.service';
+import { MediaThumbnailService } from '../media/media-thumbnail.service';
 
 // ---------------------------------------------------------------------------
 // DTOs
@@ -74,6 +75,7 @@ export class FaceDetectionController {
     private readonly circleMembershipService: CircleMembershipService,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly peopleService: PeopleService,
+    private readonly mediaThumbnailService: MediaThumbnailService,
   ) {}
 
   // --------------------------------------------------------------------------
@@ -84,7 +86,7 @@ export class FaceDetectionController {
   @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'List detected faces for a media item' })
   @ApiParam({ name: 'id', description: 'Media item ID' })
-  @ApiResponse({ status: 200, description: 'List of detected faces' })
+  @ApiResponse({ status: 200, description: 'List of detected faces (includes videoTimestampMs, videoTimestamps, faceThumbnailUrl for video faces)' })
   async listFaces(
     @Param('id') mediaItemId: string,
     @CurrentUser() user: RequestUser,
@@ -104,6 +106,9 @@ export class FaceDetectionController {
         manuallyAssigned: true,
         personId: true,
         createdAt: true,
+        videoTimestampMs: true,
+        videoTimestamps: true,
+        frameThumbnailKey: true,
         person: {
           select: { name: true },
         },
@@ -113,19 +118,26 @@ export class FaceDetectionController {
     });
 
     return {
-      data: faces.map((f) => ({
-        id: f.id,
-        boundingBox: f.boundingBox,
-        confidence: f.confidence,
-        landmarks: f.landmarks,
-        externalFaceId: f.externalFaceId,
-        providerKey: f.providerKey,
-        modelVersion: f.modelVersion,
-        manuallyAssigned: f.manuallyAssigned,
-        personId: f.personId,
-        personName: f.person?.name ?? null,
-        createdAt: f.createdAt,
-      })),
+      data: await Promise.all(
+        faces.map(async (f) => ({
+          id: f.id,
+          boundingBox: f.boundingBox,
+          confidence: f.confidence,
+          landmarks: f.landmarks,
+          externalFaceId: f.externalFaceId,
+          providerKey: f.providerKey,
+          modelVersion: f.modelVersion,
+          manuallyAssigned: f.manuallyAssigned,
+          personId: f.personId,
+          personName: f.person?.name ?? null,
+          createdAt: f.createdAt,
+          videoTimestampMs: f.videoTimestampMs ?? null,
+          videoTimestamps: f.videoTimestamps ?? [],
+          faceThumbnailUrl: f.frameThumbnailKey
+            ? await this.mediaThumbnailService.signThumb({ thumbnailStorageKey: f.frameThumbnailKey })
+            : null,
+        })),
+      ),
     };
   }
 

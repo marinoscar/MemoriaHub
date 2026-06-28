@@ -15,19 +15,26 @@ import { FaceDetectionHandler } from './face-detection.handler';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { FaceBackfillService } from './face-backfill.service';
 import { AdminFaceBackfillController } from './admin-face-backfill.controller';
+import { FaceDetectionCore } from './face-detection-core.service';
+import { VideoFrameExtractionService } from './video-frame-extraction.service';
+import { VideoFaceDetectionHandler } from './video-face-detection.handler';
+import { MediaModule } from '../media/media.module';
 
 @Module({
-  imports: [SettingsModule, StorageProvidersModule, CirclesModule, EnrichmentModule],
+  imports: [SettingsModule, StorageProvidersModule, CirclesModule, EnrichmentModule, MediaModule],
   controllers: [FaceSettingsController, FaceDetectionController, PeopleController, AdminFaceBackfillController],
   providers: [
     FaceSettingsService,
     FaceProviderRegistry,
+    FaceDetectionCore,
     FaceDetectionService,
     FaceMatchingService,
     FaceClusteringService,
     PeopleService,
     FaceDetectionHandler,
     FaceBackfillService,
+    VideoFrameExtractionService,
+    VideoFaceDetectionHandler,
   ],
   exports: [FaceSettingsService, FaceProviderRegistry, FaceMatchingService, FaceClusteringService],
 })

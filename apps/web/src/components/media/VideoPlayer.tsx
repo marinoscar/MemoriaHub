@@ -12,8 +12,10 @@ import '@vidstack/react/player/styles/default/theme.css';
 import '@vidstack/react/player/styles/default/layouts/video.css';
 
 import { MediaPlayer, MediaProvider, Gesture } from '@vidstack/react';
+import type { MediaPlayerInstance } from '@vidstack/react';
 import { defaultLayoutIcons, DefaultVideoLayout } from '@vidstack/react/player/layouts/default';
 import { Box } from '@mui/material';
+import type React from 'react';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -23,13 +25,18 @@ interface VideoPlayerProps {
   src: string;
   poster?: string | null;
   title?: string;
+  /**
+   * Optional ref forwarded to the underlying MediaPlayer instance.
+   * The parent can call `playerRef.current.currentTime = seconds` to seek.
+   */
+  playerRef?: React.Ref<MediaPlayerInstance>;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function VideoPlayer({ src, poster, title }: VideoPlayerProps) {
+export function VideoPlayer({ src, poster, title, playerRef }: VideoPlayerProps) {
   return (
     /*
      * Aspect-ratio box — 16:9 ratio, width 100% of the containing block.
@@ -46,6 +53,7 @@ export function VideoPlayer({ src, poster, title }: VideoPlayerProps) {
       }}
     >
       <MediaPlayer
+        ref={playerRef}
         src={src}
         poster={poster ?? undefined}
         title={title}

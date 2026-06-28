@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Drawer,
   Box,
@@ -37,6 +37,7 @@ import {
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
+import type { MediaPlayerInstance } from '@vidstack/react';
 import type { MediaItem, PatchMediaDto } from '../../types/media';
 import {
   patchMedia as patchMediaApi,
@@ -52,6 +53,9 @@ import { LocationMiniMap } from './LocationMiniMap';
 import { LocationPickerMap } from './LocationPickerMap';
 import { TagAutocomplete } from './TagAutocomplete';
 import { FaceThumbnails } from './FaceThumbnails';
+import { VideoFacePanel } from './VideoFacePanel';
+import { FaceMarkerStrip } from './FaceMarkerStrip';
+import { useMediaFaces } from '../../hooks/useMediaFaces';
 import { useMediaTags } from '../../hooks/useMediaTags';
 import type { MediaTagStatusType } from '../../services/tagging';
 import { useMediaMetadata } from '../../hooks/useMediaMetadata';
@@ -193,6 +197,16 @@ export function MediaDetailDrawer({
   // Image load state
   const [imgError, setImgError] = useState(false);
 
+  // Video player ref (for seek-to-face-timestamp)
+  const playerRef = useRef<MediaPlayerInstance>(null);
+  const [selectedFaceId, setSelectedFaceId] = useState<string | null>(null);
+
+  const handleSeek = useCallback((seconds: number) => {
+    if (playerRef.current) {
+      playerRef.current.currentTime = seconds;
+    }
+  }, []);
+
   // Location edit state
   const [locationEditOpen, setLocationEditOpen] = useState(false);
   const [editPinLocation, setEditPinLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -219,6 +233,7 @@ export function MediaDetailDrawer({
       setEditTagsAdd([]);
       setEditTagsRemove([]);
       setTagSuccess(null);
+      setSelectedFaceId(null);
       return;
     }
     // If the list item already carries downloadUrl (e.g. after an edit), skip fetch.
@@ -409,6 +424,10 @@ export function MediaDetailDrawer({
     onRefreshTags,
   );
 
+  // Faces for the video marker strip — only fetched when viewing a video.
+  // Always called (rules of hooks) but guarded by empty string when not a video.
+  const videoFacesResult = useMediaFaces(item?.type === 'video' ? (item?.id ?? '') : '');
+
   if (!item) return null;
 
   // Use the full item (with downloadUrl) when available; fall back to the list item.
@@ -490,6 +509,13 @@ export function MediaDetailDrawer({
               src={displayItem.downloadUrl}
               poster={displayItem.thumbnailUrl}
               title={displayItem.originalFilename}
+              playerRef={playerRef}
+            />
+            <FaceMarkerStrip
+              faces={videoFacesResult.faces}
+              durationMs={displayItem.durationMs}
+              selectedFaceId={selectedFaceId}
+              onSeek={handleSeek}
             />
           </Box>
         ) : (
@@ -736,13 +762,24 @@ export function MediaDetailDrawer({
         <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
           People / Faces
         </Typography>
-        <FaceThumbnails
-          mediaId={displayItem.id}
-          mediaType={displayItem.type}
-          thumbnailUrl={displayItem.thumbnailUrl ?? undefined}
-          downloadUrl={displayItem.downloadUrl ?? undefined}
-          circleId={displayItem.circleId}
-        />
+        {displayItem.type === 'video' ? (
+          <VideoFacePanel
+            mediaId={displayItem.id}
+            circleId={displayItem.circleId}
+            durationMs={displayItem.durationMs}
+            onSeek={handleSeek}
+            selectedFaceId={selectedFaceId}
+            onSelectFace={setSelectedFaceId}
+          />
+        ) : (
+          <FaceThumbnails
+            mediaId={displayItem.id}
+            mediaType={displayItem.type}
+            thumbnailUrl={displayItem.thumbnailUrl ?? undefined}
+            downloadUrl={displayItem.downloadUrl ?? undefined}
+            circleId={displayItem.circleId}
+          />
+        )}
 
         {/* Tags */}
         <Divider sx={{ my: 1.5 }} />

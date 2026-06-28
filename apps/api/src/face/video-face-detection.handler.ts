@@ -1,0 +1,489 @@
+// =============================================================================
+// VideoFaceDetectionHandler  (type = 'video_face_detection')
+// =============================================================================
+//
+// Enrichment handler for extracting faces from video media items.
+//
+// Pipeline:
+//   1. Guard: require mediaItemId; load MediaItem + StorageObject.
+//   2. Read face.video settings; if enabled===false, mark no_faces and return.
+//   3. Resolve provider/creds via FaceDetectionCore.
+//   4. Download video → buffer → extract frames via VideoFrameExtractionService.
+//   5. For each frame: prepareImageForProcessing → core.detectWithThrottleMapping.
+//   6. Cross-frame dedup: greedy clustering by cosine similarity ≥ clusterThreshold.
+//      Providers without embeddings (e.g. Rekognition) skip dedup and use every
+//      detection as its own representative.
+//   7. For each cluster representative: upload frame JPEG to storage under
+//      key `video-faces/{mediaItemId}/{uuid}.jpg`; set frameThumbnailKey.
+//   8. Delete existing non-manual Face rows (idempotency).
+//   9. core.persistAndMatchFaces (passes video fields).
+//  10. Upsert MediaFaceStatus.
+//
+// On any error: markFailed and rethrow so the enrichment worker retries.
+// =============================================================================
+
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { EnrichmentJob } from '@prisma/client';
+import { Readable } from 'stream';
+import { randomUUID } from 'crypto';
+import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
+import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
+import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { FaceDetectionCore, NormalizedFace, VideoFaceFields } from './face-detection-core.service';
+import { VideoFrameExtractionService } from './video-frame-extraction.service';
+import { FaceMatchingService } from './face-matching.service';
+import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
+import { MediaFaceStatusType } from '@prisma/client';
+import { extname } from 'path';
+import { DetectedFace, FaceProvider, FaceProviderCredentials } from './providers/face-provider.interface';
+
+// Max long-edge for face detection on video frames (same env var as photo path)
+const FACE_MAX_IMAGE_DIM = (): number =>
+  parseInt(process.env.FACE_MAX_IMAGE_DIM ?? '2000', 10);
+
+// Max long-edge for frame thumbnail upload (fixed at 800 px like thumbnail processor)
+const FRAME_THUMB_MAX_DIM = 800;
+
+/** A detection result tagged with its source frame timestamp. */
+interface FrameDetection {
+  face: DetectedFace;
+  /** Normalized face (after prepareImageForProcessing). */
+  normalizedFace: NormalizedFace;
+  timestampMs: number;
+  /** The frame JPEG buffer (already prepared/downscaled). */
+  frameBuf: Buffer;
+}
+
+/** A cluster of detections representing the same identity across frames. */
+interface FaceCluster {
+  representative: FrameDetection;
+  allTimestampsMs: number[];
+}
+
+@Injectable()
+export class VideoFaceDetectionHandler implements EnrichmentHandler, OnModuleInit {
+  readonly type = 'video_face_detection';
+
+  private readonly logger = new Logger(VideoFaceDetectionHandler.name);
+
+  constructor(
+    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly prisma: PrismaService,
+    private readonly core: FaceDetectionCore,
+    private readonly frameExtractor: VideoFrameExtractionService,
+    private readonly matchingService: FaceMatchingService,
+    private readonly resolver: StorageProviderResolver,
+    private readonly enrichmentJobService: EnrichmentJobService,
+  ) {}
+
+  onModuleInit(): void {
+    this.registry.register(this);
+  }
+
+  // ---------------------------------------------------------------------------
+  // process
+  // ---------------------------------------------------------------------------
+
+  async process(job: EnrichmentJob): Promise<void> {
+    if (!job.mediaItemId) {
+      throw new Error('video_face_detection job missing mediaItemId');
+    }
+
+    // --- 1. Set status → processing ---
+    await this.core.markProcessing(job.mediaItemId);
+
+    // --- 2. Resolve provider + creds ---
+    let providerKey: string;
+    let modelVersion: string;
+    let provider: FaceProvider;
+    let creds: FaceProviderCredentials;
+
+    try {
+      const resolved = await this.core.resolveProviderAndCreds();
+      providerKey = resolved.providerKey;
+      modelVersion = resolved.modelVersion;
+      provider = resolved.provider;
+      creds = resolved.creds;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`VideoFaceJob ${job.id}: ${errMsg}`);
+      await this.core.markFailed(job.mediaItemId, null, 'unknown', errMsg);
+      throw err;
+    }
+
+    await this.enrichmentJobService.recordModel(job.id, providerKey, modelVersion);
+
+    try {
+      // --- 3. Load MediaItem ---
+      const mediaItem = await this.prisma.mediaItem.findUnique({
+        where: { id: job.mediaItemId },
+        select: {
+          id: true,
+          circleId: true,
+          type: true,
+          durationMs: true,
+          width: true,
+          height: true,
+          storageObject: {
+            select: {
+              storageKey: true,
+              storageProvider: true,
+              bucket: true,
+              name: true,
+            },
+          },
+        },
+      });
+
+      if (!mediaItem || !mediaItem.storageObject) {
+        const errMsg = `MediaItem ${job.mediaItemId} or its StorageObject not found`;
+        this.logger.error(`VideoFaceJob ${job.id}: ${errMsg}`);
+        await this.core.markFailed(job.mediaItemId, providerKey, modelVersion, errMsg);
+        throw new Error(errMsg);
+      }
+
+      // --- 4. Read face.video settings ---
+      const settings = await this.prisma.systemSettings.findUnique({
+        where: { key: 'global' },
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const videoSettings = (settings?.value as any)?.face?.video as
+        | { enabled?: boolean; sampleIntervalSeconds?: number; maxFramesPerVideo?: number }
+        | undefined;
+
+      const videoEnabled = videoSettings?.enabled ?? true;
+      if (!videoEnabled) {
+        this.logger.log(
+          `VideoFaceJob ${job.id}: face.video.enabled=false; marking no_faces and skipping`,
+        );
+        await this.core.markStatus(
+          job.mediaItemId,
+          MediaFaceStatusType.no_faces,
+          0,
+          providerKey,
+          modelVersion,
+        );
+        return;
+      }
+
+      const sampleIntervalSeconds = videoSettings?.sampleIntervalSeconds ?? 5;
+      const maxFrames = videoSettings?.maxFramesPerVideo ?? 60;
+
+      // --- 5. Download video ---
+      const objectProvider = await this.resolver.getProviderFor(
+        mediaItem.storageObject.storageProvider,
+        mediaItem.storageObject.bucket,
+      );
+      const videoStream = await objectProvider.download(mediaItem.storageObject.storageKey);
+      const videoBuffer = await streamToBuffer(videoStream);
+
+      const fileExt = extname(mediaItem.storageObject.name || '') || '.mp4';
+
+      // --- 6. Extract frames ---
+      const frames = await this.frameExtractor.extractFrames(videoBuffer, {
+        durationMs: mediaItem.durationMs,
+        sampleIntervalSeconds,
+        maxFrames,
+        fileExtension: fileExt,
+      });
+
+      this.logger.log(
+        `VideoFaceJob ${job.id}: extracted ${frames.length} frame(s) from MediaItem ${job.mediaItemId}`,
+      );
+
+      // --- 7. Detect faces in each frame ---
+      const allDetections: FrameDetection[] = [];
+
+      for (const frame of frames) {
+        // prepareImageForProcessing applies EXIF orientation + downscales
+        const prepared = await prepareImageForProcessing(frame.buffer, {
+          maxDim: FACE_MAX_IMAGE_DIM(),
+        });
+
+        const frameBuf =
+          prepared.width > 0 ? prepared.buffer : frame.buffer;
+        const frameWidth = prepared.width > 0 ? prepared.width : (mediaItem.width ?? 0);
+        const frameHeight = prepared.height > 0 ? prepared.height : (mediaItem.height ?? 0);
+
+        let detectedFaces: DetectedFace[];
+        try {
+          detectedFaces = await this.core.detectWithThrottleMapping(
+            provider,
+            creds,
+            frameBuf,
+            providerKey,
+          );
+        } catch (detectErr) {
+          // RateLimitError must propagate (worker handles deferral)
+          throw detectErr;
+        }
+
+        const logCtx = `VideoFaceJob ${job.id} frame@${frame.timestampMs}ms`;
+        for (const face of detectedFaces) {
+          const normalizedFace = this.core.normalizeFace(
+            face,
+            frameWidth,
+            frameHeight,
+            logCtx,
+          );
+          allDetections.push({
+            face,
+            normalizedFace,
+            timestampMs: frame.timestampMs,
+            frameBuf,
+          });
+        }
+      }
+
+      this.logger.log(
+        `VideoFaceJob ${job.id}: total raw detections across all frames: ${allDetections.length}`,
+      );
+
+      // --- 8. Cross-frame dedup ---
+      const clusters = clusterDetections(
+        allDetections,
+        this.matchingService,
+        provider.capabilities.delegatedRecognize,
+      );
+
+      this.logger.log(
+        `VideoFaceJob ${job.id}: ${clusters.length} unique face cluster(s) after dedup`,
+      );
+
+      // --- 9. Upload representative frame thumbnails ---
+      const { id: activeProviderId, provider: activeStorageProvider } =
+        await this.resolver.getActiveProvider();
+
+      const facesWithVideoFields: Array<NormalizedFace & VideoFaceFields> = [];
+
+      for (const cluster of clusters) {
+        const rep = cluster.representative;
+
+        // Downscale frame to FRAME_THUMB_MAX_DIM for thumbnail storage
+        let thumbBuffer: Buffer;
+        try {
+          const sharp = (await import('sharp')).default;
+          thumbBuffer = await sharp(rep.frameBuf)
+            .resize({
+              width: FRAME_THUMB_MAX_DIM,
+              height: FRAME_THUMB_MAX_DIM,
+              fit: 'inside',
+              withoutEnlargement: true,
+            })
+            .jpeg({ quality: 85 })
+            .toBuffer();
+        } catch (sharpErr) {
+          // Non-fatal: store the face without a thumbnail
+          const msg = sharpErr instanceof Error ? sharpErr.message : String(sharpErr);
+          this.logger.warn(
+            `VideoFaceJob ${job.id}: thumbnail downscale failed for cluster at ${rep.timestampMs}ms — ${msg}`,
+          );
+          thumbBuffer = rep.frameBuf;
+        }
+
+        // Upload to active storage provider
+        const frameThumbId = randomUUID();
+        const frameThumbnailKey = `video-faces/${job.mediaItemId}/${frameThumbId}.jpg`;
+
+        try {
+          const thumbStream = Readable.from(thumbBuffer);
+          await activeStorageProvider.upload(frameThumbnailKey, thumbStream, {
+            mimeType: 'image/jpeg',
+            contentLength: thumbBuffer.length,
+          });
+        } catch (uploadErr) {
+          // Non-fatal: proceed without thumbnail key
+          const msg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
+          this.logger.warn(
+            `VideoFaceJob ${job.id}: frame thumbnail upload failed for cluster at ${rep.timestampMs}ms — ${msg}`,
+          );
+          facesWithVideoFields.push({
+            ...rep.normalizedFace,
+            videoTimestampMs: rep.timestampMs,
+            videoTimestamps: [...cluster.allTimestampsMs].sort((a, b) => a - b),
+            // frameThumbnailKey omitted — upload failed
+          });
+          // Suppress unused variable warning from activeProviderId
+          void activeProviderId;
+          continue;
+        }
+
+        void activeProviderId; // used indirectly through getActiveProvider context
+
+        facesWithVideoFields.push({
+          ...rep.normalizedFace,
+          videoTimestampMs: rep.timestampMs,
+          videoTimestamps: [...cluster.allTimestampsMs].sort((a, b) => a - b),
+          frameThumbnailKey,
+        });
+      }
+
+      // --- 10. Delete existing non-manual Face rows (idempotency) ---
+      await this.prisma.face.deleteMany({
+        where: {
+          mediaItemId: job.mediaItemId,
+          manuallyAssigned: false,
+        },
+      });
+      // TODO: Best-effort deletion of previously-written video-faces/{mediaItemId}/* thumbnails
+      // from storage is non-trivial (would require listing storage objects by prefix).
+      // Left as a future improvement — stale thumbnails in storage do not affect correctness.
+
+      // --- 11. Persist Face rows + match to Persons ---
+      const faceCount = await this.core.persistAndMatchFaces({
+        mediaItemId: job.mediaItemId,
+        circleId: mediaItem.circleId,
+        providerKey,
+        modelVersion,
+        faces: facesWithVideoFields,
+        isVideo: true,
+      });
+
+      // --- 12. Upsert MediaFaceStatus ---
+      const finalStatus =
+        faceCount > 0
+          ? MediaFaceStatusType.processed
+          : MediaFaceStatusType.no_faces;
+
+      await this.core.markStatus(
+        job.mediaItemId,
+        finalStatus,
+        faceCount,
+        providerKey,
+        modelVersion,
+      );
+
+      this.logger.log(
+        `VideoFaceJob ${job.id}: completed — ${faceCount} unique face(s) in MediaItem ${job.mediaItemId} using ${providerKey}/${modelVersion}`,
+      );
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      await this.core.markFailed(job.mediaItemId, providerKey, modelVersion, errMsg);
+      throw err;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cross-frame dedup: greedy single-pass clustering
+// ---------------------------------------------------------------------------
+
+/**
+ * Group raw frame detections into identity clusters using greedy single-pass
+ * cosine similarity matching.
+ *
+ * Algorithm:
+ *   For each detection (in order):
+ *     - Compare its embedding to every existing cluster's representative.
+ *     - If similarity ≥ clusterThreshold, assign it to the best-matching cluster
+ *       and update the representative if this detection has higher confidence
+ *       (tie-break: larger bounding-box area).
+ *     - Otherwise, start a new cluster.
+ *
+ * Providers without per-detection embeddings (e.g. Rekognition delegated):
+ *   Skip clustering — every detection becomes its own cluster. The lack of
+ *   embeddings makes cross-frame identity linking impossible; per-detection
+ *   Face rows still record videoTimestampMs.
+ *
+ * @param detections  All raw face detections across all frames (order preserved).
+ * @param matching    FaceMatchingService (provides cosineSimilarity + clusterThreshold).
+ * @param isDelegated True when the provider uses delegated recognition (no embeddings).
+ */
+function clusterDetections(
+  detections: FrameDetection[],
+  matching: FaceMatchingService,
+  isDelegated: boolean,
+): FaceCluster[] {
+  if (detections.length === 0) return [];
+
+  // Delegated providers have no embeddings — skip dedup, one cluster per detection
+  if (isDelegated) {
+    return detections.map((d) => ({
+      representative: d,
+      allTimestampsMs: [d.timestampMs],
+    }));
+  }
+
+  const clusters: FaceCluster[] = [];
+
+  for (const detection of detections) {
+    const emb = detection.normalizedFace.embedding;
+
+    // Detections with no embedding cannot be clustered — treat as singleton
+    if (emb.length === 0) {
+      clusters.push({
+        representative: detection,
+        allTimestampsMs: [detection.timestampMs],
+      });
+      continue;
+    }
+
+    let bestClusterIdx = -1;
+    let bestSim = -Infinity;
+
+    for (let i = 0; i < clusters.length; i++) {
+      const repEmb = clusters[i].representative.normalizedFace.embedding;
+      if (repEmb.length === 0) continue;
+
+      const sim = matching.cosineSimilarity(emb, repEmb);
+      if (sim > bestSim) {
+        bestSim = sim;
+        bestClusterIdx = i;
+      }
+    }
+
+    if (bestClusterIdx >= 0 && bestSim >= matching.clusterThreshold) {
+      // Assign to existing cluster
+      const cluster = clusters[bestClusterIdx];
+      cluster.allTimestampsMs.push(detection.timestampMs);
+
+      // Update representative if this detection is better:
+      //   Higher confidence wins; tie-break = larger bbox area.
+      if (isBetterRepresentative(detection, cluster.representative)) {
+        cluster.representative = detection;
+      }
+    } else {
+      // Start a new cluster
+      clusters.push({
+        representative: detection,
+        allTimestampsMs: [detection.timestampMs],
+      });
+    }
+  }
+
+  return clusters;
+}
+
+/**
+ * Returns true when `candidate` is a better cluster representative than `current`.
+ * Higher confidence wins. On tie, larger bounding-box area wins.
+ */
+function isBetterRepresentative(
+  candidate: FrameDetection,
+  current: FrameDetection,
+): boolean {
+  const candConf = candidate.face.confidence ?? 0;
+  const currConf = current.face.confidence ?? 0;
+
+  if (candConf !== currConf) return candConf > currConf;
+
+  // Tie-break: larger bbox area
+  const candBb = candidate.normalizedFace.boundingBox;
+  const currBb = current.normalizedFace.boundingBox;
+  return candBb.w * candBb.h > currBb.w * currBb.h;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+async function streamToBuffer(stream: Readable): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+    stream.on('end', () => resolve(Buffer.concat(chunks)));
+    stream.on('error', reject);
+  });
+}

@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 3.1 |
+| **Version** | 3.2 |
 | **Last Updated** | June 2026 |
 | **Status** | All phases implemented |
 
@@ -15,17 +15,18 @@
 3. [Providers and Abstraction](#3-providers-and-abstraction)
 4. [Settings and Credentials](#4-settings-and-credentials)
 5. [Detection Pipeline Step by Step](#5-detection-pipeline-step-by-step)
-6. [Recognition: Embeddings, Matching, and Clustering](#6-recognition-embeddings-matching-and-clustering)
-7. [People, Labeling, and Merge](#7-people-labeling-and-merge) (includes Manual People Association)
-8. [Image Quality and Resolution](#8-image-quality-and-resolution)
-9. [EXIF Orientation](#9-exif-orientation)
-10. [Per-Circle Opt-In and Biometric Privacy](#10-per-circle-opt-in-and-biometric-privacy)
-11. [Data Model](#11-data-model)
-12. [API Endpoints](#12-api-endpoints)
-13. [Configuration and Environment Variables](#13-configuration-and-environment-variables)
-14. [Operations](#14-operations)
-15. [Gotchas and Known Issues](#15-gotchas-and-known-issues)
-16. [Infrastructure](#16-infrastructure)
+6. [Video Face Detection](#6-video-face-detection)
+7. [Recognition: Embeddings, Matching, and Clustering](#7-recognition-embeddings-matching-and-clustering)
+8. [People, Labeling, and Merge](#8-people-labeling-and-merge) (includes Manual People Association)
+9. [Image Quality and Resolution](#9-image-quality-and-resolution)
+10. [EXIF Orientation](#10-exif-orientation)
+11. [Global Feature Toggle and Biometric Privacy](#11-global-feature-toggle-and-biometric-privacy)
+12. [Data Model](#12-data-model)
+13. [API Endpoints](#13-api-endpoints)
+14. [Configuration and Environment Variables](#14-configuration-and-environment-variables)
+15. [Operations](#15-operations)
+16. [Gotchas and Known Issues](#16-gotchas-and-known-issues)
+17. [Infrastructure](#17-infrastructure)
 
 ---
 
@@ -255,7 +256,110 @@ For queue mechanics (worker polling, atomic claim, retry, concurrency), see **[d
 
 ---
 
-## 6. Recognition: Embeddings, Matching, and Clustering
+## 6. Video Face Detection
+
+### Overview
+
+`VideoFaceDetectionHandler` (`apps/api/src/face/video-face-detection.handler.ts`) implements the `video_face_detection` enrichment job type. It extracts JPEG frames from a video using ffmpeg, runs the active face provider on each frame using shared `FaceDetectionCore` logic, deduplicates faces across frames by embedding similarity, and writes one `Face` row per identity cluster per video.
+
+Shared logic (`FaceDetectionCore`, `apps/api/src/face/face-detection-core.service.ts`) is used by both the photo `face_detection` handler and this video handler for provider resolution, per-frame detection, bounding box normalization, L2 embedding normalization, face persistence, and person matching.
+
+Frame extraction is implemented in `VideoFrameExtractionService` (`apps/api/src/face/video-frame-extraction.service.ts`), which uses `fluent-ffmpeg` to seek to each computed timestamp and output a single JPEG frame per seek.
+
+### Enqueue Routing
+
+`MediaEnrichmentService.enqueueUploadEnrichment` decides the job type based on `MediaType`:
+
+| Media type | Feature gate | Env kill-switch | Job type enqueued | Priority |
+|------------|-------------|-----------------|-------------------|----------|
+| `photo` | `features.faceRecognition=true` | `FACE_AUTO_DETECT != 'false'` | `face_detection` | 10 |
+| `video` | `features.faceRecognition=true` AND `face.video.enabled=true` | `FACE_AUTO_DETECT != 'false'` | `video_face_detection` | 20 |
+
+Video jobs are assigned priority 20 so that photo `face_detection` jobs (priority 10) drain first and a long video cannot head-of-line-block them.
+
+Admin backfill (`POST /api/admin/face/backfill`) includes both photos and videos, enqueuing the correct type (`face_detection` or `video_face_detection`) per item.
+
+Per-item rerun (`POST /api/media/:id/faces/rerun`) also routes by media type, enqueuing `video_face_detection` at priority 0 for video items.
+
+### Frame Sampling Algorithm
+
+`VideoFrameExtractionService` computes seek timestamps without reading the video's actual frame rate:
+
+```
+durationSec = mediaItem.durationMs / 1000
+interval    = max(sampleIntervalSeconds, durationSec / maxFramesPerVideo)
+timestamps  = [interval/2, interval*1.5, interval*2.5, …]   (mid-interval; capped at maxFramesPerVideo)
+```
+
+Mid-interval sampling (starting at `interval/2` rather than `0`) avoids extracting identical frames at hard scene boundaries.
+
+**Example — 1-hour video with defaults (sampleIntervalSeconds=5, maxFramesPerVideo=60):**
+
+```
+durationSec = 3600
+interval    = max(5, 3600/60) = max(5, 60) = 60 s
+timestamps  = [30 s, 90 s, 150 s, …, 3570 s]   → 60 frames
+```
+
+**Example — 30-second clip with defaults:**
+
+```
+durationSec = 30
+interval    = max(5, 30/60) = max(5, 0.5) = 5 s
+timestamps  = [2.5 s, 7.5 s, 12.5 s, 17.5 s, 22.5 s, 27.5 s]   → 6 frames
+```
+
+When `durationMs` is 0 or absent, a single poster frame at 0 s is extracted.
+
+Per-frame extraction errors are logged and skipped rather than aborting the job, so one corrupted seek still yields frames from other timestamps.
+
+### Cross-Frame Deduplication
+
+After detection, faces across all frames are clustered by identity to produce one `Face` row per person per video rather than one row per occurrence per frame.
+
+**Algorithm — greedy single-pass:**
+
+For each frame detection (in order):
+1. Compare its L2-normalized embedding to every existing cluster's representative via cosine similarity.
+2. If the best similarity is ≥ `FACE_CLUSTER_THRESHOLD` (default `0.45`), assign the detection to that cluster. Update the representative if the new detection has higher confidence (tie-break: larger bounding-box area).
+3. Otherwise, start a new cluster.
+
+Detections with empty embeddings (rare edge case) become singleton clusters.
+
+**Rekognition (delegated path):** Rekognition does not return per-face embeddings — recognition is delegated to AWS collections. Cross-frame clustering is skipped; every detection becomes its own cluster. Each `Face` row still records `videoTimestampMs`.
+
+### Frame Thumbnail Storage
+
+For each cluster's representative frame, the handler:
+1. Downscales the representative frame JPEG to at most 800 px on the longest side (matching the thumbnail processor).
+2. Uploads it to the active storage provider under `video-faces/{mediaItemId}/{uuid}.jpg`.
+3. Stores the resulting key in `Face.frameThumbnailKey`.
+
+`GET /api/media/:id/faces` signs `frameThumbnailKey` via `MediaThumbnailService.signThumb` and returns it as `faceThumbnailUrl`.
+
+Thumbnail upload failure is non-fatal: the `Face` row is created without `frameThumbnailKey`, and `faceThumbnailUrl` is `null` in the API response.
+
+### Settings
+
+The following settings are read from `system_settings['global'].face.video` and are editable in Admin Settings → Face (`/admin/settings/face`). All require `features.faceRecognition=true` to have any effect.
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `face.video.enabled` | Boolean | `true` | When `false`, video uploads set `MediaFaceStatus` to `no_faces` immediately without processing |
+| `face.video.sampleIntervalSeconds` | Integer (1–60) | `5` | Desired gap between sampled frames in seconds; expands automatically when the video is long enough that `durationSec / maxFramesPerVideo` exceeds this value |
+| `face.video.maxFramesPerVideo` | Integer (1–300) | `60` | Hard cap on frames extracted per video; bounds compute per video independent of duration |
+
+### Known Limitation: Frame Thumbnail Signing on Multi-Provider Setups
+
+Frame thumbnail JPEGs are uploaded to the active storage provider but are **not** registered as `StorageObject` rows. `signThumb` falls back to the default/static provider when signing them.
+
+On a single-provider deployment (the typical VPS case where active == default), this is correct. On a multi-provider setup where the active provider for uploads differs from the env-default signing provider, the signed URL will target the wrong provider and the thumbnail will 404.
+
+This is a known v1 limitation. A future improvement would register frame thumbnails as lightweight `StorageObject` rows so per-object provider routing applies.
+
+---
+
+## 7. Recognition: Embeddings, Matching, and Clustering
 
 ### Embeddings
 
@@ -320,7 +424,7 @@ The cluster threshold (`0.45`) is intentionally stricter than the match threshol
 
 ---
 
-## 7. People, Labeling, and Merge
+## 8. People, Labeling, and Merge
 
 ### Person Model
 
@@ -412,7 +516,7 @@ Using the existing `Face` model means all downstream features work unchanged: `G
 
 ---
 
-## 8. Image Quality and Resolution
+## 9. Image Quality and Resolution
 
 ### Detection Uses the Original
 
@@ -428,7 +532,7 @@ Embedding generation uses the same upright, downscaled buffer that detection use
 
 ---
 
-## 9. EXIF Orientation
+## 10. EXIF Orientation
 
 Mobile cameras frequently embed EXIF orientation metadata in JPEG files rather than rotating the pixels. Without correction, a portrait photo may be processed as landscape, causing face detectors to see rotated or sideways faces.
 
@@ -463,7 +567,7 @@ Every enrichment handler that reads image pixels MUST call `prepareImageForProce
 
 ---
 
-## 10. Global Feature Toggle and Biometric Privacy
+## 11. Global Feature Toggle and Biometric Privacy
 
 ### Default Off
 
@@ -504,7 +608,7 @@ All events are written to the `audit_events` table with `actorUserId`, `action`,
 
 ---
 
-## 11. Data Model
+## 12. Data Model
 
 ### faces
 
@@ -524,6 +628,9 @@ One row per detected face in a media item.
 | `providerKey` | String | Provider that produced this face |
 | `modelVersion` | String | Model version that produced this face |
 | `manuallyAssigned` | Boolean | `true` = user-assigned; protected from re-clustering and reruns |
+| `videoTimestampMs` | Int? | Representative appearance time in ms from video start; null for photos. Added in migration `20260627000000_face_video_columns`. |
+| `videoTimestamps` | Int[] | All sampled frame timestamps (ms) where this identity cluster was observed; empty array for photos. Feeds video-scrubber markers in the UI. |
+| `frameThumbnailKey` | Text? | Storage key of the saved representative-frame JPEG under `video-faces/{mediaItemId}/{uuid}.jpg`; null for photos. Signed on `GET /api/media/:id/faces` and returned as `faceThumbnailUrl`. |
 | `createdAt` | DateTime | |
 
 Indices: `circleId`, `mediaItemId`, `personId`, `externalFaceId`.
@@ -579,14 +686,14 @@ One row per media item — tracks detection status.
 
 `MediaFaceStatusType` enum: `not_processed`, `pending`, `processing`, `processed`, `failed`, `no_faces`.
 
-### enrichment_jobs (face_detection type)
+### enrichment_jobs (face_detection / video_face_detection types)
 
-The generic job queue. Face detection uses `type = 'face_detection'`. Full schema in [enrichment-queue.md](enrichment-queue.md#2-data-model).
+The generic job queue. Photo face detection uses `type = 'face_detection'`; video face detection uses `type = 'video_face_detection'`. Full schema in [enrichment-queue.md](enrichment-queue.md#2-data-model).
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | UUID | Primary key |
-| `type` | String | `'face_detection'` for face jobs |
+| `type` | String | `'face_detection'` for photos; `'video_face_detection'` for videos |
 | `mediaItemId` | UUID | Target media item |
 | `circleId` | UUID | Scoping for RBAC |
 | `status` | JobStatus | `pending`, `running`, `succeeded`, `failed` |
@@ -609,7 +716,7 @@ The per-circle `faceRecognitionEnabled` column was dropped from the `circles` ta
 
 ---
 
-## 12. API Endpoints
+## 13. API Endpoints
 
 ### Face Settings (Admin only)
 
@@ -621,16 +728,16 @@ The per-circle `faceRecognitionEnabled` column was dropped from the `circles` ta
 | `POST` | `/api/face/test` | `face_settings:read` | — | Test provider connectivity |
 | `GET` | `/api/face/models` | `face_settings:read` | — | List models for a provider |
 | `PUT` | `/api/face/features/detection` | `face_settings:write` | — | Set active detection provider/model |
-| `POST` | `/api/admin/face/backfill` | `face_settings:write` | — | Bulk-enqueue photos across all circles; requires global feature enabled; body `{ force? }`; returns `{ enqueued, circles }` |
+| `POST` | `/api/admin/face/backfill` | `face_settings:write` | — | Bulk-enqueue face detection across all circles (photos → `face_detection`; videos → `video_face_detection`); requires global feature enabled; body `{ from?, to?, force? }`; returns `{ enqueued, circles }` |
 | `DELETE` | `/api/face/biometrics` | `face_settings:write` | `circle_admin` | Permanently erase all biometric data for a circle |
 
 ### Face Detection (media:read / media:write)
 
 | Method | Path | Permission | Per-circle Role | Description |
 |--------|------|------------|-----------------|-------------|
-| `GET` | `/api/media/:id/faces` | `media:read` | viewer | List faces on a media item (embedding excluded) |
+| `GET` | `/api/media/:id/faces` | `media:read` | viewer | List faces on a media item (embedding excluded); for video faces also returns `videoTimestampMs` (Int?), `videoTimestamps` (Int[]), and `faceThumbnailUrl` (signed URL of representative frame JPEG; null for photos and when thumbnail upload failed) |
 | `GET` | `/api/media/:id/faces/status` | `media:read` | viewer | Detection status, faceCount, providerKey, lastError |
-| `POST` | `/api/media/:id/faces/rerun` | `media:write` | collaborator | Re-enqueue face detection; priority=0 |
+| `POST` | `/api/media/:id/faces/rerun` | `media:write` | collaborator | Re-enqueue face detection at priority 0; routes by media type — photos → `face_detection`, videos → `video_face_detection` |
 
 ### People
 
@@ -669,7 +776,7 @@ The `noFaces` filter is also available in `POST /api/search` (as the `noFaces: t
 
 ---
 
-## 13. Configuration and Environment Variables
+## 14. Configuration and Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -691,28 +798,28 @@ The `noFaces` filter is also available in `POST /api/search` (as the `noFaces: t
 
 ---
 
-## 14. Operations
+## 15. Operations
 
 ### Backfill Workflow
 
-Use when face recognition was enabled after photos were already imported, or when switching to a different provider.
+Use when face recognition was enabled after photos or videos were already imported, or when switching to a different provider.
 
 1. Ensure `features.faceRecognition` is enabled globally (Admin → `/admin/settings/face`).
 2. Navigate to Admin → Settings → Face → Backfill panel, optionally check "Force re-process already processed items".
-3. `POST /api/admin/face/backfill { force? }` enqueues all eligible photos across all circles at priority 100.
-4. Monitor progress at Admin → Jobs (`/admin/settings/jobs`), filtering by `type = face_detection`.
+3. `POST /api/admin/face/backfill { from?, to?, force? }` enqueues all eligible media items (photos and videos) across all circles at priority 100. Photos receive `face_detection` jobs; videos receive `video_face_detection` jobs.
+4. Monitor progress at Admin → Jobs (`/admin/settings/jobs`), filtering by `type = face_detection` or `type = video_face_detection`.
 
-The backfill endpoint skips items already in `processed` or `no_faces` status unless `force=true`. It also skips items where `MediaType` is not photo or `deletedAt` is set.
+The backfill endpoint skips items already in `processed` or `no_faces` status unless `force=true`. It also skips items where `deletedAt` is set.
 
-### Per-Photo Rerun
+### Per-Item Rerun
 
-`POST /api/media/:id/faces/rerun` — available to circle collaborators. Enqueues a single job at priority 0 (highest), ensuring it runs ahead of any pending upload or backfill jobs. Returns `{ jobId, status }`.
+`POST /api/media/:id/faces/rerun` — available to circle collaborators. Enqueues a single job at priority 0 (highest), ensuring it runs ahead of any pending upload or backfill jobs. Routes by media type: photos enqueue `face_detection`, videos enqueue `video_face_detection`. Returns `{ jobId, status }`.
 
 ### Observing via Admin Jobs
 
 The `/admin/jobs` page provides:
 - Stats panel: total, per-status counts, per-type breakdown, stuck-running badge (jobs in `running` for > 10 minutes).
-- Filterable paginated table: set `type = face_detection` to see only face jobs.
+- Filterable paginated table: set `type = face_detection` to see photo face jobs; set `type = video_face_detection` to see video face jobs.
 - Per-row actions: Retry (reset to pending), Delete.
 - Bulk actions: Retry all failed (with optional type filter), Reset stuck.
 - Auto-refresh every 5 seconds.
@@ -723,7 +830,7 @@ A job stuck in `running` status indicates the worker crashed or the container re
 
 ---
 
-## 15. Gotchas and Known Issues
+## 16. Gotchas and Known Issues
 
 **EXIF orientation must be applied before pixel access.** Any code that reads image pixels — in a provider `detect()` call or any other image processor — must obtain the buffer via `prepareImageForProcessing`, never by decoding raw bytes directly. Skipping this step causes face detectors to see rotated images and produce incorrect bounding boxes.
 
@@ -741,9 +848,11 @@ A job stuck in `running` status indicates the worker crashed or the container re
 
 **Model-specific embeddings are not cross-comparable.** CompreFace 128-d and Human 1024-d embeddings live in entirely different vector spaces. Rekognition embeddings are not stored at all. A circle must use one provider consistently. Switching providers requires erasing existing face data (`DELETE /api/face/biometrics`) and re-running detection.
 
+**Video frame thumbnails are not registered as StorageObject rows (v1 limitation).** Frame thumbnail JPEGs (`video-faces/{mediaItemId}/{uuid}.jpg`) are uploaded to the active storage provider but no `StorageObject` row is created for them. `signThumb` therefore falls back to the default/static (env-configured) provider when signing. On a single-provider deployment this is correct; on a multi-provider setup where the active upload provider differs from the env default, the signed URL may target the wrong provider and the thumbnail will 404. A future improvement would register frame thumbnails as lightweight `StorageObject` rows so per-object provider routing applies.
+
 ---
 
-## 16. Infrastructure
+## 17. Infrastructure
 
 ### CompreFace Sidecar
 
@@ -781,3 +890,4 @@ A job stuck in `running` status indicates the worker crashed or the container re
 | 3.0 | June 2026 | AI Assistant | Complete rewrite as end-to-end reference; replaces phase-based structure |
 | 3.1 | June 2026 | AI Assistant | Added Manual People Association subsection (§7) and `noFaces` filter documentation (§12) |
 | 3.2 | June 2026 | AI Assistant | Per-circle opt-in removed — face recognition is now a global system setting (`features.faceRecognition`); per-circle backfill replaced by global admin endpoint; circle face-settings endpoints removed; biometrics erase no longer clears per-circle flag |
+| 3.3 | June 2026 | AI Assistant | Added §6 Video Face Detection: `video_face_detection` job type, `VideoFrameExtractionService` frame-sampling algorithm, cross-frame dedup, `face.video.*` settings, enqueue routing table, new `Face` columns (`videoTimestampMs`, `videoTimestamps`, `frameThumbnailKey`), `faceThumbnailUrl` in faces API, and known signing limitation on multi-provider setups |
