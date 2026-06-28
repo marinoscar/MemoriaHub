@@ -22,6 +22,7 @@ import {
   Backup as BackupIcon,
   Archive as ArchiveIcon,
   QueryStats as QueryStatsIcon,
+  Videocam as VideocamIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 
@@ -104,6 +105,13 @@ export default function SettingsHubPage() {
           description: 'Tune burst detection sensitivity, time windows, and review queue settings.',
           icon: <BurstModeIcon sx={{ fontSize: 40 }} color="primary" />,
           path: '/admin/settings/bursts',
+          permission: 'system_settings:read',
+        },
+        {
+          title: 'Social Media Detection',
+          description: 'Detect videos from TikTok, Instagram, Facebook and apply protected system tags.',
+          icon: <VideocamIcon sx={{ fontSize: 40 }} color="primary" />,
+          path: '/admin/settings/social',
           permission: 'system_settings:read',
         },
       ],
