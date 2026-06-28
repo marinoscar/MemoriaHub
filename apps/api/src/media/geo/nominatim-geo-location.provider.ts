@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { GeoLocationProvider, GeoLocationResult } from './geo-location-provider.interface';
+import { RateLimitError, parseRetryAfterMs } from '../../enrichment/rate-limit.error';
 
 /**
  * IMPORTANT — PRIVACY NOTICE:
@@ -41,6 +42,18 @@ export class NominatimGeoLocationProvider implements GeoLocationProvider {
         },
       });
 
+      // HTTP-level throttle or server error — throw before parsing so the
+      // enrichment worker routes through the rate-limit deferral path.
+      if (response.status === 429 || response.status >= 500) {
+        const retryAfterMs =
+          parseRetryAfterMs(response.headers.get('retry-after') ?? undefined) ?? undefined;
+        throw new RateLimitError(
+          `Nominatim throttled (HTTP ${response.status})`,
+          retryAfterMs,
+          'nominatim',
+        );
+      }
+
       if (!response.ok) {
         this.logger.warn(
           `Nominatim returned HTTP ${response.status} for (${lat}, ${lng})`,
@@ -79,6 +92,10 @@ export class NominatimGeoLocationProvider implements GeoLocationProvider {
         placeName: data.display_name,
       };
     } catch (error) {
+      // Re-throw RateLimitError — do not swallow it into a null return.
+      if (error instanceof RateLimitError) {
+        throw error;
+      }
       const msg = error instanceof Error ? error.message : String(error);
       this.logger.warn(`Nominatim request failed for (${lat}, ${lng}): ${msg}`);
       return null;
