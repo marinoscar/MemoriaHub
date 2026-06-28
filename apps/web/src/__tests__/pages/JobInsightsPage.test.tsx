@@ -95,6 +95,12 @@ const sampleInsights: JobInsights = {
       { type: 'face_detection', remaining: 7, avgMs: 2000, etcMs: 14000 },
     ],
   },
+  lifetime: {
+    overall: { succeeded: 940, failed: 60, total: 1000, avgMs: 2100, samples: 940 },
+    byType: [
+      { type: 'face_detection', succeeded: 940, failed: 60, total: 1000, avgMs: 2100, samples: 940 },
+    ],
+  },
 };
 
 const emptyInsights: JobInsights = {
@@ -116,6 +122,10 @@ const emptyInsights: JobInsights = {
     byType: [],
   },
   eta: { totalRemaining: 0, etaMs: 0, basis: 'live', perType: [] },
+  lifetime: {
+    overall: { succeeded: 0, failed: 0, total: 0, avgMs: 0, samples: 0 },
+    byType: [],
+  },
 };
 
 function makeAdminPermissions() {
