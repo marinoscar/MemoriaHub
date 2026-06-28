@@ -558,7 +558,11 @@ export class MediaService {
 
     return {
       ...rest,
-      tags: mediaTags.filter((mt) => !mt.tag.isSystem).map((mt) => mt.tag.name),
+      // `tags` carries every tag name (system + manual + AI); `systemTags` is the
+      // subset flagged read-only. The web client renders chips from `tags` and
+      // cross-references `systemTags` to lock the protected ones, so system tag
+      // names MUST remain present in `tags` for them to appear at all.
+      tags: mediaTags.map((mt) => mt.tag.name),
       systemTags: mediaTags.filter((mt) => mt.tag.isSystem).map((mt) => mt.tag.name),
       thumbnailUrl,
       downloadUrl,
