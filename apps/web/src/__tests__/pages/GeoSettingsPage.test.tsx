@@ -476,6 +476,97 @@ describe('GeoSettingsPage', () => {
         expect(screen.getByText(/forward search setting saved/i)).toBeInTheDocument();
       });
     });
+
+    // -------------------------------------------------------------------------
+    // Fix #2 regression tests: version-conflict retry in handleForwardSearchChange
+    // -------------------------------------------------------------------------
+    describe('conflict retry logic (Fix #2)', () => {
+      const CONFLICT_MSG = 'Settings were updated elsewhere. Please review and try again.';
+
+      function getForwardSearchSwitch() {
+        const label = screen.getByText(/enable forward location search/i);
+        return label
+          .closest('.MuiFormControlLabel-root')
+          ?.querySelector('input[type="checkbox"]') as HTMLElement;
+      }
+
+      it('retries once on version-conflict error and shows success when retry resolves', async () => {
+        // First call: reject with the well-known version-conflict message.
+        // Second call (retry): resolve successfully.
+        const updateSettings = vi
+          .fn()
+          .mockRejectedValueOnce(new Error(CONFLICT_MSG))
+          .mockResolvedValueOnce(undefined);
+
+        mockUseSystemSettings.mockReturnValue(
+          makeSystemSettingsMock({ forwardSearchEnabled: false, updateSettings }) as ReturnType<typeof useSystemSettings>,
+        );
+
+        const user = userEvent.setup();
+        render(<GeoSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+        await user.click(getForwardSearchSwitch());
+
+        // The success toast should appear — not an error
+        await waitFor(() => {
+          expect(screen.getByText(/forward search setting saved/i)).toBeInTheDocument();
+        });
+
+        // updateSettings must have been called exactly twice (initial + one retry)
+        expect(updateSettings).toHaveBeenCalledTimes(2);
+        expect(screen.queryByText(CONFLICT_MSG)).not.toBeInTheDocument();
+      });
+
+      it('shows error and does NOT retry more than once when conflict persists on retry', async () => {
+        // Both the initial call and the retry reject with the version-conflict message.
+        const updateSettings = vi
+          .fn()
+          .mockRejectedValueOnce(new Error(CONFLICT_MSG))
+          .mockRejectedValueOnce(new Error(CONFLICT_MSG));
+
+        mockUseSystemSettings.mockReturnValue(
+          makeSystemSettingsMock({ forwardSearchEnabled: false, updateSettings }) as ReturnType<typeof useSystemSettings>,
+        );
+
+        const user = userEvent.setup();
+        render(<GeoSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+        await user.click(getForwardSearchSwitch());
+
+        // Error toast must appear (from the retry rejection)
+        await waitFor(() => {
+          expect(screen.getByText(CONFLICT_MSG)).toBeInTheDocument();
+        });
+
+        // Called exactly twice — no infinite retry loop
+        expect(updateSettings).toHaveBeenCalledTimes(2);
+        expect(screen.queryByText(/forward search setting saved/i)).not.toBeInTheDocument();
+      });
+
+      it('shows error immediately without retrying for a non-conflict error', async () => {
+        const updateSettings = vi
+          .fn()
+          .mockRejectedValueOnce(new Error('Network error'));
+
+        mockUseSystemSettings.mockReturnValue(
+          makeSystemSettingsMock({ forwardSearchEnabled: false, updateSettings }) as ReturnType<typeof useSystemSettings>,
+        );
+
+        const user = userEvent.setup();
+        render(<GeoSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+        await user.click(getForwardSearchSwitch());
+
+        // Error toast must show the original error message
+        await waitFor(() => {
+          expect(screen.getByText(/network error/i)).toBeInTheDocument();
+        });
+
+        // Only one attempt — no retry for a non-conflict error
+        expect(updateSettings).toHaveBeenCalledTimes(1);
+        expect(screen.queryByText(/forward search setting saved/i)).not.toBeInTheDocument();
+      });
+    });
   });
 
   // -------------------------------------------------------------------------
