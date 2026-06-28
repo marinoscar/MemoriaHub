@@ -249,8 +249,10 @@ function SocialSettingsContent() {
                     <ListItemText
                       primary={p.key}
                       secondary={`Tag: ${p.tagName}`}
-                      primaryTypographyProps={{ variant: 'body2', fontWeight: 500 }}
-                      secondaryTypographyProps={{ variant: 'caption', fontFamily: 'monospace' }}
+                      slotProps={{
+                        primary: { variant: 'body2', sx: { fontWeight: 500 } },
+                        secondary: { variant: 'caption', sx: { fontFamily: 'monospace' } },
+                      }}
                     />
                   </ListItem>
                 ))}
