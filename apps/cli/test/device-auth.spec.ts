@@ -100,7 +100,7 @@ async function drivePolling(
   deviceCode: string,
   expiresInSec: number = 3600,
   onTick?: (state: 'pending' | 'slow_down') => void,
-): Promise<string> {
+) {
   const promise = pollForDeviceToken(serverUrl, deviceCode, 5, expiresInSec, onTick);
 
   // Drain the internal timer/microtask queue until the promise settles.
@@ -226,9 +226,12 @@ describe('pollForDeviceToken', () => {
 
     const tokenPromise = pollForDeviceToken('https://example.com', 'dc_abc', 5, 3600);
     await jest.runAllTimersAsync();
-    const token = await tokenPromise;
+    const result = await tokenPromise;
 
-    expect(token).toBe('pat_first_try');
+    expect(result.accessToken).toBe('pat_first_try');
+    // makeTokenSuccess provides expiresIn: 7776000, so expiresAt must be computed
+    expect(result.expiresAt).toBeDefined();
+    expect(typeof result.expiresAt).toBe('string');
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
@@ -252,9 +255,9 @@ describe('pollForDeviceToken', () => {
       .mockResolvedValueOnce(makeRfcError('authorization_pending', 'Not yet'))
       .mockResolvedValueOnce(makeTokenSuccess('pat_after_wait'));
 
-    const token = await drivePolling('https://example.com', 'dc_abc');
+    const result = await drivePolling('https://example.com', 'dc_abc');
 
-    expect(token).toBe('pat_after_wait');
+    expect(result.accessToken).toBe('pat_after_wait');
     expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
@@ -280,14 +283,14 @@ describe('pollForDeviceToken', () => {
       .mockResolvedValueOnce(makeRfcError('slow_down', 'Too fast'))
       .mockResolvedValueOnce(makeTokenSuccess('pat_after_slowdown'));
 
-    const token = await drivePolling(
+    const result = await drivePolling(
       'https://example.com',
       'dc',
       9999,
       (state) => ticks.push(state),
     );
 
-    expect(token).toBe('pat_after_slowdown');
+    expect(result.accessToken).toBe('pat_after_slowdown');
     expect(ticks).toEqual(['slow_down']);
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
@@ -356,8 +359,8 @@ describe('pollForDeviceToken', () => {
       .mockResolvedValueOnce(noRfcFieldResponse)
       .mockResolvedValueOnce(makeTokenSuccess('pat_compat'));
 
-    const token = await drivePolling('https://example.com', 'dc');
-    expect(token).toBe('pat_compat');
+    const result = await drivePolling('https://example.com', 'dc');
+    expect(result.accessToken).toBe('pat_compat');
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
@@ -395,8 +398,8 @@ describe('pollForDeviceToken', () => {
       .mockResolvedValueOnce(nonJsonResponse)
       .mockResolvedValueOnce(makeTokenSuccess('pat_after_parse_error'));
 
-    const token = await drivePolling('https://example.com', 'dc');
-    expect(token).toBe('pat_after_parse_error');
+    const result = await drivePolling('https://example.com', 'dc');
+    expect(result.accessToken).toBe('pat_after_parse_error');
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 });

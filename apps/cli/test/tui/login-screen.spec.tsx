@@ -333,7 +333,7 @@ describe('LoginScreen — device authorization flow', () => {
 
   it('calls saveConfig with the token returned by pollForDeviceToken', async () => {
     mockRequestDeviceCode.mockResolvedValue(fakeDeviceCode);
-    mockPollForDeviceToken.mockResolvedValue('pat_from_device_flow');
+    mockPollForDeviceToken.mockResolvedValue({ accessToken: 'pat_from_device_flow' });
     mockApiGet.mockResolvedValue({ email: 'me@example.com' });
 
     const { stdin } = render(
@@ -357,7 +357,7 @@ describe('LoginScreen — device authorization flow', () => {
     // Use real timers so we can simply await the full flow including the
     // 1.5s display delay.  The jest.config timeout is 15s so this is fine.
     mockRequestDeviceCode.mockResolvedValue(fakeDeviceCode);
-    mockPollForDeviceToken.mockResolvedValue('pat_test');
+    mockPollForDeviceToken.mockResolvedValue({ accessToken: 'pat_test' });
     mockApiGet.mockResolvedValue({ email: 'me@example.com' });
 
     const onDone = jest.fn();

@@ -23,6 +23,9 @@ import {
   SEED_SETTINGS_V4,
   ALTER_FILES_ADD_MTIME_MS,
   ALTER_FOLDERS_ADD_CIRCLE_ID,
+  ALTER_FILES_ADD_UPLOAD_ID,
+  ALTER_FILES_ADD_UPLOAD_PART_SIZE,
+  CREATE_FILE_UPLOAD_PARTS,
 } from '../../src/db/schema.js';
 import type BetterSqlite3 from 'better-sqlite3';
 
@@ -44,10 +47,10 @@ function openRaw(): BetterSqlite3.Database {
 // We do NOT override HOME here — we just use ':memory:' which bypasses the file path.
 
 describe('migrations — fresh :memory: database', () => {
-  it('reaches the latest user_version (4)', () => {
+  it('reaches the latest user_version (5)', () => {
     const db = openDb(':memory:');
     const version = db.pragma('user_version', { simple: true }) as number;
-    expect(version).toBe(4);
+    expect(version).toBe(5);
     db.close();
   });
 
@@ -138,11 +141,11 @@ describe('migrations — fresh :memory: database', () => {
     // Use raw DB so importLegacyManifests does not interfere with the settings count.
     const db = openRaw();
 
-    // Run again — should be a no-op (version already at 4, all seeds use INSERT OR IGNORE)
+    // Run again — should be a no-op (version already at 5, all seeds use INSERT OR IGNORE)
     runMigrations(db);
 
     const version = db.pragma('user_version', { simple: true }) as number;
-    expect(version).toBe(4);
+    expect(version).toBe(5);
 
     const count = (
       db.prepare('SELECT COUNT(*) as cnt FROM settings').get() as { cnt: number }
@@ -168,14 +171,14 @@ describe('migrations — fresh :memory: database', () => {
 
   it('migration 2 is idempotent — re-running on an already-migrated db is a no-op', () => {
     const db = openRaw();
-    // openRaw() already runs all migrations including v2, v3, and v4
+    // openRaw() already runs all migrations including v2, v3, v4, and v5
     const versionBefore = db.pragma('user_version', { simple: true }) as number;
-    expect(versionBefore).toBe(4);
+    expect(versionBefore).toBe(5);
 
     // Re-running must not throw and must not change version
     runMigrations(db);
     const versionAfter = db.pragma('user_version', { simple: true }) as number;
-    expect(versionAfter).toBe(4);
+    expect(versionAfter).toBe(5);
 
     db.close();
   });
@@ -216,25 +219,25 @@ describe('migrations — fresh :memory: database', () => {
     const colsBefore = db.prepare("PRAGMA table_info('folders')").all() as Array<{ name: string }>;
     expect(colsBefore.some((c) => c.name === 'circle_id')).toBe(false);
 
-    // Now run runMigrations — should apply v3 and v4
+    // Now run runMigrations — should apply v3, v4, and v5
     runMigrations(db);
 
     const version = db.pragma('user_version', { simple: true }) as number;
-    expect(version).toBe(4);
+    expect(version).toBe(5);
 
     const colsAfter = db.prepare("PRAGMA table_info('folders')").all() as Array<{ name: string }>;
     expect(colsAfter.some((c) => c.name === 'circle_id')).toBe(true);
     db.close();
   });
 
-  it('migration 3 is idempotent — re-running on a v4 db is a no-op', () => {
+  it('migration 3 is idempotent — re-running on a v5 db is a no-op', () => {
     const db = openRaw();
     const versionBefore = db.pragma('user_version', { simple: true }) as number;
-    expect(versionBefore).toBe(4);
+    expect(versionBefore).toBe(5);
 
     runMigrations(db);
     const versionAfter = db.pragma('user_version', { simple: true }) as number;
-    expect(versionAfter).toBe(4);
+    expect(versionAfter).toBe(5);
 
     db.close();
   });
@@ -278,7 +281,7 @@ describe('migrations — fresh :memory: database', () => {
 
     runMigrations(db);
 
-    expect(db.pragma('user_version', { simple: true }) as number).toBe(4);
+    expect(db.pragma('user_version', { simple: true }) as number).toBe(5);
     for (const { key } of SEED_SETTINGS_V4) {
       const after = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
       expect(after).toBeDefined();
@@ -288,9 +291,11 @@ describe('migrations — fresh :memory: database', () => {
 
   it('migration 4 preserves a user-customized value (INSERT OR IGNORE)', () => {
     // Pre-seed a custom max_retries before v4 runs, then ensure it is not overwritten.
+    // CREATE_FILES is required so that migration 5 can ALTER TABLE files without error.
     const db = new RawDatabase(':memory:') as BetterSqlite3.Database;
     db.pragma('foreign_keys = ON');
     db.exec(CREATE_SETTINGS);
+    db.exec(CREATE_FILES);
     db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
       .run('max_retries', JSON.stringify(99));
     db.exec('PRAGMA user_version = 3');
@@ -300,6 +305,91 @@ describe('migrations — fresh :memory: database', () => {
     const row = db.prepare("SELECT value FROM settings WHERE key='max_retries'")
       .get() as { value: string };
     expect(JSON.parse(row.value)).toBe(99);
+    db.close();
+  });
+
+  it('migration 5 bumps user_version to 5 from a v4 database', () => {
+    // Build a v4 database and verify that running migrations advances to 5.
+    const db = new RawDatabase(':memory:') as BetterSqlite3.Database;
+    db.pragma('foreign_keys = ON');
+    db.exec(CREATE_FOLDERS);
+    db.exec(CREATE_FOLDERS_IDX_ENABLED);
+    db.exec(CREATE_FILES);
+    db.exec(CREATE_FILES_IDX_FOLDER_STATUS);
+    db.exec(CREATE_FILES_IDX_STATUS);
+    db.exec(CREATE_FILES_IDX_SHA256);
+    db.exec(CREATE_SYNC_RUNS);
+    db.exec(CREATE_SYNC_RUNS_IDX_STARTED);
+    db.exec(CREATE_SETTINGS);
+    const insert = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+    for (const { key, value } of SEED_SETTINGS) { insert.run(key, value); }
+    db.exec(ALTER_FILES_ADD_MTIME_MS);
+    db.exec(ALTER_FOLDERS_ADD_CIRCLE_ID);
+    for (const { key, value } of SEED_SETTINGS_V4) { insert.run(key, value); }
+    db.exec('PRAGMA user_version = 4');
+
+    // Pre-condition: no upload columns or file_upload_parts table yet.
+    const colsBefore = db.prepare("PRAGMA table_info('files')").all() as Array<{ name: string }>;
+    expect(colsBefore.some((c) => c.name === 'upload_id')).toBe(false);
+    expect(colsBefore.some((c) => c.name === 'upload_part_size')).toBe(false);
+    const tableBefore = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='file_upload_parts'")
+      .get();
+    expect(tableBefore).toBeUndefined();
+
+    runMigrations(db);
+
+    expect(db.pragma('user_version', { simple: true }) as number).toBe(5);
+    db.close();
+  });
+
+  it('migration 5 adds upload_id and upload_part_size columns to files table', () => {
+    const db = openDb(':memory:');
+    const cols = db.prepare("PRAGMA table_info('files')").all() as Array<{ name: string; type: string; notnull: number }>;
+
+    const uploadIdCol = cols.find((c) => c.name === 'upload_id');
+    expect(uploadIdCol).toBeDefined();
+    expect(uploadIdCol!.type).toBe('TEXT');
+    expect(uploadIdCol!.notnull).toBe(0); // nullable
+
+    const uploadPartSizeCol = cols.find((c) => c.name === 'upload_part_size');
+    expect(uploadPartSizeCol).toBeDefined();
+    expect(uploadPartSizeCol!.type).toBe('INTEGER');
+    expect(uploadPartSizeCol!.notnull).toBe(0); // nullable
+
+    db.close();
+  });
+
+  it('migration 5 creates the file_upload_parts table with PK (file_id, part_number)', () => {
+    const db = openDb(':memory:');
+
+    const tableRow = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='file_upload_parts'")
+      .get();
+    expect(tableRow).toBeTruthy();
+
+    // Verify the column set
+    const cols = db.prepare("PRAGMA table_info('file_upload_parts')").all() as Array<{ name: string; type: string; notnull: number; pk: number }>;
+    const colNames = cols.map((c) => c.name);
+    expect(colNames).toContain('file_id');
+    expect(colNames).toContain('part_number');
+    expect(colNames).toContain('etag');
+
+    // Both file_id and part_number are part of the composite PK (pk > 0)
+    const fileIdCol = cols.find((c) => c.name === 'file_id')!;
+    const partNumCol = cols.find((c) => c.name === 'part_number')!;
+    expect(fileIdCol.pk).toBeGreaterThan(0);
+    expect(partNumCol.pk).toBeGreaterThan(0);
+
+    // Verify the composite PK enforces uniqueness — inserting the same (file_id, part_number) twice should throw
+    // First we need a files row to satisfy the FK; skip that overhead by disabling FK checks temporarily.
+    db.pragma('foreign_keys = OFF');
+    db.prepare("INSERT INTO file_upload_parts (file_id, part_number, etag) VALUES (1, 1, 'abc')").run();
+    expect(() => {
+      db.prepare("INSERT INTO file_upload_parts (file_id, part_number, etag) VALUES (1, 1, 'xyz')").run();
+    }).toThrow();
+    db.pragma('foreign_keys = ON');
+
     db.close();
   });
 

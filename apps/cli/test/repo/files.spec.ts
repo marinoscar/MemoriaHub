@@ -379,5 +379,159 @@ describe('FileRepo', () => {
     it('returns 0 when nothing is uploading', () => {
       expect(repo.resetStaleUploading()).toBe(0);
     });
+
+    it('does NOT delete file_upload_parts rows when resetting stale uploads', () => {
+      // Insert a file, mark it uploading, add part rows
+      const r1 = repo.upsert(folderId, '/tmp/stale-parts.jpg');
+      repo.setStatus(r1.id, 'uploading');
+
+      // Persist two completed parts
+      repo.saveUploadPart(r1.id, 1, 'etag-p1');
+      repo.saveUploadPart(r1.id, 2, 'etag-p2');
+
+      // resetStaleUploading must NOT delete part rows
+      repo.resetStaleUploading([folderId]);
+
+      const parts = repo.getUploadParts(r1.id);
+      // Parts should still be there (the caller will handle them on resume or
+      // clearUploadState after a fresh re-init)
+      expect(parts).toHaveLength(2);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // saveUploadPart / getUploadParts / clearUploadState
+  // ---------------------------------------------------------------------------
+
+  describe('saveUploadPart', () => {
+    it('inserts a new part row', () => {
+      const rec = repo.upsert(folderId, '/tmp/multipart.mp4');
+      repo.saveUploadPart(rec.id, 1, 'etag-abc');
+
+      const parts = repo.getUploadParts(rec.id);
+      expect(parts).toHaveLength(1);
+      expect(parts[0]!.partNumber).toBe(1);
+      expect(parts[0]!.eTag).toBe('etag-abc');
+    });
+
+    it('upserts on duplicate (file_id, part_number) — updates ETag', () => {
+      const rec = repo.upsert(folderId, '/tmp/multipart2.mp4');
+      repo.saveUploadPart(rec.id, 1, 'old-etag');
+      repo.saveUploadPart(rec.id, 1, 'new-etag'); // same part_number → upsert
+
+      const parts = repo.getUploadParts(rec.id);
+      expect(parts).toHaveLength(1);
+      expect(parts[0]!.eTag).toBe('new-etag');
+    });
+
+    it('stores multiple parts for the same file', () => {
+      const rec = repo.upsert(folderId, '/tmp/multipart3.mp4');
+      repo.saveUploadPart(rec.id, 1, 'etag-1');
+      repo.saveUploadPart(rec.id, 2, 'etag-2');
+      repo.saveUploadPart(rec.id, 3, 'etag-3');
+
+      const parts = repo.getUploadParts(rec.id);
+      expect(parts).toHaveLength(3);
+    });
+  });
+
+  describe('getUploadParts', () => {
+    it('returns an empty array when no parts exist', () => {
+      const rec = repo.upsert(folderId, '/tmp/noparts.mp4');
+      expect(repo.getUploadParts(rec.id)).toHaveLength(0);
+    });
+
+    it('returns parts ordered by part_number ascending', () => {
+      const rec = repo.upsert(folderId, '/tmp/ordered.mp4');
+      // Insert out of order
+      repo.saveUploadPart(rec.id, 3, 'etag-3');
+      repo.saveUploadPart(rec.id, 1, 'etag-1');
+      repo.saveUploadPart(rec.id, 2, 'etag-2');
+
+      const parts = repo.getUploadParts(rec.id);
+      expect(parts.map((p) => p.partNumber)).toEqual([1, 2, 3]);
+    });
+
+    it('returns CompletedPart shapes with PartNumber and ETag fields', () => {
+      const rec = repo.upsert(folderId, '/tmp/shape.mp4');
+      repo.saveUploadPart(rec.id, 5, 'etag-five');
+
+      const [part] = repo.getUploadParts(rec.id);
+      expect(part).toHaveProperty('partNumber', 5);
+      expect(part).toHaveProperty('eTag', 'etag-five');
+    });
+
+    it('isolates parts per file — does not return parts from a different file', () => {
+      const r1 = repo.upsert(folderId, '/tmp/file-a.mp4');
+      const r2 = repo.upsert(folderId, '/tmp/file-b.mp4');
+      repo.saveUploadPart(r1.id, 1, 'etag-a1');
+      repo.saveUploadPart(r2.id, 1, 'etag-b1');
+
+      const partsA = repo.getUploadParts(r1.id);
+      expect(partsA).toHaveLength(1);
+      expect(partsA[0]!.eTag).toBe('etag-a1');
+    });
+  });
+
+  describe('clearUploadState', () => {
+    it('deletes all part rows for the file', () => {
+      const rec = repo.upsert(folderId, '/tmp/clear-test.mp4');
+      repo.saveUploadPart(rec.id, 1, 'etag-1');
+      repo.saveUploadPart(rec.id, 2, 'etag-2');
+
+      repo.clearUploadState(rec.id);
+
+      expect(repo.getUploadParts(rec.id)).toHaveLength(0);
+    });
+
+    it('nulls the upload_id column on the file row', () => {
+      const rec = repo.upsert(folderId, '/tmp/clear-id.mp4');
+      // Manually set upload_id via the db to simulate an in-progress upload
+      db.prepare('UPDATE files SET upload_id = ? WHERE id = ?').run('upload-123', rec.id);
+      expect(
+        (db.prepare('SELECT upload_id FROM files WHERE id = ?').get(rec.id) as any).upload_id,
+      ).toBe('upload-123');
+
+      repo.clearUploadState(rec.id);
+
+      const row = db.prepare('SELECT upload_id FROM files WHERE id = ?').get(rec.id) as any;
+      expect(row.upload_id).toBeNull();
+    });
+
+    it('nulls the upload_part_size column on the file row', () => {
+      const rec = repo.upsert(folderId, '/tmp/clear-partsize.mp4');
+      db.prepare('UPDATE files SET upload_part_size = ? WHERE id = ?').run(5_000_000, rec.id);
+
+      repo.clearUploadState(rec.id);
+
+      const row = db.prepare('SELECT upload_part_size FROM files WHERE id = ?').get(
+        rec.id,
+      ) as any;
+      expect(row.upload_part_size).toBeNull();
+    });
+
+    it('does not affect part rows for other files', () => {
+      const r1 = repo.upsert(folderId, '/tmp/keep-parts.mp4');
+      const r2 = repo.upsert(folderId, '/tmp/clear-parts.mp4');
+      repo.saveUploadPart(r1.id, 1, 'etag-keep');
+      repo.saveUploadPart(r2.id, 1, 'etag-clear');
+
+      repo.clearUploadState(r2.id);
+
+      // r1's parts should be intact
+      expect(repo.getUploadParts(r1.id)).toHaveLength(1);
+      // r2's parts should be gone
+      expect(repo.getUploadParts(r2.id)).toHaveLength(0);
+    });
+
+    it('is idempotent — calling twice does not throw', () => {
+      const rec = repo.upsert(folderId, '/tmp/idem.mp4');
+      repo.saveUploadPart(rec.id, 1, 'etag-x');
+
+      expect(() => {
+        repo.clearUploadState(rec.id);
+        repo.clearUploadState(rec.id);
+      }).not.toThrow();
+    });
   });
 });
