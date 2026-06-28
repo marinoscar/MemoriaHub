@@ -41,7 +41,6 @@ import {
   removePersonFromMedia,
 } from '../../services/face';
 import type { PersonListItem } from '../../services/face';
-import { FaceCrop } from '../people/FaceCrop';
 import { PersonAvatar } from '../people/PersonAvatar';
 
 // ---------------------------------------------------------------------------
@@ -227,6 +226,13 @@ export function VideoFacePanel({
         )}
       </Stack>
 
+      {/* Detection error detail */}
+      {status?.status === 'failed' && status.lastError && (
+        <Alert severity="error" sx={{ mt: 1, mb: 1 }}>
+          {status.lastError}
+        </Alert>
+      )}
+
       {/* Rerun button */}
       <Button
         size="small"
@@ -268,15 +274,18 @@ export function VideoFacePanel({
                     transition: 'background-color 0.15s',
                   }}
                 >
-                  {/* Face crop or placeholder avatar */}
+                  {/* Face thumbnail or placeholder avatar */}
                   {hasThumbnail ? (
-                    <FaceCrop
-                      imageUrl={face.faceThumbnailUrl!}
-                      boundingBox={face.boundingBox}
-                      size={56}
+                    // faceThumbnailUrl is an already-cropped representative-frame JPEG —
+                    // do NOT re-apply bounding-box crop math (FaceCrop would produce a
+                    // double-crop artifact). Render it directly as a rounded avatar.
+                    <Avatar
+                      src={face.faceThumbnailUrl!}
+                      variant="rounded"
+                      sx={{ width: 56, height: 56 }}
                     />
                   ) : (
-                    <Avatar sx={{ width: 56, height: 56, bgcolor: 'grey.300' }}>
+                    <Avatar sx={{ width: 56, height: 56, bgcolor: 'grey.300' }} variant="rounded">
                       <PersonIcon sx={{ color: 'grey.600' }} />
                     </Avatar>
                   )}
