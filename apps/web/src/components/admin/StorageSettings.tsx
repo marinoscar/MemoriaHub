@@ -48,10 +48,12 @@ interface StorageSettingsProps {
   jobsSettings?: JobsConfig;
   onSave: (storage: StorageConfig) => Promise<void>;
   onSaveJobs?: (jobs: JobsConfig) => Promise<void>;
+  /** Clears the lifetime job-stats rollup (all-time analytics). */
+  onResetHistory?: () => Promise<void>;
   disabled?: boolean;
 }
 
-export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, disabled }: StorageSettingsProps) {
+export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, onResetHistory, disabled }: StorageSettingsProps) {
   const initialHours = settings?.insights?.refreshIntervalHours ?? DEFAULT_REFRESH_HOURS;
   const initialRetentionDays = settings?.trash?.retentionDays ?? DEFAULT_RETENTION_DAYS;
 
@@ -72,6 +74,8 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, di
     jobsSettings?.history?.purgeEnabled ?? true,
   );
   const [isSavingJobs, setIsSavingJobs] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetMessage, setResetMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setRefreshHours(settings?.insights?.refreshIntervalHours ?? DEFAULT_REFRESH_HOURS);
@@ -151,6 +155,22 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, di
       });
     } finally {
       setIsSavingJobs(false);
+    }
+  };
+
+  const handleResetHistory = async () => {
+    if (!onResetHistory || isResetting) return;
+    const ok = window.confirm(
+      'Reset lifetime job analytics? This clears all-time totals (counts and average durations). Live job records are not affected. This cannot be undone.',
+    );
+    if (!ok) return;
+    setIsResetting(true);
+    setResetMessage(null);
+    try {
+      await onResetHistory();
+      setResetMessage('Lifetime job analytics reset.');
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -251,7 +271,7 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, di
             </Typography>
           </Box>
 
-          <Box sx={{ mt: 3 }}>
+          <Box sx={{ mt: 3, display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
             <Button
               variant="contained"
               onClick={() => void handleSaveJobs()}
@@ -259,7 +279,27 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, di
             >
               {isSavingJobs ? 'Saving...' : 'Save Job Settings'}
             </Button>
+
+            {onResetHistory && (
+              <Button
+                variant="outlined"
+                color="error"
+                onClick={() => void handleResetHistory()}
+                disabled={disabled || isResetting}
+              >
+                {isResetting ? 'Resetting...' : 'Reset lifetime history'}
+              </Button>
+            )}
+            {resetMessage && (
+              <Typography variant="caption" color="success.main">
+                {resetMessage}
+              </Typography>
+            )}
           </Box>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+            Reset clears all-time analytics totals (counts and average durations). Live job records
+            are not affected.
+          </Typography>
         </>
       )}
     </Box>
