@@ -4,6 +4,11 @@ import { MediaType, JobReason, MediaTagStatusType, MediaFaceStatusType, MediaSoc
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 
+// Env kill-switch check helper (extracted for reuse)
+function isFaceKilled(): boolean {
+  return (process.env['FACE_AUTO_DETECT'] ?? 'true') === 'false';
+}
+
 /** Minimal shape of a MediaItem needed to decide which enrichment jobs to enqueue. */
 export interface EnrichmentMediaItem {
   id: string;
@@ -66,12 +71,13 @@ export class MediaEnrichmentService {
       const faceOn = settings.features?.['faceRecognition'] === true;
       const burstOn = settings.features?.['burstDetection'] === true;
       const videoFaceOn = settings.face?.video?.enabled !== false;
+      const socialOn = settings.features?.['socialMediaDetection'] === true;
 
       // Pre-compute env kill-switches once (exact expressions from old listeners).
       const autoTagKilled = process.env['AUTO_TAG_ENABLED'] === 'false';
-      const faceAutoDetect = process.env['FACE_AUTO_DETECT'] ?? 'true';
-      const faceKilled = faceAutoDetect === 'false';
+      const faceKilled = isFaceKilled();
       const burstKilled = process.env['BURST_DETECTION_ENABLED'] === 'false';
+      const socialKilled = process.env['SOCIAL_MEDIA_DETECTION_ENABLED'] === 'false';
 
       const enqueued: string[] = [];
       const skipped: string[] = [];
@@ -109,6 +115,8 @@ export class MediaEnrichmentService {
 
       // ------------------------------------------------------------------
       // Face detection — photo path (priority 10) vs video path (priority 20)
+      // Video face detection is deferred when social detection is active (social
+      // acts as a gate: not-detected → chain to video_face_detection afterwards).
       // ------------------------------------------------------------------
       if (item.type === MediaType.photo && faceOn && !faceKilled) {
         const job = await this.enrichmentJobService.enqueue({
@@ -133,29 +141,35 @@ export class MediaEnrichmentService {
 
         enqueued.push(`face_detection(job=${job.id})`);
       } else if (item.type === MediaType.video && faceOn && !faceKilled && videoFaceOn) {
-        // Video face detection uses a higher priority number (20) so cheap photo
-        // face jobs drain first and a long video cannot head-of-line-block them.
-        const job = await this.enrichmentJobService.enqueue({
-          type: 'video_face_detection',
-          mediaItemId: item.id,
-          circleId: item.circleId,
-          reason: JobReason.upload,
-          priority: 20,
-        });
-
-        await this.prisma.mediaFaceStatus.upsert({
-          where: { mediaItemId: item.id },
-          create: {
+        if (socialOn && !socialKilled) {
+          // Social detection is active: defer video_face_detection.
+          // The social handler chains to enqueueVideoFaceIfEligible after it
+          // finishes and determines the item is NOT flagged as social media.
+          skipped.push('video_face_detection(deferred: social gate active)');
+        } else {
+          // Social is off/killed: enqueue immediately as before.
+          const job = await this.enrichmentJobService.enqueue({
+            type: 'video_face_detection',
             mediaItemId: item.id,
-            status: MediaFaceStatusType.pending,
-            faceCount: 0,
-          },
-          update: {
-            status: MediaFaceStatusType.pending,
-          },
-        });
+            circleId: item.circleId,
+            reason: JobReason.upload,
+            priority: 20,
+          });
 
-        enqueued.push(`video_face_detection(job=${job.id})`);
+          await this.prisma.mediaFaceStatus.upsert({
+            where: { mediaItemId: item.id },
+            create: {
+              mediaItemId: item.id,
+              status: MediaFaceStatusType.pending,
+              faceCount: 0,
+            },
+            update: {
+              status: MediaFaceStatusType.pending,
+            },
+          });
+
+          enqueued.push(`video_face_detection(job=${job.id})`);
+        }
       } else if (item.type === MediaType.photo || item.type === MediaType.video) {
         // Only log skip for face-eligible types
         const reason = !faceOn
@@ -169,16 +183,13 @@ export class MediaEnrichmentService {
       // ------------------------------------------------------------------
       // Social media detection — videos only
       // ------------------------------------------------------------------
-      const socialOn = settings.features?.['socialMediaDetection'] === true;
-      const socialKilled = process.env['SOCIAL_MEDIA_DETECTION_ENABLED'] === 'false';
-
       if (item.type === MediaType.video && socialOn && !socialKilled) {
         const job = await this.enrichmentJobService.enqueue({
           type: 'social_media_detection',
           mediaItemId: item.id,
           circleId: item.circleId,
           reason: JobReason.upload,
-          priority: 30,
+          priority: 15,
         });
 
         await this.prisma.mediaSocialStatus.upsert({
@@ -228,6 +239,54 @@ export class MediaEnrichmentService {
       );
       // Never rethrow — enrichment failure must not fail the parent createMedia call.
     }
+  }
+
+  /**
+   * Enqueue video_face_detection for a video MediaItem if the feature is enabled.
+   *
+   * Called by SocialDetectionService after confirming the item is NOT flagged as
+   * social media (not-detected path), thereby releasing the social gate.
+   *
+   * Safe to call repeatedly — EnrichmentJobService.enqueue deduplicates
+   * pending/running jobs by (type, mediaItemId). Only fires for videos;
+   * photo face detection is always enqueued at upload time.
+   *
+   * @param item Minimal MediaItem shape (id, type, circleId, deletedAt).
+   */
+  async enqueueVideoFaceIfEligible(item: EnrichmentMediaItem): Promise<void> {
+    if (item.type !== MediaType.video) return;
+    if (item.deletedAt) return;
+
+    const settings = await this.systemSettings.getSettings();
+    const faceOn = settings.features?.['faceRecognition'] === true;
+    const videoFaceOn = settings.face?.video?.enabled !== false;
+    const killed = isFaceKilled();
+
+    if (!faceOn || !videoFaceOn || killed) return;
+
+    const job = await this.enrichmentJobService.enqueue({
+      type: 'video_face_detection',
+      mediaItemId: item.id,
+      circleId: item.circleId,
+      reason: JobReason.upload,
+      priority: 20,
+    });
+
+    await this.prisma.mediaFaceStatus.upsert({
+      where: { mediaItemId: item.id },
+      create: {
+        mediaItemId: item.id,
+        status: MediaFaceStatusType.pending,
+        faceCount: 0,
+      },
+      update: {
+        status: MediaFaceStatusType.pending,
+      },
+    });
+
+    this.logger.log(
+      `MediaItem ${item.id}: video_face_detection enqueued (social gate cleared) job=${job.id}`,
+    );
   }
 
   /**
