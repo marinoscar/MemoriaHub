@@ -456,8 +456,10 @@ export function MediaDetailDrawer({
     } catch { /* swallow */ }
   }, [item?.id, onItemUpdated]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Social media detection applies to videos only. Always called (rules of
+  // hooks) but guarded by empty string so no status request fires for photos.
   const { status: socialStatus, rerun: rerunSocialDetection, rerunLoading: rerunSocialLoading } = useMediaSocial(
-    item?.id ?? '',
+    item?.type === 'video' ? (item?.id ?? '') : '',
     onRefreshSocial,
   );
 
