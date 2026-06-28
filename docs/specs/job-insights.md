@@ -312,10 +312,17 @@ The handler is a global enrichment job (no `mediaItemId`, no `circleId`). It run
 
 **Handler behavior:**
 
-1. Reads `jobs.history.retentionDays` from system settings.
-2. Batch-deletes terminal rows in groups of 5 000 rows at a time: `DELETE FROM enrichment_jobs WHERE status IN ('succeeded', 'failed') AND finished_at < now() - retentionDays * interval '1 day' LIMIT 5000`.
-3. Repeats until no eligible rows remain or the handler exits.
-4. The 5 000-row batch size keeps each DELETE statement short, limiting the duration of its ROW EXCLUSIVE lock and avoiding long contention with the worker's SELECT FOR UPDATE.
+1. Reads `jobs.history.purgeEnabled` (default true) and `jobs.history.retentionDays` (default 30) from system settings. If purging is disabled, it returns without touching the table.
+2. Selects up to 5 000 eligible terminal rows (`status IN ('succeeded','failed') AND finished_at < cutoff`), reading `type`, `status`, `started_at`, `finished_at`.
+3. **Folds the batch into the lifetime rollup before deleting it.** Per-type deltas (succeeded/failed counts, summed duration + sample count for succeeded rows with both timestamps) are upserted into `job_stats_rollup`, and the batch `deleteMany` is issued — both inside a single `$transaction`, so a crash can never delete a row without counting it or count it without deleting it.
+4. Repeats until a short batch (< 5 000) signals no rows remain.
+5. The 5 000-row batch size keeps each transaction short, limiting the duration of its ROW EXCLUSIVE lock and avoiding long contention with the worker's SELECT FOR UPDATE.
+
+### Lifetime Totals Rollup (`job_stats_rollup`)
+
+To keep all-time analytics from being lost when history is purged, the purge folds each deleted batch into a `job_stats_rollup` table (PK `type`) holding `succeeded_count`, `failed_count`, `sum_duration_ms` (DOUBLE PRECISION — exact for integers up to 2^53 ms, sidestepping the JSON-unsafe BigInt pitfall), and `duration_samples` (the average denominator). Only exactly-mergeable aggregates are stored — counts and total duration → average. **Percentiles are deliberately not rolled up** (they cannot be merged from pre-aggregated buckets without a histogram/t-digest), so p50/p95 remain live-window-only.
+
+`GET /api/admin/jobs/insights` exposes these as `lifetime.overall` and `lifetime.byType[]`, merging the rollup (purged rows) with un-windowed live aggregates (rows still in the table) so each row is counted exactly once. `POST /api/admin/jobs/insights/reset-history` (jobs:write) truncates the rollup to start analytics fresh; live job rows are unaffected.
 
 **Scheduling:** The `JobHistoryPurgeTask` cron (`@Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)`) runs nightly. On each tick it:
 
