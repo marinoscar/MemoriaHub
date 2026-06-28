@@ -22,7 +22,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { IsString, IsOptional, IsUUID } from 'class-validator';
-import { CircleRole } from '@prisma/client';
+import { CircleRole, MediaType } from '@prisma/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
@@ -207,8 +207,14 @@ export class FaceDetectionController {
 
     // Always create a new job on rerun — user intentionally requested it
     // Use priority 0 (highest) so user-triggered reruns are processed first
+    // Route to the correct handler: video items use video_face_detection;
+    // the video handler internally checks face.video.enabled, so we do not
+    // gate on that setting here.
+    const jobType =
+      mediaItem.type === MediaType.video ? 'video_face_detection' : 'face_detection';
+
     const job = await this.enrichmentJobService.enqueue({
-      type: 'face_detection',
+      type: jobType,
       mediaItemId,
       circleId: mediaItem.circleId,
       reason: JobReason.rerun,
@@ -229,7 +235,7 @@ export class FaceDetectionController {
     });
 
     this.logger.log(
-      `Rerun face job ${job.id} enqueued for MediaItem ${mediaItemId} by user ${user.id}`,
+      `Rerun ${jobType} job ${job.id} enqueued for MediaItem ${mediaItemId} by user ${user.id}`,
     );
 
     return { data: { jobId: job.id, status: job.status } };
@@ -387,10 +393,10 @@ export class FaceDetectionController {
     mediaItemId: string,
     user: RequestUser,
     requiredRole: CircleRole = 'viewer' as CircleRole,
-  ): Promise<{ id: string; circleId: string }> {
+  ): Promise<{ id: string; circleId: string; type: MediaType }> {
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },
-      select: { id: true, circleId: true, deletedAt: true },
+      select: { id: true, circleId: true, deletedAt: true, type: true },
     });
 
     if (!mediaItem || mediaItem.deletedAt) {
@@ -404,6 +410,6 @@ export class FaceDetectionController {
       requiredRole,
     );
 
-    return { id: mediaItem.id, circleId: mediaItem.circleId };
+    return { id: mediaItem.id, circleId: mediaItem.circleId, type: mediaItem.type };
   }
 }
