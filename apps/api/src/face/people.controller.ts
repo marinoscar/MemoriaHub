@@ -34,6 +34,7 @@ import {
   AssignFacesDto,
   ClusterDto,
   ListUnassignedFacesQueryDto,
+  BulkPeopleDto,
 } from './dto/people.dto';
 import { MergePeopleDto } from './dto/merge-people.dto';
 
@@ -108,6 +109,7 @@ export class PeopleController {
   @ApiOperation({ summary: 'List people in a circle (paginated)' })
   @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
   @ApiQuery({ name: 'includeUnlabeled', required: false, type: Boolean, description: 'Include unlabeled (name=null) people' })
+  @ApiQuery({ name: 'hidden', required: false, type: Boolean, description: 'When true, return only hidden people instead of visible people' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'pageSize', required: false, type: Number })
   @ApiResponse({ status: 200, description: 'Paginated people list' })
@@ -136,6 +138,71 @@ export class PeopleController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.peopleService.listUnassignedFaces(user.id, user.permissions, query);
+  }
+
+  /**
+   * PATCH /api/people/bulk/hide
+   * Bulk hide people (set hiddenAt). Requires collaborator role in the circle.
+   */
+  @Patch('bulk/hide')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Bulk hide people (collaborator+)',
+    description:
+      'Sets hiddenAt on 1–500 people in a circle. Hidden people are excluded from the default ' +
+      'people list. Use GET /people?hidden=true to retrieve them.',
+  })
+  @ApiResponse({ status: 200, description: 'Returns { hidden: number }' })
+  @ApiResponse({ status: 403, description: 'Access denied (collaborator required)' })
+  async hidePeople(
+    @Body() dto: BulkPeopleDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.peopleService.hidePeople(dto, user.id, user.permissions);
+  }
+
+  /**
+   * PATCH /api/people/bulk/unhide
+   * Bulk unhide people (clear hiddenAt). Requires collaborator role in the circle.
+   */
+  @Patch('bulk/unhide')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Bulk unhide people (collaborator+)',
+    description: 'Clears hiddenAt on 1–500 hidden people in a circle.',
+  })
+  @ApiResponse({ status: 200, description: 'Returns { unhidden: number }' })
+  @ApiResponse({ status: 403, description: 'Access denied (collaborator required)' })
+  async unhidePeople(
+    @Body() dto: BulkPeopleDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.peopleService.unhidePeople(dto, user.id, user.permissions);
+  }
+
+  /**
+   * POST /api/people/bulk/purge
+   * Permanent hard-delete of Person rows + their Face rows. Requires media:delete permission.
+   */
+  @Post('bulk/purge')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Permanently purge people and their face data (media:delete + collaborator)',
+    description:
+      'Hard-deletes Person rows AND all associated Face rows (reclaims embedding storage). ' +
+      'Photos/media items are NOT deleted. Affected media items are re-queued for auto-tagging. ' +
+      '1–500 ids per call.',
+  })
+  @ApiResponse({ status: 200, description: 'Returns { deleted: number }' })
+  @ApiResponse({ status: 403, description: 'Access denied (collaborator + media:delete required)' })
+  async purgePeople(
+    @Body() dto: BulkPeopleDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.peopleService.purgePeople(dto, user.id, user.permissions);
   }
 
   /**

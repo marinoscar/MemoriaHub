@@ -76,7 +76,7 @@ describe('FaceBackfillService', () => {
     });
 
     describe('base filters always present', () => {
-      it('includes circleId, type photo, and deletedAt null regardless of date opts', async () => {
+      it('includes circleId, type in [photo, video], and deletedAt null regardless of date opts', async () => {
         (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
 
         await service.backfillCircle(CIRCLE_ID, { from: '2024-01-01', to: '2024-12-31' });
@@ -85,7 +85,7 @@ describe('FaceBackfillService', () => {
         const where = callArgs[0].where;
 
         expect(where.circleId).toBe(CIRCLE_ID);
-        expect(where.type).toBe(MediaType.photo);
+        expect(where.type).toEqual({ in: [MediaType.photo, MediaType.video] });
         expect(where.deletedAt).toBeNull();
       });
     });

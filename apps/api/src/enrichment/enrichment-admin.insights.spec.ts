@@ -23,7 +23,7 @@ import { createMockPrismaService, MockPrismaService } from '../../test/mocks/pri
 // ---------------------------------------------------------------------------
 
 /** Build a status-groupBy result for getStats() */
-function makeStatusGroups(counts: Partial<Record<JobStatus, number>> = []) {
+function makeStatusGroups(counts: Partial<Record<JobStatus, number>> = {}) {
   return Object.entries(counts).map(([status, count]) => ({
     status: status as JobStatus,
     _count: { id: count as number },
