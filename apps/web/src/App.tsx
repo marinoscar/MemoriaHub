@@ -43,6 +43,8 @@ const BurstsPage = lazy(() => import('./pages/Bursts/BurstsPage'));
 const BurstGroupPage = lazy(() => import('./pages/Bursts/BurstGroupPage'));
 const ArchivePage = lazy(() => import('./pages/Archive/ArchivePage'));
 const TrashPage = lazy(() => import('./pages/Trash/TrashPage'));
+const PublicSharePage = lazy(() => import('./pages/Public/PublicSharePage'));
+const PublicSharesPage = lazy(() => import('./pages/Admin/PublicSharesPage'));
 
 // Test login page (development only)
 const TestLoginPage = import.meta.env.PROD
@@ -61,6 +63,7 @@ function AppRoutes() {
             {/* Public routes */}
             <Route path="/login" element={<LoginPage />} />
             <Route path="/auth/callback" element={<AuthCallbackPage />} />
+            <Route path="/s/:token" element={<PublicSharePage />} />
 
             {/* Test login (development only) */}
             {!import.meta.env.PROD && TestLoginPage && (
@@ -93,6 +96,7 @@ function AppRoutes() {
                 <Route path="/admin/settings/jobs" element={<JobsPage />} />
                 <Route path="/admin/settings/jobs/insights" element={<JobInsightsPage />} />
                 <Route path="/admin/settings/backup" element={<BackupPage />} />
+                <Route path="/admin/settings/sharing" element={<PublicSharesPage />} />
                 {/* Legacy admin route redirects */}
                 <Route path="/admin/users" element={<Navigate to="/admin/settings/users" replace />} />
                 <Route path="/admin/ai-settings" element={<Navigate to="/admin/settings/ai" replace />} />
