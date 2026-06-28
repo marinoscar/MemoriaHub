@@ -165,18 +165,24 @@ export class PeopleService {
           boundingBox: true,
           confidence: true,
           createdAt: true,
+          frameThumbnailKey: true,
         },
       }),
       this.prisma.face.count({ where }),
     ]);
 
-    const items = faces.map((f) => ({
-      faceId: f.id,
-      mediaItemId: f.mediaItemId,
-      boundingBox: f.boundingBox,
-      confidence: f.confidence,
-      createdAt: f.createdAt,
-    }));
+    const items = await Promise.all(
+      faces.map(async (f) => ({
+        faceId: f.id,
+        mediaItemId: f.mediaItemId,
+        boundingBox: f.boundingBox,
+        confidence: f.confidence,
+        createdAt: f.createdAt,
+        faceThumbnailUrl: f.frameThumbnailKey
+          ? await this.mediaThumbnailService.signThumb({ thumbnailStorageKey: f.frameThumbnailKey })
+          : null,
+      })),
+    );
 
     return {
       items,
@@ -244,14 +250,19 @@ export class PeopleService {
       coverFace: await this.resolveCoverFace(person.coverFace, person.faces),
       profileMediaItemId: person.profileMediaItemId ?? null,
       profileCrop: person.profileCrop ?? null,
-      faces: person.faces.map((f) => ({
-        faceId: f.id,
-        mediaItemId: f.mediaItemId,
-        boundingBox: f.boundingBox,
-        confidence: f.confidence,
-        manuallyAssigned: f.manuallyAssigned,
-        createdAt: f.createdAt,
-      })),
+      faces: await Promise.all(
+        person.faces.map(async (f) => ({
+          faceId: f.id,
+          mediaItemId: f.mediaItemId,
+          boundingBox: f.boundingBox,
+          confidence: f.confidence,
+          manuallyAssigned: f.manuallyAssigned,
+          createdAt: f.createdAt,
+          faceThumbnailUrl: f.frameThumbnailKey
+            ? await this.mediaThumbnailService.signThumb({ thumbnailStorageKey: f.frameThumbnailKey })
+            : null,
+        })),
+      ),
       createdAt: person.createdAt,
       updatedAt: person.updatedAt,
     };
