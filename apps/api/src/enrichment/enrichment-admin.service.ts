@@ -119,6 +119,20 @@ export interface JobInsights {
       etcMs: number | null;
     }>;
   };
+  // All-time totals that survive history purging (live rows + rollup of purged
+  // rows). Counts and average duration only — no percentiles.
+  lifetime: {
+    overall: JobLifetimeStats;
+    byType: Array<JobLifetimeStats & { type: string }>;
+  };
+}
+
+export interface JobLifetimeStats {
+  succeeded: number;
+  failed: number;
+  total: number;
+  avgMs: number;
+  samples: number;
 }
 
 export type ProcessedWithinWindow = '4h' | '24h' | '7d' | '30d' | 'all';
@@ -248,7 +262,7 @@ export class EnrichmentAdminService {
 
     const throughputSince = new Date(Date.now() - 60 * 60 * 1000);
 
-    const [stats, rateLimited, retried, durByType, durOverall, tpByType] =
+    const [stats, rateLimited, retried, durByType, durOverall, tpByType, rollups, lifeDurByType] =
       await Promise.all([
         this.getStats(),
         this.prisma.enrichmentJob.count({
@@ -288,6 +302,20 @@ export class EnrichmentAdminService {
           where: { status: JobStatus.succeeded, finishedAt: { gte: throughputSince } },
           _count: { id: true },
         }),
+        // Lifetime rollup of already-purged rows
+        this.prisma.jobStatsRollup.findMany(),
+        // All-time (un-windowed) duration sum + sample count over LIVE rows, so
+        // lifetime avg = (rollup + live) sum / (rollup + live) samples
+        this.prisma.$queryRaw<
+          Array<{ type: string; samples: number; sum_sec: number }>
+        >(Prisma.sql`
+          SELECT type,
+            COUNT(*)::int AS samples,
+            COALESCE(SUM(EXTRACT(EPOCH FROM (finished_at - started_at))), 0)::float8 AS sum_sec
+          FROM enrichment_jobs
+          WHERE status = 'succeeded' AND started_at IS NOT NULL AND finished_at IS NOT NULL
+          GROUP BY type
+        `),
       ]);
 
     const secToMs = (s: number): number => Math.round(s * 1000);
@@ -365,6 +393,68 @@ export class EnrichmentAdminService {
       basis = usedFallback ? 'partial' : 'live';
     }
 
+    // -------- Lifetime totals (live all-time + purged rollup) --------
+    // Merge by type across: live status counts (stats.byType, all-time), live
+    // duration sum/samples (lifeDurByType, all-time), and the purged rollup.
+    const lifeMap = new Map<
+      string,
+      { type: string; succeeded: number; failed: number; sumMs: number; samples: number }
+    >();
+    const ensureLife = (type: string) => {
+      let e = lifeMap.get(type);
+      if (!e) {
+        e = { type, succeeded: 0, failed: 0, sumMs: 0, samples: 0 };
+        lifeMap.set(type, e);
+      }
+      return e;
+    };
+    for (const bt of stats.byType) {
+      const e = ensureLife(bt.type);
+      e.succeeded += bt.succeeded;
+      e.failed += bt.failed;
+    }
+    for (const r of lifeDurByType) {
+      const e = ensureLife(r.type);
+      e.sumMs += r.sum_sec * 1000;
+      e.samples += r.samples;
+    }
+    for (const r of rollups) {
+      const e = ensureLife(r.type);
+      e.succeeded += r.succeededCount;
+      e.failed += r.failedCount;
+      e.sumMs += r.sumDurationMs;
+      e.samples += r.durationSamples;
+    }
+
+    const lifetimeByType = Array.from(lifeMap.values())
+      .map((e) => ({
+        type: e.type,
+        succeeded: e.succeeded,
+        failed: e.failed,
+        total: e.succeeded + e.failed,
+        avgMs: e.samples > 0 ? Math.round(e.sumMs / e.samples) : 0,
+        samples: e.samples,
+      }))
+      .sort((a, b) => b.total - a.total || a.type.localeCompare(b.type));
+
+    const lifeAgg = lifetimeByType.reduce(
+      (acc, e) => {
+        acc.succeeded += e.succeeded;
+        acc.failed += e.failed;
+        acc.sumMs += e.avgMs * e.samples;
+        acc.samples += e.samples;
+        return acc;
+      },
+      { succeeded: 0, failed: 0, sumMs: 0, samples: 0 },
+    );
+    const lifetimeOverall = {
+      succeeded: lifeAgg.succeeded,
+      failed: lifeAgg.failed,
+      total: lifeAgg.succeeded + lifeAgg.failed,
+      avgMs: lifeAgg.samples > 0 ? Math.round(lifeAgg.sumMs / lifeAgg.samples) : 0,
+      samples: lifeAgg.samples,
+    };
+
     return {
       computedAt: new Date().toISOString(),
       windowDays,
@@ -382,7 +472,18 @@ export class EnrichmentAdminService {
       },
       history: { overall, byType: historyByType },
       eta: { totalRemaining, etaMs, basis, perType },
+      lifetime: { overall: lifetimeOverall, byType: lifetimeByType },
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // resetHistory — clear the lifetime rollup (analytics reset)
+  // -------------------------------------------------------------------------
+
+  async resetHistory(): Promise<{ reset: number }> {
+    const result = await this.prisma.jobStatsRollup.deleteMany({});
+    this.logger.log(`Admin reset job history rollup (${result.count} type rows cleared)`);
+    return { reset: result.count };
   }
 
   // -------------------------------------------------------------------------
