@@ -55,6 +55,10 @@ export interface MultipartFile {
   file: Readable;
 }
 
+// Derived/internal storage objects that should not appear in user-facing browse lists.
+// These are auto-generated blobs, not user-uploaded files.
+const DERIVED_KEY_PREFIXES = ['thumbnails/', 'video-faces/'];
+
 @Injectable()
 export class ObjectsService {
   private readonly logger = new Logger(ObjectsService.name);
@@ -478,6 +482,9 @@ export class ObjectsService {
     const where = {
       uploadedById: userId,
       ...(status && { status }),
+      NOT: DERIVED_KEY_PREFIXES.map((prefix) => ({
+        storageKey: { startsWith: prefix },
+      })),
     };
 
     // Build orderBy clause
