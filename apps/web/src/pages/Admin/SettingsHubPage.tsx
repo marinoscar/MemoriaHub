@@ -22,6 +22,7 @@ import {
   Backup as BackupIcon,
   Archive as ArchiveIcon,
   QueryStats as QueryStatsIcon,
+  Public as PublicIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 
@@ -163,6 +164,13 @@ export default function SettingsHubPage() {
           icon: <BackupIcon sx={{ fontSize: 40 }} color="primary" />,
           path: '/admin/settings/backup',
           permission: 'backup:read',
+        },
+        {
+          title: 'Public Sharing',
+          description: 'View and manage all public share links; revoke or set expirations in bulk.',
+          icon: <PublicIcon sx={{ fontSize: 40 }} color="primary" />,
+          path: '/admin/settings/sharing',
+          permission: 'shares:manage_any',
         },
       ],
     },
