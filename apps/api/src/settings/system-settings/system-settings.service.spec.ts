@@ -619,6 +619,133 @@ describe('SystemSettingsService', () => {
         },
       });
     });
+
+    // -------------------------------------------------------------------------
+    // Fix #1 regression tests: jobs and face.video preservation
+    // -------------------------------------------------------------------------
+    describe('jobs and face.video preservation (Fix #1)', () => {
+      it('preserves non-default jobs and face.video values when patching an unrelated field', async () => {
+        // Arrange: existing settings have non-default jobs.history and face.video values
+        const existingValue = {
+          ...DEFAULT_SYSTEM_SETTINGS,
+          jobs: { history: { retentionDays: 90, purgeEnabled: false } },
+          face: {
+            features: DEFAULT_SYSTEM_SETTINGS.face!.features,
+            video: { enabled: true, sampleIntervalSeconds: 20, maxFramesPerVideo: 30 },
+          },
+        };
+        mockPrisma.systemSettings.findUnique.mockResolvedValue({
+          ...mockSystemSettings,
+          value: existingValue as any,
+        } as any);
+
+        const savedValue = {
+          ...existingValue,
+          geo: {
+            ...(DEFAULT_SYSTEM_SETTINGS.geo as any),
+            forwardSearchEnabled: true,
+          },
+        };
+        mockPrisma.systemSettings.update.mockResolvedValue({
+          ...mockSystemSettings,
+          value: savedValue as any,
+          version: 2,
+        } as any);
+        mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+        // Act: patch only geo.forwardSearchEnabled — jobs and face.video must NOT reset
+        const result = await service.patchSettings(
+          { geo: { forwardSearchEnabled: true } } as any,
+          mockUserId,
+        );
+
+        // Assert: the value written to DB preserves the non-default jobs and face.video
+        const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+        expect(updateCall.data.value).toMatchObject({
+          jobs: { history: { retentionDays: 90, purgeEnabled: false } },
+          face: expect.objectContaining({
+            video: expect.objectContaining({ sampleIntervalSeconds: 20 }),
+          }),
+        });
+
+        // Assert: the returned value includes the jobs branch with the preserved values
+        expect((result as any).jobs).toBeDefined();
+        expect((result as any).jobs.history.retentionDays).toBe(90);
+        expect((result as any).jobs.history.purgeEnabled).toBe(false);
+      });
+
+      it('updates jobs.history.retentionDays when explicitly included in the PATCH dto', async () => {
+        mockPrisma.systemSettings.update.mockResolvedValue({
+          ...mockSystemSettings,
+          value: {
+            ...DEFAULT_SYSTEM_SETTINGS,
+            jobs: { history: { retentionDays: 60, purgeEnabled: false } },
+          } as any,
+          version: 2,
+        } as any);
+        mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+        await service.patchSettings(
+          { jobs: { history: { retentionDays: 60, purgeEnabled: false } } } as any,
+          mockUserId,
+        );
+
+        const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+        expect(updateCall.data.value).toMatchObject({
+          jobs: { history: { retentionDays: 60, purgeEnabled: false } },
+        });
+      });
+
+      it('updates face.video settings when explicitly included in the PATCH dto', async () => {
+        mockPrisma.systemSettings.update.mockResolvedValue({
+          ...mockSystemSettings,
+          value: {
+            ...DEFAULT_SYSTEM_SETTINGS,
+            face: {
+              features: DEFAULT_SYSTEM_SETTINGS.face!.features,
+              video: { enabled: false, sampleIntervalSeconds: 10, maxFramesPerVideo: 90 },
+            },
+          } as any,
+          version: 2,
+        } as any);
+        mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+        await service.patchSettings(
+          { face: { video: { enabled: false, sampleIntervalSeconds: 10, maxFramesPerVideo: 90 } } } as any,
+          mockUserId,
+        );
+
+        const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+        expect(updateCall.data.value).toMatchObject({
+          face: expect.objectContaining({
+            video: { enabled: false, sampleIntervalSeconds: 10, maxFramesPerVideo: 90 },
+          }),
+        });
+      });
+
+      it('includes the jobs branch in the returned value after any patch', async () => {
+        mockPrisma.systemSettings.update.mockResolvedValue({
+          ...mockSystemSettings,
+          value: {
+            ...DEFAULT_SYSTEM_SETTINGS,
+            jobs: { history: { retentionDays: 30, purgeEnabled: true } },
+          } as any,
+          version: 2,
+        } as any);
+        mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+        const result = await service.patchSettings(
+          { ui: { allowUserThemeOverride: false } },
+          mockUserId,
+        );
+
+        expect((result as any).jobs).toBeDefined();
+        expect((result as any).jobs.history).toMatchObject({
+          retentionDays: 30,
+          purgeEnabled: true,
+        });
+      });
+    });
   });
 
   describe('getSettingValue', () => {
