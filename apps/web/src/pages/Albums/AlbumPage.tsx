@@ -27,11 +27,13 @@ import {
 import {
   ArrowBack as ArrowBackIcon,
   MoreVert as MoreVertIcon,
+  Share as ShareIcon,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { getAlbum, updateAlbum, deleteAlbum } from '../../services/media';
 import { MediaGallery } from '../../components/media/MediaGallery';
+import { ShareDialog } from '../../components/share/ShareDialog';
 
 export default function AlbumPage() {
   const { albumId } = useParams<{ albumId: string }>();
@@ -58,6 +60,9 @@ export default function AlbumPage() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Share dialog
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
 
   // Gallery refresh token — incrementing causes MediaGallery to re-fetch album header
   const [headerRefreshToken, setHeaderRefreshToken] = useState(0);
@@ -207,6 +212,15 @@ export default function AlbumPage() {
                 <MenuItem
                   onClick={() => {
                     setMenuAnchor(null);
+                    setShareDialogOpen(true);
+                  }}
+                >
+                  <ShareIcon fontSize="small" sx={{ mr: 1 }} />
+                  Share album
+                </MenuItem>
+                <MenuItem
+                  onClick={() => {
+                    setMenuAnchor(null);
                     setDeleteConfirmOpen(true);
                   }}
                   sx={{ color: 'error.main' }}
@@ -240,6 +254,15 @@ export default function AlbumPage() {
             </Box>
           }
           onChange={reloadAlbumHeader}
+        />
+      )}
+
+      {/* Share dialog */}
+      {albumId && (
+        <ShareDialog
+          open={shareDialogOpen}
+          onClose={() => setShareDialogOpen(false)}
+          target={{ type: 'album', id: albumId }}
         />
       )}
 
