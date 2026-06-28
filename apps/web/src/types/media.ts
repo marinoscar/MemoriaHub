@@ -62,6 +62,8 @@ export interface MediaItem {
   downloadUrl?: string | null;
   // Tag names associated with this item
   tags?: string[];
+  // System-applied protected tag names (social media detection, etc.)
+  systemTags?: string[];
 }
 
 export interface MediaListMeta {
