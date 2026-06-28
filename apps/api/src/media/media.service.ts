@@ -669,6 +669,14 @@ export class MediaService {
       'collaborator' as CircleRole,
     );
 
+    // Guard: system tag names cannot be manually applied
+    const systemTagNamesLower = ALL_SYSTEM_TAG_NAMES.map((n) => n.toLowerCase());
+    for (const name of dto.names) {
+      if (systemTagNamesLower.includes(name.toLowerCase())) {
+        throw new BadRequestException(`Tag name "${name}" is reserved as a system tag and cannot be applied manually`);
+      }
+    }
+
     const result: Array<{ tagId: string; name: string }> = [];
 
     for (const name of dto.names) {
