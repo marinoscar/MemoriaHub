@@ -495,6 +495,7 @@ Sub-pages:
 - `/admin/settings/jobs` — enrichment job queue (replaces `/admin/jobs`)
 - `/admin/settings/jobs/insights` — job queue insights & ETA dashboard (jobs:read); KPI cards + per-type duration/throughput table; reachable from the Settings hub Operations group and from a "View insights & ETA" link on the Job Queue page
 - `/admin/settings/backup` — backup configuration and run history
+- `/admin/settings/sharing` — public share management; per-row and bulk revoke/set-expiration/delete for all shares across the app (shares:manage_any)
 
 ### Storage Provider Configuration (Admin only — storage_settings:read / storage_settings:write)
 Admins can configure multiple object-storage providers (AWS S3, Cloudflare R2, local disk), test connectivity, choose the ACTIVE provider for new uploads, and migrate existing objects between providers (COPY-ONLY: bytes are copied and the object is repointed; the source file is left in place as a fallback). Objects on different providers are served simultaneously via per-object routing.
@@ -510,6 +511,26 @@ Admins can configure multiple object-storage providers (AWS S3, Cloudflare R2, l
 - `POST /api/storage-settings/migrate/:runId/cancel` (storage_settings:write) — Cancel a pending or running migration run; in-flight items detect the cancelled run and skip
 
 > **UI:** The Admin Settings page at `/admin/settings/storage/providers` (reachable from the Settings hub) shows provider cards with per-card "Test connection", an active-provider selector, and a copy-only migration panel with live progress and run history.
+
+### Public Sharing (shares:manage / shares:manage_any)
+Circle collaborators and admins can publish a single media item or an entire album to an unauthenticated public URL. Media bytes are **proxied** through the API — the storage URL is never exposed. Shares support optional expiration (`null` = forever) and can be soft-revoked at any time. A standalone admin page at `/admin/settings/sharing` allows per-row and bulk management of all shares.
+
+**Authenticated management endpoints** (require JWT):
+- `POST /api/shares` body `{ targetType: 'media_item'|'album', mediaItemId?, albumId?, expiresAt? }` → `{ share, publicUrl }` — create or return existing share (idempotent); requires shares:manage + per-circle collaborator role
+- `GET /api/shares?scope=mine|all&status=&targetType=&page=&pageSize=` — list shares; `scope=all` requires shares:manage_any (Admin only)
+- `PATCH /api/shares/:id` body `{ expiresAt }` (`null` = never expires) — update expiration; requires shares:manage (own) or shares:manage_any
+- `DELETE /api/shares/:id` — soft-revoke (sets `revokedAt`); returns 204; requires shares:manage (own) or shares:manage_any
+- `POST /api/shares/bulk` body `{ ids[], action: 'revoke'|'set_expiration'|'delete', expiresAt? }` → `{ affected }` — bulk revoke, update expiration, or hard-delete shares; requires shares:manage_any (Admin only)
+
+**Unauthenticated public endpoints** (`@Public()` — no JWT required):
+- `GET /api/public/shares/:token` — validate share and return **metadata-stripped** representation: `{ type: 'media_item', media: { mediaType, width, height } }` or `{ type: 'album', itemCount, items: [{ mediaType, width, height }] }`; revoked/expired/trashed targets → generic 404 (enumeration-resistant)
+- `GET /api/public/shares/:token/media/:idx` — byte-proxy for the media file (`Content-Disposition: inline`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`); video responses support Range requests (206); `?variant=thumb` returns the thumbnail for album grid display; revoked/expired/trashed → generic 404
+
+**Policy notes:**
+- Archived items ARE served via public share (archive does not block public access).
+- Albums exclude trashed members from both metadata and byte-proxy responses.
+- Hard-deleting a media item or album cascades the share row away.
+- **EXIF / GPS limitation:** bytes are served as raw originals; embedded EXIF metadata (including GPS) inside the file is NOT stripped. The no-metadata guarantee applies at the API layer only (no metadata fields in the JSON response, no download affordance, no storage URL). File-level stripping (piping through `apps/api/src/storage/processing/`) is a future improvement.
 
 ### Deterministic Search (search:use)
 - `POST /api/search` - Execute deterministic media search with explicit filters; optionally add `semanticQuery: string` (1–512 chars) to rank results by vector similarity instead of sort order; also accepts `noFaces: true` boolean to return only items with no faces (detected or manually added); also accepts `excludeArchived: true` to exclude archived items from results (archived items are included by default in search, unlike browse surfaces); also accepts `missingCapturedAt: true` to return only items with no EXIF capture date (`capturedAt` is null) and `missingCamera: true` to return only items with no camera make/model; also accepts `near: { lat, lng, radiusKm }` to filter to items whose `takenLat`/`takenLng` fall within a bounding-box approximation of the given radius (geo-radius filter). **All filters are AND-composed** — every descriptor contributes to a shared `AND: []` array so combining multiple filters (including descriptors that each emit an internal `OR`) never silently drops criteria. Each item in the response includes a signed `thumbnailUrl` (media:read + search:use)
@@ -554,6 +575,8 @@ Agentic search is **stateless** — no conversation rows are stored server-side.
 - `geo_settings:write` - Configure geo provider credentials, set active reverse provider, run app-wide geocode backfill (Admin only)
 - `jobs:read` - View enrichment job queue stats and list jobs (Admin only)
 - `jobs:write` - Retry, reset, and delete enrichment jobs (Admin only)
+- `shares:manage` - Create, list, update expiration, and revoke own public shares (Contributor + Admin)
+- `shares:manage_any` - Manage all public shares regardless of owner; required for `scope=all` listing and bulk operations (Admin only)
 
 ### Per-Circle Roles
 Each circle has its own role for each member, independent of the system role:
@@ -607,6 +630,7 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `media_metadata_status` - Per-media-item metadata extraction re-run status (one row per item); statuses: `not_processed`, `pending`, `processing`, `processed`, `failed`; records `processed_at` and `last_error`; unique on `media_item_id`; cascade delete on both `media_items` and `circles`
 - `geo_provider_credentials` - Reverse-geocoding provider API keys (AES-256-GCM encrypted via `SECRETS_ENCRYPTION_KEY`); one row per provider; currently only `google` is supported; `last4` exposed for display; `enabled` flag allows disabling without deleting; plaintext key never stored or returned
 - `media_geocode_status` - Per-media-item geocoding status (one row per item); reuses `MediaMetadataStatusType` enum (`not_processed`, `pending`, `processing`, `processed`, `failed`); tracks `processed_at` and `last_error`; unique on `media_item_id`; cascade delete on both `media_items` and `circles`
+- `media_shares` - Public share records; one row per published item or album; `targetType` enum (`media_item` | `album`) with a CHECK constraint enforcing XOR — exactly one of `mediaItemId` or `albumId` must be non-null; `token` is a unique random slug used in the public URL; `expiresAt` is nullable (null = never expires); soft-revoke via `revokedAt` (null = active); FK to `media_items` and `albums` both set to CASCADE DELETE so hard-deleting a target removes the share row; FK to `circles` (CASCADE DELETE) and `created_by` user (SET NULL); added in migration `20260628130000_add_media_shares`
 
 **Note:** `media_items` has `description` (nullable, max 8 192 chars) written by the auto-tagging handler on each successful vision call. There is no `title` column. `media_items`, `albums`, and `tags` use `added_by_id` (not `owner_id`) to track the uploading user. Dedup uniqueness for `media_items` is `(circle_id, content_hash)`. Tag names are unique per `(circle_id, name)`. The `media_tags` join table has a `source` column (`manual` | `ai`, default `manual`) that tracks whether a tag was applied by the AI auto-tagging service or by a user manually; AI re-runs are authoritative over `source='ai'` rows only and never modify `source='manual'` rows. `media_items` also carries burst detection columns: `perceptual_hash` (**TEXT?**, unsigned 64-bit dHash stored as a decimal string — see storage rationale below), `sharpness_score` (Float?, variance-of-Laplacian sharpness measure), `burst_uuid` (String?, Apple BurstUUID from EXIF MakerNote — null for non-Apple cameras), `burst_score` (Float?, composite quality score within the group — null when not in a group), and `burst_group_id` (FK → `burst_groups`, SetNull on delete). The `perceptual_hash` column is omitted from default API responses via a Prisma global `omit` because it is an internal computation value; the burst matcher parses it with `BigInt(string)` only when computing Hamming distance. **Why TEXT and not `bigint`:** Postgres `bigint` is a signed 64-bit integer (max 2^63-1); a dHash is an unsigned 64-bit value and hashes with the high bit set overflow, producing a "value out of range for type bigint" error. Additionally, Prisma maps `BigInt` to JavaScript's `BigInt` primitive, which throws "Do not know how to serialize a BigInt" on `JSON.stringify`, crashing any endpoint that returns the column. Storing the value as a decimal string avoids both problems. `media_items` also carries the archive column: `archived_at` (DateTime?, nullable; null = active/not-archived; non-null = archived). Trash reuses the existing `deleted_at` column (soft-delete). The two states are independent: `deleted_at` for Trash, `archived_at` for Archive.
 
@@ -809,6 +833,7 @@ The refresh cadence for the precomputed storage metrics snapshot is controlled v
 
 - **Never store an unsigned 64-bit value in a Postgres `bigint` / Prisma `BigInt` column.** Postgres `bigint` is signed (max 2^63-1); values with the high bit set overflow with "value out of range for type bigint". Use a `TEXT` column (decimal or hex string) or the `numeric` type instead. Parse back to `BigInt()` in application code only where arithmetic is needed.
 - **`BigInt` is not JSON-serializable.** `JSON.stringify` throws "Do not know how to serialize a BigInt" for any object that contains a JS `BigInt`. Never return a Prisma `BigInt` column directly in an API response. Store large integers as strings, and/or use a Prisma global `omit` to keep internal-only columns out of default selects so they cannot accidentally leak into response serialization.
+- **Public shares proxy raw bytes — EXIF/GPS is NOT stripped at the file level.** `GET /api/public/shares/:token/media/:idx` streams raw original bytes from storage. The API response contains no metadata fields and no download link, but the file itself may contain embedded EXIF including GPS. If file-level stripping is required, pipe the stream through `apps/api/src/storage/processing/` before sending. See [Public Sharing spec](docs/specs/public-sharing.md).
 
 ## Feature Specifications
 
@@ -826,6 +851,7 @@ Detailed specs live under `docs/specs/`:
 - [Storage Provider Configuration](docs/specs/storage-providers.md) — multi-provider credential management, per-object routing with env fallback, copy-only migration model, active-provider selection
 - [Bulk Import Resilience](docs/specs/bulk-import-resilience.md) — dual-path retry model, per-provider throttle gate, stuck-job auto-reset cron, provider rate-limit classification matrix, CLI durable multipart resume, PAT pre-flight, recovery runbook
 - [Job Queue Insights](docs/specs/job-insights.md) — on-demand live aggregate, lock-safety rationale, ETA formula and basis semantics, web dashboard, CLI TUI, nightly job_history_purge retention model
+- [Public Media Sharing](docs/specs/public-sharing.md) — token-based unauthenticated access, byte-proxy rationale, metadata-stripping contract, EXIF/GPS limitation, RBAC, enumeration-resistant 404 policy, archived/trashed item handling
 
 ## Audits
 
