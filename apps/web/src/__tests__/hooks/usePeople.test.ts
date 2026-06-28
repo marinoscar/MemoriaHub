@@ -82,6 +82,7 @@ function makePersonDetail(): PersonDetail {
         confidence: 0.9,
         manuallyAssigned: false,
         createdAt: new Date().toISOString(),
+        faceThumbnailUrl: null,
       },
     ],
     createdAt: new Date().toISOString(),

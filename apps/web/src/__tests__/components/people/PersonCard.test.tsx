@@ -128,6 +128,7 @@ describe('PersonCard', () => {
             faceId: 'face-1',
             mediaItemId: 'media-1',
             boundingBox: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
+            faceThumbnailUrl: null,
           },
         })}
         onClick={vi.fn()}
