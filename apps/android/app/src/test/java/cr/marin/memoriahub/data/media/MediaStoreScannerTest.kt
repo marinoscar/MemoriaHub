@@ -15,9 +15,9 @@ class MediaStoreScannerTest {
     }
 
     @Test
-    fun `selection builds an IN clause with one placeholder per bucket`() {
+    fun `null selection falls back to the legacy camera display-name filter`() {
         val (selection, args) = MediaStoreScanner.buildBucketSelection(
-            listOf("Camera", "DCIM", "Pictures"),
+            selectedBucketIds = null,
             sinceDateAddedSec = 0,
         )
         assertEquals("bucket_display_name IN (?, ?, ?)", selection)
@@ -25,12 +25,32 @@ class MediaStoreScannerTest {
     }
 
     @Test
+    fun `a selection builds a bucket_id IN clause with one placeholder per id`() {
+        val (selection, args) = MediaStoreScanner.buildBucketSelection(
+            selectedBucketIds = linkedSetOf("11", "22"),
+            sinceDateAddedSec = 0,
+        )
+        assertEquals("bucket_id IN (?, ?)", selection)
+        assertEquals(listOf("11", "22"), args.toList())
+    }
+
+    @Test
+    fun `an empty selection matches nothing`() {
+        val (selection, args) = MediaStoreScanner.buildBucketSelection(
+            selectedBucketIds = emptySet(),
+            sinceDateAddedSec = 0,
+        )
+        assertEquals("0 = 1", selection)
+        assertTrue(args.isEmpty())
+    }
+
+    @Test
     fun `high-water mark appends a date_added bound and its arg`() {
         val (selection, args) = MediaStoreScanner.buildBucketSelection(
-            listOf("Camera"),
+            selectedBucketIds = linkedSetOf("99"),
             sinceDateAddedSec = 1700,
         )
-        assertEquals("bucket_display_name IN (?) AND date_added >= ?", selection)
-        assertEquals(listOf("Camera", "1700"), args.toList())
+        assertEquals("bucket_id IN (?) AND date_added >= ?", selection)
+        assertEquals(listOf("99", "1700"), args.toList())
     }
 }
