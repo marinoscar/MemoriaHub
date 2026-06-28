@@ -753,6 +753,24 @@ describe('AutoTaggingService', () => {
       // No upsert calls since no labels produced
       expect(mockPrisma.mediaTag.upsert).not.toHaveBeenCalled();
     });
+
+    it('deleteMany is scoped to source=ai only — system tags are preserved', async () => {
+      // Even when the model returns no tags, only source:'ai' rows are deleted;
+      // source:'system' rows (social media tags) are never touched.
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Ocean'], description: 'Waves.' }),
+      );
+      (mockPrisma.tagLabel.findMany as jest.Mock).mockResolvedValue([{ name: 'Ocean' }]);
+      (mockPrisma.tag.upsert as jest.Mock).mockResolvedValue({ id: 'tag-ocean' });
+
+      await service.processMediaItem(makeJob());
+
+      const deleteManyCall = (mockPrisma.mediaTag.deleteMany as jest.Mock).mock.calls[0][0];
+      // The where clause must include source:'ai' — not 'system'
+      expect(deleteManyCall.where.source).toBe('ai');
+      // source must NOT be a negation that would accidentally include 'system'
+      expect(deleteManyCall.where.source).not.toEqual(expect.objectContaining({ not: 'ai' }));
+    });
   });
 
   // -------------------------------------------------------------------------

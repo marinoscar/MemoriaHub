@@ -256,6 +256,20 @@ describe('TagLabelsService', () => {
       expect(mockPrisma.tag.deleteMany).not.toHaveBeenCalled();
     });
 
+    it('includes isSystem:false in tag.findMany where clause so system tags are never auto-deleted', async () => {
+      // Even if a system tag happens to share the label name and has no mediaTags,
+      // the cleanup query must not match it.
+      (mockPrisma.tag.findMany as jest.Mock).mockResolvedValue([]);
+
+      await service.remove('label-1');
+
+      expect(mockPrisma.tag.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ isSystem: false }),
+        }),
+      );
+    });
+
     it('throws NotFoundException when label does not exist', async () => {
       (mockPrisma.tagLabel.findUnique as jest.Mock).mockResolvedValue(null);
 
