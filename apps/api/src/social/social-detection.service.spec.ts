@@ -12,13 +12,14 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { MediaSocialStatusType } from '@prisma/client';
+import { JobReason, MediaSocialStatusType } from '@prisma/client';
 import { SocialDetectionService } from './social-detection.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { VideoProbeProcessor } from '../storage/processing/processors/video-probe.processor';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { SocialOcrService } from './social-ocr.service';
+import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 import {
   createMockPrismaService,
   MockPrismaService,
@@ -32,12 +33,14 @@ function makeJob(overrides: Partial<{
   id: string;
   mediaItemId: string | null;
   circleId: string | null;
+  reason: JobReason;
 }> = {}) {
   return {
     id: 'job-social-1',
     type: 'social_media_detection',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
+    reason: JobReason.upload,
     ...overrides,
   } as any;
 }
@@ -93,6 +96,7 @@ describe('SocialDetectionService', () => {
   let mockVideoProbeProcessor: { process: jest.Mock };
   let mockSystemSettings: { getSettings: jest.Mock };
   let mockSocialOcrService: { extractOcrText: jest.Mock };
+  let mockMediaEnrichmentService: { enqueueVideoFaceIfEligible: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -123,6 +127,10 @@ describe('SocialDetectionService', () => {
       extractOcrText: jest.fn().mockResolvedValue(''),
     };
 
+    mockMediaEnrichmentService = {
+      enqueueVideoFaceIfEligible: jest.fn().mockResolvedValue(undefined),
+    };
+
     // Default Prisma mock returns
     (mockPrisma.mediaSocialStatus.upsert as jest.Mock).mockResolvedValue({} as any);
     (mockPrisma.tag.upsert as jest.Mock).mockResolvedValue({ id: 'tag-1' } as any);
@@ -137,6 +145,7 @@ describe('SocialDetectionService', () => {
         { provide: VideoProbeProcessor, useValue: mockVideoProbeProcessor },
         { provide: SystemSettingsService, useValue: mockSystemSettings },
         { provide: SocialOcrService, useValue: mockSocialOcrService },
+        { provide: MediaEnrichmentService, useValue: mockMediaEnrichmentService },
       ],
     }).compile();
 
@@ -520,6 +529,92 @@ describe('SocialDetectionService', () => {
           update: expect.objectContaining({ status: MediaSocialStatusType.failed }),
         }),
       );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Phase 2: social gate chain — enqueueVideoFaceIfEligible
+  // ---------------------------------------------------------------------------
+
+  describe('social gate chain (Phase 2)', () => {
+    /**
+     * Build a camera-original item that scores below the detection threshold
+     * so the "not detected" path is exercised.
+     */
+    function makeCameraOriginalItem() {
+      return makeMediaItem({
+        originalFilename: 'PXL_20240101_120000.mp4',
+        cameraMake: 'Google',
+        cameraModel: 'Pixel 8',
+        width: 1920,
+        height: 1080,
+        takenLat: 9.9281,
+        takenLng: -84.0907,
+        storageObject: {
+          ...makeMediaItem().storageObject,
+          name: 'PXL_20240101_120000.mp4',
+          metadata: {
+            _processing: {
+              'video-probe': {
+                durationMs: 10000,
+                width: 1920,
+                height: 1080,
+                codec: 'h264',
+                containerTags: {},
+                hasContainerCreationTime: true,
+              },
+            },
+          },
+        },
+      });
+    }
+
+    beforeEach(() => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        social: { ocr: { enabled: false } },
+      });
+    });
+
+    it('calls enqueueVideoFaceIfEligible when job.reason=upload and item is NOT detected', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeCameraOriginalItem());
+
+      const uploadJob = makeJob({ reason: JobReason.upload });
+      await service.processMediaItem(uploadJob);
+
+      expect(mockMediaEnrichmentService.enqueueVideoFaceIfEligible).toHaveBeenCalledWith({
+        id: 'media-1',
+        circleId: 'circle-1',
+        type: 'video',
+        deletedAt: null,
+      });
+    });
+
+    it('does NOT call enqueueVideoFaceIfEligible when detected=true (social media clip)', async () => {
+      // TikTok item is detected
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+
+      const uploadJob = makeJob({ reason: JobReason.upload });
+      await service.processMediaItem(uploadJob);
+
+      expect(mockMediaEnrichmentService.enqueueVideoFaceIfEligible).not.toHaveBeenCalled();
+    });
+
+    it('does NOT call enqueueVideoFaceIfEligible when job.reason=rerun (even if not detected)', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeCameraOriginalItem());
+
+      const rerunJob = makeJob({ reason: JobReason.rerun });
+      await service.processMediaItem(rerunJob);
+
+      expect(mockMediaEnrichmentService.enqueueVideoFaceIfEligible).not.toHaveBeenCalled();
+    });
+
+    it('does NOT call enqueueVideoFaceIfEligible when job.reason=backfill (even if not detected)', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeCameraOriginalItem());
+
+      const backfillJob = makeJob({ reason: JobReason.backfill });
+      await service.processMediaItem(backfillJob);
+
+      expect(mockMediaEnrichmentService.enqueueVideoFaceIfEligible).not.toHaveBeenCalled();
     });
   });
 
