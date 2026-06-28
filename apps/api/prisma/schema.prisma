@@ -373,6 +373,8 @@ model Circle {
   mediaMetadataStatuses MediaMetadataStatus[]
   // Geocode Status relations
   mediaGeocodeStatuses  MediaGeocodeStatus[]
+  // Social Media Detection relations
+  mediaSocialStatuses   MediaSocialStatus[]
   // Burst Detection relations
   bursts              BurstGroup[]
 
@@ -517,6 +519,8 @@ model MediaItem {
   metadataStatus MediaMetadataStatus?
   // Geocode Status relations
   geocodeStatus  MediaGeocodeStatus?
+  // Social Media Detection relations
+  socialStatus   MediaSocialStatus?
   // Semantic search embedding (1536-d, stored via raw SQL / pgvector)
   embedding      MediaItemEmbedding?
   // Burst Detection relations
@@ -592,17 +596,20 @@ model Tag {
   addedById String     @map("added_by_id") @db.Uuid
   addedBy   User       @relation("TagAddedBy", fields: [addedById], references: [id])
   name      String
+  isSystem  Boolean    @default(false) @map("is_system")
   createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz
   mediaTags MediaTag[]
 
   @@unique([circleId, name])
   @@index([circleId])
+  @@index([circleId, isSystem])
   @@map("tags")
 }
 
 enum MediaTagSource {
   manual
   ai
+  system
 }
 
 model MediaTag {
@@ -966,6 +973,40 @@ model MediaGeocodeStatus {
   @@index([circleId])
   @@index([status])
   @@map("media_geocode_status")
+}
+
+// =============================================================================
+// Social Media Detection
+// =============================================================================
+
+enum MediaSocialStatusType {
+  not_processed
+  pending
+  processing
+  processed
+  failed
+}
+
+model MediaSocialStatus {
+  id          String                @id @default(uuid()) @db.Uuid
+  mediaItemId String                @unique @map("media_item_id") @db.Uuid
+  circleId    String                @map("circle_id") @db.Uuid
+  status      MediaSocialStatusType @default(not_processed)
+  detected    Boolean               @default(false)
+  platform    String?
+  score       Float?
+  processedAt DateTime?             @map("processed_at") @db.Timestamptz
+  lastError   String?               @map("last_error")
+  createdAt   DateTime              @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime              @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  mediaItem MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  circle    Circle    @relation(fields: [circleId], references: [id], onDelete: Cascade)
+
+  @@index([circleId])
+  @@index([status])
+  @@map("media_social_status")
 }
 
 // =============================================================================
