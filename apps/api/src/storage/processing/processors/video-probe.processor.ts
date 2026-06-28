@@ -89,6 +89,32 @@ export class VideoProbeProcessor implements ObjectProcessor {
       if (typeof codec === 'string') metadata['codec'] = codec;
       if (capturedAt !== undefined) metadata['capturedAt'] = capturedAt;
 
+      // Harvest container tags for social detection (keys + values lowercased, empty values omitted)
+      const CONTAINER_TAG_KEYS = [
+        'major_brand', 'minor_version', 'compatible_brands', 'encoder', 'handler_name',
+        'com.android.version', 'com.android.manufacturer', 'com.android.model',
+        'com.android.capture.fps', 'com.apple.quicktime.make', 'com.apple.quicktime.model',
+        'com.apple.quicktime.software', 'com.apple.quicktime.location.iso6709',
+        'make', 'model', 'location', 'location-eng', 'title', 'artist', 'comment', 'vendor_id',
+      ];
+      const formatTags = (probeData.format?.tags ?? {}) as Record<string, unknown>;
+      const streamTags = (videoStream?.tags ?? {}) as Record<string, unknown>;
+      const containerTags: Record<string, string> = {};
+      for (const key of CONTAINER_TAG_KEYS) {
+        const rawVal = formatTags[key] ?? streamTags[key];
+        if (typeof rawVal === 'string' && rawVal.trim().length > 0) {
+          containerTags[key.toLowerCase()] = rawVal.toLowerCase();
+        }
+      }
+      if (Object.keys(containerTags).length > 0) {
+        metadata['containerTags'] = containerTags;
+      }
+      // hasContainerCreationTime: true if format.tags.creation_time OR video stream tags.creation_time present
+      const hasContainerCreationTime =
+        typeof (formatTags['creation_time']) === 'string' ||
+        typeof (streamTags['creation_time']) === 'string';
+      metadata['hasContainerCreationTime'] = hasContainerCreationTime;
+
       this.logger.debug(
         `video-probe for object ${object.id}: ${durationMs}ms ${width}x${height} ${codec}` +
           (capturedAt ? ` capturedAt=${capturedAt}` : ''),
