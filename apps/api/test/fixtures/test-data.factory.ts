@@ -107,6 +107,17 @@ export const mockPermissions = {
     name: 'media:delete_any',
     description: 'Delete any media item',
   },
+  // Sharing permissions
+  sharesManage: {
+    id: randomUUID(),
+    name: 'shares:manage',
+    description: 'Create, list, update, and revoke own shares',
+  },
+  sharesManageAny: {
+    id: randomUUID(),
+    name: 'shares:manage_any',
+    description: 'Admin: manage any user\'s shares',
+  },
 };
 
 export const mockRoles = {
@@ -407,6 +418,8 @@ export const rolePermissionsMap = {
     mockPermissions.mediaReadAny,
     mockPermissions.mediaWriteAny,
     mockPermissions.mediaDeleteAny,
+    mockPermissions.sharesManage,
+    mockPermissions.sharesManageAny,
   ],
   contributor: [
     mockPermissions.userSettingsRead,
@@ -416,12 +429,14 @@ export const rolePermissionsMap = {
     mockPermissions.mediaRead,
     mockPermissions.mediaWrite,
     mockPermissions.mediaDelete,
+    mockPermissions.sharesManage,
   ],
   viewer: [
     mockPermissions.userSettingsRead,
     mockPermissions.userSettingsWrite,
     mockPermissions.storageRead,
     mockPermissions.mediaRead,
+    // Note: viewer does NOT have shares:manage — intentional
   ],
 };
 
