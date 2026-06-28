@@ -36,10 +36,17 @@
 // ---------------------------------------------------------------------------
 
 // Mock sharp so the dynamic `await import('sharp')` in the handler resolves.
-// The factory returns a chainable mock whose toBuffer() resolves to a
-// fake JPEG buffer; each test can override with mockReturnValueOnce.
+// The factory returns a chainable mock that supports:
+//   .metadata()  — resolves to { width, height } (separate call, not chainable in real sharp)
+//   .extract()   — chainable, returns the pipeline so .resize().jpeg().toBuffer() works
+//   .resize()    — chainable
+//   .jpeg()      — chainable
+//   .toBuffer()  — resolves to a fake JPEG buffer
+// Each test can override per-call via mockReturnValueOnce on jest.requireMock('sharp').
 jest.mock('sharp', () => {
   const mockPipeline = {
+    metadata: jest.fn().mockResolvedValue({ width: 1000, height: 800 }),
+    extract: jest.fn().mockReturnThis(),
     resize: jest.fn().mockReturnThis(),
     jpeg: jest.fn().mockReturnThis(),
     toBuffer: jest.fn().mockResolvedValue(Buffer.from('fake-thumb-jpeg')),
@@ -192,9 +199,12 @@ describe('VideoFaceDetectionHandler', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    // Reset sharp mock pipeline so toBuffer returns a consistent small buffer
+    // Reset sharp mock pipeline so all methods return consistent defaults.
+    // metadata() and extract() are added here to support the face-crop path.
     const sharpMock = jest.requireMock('sharp') as jest.Mock;
     sharpMock.mockReturnValue({
+      metadata: jest.fn().mockResolvedValue({ width: 1000, height: 800 }),
+      extract: jest.fn().mockReturnThis(),
       resize: jest.fn().mockReturnThis(),
       jpeg: jest.fn().mockReturnThis(),
       toBuffer: jest.fn().mockResolvedValue(Buffer.from('fake-thumb-jpeg')),
@@ -549,6 +559,167 @@ describe('VideoFaceDetectionHandler', () => {
       );
 
       expect(mockPrisma.storageObject.upsert).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Face-centered crop thumbnail — normal bounding box
+  // -------------------------------------------------------------------------
+
+  describe('face-crop thumbnail with normal bounding box', () => {
+    /**
+     * Bounding box: { x: 0.4, y: 0.3, w: 0.2, h: 0.2 }
+     * Frame dims from mocked metadata(): 1000 × 800
+     *
+     * Expected crop with 35% padding:
+     *   padX = 0.2 * 0.35 = 0.07
+     *   padY = 0.2 * 0.35 = 0.07
+     *   left   = max(0, 0.4 - 0.07) = 0.33  → cropLeft = round(0.33 * 1000) = 330
+     *   top    = max(0, 0.3 - 0.07) = 0.23  → cropTop  = round(0.23 * 800)  = 184
+     *   right  = min(1, 0.4 + 0.2 + 0.07) = 0.67 → round(0.67 * 1000) = 670
+     *   bottom = min(1, 0.3 + 0.2 + 0.07) = 0.57 → round(0.57 * 800)  = 456
+     *   cropW  = 670 - 330 = 340 (clamped: 340 ≤ 1000 - 330 = 670 ✓)
+     *   cropH  = 456 - 184 = 272 (clamped: 272 ≤ 800 - 184 = 616 ✓)
+     */
+    const NORMAL_BBOX = { x: 0.4, y: 0.3, w: 0.2, h: 0.2 };
+    const FRAME_W = 1000;
+    const FRAME_H = 800;
+
+    beforeEach(() => {
+      // Use a face with our specific bounding box
+      const faceWithNormalBbox = {
+        ...FAKE_FACE,
+        boundingBox: NORMAL_BBOX,
+      };
+      const normalizedWithNormalBbox = {
+        ...FAKE_NORMALIZED_FACE,
+        boundingBox: NORMAL_BBOX,
+      };
+
+      mockCore.detectWithThrottleMapping.mockResolvedValue([faceWithNormalBbox]);
+      mockCore.normalizeFace.mockReturnValue(normalizedWithNormalBbox);
+
+      // Make sharp().metadata() return the known frame dimensions
+      const sharpMock = jest.requireMock('sharp') as jest.Mock;
+      sharpMock.mockReturnValue({
+        metadata: jest.fn().mockResolvedValue({ width: FRAME_W, height: FRAME_H }),
+        extract: jest.fn().mockReturnThis(),
+        resize: jest.fn().mockReturnThis(),
+        jpeg: jest.fn().mockReturnThis(),
+        toBuffer: jest.fn().mockResolvedValue(Buffer.from('fake-crop-jpeg')),
+      });
+    });
+
+    it('calls sharp().extract() with a crop region matching the 35%-margin box', async () => {
+      await handler.process(makeJob());
+
+      const sharpMock = jest.requireMock('sharp') as jest.Mock;
+      // The pipeline instance returned by sharp() — same object for all calls
+      const pipeline = sharpMock.mock.results[sharpMock.mock.results.length - 1].value;
+      const extractCall = pipeline.extract.mock.calls[0][0] as {
+        left: number;
+        top: number;
+        width: number;
+        height: number;
+      };
+
+      expect(extractCall.left).toBe(330);
+      expect(extractCall.top).toBe(184);
+      expect(extractCall.width).toBe(340);
+      expect(extractCall.height).toBe(272);
+    });
+
+    it('calls sharp().resize() with width and height of 512 (FACE_CROP_MAX_DIM)', async () => {
+      await handler.process(makeJob());
+
+      const sharpMock = jest.requireMock('sharp') as jest.Mock;
+      const pipeline = sharpMock.mock.results[sharpMock.mock.results.length - 1].value;
+      const resizeCall = pipeline.resize.mock.calls[0][0] as {
+        width: number;
+        height: number;
+        fit: string;
+        withoutEnlargement: boolean;
+      };
+
+      expect(resizeCall.width).toBe(512);
+      expect(resizeCall.height).toBe(512);
+      expect(resizeCall.fit).toBe('inside');
+      expect(resizeCall.withoutEnlargement).toBe(true);
+    });
+
+    it('still calls storageObject.upsert after a successful crop', async () => {
+      await handler.process(makeJob());
+
+      expect(mockPrisma.storageObject.upsert).toHaveBeenCalledTimes(1);
+      const call = mockPrisma.storageObject.upsert.mock.calls[0][0];
+      expect(call.create.mimeType).toBe('image/jpeg');
+      expect(call.create.status).toBe('ready');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Face-centered crop thumbnail — degenerate bounding box (fallback path)
+  // -------------------------------------------------------------------------
+
+  describe('face-crop thumbnail with degenerate bounding box (w=0, h=0)', () => {
+    /**
+     * When the bounding box has w<=0 or h<=0 the handler must NOT call extract()
+     * and must fall back to the full-frame resize path (FRAME_THUMB_MAX_DIM = 800).
+     */
+    const DEGENERATE_BBOX = { x: 0, y: 0, w: 0, h: 0 };
+
+    beforeEach(() => {
+      const faceDegenerate = { ...FAKE_FACE, boundingBox: DEGENERATE_BBOX };
+      const normalizedDegenerate = { ...FAKE_NORMALIZED_FACE, boundingBox: DEGENERATE_BBOX };
+
+      mockCore.detectWithThrottleMapping.mockResolvedValue([faceDegenerate]);
+      mockCore.normalizeFace.mockReturnValue(normalizedDegenerate);
+
+      // Provide valid frame dims — the fallback is triggered by the degenerate bbox,
+      // not by missing metadata.
+      const sharpMock = jest.requireMock('sharp') as jest.Mock;
+      sharpMock.mockReturnValue({
+        metadata: jest.fn().mockResolvedValue({ width: 1000, height: 800 }),
+        extract: jest.fn().mockReturnThis(),
+        resize: jest.fn().mockReturnThis(),
+        jpeg: jest.fn().mockReturnThis(),
+        toBuffer: jest.fn().mockResolvedValue(Buffer.from('fake-fallback-jpeg')),
+      });
+    });
+
+    it('does NOT call sharp().extract() when the bounding box is degenerate', async () => {
+      await handler.process(makeJob());
+
+      const sharpMock = jest.requireMock('sharp') as jest.Mock;
+      // Gather all pipeline instances across all sharp() calls
+      const allPipelines = sharpMock.mock.results.map((r: jest.MockResult<unknown>) => r.value) as Array<{
+        extract: jest.Mock;
+      }>;
+      const anyExtractCalled = allPipelines.some((p) => p.extract.mock.calls.length > 0);
+      expect(anyExtractCalled).toBe(false);
+    });
+
+    it('calls sharp().resize() with 800 (full-frame fallback) when bbox is degenerate', async () => {
+      await handler.process(makeJob());
+
+      const sharpMock = jest.requireMock('sharp') as jest.Mock;
+      // The last pipeline instance is from the actual thumbnail build
+      const pipeline = sharpMock.mock.results[sharpMock.mock.results.length - 1].value as {
+        resize: jest.Mock;
+      };
+      const resizeCall = pipeline.resize.mock.calls[0][0] as {
+        width: number;
+        height: number;
+      };
+
+      expect(resizeCall.width).toBe(800);
+      expect(resizeCall.height).toBe(800);
+    });
+
+    it('still calls storageObject.upsert after the full-frame fallback', async () => {
+      await handler.process(makeJob());
+
+      expect(mockPrisma.storageObject.upsert).toHaveBeenCalledTimes(1);
     });
   });
 });

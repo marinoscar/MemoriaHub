@@ -687,6 +687,84 @@ describe('ObjectsService', () => {
         }),
       );
     });
+
+    it('should exclude derived objects (thumbnails/ and video-faces/ prefixes) from findMany', async () => {
+      const query = {
+        page: 1,
+        pageSize: 20,
+        sortBy: 'createdAt' as const,
+        sortOrder: 'desc' as const,
+      };
+
+      mockPrisma.storageObject.findMany.mockResolvedValue([]);
+      mockPrisma.storageObject.count.mockResolvedValue(0);
+
+      await service.list(query, testUserId);
+
+      expect(mockPrisma.storageObject.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            NOT: expect.arrayContaining([
+              { storageKey: { startsWith: 'thumbnails/' } },
+              { storageKey: { startsWith: 'video-faces/' } },
+            ]),
+          }),
+        }),
+      );
+    });
+
+    it('should exclude derived objects (thumbnails/ and video-faces/ prefixes) from count', async () => {
+      const query = {
+        page: 1,
+        pageSize: 20,
+        sortBy: 'createdAt' as const,
+        sortOrder: 'desc' as const,
+      };
+
+      mockPrisma.storageObject.findMany.mockResolvedValue([]);
+      mockPrisma.storageObject.count.mockResolvedValue(0);
+
+      await service.list(query, testUserId);
+
+      expect(mockPrisma.storageObject.count).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            NOT: expect.arrayContaining([
+              { storageKey: { startsWith: 'thumbnails/' } },
+              { storageKey: { startsWith: 'video-faces/' } },
+            ]),
+          }),
+        }),
+      );
+    });
+
+    it('should apply derived-object exclusion alongside uploadedById and status filters', async () => {
+      const query = {
+        page: 1,
+        pageSize: 20,
+        status: 'ready' as const,
+        sortBy: 'createdAt' as const,
+        sortOrder: 'desc' as const,
+      };
+
+      mockPrisma.storageObject.findMany.mockResolvedValue([]);
+      mockPrisma.storageObject.count.mockResolvedValue(0);
+
+      await service.list(query, testUserId);
+
+      expect(mockPrisma.storageObject.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            uploadedById: testUserId,
+            status: 'ready',
+            NOT: expect.arrayContaining([
+              { storageKey: { startsWith: 'thumbnails/' } },
+              { storageKey: { startsWith: 'video-faces/' } },
+            ]),
+          }),
+        }),
+      );
+    });
   });
 
   describe('getById', () => {
