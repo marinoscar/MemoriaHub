@@ -1279,6 +1279,7 @@ function HiddenPeopleView({
     try {
       const result = await unhide([person.id]);
       onSuccess(`Unhid ${result.unhidden} person`);
+      await refreshHidden();
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Failed to unhide');
     }
@@ -1290,6 +1291,7 @@ function HiddenPeopleView({
       const result = await unhide(ids);
       onSuccess(`Unhid ${result.unhidden} person${result.unhidden !== 1 ? 's' : ''}`);
       handleClearSelection();
+      await refreshHidden();
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Failed to unhide');
     }
@@ -1304,6 +1306,7 @@ function HiddenPeopleView({
       );
       handleClearSelection();
       setPurgeDialogOpen(false);
+      await refreshHidden();
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Failed to delete');
       throw err;
