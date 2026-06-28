@@ -38,6 +38,7 @@ import { prepareImageForProcessing } from '../storage/processing/image-orientati
 import { MediaFaceStatusType } from '@prisma/client';
 import { extname } from 'path';
 import { DetectedFace, FaceProvider, FaceProviderCredentials } from './providers/face-provider.interface';
+import { SOCIAL_MAIN_TAG } from '../social/social-detectors';
 
 // Max long-edge for face detection on video frames (same env var as photo path)
 const FACE_MAX_IMAGE_DIM = (): number =>
@@ -145,6 +146,33 @@ export class VideoFaceDetectionHandler implements EnrichmentHandler, OnModuleIni
         this.logger.error(`VideoFaceJob ${job.id}: ${errMsg}`);
         await this.core.markFailed(job.mediaItemId, providerKey, modelVersion, errMsg);
         throw new Error(errMsg);
+      }
+
+      // --- 3b. Defense-in-depth: social gate check ---
+      // If the item carries the Social Media system tag it was flagged as a
+      // social media clip. Skip face detection entirely (it's a gate, not a
+      // priority: social clips should not get face-detected at all).
+      const socialGate = await this.prisma.mediaTag.findFirst({
+        where: {
+          mediaItemId: job.mediaItemId,
+          source: 'system',
+          tag: { is: { name: SOCIAL_MAIN_TAG } },
+        },
+        select: { id: true },
+      });
+
+      if (socialGate) {
+        this.logger.log(
+          `VideoFaceJob ${job.id}: MediaItem ${job.mediaItemId} is gated by Social Media system tag — marking no_faces and skipping`,
+        );
+        await this.core.markStatus(
+          job.mediaItemId,
+          MediaFaceStatusType.no_faces,
+          0,
+          providerKey,
+          modelVersion,
+        );
+        return;
       }
 
       // --- 4. Read face.video settings ---

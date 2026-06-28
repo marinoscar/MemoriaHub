@@ -97,6 +97,12 @@ export const systemSettingsSchema = z.object({
       purgeEnabled: z.boolean().default(true),
     }).default({ retentionDays: 30, purgeEnabled: true }),
   }).optional().default({ history: { retentionDays: 30, purgeEnabled: true } }),
+  social: z.object({
+    ocr: z.object({
+      enabled: z.boolean().default(true),
+      frameCount: z.number().int().min(1).max(10).default(3),
+    }).optional().default({ enabled: true, frameCount: 3 }),
+  }).optional().default({ ocr: { enabled: true, frameCount: 3 } }),
 });
 
 export type SystemSettingsDto = z.infer<typeof systemSettingsSchema>;
@@ -158,6 +164,12 @@ export const systemSettingsPatchSchema = z.object({
     history: z.object({
       retentionDays: z.number().int().min(1).max(365).optional(),
       purgeEnabled: z.boolean().optional(),
+    }).optional(),
+  }).optional(),
+  social: z.object({
+    ocr: z.object({
+      enabled: z.boolean().optional(),
+      frameCount: z.number().int().min(1).max(10).optional(),
     }).optional(),
   }).optional(),
 });

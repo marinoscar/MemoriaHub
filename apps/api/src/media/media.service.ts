@@ -45,6 +45,7 @@ import { EmptyTrashDto } from './dto/empty-trash.dto';
 import { geoResultToMediaColumns, GEO_CLEAR_COLUMNS } from './geo/geo-result.mapper';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
+import { ALL_SYSTEM_TAG_NAMES } from '../social/social-detectors';
 
 /** Shape of each element returned by listLocations. */
 export interface MediaLocation {
@@ -557,7 +558,12 @@ export class MediaService {
 
     return {
       ...rest,
+      // `tags` carries every tag name (system + manual + AI); `systemTags` is the
+      // subset flagged read-only. The web client renders chips from `tags` and
+      // cross-references `systemTags` to lock the protected ones, so system tag
+      // names MUST remain present in `tags` for them to appear at all.
       tags: mediaTags.map((mt) => mt.tag.name),
+      systemTags: mediaTags.filter((mt) => mt.tag.isSystem).map((mt) => mt.tag.name),
       thumbnailUrl,
       downloadUrl,
     };
@@ -667,6 +673,14 @@ export class MediaService {
       'collaborator' as CircleRole,
     );
 
+    // Guard: system tag names cannot be manually applied
+    const systemTagNamesLower = ALL_SYSTEM_TAG_NAMES.map((n) => n.toLowerCase());
+    for (const name of dto.names) {
+      if (systemTagNamesLower.includes(name.toLowerCase())) {
+        throw new BadRequestException(`Tag name "${name}" is reserved as a system tag and cannot be applied manually`);
+      }
+    }
+
     const result: Array<{ tagId: string; name: string }> = [];
 
     for (const name of dto.names) {
@@ -712,6 +726,7 @@ export class MediaService {
 
     const mediaTag = await this.prisma.mediaTag.findUnique({
       where: { tagId_mediaItemId: { tagId, mediaItemId } },
+      include: { tag: { select: { isSystem: true, name: true } } },
     });
 
     if (!mediaTag) {
@@ -720,11 +735,29 @@ export class MediaService {
       );
     }
 
+    // System tags can now be removed manually (reverse of the social gate).
+    // When a system tag is removed we also update MediaSocialStatus.detected to
+    // false for display consistency (the gate keys off tag presence, not status).
+    const wasSystemTag = mediaTag.tag.isSystem;
+
     await this.prisma.mediaTag.delete({
       where: { tagId_mediaItemId: { tagId, mediaItemId } },
     });
 
-    this.logger.log(`Removed tag ${tagId} from MediaItem ${mediaItemId}`);
+    if (wasSystemTag) {
+      // Best-effort: update the detected flag on mediaSocialStatus so the UI
+      // correctly reflects that the item is no longer considered social media.
+      try {
+        await this.prisma.mediaSocialStatus.updateMany({
+          where: { mediaItemId },
+          data: { detected: false },
+        });
+      } catch {
+        // Non-fatal — status display is informational only
+      }
+    }
+
+    this.logger.log(`Removed tag ${tagId} from MediaItem ${mediaItemId}${wasSystemTag ? ' (system tag — social gate released)' : ''}`);
   }
 
   // ---------------------------------------------------------------------------
@@ -1453,6 +1486,14 @@ export class MediaService {
 
     await this.prisma.$transaction(async (tx) => {
       if (dto.add && dto.add.length > 0) {
+        // Guard: system tag names cannot be used as manual tags
+        const systemTagNamesLower = ALL_SYSTEM_TAG_NAMES.map((n) => n.toLowerCase());
+        for (const name of dto.add) {
+          if (systemTagNamesLower.includes(name.toLowerCase())) {
+            throw new BadRequestException(`Tag name "${name}" is reserved as a system tag and cannot be used`);
+          }
+        }
+
         const tagIds: string[] = [];
         for (const name of dto.add) {
           const tag = await tx.tag.upsert({
@@ -1468,7 +1509,7 @@ export class MediaService {
           tagIds.map((tagId) => ({ mediaItemId, tagId, source: 'manual' as const })),
         );
         const result = await tx.mediaTag.createMany({ data: pairsWithSource, skipDuplicates: true });
-        // Promote any existing ai-sourced tags to manual for these pairs
+        // Promote any existing ai-sourced tags to manual for these pairs (never promote system tags)
         await tx.mediaTag.updateMany({
           where: {
             tagId: { in: tagIds },
@@ -1481,12 +1522,13 @@ export class MediaService {
       }
 
       if (dto.remove && dto.remove.length > 0) {
+        // System tags CAN be removed via bulk ops (manual override of social gate).
         const tags = await tx.tag.findMany({
           where: {
             circleId: dto.circleId,
             name: { in: dto.remove },
           },
-          select: { id: true },
+          select: { id: true, isSystem: true },
         });
         if (tags.length > 0) {
           const removeTagIds = tags.map((t) => t.id);
@@ -1497,6 +1539,20 @@ export class MediaService {
             },
           });
           removed = result.count;
+
+          // If any removed tags were system tags, update mediaSocialStatus.detected
+          // for display consistency (best-effort, non-fatal).
+          const hasSystemTags = tags.some((t) => t.isSystem);
+          if (hasSystemTags) {
+            try {
+              await tx.mediaSocialStatus.updateMany({
+                where: { mediaItemId: { in: dto.ids } },
+                data: { detected: false },
+              });
+            } catch {
+              // Non-fatal — status display is informational only
+            }
+          }
         }
       }
     });

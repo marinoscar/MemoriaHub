@@ -114,11 +114,12 @@ export class TagLabelsService {
       },
     });
 
-    // Clean up now-empty Tag rows for this label name
+    // Clean up now-empty Tag rows for this label name (never delete system tags)
     const emptyTags = await tx.tag.findMany({
       where: {
         name: { equals: labelName, mode: 'insensitive' },
         mediaTags: { none: {} },
+        isSystem: false, // Never auto-delete system tags
       },
       select: { id: true },
     });

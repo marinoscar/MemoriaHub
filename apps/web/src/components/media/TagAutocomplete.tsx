@@ -1,4 +1,4 @@
-import { useState, useEffect, type SyntheticEvent } from 'react';
+import { useState, useEffect, type SyntheticEvent, type EventHandler } from 'react';
 import { Autocomplete, TextField, Chip } from '@mui/material';
 import type {
   AutocompleteRenderValueGetItemProps,
@@ -14,6 +14,8 @@ interface TagAutocompleteProps {
   circleId?: string;
   disabled?: boolean;
   placeholder?: string;
+  /** Tag names that cannot be removed by the user (rendered with lock styling). */
+  lockedNames?: string[];
 }
 
 export function TagAutocomplete({
@@ -23,6 +25,7 @@ export function TagAutocomplete({
   circleId,
   disabled,
   placeholder,
+  lockedNames,
 }: TagAutocompleteProps) {
   const [options, setOptions] = useState<string[]>([]);
 
@@ -33,7 +36,17 @@ export function TagAutocomplete({
   }, [circleId]);
 
   const handleChange = (_event: SyntheticEvent, newValue: (string | string)[]) => {
-    onChange(newValue as string[]);
+    const next = newValue as string[];
+    // Prevent locked names from being removed
+    if (lockedNames && lockedNames.length > 0) {
+      const currentLocked = value.filter((v) => lockedNames.includes(v));
+      const missingLocked = currentLocked.filter((l) => !next.includes(l));
+      if (missingLocked.length > 0) {
+        onChange([...next, ...missingLocked]);
+        return;
+      }
+    }
+    onChange(next);
   };
 
   const renderValue = (
@@ -42,13 +55,16 @@ export function TagAutocomplete({
     _ownerState: AutocompleteOwnerState<string, true, false, true>,
   ) =>
     (tagValue as string[]).map((option: string, index: number) => {
-      const { key, ...chipProps } = getItemProps({ index });
+      const { key, onDelete, ...chipProps } = getItemProps({ index }) as ReturnType<AutocompleteRenderValueGetItemProps<true>> & { onDelete?: EventHandler<SyntheticEvent> };
+      const isLocked = lockedNames?.includes(option) ?? false;
       return (
         <Chip
           key={key}
           label={option}
           size="small"
+          color={isLocked ? 'secondary' : 'default'}
           {...chipProps}
+          {...(isLocked ? {} : { onDelete })}
         />
       );
     });

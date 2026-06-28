@@ -65,6 +65,12 @@ export const patchSystemSettingsSchema = z.object({
         .optional(),
     })
     .optional(),
+  social: z.object({
+    ocr: z.object({
+      enabled: z.boolean().optional(),
+      frameCount: z.number().int().min(1).max(10).optional(),
+    }).optional(),
+  }).optional(),
 });
 
 export class PatchSystemSettingsDto extends createZodDto(

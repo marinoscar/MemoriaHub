@@ -26,6 +26,7 @@ import { TaggingModule } from './tagging/tagging.module';
 import { InsightsModule } from './insights/insights.module';
 import { BurstModule } from './burst/burst.module';
 import { MetadataModule } from './metadata/metadata.module';
+import { SocialModule } from './social/social.module';
 import { GeoModule } from './geo/geo.module';
 import { StorageSettingsModule } from './storage-settings/storage-settings.module';
 import { LoggerModule } from './common/logger/logger.module';
@@ -79,6 +80,7 @@ import configuration from './config/configuration';
     InsightsModule,
     BurstModule,
     MetadataModule,
+    SocialModule,
     GeoModule,
     StorageSettingsModule,
 

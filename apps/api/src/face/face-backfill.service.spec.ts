@@ -76,7 +76,7 @@ describe('FaceBackfillService', () => {
     });
 
     describe('base filters always present', () => {
-      it('includes circleId, type photo, and deletedAt null regardless of date opts', async () => {
+      it('includes circleId, type in [photo, video], deletedAt null, and social-tag NOT exclusion', async () => {
         (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
 
         await service.backfillCircle(CIRCLE_ID, { from: '2024-01-01', to: '2024-12-31' });
@@ -85,8 +85,20 @@ describe('FaceBackfillService', () => {
         const where = callArgs[0].where;
 
         expect(where.circleId).toBe(CIRCLE_ID);
-        expect(where.type).toBe(MediaType.photo);
+        // Phase 2: backfill now covers both photos AND videos
+        expect(where.type).toEqual({ in: [MediaType.photo, MediaType.video] });
         expect(where.deletedAt).toBeNull();
+
+        // Phase 2: social-tag exclusion — social media clips must not be backfilled
+        expect(where.NOT).toBeDefined();
+        expect(where.NOT).toMatchObject({
+          mediaTags: {
+            some: {
+              source: 'system',
+              tag: { is: { name: 'Social Media' } },
+            },
+          },
+        });
       });
     });
 
@@ -141,10 +153,10 @@ describe('FaceBackfillService', () => {
     });
 
     describe('enqueuing and status upsert', () => {
-      it('enqueues a face_detection backfill job for each matched item', async () => {
+      it('enqueues face_detection for photo items and video_face_detection for video items', async () => {
         const items = [
-          { id: 'item-1', circleId: CIRCLE_ID },
-          { id: 'item-2', circleId: CIRCLE_ID },
+          { id: 'item-1', circleId: CIRCLE_ID, type: MediaType.photo },
+          { id: 'item-2', circleId: CIRCLE_ID, type: MediaType.video },
         ];
         (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue(items);
 
@@ -162,7 +174,7 @@ describe('FaceBackfillService', () => {
         );
         expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
           expect.objectContaining({
-            type: 'face_detection',
+            type: 'video_face_detection',
             mediaItemId: 'item-2',
             circleId: CIRCLE_ID,
             reason: JobReason.backfill,
@@ -172,8 +184,8 @@ describe('FaceBackfillService', () => {
 
       it('upserts MediaFaceStatus to pending for each matched item', async () => {
         const items = [
-          { id: 'item-1', circleId: CIRCLE_ID },
-          { id: 'item-2', circleId: CIRCLE_ID },
+          { id: 'item-1', circleId: CIRCLE_ID, type: MediaType.photo },
+          { id: 'item-2', circleId: CIRCLE_ID, type: MediaType.photo },
         ];
         (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue(items);
 

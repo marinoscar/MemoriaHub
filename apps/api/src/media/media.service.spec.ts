@@ -1068,7 +1068,7 @@ describe('MediaService', () => {
     it('should delete the MediaTag join record', async () => {
       const item = makeMediaItem({ addedById: 'user-1' });
       const tag = makeTag();
-      const mediaTag = { id: randomUUID(), tagId: tag.id, mediaItemId: item.id, addedAt: new Date() };
+      const mediaTag = { id: randomUUID(), tagId: tag.id, mediaItemId: item.id, addedAt: new Date(), tag: { isSystem: false } };
 
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
       mockPrisma.mediaTag.findUnique.mockResolvedValue(mediaTag as any);
@@ -2727,6 +2727,249 @@ describe('MediaService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // System tag protections
+  // -------------------------------------------------------------------------
+
+  describe('system tag protections', () => {
+    // -- removeTag: system tags CAN now be removed (Phase 2 reversal) ---------
+
+    describe('removeTag — system tag', () => {
+      it('SUCCEEDS (does not throw) when the tag has isSystem=true and deletes the join row', async () => {
+        const item = makeMediaItem({ addedById: 'user-1' });
+        const tag = makeTag({ name: 'TikTok' });
+        const mediaTag = {
+          id: randomUUID(),
+          tagId: tag.id,
+          mediaItemId: item.id,
+          addedAt: new Date(),
+          tag: { isSystem: true, name: 'TikTok' },
+        };
+
+        mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+        mockPrisma.mediaTag.findUnique.mockResolvedValue(mediaTag as any);
+        mockPrisma.mediaTag.delete.mockResolvedValue(mediaTag as any);
+        (mockPrisma.mediaSocialStatus.updateMany as jest.Mock).mockResolvedValue({ count: 1 } as any);
+
+        await expect(
+          service.removeTag(item.id, tag.id, 'user-1', ownPerms),
+        ).resolves.not.toThrow();
+
+        // The join row MUST be deleted
+        expect(mockPrisma.mediaTag.delete).toHaveBeenCalledWith({
+          where: { tagId_mediaItemId: { tagId: tag.id, mediaItemId: item.id } },
+        });
+      });
+
+      it('sets mediaSocialStatus.detected=false (best-effort) after removing a system tag', async () => {
+        const item = makeMediaItem({ addedById: 'user-1' });
+        const tag = makeTag({ name: 'Social Media' });
+        const mediaTag = {
+          id: randomUUID(),
+          tagId: tag.id,
+          mediaItemId: item.id,
+          addedAt: new Date(),
+          tag: { isSystem: true, name: 'Social Media' },
+        };
+
+        mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+        mockPrisma.mediaTag.findUnique.mockResolvedValue(mediaTag as any);
+        mockPrisma.mediaTag.delete.mockResolvedValue(mediaTag as any);
+        (mockPrisma.mediaSocialStatus.updateMany as jest.Mock).mockResolvedValue({ count: 1 } as any);
+
+        await service.removeTag(item.id, tag.id, 'user-1', ownPerms);
+
+        expect(mockPrisma.mediaSocialStatus.updateMany).toHaveBeenCalledWith({
+          where: { mediaItemId: item.id },
+          data: { detected: false },
+        });
+      });
+
+      it('does NOT throw for a non-system tag (isSystem=false)', async () => {
+        const item = makeMediaItem({ addedById: 'user-1' });
+        const tag = makeTag({ name: 'nature' });
+        const mediaTag = {
+          id: randomUUID(),
+          tagId: tag.id,
+          mediaItemId: item.id,
+          addedAt: new Date(),
+          tag: { isSystem: false, name: 'nature' },
+        };
+
+        mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+        mockPrisma.mediaTag.findUnique.mockResolvedValue(mediaTag as any);
+        mockPrisma.mediaTag.delete.mockResolvedValue(mediaTag as any);
+
+        await expect(
+          service.removeTag(item.id, tag.id, 'user-1', ownPerms),
+        ).resolves.not.toThrow();
+
+        expect(mockPrisma.mediaTag.delete).toHaveBeenCalledTimes(1);
+        // Non-system tag must NOT trigger social status update
+        expect(mockPrisma.mediaSocialStatus.updateMany).not.toHaveBeenCalled();
+      });
+    });
+
+    // -- attachTags: BadRequestException for reserved names ------------------
+
+    describe('attachTags — reserved system names', () => {
+      it('throws BadRequestException when a name matches a system tag (Social Media)', async () => {
+        const item = makeMediaItem({ addedById: 'user-1' });
+        mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+
+        await expect(
+          service.attachTags(item.id, { names: ['Social Media'] }, 'user-1', ownPerms),
+        ).rejects.toThrow(BadRequestException);
+
+        expect(mockPrisma.tag.upsert).not.toHaveBeenCalled();
+      });
+
+      it('throws BadRequestException for platform tags (TikTok)', async () => {
+        const item = makeMediaItem({ addedById: 'user-1' });
+        mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+
+        await expect(
+          service.attachTags(item.id, { names: ['TikTok'] }, 'user-1', ownPerms),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('throws BadRequestException even when the casing differs (tiktok)', async () => {
+        const item = makeMediaItem({ addedById: 'user-1' });
+        mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+
+        await expect(
+          service.attachTags(item.id, { names: ['tiktok'] }, 'user-1', ownPerms),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('allows non-reserved names through', async () => {
+        const item = makeMediaItem({ addedById: 'user-1' });
+        const tag = makeTag({ name: 'beach' });
+
+        mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+        mockPrisma.tag.upsert.mockResolvedValue(tag as any);
+        mockPrisma.mediaTag.upsert.mockResolvedValue({} as any);
+
+        await expect(
+          service.attachTags(item.id, { names: ['beach'] }, 'user-1', ownPerms),
+        ).resolves.not.toThrow();
+      });
+    });
+
+    // -- bulkTags: add path rejects reserved names ---------------------------
+
+    describe('bulkTags — add path rejects reserved names', () => {
+      it('throws BadRequestException when add list contains a system tag name', async () => {
+        const ids = [randomUUID()];
+        const dto: any = { circleId: CIRCLE_ID, ids, add: ['Social Media'] };
+
+        mockPrisma.mediaItem.findMany.mockResolvedValue(ids.map((id) => ({ id })) as any);
+
+        await expect(
+          service.bulkTags(dto, 'user-1', ownPerms),
+        ).rejects.toThrow(BadRequestException);
+
+        expect(mockPrisma.tag.upsert).not.toHaveBeenCalled();
+      });
+    });
+
+    // -- bulkTags: remove path now includes system tags (Phase 2 reversal) ----
+
+    describe('bulkTags — remove path CAN remove system tags', () => {
+      it('does NOT filter by isSystem:false in tag.findMany when removing by name (system tags allowed)', async () => {
+        const ids = [randomUUID()];
+        const dto: any = { circleId: CIRCLE_ID, ids, remove: ['TikTok'] };
+
+        mockPrisma.mediaItem.findMany.mockResolvedValue(ids.map((id) => ({ id })) as any);
+        // Return empty so deleteMany is skipped (we only care about the findMany call)
+        (mockPrisma.tag.findMany as jest.Mock).mockResolvedValue([]);
+
+        await service.bulkTags(dto, 'user-1', ownPerms);
+
+        // The findMany call must NOT scope out system tags (isSystem:false no longer present)
+        expect(mockPrisma.tag.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.not.objectContaining({ isSystem: false }),
+          }),
+        );
+      });
+
+      it('triggers mediaSocialStatus.updateMany with detected=false when a system tag is removed', async () => {
+        const ids = [randomUUID()];
+        const dto: any = { circleId: CIRCLE_ID, ids, remove: ['Social Media'] };
+
+        mockPrisma.mediaItem.findMany.mockResolvedValue(ids.map((id) => ({ id })) as any);
+        // Return one system tag so the code path executes
+        (mockPrisma.tag.findMany as jest.Mock).mockResolvedValue([{ id: 'tag-social', isSystem: true }] as any);
+        (mockPrisma.mediaTag.deleteMany as jest.Mock).mockResolvedValue({ count: 1 } as any);
+        (mockPrisma.mediaSocialStatus.updateMany as jest.Mock).mockResolvedValue({ count: 1 } as any);
+
+        await service.bulkTags(dto, 'user-1', ownPerms);
+
+        expect(mockPrisma.mediaSocialStatus.updateMany).toHaveBeenCalledWith({
+          where: { mediaItemId: { in: ids } },
+          data: { detected: false },
+        });
+      });
+    });
+
+    // -- getMedia serializer: systemTags populated ----------------------------
+
+    describe('getMedia serializer — systemTags field', () => {
+      it('returns system tag names in both tags[] and systemTags[]', async () => {
+        const item = makeMediaItem({ addedById: 'user-1' });
+        const mediaTags = [
+          { tag: { name: 'Beach', isSystem: false } },
+          { tag: { name: 'Social Media', isSystem: true } },
+          { tag: { name: 'TikTok', isSystem: true } },
+        ];
+        const storageObj = {
+          storageKey: 'uploads/video.mp4',
+          storageProvider: 's3',
+          bucket: 'test-bucket',
+        };
+
+        mockPrisma.mediaItem.findUnique.mockResolvedValue({
+          ...item,
+          mediaTags,
+        } as any);
+        mockPrisma.storageObject.findUnique.mockResolvedValue(storageObj as any);
+
+        const result = await service.getMedia(item.id, 'user-1', ownPerms);
+
+        // Both system tags appear in tags[]
+        expect(result.tags).toContain('Social Media');
+        expect(result.tags).toContain('TikTok');
+        expect(result.tags).toContain('Beach');
+
+        // Only system tags appear in systemTags[]
+        expect(result.systemTags).toEqual(
+          expect.arrayContaining(['Social Media', 'TikTok']),
+        );
+        expect(result.systemTags).not.toContain('Beach');
+        expect(result.systemTags).toHaveLength(2);
+      });
+
+      it('returns empty systemTags[] when no system tags are attached', async () => {
+        const item = makeMediaItem({ addedById: 'user-1' });
+        const mediaTags = [
+          { tag: { name: 'Sunset', isSystem: false } },
+        ];
+
+        mockPrisma.mediaItem.findUnique.mockResolvedValue({
+          ...item,
+          mediaTags,
+        } as any);
+        mockPrisma.storageObject.findUnique.mockResolvedValue(null);
+
+        const result = await service.getMedia(item.id, 'user-1', ownPerms);
+
+        expect(result.systemTags).toEqual([]);
+        expect(result.tags).toEqual(['Sunset']);
+      });
+    });
+  });
+
   // createMedia — upload enrichment trigger (direct service call replacing event emission)
   // -------------------------------------------------------------------------
 
