@@ -46,6 +46,9 @@ const FACE_MAX_IMAGE_DIM = (): number =>
 // Max long-edge for frame thumbnail upload (fixed at 800 px like thumbnail processor)
 const FRAME_THUMB_MAX_DIM = 800;
 
+// Max long-edge for face-crop thumbnail (face-centered crop target)
+const FACE_CROP_MAX_DIM = 512;
+
 /** A detection result tagged with its source frame timestamp. */
 interface FrameDetection {
   face: DetectedFace;
@@ -261,26 +264,78 @@ export class VideoFaceDetectionHandler implements EnrichmentHandler, OnModuleIni
       for (const cluster of clusters) {
         const rep = cluster.representative;
 
-        // Downscale frame to FRAME_THUMB_MAX_DIM for thumbnail storage
+        // Build face-centered crop thumbnail; fall back to full-frame resize on any error
         let thumbBuffer: Buffer;
         try {
           const sharp = (await import('sharp')).default;
-          thumbBuffer = await sharp(rep.frameBuf)
-            .resize({
-              width: FRAME_THUMB_MAX_DIM,
-              height: FRAME_THUMB_MAX_DIM,
-              fit: 'inside',
-              withoutEnlargement: true,
-            })
-            .jpeg({ quality: 85 })
-            .toBuffer();
+          const meta = await sharp(rep.frameBuf).metadata();
+          const bb = rep.normalizedFace.boundingBox;
+
+          const frameW = meta.width ?? 0;
+          const frameH = meta.height ?? 0;
+
+          if (bb.w > 0 && bb.h > 0 && frameW > 0 && frameH > 0) {
+            // 35% padding on each side of the bounding box
+            const padX = bb.w * 0.35;
+            const padY = bb.h * 0.35;
+
+            const left   = Math.max(0, Math.min(1, bb.x - padX));
+            const top    = Math.max(0, Math.min(1, bb.y - padY));
+            const right  = Math.max(0, Math.min(1, bb.x + bb.w + padX));
+            const bottom = Math.max(0, Math.min(1, bb.y + bb.h + padY));
+
+            const cropLeft = Math.round(left   * frameW);
+            const cropTop  = Math.round(top    * frameH);
+            let   cropW    = Math.max(1, Math.round(right  * frameW) - cropLeft);
+            let   cropH    = Math.max(1, Math.round(bottom * frameH) - cropTop);
+
+            // Clamp so the crop never exceeds the frame boundary
+            cropW = Math.min(cropW, frameW - cropLeft);
+            cropH = Math.min(cropH, frameH - cropTop);
+
+            thumbBuffer = await sharp(rep.frameBuf)
+              .extract({ left: cropLeft, top: cropTop, width: cropW, height: cropH })
+              .resize({
+                width: FACE_CROP_MAX_DIM,
+                height: FACE_CROP_MAX_DIM,
+                fit: 'inside',
+                withoutEnlargement: true,
+              })
+              .jpeg({ quality: 85 })
+              .toBuffer();
+          } else {
+            // Bounding box or frame dims unavailable — fall back to full-frame resize
+            thumbBuffer = await sharp(rep.frameBuf)
+              .resize({
+                width: FRAME_THUMB_MAX_DIM,
+                height: FRAME_THUMB_MAX_DIM,
+                fit: 'inside',
+                withoutEnlargement: true,
+              })
+              .jpeg({ quality: 85 })
+              .toBuffer();
+          }
         } catch (sharpErr) {
-          // Non-fatal: store the face without a thumbnail
+          // Non-fatal: fall back to full-frame resize on any crop/processing error
           const msg = sharpErr instanceof Error ? sharpErr.message : String(sharpErr);
           this.logger.warn(
-            `VideoFaceJob ${job.id}: thumbnail downscale failed for cluster at ${rep.timestampMs}ms — ${msg}`,
+            `VideoFaceJob ${job.id}: face-crop thumbnail failed for cluster at ${rep.timestampMs}ms — ${msg}; falling back to full-frame resize`,
           );
-          thumbBuffer = rep.frameBuf;
+          try {
+            const sharp = (await import('sharp')).default;
+            thumbBuffer = await sharp(rep.frameBuf)
+              .resize({
+                width: FRAME_THUMB_MAX_DIM,
+                height: FRAME_THUMB_MAX_DIM,
+                fit: 'inside',
+                withoutEnlargement: true,
+              })
+              .jpeg({ quality: 85 })
+              .toBuffer();
+          } catch {
+            // Last-resort: store raw frame buffer without any processing
+            thumbBuffer = rep.frameBuf;
+          }
         }
 
         // Upload to active storage provider
