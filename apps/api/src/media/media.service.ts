@@ -726,7 +726,7 @@ export class MediaService {
 
     const mediaTag = await this.prisma.mediaTag.findUnique({
       where: { tagId_mediaItemId: { tagId, mediaItemId } },
-      include: { tag: { select: { isSystem: true } } },
+      include: { tag: { select: { isSystem: true, name: true } } },
     });
 
     if (!mediaTag) {
@@ -735,17 +735,29 @@ export class MediaService {
       );
     }
 
-    if (mediaTag.tag.isSystem) {
-      throw new ForbiddenException(
-        `Tag ${tagId} is a system tag and cannot be removed manually`,
-      );
-    }
+    // System tags can now be removed manually (reverse of the social gate).
+    // When a system tag is removed we also update MediaSocialStatus.detected to
+    // false for display consistency (the gate keys off tag presence, not status).
+    const wasSystemTag = mediaTag.tag.isSystem;
 
     await this.prisma.mediaTag.delete({
       where: { tagId_mediaItemId: { tagId, mediaItemId } },
     });
 
-    this.logger.log(`Removed tag ${tagId} from MediaItem ${mediaItemId}`);
+    if (wasSystemTag) {
+      // Best-effort: update the detected flag on mediaSocialStatus so the UI
+      // correctly reflects that the item is no longer considered social media.
+      try {
+        await this.prisma.mediaSocialStatus.updateMany({
+          where: { mediaItemId },
+          data: { detected: false },
+        });
+      } catch {
+        // Non-fatal — status display is informational only
+      }
+    }
+
+    this.logger.log(`Removed tag ${tagId} from MediaItem ${mediaItemId}${wasSystemTag ? ' (system tag — social gate released)' : ''}`);
   }
 
   // ---------------------------------------------------------------------------
@@ -1510,13 +1522,13 @@ export class MediaService {
       }
 
       if (dto.remove && dto.remove.length > 0) {
+        // System tags CAN be removed via bulk ops (manual override of social gate).
         const tags = await tx.tag.findMany({
           where: {
             circleId: dto.circleId,
             name: { in: dto.remove },
-            isSystem: false, // Never remove system tags via bulk ops
           },
-          select: { id: true },
+          select: { id: true, isSystem: true },
         });
         if (tags.length > 0) {
           const removeTagIds = tags.map((t) => t.id);
@@ -1524,10 +1536,23 @@ export class MediaService {
             where: {
               tagId: { in: removeTagIds },
               mediaItemId: { in: dto.ids },
-              source: { not: 'system' as const },
             },
           });
           removed = result.count;
+
+          // If any removed tags were system tags, update mediaSocialStatus.detected
+          // for display consistency (best-effort, non-fatal).
+          const hasSystemTags = tags.some((t) => t.isSystem);
+          if (hasSystemTags) {
+            try {
+              await tx.mediaSocialStatus.updateMany({
+                where: { mediaItemId: { in: dto.ids } },
+                data: { detected: false },
+              });
+            } catch {
+              // Non-fatal — status display is informational only
+            }
+          }
         }
       }
     });
