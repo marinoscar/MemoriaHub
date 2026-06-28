@@ -15,8 +15,8 @@ import { TypedEmitter, EV } from './events.js';
 import { runPool } from './worker-pool.js';
 import { enumerateFiles } from '../files.js';
 import { sha256File } from '../hash.js';
-import { uploadFile } from '../upload.js';
-import type { ApiClient } from '../api.js';
+import { uploadFile, type UploadPersistence } from '../upload.js';
+import { ApiError, type ApiClient } from '../api.js';
 import type { FolderRepo } from '../repo/folders.js';
 import type { FileRepo } from '../repo/files.js';
 import type { RunRepo } from '../repo/runs.js';
@@ -430,7 +430,48 @@ export class SyncEngine extends TypedEmitter {
           return;
         }
 
-        // --- Real upload ---
+        // --- Real upload (with durable multipart resume) ---
+        //
+        // Build a persistence adapter that reads/writes to the SQLite ledger.
+        // getResumeState() uses the currentFileRecord snapshot taken just above,
+        // which reflects whatever upload_id / upload_part_size were stored during
+        // a previous (crashed) run.  The other callbacks write synchronously so a
+        // crash between calls never loses a confirmed part.
+        const persistence: UploadPersistence = {
+          getResumeState: () => {
+            if (!currentFileRecord?.upload_id || !currentFileRecord?.upload_part_size) {
+              return null;
+            }
+            // storage_object_id must be set when upload_id is set.
+            const objId = currentFileRecord.storage_object_id;
+            if (!objId) return null;
+            return {
+              objectId: objId,
+              uploadId: currentFileRecord.upload_id,
+              partSize: currentFileRecord.upload_part_size,
+              completedParts: files.getUploadParts(fileId),
+            };
+          },
+          onInit: (objId, uploadId, uploadPartSize) => {
+            // Persist session identifiers immediately after server-side init so
+            // any crash between now and the first successful part PUT still leaves
+            // enough information for the next run to validate the session.
+            files.setStatus(fileId, 'uploading', {
+              storage_object_id: objId,
+              upload_id: uploadId,
+              upload_part_size: uploadPartSize,
+            });
+          },
+          onPartComplete: (partNumber, eTag) => {
+            files.saveUploadPart(fileId, partNumber, eTag);
+          },
+          onComplete: () => {
+            // Clear part rows and upload_id / upload_part_size.  Called both on
+            // success and when the server session was found to have expired.
+            files.clearUploadState(fileId);
+          },
+        };
+
         const uploadResult = await this.deps.uploadFn(
           api,
           filePath,
@@ -438,6 +479,7 @@ export class SyncEngine extends TypedEmitter {
           (fraction) => {
             this.emit(EV.FILE_PROGRESS, { fileId, fraction });
           },
+          persistence,
         );
         const { objectId } = uploadResult;
 
@@ -483,7 +525,16 @@ export class SyncEngine extends TypedEmitter {
 
         this._emitProgress(files, targetFolderIds, total);
       } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
+        // Give an actionable message when the token has expired mid-run so the
+        // user knows exactly what to do and the last_error is not cryptic.
+        // 401 is intentionally NOT in the retryable set; it is surfaced here as
+        // a permanent failure so the file is marked failed and the run continues.
+        let errorMsg = err instanceof Error ? err.message : String(err);
+        if (err instanceof ApiError && err.status === 401) {
+          errorMsg =
+            'Access token expired or invalid (HTTP 401). ' +
+            'Run `memoriahub login` to re-authenticate, then `memoriahub retry` to resume.';
+        }
         files.setError(fileId, errorMsg);
         files.setStatus(fileId, 'failed');
 

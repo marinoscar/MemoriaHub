@@ -96,3 +96,35 @@ export const SEED_SETTINGS_V4: Array<{ key: string; value: string }> = [
   { key: 'rate_limit_cooldown_ms',     value: JSON.stringify(2000) },
   { key: 'rate_limit_max_cooldown_ms', value: JSON.stringify(60000) },
 ];
+
+/**
+ * Migration 5: durable multipart resume.
+ *
+ * upload_id       — opaque upload-session identifier from the server's /upload/init
+ *                   response.  NULL when no upload is in progress.
+ * upload_part_size — byte length of each part, needed to slice the file correctly
+ *                   on resume.  NULL when no upload is in progress.
+ */
+export const ALTER_FILES_ADD_UPLOAD_ID = `
+ALTER TABLE files ADD COLUMN upload_id TEXT`;
+
+export const ALTER_FILES_ADD_UPLOAD_PART_SIZE = `
+ALTER TABLE files ADD COLUMN upload_part_size INTEGER`;
+
+/**
+ * Migration 5: table that records which multipart parts have been successfully
+ * PUT to storage.  Each row is written immediately after the S3/R2 PUT returns
+ * an ETag so a CLI crash leaves behind exactly the parts that were confirmed.
+ *
+ * The PRIMARY KEY (file_id, part_number) is the idempotency anchor — re-saving
+ * the same part is safe (ON CONFLICT REPLACE).  Rows are deleted when the
+ * upload completes successfully or when the server session is found to have
+ * expired (so the next attempt starts clean).
+ */
+export const CREATE_FILE_UPLOAD_PARTS = `
+CREATE TABLE IF NOT EXISTS file_upload_parts (
+  file_id      INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+  part_number  INTEGER NOT NULL,
+  etag         TEXT    NOT NULL,
+  PRIMARY KEY (file_id, part_number)
+)`;

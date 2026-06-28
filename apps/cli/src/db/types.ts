@@ -40,6 +40,17 @@ export interface FileRecord {
   mime_type: string | null;
   /** Modification time in milliseconds (Math.round of fs.stat.mtimeMs), or null if not yet recorded. */
   mtime_ms: number | null;
+  /**
+   * Active multipart upload-session ID from the server's /upload/init response.
+   * Null when no upload is in progress.  Combined with storage_object_id and
+   * upload_part_size, this is enough to resume an interrupted upload.
+   */
+  upload_id: string | null;
+  /**
+   * Byte length of each part for the current multipart upload.
+   * Null when no upload is in progress.
+   */
+  upload_part_size: number | null;
   first_seen_at: string;  // ISO 8601
   updated_at: string;     // ISO 8601
   uploaded_at: string | null;

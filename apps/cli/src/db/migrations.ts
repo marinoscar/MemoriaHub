@@ -22,6 +22,9 @@ import {
   SEED_SETTINGS_V4,
   ALTER_FILES_ADD_MTIME_MS,
   ALTER_FOLDERS_ADD_CIRCLE_ID,
+  ALTER_FILES_ADD_UPLOAD_ID,
+  ALTER_FILES_ADD_UPLOAD_PART_SIZE,
+  CREATE_FILE_UPLOAD_PARTS,
 } from './schema.js';
 
 interface Migration {
@@ -83,6 +86,23 @@ const MIGRATIONS: Migration[] = [
       for (const { key, value } of SEED_SETTINGS_V4) {
         insert.run(key, value);
       }
+    },
+  },
+  {
+    version: 5,
+    up(db: BetterSqlite3.Database): void {
+      // Add upload_id column: stores the server-issued multipart upload session
+      // identifier so the CLI can resume an interrupted upload on restart.
+      // Nullable — NULL means no upload is currently in progress.
+      db.exec(ALTER_FILES_ADD_UPLOAD_ID);
+      // Add upload_part_size column: the byte length of each part, required to
+      // slice the file correctly when re-uploading remaining parts on resume.
+      // Nullable — NULL when no upload is in progress.
+      db.exec(ALTER_FILES_ADD_UPLOAD_PART_SIZE);
+      // Create the per-part persistence table.  Each row is written immediately
+      // after a presigned PUT succeeds, so a crash leaves behind exactly the
+      // parts that were confirmed by the storage provider.
+      db.exec(CREATE_FILE_UPLOAD_PARTS);
     },
   },
 ];

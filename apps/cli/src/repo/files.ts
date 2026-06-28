@@ -25,9 +25,17 @@ interface FileRow {
   size_bytes: number | null;
   mime_type: string | null;
   mtime_ms: number | null;
+  upload_id: string | null;
+  upload_part_size: number | null;
   first_seen_at: string;
   updated_at: string;
   uploaded_at: string | null;
+}
+
+/** A completed multipart upload part as persisted in file_upload_parts. */
+export interface CompletedPart {
+  partNumber: number;
+  eTag: string;
 }
 
 function rowToFile(row: FileRow): FileRecord {
@@ -44,6 +52,8 @@ function rowToFile(row: FileRow): FileRecord {
     size_bytes: row.size_bytes,
     mime_type: row.mime_type,
     mtime_ms: row.mtime_ms ?? null,
+    upload_id: row.upload_id ?? null,
+    upload_part_size: row.upload_part_size ?? null,
     first_seen_at: row.first_seen_at,
     updated_at: row.updated_at,
     uploaded_at: row.uploaded_at,
@@ -62,6 +72,8 @@ export interface FilePatch {
   size_bytes?: number | null;
   mime_type?: string | null;
   mtime_ms?: number | null;
+  upload_id?: string | null;
+  upload_part_size?: number | null;
   uploaded_at?: string | null;
   last_error?: string | null;
   attempt_count?: number;
@@ -133,6 +145,8 @@ export class FileRepo {
       apply('size_bytes', 'size_bytes');
       apply('mime_type', 'mime_type');
       apply('mtime_ms', 'mtime_ms');
+      apply('upload_id', 'upload_id');
+      apply('upload_part_size', 'upload_part_size');
       apply('uploaded_at', 'uploaded_at');
       apply('last_error', 'last_error');
       apply('attempt_count', 'attempt_count');
@@ -179,6 +193,8 @@ export class FileRepo {
     apply('size_bytes', 'size_bytes');
     apply('mime_type', 'mime_type');
     apply('mtime_ms', 'mtime_ms');
+    apply('upload_id', 'upload_id');
+    apply('upload_part_size', 'upload_part_size');
     apply('uploaded_at', 'uploaded_at');
     apply('last_error', 'last_error');
     apply('attempt_count', 'attempt_count');
@@ -327,6 +343,10 @@ export class FileRepo {
    * Reset any files stuck in `uploading` status back to `queued`.
    * Called on startup to recover from interrupted sync sessions.
    * Optionally scoped to specific folder IDs.
+   *
+   * NOTE: This intentionally does NOT clear upload_id, upload_part_size, or
+   * file_upload_parts rows.  Those are preserved so the next run can resume
+   * the interrupted multipart upload from where it left off.
    */
   resetStaleUploading(folderIds: number[] = []): number {
     const now = new Date().toISOString();
@@ -341,5 +361,66 @@ export class FileRepo {
 
     const info = this.db.prepare(sql).run(...params);
     return info.changes;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Multipart upload part persistence
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Retrieve a single file by ID.  Returns null if not found.
+   */
+  getById(id: number): FileRecord | null {
+    const row = this.db
+      .prepare<[number], FileRow>('SELECT * FROM files WHERE id = ?')
+      .get(id);
+    return row ? rowToFile(row) : null;
+  }
+
+  /**
+   * Persist (upsert) a completed part for a file's in-progress multipart upload.
+   * Called immediately after a presigned PUT returns an ETag so that a crash
+   * leaves exactly the confirmed parts in the database.
+   */
+  saveUploadPart(fileId: number, partNumber: number, eTag: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO file_upload_parts (file_id, part_number, etag)
+         VALUES (?, ?, ?)
+         ON CONFLICT(file_id, part_number) DO UPDATE SET etag = excluded.etag`,
+      )
+      .run(fileId, partNumber, eTag);
+  }
+
+  /**
+   * Return all completed parts for a file, ordered by part number ascending.
+   * Returns an empty array when no parts have been persisted yet.
+   */
+  getUploadParts(fileId: number): CompletedPart[] {
+    const rows = this.db
+      .prepare<[number], { part_number: number; etag: string }>(
+        'SELECT part_number, etag FROM file_upload_parts WHERE file_id = ? ORDER BY part_number',
+      )
+      .all(fileId) as Array<{ part_number: number; etag: string }>;
+    return rows.map((r) => ({ partNumber: r.part_number, eTag: r.etag }));
+  }
+
+  /**
+   * Clear all in-progress multipart upload state for a file:
+   * - Deletes all rows from file_upload_parts for this file.
+   * - Sets upload_id and upload_part_size to NULL on the files row.
+   *
+   * Called when an upload completes successfully, or when the server signals
+   * that the upload session has expired (so the next attempt starts fresh).
+   */
+  clearUploadState(fileId: number): void {
+    this.db
+      .prepare('DELETE FROM file_upload_parts WHERE file_id = ?')
+      .run(fileId);
+    this.db
+      .prepare(
+        `UPDATE files SET upload_id = NULL, upload_part_size = NULL, updated_at = ? WHERE id = ?`,
+      )
+      .run(new Date().toISOString(), fileId);
   }
 }
