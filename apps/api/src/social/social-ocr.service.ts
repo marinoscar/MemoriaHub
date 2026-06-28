@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
-import * as ffmpeg from 'fluent-ffmpeg';
+import Ffmpeg from 'fluent-ffmpeg';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 
 export interface OcrOpts {
@@ -98,7 +98,7 @@ export class SocialOcrService {
 
   private extractFrame(videoPath: string, framePath: string, seekSec: number): Promise<void> {
     return new Promise((resolve, reject) => {
-      ffmpeg(videoPath)
+      Ffmpeg(videoPath)
         .seekInput(seekSec)
         .frames(1)
         .output(framePath)

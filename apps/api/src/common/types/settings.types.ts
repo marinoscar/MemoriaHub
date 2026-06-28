@@ -86,6 +86,12 @@ export interface SystemSettingsValue {
       purgeEnabled: boolean;
     };
   };
+  social?: {
+    ocr?: {
+      enabled?: boolean;
+      frameCount?: number;
+    };
+  };
 }
 
 /**
@@ -95,6 +101,7 @@ export const FEATURE_KEYS = {
   AUTO_TAGGING: 'autoTagging',
   FACE_RECOGNITION: 'faceRecognition',
   BURST_DETECTION: 'burstDetection',
+  SOCIAL_MEDIA_DETECTION: 'socialMediaDetection',
 } as const;
 
 /**
@@ -121,6 +128,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     [FEATURE_KEYS.AUTO_TAGGING]: false,
     [FEATURE_KEYS.FACE_RECOGNITION]: false,
     [FEATURE_KEYS.BURST_DETECTION]: false,
+    [FEATURE_KEYS.SOCIAL_MEDIA_DETECTION]: false,
   },
   ai: {
     features: {
@@ -157,6 +165,12 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     history: {
       retentionDays: 30,
       purgeEnabled: true,
+    },
+  },
+  social: {
+    ocr: {
+      enabled: true,
+      frameCount: 3,
     },
   },
 };

@@ -37,6 +37,7 @@ export class SocialDetectionService {
         deletedAt: true,
         type: true,
         originalFilename: true,
+        addedById: true,
         cameraMake: true,
         cameraModel: true,
         takenLat: true,
@@ -213,7 +214,7 @@ export class SocialDetectionService {
               create: {
                 circleId,
                 name: tagName,
-                addedById: null as unknown as string, // system-generated; no user context
+                addedById: mediaItem.addedById, // attribute system tags to the item's uploader
                 isSystem: true,
               },
               update: { isSystem: true },

@@ -28,6 +28,7 @@ export interface ResolvedSettings {
   burst: SystemSettingsValue['burst'];
   geo: SystemSettingsValue['geo'];
   jobs: SystemSettingsValue['jobs'];
+  social: SystemSettingsValue['social'];
   updatedAt: Date;
   updatedBy: { id: string; email: string } | null;
   version: number;
@@ -103,6 +104,7 @@ export class SystemSettingsService {
       burst: value.burst,
       geo: value.geo,
       jobs: value.jobs,
+      social: value.social,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
