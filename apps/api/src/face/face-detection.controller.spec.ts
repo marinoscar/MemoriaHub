@@ -50,11 +50,13 @@ function makeMediaItem(overrides: Partial<{
   id: string;
   circleId: string;
   deletedAt: Date | null;
+  type: MediaType;
 }> = {}) {
   return {
     id: 'media-1',
     circleId: 'circle-1',
     deletedAt: null,
+    type: MediaType.photo,
     ...overrides,
   };
 }
@@ -284,7 +286,9 @@ describe('FaceDetectionController', () => {
     });
 
     it('calls enrichmentJobService.enqueue with reason: rerun and type: face_detection', async () => {
-      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ type: MediaType.photo }),
+      );
       mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-1', status: JobStatus.pending });
       (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
 
@@ -295,6 +299,64 @@ describe('FaceDetectionController', () => {
           type: 'face_detection',
           mediaItemId: 'media-1',
           reason: JobReason.rerun,
+        }),
+      );
+    });
+
+    it('enqueues video_face_detection when mediaItem type is video', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ type: MediaType.video }),
+      );
+      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-vid-1', status: JobStatus.pending });
+      (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
+
+      const result = await controller.rerunFaceDetection('media-1', makeUser());
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'video_face_detection',
+          mediaItemId: 'media-1',
+          circleId: 'circle-1',
+          reason: JobReason.rerun,
+          priority: 0,
+        }),
+      );
+      expect(result.data.jobId).toBe('job-vid-1');
+      expect(result.data.status).toBe(JobStatus.pending);
+      expect(mockPrisma.mediaFaceStatus.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { mediaItemId: 'media-1' },
+          create: expect.objectContaining({ status: MediaFaceStatusType.pending }),
+          update: expect.objectContaining({ status: MediaFaceStatusType.pending }),
+        }),
+      );
+    });
+
+    it('enqueues face_detection when mediaItem type is photo', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ type: MediaType.photo }),
+      );
+      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-photo-1', status: JobStatus.pending });
+      (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
+
+      const result = await controller.rerunFaceDetection('media-1', makeUser());
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'face_detection',
+          mediaItemId: 'media-1',
+          circleId: 'circle-1',
+          reason: JobReason.rerun,
+          priority: 0,
+        }),
+      );
+      expect(result.data.jobId).toBe('job-photo-1');
+      expect(result.data.status).toBe(JobStatus.pending);
+      expect(mockPrisma.mediaFaceStatus.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { mediaItemId: 'media-1' },
+          create: expect.objectContaining({ status: MediaFaceStatusType.pending }),
+          update: expect.objectContaining({ status: MediaFaceStatusType.pending }),
         }),
       );
     });
