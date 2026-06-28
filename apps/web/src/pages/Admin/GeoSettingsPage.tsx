@@ -184,16 +184,28 @@ function GeoSettingsContent() {
     }
   };
 
-  const handleForwardSearchChange = (checked: boolean) => {
-    void updateSysSettings({
-      geo: {
-        forwardSearchEnabled: checked,
-      },
-    })
-      .then(() => setSuccessMessage('Forward search setting saved'))
-      .catch((err: unknown) => {
-        setLocalError(err instanceof Error ? err.message : 'Failed to save settings');
-      });
+  const handleForwardSearchChange = async (checked: boolean) => {
+    try {
+      await updateSysSettings({ geo: { forwardSearchEnabled: checked } });
+      setSuccessMessage('Forward search setting saved');
+    } catch (err) {
+      const isVersionConflict =
+        err instanceof Error &&
+        err.message === 'Settings were updated elsewhere. Please review and try again.';
+      if (isVersionConflict) {
+        // The hook already refetched the latest version after the 409, so retry once
+        // with the now-fresh If-Match value — this will succeed without prompting the user.
+        try {
+          await updateSysSettings({ geo: { forwardSearchEnabled: checked } });
+          setSuccessMessage('Forward search setting saved');
+          return;
+        } catch (retryErr) {
+          setLocalError(retryErr instanceof Error ? retryErr.message : 'Failed to save settings');
+          return;
+        }
+      }
+      setLocalError(err instanceof Error ? err.message : 'Failed to save settings');
+    }
   };
 
   if (loading && !settings) {
@@ -468,7 +480,7 @@ function GeoSettingsContent() {
             control={
               <Switch
                 checked={forwardSearchEnabled}
-                onChange={(e) => handleForwardSearchChange(e.target.checked)}
+                onChange={(e) => void handleForwardSearchChange(e.target.checked)}
                 disabled={sysSaving || !sysSettings}
               />
             }
