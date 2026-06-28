@@ -72,6 +72,13 @@ describe('JobHistoryPurgeHandler', () => {
 
     mockPrisma = createMockPrismaService();
 
+    // Each batch folds rollup upserts + the deleteMany into ONE $transaction.
+    // Execute the ops array so the handler can read the deleteMany result.
+    (mockPrisma.$transaction as jest.Mock).mockImplementation(async (ops: unknown) =>
+      Array.isArray(ops) ? Promise.all(ops) : undefined,
+    );
+    (mockPrisma.jobStatsRollup.upsert as jest.Mock).mockResolvedValue(undefined);
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         JobHistoryPurgeHandler,
@@ -256,6 +263,32 @@ describe('JobHistoryPurgeHandler', () => {
       mockPrisma.enrichmentJob.deleteMany.mockResolvedValue({ count: 1 });
 
       await expect(handler.process(makeJob())).resolves.toBeUndefined();
+    });
+
+    it('folds the batch into the lifetime rollup before deleting', async () => {
+      const started = new Date('2025-01-01T00:00:00.000Z');
+      const finished = new Date('2025-01-01T00:00:02.000Z'); // 2000ms duration
+      mockPrisma.enrichmentJob.findMany.mockResolvedValue([
+        { id: 'a', type: 'face_detection', status: JobStatus.succeeded, startedAt: started, finishedAt: finished },
+        { id: 'b', type: 'face_detection', status: JobStatus.failed, startedAt: null, finishedAt: finished },
+      ] as any);
+      mockPrisma.enrichmentJob.deleteMany.mockResolvedValue({ count: 2 });
+
+      await handler.process(makeJob());
+
+      expect(mockPrisma.jobStatsRollup.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { type: 'face_detection' },
+          update: expect.objectContaining({
+            succeededCount: { increment: 1 },
+            failedCount: { increment: 1 },
+            sumDurationMs: { increment: 2000 },
+            durationSamples: { increment: 1 },
+          }),
+        }),
+      );
+      // Rollup upsert + delete run inside a single transaction
+      expect(mockPrisma.$transaction).toHaveBeenCalled();
     });
 
     it('propagates errors thrown by deleteMany', async () => {

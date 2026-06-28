@@ -21,6 +21,14 @@ interface UnknownFacesReviewProps {
   onRename: (personId: string, name: string) => Promise<void>;
   canCluster: boolean;   // true if user has collaborator+ role in the circle
   loading?: boolean;
+  /** Called when the hide icon is clicked on a person card */
+  onHide?: (person: PersonListItem) => void;
+  /** Whether selection mode is active (from parent) */
+  selectionMode?: boolean;
+  /** Currently selected IDs (from parent) */
+  selectedIds?: Set<string>;
+  /** Toggle selection of a person */
+  onToggleSelect?: (person: PersonListItem) => void;
 }
 
 export function UnknownFacesReview({
@@ -29,6 +37,10 @@ export function UnknownFacesReview({
   onCluster,
   canCluster,
   loading,
+  onHide,
+  selectionMode,
+  selectedIds,
+  onToggleSelect,
 }: UnknownFacesReviewProps) {
   const [clusterLoading, setClusterLoading] = useState(false);
   const [clusterResult, setClusterResult] = useState<ClusterResult | null>(null);
@@ -94,6 +106,10 @@ export function UnknownFacesReview({
           onPersonClick={onPersonClick}
           loading={loading}
           emptyMessage="No unknown clusters"
+          onHide={onHide}
+          selectionMode={selectionMode}
+          selectedIds={selectedIds}
+          onToggleSelect={onToggleSelect}
         />
       )}
     </Paper>

@@ -13,6 +13,7 @@ import { FaceClusteringService } from './face-clustering.service';
 import { FaceMatchingService } from './face-matching.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 // ---------------------------------------------------------------------------
@@ -69,6 +70,7 @@ describe('PeopleService', () => {
   let mockMatchingService: { computePersonCentroid: jest.Mock };
   let mockEnrichmentJobService: { enqueue: jest.Mock };
   let mockSystemSettings: { isFeatureEnabled: jest.Mock };
+  let mockMediaThumbnailService: { signThumb: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -87,6 +89,9 @@ describe('PeopleService', () => {
     mockSystemSettings = {
       isFeatureEnabled: jest.fn().mockResolvedValue(true),
     };
+    mockMediaThumbnailService = {
+      signThumb: jest.fn().mockResolvedValue(null),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -97,6 +102,7 @@ describe('PeopleService', () => {
         { provide: FaceMatchingService, useValue: mockMatchingService },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: MediaThumbnailService, useValue: mockMediaThumbnailService },
       ],
     }).compile();
 
@@ -1106,6 +1112,7 @@ describe('PeopleService', () => {
         faceId: 'cover-face-id',
         mediaItemId: MEDIA_ID,
         boundingBox: coverFace.boundingBox,
+        faceThumbnailUrl: null,
       });
     });
 
@@ -1132,6 +1139,7 @@ describe('PeopleService', () => {
         faceId: 'fallback-face',
         mediaItemId: MEDIA_ID,
         boundingBox: fallbackFace.boundingBox,
+        faceThumbnailUrl: null,
       });
     });
 
@@ -1200,6 +1208,7 @@ describe('PeopleService', () => {
         faceId: 'cover-face-id',
         mediaItemId: MEDIA_ID,
         boundingBox: coverFace.boundingBox,
+        faceThumbnailUrl: null,
       });
     });
 
@@ -2106,6 +2115,329 @@ describe('PeopleService', () => {
       setupDeleteMany(2);
 
       const result = await service.removePersonFromMedia(MEDIA_ID, PERSON_ID, USER_ID, PERMS);
+
+      expect(result).toEqual({ deleted: 2 });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // listPeople — hidden flag
+  // -------------------------------------------------------------------------
+
+  describe('listPeople — hidden flag', () => {
+    it('applies hiddenAt: null filter when hidden is false (default)', async () => {
+      (mockPrisma.person.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.person.count as jest.Mock).mockResolvedValue(0);
+
+      await service.listPeople(
+        { circleId: CIRCLE_ID, includeUnlabeled: false, hidden: false, page: 1, pageSize: 20 } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      const findManyCall = (mockPrisma.person.findMany as jest.Mock).mock.calls[0][0];
+      expect(findManyCall.where).toMatchObject({ hiddenAt: null });
+      expect(findManyCall.where.hiddenAt).toBeNull();
+    });
+
+    it('applies hiddenAt: { not: null } filter when hidden is true', async () => {
+      (mockPrisma.person.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.person.count as jest.Mock).mockResolvedValue(0);
+
+      await service.listPeople(
+        { circleId: CIRCLE_ID, includeUnlabeled: false, hidden: true, page: 1, pageSize: 20 } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      const findManyCall = (mockPrisma.person.findMany as jest.Mock).mock.calls[0][0];
+      expect(findManyCall.where.hiddenAt).toEqual({ not: null });
+    });
+
+    it('response items include hiddenAt field', async () => {
+      const hiddenAt = new Date();
+      const person = makePerson({
+        hiddenAt,
+        _count: { faces: 1 },
+        coverFace: null,
+        faces: [],
+        profileMediaItemId: null,
+        profileCrop: null,
+        favorite: false,
+      });
+      (mockPrisma.person.findMany as jest.Mock).mockResolvedValue([person]);
+      (mockPrisma.person.count as jest.Mock).mockResolvedValue(1);
+
+      const result = await service.listPeople(
+        { circleId: CIRCLE_ID, includeUnlabeled: false, hidden: true, page: 1, pageSize: 20 } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      expect(result.items[0].hiddenAt).toEqual(hiddenAt);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // hidePeople
+  // -------------------------------------------------------------------------
+
+  describe('hidePeople', () => {
+    const dto = { circleId: CIRCLE_ID, ids: [PERSON_ID] } as any;
+
+    beforeEach(() => {
+      (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({ id: 'audit-1' });
+    });
+
+    it('calls assertCircleAccess with collaborator role', async () => {
+      (mockPrisma.person.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+      await service.hidePeople(dto, USER_ID, PERMS);
+
+      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+        USER_ID,
+        CIRCLE_ID,
+        PERMS,
+        'collaborator',
+      );
+    });
+
+    it('calls person.updateMany with hiddenAt set and correct where clause', async () => {
+      (mockPrisma.person.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+      await service.hidePeople(dto, USER_ID, PERMS);
+
+      const call = (mockPrisma.person.updateMany as jest.Mock).mock.calls[0][0];
+      expect(call.where).toMatchObject({
+        id: { in: [PERSON_ID] },
+        circleId: CIRCLE_ID,
+        deletedAt: null,
+        hiddenAt: null,
+      });
+      expect(call.data.hiddenAt).toBeInstanceOf(Date);
+    });
+
+    it('where clause includes deletedAt: null and hiddenAt: null', async () => {
+      (mockPrisma.person.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+      await service.hidePeople(dto, USER_ID, PERMS);
+
+      const call = (mockPrisma.person.updateMany as jest.Mock).mock.calls[0][0];
+      expect(call.where.deletedAt).toBeNull();
+      expect(call.where.hiddenAt).toBeNull();
+    });
+
+    it('returns { hidden: count }', async () => {
+      (mockPrisma.person.updateMany as jest.Mock).mockResolvedValue({ count: 3 });
+
+      const result = await service.hidePeople(dto, USER_ID, PERMS);
+
+      expect(result).toEqual({ hidden: 3 });
+    });
+
+    it('scopes update to the provided circleId only', async () => {
+      (mockPrisma.person.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+      await service.hidePeople({ circleId: CIRCLE_ID, ids: ['p1', 'p2'] } as any, USER_ID, PERMS);
+
+      const call = (mockPrisma.person.updateMany as jest.Mock).mock.calls[0][0];
+      expect(call.where.circleId).toBe(CIRCLE_ID);
+      expect(call.where.id).toEqual({ in: ['p1', 'p2'] });
+    });
+
+    it('writes a person:hide audit event with correct fields', async () => {
+      (mockPrisma.person.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+
+      await service.hidePeople(dto, USER_ID, PERMS);
+
+      expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            actorUserId: USER_ID,
+            action: 'person:hide',
+            targetType: 'person',
+            targetId: PERSON_ID,
+            meta: expect.objectContaining({ circleId: CIRCLE_ID, ids: [PERSON_ID], count: 2 }),
+          }),
+        }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // unhidePeople
+  // -------------------------------------------------------------------------
+
+  describe('unhidePeople', () => {
+    const dto = { circleId: CIRCLE_ID, ids: [PERSON_ID] } as any;
+
+    beforeEach(() => {
+      (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({ id: 'audit-1' });
+    });
+
+    it('calls assertCircleAccess with collaborator role', async () => {
+      (mockPrisma.person.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+      await service.unhidePeople(dto, USER_ID, PERMS);
+
+      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+        USER_ID,
+        CIRCLE_ID,
+        PERMS,
+        'collaborator',
+      );
+    });
+
+    it('calls person.updateMany clearing hiddenAt with hiddenAt: { not: null } filter', async () => {
+      (mockPrisma.person.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+
+      await service.unhidePeople(dto, USER_ID, PERMS);
+
+      const call = (mockPrisma.person.updateMany as jest.Mock).mock.calls[0][0];
+      expect(call.where).toMatchObject({
+        id: { in: [PERSON_ID] },
+        circleId: CIRCLE_ID,
+        deletedAt: null,
+        hiddenAt: { not: null },
+      });
+      expect(call.data.hiddenAt).toBeNull();
+    });
+
+    it('returns { unhidden: count }', async () => {
+      (mockPrisma.person.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+
+      const result = await service.unhidePeople(dto, USER_ID, PERMS);
+
+      expect(result).toEqual({ unhidden: 2 });
+    });
+
+    it('writes a person:unhide audit event with correct fields', async () => {
+      (mockPrisma.person.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+
+      await service.unhidePeople(dto, USER_ID, PERMS);
+
+      expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            actorUserId: USER_ID,
+            action: 'person:unhide',
+            targetType: 'person',
+            targetId: PERSON_ID,
+            meta: expect.objectContaining({ circleId: CIRCLE_ID, ids: [PERSON_ID], count: 2 }),
+          }),
+        }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // purgePeople
+  // -------------------------------------------------------------------------
+
+  describe('purgePeople', () => {
+    const dto = { circleId: CIRCLE_ID, ids: [PERSON_ID] } as any;
+
+    function setupPurgeMocks(deletedCount = 1, affectedFaces: any[] = []) {
+      // face.findMany for affected media items lookup
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue(affectedFaces);
+      // $transaction runs the callback immediately (mockPrismaTransaction pattern)
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb: any) => {
+        return cb(mockPrisma);
+      });
+      (mockPrisma.face.deleteMany as jest.Mock).mockResolvedValue({ count: affectedFaces.length });
+      (mockPrisma.person.deleteMany as jest.Mock).mockResolvedValue({ count: deletedCount });
+      (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({ id: 'audit-1' });
+    }
+
+    it('calls assertCircleAccess with collaborator role', async () => {
+      setupPurgeMocks();
+
+      await service.purgePeople(dto, USER_ID, PERMS);
+
+      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+        USER_ID,
+        CIRCLE_ID,
+        PERMS,
+        'collaborator',
+      );
+    });
+
+    it('deletes Face rows for the person ids first (face.deleteMany inside transaction)', async () => {
+      setupPurgeMocks();
+
+      await service.purgePeople(dto, USER_ID, PERMS);
+
+      expect(mockPrisma.face.deleteMany).toHaveBeenCalledWith({
+        where: { personId: { in: [PERSON_ID] }, circleId: CIRCLE_ID },
+      });
+    });
+
+    it('hard-deletes Person rows (person.deleteMany inside transaction)', async () => {
+      setupPurgeMocks();
+
+      await service.purgePeople(dto, USER_ID, PERMS);
+
+      expect(mockPrisma.person.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: [PERSON_ID] }, circleId: CIRCLE_ID },
+      });
+    });
+
+    it('writes a person:purge audit event inside the transaction', async () => {
+      setupPurgeMocks();
+
+      await service.purgePeople(dto, USER_ID, PERMS);
+
+      expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            action: 'person:purge',
+            actorUserId: USER_ID,
+          }),
+        }),
+      );
+    });
+
+    it('does NOT call mediaItem.deleteMany (photos are preserved)', async () => {
+      setupPurgeMocks();
+
+      await service.purgePeople(dto, USER_ID, PERMS);
+
+      expect(mockPrisma.mediaItem.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('re-enqueues auto_tagging for affected media items after purge', async () => {
+      mockSystemSettings.isFeatureEnabled.mockResolvedValue(true);
+      setupPurgeMocks(1, [
+        {
+          mediaItemId: MEDIA_ID,
+          mediaItem: { circleId: CIRCLE_ID },
+        },
+      ]);
+
+      await service.purgePeople(dto, USER_ID, PERMS);
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'auto_tagging',
+          mediaItemId: MEDIA_ID,
+          circleId: CIRCLE_ID,
+        }),
+      );
+    });
+
+    it('does not enqueue auto_tagging when there are no affected media items', async () => {
+      mockSystemSettings.isFeatureEnabled.mockResolvedValue(true);
+      setupPurgeMocks(1, []);
+
+      await service.purgePeople(dto, USER_ID, PERMS);
+
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('returns { deleted: count }', async () => {
+      setupPurgeMocks(2);
+
+      const result = await service.purgePeople(dto, USER_ID, PERMS);
 
       expect(result).toEqual({ deleted: 2 });
     });

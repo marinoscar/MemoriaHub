@@ -26,6 +26,9 @@ import {
   Timeline,
   QueryStats,
   PlayCircleOutlined,
+  Inventory2Outlined,
+  CheckCircleOutlined,
+  HistoryToggleOff,
 } from '@mui/icons-material';
 import { Navigate, Link as RouterLink } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -39,7 +42,9 @@ import type {
   JobInsightsLiveByType,
   JobInsightsHistoryByType,
   JobInsightsEtaPerType,
+  JobLifetimeByType,
 } from '../../services/jobInsights';
+import { formatCompactNumber } from '../../utils/formatBytes';
 
 // ---------------------------------------------------------------------------
 // Color palette for proportion bar segments
@@ -67,23 +72,27 @@ interface PerTypeRow {
   p95Ms: number | null;
   throughputPerMin: number | null;
   etcMs: number | null;
+  lifetimeTotal: number;
 }
 
 function buildPerTypeRows(
   liveByType: JobInsightsLiveByType[],
   historyByType: JobInsightsHistoryByType[],
   etaPerType: JobInsightsEtaPerType[],
+  lifetimeByType: JobLifetimeByType[],
 ): PerTypeRow[] {
   // Build a map of all types
   const allTypes = new Set<string>();
   liveByType.forEach((r) => allTypes.add(r.type));
   historyByType.forEach((r) => allTypes.add(r.type));
   etaPerType.forEach((r) => allTypes.add(r.type));
+  lifetimeByType.forEach((r) => allTypes.add(r.type));
 
   const rows: PerTypeRow[] = Array.from(allTypes).map((type) => {
     const live = liveByType.find((r) => r.type === type);
     const hist = historyByType.find((r) => r.type === type);
     const eta = etaPerType.find((r) => r.type === type);
+    const life = lifetimeByType.find((r) => r.type === type);
 
     const queued = (live?.pending ?? 0) + (live?.running ?? 0);
 
@@ -94,6 +103,7 @@ function buildPerTypeRows(
       p95Ms: hist?.p95Ms ?? null,
       throughputPerMin: hist?.throughputPerMin ?? null,
       etcMs: eta?.etcMs ?? null,
+      lifetimeTotal: life?.total ?? 0,
     };
   });
 
@@ -129,6 +139,7 @@ function JobInsightsPageContent() {
           data.live.byType,
           data.history.byType,
           data.eta.perType,
+          data.lifetime.byType,
         )
       : [];
 
@@ -342,12 +353,13 @@ function JobInsightsPageContent() {
                         <TableCell align="right">p95</TableCell>
                         <TableCell align="right">Throughput</TableCell>
                         <TableCell align="right">ETC</TableCell>
+                        <TableCell align="right">All-time</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
                       {perTypeRows.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={6} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+                          <TableCell colSpan={7} align="center" sx={{ py: 3, color: 'text.secondary' }}>
                             No per-type data available
                           </TableCell>
                         </TableRow>
@@ -386,6 +398,11 @@ function JobInsightsPageContent() {
                                 {formatDuration(row.etcMs)}
                               </Typography>
                             </TableCell>
+                            <TableCell align="right">
+                              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                                {row.lifetimeTotal > 0 ? formatCompactNumber(row.lifetimeTotal) : '—'}
+                              </Typography>
+                            </TableCell>
                           </TableRow>
                         ))
                       )}
@@ -404,6 +421,52 @@ function JobInsightsPageContent() {
                 )}
               </CardContent>
             </Card>
+
+            {/* Tier 4 — Lifetime totals (survive history purging) */}
+            <Box>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 0.5 }}>
+                Lifetime totals
+              </Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+                All-time counts and average duration, preserved across job history purges.
+              </Typography>
+              <Grid container spacing={3}>
+                <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+                  <KpiCard
+                    label="Total processed"
+                    value={formatCompactNumber(data.lifetime.overall.total)}
+                    subLabel="all-time, succeeded + failed"
+                    icon={<Inventory2Outlined />}
+                    accentColor="#3b82f6"
+                  />
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+                  <KpiCard
+                    label="Succeeded (all-time)"
+                    value={formatCompactNumber(data.lifetime.overall.succeeded)}
+                    icon={<CheckCircleOutlined />}
+                    accentColor="#10b981"
+                  />
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+                  <KpiCard
+                    label="Failed (all-time)"
+                    value={formatCompactNumber(data.lifetime.overall.failed)}
+                    icon={<ErrorOutlined />}
+                    accentColor={theme.palette.error.main}
+                  />
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+                  <KpiCard
+                    label="Avg duration (all-time)"
+                    value={formatDuration(data.lifetime.overall.avgMs)}
+                    subLabel={`over ${formatCompactNumber(data.lifetime.overall.samples)} samples`}
+                    icon={<HistoryToggleOff />}
+                    accentColor="#8b5cf6"
+                  />
+                </Grid>
+              </Grid>
+            </Box>
           </Box>
         )}
       </Box>

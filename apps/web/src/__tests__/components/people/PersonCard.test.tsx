@@ -149,3 +149,168 @@ describe('PersonCard', () => {
     expect(handleClick).toHaveBeenCalledWith(person);
   });
 });
+
+describe('PersonCard — hide/unhide buttons', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows "Hide person" button when onHide prop is provided', () => {
+    render(<PersonCard person={makePerson()} onClick={vi.fn()} onHide={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: /hide person/i })).toBeInTheDocument();
+  });
+
+  it('does NOT show "Hide person" button when onHide is not provided', () => {
+    render(<PersonCard person={makePerson()} onClick={vi.fn()} />);
+
+    expect(screen.queryByRole('button', { name: /hide person/i })).not.toBeInTheDocument();
+  });
+
+  it('calls onHide with the person when hide button is clicked', () => {
+    const person = makePerson();
+    const handleHide = vi.fn();
+
+    render(<PersonCard person={person} onClick={vi.fn()} onHide={handleHide} />);
+    fireEvent.click(screen.getByRole('button', { name: /hide person/i }));
+
+    expect(handleHide).toHaveBeenCalledWith(person);
+  });
+
+  it('does not call onClick when hide button is clicked (stops propagation)', () => {
+    const handleClick = vi.fn();
+    const handleHide = vi.fn();
+
+    render(<PersonCard person={makePerson()} onClick={handleClick} onHide={handleHide} />);
+    fireEvent.click(screen.getByRole('button', { name: /hide person/i }));
+
+    expect(handleClick).not.toHaveBeenCalled();
+  });
+
+  it('shows "Unhide person" button when onUnhide prop is provided', () => {
+    render(<PersonCard person={makePerson()} onClick={vi.fn()} onUnhide={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: /unhide person/i })).toBeInTheDocument();
+  });
+
+  it('calls onUnhide with the person when unhide button is clicked', () => {
+    const person = makePerson();
+    const handleUnhide = vi.fn();
+
+    render(<PersonCard person={person} onClick={vi.fn()} onUnhide={handleUnhide} />);
+    fireEvent.click(screen.getByRole('button', { name: /unhide person/i }));
+
+    expect(handleUnhide).toHaveBeenCalledWith(person);
+  });
+
+  it('does not show hide button when onUnhide is provided instead', () => {
+    render(<PersonCard person={makePerson()} onClick={vi.fn()} onUnhide={vi.fn()} />);
+
+    // The hide button has aria-label "Hide person" (not "Unhide person")
+    // Use exact string to avoid matching "Unhide person"
+    expect(screen.queryByRole('button', { name: 'Hide person' })).not.toBeInTheDocument();
+  });
+
+  it('does not show hide button when selectionMode is true', () => {
+    render(
+      <PersonCard
+        person={makePerson()}
+        onClick={vi.fn()}
+        onHide={vi.fn()}
+        selectionMode={true}
+        onToggleSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /hide person/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('PersonCard — selection mode', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows checkbox when selectionMode is true', () => {
+    render(
+      <PersonCard
+        person={makePerson()}
+        onClick={vi.fn()}
+        selectionMode={true}
+        selected={false}
+        onToggleSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('checkbox')).toBeInTheDocument();
+  });
+
+  it('checkbox is checked when selected is true', () => {
+    render(
+      <PersonCard
+        person={makePerson()}
+        onClick={vi.fn()}
+        selectionMode={true}
+        selected={true}
+        onToggleSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('checkbox')).toBeChecked();
+  });
+
+  it('checkbox is unchecked when selected is false', () => {
+    render(
+      <PersonCard
+        person={makePerson()}
+        onClick={vi.fn()}
+        selectionMode={true}
+        selected={false}
+        onToggleSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('checkbox')).not.toBeChecked();
+  });
+
+  it('calls onToggleSelect when checkbox changes', () => {
+    const person = makePerson();
+    const handleToggle = vi.fn();
+
+    render(
+      <PersonCard
+        person={person}
+        onClick={vi.fn()}
+        selectionMode={true}
+        selected={false}
+        onToggleSelect={handleToggle}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('checkbox'));
+    // Note: checkbox's own click fires onToggleSelect via onChange
+    expect(handleToggle).toHaveBeenCalled();
+  });
+
+  it('calls onToggleSelect (not onClick) when card area clicked in selectionMode', () => {
+    const person = makePerson();
+    const handleClick = vi.fn();
+    const handleToggle = vi.fn();
+
+    render(
+      <PersonCard
+        person={person}
+        onClick={handleClick}
+        selectionMode={true}
+        selected={false}
+        onToggleSelect={handleToggle}
+      />,
+    );
+
+    // Click the person name text (inside the CardActionArea)
+    fireEvent.click(screen.getByText('Alice'));
+
+    expect(handleToggle).toHaveBeenCalledWith(person);
+    expect(handleClick).not.toHaveBeenCalled();
+  });
+});

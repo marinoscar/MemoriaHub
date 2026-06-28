@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 3.2 |
+| **Version** | 3.4 |
 | **Last Updated** | June 2026 |
 | **Status** | All phases implemented |
 
@@ -17,7 +17,7 @@
 5. [Detection Pipeline Step by Step](#5-detection-pipeline-step-by-step)
 6. [Video Face Detection](#6-video-face-detection)
 7. [Recognition: Embeddings, Matching, and Clustering](#7-recognition-embeddings-matching-and-clustering)
-8. [People, Labeling, and Merge](#8-people-labeling-and-merge) (includes Manual People Association)
+8. [People, Labeling, and Merge](#8-people-labeling-and-merge) (includes Manual People Association, Hide, and Purge)
 9. [Image Quality and Resolution](#9-image-quality-and-resolution)
 10. [EXIF Orientation](#10-exif-orientation)
 11. [Global Feature Toggle and Biometric Privacy](#11-global-feature-toggle-and-biometric-privacy)
@@ -514,6 +514,63 @@ Using the existing `Face` model means all downstream features work unchanged: `G
 | `POST` | `/api/media/:id/people` | `media:write` | collaborator | Associate a person; body `{ personId }` or `{ name }` (exactly one); idempotent; returns `{ personId, personName, faceId, mediaItemId }` |
 | `DELETE` | `/api/media/:id/people/:personId` | `media:write` | collaborator | Remove the manual association; 404 if no manual face for that person; 204 No Content |
 
+### Hide and Purge
+
+Two independent actions let users manage unwanted people or clusters without affecting photo visibility.
+
+#### Hide (reversible)
+
+`PATCH /api/people/bulk/hide` body `{ circleId, ids[] }` (1–500, `collaborator` role):
+
+Sets `Person.hiddenAt = now()` on each named person or unnamed cluster in the list. Hidden persons:
+
+- Are excluded from the People page grid and the Unknown Faces review queue.
+- Are **not** deleted. Their `Face` rows and embeddings are preserved; new detections can still match to them.
+- Their media items remain fully visible in browse, albums, search, and all `?personId=` filters — hide is a UI-surface filter only, not a data erasure.
+- Are retrievable via `GET /api/people?circleId=...&hidden=true` (returns only hidden persons; response items include `hiddenAt`). The default list — `GET /api/people?circleId=...` — excludes hidden persons.
+
+`PATCH /api/people/bulk/unhide` body `{ circleId, ids[] }` (1–500, `collaborator` role) clears `hiddenAt`, restoring the person to the normal People UI surfaces.
+
+`hiddenAt` is independent of `deletedAt`. A person can be hidden without being deleted; the two states do not interact.
+
+#### Purge (permanent)
+
+`POST /api/people/bulk/purge` body `{ circleId, ids[] }` (1–500, `media:delete` + `collaborator` role):
+
+Hard-deletes the Person row and all of its associated `Face` rows in a single transaction. This reclaims embedding storage and permanently removes biometric associations. After purge:
+
+- The person no longer appears in any query.
+- Faces that were assigned to the person are gone; the affected media items have no face rows for that individual.
+- An `auto_tagging` enrichment job is re-enqueued at priority 0 for each affected media item so descriptions and embeddings refresh without the purged person's context.
+- An audit event `person:purge` is written with the acting user, target person ID, and affected media item count.
+
+**Photos and media items are never deleted by purge.** Only the `Person` record and its `Face` rows are removed.
+
+#### Comparison
+
+| Action | `hiddenAt` | `Face` rows | Media visible | Reversible | Permission |
+|--------|-----------|-------------|---------------|------------|------------|
+| Hide | set | preserved | yes | yes (unhide) | `media:write` + collaborator |
+| Soft-delete | — | freed to unknown pool | yes | no (currently) | `media:write` + collaborator |
+| Purge | — | hard-deleted | yes | no | `media:delete` + collaborator |
+
+#### Audit Events
+
+| Event | Trigger |
+|-------|---------|
+| `person:hide` | `PATCH /api/people/bulk/hide` |
+| `person:unhide` | `PATCH /api/people/bulk/unhide` |
+| `person:purge` | `POST /api/people/bulk/purge` |
+
+#### Frontend Integration
+
+The People page (`/people`) gains two tabs:
+
+- **People** — existing named persons and clusters (hidden persons excluded).
+- **Hidden** — persons with `hiddenAt IS NOT NULL`; shows a count badge. Each card has an unhide action and a permanent-delete confirm dialog that calls `POST /api/people/bulk/purge`.
+
+In the default People tab, each named person card and each unknown cluster card shows a hide action (eye-off icon). A selection-mode bulk toolbar exposes hide for multiple selected persons in one call.
+
 ---
 
 ## 9. Image Quality and Resolution
@@ -602,6 +659,9 @@ This action is irreversible. Face embeddings are biometric data; operators shoul
 |-------|---------|
 | `person:merge` | `POST /api/people/merge` |
 | `person:delete` | `DELETE /api/people/:id` |
+| `person:hide` | `PATCH /api/people/bulk/hide` |
+| `person:unhide` | `PATCH /api/people/bulk/unhide` |
+| `person:purge` | `POST /api/people/bulk/purge` |
 | `face:biometrics_delete` | `DELETE /api/face/biometrics` |
 
 All events are written to the `audit_events` table with `actorUserId`, `action`, `targetType`, `targetId`, and `meta` (JSONB).
@@ -650,6 +710,9 @@ Per-circle identity records.
 | `createdAt` | DateTime | |
 | `updatedAt` | DateTime | |
 | `deletedAt` | DateTime? | Soft-delete timestamp |
+| `hiddenAt` | DateTime? | Hide timestamp (migration `20260628000000_person_hidden_at`); non-null = hidden from People UI surfaces; null = visible; independent of `deletedAt` |
+
+Active persons are those with `deletedAt=null` and `mergedIntoId=null`. Hidden persons additionally have `hiddenAt IS NOT NULL`; they remain active (their faces match and their media is reachable) but are excluded from the default People page listing and Unknown Faces review queue.
 
 ### face_provider_credentials
 
@@ -753,6 +816,10 @@ The per-circle `faceRecognitionEnabled` column was dropped from the `circles` ta
 | `POST` | `/api/people/cluster` | `media:write` | circle_admin | Cluster unknown faces; requires global feature enabled |
 | `POST` | `/api/people/merge` | `media:write` | collaborator | Merge source into target person |
 | `DELETE` | `/api/people/:id` | `media:write` | collaborator | Soft-delete person; faces return to unknown pool |
+| `PATCH` | `/api/people/bulk/hide` | `media:write` | collaborator | Hide 1–500 persons/clusters from People UI surfaces; sets `hiddenAt`; does not touch faces or media; body `{ circleId, ids[] }`; returns `{ hidden: number }` |
+| `PATCH` | `/api/people/bulk/unhide` | `media:write` | collaborator | Unhide 1–500 persons; clears `hiddenAt`; body `{ circleId, ids[] }`; returns `{ unhidden: number }` |
+| `POST` | `/api/people/bulk/purge` | `media:delete` | collaborator | Permanently hard-delete 1–500 Person + Face rows; re-enqueues `auto_tagging` for affected media; body `{ circleId, ids[] }`; returns `{ deleted: number }` |
+| `GET` | `/api/people?hidden=true` | `media:read` | viewer | List ONLY hidden persons in a circle; response items include `hiddenAt`; default list excludes hidden persons |
 
 ### Media Filter
 
@@ -891,3 +958,4 @@ A job stuck in `running` status indicates the worker crashed or the container re
 | 3.1 | June 2026 | AI Assistant | Added Manual People Association subsection (§7) and `noFaces` filter documentation (§12) |
 | 3.2 | June 2026 | AI Assistant | Per-circle opt-in removed — face recognition is now a global system setting (`features.faceRecognition`); per-circle backfill replaced by global admin endpoint; circle face-settings endpoints removed; biometrics erase no longer clears per-circle flag |
 | 3.3 | June 2026 | AI Assistant | Added §6 Video Face Detection: `video_face_detection` job type, `VideoFrameExtractionService` frame-sampling algorithm, cross-frame dedup, `face.video.*` settings, enqueue routing table, new `Face` columns (`videoTimestampMs`, `videoTimestamps`, `frameThumbnailKey`), `faceThumbnailUrl` in faces API, and known signing limitation on multi-provider setups |
+| 3.4 | June 2026 | AI Assistant | Added Hide/Purge subsection in §8: `Person.hiddenAt` column (migration `20260628000000_person_hidden_at`), bulk hide/unhide/purge endpoints, search-inclusion asymmetry, audit events, and frontend People/Hidden tab integration |

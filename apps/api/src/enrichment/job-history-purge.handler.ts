@@ -7,6 +7,10 @@
 // finishedAt is older than the configured jobs.history.retentionDays. Pending
 // and running jobs are never touched.
 //
+// Before deleting each batch, the rows are folded into the JobStatsRollup table
+// (per-type lifetime counts + total duration) in the SAME transaction as the
+// delete, so all-time analytics survive the purge with no double-count or loss.
+//
 // Deletes in bounded batches so each DELETE statement stays short and never
 // holds locks long enough to stall the worker's row claims. Runs via the shared
 // enrichment worker queue (retries, visibility in /admin/jobs, and the dedup
@@ -63,28 +67,102 @@ export class JobHistoryPurgeHandler implements EnrichmentHandler, OnModuleInit {
       finishedAt: { not: null, lt: cutoff },
     };
 
-    // Lock-safe batched delete: select a bounded set of ids, delete them, repeat
-    // until nothing matches. Keeps each statement short so it never stalls the
-    // worker's claim transaction.
+    // Lock-safe batched delete: select a bounded set of rows, fold them into the
+    // lifetime rollup, delete them — repeat until nothing matches. Each batch's
+    // rollup upserts + delete run in ONE transaction so a crash can never delete
+    // a row without counting it (or count it without deleting it).
     let totalDeleted = 0;
     for (;;) {
       const batch = await this.prisma.enrichmentJob.findMany({
         where,
-        select: { id: true },
+        select: { id: true, type: true, status: true, startedAt: true, finishedAt: true },
         take: BATCH_SIZE,
       });
 
       if (batch.length === 0) break;
 
+      const deltas = this.aggregateBatch(batch);
       const ids = batch.map((b) => b.id);
-      const result = await this.prisma.enrichmentJob.deleteMany({
-        where: { id: { in: ids } },
-      });
-      totalDeleted += result.count;
+
+      const ops: Prisma.PrismaPromise<unknown>[] = [];
+      for (const d of deltas.values()) {
+        ops.push(
+          this.prisma.jobStatsRollup.upsert({
+            where: { type: d.type },
+            create: {
+              type: d.type,
+              succeededCount: d.succeeded,
+              failedCount: d.failed,
+              sumDurationMs: d.sumDurationMs,
+              durationSamples: d.durationSamples,
+            },
+            update: {
+              succeededCount: { increment: d.succeeded },
+              failedCount: { increment: d.failed },
+              sumDurationMs: { increment: d.sumDurationMs },
+              durationSamples: { increment: d.durationSamples },
+            },
+          }),
+        );
+      }
+      ops.push(this.prisma.enrichmentJob.deleteMany({ where: { id: { in: ids } } }));
+
+      const results = await this.prisma.$transaction(ops);
+      // Last op is the deleteMany — its count is { count: number }.
+      const deleteResult = results[results.length - 1] as { count: number };
+      totalDeleted += deleteResult.count;
 
       if (batch.length < BATCH_SIZE) break;
     }
 
-    this.logger.log(`job_history_purge: deleted ${totalDeleted} terminal job rows past cutoff`);
+    this.logger.log(
+      `job_history_purge: rolled up + deleted ${totalDeleted} terminal job rows past cutoff`,
+    );
+  }
+
+  /**
+   * Aggregate a batch of soon-to-be-deleted rows into per-type lifetime deltas.
+   * Duration (ms) is summed only for succeeded rows that have both timestamps.
+   */
+  private aggregateBatch(
+    rows: Array<{
+      type: string;
+      status: JobStatus;
+      startedAt: Date | null;
+      finishedAt: Date | null;
+    }>,
+  ): Map<string, {
+    type: string;
+    succeeded: number;
+    failed: number;
+    sumDurationMs: number;
+    durationSamples: number;
+  }> {
+    const map = new Map<
+      string,
+      { type: string; succeeded: number; failed: number; sumDurationMs: number; durationSamples: number }
+    >();
+
+    for (const r of rows) {
+      let d = map.get(r.type);
+      if (!d) {
+        d = { type: r.type, succeeded: 0, failed: 0, sumDurationMs: 0, durationSamples: 0 };
+        map.set(r.type, d);
+      }
+      if (r.status === JobStatus.succeeded) {
+        d.succeeded += 1;
+        if (r.startedAt && r.finishedAt) {
+          const ms = r.finishedAt.getTime() - r.startedAt.getTime();
+          if (ms >= 0) {
+            d.sumDurationMs += ms;
+            d.durationSamples += 1;
+          }
+        }
+      } else if (r.status === JobStatus.failed) {
+        d.failed += 1;
+      }
+    }
+
+    return map;
   }
 }
