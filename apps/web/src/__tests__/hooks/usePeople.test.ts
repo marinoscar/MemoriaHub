@@ -18,6 +18,9 @@ vi.mock('../../services/face', () => ({
   assignFaces: vi.fn(),
   unassignFace: vi.fn(),
   clusterUnknownFaces: vi.fn(),
+  bulkHidePeople: vi.fn(),
+  bulkUnhidePeople: vi.fn(),
+  purgePeople: vi.fn(),
 }));
 
 import {
@@ -28,6 +31,9 @@ import {
   assignFaces,
   unassignFace,
   clusterUnknownFaces,
+  bulkHidePeople,
+  bulkUnhidePeople,
+  purgePeople,
 } from '../../services/face';
 import type { PersonListResponse, PersonDetail, ClusterResult } from '../../services/face';
 import { usePeople, usePerson } from '../../hooks/usePeople';
@@ -39,6 +45,9 @@ const mockUpdatePerson = vi.mocked(updatePerson);
 const mockAssignFaces = vi.mocked(assignFaces);
 const mockUnassignFace = vi.mocked(unassignFace);
 const mockClusterUnknownFaces = vi.mocked(clusterUnknownFaces);
+const mockBulkHidePeople = vi.mocked(bulkHidePeople);
+const mockBulkUnhidePeople = vi.mocked(bulkUnhidePeople);
+const mockPurgePeople = vi.mocked(purgePeople);
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -401,5 +410,211 @@ describe('usePerson', () => {
 
       expect(mockGetPerson).not.toHaveBeenCalled();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: usePeople — hidden mode
+// ---------------------------------------------------------------------------
+
+describe('usePeople — hidden mode', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('calls listPeople with hidden:true when opts.hidden is true', async () => {
+    mockListPeople.mockResolvedValue(makePersonListResponse());
+
+    renderHook(() => usePeople('circle-1', { hidden: true }));
+
+    await waitFor(() => {
+      expect(mockListPeople).toHaveBeenCalledWith(
+        'circle-1',
+        expect.objectContaining({ hidden: true }),
+      );
+    });
+  });
+
+  it('calls listPeople without hidden flag when no opts provided', async () => {
+    mockListPeople.mockResolvedValue(makePersonListResponse());
+
+    renderHook(() => usePeople('circle-1'));
+
+    await waitFor(() => {
+      expect(mockListPeople).toHaveBeenCalledWith(
+        'circle-1',
+        expect.not.objectContaining({ hidden: true }),
+      );
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: usePeople — hide()
+// ---------------------------------------------------------------------------
+
+describe('usePeople — hide()', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('calls bulkHidePeople with circleId and ids', async () => {
+    mockListPeople.mockResolvedValue(makePersonListResponse());
+    mockBulkHidePeople.mockResolvedValue({ hidden: 1 });
+
+    const { result } = renderHook(() => usePeople('circle-1'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.hide(['person-1']);
+    });
+
+    expect(mockBulkHidePeople).toHaveBeenCalledWith('circle-1', ['person-1']);
+  });
+
+  it('calls refresh after successful hide', async () => {
+    mockListPeople.mockResolvedValue(makePersonListResponse());
+    mockBulkHidePeople.mockResolvedValue({ hidden: 1 });
+
+    const { result } = renderHook(() => usePeople('circle-1'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.hide(['person-1']);
+    });
+
+    // listPeople called once on mount, once after hide
+    expect(mockListPeople).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns the { hidden } result', async () => {
+    mockListPeople.mockResolvedValue(makePersonListResponse());
+    mockBulkHidePeople.mockResolvedValue({ hidden: 3 });
+
+    const { result } = renderHook(() => usePeople('circle-1'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let hideResult: any;
+    await act(async () => {
+      hideResult = await result.current.hide(['p1', 'p2', 'p3']);
+    });
+
+    expect(hideResult).toEqual({ hidden: 3 });
+  });
+
+  it('throws when circleId is null', async () => {
+    const { result } = renderHook(() => usePeople(null));
+
+    await expect(
+      act(async () => {
+        await result.current.hide(['person-1']);
+      }),
+    ).rejects.toThrow('No active circle');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: usePeople — unhide()
+// ---------------------------------------------------------------------------
+
+describe('usePeople — unhide()', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('calls bulkUnhidePeople with circleId and ids', async () => {
+    mockListPeople.mockResolvedValue(makePersonListResponse());
+    mockBulkUnhidePeople.mockResolvedValue({ unhidden: 2 });
+
+    const { result } = renderHook(() => usePeople('circle-1'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.unhide(['person-1', 'person-2']);
+    });
+
+    expect(mockBulkUnhidePeople).toHaveBeenCalledWith('circle-1', ['person-1', 'person-2']);
+  });
+
+  it('calls refresh after successful unhide', async () => {
+    mockListPeople.mockResolvedValue(makePersonListResponse());
+    mockBulkUnhidePeople.mockResolvedValue({ unhidden: 1 });
+
+    const { result } = renderHook(() => usePeople('circle-1'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.unhide(['person-1']);
+    });
+
+    expect(mockListPeople).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns the { unhidden } result', async () => {
+    mockListPeople.mockResolvedValue(makePersonListResponse());
+    mockBulkUnhidePeople.mockResolvedValue({ unhidden: 2 });
+
+    const { result } = renderHook(() => usePeople('circle-1'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let unhideResult: any;
+    await act(async () => {
+      unhideResult = await result.current.unhide(['p1', 'p2']);
+    });
+
+    expect(unhideResult).toEqual({ unhidden: 2 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: usePeople — purge()
+// ---------------------------------------------------------------------------
+
+describe('usePeople — purge()', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('calls purgePeople with circleId and ids', async () => {
+    mockListPeople.mockResolvedValue(makePersonListResponse());
+    mockPurgePeople.mockResolvedValue({ deleted: 1 });
+
+    const { result } = renderHook(() => usePeople('circle-1'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.purge(['person-1']);
+    });
+
+    expect(mockPurgePeople).toHaveBeenCalledWith('circle-1', ['person-1']);
+  });
+
+  it('calls refresh after successful purge', async () => {
+    mockListPeople.mockResolvedValue(makePersonListResponse());
+    mockPurgePeople.mockResolvedValue({ deleted: 1 });
+
+    const { result } = renderHook(() => usePeople('circle-1'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.purge(['person-1']);
+    });
+
+    expect(mockListPeople).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns the { deleted } result', async () => {
+    mockListPeople.mockResolvedValue(makePersonListResponse());
+    mockPurgePeople.mockResolvedValue({ deleted: 5 });
+
+    const { result } = renderHook(() => usePeople('circle-1'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let purgeResult: any;
+    await act(async () => {
+      purgeResult = await result.current.purge(['p1', 'p2', 'p3', 'p4', 'p5']);
+    });
+
+    expect(purgeResult).toEqual({ deleted: 5 });
   });
 });

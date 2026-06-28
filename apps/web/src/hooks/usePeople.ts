@@ -7,11 +7,17 @@ import {
   assignFaces,
   unassignFace,
   clusterUnknownFaces,
+  bulkHidePeople,
+  bulkUnhidePeople,
+  purgePeople,
 } from '../services/face';
 import type { PersonListResponse, PersonDetail, ClusterResult } from '../services/face';
 
 // Hook for listing people in a circle
-export function usePeople(circleId: string | null, opts?: { includeUnlabeled?: boolean }) {
+export function usePeople(
+  circleId: string | null,
+  opts?: { includeUnlabeled?: boolean; hidden?: boolean },
+) {
   const [data, setData] = useState<PersonListResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,6 +29,7 @@ export function usePeople(circleId: string | null, opts?: { includeUnlabeled?: b
     try {
       const result = await listPeople(circleId, {
         includeUnlabeled: opts?.includeUnlabeled,
+        hidden: opts?.hidden,
         pageSize: 100,
       });
       setData(result);
@@ -31,7 +38,7 @@ export function usePeople(circleId: string | null, opts?: { includeUnlabeled?: b
     } finally {
       setLoading(false);
     }
-  }, [circleId, opts?.includeUnlabeled]);
+  }, [circleId, opts?.includeUnlabeled, opts?.hidden]);
 
   useEffect(() => {
     void refresh();
@@ -78,6 +85,36 @@ export function usePeople(circleId: string | null, opts?: { includeUnlabeled?: b
     [refresh],
   );
 
+  const hide = useCallback(
+    async (ids: string[]) => {
+      if (!circleId) throw new Error('No active circle');
+      const result = await bulkHidePeople(circleId, ids);
+      await refresh();
+      return result;
+    },
+    [circleId, refresh],
+  );
+
+  const unhide = useCallback(
+    async (ids: string[]) => {
+      if (!circleId) throw new Error('No active circle');
+      const result = await bulkUnhidePeople(circleId, ids);
+      await refresh();
+      return result;
+    },
+    [circleId, refresh],
+  );
+
+  const purge = useCallback(
+    async (ids: string[]) => {
+      if (!circleId) throw new Error('No active circle');
+      const result = await purgePeople(circleId, ids);
+      await refresh();
+      return result;
+    },
+    [circleId, refresh],
+  );
+
   return {
     data,
     loading,
@@ -88,6 +125,9 @@ export function usePeople(circleId: string | null, opts?: { includeUnlabeled?: b
     cluster,
     assignFaces: doAssignFaces,
     unassignFace: doUnassignFace,
+    hide,
+    unhide,
+    purge,
   };
 }
 

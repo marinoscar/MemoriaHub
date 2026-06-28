@@ -22,6 +22,10 @@ import {
   Checkbox,
   Autocomplete,
   Tooltip,
+  Snackbar,
+  Tab,
+  Tabs,
+  Badge,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -35,6 +39,9 @@ import {
   Star as StarIcon,
   StarBorder as StarBorderIcon,
   ImageSearch as ImageSearchIcon,
+  VisibilityOff as VisibilityOffIcon,
+  Visibility as VisibilityIcon,
+  SelectAll as SelectAllIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import Cropper from 'react-easy-crop';
@@ -209,6 +216,75 @@ function DeletePersonDialog({ open, personName, onClose, onConfirm }: DeletePers
           startIcon={deleting ? <CircularProgress size={16} /> : undefined}
         >
           {deleting ? 'Deleting…' : 'Delete'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Purge (permanent delete) Confirmation Dialog
+// ---------------------------------------------------------------------------
+
+interface PurgePeopleDialogProps {
+  open: boolean;
+  count: number;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+}
+
+function PurgePeopleDialog({ open, count, onClose, onConfirm }: PurgePeopleDialogProps) {
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleConfirm = async () => {
+    setDeleting(true);
+    setError(null);
+    try {
+      await onConfirm();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Deletion failed. Please try again.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleClose = () => {
+    if (deleting) return;
+    setError(null);
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onClose={handleClose} maxWidth="xs" fullWidth>
+      <DialogTitle>Delete permanently?</DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" sx={{ mb: 1 }}>
+          This permanently removes{' '}
+          <strong>
+            {count} person record{count !== 1 ? 's' : ''}
+          </strong>{' '}
+          and their face data. <strong>Your photos are NOT deleted.</strong> This cannot be undone.
+        </Typography>
+        {error && (
+          <Alert severity="error" sx={{ mt: 2 }}>
+            {error}
+          </Alert>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={handleClose} disabled={deleting}>
+          Cancel
+        </Button>
+        <Button
+          variant="contained"
+          color="error"
+          onClick={() => void handleConfirm()}
+          disabled={deleting}
+          startIcon={deleting ? <CircularProgress size={16} /> : undefined}
+        >
+          {deleting ? 'Deleting…' : 'Delete permanently'}
         </Button>
       </DialogActions>
     </Dialog>
@@ -716,7 +792,7 @@ function PersonDetailDrawer({
 
 
 // ---------------------------------------------------------------------------
-// Unassigned Faces Section (lone faces not yet in any Person)
+// Unassigned Faces Section (lone detected faces not yet in any Person)
 // ---------------------------------------------------------------------------
 
 function UnassignedFacesSection({
@@ -1021,6 +1097,292 @@ function UnassignedFacesSection({
 }
 
 // ---------------------------------------------------------------------------
+// People bulk toolbar (for selection mode on the main People tab)
+// ---------------------------------------------------------------------------
+
+interface PeopleBulkToolbarProps {
+  selected: Set<string>;
+  allIds: string[];
+  circleId: string;
+  onClear: () => void;
+  onSelectAll: () => void;
+  onSuccess: (message: string) => void;
+  onError: (message: string) => void;
+  /** If true, show Unhide + Purge actions instead of Hide */
+  hiddenMode?: boolean;
+  onHideSelected: () => Promise<void>;
+  onUnhideSelected: () => Promise<void>;
+  onPurgeSelected: () => void; // opens confirm dialog
+}
+
+function PeopleBulkToolbar({
+  selected,
+  allIds,
+  onClear,
+  onSelectAll,
+  onSuccess: _onSuccess,
+  onError: _onError,
+  hiddenMode,
+  onHideSelected,
+  onUnhideSelected,
+  onPurgeSelected,
+}: PeopleBulkToolbarProps) {
+  const [loading, setLoading] = useState(false);
+  const count = selected.size;
+
+  if (count === 0) return null;
+
+  const handleHide = async () => {
+    setLoading(true);
+    try {
+      await onHideSelected();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUnhide = async () => {
+    setLoading(true);
+    try {
+      await onUnhideSelected();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Box
+      sx={{
+        position: 'sticky',
+        top: 64,
+        zIndex: (theme) => theme.zIndex.appBar + 2,
+        mx: 0,
+        mb: 1.5,
+        px: { xs: 1, sm: 2 },
+        py: 1,
+        minHeight: 56,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1,
+        bgcolor: 'background.paper',
+        color: 'text.primary',
+        borderRadius: 2,
+        boxShadow: 3,
+      }}
+    >
+      <Tooltip title="Cancel selection">
+        <IconButton aria-label="Cancel selection" onClick={onClear}>
+          <CloseIcon />
+        </IconButton>
+      </Tooltip>
+
+      <Typography variant="subtitle1" sx={{ fontWeight: 700, color: 'primary.main' }}>
+        {count} selected
+      </Typography>
+
+      <Box sx={{ flexGrow: 1 }} />
+
+      <Tooltip title={`Select all (${allIds.length})`}>
+        <IconButton aria-label="Select all" onClick={onSelectAll}>
+          <SelectAllIcon />
+        </IconButton>
+      </Tooltip>
+
+      {!hiddenMode && (
+        <Tooltip title="Hide selected (removes from People page; photos stay)">
+          <IconButton
+            aria-label="Hide selected"
+            onClick={() => void handleHide()}
+            disabled={loading}
+          >
+            {loading ? <CircularProgress size={20} /> : <VisibilityOffIcon />}
+          </IconButton>
+        </Tooltip>
+      )}
+
+      {hiddenMode && (
+        <>
+          <Tooltip title="Unhide selected">
+            <IconButton
+              aria-label="Unhide selected"
+              onClick={() => void handleUnhide()}
+              disabled={loading}
+            >
+              {loading ? <CircularProgress size={20} /> : <VisibilityIcon />}
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title="Delete permanently (removes person and face data; photos stay)">
+            <IconButton
+              aria-label="Delete permanently"
+              color="error"
+              onClick={onPurgeSelected}
+              disabled={loading}
+            >
+              <DeleteIcon />
+            </IconButton>
+          </Tooltip>
+        </>
+      )}
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Hidden People View
+// ---------------------------------------------------------------------------
+
+function HiddenPeopleView({
+  circleId,
+  onSuccess,
+  onError,
+}: {
+  circleId: string;
+  onSuccess: (msg: string) => void;
+  onError: (msg: string) => void;
+}) {
+  const {
+    data: hiddenData,
+    loading: hiddenLoading,
+    error: hiddenError,
+    refresh: refreshHidden,
+    unhide,
+    purge,
+  } = usePeople(circleId, { hidden: true, includeUnlabeled: true });
+
+  const hiddenPeople = hiddenData?.items ?? [];
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
+
+  const handleToggleSelect = (person: PersonListItem) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(person.id)) next.delete(person.id);
+      else next.add(person.id);
+      return next;
+    });
+    if (!selectionMode) setSelectionMode(true);
+  };
+
+  const handleSelectAll = () => {
+    setSelectedIds(new Set(hiddenPeople.map((p) => p.id)));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+  };
+
+  const handleUnhideSingle = async (person: PersonListItem) => {
+    try {
+      const result = await unhide([person.id]);
+      onSuccess(`Unhid ${result.unhidden} person`);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Failed to unhide');
+    }
+  };
+
+  const handleUnhideSelected = async () => {
+    const ids = Array.from(selectedIds);
+    try {
+      const result = await unhide(ids);
+      onSuccess(`Unhid ${result.unhidden} person${result.unhidden !== 1 ? 's' : ''}`);
+      handleClearSelection();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Failed to unhide');
+    }
+  };
+
+  const handlePurgeSelected = async () => {
+    const ids = Array.from(selectedIds);
+    try {
+      const result = await purge(ids);
+      onSuccess(
+        `Permanently deleted ${result.deleted} person record${result.deleted !== 1 ? 's' : ''}`,
+      );
+      handleClearSelection();
+      setPurgeDialogOpen(false);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Failed to delete');
+      throw err;
+    }
+  };
+
+  if (hiddenError) {
+    return <Alert severity="error">{hiddenError}</Alert>;
+  }
+
+  return (
+    <Box>
+      {/* Bulk toolbar */}
+      {selectionMode && selectedIds.size > 0 && (
+        <PeopleBulkToolbar
+          selected={selectedIds}
+          allIds={hiddenPeople.map((p) => p.id)}
+          circleId={circleId}
+          onClear={handleClearSelection}
+          onSelectAll={handleSelectAll}
+          onSuccess={onSuccess}
+          onError={onError}
+          hiddenMode
+          onHideSelected={async () => { /* no-op in hidden view */ }}
+          onUnhideSelected={handleUnhideSelected}
+          onPurgeSelected={() => setPurgeDialogOpen(true)}
+        />
+      )}
+
+      {hiddenLoading && !hiddenData ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+          <CircularProgress />
+        </Box>
+      ) : hiddenPeople.length === 0 ? (
+        <Box sx={{ textAlign: 'center', py: 6 }}>
+          <VisibilityOffIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
+          <Typography variant="body2" color="text.secondary">
+            No hidden people. Use the hide button on any person card to remove them from this page.
+          </Typography>
+        </Box>
+      ) : (
+        <>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Hidden people are excluded from the People page but their photos remain fully searchable.
+            Click the eye icon to unhide, or select multiple to unhide/delete in bulk.
+          </Typography>
+          <PersonGrid
+            people={hiddenPeople}
+            onPersonClick={(person) => {
+              // In selection mode, clicking toggles selection
+              if (selectionMode) {
+                handleToggleSelect(person);
+              } else {
+                setSelectionMode(true);
+                handleToggleSelect(person);
+              }
+            }}
+            loading={hiddenLoading}
+            onUnhide={handleUnhideSingle}
+            selectionMode={selectionMode}
+            selectedIds={selectedIds}
+            onToggleSelect={handleToggleSelect}
+            emptyMessage="No hidden people"
+          />
+        </>
+      )}
+
+      {/* Purge confirm dialog */}
+      <PurgePeopleDialog
+        open={purgeDialogOpen}
+        count={selectedIds.size}
+        onClose={() => setPurgeDialogOpen(false)}
+        onConfirm={handlePurgeSelected}
+      />
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -1029,8 +1391,27 @@ export default function PeoplePage() {
   const navigate = useNavigate();
   const [selectedPerson, setSelectedPerson] = useState<PersonListItem | null>(null);
 
+  // Tab: 0 = People, 1 = Hidden
+  const [activeTab, setActiveTab] = useState(0);
+
   // Optimistic favorite overrides: maps personId -> boolean
   const [pendingFavorites, setPendingFavorites] = useState<Record<string, boolean>>({});
+
+  // Selection mode on the main People tab
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Snackbar
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
+    open: false,
+    message: '',
+    severity: 'success',
+  });
+
+  const showSuccess = (message: string) =>
+    setSnackbar({ open: true, message, severity: 'success' });
+  const showError = (message: string) =>
+    setSnackbar({ open: true, message, severity: 'error' });
 
   // Settings menu state
   const [settingsAnchorEl, setSettingsAnchorEl] = useState<null | HTMLElement>(null);
@@ -1045,6 +1426,9 @@ export default function PeoplePage() {
     deletedPeople: number;
   } | null>(null);
 
+  // Purge dialog for bulk selection on People tab
+  const [bulkPurgeDialogOpen, setBulkPurgeDialogOpen] = useState(false);
+
   const canCluster =
     activeCircleRole === 'circle_admin' || activeCircleRole === 'collaborator';
 
@@ -1056,6 +1440,7 @@ export default function PeoplePage() {
     refresh: refreshLabeled,
     rename,
     cluster,
+    hide: hidePeople,
   } = usePeople(activeCircleId, { includeUnlabeled: false });
 
   // Unlabeled people
@@ -1064,7 +1449,15 @@ export default function PeoplePage() {
     loading: unlabeledLoading,
     error: unlabeledError,
     refresh: refreshUnlabeled,
+    hide: hideUnlabeled,
   } = usePeople(activeCircleId, { includeUnlabeled: true });
+
+  // Hidden people count (for badge)
+  const {
+    data: hiddenData,
+    refresh: refreshHidden,
+  } = usePeople(activeCircleId, { hidden: true, includeUnlabeled: true });
+  const hiddenCount = hiddenData?.meta.totalItems ?? 0;
 
   // Filter unlabeled from the unlabeled fetch
   const unlabeledPeople = (unlabeledData?.items ?? []).filter((p) => p.isUnlabeled);
@@ -1075,14 +1468,66 @@ export default function PeoplePage() {
       : p,
   );
   const allPeople = [...labeledPeople, ...unlabeledPeople];
+  // All IDs for select-all
+  const allVisibleIds = allPeople.map((p) => p.id);
 
   const handleBiometricsDeleted = async (deletedFaces: number, deletedPeople: number) => {
     setBiometricsResult({ deletedFaces, deletedPeople });
-    await Promise.all([refreshLabeled(), refreshUnlabeled()]);
+    await Promise.all([refreshLabeled(), refreshUnlabeled(), refreshHidden()]);
   };
 
   const handlePersonClick = (person: PersonListItem) => {
-    setSelectedPerson(person);
+    if (selectionMode) {
+      handleToggleSelect(person);
+    } else {
+      setSelectedPerson(person);
+    }
+  };
+
+  const handleToggleSelect = (person: PersonListItem) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(person.id)) next.delete(person.id);
+      else next.add(person.id);
+      return next;
+    });
+    if (!selectionMode) setSelectionMode(true);
+  };
+
+  const handleClearSelection = () => {
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+  };
+
+  const handleSelectAll = () => {
+    setSelectedIds(new Set(allVisibleIds));
+  };
+
+  // Hide a single person from the named/unlabeled grid
+  const handleHideSingle = async (person: PersonListItem) => {
+    const hideFunc = person.isUnlabeled ? hideUnlabeled : hidePeople;
+    try {
+      const result = await hideFunc([person.id]);
+      showSuccess(`Hidden ${result.hidden} person. Refresh to see updated count.`);
+      await Promise.all([refreshLabeled(), refreshUnlabeled(), refreshHidden()]);
+    } catch (err) {
+      showError(err instanceof Error ? err.message : 'Failed to hide');
+    }
+  };
+
+  // Bulk hide selected
+  const handleHideSelected = async () => {
+    const ids = Array.from(selectedIds);
+    // We call via the labeled hook which accepts any ids (both named and unlabeled)
+    // The hook calls bulkHidePeople which handles the mix server-side.
+    try {
+      const result = await hidePeople(ids);
+      showSuccess(`Hidden ${result.hidden} person${result.hidden !== 1 ? 's' : ''}`);
+      handleClearSelection();
+      await Promise.all([refreshLabeled(), refreshUnlabeled(), refreshHidden()]);
+    } catch (err) {
+      showError(err instanceof Error ? err.message : 'Failed to hide');
+    }
   };
 
   const handleCluster = async () => {
@@ -1097,7 +1542,7 @@ export default function PeoplePage() {
   };
 
   const handlePersonDeleted = async () => {
-    await Promise.all([refreshLabeled(), refreshUnlabeled()]);
+    await Promise.all([refreshLabeled(), refreshUnlabeled(), refreshHidden()]);
   };
 
   const handlePersonMerged = async () => {
@@ -1193,67 +1638,143 @@ export default function PeoplePage() {
         </Alert>
       )}
 
-      {/* "Photos with no faces" shortcut */}
-      <Box sx={{ mb: 3 }}>
-        <Button
-          variant="outlined"
-          startIcon={<ImageSearchIcon />}
-          onClick={() => navigate('/media?noFaces=1')}
-          sx={{ minHeight: 44 }}
-        >
-          Photos with no faces detected
-        </Button>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-          Find photos where face detection found no faces — add people manually.
-        </Typography>
-      </Box>
-
-      {/* Labeled people section */}
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h6" sx={{ mb: 1 }}>
-          Named People ({labeledPeople.length})
-        </Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
-          Tip: open a person and use the Merge button to combine duplicates.
-        </Typography>
-        <PersonGrid
-          people={labeledPeople}
-          onPersonClick={handlePersonClick}
-          loading={labeledLoading}
-          emptyMessage="No named people yet. Use 'Find People' then name the clusters below."
-          onToggleFavorite={(person) =>
-            void handleToggleFavorite(
-              person.id,
-              !(pendingFavorites[person.id] ?? person.favorite),
+      {/* Tabs: People / Hidden */}
+      <Tabs
+        value={activeTab}
+        onChange={(_, v: number) => {
+          setActiveTab(v);
+          handleClearSelection();
+        }}
+        sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
+      >
+        <Tab label="People" value={0} />
+        <Tab
+          label={
+            hiddenCount > 0 ? (
+              <Badge badgeContent={hiddenCount} color="default" max={999}>
+                Hidden
+              </Badge>
+            ) : (
+              'Hidden'
             )
           }
+          value={1}
+          icon={<VisibilityOffIcon fontSize="small" />}
+          iconPosition="start"
         />
-      </Box>
+      </Tabs>
 
-      <Divider sx={{ mb: 3 }} />
+      {/* ── MAIN PEOPLE TAB ── */}
+      {activeTab === 0 && (
+        <>
+          {/* Bulk toolbar — shown when items are selected */}
+          {selectionMode && selectedIds.size > 0 && (
+            <PeopleBulkToolbar
+              selected={selectedIds}
+              allIds={allVisibleIds}
+              circleId={activeCircleId}
+              onClear={handleClearSelection}
+              onSelectAll={handleSelectAll}
+              onSuccess={showSuccess}
+              onError={showError}
+              hiddenMode={false}
+              onHideSelected={handleHideSelected}
+              onUnhideSelected={async () => { /* no-op */ }}
+              onPurgeSelected={() => setBulkPurgeDialogOpen(true)}
+            />
+          )}
 
-      {/* Unassigned faces section — lone detected faces */}
-      {activeCircleId && (
-        <Box sx={{ mb: 4 }}>
-          <UnassignedFacesSection
-            circleId={activeCircleId}
-            allPeople={allPeople}
-            onAssigned={() => void Promise.all([refreshLabeled(), refreshUnlabeled()])}
+          {/* "Photos with no faces" shortcut */}
+          <Box sx={{ mb: 3 }}>
+            <Button
+              variant="outlined"
+              startIcon={<ImageSearchIcon />}
+              onClick={() => navigate('/media?noFaces=1')}
+              sx={{ minHeight: 44 }}
+            >
+              Photos with no faces detected
+            </Button>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+              Find photos where face detection found no faces — add people manually.
+            </Typography>
+          </Box>
+
+          {/* Selection mode hint */}
+          {!selectionMode && allPeople.length > 0 && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+              Tip: click any card while holding the hide button, or click multiple cards after
+              selecting one, to hide clusters in bulk.
+            </Typography>
+          )}
+
+          {/* Labeled people section */}
+          <Box sx={{ mb: 4 }}>
+            <Typography variant="h6" sx={{ mb: 1 }}>
+              Named People ({labeledPeople.length})
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+              Tip: open a person and use the Merge button to combine duplicates.
+            </Typography>
+            <PersonGrid
+              people={labeledPeople}
+              onPersonClick={handlePersonClick}
+              loading={labeledLoading}
+              emptyMessage="No named people yet. Use 'Find People' then name the clusters below."
+              onToggleFavorite={(person) =>
+                void handleToggleFavorite(
+                  person.id,
+                  !(pendingFavorites[person.id] ?? person.favorite),
+                )
+              }
+              onHide={handleHideSingle}
+              selectionMode={selectionMode}
+              selectedIds={selectedIds}
+              onToggleSelect={handleToggleSelect}
+            />
+          </Box>
+
+          <Divider sx={{ mb: 3 }} />
+
+          {/* Unassigned faces section — lone detected faces */}
+          {activeCircleId && (
+            <Box sx={{ mb: 4 }}>
+              <UnassignedFacesSection
+                circleId={activeCircleId}
+                allPeople={allPeople}
+                onAssigned={() => void Promise.all([refreshLabeled(), refreshUnlabeled()])}
+              />
+            </Box>
+          )}
+
+          <Divider sx={{ mb: 3 }} />
+
+          {/* Unknown faces section */}
+          <UnknownFacesReview
+            unlabeledPeople={unlabeledPeople}
+            onPersonClick={handlePersonClick}
+            onCluster={handleCluster}
+            onRename={handleRename}
+            canCluster={canCluster}
+            loading={unlabeledLoading}
+            onHide={handleHideSingle}
+            selectionMode={selectionMode}
+            selectedIds={selectedIds}
+            onToggleSelect={handleToggleSelect}
           />
-        </Box>
+        </>
       )}
 
-      <Divider sx={{ mb: 3 }} />
-
-      {/* Unknown faces section */}
-      <UnknownFacesReview
-        unlabeledPeople={unlabeledPeople}
-        onPersonClick={handlePersonClick}
-        onCluster={handleCluster}
-        onRename={handleRename}
-        canCluster={canCluster}
-        loading={unlabeledLoading}
-      />
+      {/* ── HIDDEN PEOPLE TAB ── */}
+      {activeTab === 1 && activeCircleId && (
+        <HiddenPeopleView
+          circleId={activeCircleId}
+          onSuccess={(msg) => {
+            showSuccess(msg);
+            void refreshHidden();
+          }}
+          onError={showError}
+        />
+      )}
 
       {/* Person detail drawer */}
       <Drawer
@@ -1296,6 +1817,34 @@ export default function PeoplePage() {
           onDeleted={handleBiometricsDeleted}
         />
       )}
+
+      {/* Bulk purge confirm dialog (main tab) */}
+      <PurgePeopleDialog
+        open={bulkPurgeDialogOpen}
+        count={selectedIds.size}
+        onClose={() => setBulkPurgeDialogOpen(false)}
+        onConfirm={async () => {
+          // Not used from main tab — purge is only in hidden view
+          // Keep this wired in case we add it to selection later
+          setBulkPurgeDialogOpen(false);
+        }}
+      />
+
+      {/* Snackbar feedback */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          severity={snackbar.severity}
+          onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 }

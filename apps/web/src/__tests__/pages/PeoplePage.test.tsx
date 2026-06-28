@@ -41,6 +41,9 @@ vi.mock('../../services/face', () => ({
   mergePeople: vi.fn().mockResolvedValue({}),
   deletePerson: vi.fn().mockResolvedValue(undefined),
   setPersonFavorite: vi.fn().mockResolvedValue(undefined),
+  bulkHidePeople: vi.fn().mockResolvedValue({ hidden: 0 }),
+  bulkUnhidePeople: vi.fn().mockResolvedValue({ unhidden: 0 }),
+  purgePeople: vi.fn().mockResolvedValue({ deleted: 0 }),
 }));
 
 vi.mock('react-router-dom', async (importOriginal) => {
@@ -105,6 +108,9 @@ function makeUsePeopleDefaults(items: PersonListItem[] = [], overrides: Record<s
     cluster: vi.fn().mockResolvedValue({ clustersCreated: 0, facesAssigned: 0 }),
     assignFaces: vi.fn().mockResolvedValue(undefined),
     unassignFace: vi.fn().mockResolvedValue(undefined),
+    hide: vi.fn().mockResolvedValue({ hidden: 0 }),
+    unhide: vi.fn().mockResolvedValue({ unhidden: 0 }),
+    purge: vi.fn().mockResolvedValue({ deleted: 0 }),
     ...overrides,
   };
 }
@@ -280,6 +286,150 @@ describe('PeoplePage', () => {
       await user.click(deleteBtn);
       await waitFor(() => {
         expect(mockDeleteCircleBiometrics).toHaveBeenCalledWith('circle-1');
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('tabs — People / Hidden', () => {
+    it('renders "People" and "Hidden" tabs', async () => {
+      render(<PeoplePage />);
+
+      expect(await screen.findByRole('tab', { name: /^people$/i })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /hidden/i })).toBeInTheDocument();
+    });
+
+    it('shows the People tab content by default (Named People heading)', async () => {
+      render(<PeoplePage />);
+
+      expect(await screen.findByRole('heading', { name: /named people/i })).toBeInTheDocument();
+    });
+
+    it('switches to the Hidden tab when clicked', async () => {
+      const user = userEvent.setup();
+      render(<PeoplePage />);
+
+      await screen.findByRole('tab', { name: /^people$/i });
+      await user.click(screen.getByRole('tab', { name: /hidden/i }));
+
+      // HiddenPeopleView renders an empty state message when no hidden people
+      await waitFor(() => {
+        expect(screen.getByText(/no hidden people/i)).toBeInTheDocument();
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('hide button on PersonCard', () => {
+    it('shows the hide button on labeled person cards (onHide prop passed)', async () => {
+      mockUsePeople.mockImplementation((_, opts?: { includeUnlabeled?: boolean; hidden?: boolean }) => {
+        if (opts?.hidden) return makeUsePeopleDefaults([]) as any;
+        if (opts?.includeUnlabeled) return makeUsePeopleDefaults([]) as any;
+        return makeUsePeopleDefaults([makePerson('p1', 'Alice')]) as any;
+      });
+
+      render(<PeoplePage />);
+
+      await screen.findByText('Alice');
+      expect(screen.getByRole('button', { name: /hide person/i })).toBeInTheDocument();
+    });
+
+    it('calls hide() when hide button is clicked on a person card', async () => {
+      const hideFn = vi.fn().mockResolvedValue({ hidden: 1 });
+      mockUsePeople.mockImplementation((_, opts?: { includeUnlabeled?: boolean; hidden?: boolean }) => {
+        if (opts?.hidden) return makeUsePeopleDefaults([]) as any;
+        if (opts?.includeUnlabeled) return makeUsePeopleDefaults([]) as any;
+        return makeUsePeopleDefaults([makePerson('p1', 'Alice')], { hide: hideFn }) as any;
+      });
+
+      const user = userEvent.setup();
+      render(<PeoplePage />);
+
+      await screen.findByText('Alice');
+      await user.click(screen.getByRole('button', { name: /hide person/i }));
+
+      await waitFor(() => {
+        expect(hideFn).toHaveBeenCalledWith(['p1']);
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('Hidden tab — unhide button', () => {
+    it('shows the unhide button on hidden person cards', async () => {
+      const hiddenPerson = makePerson('hp1', 'Bob');
+      mockUsePeople.mockImplementation((_, opts?: { includeUnlabeled?: boolean; hidden?: boolean }) => {
+        if (opts?.hidden) return makeUsePeopleDefaults([hiddenPerson]) as any;
+        return makeUsePeopleDefaults([]) as any;
+      });
+
+      const user = userEvent.setup();
+      render(<PeoplePage />);
+
+      await screen.findByRole('tab', { name: /hidden/i });
+      await user.click(screen.getByRole('tab', { name: /hidden/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Bob')).toBeInTheDocument();
+      });
+      expect(screen.getByRole('button', { name: /unhide person/i })).toBeInTheDocument();
+    });
+
+    it('calls unhide() when the unhide button is clicked', async () => {
+      const hiddenPerson = makePerson('hp1', 'Bob');
+      const unhideFn = vi.fn().mockResolvedValue({ unhidden: 1 });
+      mockUsePeople.mockImplementation((_, opts?: { includeUnlabeled?: boolean; hidden?: boolean }) => {
+        if (opts?.hidden) return makeUsePeopleDefaults([hiddenPerson], { unhide: unhideFn }) as any;
+        return makeUsePeopleDefaults([]) as any;
+      });
+
+      const user = userEvent.setup();
+      render(<PeoplePage />);
+
+      await user.click(screen.getByRole('tab', { name: /hidden/i }));
+      await screen.findByRole('button', { name: /unhide person/i });
+      await user.click(screen.getByRole('button', { name: /unhide person/i }));
+
+      await waitFor(() => {
+        expect(unhideFn).toHaveBeenCalledWith(['hp1']);
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('PurgePeopleDialog', () => {
+    it('opens the purge dialog when "Delete permanently" button is clicked in hidden tab bulk toolbar', async () => {
+      const hiddenPerson = makePerson('hp1', 'Bob');
+      const unhideFn = vi.fn().mockResolvedValue({ unhidden: 0 });
+      const purgeFn = vi.fn().mockResolvedValue({ deleted: 1 });
+
+      mockUsePeople.mockImplementation((_, opts?: { includeUnlabeled?: boolean; hidden?: boolean }) => {
+        if (opts?.hidden) {
+          return makeUsePeopleDefaults([hiddenPerson], { unhide: unhideFn, purge: purgeFn }) as any;
+        }
+        return makeUsePeopleDefaults([]) as any;
+      });
+
+      const user = userEvent.setup();
+      render(<PeoplePage />);
+
+      // Switch to Hidden tab
+      await user.click(screen.getByRole('tab', { name: /hidden/i }));
+      await screen.findByText('Bob');
+
+      // Click on the card to enter selection mode
+      await user.click(screen.getByText('Bob'));
+
+      // Now "Delete permanently" bulk action should appear
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /delete permanently/i })).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole('button', { name: /delete permanently/i }));
+
+      // PurgePeopleDialog should open
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: /delete permanently/i })).toBeInTheDocument();
       });
     });
   });

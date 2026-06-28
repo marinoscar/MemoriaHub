@@ -11,6 +11,10 @@ export const listPeopleQuerySchema = z.object({
     .string()
     .optional()
     .transform((v) => v === 'true'),
+  hidden: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true'),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
@@ -98,3 +102,14 @@ export const listUnassignedFacesQuerySchema = z.object({
 });
 
 export class ListUnassignedFacesQueryDto extends createZodDto(listUnassignedFacesQuerySchema) {}
+
+// ---------------------------------------------------------------------------
+// BulkPeopleDto  (shared shape: circleId + ids[])
+// ---------------------------------------------------------------------------
+
+export const bulkPeopleSchema = z.object({
+  circleId: z.string().uuid(),
+  ids: z.array(z.string().uuid()).min(1).max(500),
+});
+
+export class BulkPeopleDto extends createZodDto(bulkPeopleSchema) {}
