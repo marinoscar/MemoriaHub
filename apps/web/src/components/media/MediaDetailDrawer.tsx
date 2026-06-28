@@ -34,6 +34,8 @@ import {
   Archive as ArchiveIcon,
   Unarchive as UnarchiveIcon,
   Delete as DeleteIcon,
+  LockOutlined as LockIcon,
+  Videocam as VideocamIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
@@ -60,6 +62,8 @@ import { useMediaTags } from '../../hooks/useMediaTags';
 import type { MediaTagStatusType } from '../../services/tagging';
 import { useMediaMetadata } from '../../hooks/useMediaMetadata';
 import type { MediaMetadataStatusType } from '../../services/metadata';
+import { useMediaSocial } from '../../hooks/useMediaSocial';
+import type { SocialStatusType } from '../../services/social';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -124,6 +128,24 @@ function metadataStatusChipProps(status: MediaMetadataStatusType | undefined): {
       return { label: 'Failed', color: 'error' };
     default:
       return { label: 'Not Extracted', color: 'default' };
+  }
+}
+
+function socialStatusChipProps(status: SocialStatusType | undefined): {
+  label: string;
+  color: 'success' | 'warning' | 'info' | 'default' | 'error';
+} {
+  switch (status) {
+    case 'processed':
+      return { label: 'Detected', color: 'success' };
+    case 'pending':
+      return { label: 'Pending', color: 'warning' };
+    case 'processing':
+      return { label: 'Processing', color: 'info' };
+    case 'failed':
+      return { label: 'Failed', color: 'error' };
+    default:
+      return { label: 'Not Scanned', color: 'default' };
   }
 }
 
@@ -422,6 +444,21 @@ export function MediaDetailDrawer({
   const { status: metadataStatus, rerun: rerunMetadata, rerunLoading: rerunMetadataLoading } = useMediaMetadata(
     item?.id ?? '',
     onRefreshTags,
+  );
+
+  // Callback that refreshes the full item after a social detection rerun completes
+  const onRefreshSocial = useCallback(async () => {
+    if (!item) return;
+    try {
+      const refreshed = await getMedia(item.id);
+      setFullItem(refreshed);
+      onItemUpdated(refreshed);
+    } catch { /* swallow */ }
+  }, [item?.id, onItemUpdated]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const { status: socialStatus, rerun: rerunSocialDetection, rerunLoading: rerunSocialLoading } = useMediaSocial(
+    item?.id ?? '',
+    onRefreshSocial,
   );
 
   // Faces for the video marker strip — only fetched when viewing a video.
@@ -817,11 +854,56 @@ export function MediaDetailDrawer({
           );
         })()}
 
+        {/* Social media detection status + rerun — for videos only */}
+        {displayItem.type === 'video' && (() => {
+          const chipProps = socialStatusChipProps(socialStatus?.status);
+          return (
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ alignItems: { xs: 'flex-start', sm: 'center' }, mb: 1 }}>
+              <Chip
+                label={chipProps.label}
+                color={chipProps.color}
+                size="small"
+                icon={<VideocamIcon />}
+              />
+              {socialStatus?.detected && socialStatus.platform && (
+                <Typography variant="caption" color="text.secondary">
+                  Platform: {socialStatus.platform}
+                </Typography>
+              )}
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={rerunSocialLoading ? <CircularProgress size={14} /> : <RefreshIcon />}
+                onClick={() => void rerunSocialDetection()}
+                disabled={rerunSocialLoading}
+                sx={{ minHeight: 44 }}
+              >
+                Re-run social detection
+              </Button>
+            </Stack>
+          );
+        })()}
+        {socialStatus?.status === 'failed' && socialStatus.lastError && (
+          <Alert severity="error" sx={{ mb: 1 }}>{socialStatus.lastError}</Alert>
+        )}
+
         {displayItem.tags && displayItem.tags.length > 0 ? (
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
-            {displayItem.tags.map((tag) => (
-              <Chip key={tag} label={tag} size="small" variant="outlined" />
-            ))}
+            {displayItem.tags.map((tag) => {
+              const isSystem = displayItem.systemTags?.includes(tag) ?? false;
+              return isSystem ? (
+                <Tooltip key={tag} title="System tag — applied automatically, cannot be removed">
+                  <Chip
+                    label={tag}
+                    size="small"
+                    color="secondary"
+                    icon={<LockIcon sx={{ fontSize: '0.85rem' }} />}
+                  />
+                </Tooltip>
+              ) : (
+                <Chip key={tag} label={tag} size="small" variant="outlined" />
+              );
+            })}
           </Box>
         ) : (
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>No tags</Typography>
@@ -850,6 +932,7 @@ export function MediaDetailDrawer({
               onChange={setEditTagsRemove}
               circleId={item?.circleId}
               disabled={tagSaving}
+              lockedNames={displayItem.systemTags}
             />
             {tagError && <Alert severity="error">{tagError}</Alert>}
             <Stack direction="row" spacing={1}>
