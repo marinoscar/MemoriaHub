@@ -14,6 +14,7 @@ data class ScannedMedia(
     val mediaStoreId: Long,
     val contentUri: String,
     val displayName: String,
+    val bucketId: String?,
     val bucket: String?,
     val mimeType: String,
     val type: MediaType,
@@ -23,31 +24,83 @@ data class ScannedMedia(
     val dateTakenMs: Long?,
 )
 
+/** A device media folder (MediaStore bucket) that contains at least one photo or video. */
+data class MediaBucket(
+    val id: String,
+    val displayName: String,
+)
+
 /**
- * Enumerates camera photos and videos from MediaStore. The [sinceDateAddedSec]
+ * Enumerates device photos and videos from MediaStore. The [sinceDateAddedSec]
  * high-water mark makes incremental scans cheap; callers should still periodically
  * run a full scan (sinceDateAddedSec = 0) for a complete reconcile.
+ *
+ * Which folders are scanned is driven by the user's selected MediaStore buckets
+ * (see [scan]); [listBuckets] enumerates the candidate folders for the picker UI.
  */
 @Singleton
 class MediaStoreScanner @Inject constructor(
     @param:ApplicationContext private val context: Context,
 ) {
-    fun scanCamera(sinceDateAddedSec: Long = 0): List<ScannedMedia> {
+    /**
+     * Scan the selected buckets for media.
+     *
+     * @param selectedBucketIds the MediaStore `bucket_id`s to scan. When `null` (never
+     *   configured — e.g. an existing install that hasn't opened the folder picker), the
+     *   legacy [CAMERA_BUCKETS] display-name filter is used so backups keep working. An
+     *   empty set scans nothing.
+     */
+    fun scan(selectedBucketIds: Set<String>?, sinceDateAddedSec: Long = 0): List<ScannedMedia> {
         val results = ArrayList<ScannedMedia>()
         results += query(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
             MediaType.PHOTO,
+            selectedBucketIds,
             sinceDateAddedSec,
         )
         results += query(
             MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
             MediaType.VIDEO,
+            selectedBucketIds,
             sinceDateAddedSec,
         )
         return results
     }
 
-    private fun query(collection: Uri, type: MediaType, sinceDateAddedSec: Long): List<ScannedMedia> {
+    /**
+     * Enumerate distinct device folders (MediaStore buckets) that contain at least one
+     * photo or video. Any bucket returned by MediaStore necessarily has media, so the
+     * "only folders with media" requirement is automatic.
+     */
+    fun listBuckets(): List<MediaBucket> {
+        val map = LinkedHashMap<String, String>()
+        collectBuckets(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, map)
+        collectBuckets(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, map)
+        return map.map { (id, name) -> MediaBucket(id, name) }
+            .sortedBy { it.displayName.lowercase() }
+    }
+
+    private fun collectBuckets(collection: Uri, into: MutableMap<String, String>) {
+        val projection = arrayOf(COL_BUCKET_ID, COL_BUCKET)
+        context.contentResolver.query(collection, projection, null, null, null)?.use { cursor ->
+            val idCol = cursor.getColumnIndex(COL_BUCKET_ID)
+            val nameCol = cursor.getColumnIndex(COL_BUCKET)
+            if (idCol < 0) return
+            while (cursor.moveToNext()) {
+                if (cursor.isNull(idCol)) continue
+                val id = cursor.getString(idCol) ?: continue
+                val name = if (nameCol >= 0) cursor.getString(nameCol) else null
+                into.putIfAbsent(id, name ?: id)
+            }
+        }
+    }
+
+    private fun query(
+        collection: Uri,
+        type: MediaType,
+        selectedBucketIds: Set<String>?,
+        sinceDateAddedSec: Long,
+    ): List<ScannedMedia> {
         val projection = arrayOf(
             MediaStore.MediaColumns._ID,
             MediaStore.MediaColumns.DISPLAY_NAME,
@@ -56,10 +109,11 @@ class MediaStoreScanner @Inject constructor(
             MediaStore.MediaColumns.DATE_MODIFIED,
             MediaStore.MediaColumns.MIME_TYPE,
             COL_DATE_TAKEN,
+            COL_BUCKET_ID,
             COL_BUCKET,
         )
 
-        val (selection, args) = buildBucketSelection(CAMERA_BUCKETS, sinceDateAddedSec)
+        val (selection, args) = buildBucketSelection(selectedBucketIds, sinceDateAddedSec)
         val sortOrder = "${MediaStore.MediaColumns.DATE_ADDED} ASC"
 
         val resolver: ContentResolver = context.contentResolver
@@ -73,6 +127,7 @@ class MediaStoreScanner @Inject constructor(
                 val modifiedCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
                 val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
                 val takenCol = cursor.getColumnIndex(COL_DATE_TAKEN)
+                val bucketIdCol = cursor.getColumnIndex(COL_BUCKET_ID)
                 val bucketCol = cursor.getColumnIndex(COL_BUCKET)
 
                 while (cursor.moveToNext()) {
@@ -86,6 +141,7 @@ class MediaStoreScanner @Inject constructor(
                         mediaStoreId = id,
                         contentUri = ContentUris.withAppendedId(collection, id).toString(),
                         displayName = cursor.getString(nameCol) ?: "media_$id",
+                        bucketId = if (bucketIdCol >= 0) cursor.getString(bucketIdCol) else null,
                         bucket = if (bucketCol >= 0) cursor.getString(bucketCol) else null,
                         mimeType = cursor.getString(mimeCol) ?: defaultMime(type),
                         type = type,
@@ -104,29 +160,44 @@ class MediaStoreScanner @Inject constructor(
 
     companion object {
         /**
-         * MediaStore buckets scanned for backup. Different cameras/devices save
-         * captures to different folders: stock Android cameras use DCIM/Camera
-         * (bucket "Camera"), some OEMs and the Android emulator save to Pictures
-         * or DCIM root. Scanning all three catches the common cases instead of
-         * silently missing photos that aren't under DCIM/Camera.
+         * Legacy fallback buckets, matched by display name, used only when the user has
+         * never configured a folder selection. Stock Android cameras save to DCIM/Camera
+         * (bucket "Camera"); some OEMs and the Android emulator save to Pictures or DCIM
+         * root. These are the folders pre-selected by default in the picker.
          */
         val CAMERA_BUCKETS = listOf("Camera", "DCIM", "Pictures")
 
         // Raw column names work across API 26+, avoiding API-gated MediaColumns constants.
         const val COL_DATE_TAKEN = "datetaken"
         const val COL_BUCKET = "bucket_display_name"
+        const val COL_BUCKET_ID = "bucket_id"
 
         /**
-         * Build the MediaStore selection clause and args for the given buckets,
-         * optionally bounded by a DATE_ADDED high-water mark. Extracted for unit testing.
+         * Build the MediaStore selection clause and args, optionally bounded by a
+         * DATE_ADDED high-water mark. Extracted for unit testing.
+         *
+         * - `selectedBucketIds == null` → legacy `bucket_display_name IN (CAMERA_BUCKETS)`.
+         * - non-null, non-empty → `bucket_id IN (…)`.
+         * - empty set → `0 = 1` (matches nothing).
          */
         internal fun buildBucketSelection(
-            buckets: List<String>,
+            selectedBucketIds: Set<String>?,
             sinceDateAddedSec: Long,
         ): Pair<String, Array<String>> {
-            val placeholders = buckets.joinToString(", ") { "?" }
-            val selection = StringBuilder("$COL_BUCKET IN ($placeholders)")
-            val args = ArrayList(buckets)
+            val selection = StringBuilder()
+            val args = ArrayList<String>()
+
+            if (selectedBucketIds == null) {
+                selection.append("$COL_BUCKET IN (${CAMERA_BUCKETS.joinToString(", ") { "?" }})")
+                args.addAll(CAMERA_BUCKETS)
+            } else if (selectedBucketIds.isEmpty()) {
+                selection.append("0 = 1")
+            } else {
+                val ids = selectedBucketIds.toList()
+                selection.append("$COL_BUCKET_ID IN (${ids.joinToString(", ") { "?" }})")
+                args.addAll(ids)
+            }
+
             if (sinceDateAddedSec > 0) {
                 selection.append(" AND ${MediaStore.MediaColumns.DATE_ADDED} >= ?")
                 args.add(sinceDateAddedSec.toString())

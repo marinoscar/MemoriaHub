@@ -60,6 +60,17 @@ interface SyncFileDao {
     )
     suspend fun requeueFailed(includeBlocked: Boolean, resetAttempts: Boolean, now: Long): Int
 
+    /**
+     * Drop not-yet-uploaded rows for the given buckets (used when the user deselects a
+     * folder). Already-uploaded items (UPLOADED/SKIPPED) are preserved so they remain on
+     * the server.
+     */
+    @Query(
+        "DELETE FROM sync_files " +
+            "WHERE bucketId IN (:bucketIds) AND status NOT IN ('UPLOADED', 'SKIPPED')",
+    )
+    suspend fun deletePendingByBucketIds(bucketIds: List<String>): Int
+
     @Query("DELETE FROM sync_files")
     suspend fun clear()
 }

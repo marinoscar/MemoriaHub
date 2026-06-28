@@ -10,6 +10,7 @@ import cr.marin.memoriahub.data.db.SyncRunEntity
 import cr.marin.memoriahub.data.db.SyncStatus
 import cr.marin.memoriahub.data.media.MediaStoreScanner
 import cr.marin.memoriahub.data.media.ScannedMedia
+import cr.marin.memoriahub.data.media.MediaStoreScanner.Companion.CAMERA_BUCKETS
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -46,7 +47,7 @@ class SyncRepository @Inject constructor(
      */
     suspend fun reconcile(fullScan: Boolean = false): Int = withContext(Dispatchers.IO) {
         val since = if (fullScan) 0L else appConfigStore.lastScanDateAddedSec
-        val scanned = scanner.scanCamera(sinceDateAddedSec = since)
+        val scanned = scanner.scan(appConfigStore.selectedBucketIds, sinceDateAddedSec = since)
         val now = time.nowMillis()
         var queuedCount = 0
         var maxAdded = appConfigStore.lastScanDateAddedSec
@@ -69,6 +70,7 @@ class SyncRepository @Inject constructor(
                         existing.copy(
                             contentUri = item.contentUri,
                             displayName = item.displayName,
+                            bucketId = item.bucketId,
                             bucket = item.bucket,
                             dateTakenMs = item.dateTakenMs ?: existing.dateTakenMs,
                             updatedAt = now,
@@ -99,13 +101,41 @@ class SyncRepository @Inject constructor(
     suspend fun pendingWorkCount(): Int = withContext(Dispatchers.IO) {
         syncFileDao.pendingWorkCount()
     }
+
+    /**
+     * Enumerate device folders that contain media, each marked selected per the user's
+     * saved selection. When nothing has been configured yet (`selectedBucketIds == null`),
+     * the legacy camera folders are shown pre-selected so the default matches current
+     * backup behavior — without persisting anything until the user actually toggles.
+     */
+    suspend fun listSyncableFolders(): List<SyncFolder> = withContext(Dispatchers.IO) {
+        val selection = appConfigStore.selectedBucketIds
+        scanner.listBuckets().map { bucket ->
+            val selected = selection?.contains(bucket.id)
+                ?: (bucket.displayName in CAMERA_BUCKETS)
+            SyncFolder(id = bucket.id, displayName = bucket.displayName, selected = selected)
+        }
+    }
+
+    /** Remove not-yet-uploaded rows for deselected folders so they stop syncing. */
+    suspend fun dropPendingForBuckets(bucketIds: List<String>): Int = withContext(Dispatchers.IO) {
+        if (bucketIds.isEmpty()) 0 else syncFileDao.deletePendingByBucketIds(bucketIds)
+    }
 }
+
+/** A selectable backup folder for the picker UI. */
+data class SyncFolder(
+    val id: String,
+    val displayName: String,
+    val selected: Boolean,
+)
 
 private fun ScannedMedia.toQueuedEntity(circleId: String?, now: Long): SyncFileEntity =
     SyncFileEntity(
         mediaStoreId = mediaStoreId,
         contentUri = contentUri,
         displayName = displayName,
+        bucketId = bucketId,
         bucket = bucket,
         relativePath = null,
         mimeType = mimeType,
@@ -123,6 +153,7 @@ private fun SyncFileEntity.resetForRescan(item: ScannedMedia, now: Long): SyncFi
     copy(
         contentUri = item.contentUri,
         displayName = item.displayName,
+        bucketId = item.bucketId,
         bucket = item.bucket,
         mimeType = item.mimeType,
         sizeBytes = item.sizeBytes,

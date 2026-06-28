@@ -6,7 +6,10 @@ import androidx.room.TypeConverters
 
 @Database(
     entities = [SyncFileEntity::class, SyncRunEntity::class],
-    version = 1,
+    // v2: added SyncFileEntity.bucketId for per-folder sync selection. The local sync
+    // state is a reconstructable cache (reconcile + server-side dedup), so the module's
+    // destructive-migration fallback safely rebuilds it on upgrade.
+    version = 2,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)

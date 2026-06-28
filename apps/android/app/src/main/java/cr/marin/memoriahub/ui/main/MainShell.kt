@@ -34,6 +34,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import cr.marin.memoriahub.ui.folders.FolderSelectionScreen
 import cr.marin.memoriahub.ui.photos.PhotosScreen
 import cr.marin.memoriahub.ui.settings.SettingsScreen
 import cr.marin.memoriahub.ui.status.SyncStatusScreen
@@ -43,6 +44,9 @@ private enum class Tab(val route: String, val label: String, val icon: ImageVect
     Sync("sync", "Backup", Icons.Filled.CloudSync),
     Settings("settings", "Settings", Icons.Filled.Settings),
 }
+
+/** Folder picker; a Settings detail route, not a bottom-nav tab. */
+private const val ROUTE_FOLDERS = "folders"
 
 @Composable
 fun MainShell(modifier: Modifier = Modifier) {
@@ -89,7 +93,12 @@ fun MainShell(modifier: Modifier = Modifier) {
         ) {
             composable(Tab.Photos.route) { PhotosScreen() }
             composable(Tab.Sync.route) { SyncStatusScreen() }
-            composable(Tab.Settings.route) { SettingsScreen() }
+            composable(Tab.Settings.route) {
+                SettingsScreen(onOpenFolders = { navController.navigate(ROUTE_FOLDERS) })
+            }
+            composable(ROUTE_FOLDERS) {
+                FolderSelectionScreen(onBack = { navController.popBackStack() })
+            }
         }
     }
 }

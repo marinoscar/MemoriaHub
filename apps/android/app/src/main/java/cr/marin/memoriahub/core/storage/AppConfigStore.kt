@@ -31,10 +31,17 @@ class AppConfigStore @Inject constructor(
     private val _targetCircleId = MutableStateFlow(prefs.getString(KEY_TARGET_CIRCLE, null))
     val targetCircleIdFlow: StateFlow<String?> = _targetCircleId.asStateFlow()
 
+    private val _selectedBucketIds = MutableStateFlow(readSelectedBucketIds())
+    /** The MediaStore bucket ids the user chose to back up; `null` until first configured. */
+    val selectedBucketIdsFlow: StateFlow<Set<String>?> = _selectedBucketIds.asStateFlow()
+
     /** Synchronous accessor for interceptors. */
     val serverUrl: String? get() = _serverUrl.value
 
     val targetCircleId: String? get() = _targetCircleId.value
+
+    /** `null` = never configured (falls back to legacy camera-folder scanning). */
+    val selectedBucketIds: Set<String>? get() = _selectedBucketIds.value
 
     fun setServerUrl(url: String?) {
         val normalized = url?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
@@ -46,6 +53,21 @@ class AppConfigStore @Inject constructor(
         prefs.edit().putString(KEY_TARGET_CIRCLE, circleId).apply()
         _targetCircleId.value = circleId
     }
+
+    fun setSelectedBucketIds(ids: Set<String>) {
+        // Copy defensively: SharedPreferences must not be handed a mutable set it keeps a
+        // reference to, and StateFlow needs a distinct instance to emit.
+        val snapshot = ids.toSet()
+        prefs.edit().putStringSet(KEY_SELECTED_BUCKETS, snapshot).apply()
+        _selectedBucketIds.value = snapshot
+    }
+
+    private fun readSelectedBucketIds(): Set<String>? =
+        if (prefs.contains(KEY_SELECTED_BUCKETS)) {
+            prefs.getStringSet(KEY_SELECTED_BUCKETS, emptySet())?.toSet() ?: emptySet()
+        } else {
+            null
+        }
 
     /** High-water mark (MediaStore DATE_ADDED, seconds) of the last incremental scan. */
     var lastScanDateAddedSec: Long
@@ -63,6 +85,7 @@ class AppConfigStore @Inject constructor(
     private companion object {
         const val KEY_SERVER_URL = "server_url"
         const val KEY_TARGET_CIRCLE = "target_circle_id"
+        const val KEY_SELECTED_BUCKETS = "selected_bucket_ids"
         const val KEY_LAST_SCAN_ADDED = "last_scan_date_added_sec"
         const val KEY_DEVICE_ID = "device_id"
     }

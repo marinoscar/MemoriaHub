@@ -23,6 +23,8 @@ data class SyncFileEntity(
 
     val contentUri: String,
     val displayName: String,
+    /** MediaStore `bucket_id` of the folder this item lives in; drives folder-scoped cleanup. */
+    val bucketId: String? = null,
     val bucket: String? = null,
     val relativePath: String? = null,
     val mimeType: String,
