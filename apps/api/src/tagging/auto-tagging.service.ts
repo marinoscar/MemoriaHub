@@ -12,7 +12,7 @@ import { StorageProviderResolver } from '../storage/providers/storage-provider.r
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import { detectImageMime } from './image-mime.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { RateLimitError, parseRetryAfterMs } from '../enrichment/rate-limit.error';
+import { RateLimitError, parseRetryAfterMs, classifyRateLimit } from '../enrichment/rate-limit.error';
 
 /**
  * Maximum image dimension (long edge) before downscaling.
@@ -247,7 +247,8 @@ export class AutoTaggingService {
         const e = providerErr as Record<string, unknown> | null;
         const httpStatus =
           typeof e?.['status'] === 'number' ? e['status'] : undefined;
-        if (httpStatus === 429) {
+        // 529 = Anthropic "Overloaded" — transient, treat the same as 429
+        if (httpStatus === 429 || httpStatus === 529) {
           const retryHeader =
             typeof (e?.['headers'] as Record<string, unknown> | undefined)?.['retry-after'] === 'string'
               ? ((e?.['headers'] as Record<string, unknown>)['retry-after'] as string)
@@ -418,6 +419,11 @@ export class AutoTaggingService {
         `AutoTagging embedAndStore: stored ${embedding.length}-d embedding for MediaItem ${mediaItemId} using ${embProvider}/${embModel}`,
       );
     } catch (err) {
+      // Re-throw rate-limit errors so the worker defers the entire tagging job
+      // rather than silently dropping the embedding and marking it processed.
+      const rl = err instanceof RateLimitError ? err : classifyRateLimit(err);
+      if (rl) throw rl;
+
       this.logger.warn(
         `AutoTagging embedAndStore: embedding failed for MediaItem ${mediaItemId} — ${err instanceof Error ? err.message : String(err)}`,
       );

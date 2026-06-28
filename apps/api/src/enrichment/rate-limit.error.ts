@@ -128,11 +128,12 @@ export function classifyRateLimit(err: unknown): RateLimitError | null {
       ? ((e['$metadata'] as Record<string, unknown>)['httpStatusCode'] as number)
       : undefined);
 
-  if (httpStatus === 429) {
+  // 529 = Anthropic "Overloaded" — transient, treat as rate limit
+  if (httpStatus === 429 || httpStatus === 529) {
     const message =
       typeof e['message'] === 'string'
         ? e['message']
-        : 'Provider rate limit exceeded (HTTP 429)';
+        : `Provider rate limit exceeded (HTTP ${httpStatus})`;
     return new RateLimitError(message, retryAfterMs);
   }
 
