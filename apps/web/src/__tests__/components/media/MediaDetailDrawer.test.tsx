@@ -37,6 +37,22 @@ vi.mock('../../../services/media', () => ({
   listTags: vi.fn().mockResolvedValue([]),
 }));
 
+// ---------------------------------------------------------------------------
+// Mock the social service — useMediaSocial calls getSocialStatus on mount.
+// Without this mock the hook issues a real fetch that fails in jsdom.
+// ---------------------------------------------------------------------------
+
+vi.mock('../../../services/social', () => ({
+  getSocialStatus: vi.fn().mockResolvedValue({
+    status: 'not_processed',
+    detected: false,
+    platform: null,
+    processedAt: null,
+    lastError: null,
+  }),
+  rerunSocial: vi.fn().mockResolvedValue({ jobId: 'job-s1', status: 'pending' }),
+}));
+
 import { patchMedia, getMedia } from '../../../services/media';
 
 const mockPatchMedia = vi.mocked(patchMedia);
@@ -790,6 +806,63 @@ describe('MediaDetailDrawer', () => {
       await waitFor(() => {
         expect(screen.queryByText(/image not available/i)).not.toBeInTheDocument();
         expect(screen.getByRole('img', { name: item.originalFilename })).toBeInTheDocument();
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // System tag chip rendering
+  // -------------------------------------------------------------------------
+
+  describe('system tag chip rendering', () => {
+    it('renders all tag names including system tags as chips', async () => {
+      const item = makeMediaItem({
+        tags: ['Beach', 'Social Media', 'TikTok'],
+        systemTags: ['Social Media', 'TikTok'],
+      });
+
+      render(<MediaDetailDrawer item={item} open={true} onClose={vi.fn()} onItemUpdated={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Beach')).toBeInTheDocument();
+        expect(screen.getByText('Social Media')).toBeInTheDocument();
+        expect(screen.getByText('TikTok')).toBeInTheDocument();
+      });
+    });
+
+    it('both system and non-system tag names are present in the DOM', async () => {
+      // Verifies the branching logic (isSystem ? Tooltip+Chip : Chip) renders
+      // all tag names regardless of which branch is taken.
+      const item = makeMediaItem({
+        tags: ['Beach', 'Social Media'],
+        systemTags: ['Social Media'],
+      });
+
+      render(<MediaDetailDrawer item={item} open={true} onClose={vi.fn()} onItemUpdated={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Beach')).toBeInTheDocument();
+        expect(screen.getByText('Social Media')).toBeInTheDocument();
+      });
+    });
+
+    it('renders "No tags" when tags array is empty', async () => {
+      const item = makeMediaItem({ tags: [], systemTags: [] });
+
+      render(<MediaDetailDrawer item={item} open={true} onClose={vi.fn()} onItemUpdated={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/no tags/i)).toBeInTheDocument();
+      });
+    });
+
+    it('renders "No tags" when tags field is absent', async () => {
+      const item = makeMediaItem({ tags: undefined, systemTags: undefined });
+
+      render(<MediaDetailDrawer item={item} open={true} onClose={vi.fn()} onItemUpdated={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/no tags/i)).toBeInTheDocument();
       });
     });
   });
