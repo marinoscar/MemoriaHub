@@ -50,6 +50,12 @@ const listJobsQuerySchema = z.object({
 
 export class ListJobsQueryDto extends createZodDto(listJobsQuerySchema) {}
 
+const jobInsightsQuerySchema = z.object({
+  windowDays: z.coerce.number().int().min(1).max(90).default(7),
+});
+
+export class JobInsightsQueryDto extends createZodDto(jobInsightsQuerySchema) {}
+
 const retryAllFailedSchema = z.object({
   type: z.string().min(1).optional(),
 });
@@ -85,6 +91,48 @@ export class EnrichmentAdminController {
   })
   async getStats() {
     return this.adminService.getStats();
+  }
+
+  // -------------------------------------------------------------------------
+  // GET /admin/jobs/insights  (before :id to avoid route conflicts)
+  // -------------------------------------------------------------------------
+
+  @Get('insights')
+  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.JOBS_READ] })
+  @ApiOperation({
+    summary: 'Get job queue insights + ETA (Admin)',
+    description:
+      'On-demand, read-only aggregate: live counts, per-type and overall ' +
+      'duration history (avg/p50/p95 over a rolling window), throughput, and an ' +
+      'estimated time to completion (ETC) for the current backlog. Computed only ' +
+      'when requested — no polling. Queries take only ACCESS SHARE locks and do ' +
+      'not block the worker.',
+  })
+  @ApiQuery({
+    name: 'windowDays',
+    required: false,
+    description: 'Rolling window (days) for the duration-history aggregate (default 7, max 90)',
+  })
+  @ApiResponse({ status: 200, description: 'Job insights snapshot incl. overall + per-type ETC and avg duration' })
+  async getInsights(@Query() query: JobInsightsQueryDto) {
+    return this.adminService.getInsights(query.windowDays);
+  }
+
+  // -------------------------------------------------------------------------
+  // POST /admin/jobs/insights/reset-history  (before :id to avoid route conflicts)
+  // -------------------------------------------------------------------------
+
+  @Post('insights/reset-history')
+  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.JOBS_WRITE] })
+  @ApiOperation({
+    summary: 'Reset lifetime job history analytics (Admin)',
+    description:
+      'Clears the JobStatsRollup table (the all-time aggregate of purged job rows). ' +
+      'Live job rows are unaffected. Use to start lifetime analytics fresh.',
+  })
+  @ApiResponse({ status: 201, description: 'Number of per-type rollup rows cleared' })
+  async resetHistory() {
+    return this.adminService.resetHistory();
   }
 
   // -------------------------------------------------------------------------

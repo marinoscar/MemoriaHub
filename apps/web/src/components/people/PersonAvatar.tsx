@@ -92,15 +92,34 @@ export function PersonAvatar({ person, size = 48 }: PersonAvatarProps) {
   }
 
   // Case 2: coverFace set and URL resolved
-  if (person.coverFace && imageUrl && !profileMediaItemId) {
-    return (
-      <FaceCrop
-        imageUrl={imageUrl}
-        boundingBox={person.coverFace.boundingBox}
-        size={size}
-        sx={{ borderRadius: '50%' }}
-      />
-    );
+  if (person.coverFace && !profileMediaItemId) {
+    if (person.coverFace.faceThumbnailUrl) {
+      return (
+        <Box
+          component="img"
+          src={person.coverFace.faceThumbnailUrl}
+          alt={person.name ?? 'Person'}
+          sx={{
+            width: size,
+            height: size,
+            objectFit: 'cover',
+            borderRadius: '50%',
+            display: 'block',
+            flexShrink: 0,
+          }}
+        />
+      );
+    }
+    if (imageUrl) {
+      return (
+        <FaceCrop
+          imageUrl={imageUrl}
+          boundingBox={person.coverFace.boundingBox}
+          size={size}
+          sx={{ borderRadius: '50%' }}
+        />
+      );
+    }
   }
 
   // Case 3: fallback — generic person avatar (also shown while loading)

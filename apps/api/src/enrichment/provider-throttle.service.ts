@@ -20,7 +20,7 @@
 // will never trip — a no-op acquire is essentially free.
 // =============================================================================
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 
 interface GateState {
   cooldownUntil: number;
@@ -49,6 +49,13 @@ export class ProviderThrottleService {
   private readonly _sleep: (ms: number) => Promise<void>;
 
   constructor(
+    // @Optional() prevents Nest from attempting to resolve this plain-object
+    // parameter as an injectable dependency (it has no provider token).
+    // Nest injects `undefined` for unresolvable optional params, and the `= {}`
+    // default kicks in — giving production behaviour with no args.
+    // Unit tests construct `new ProviderThrottleService({ now, sleep })` directly
+    // (bypassing the Nest container entirely) so test construction is unchanged.
+    @Optional()
     hooks: {
       now?: () => number;
       sleep?: (ms: number) => Promise<void>;

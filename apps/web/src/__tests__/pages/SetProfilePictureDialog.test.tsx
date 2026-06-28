@@ -89,6 +89,7 @@ function makePerson(id: string, name: string): PersonListItem {
       faceId: 'f1',
       mediaItemId: 'media-1',
       boundingBox: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
+      faceThumbnailUrl: null,
     },
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -107,6 +108,7 @@ function makePersonDetail(id: string = 'p1'): PersonDetail {
       faceId: 'f1',
       mediaItemId: 'media-1',
       boundingBox: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
+      faceThumbnailUrl: null,
     },
     faces: [
       {
@@ -116,6 +118,7 @@ function makePersonDetail(id: string = 'p1'): PersonDetail {
         confidence: null,
         manuallyAssigned: false,
         createdAt: new Date().toISOString(),
+        faceThumbnailUrl: null,
       },
     ],
     createdAt: new Date().toISOString(),

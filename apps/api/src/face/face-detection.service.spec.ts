@@ -42,6 +42,7 @@ jest.mock('sharp', () => {
 import { Test, TestingModule } from '@nestjs/testing';
 import { Readable } from 'stream';
 import { FaceDetectionService } from './face-detection.service';
+import { FaceDetectionCore } from './face-detection-core.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { FaceSettingsService } from './face-settings.service';
 import { FaceProviderRegistry } from './providers/face-provider.registry';
@@ -173,6 +174,7 @@ describe('FaceDetectionService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FaceDetectionService,
+        FaceDetectionCore, // Real instance wired to the mocked dependencies below
         { provide: PrismaService, useValue: mockPrisma },
         { provide: FaceSettingsService, useValue: mockFaceSettingsService },
         { provide: FaceProviderRegistry, useValue: mockRegistry },

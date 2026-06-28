@@ -34,7 +34,9 @@ import {
   Archive as ArchiveIcon,
   Unarchive as UnarchiveIcon,
   Delete as DeleteIcon,
+  IosShare as IosShareIcon,
 } from '@mui/icons-material';
+import { ShareDialog } from '../share/ShareDialog';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
 import type { MediaPlayerInstance } from '@vidstack/react';
@@ -193,6 +195,9 @@ export function MediaDetailDrawer({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Share dialog state
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
 
   // Image load state
   const [imgError, setImgError] = useState(false);
@@ -494,6 +499,13 @@ export function MediaDetailDrawer({
             </IconButton>
           </Tooltip>
         )}
+
+        {/* Share publicly */}
+        <Tooltip title="Share publicly">
+          <IconButton onClick={() => setShareDialogOpen(true)} aria-label="Share publicly">
+            <IosShareIcon />
+          </IconButton>
+        </Tooltip>
       </Box>
 
       {/* Preview — branches on media type */}
@@ -968,6 +980,15 @@ export function MediaDetailDrawer({
           </Button>
         </Stack>
       </Box>
+
+      {/* Share dialog */}
+      {item && (
+        <ShareDialog
+          open={shareDialogOpen}
+          onClose={() => setShareDialogOpen(false)}
+          target={{ type: 'media_item', id: item.id }}
+        />
+      )}
 
       {/* Move to Trash confirm dialog */}
       <Dialog open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)} maxWidth="xs" fullWidth>

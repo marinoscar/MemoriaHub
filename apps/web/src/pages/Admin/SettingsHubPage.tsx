@@ -21,6 +21,8 @@ import {
   WorkHistory as WorkHistoryIcon,
   Backup as BackupIcon,
   Archive as ArchiveIcon,
+  QueryStats as QueryStatsIcon,
+  Public as PublicIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 
@@ -150,11 +152,25 @@ export default function SettingsHubPage() {
           permission: 'jobs:read',
         },
         {
+          title: 'Job Queue Insights',
+          description: 'Live queue stats, per-type durations, and an ETA for the backlog.',
+          icon: <QueryStatsIcon sx={{ fontSize: 40 }} color="primary" />,
+          path: '/admin/settings/jobs/insights',
+          permission: 'jobs:read',
+        },
+        {
           title: 'Backup',
           description: 'Trigger backup runs, view run history, and browse backup objects.',
           icon: <BackupIcon sx={{ fontSize: 40 }} color="primary" />,
           path: '/admin/settings/backup',
           permission: 'backup:read',
+        },
+        {
+          title: 'Public Sharing',
+          description: 'View and manage all public share links; revoke or set expirations in bulk.',
+          icon: <PublicIcon sx={{ fontSize: 40 }} color="primary" />,
+          path: '/admin/settings/sharing',
+          permission: 'shares:manage_any',
         },
       ],
     },

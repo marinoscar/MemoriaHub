@@ -85,7 +85,7 @@ describe('PersonAvatar', () => {
   describe('Case 2 — coverFace present (no profileMediaItemId)', () => {
     it('renders FaceCrop after resolving the cover media item', async () => {
       const person = makePerson({
-        coverFace: { faceId: 'f1', mediaItemId: 'media-cover', boundingBox: BOUNDING_BOX },
+        coverFace: { faceId: 'f1', mediaItemId: 'media-cover', boundingBox: BOUNDING_BOX, faceThumbnailUrl: null },
       });
 
       render(<PersonAvatar person={person} />);
@@ -97,7 +97,7 @@ describe('PersonAvatar', () => {
 
     it('calls getMedia with the coverFace mediaItemId', async () => {
       const person = makePerson({
-        coverFace: { faceId: 'f1', mediaItemId: 'media-cover-id', boundingBox: BOUNDING_BOX },
+        coverFace: { faceId: 'f1', mediaItemId: 'media-cover-id', boundingBox: BOUNDING_BOX, faceThumbnailUrl: null },
       });
 
       render(<PersonAvatar person={person} />);
@@ -185,6 +185,141 @@ describe('PersonAvatar', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Regression: video vs photo face rendering (faceThumbnailUrl branch)
+  //
+  // When a coverFace carries a signed faceThumbnailUrl (video face), the component
+  // must render an <img> whose src is that URL directly — it must NOT call getMedia
+  // and must NOT render a FaceCrop bounding-box crop.
+  //
+  // When faceThumbnailUrl is null (photo face) and the media item resolves, the
+  // component must fall through to the FaceCrop bounding-box path.
+  // -------------------------------------------------------------------------
+  describe('Case 2 — video face (faceThumbnailUrl non-null)', () => {
+    it('renders an <img> whose src equals faceThumbnailUrl', () => {
+      const VIDEO_THUMB = 'https://cdn.example.com/faces/frame-00042.jpg';
+      const person = makePerson({
+        coverFace: {
+          faceId: 'fv1',
+          mediaItemId: 'media-video-1',
+          boundingBox: BOUNDING_BOX,
+          faceThumbnailUrl: VIDEO_THUMB,
+        },
+      });
+
+      render(<PersonAvatar person={person} />);
+
+      // The component renders a MUI Box component="img" immediately (no async needed)
+      // because faceThumbnailUrl is already available without fetching the media item.
+      const img = screen.getByRole('img', { name: 'Alice' }) as HTMLImageElement;
+      expect(img.src).toBe(VIDEO_THUMB);
+    });
+
+    it('does NOT render a FaceCrop when faceThumbnailUrl is set', () => {
+      const person = makePerson({
+        coverFace: {
+          faceId: 'fv2',
+          mediaItemId: 'media-video-2',
+          boundingBox: BOUNDING_BOX,
+          faceThumbnailUrl: 'https://cdn.example.com/faces/frame-00100.jpg',
+        },
+      });
+
+      render(<PersonAvatar person={person} />);
+
+      // FaceCrop renders with role="img" aria-label="Face crop" — must be absent
+      expect(screen.queryByRole('img', { name: 'Face crop' })).not.toBeInTheDocument();
+    });
+
+    it('renders the video thumbnail synchronously without waiting for getMedia', () => {
+      // With faceThumbnailUrl set the component can render the img immediately
+      // using that URL. Although the useEffect still enqueues a getMedia call
+      // (because coverFace.mediaItemId is non-null), the video thumbnail must
+      // already appear in the DOM before that async fetch completes.
+      const person = makePerson({
+        coverFace: {
+          faceId: 'fv3',
+          mediaItemId: 'media-video-3',
+          boundingBox: BOUNDING_BOX,
+          faceThumbnailUrl: 'https://cdn.example.com/faces/frame-00200.jpg',
+        },
+      });
+
+      // Simulate a never-resolving getMedia to confirm the thumbnail doesn't
+      // depend on it.
+      mockGetMedia.mockReturnValue(new Promise(() => {}));
+
+      render(<PersonAvatar person={person} />);
+
+      // The video thumbnail img must be present synchronously (or at least before
+      // the pending media promise resolves).
+      expect(screen.getByRole('img', { name: 'Alice' })).toBeInTheDocument();
+    });
+
+    it('respects a custom size prop when rendering the video thumbnail img', () => {
+      const VIDEO_THUMB = 'https://cdn.example.com/faces/frame-00300.jpg';
+      const person = makePerson({
+        name: 'Bob',
+        coverFace: {
+          faceId: 'fv4',
+          mediaItemId: 'media-video-4',
+          boundingBox: BOUNDING_BOX,
+          faceThumbnailUrl: VIDEO_THUMB,
+        },
+      });
+
+      render(<PersonAvatar person={person} size={64} />);
+
+      const img = screen.getByRole('img', { name: 'Bob' }) as HTMLImageElement;
+      expect(img.src).toBe(VIDEO_THUMB);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('Case 2 — photo face (faceThumbnailUrl null, source image resolves)', () => {
+    it('renders FaceCrop after the media item resolves when faceThumbnailUrl is null', async () => {
+      const THUMB_URL = 'https://example.com/photo-thumb.jpg';
+      mockGetMedia.mockResolvedValue({
+        id: 'media-photo-1',
+        thumbnailUrl: THUMB_URL,
+        downloadUrl: null,
+      } as any);
+
+      const person = makePerson({
+        coverFace: {
+          faceId: 'fp1',
+          mediaItemId: 'media-photo-1',
+          boundingBox: BOUNDING_BOX,
+          faceThumbnailUrl: null,
+        },
+      });
+
+      render(<PersonAvatar person={person} />);
+
+      // FaceCrop appears once the media fetch resolves
+      await waitFor(() => {
+        expect(screen.getByRole('img', { name: 'Face crop' })).toBeInTheDocument();
+      });
+    });
+
+    it('uses the mediaItemId from coverFace to fetch the source image', async () => {
+      const person = makePerson({
+        coverFace: {
+          faceId: 'fp2',
+          mediaItemId: 'media-photo-2',
+          boundingBox: BOUNDING_BOX,
+          faceThumbnailUrl: null,
+        },
+      });
+
+      render(<PersonAvatar person={person} />);
+
+      await waitFor(() => {
+        expect(mockGetMedia).toHaveBeenCalledWith('media-photo-2');
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
   describe('dedup cache', () => {
     it('calls getMedia only once when two PersonAvatars share the same coverFace.mediaItemId', async () => {
       // Use a unique ID so we don't accidentally hit a prior test's cache entry
@@ -195,7 +330,7 @@ describe('PersonAvatar', () => {
         downloadUrl: null,
       } as any);
 
-      const coverFace = { faceId: 'f-shared', mediaItemId: sharedId, boundingBox: BOUNDING_BOX };
+      const coverFace = { faceId: 'f-shared', mediaItemId: sharedId, boundingBox: BOUNDING_BOX, faceThumbnailUrl: null };
       const person1 = makePerson({ id: 'p-shared-1', coverFace });
       const person2 = makePerson({ id: 'p-shared-2', coverFace });
 

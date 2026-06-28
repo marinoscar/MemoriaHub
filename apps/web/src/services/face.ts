@@ -150,6 +150,8 @@ export interface PersonCoverFace {
   faceId: string;
   mediaItemId: string;
   boundingBox: BoundingBox;
+  /** Signed URL of the representative video frame JPEG used for face crops. Null for photos. */
+  faceThumbnailUrl: string | null;
 }
 
 export interface PersonListItem {
@@ -182,6 +184,8 @@ export interface PersonFace {
   confidence: number | null;
   manuallyAssigned: boolean;
   createdAt: string;
+  /** Signed URL of the representative video frame JPEG used for face crops. Null for photos. */
+  faceThumbnailUrl: string | null;
 }
 
 export interface PersonDetail {
@@ -209,13 +213,39 @@ export interface ClusterResult {
 
 export async function listPeople(
   circleId: string,
-  opts?: { includeUnlabeled?: boolean; page?: number; pageSize?: number },
+  opts?: { includeUnlabeled?: boolean; page?: number; pageSize?: number; hidden?: boolean },
 ): Promise<PersonListResponse> {
   const p = new URLSearchParams({ circleId });
   if (opts?.includeUnlabeled) p.set('includeUnlabeled', 'true');
   if (opts?.page) p.set('page', String(opts.page));
   if (opts?.pageSize) p.set('pageSize', String(opts.pageSize));
+  if (opts?.hidden) p.set('hidden', 'true');
   return api.get<PersonListResponse>(`/people?${p.toString()}`);
+}
+
+// ---------------------------------------------------------------------------
+// Bulk hide / unhide / purge
+// ---------------------------------------------------------------------------
+
+export async function bulkHidePeople(
+  circleId: string,
+  ids: string[],
+): Promise<{ hidden: number }> {
+  return api.patch<{ hidden: number }>('/people/bulk/hide', { circleId, ids });
+}
+
+export async function bulkUnhidePeople(
+  circleId: string,
+  ids: string[],
+): Promise<{ unhidden: number }> {
+  return api.patch<{ unhidden: number }>('/people/bulk/unhide', { circleId, ids });
+}
+
+export async function purgePeople(
+  circleId: string,
+  ids: string[],
+): Promise<{ deleted: number }> {
+  return api.post<{ deleted: number }>('/people/bulk/purge', { circleId, ids });
 }
 
 export async function getPerson(id: string): Promise<PersonDetail> {
@@ -315,6 +345,8 @@ export interface UnassignedFaceDto {
   boundingBox: BoundingBox;
   confidence: number | null;
   createdAt: string;
+  /** Signed URL of the representative video frame JPEG used for face crops. Null for photos. */
+  faceThumbnailUrl: string | null;
 }
 
 export interface UnassignedFacesResponse {

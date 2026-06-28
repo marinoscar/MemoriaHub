@@ -87,6 +87,10 @@ const PERMISSIONS = [
   // Geo Provider Settings (Admin only)
   { name: 'geo_settings:read', description: 'Read geo provider settings and status' },
   { name: 'geo_settings:write', description: 'Configure geo provider credentials and active reverse-geocoding provider' },
+
+  // Sharing (Admin + Contributor; manage_any = Admin only)
+  { name: 'shares:manage', description: 'Create, list, update, and revoke own shares' },
+  { name: 'shares:manage_any', description: 'Admin: manage any user\'s shares' },
 ] as const;
 
 // Role to permissions mapping
@@ -134,6 +138,9 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     // Geo Provider Settings: admin-only
     'geo_settings:read',
     'geo_settings:write',
+    // Sharing: admin can manage any share
+    'shares:manage',
+    'shares:manage_any',
   ],
   contributor: [
     'user_settings:read',
@@ -148,6 +155,8 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'circles:write',
     // Search: contributors can use AI search
     'search:use',
+    // Sharing: contributors can manage their own shares
+    'shares:manage',
   ],
   viewer: [
     'user_settings:read',

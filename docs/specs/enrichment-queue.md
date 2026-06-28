@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.1 |
+| **Version** | 1.2 |
 | **Last Updated** | June 2026 |
 
 ---
@@ -740,6 +740,7 @@ The following handlers are registered in the current production codebase. Each i
 | `metadata_extraction` | `MediaModule` | per media item | rerun + backfill only (no upload enqueue) | No per-circle opt-in; see [metadata-rerun.md](metadata-rerun.md) |
 | `storage_insights` | `InsightsModule` | global (`mediaItemId: null`) | hourly cron (`InsightsRefreshTask`) | Interval-gated; manual via `POST /api/admin/insights/refresh`; see [storage-insights.md](storage-insights.md) |
 | `trash_purge` | `MediaModule` | global (`mediaItemId: null`) | hourly cron (`TrashPurgeTask`) | Hard-deletes trashed `media_items` past `storage.trash.retentionDays` cutoff; see [archive-trash.md](archive-trash.md) |
+| `job_history_purge` | `EnrichmentModule` | global (`mediaItemId: null`) | nightly cron (`JobHistoryPurgeTask`, midnight) | Batch-deletes terminal `enrichment_jobs` rows (`succeeded`/`failed`) with `finishedAt` older than `jobs.history.retentionDays`; 5 000-row batches; pending/running rows never deleted; gated by `jobs.history.purgeEnabled`; see [job-insights.md](job-insights.md) |
 
 ### Global handler pattern
 
@@ -774,3 +775,4 @@ Each of these would: implement `EnrichmentHandler`, self-register via `onModuleI
 | 1.0 | June 2026 | AI Assistant | Initial reference document |
 | 1.1 | June 2026 | AI Assistant | Rate-limit & scheduled backoff: new `scheduledFor`, `rateLimitedAt`, `rateLimitHits` columns; two-path retry model; `RateLimitError` detection; new env knobs; updated claim query; admin stats `scheduled` field; job list `scheduled=true` filter and new item fields |
 | 1.2 | June 2026 | AI Assistant | Upload enrichment trigger model (Section 10): synchronous enqueue in `createMedia` via `MediaEnrichmentService`; single backstop `MediaEnrichmentEnqueueListener`; gating table with feature flags and env kill-switches; feature-flag caching; metadata sync separation; client-never-enqueues principle |
+| 1.3 | June 2026 | AI Assistant | Registered handlers reference (Section 15): add `job_history_purge` global handler — nightly cron purge of terminal job rows past retention cutoff |

@@ -17,6 +17,7 @@ import { SystemSettingsEditor } from '../components/admin/SystemSettingsEditor';
 import { FeatureFlagsList } from '../components/admin/FeatureFlagsList';
 import { UISettings } from '../components/admin/UISettings';
 import { StorageSettings } from '../components/admin/StorageSettings';
+import { resetJobHistory } from '../services/jobInsights';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -124,7 +125,10 @@ export default function SystemSettingsPage() {
               <TabPanel value={tabIndex} index={2}>
                 <StorageSettings
                   settings={settings.storage}
+                  jobsSettings={settings.jobs}
                   onSave={(storage) => handleSave('storage', storage)}
+                  onSaveJobs={(jobs) => handleSave('jobs', jobs)}
+                  onResetHistory={canWrite ? () => resetJobHistory().then(() => undefined) : undefined}
                   disabled={!canWrite || isSaving}
                 />
               </TabPanel>

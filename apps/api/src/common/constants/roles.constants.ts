@@ -78,6 +78,10 @@ export const PERMISSIONS = {
   // Geo Provider Settings (Admin only)
   GEO_SETTINGS_READ: 'geo_settings:read',
   GEO_SETTINGS_WRITE: 'geo_settings:write',
+
+  // Sharing (Admin + Contributor; manage_any = Admin only)
+  SHARES_MANAGE: 'shares:manage',
+  SHARES_MANAGE_ANY: 'shares:manage_any',
 } as const;
 
 export type PermissionName = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
