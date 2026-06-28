@@ -45,6 +45,7 @@ import { EmptyTrashDto } from './dto/empty-trash.dto';
 import { geoResultToMediaColumns, GEO_CLEAR_COLUMNS } from './geo/geo-result.mapper';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
+import { ALL_SYSTEM_TAG_NAMES } from '../social/social-detectors';
 
 /** Shape of each element returned by listLocations. */
 export interface MediaLocation {
@@ -712,11 +713,18 @@ export class MediaService {
 
     const mediaTag = await this.prisma.mediaTag.findUnique({
       where: { tagId_mediaItemId: { tagId, mediaItemId } },
+      include: { tag: { select: { isSystem: true } } },
     });
 
     if (!mediaTag) {
       throw new NotFoundException(
         `Tag ${tagId} is not attached to media item ${mediaItemId}`,
+      );
+    }
+
+    if (mediaTag.tag.isSystem) {
+      throw new ForbiddenException(
+        `Tag ${tagId} is a system tag and cannot be removed manually`,
       );
     }
 
@@ -1453,6 +1461,14 @@ export class MediaService {
 
     await this.prisma.$transaction(async (tx) => {
       if (dto.add && dto.add.length > 0) {
+        // Guard: system tag names cannot be used as manual tags
+        const systemTagNamesLower = ALL_SYSTEM_TAG_NAMES.map((n) => n.toLowerCase());
+        for (const name of dto.add) {
+          if (systemTagNamesLower.includes(name.toLowerCase())) {
+            throw new BadRequestException(`Tag name "${name}" is reserved as a system tag and cannot be used`);
+          }
+        }
+
         const tagIds: string[] = [];
         for (const name of dto.add) {
           const tag = await tx.tag.upsert({
@@ -1468,7 +1484,7 @@ export class MediaService {
           tagIds.map((tagId) => ({ mediaItemId, tagId, source: 'manual' as const })),
         );
         const result = await tx.mediaTag.createMany({ data: pairsWithSource, skipDuplicates: true });
-        // Promote any existing ai-sourced tags to manual for these pairs
+        // Promote any existing ai-sourced tags to manual for these pairs (never promote system tags)
         await tx.mediaTag.updateMany({
           where: {
             tagId: { in: tagIds },
@@ -1485,6 +1501,7 @@ export class MediaService {
           where: {
             circleId: dto.circleId,
             name: { in: dto.remove },
+            isSystem: false, // Never remove system tags via bulk ops
           },
           select: { id: true },
         });
@@ -1494,6 +1511,7 @@ export class MediaService {
             where: {
               tagId: { in: removeTagIds },
               mediaItemId: { in: dto.ids },
+              source: { not: 'system' as const },
             },
           });
           removed = result.count;
