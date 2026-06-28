@@ -143,7 +143,7 @@ function EditExpirationDialog({ share, onClose, onSave }: EditExpirationDialogPr
               value={dateValue}
               onChange={(e) => setDateValue(e.target.value)}
               fullWidth
-              InputLabelProps={{ shrink: true }}
+              slotProps={{ inputLabel: { shrink: true } }}
             />
           )}
         </Stack>
@@ -253,7 +253,7 @@ function BulkExpirationDialog({ open, onClose, onSave, count }: BulkExpirationDi
               value={dateValue}
               onChange={(e) => setDateValue(e.target.value)}
               fullWidth
-              InputLabelProps={{ shrink: true }}
+              slotProps={{ inputLabel: { shrink: true } }}
             />
           )}
         </Stack>
@@ -406,10 +406,10 @@ function PublicSharesPageContent() {
   return (
     <Box sx={{ p: { xs: 2, md: 4 } }}>
       {/* Header */}
-      <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>
+      <Stack direction="row" spacing={2} sx={{ mb: 3, alignItems: 'center' }}>
         <PublicIcon color="primary" sx={{ fontSize: 32 }} />
         <Box sx={{ flex: 1 }}>
-          <Typography variant="h5" fontWeight={700}>
+          <Typography variant="h5" sx={{ fontWeight: 700 }}>
             Public Sharing
           </Typography>
           <Typography variant="body2" color="text.secondary">
@@ -554,7 +554,7 @@ function PublicSharesPageContent() {
                     )}
                   </TableCell>
                   <TableCell>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
+                    <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                       {share.targetType === 'album' ? (
                         <AlbumIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
                       ) : (
@@ -593,7 +593,7 @@ function PublicSharesPageContent() {
                     </Typography>
                   </TableCell>
                   <TableCell align="right">
-                    <Stack direction="row" justifyContent="flex-end" spacing={0.5}>
+                    <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
                       <Tooltip title="Copy link">
                         <IconButton size="small" onClick={() => handleCopy(share.publicUrl)}>
                           <CopyIcon fontSize="small" />
