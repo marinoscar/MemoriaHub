@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { MediaType, JobReason, MediaTagStatusType, MediaFaceStatusType } from '@prisma/client';
+import { MediaType, JobReason, MediaTagStatusType, MediaFaceStatusType, MediaSocialStatusType } from '@prisma/client';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 
@@ -164,6 +164,40 @@ export class MediaEnrichmentService {
             ? 'face.video.enabled=false'
             : 'FACE_AUTO_DETECT=false';
         skipped.push(`face_detection(${reason})`);
+      }
+
+      // ------------------------------------------------------------------
+      // Social media detection — videos only
+      // ------------------------------------------------------------------
+      const socialOn = settings.features?.['socialMediaDetection'] === true;
+      const socialKilled = process.env['SOCIAL_MEDIA_DETECTION_ENABLED'] === 'false';
+
+      if (item.type === MediaType.video && socialOn && !socialKilled) {
+        const job = await this.enrichmentJobService.enqueue({
+          type: 'social_media_detection',
+          mediaItemId: item.id,
+          circleId: item.circleId,
+          reason: JobReason.upload,
+          priority: 30,
+        });
+
+        await this.prisma.mediaSocialStatus.upsert({
+          where: { mediaItemId: item.id },
+          create: {
+            mediaItemId: item.id,
+            circleId: item.circleId,
+            status: MediaSocialStatusType.pending,
+            detected: false,
+          },
+          update: {
+            status: MediaSocialStatusType.pending,
+          },
+        });
+
+        enqueued.push(`social_media_detection(job=${job.id})`);
+      } else if (item.type === MediaType.video) {
+        const reason = !socialOn ? 'feature disabled' : 'SOCIAL_MEDIA_DETECTION_ENABLED=false';
+        skipped.push(`social_media_detection(${reason})`);
       }
 
       // ------------------------------------------------------------------
