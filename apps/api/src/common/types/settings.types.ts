@@ -80,6 +80,12 @@ export interface SystemSettingsValue {
     reverseProvider: 'offline' | 'nominatim' | 'google';
     forwardSearchEnabled: boolean;
   };
+  jobs?: {
+    history: {
+      retentionDays: number;
+      purgeEnabled: boolean;
+    };
+  };
 }
 
 /**
@@ -146,5 +152,11 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
   geo: {
     reverseProvider: process.env['GEO_PROVIDER'] === 'nominatim' ? 'nominatim' : 'offline',
     forwardSearchEnabled: process.env['GEO_FORWARD_SEARCH_ENABLED'] === 'true',
+  },
+  jobs: {
+    history: {
+      retentionDays: 30,
+      purgeEnabled: true,
+    },
   },
 };
