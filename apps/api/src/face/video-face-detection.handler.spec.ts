@@ -177,6 +177,7 @@ describe('VideoFaceDetectionHandler', () => {
     storageObject: { upsert: jest.Mock };
     face: { deleteMany: jest.Mock; create: jest.Mock; update: jest.Mock };
     mediaFaceStatus: { upsert: jest.Mock };
+    mediaTag: { findFirst: jest.Mock };
   };
   let mockCore: {
     markProcessing: jest.Mock;
@@ -230,6 +231,8 @@ describe('VideoFaceDetectionHandler', () => {
         update: jest.fn().mockResolvedValue({}),
       },
       mediaFaceStatus: { upsert: jest.fn().mockResolvedValue({}) },
+      // Phase 2: social gate check — default to null (no social tag → process normally)
+      mediaTag: { findFirst: jest.fn().mockResolvedValue(null) },
     };
 
     // -----------------------------------------------------------------------
@@ -720,6 +723,66 @@ describe('VideoFaceDetectionHandler', () => {
       await handler.process(makeJob());
 
       expect(mockPrisma.storageObject.upsert).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Phase 2: social gate — skip detection when Social Media system tag present
+  // -------------------------------------------------------------------------
+
+  describe('social gate (Phase 2): Social Media system tag → mark no_faces and return', () => {
+    beforeEach(() => {
+      // Simulate the Social Media system tag being present on the item
+      mockPrisma.mediaTag.findFirst.mockResolvedValue({ id: 'tag-social-1' } as any);
+    });
+
+    it('calls core.markStatus with no_faces when social gate tag is present', async () => {
+      await handler.process(makeJob());
+
+      expect(mockCore.markStatus).toHaveBeenCalledWith(
+        makeJob().mediaItemId,
+        'no_faces',
+        0,
+        expect.any(String), // providerKey
+        expect.any(String), // modelVersion
+      );
+    });
+
+    it('does NOT call frame extractor when social gate tag is present', async () => {
+      await handler.process(makeJob());
+
+      expect(mockFrameExtractor.extractFrames).not.toHaveBeenCalled();
+    });
+
+    it('does NOT call face detection provider when social gate tag is present', async () => {
+      await handler.process(makeJob());
+
+      expect(mockCore.detectWithThrottleMapping).not.toHaveBeenCalled();
+    });
+
+    it('does NOT call persistAndMatchFaces when social gate tag is present', async () => {
+      await handler.process(makeJob());
+
+      expect(mockCore.persistAndMatchFaces).not.toHaveBeenCalled();
+    });
+
+    it('does NOT call storageObject.upsert when social gate tag is present', async () => {
+      await handler.process(makeJob());
+
+      expect(mockPrisma.storageObject.upsert).not.toHaveBeenCalled();
+    });
+
+    it('queries mediaTag.findFirst with the correct social gate where clause', async () => {
+      await handler.process(makeJob());
+
+      expect(mockPrisma.mediaTag.findFirst).toHaveBeenCalledWith({
+        where: {
+          mediaItemId: makeJob().mediaItemId,
+          source: 'system',
+          tag: { is: { name: 'Social Media' } },
+        },
+        select: { id: true },
+      });
     });
   });
 });
