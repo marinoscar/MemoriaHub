@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   NotFoundException,
+  BadRequestException,
   Logger,
 } from '@nestjs/common';
 import {
@@ -13,7 +14,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { CircleRole, JobReason, MediaSocialStatusType } from '@prisma/client';
+import { CircleRole, JobReason, MediaSocialStatusType, MediaType } from '@prisma/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
@@ -52,6 +53,13 @@ export class SocialController {
       user,
       'collaborator' as CircleRole,
     );
+
+    // Social media detection only applies to videos — never enqueue for photos.
+    if (mediaItem.type !== MediaType.video) {
+      throw new BadRequestException(
+        'Social media detection only applies to videos',
+      );
+    }
 
     const job = await this.enrichmentJobService.enqueue({
       type: 'social_media_detection',
@@ -131,10 +139,10 @@ export class SocialController {
     mediaItemId: string,
     user: RequestUser,
     requiredRole: CircleRole = 'viewer' as CircleRole,
-  ): Promise<{ id: string; circleId: string }> {
+  ): Promise<{ id: string; circleId: string; type: MediaType }> {
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },
-      select: { id: true, circleId: true, deletedAt: true },
+      select: { id: true, circleId: true, type: true, deletedAt: true },
     });
 
     if (!mediaItem || mediaItem.deletedAt) {
@@ -148,6 +156,6 @@ export class SocialController {
       requiredRole,
     );
 
-    return { id: mediaItem.id, circleId: mediaItem.circleId };
+    return { id: mediaItem.id, circleId: mediaItem.circleId, type: mediaItem.type };
   }
 }
