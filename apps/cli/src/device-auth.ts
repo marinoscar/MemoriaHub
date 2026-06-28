@@ -97,6 +97,18 @@ export async function requestDeviceCode(
   return envelope.data;
 }
 
+/** Successful result from polling the device token endpoint. */
+export interface DeviceTokenResult {
+  /** The issued access token (PAT string). */
+  accessToken: string;
+  /**
+   * ISO 8601 timestamp when the token expires, computed from the server's
+   * `expiresIn` field (seconds from now).  Undefined when the server does not
+   * include an `expiresIn` value in the response.
+   */
+  expiresAt?: string;
+}
+
 /**
  * Poll the token endpoint until the user approves the device.
  *
@@ -105,7 +117,7 @@ export async function requestDeviceCode(
  * @param intervalSec   Initial polling interval in seconds (server-specified)
  * @param expiresInSec  Total seconds before the device code expires
  * @param onTick        Optional callback called on each poll attempt
- * @returns The raw access token (PAT string) on success
+ * @returns The issued access token and optional expiry timestamp on success
  */
 export async function pollForDeviceToken(
   serverUrl: string,
@@ -113,7 +125,7 @@ export async function pollForDeviceToken(
   intervalSec: number,
   expiresInSec: number,
   onTick?: (state: 'pending' | 'slow_down') => void,
-): Promise<string> {
+): Promise<DeviceTokenResult> {
   const base = serverUrl.replace(/\/$/, '');
   const deadline = Date.now() + expiresInSec * 1000;
   // Add a small buffer so we don't race the server-side expiry check
@@ -145,7 +157,7 @@ export async function pollForDeviceToken(
 
     if (res.ok) {
       // Success: { data: { accessToken, refreshToken, tokenType, expiresIn } }
-      const envelope = parsed as { data: { accessToken: string } };
+      const envelope = parsed as { data: { accessToken: string; expiresIn?: number } };
       if (
         typeof envelope.data !== 'object' ||
         envelope.data === null ||
@@ -153,7 +165,13 @@ export async function pollForDeviceToken(
       ) {
         throw new Error('Unexpected success response shape from /api/auth/device/token');
       }
-      return envelope.data.accessToken;
+      const { accessToken, expiresIn } = envelope.data;
+      // Compute an absolute expiry timestamp when the server provides expiresIn.
+      const expiresAt =
+        typeof expiresIn === 'number' && expiresIn > 0
+          ? new Date(Date.now() + expiresIn * 1000).toISOString()
+          : undefined;
+      return { accessToken, expiresAt };
     }
 
     // Non-2xx: inspect the RFC error code

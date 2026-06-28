@@ -20,6 +20,7 @@ import { SettingsRepo } from '../repo/settings.js';
 import { SyncEngine } from '../sync/sync-engine.js';
 import { renderSyncHeadless } from '../render/headless-sync.js';
 import { getRetrySelection } from '../sync/retry.js';
+import { runPatPreflight } from '../preflight.js';
 import { ui } from '../ui.js';
 
 export function retryCommand(): Command {
@@ -54,6 +55,10 @@ export function retryCommand(): Command {
       // Default: retry across all folders
       folderIds = undefined;
     }
+
+    // Pre-flight: validate the PAT and warn about near-expiry before we start
+    // doing any real work.  A 401 exits immediately with an actionable message.
+    await runPatPreflight(api, cfg);
 
     // Preview the retry selection before running
     const selection = getRetrySelection(fileRepo, settingsRepo, folderIds);

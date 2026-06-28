@@ -24,7 +24,7 @@ import chalk from 'chalk';
 import { saveConfig } from '../config.js';
 import { ApiClient, ApiError } from '../api.js';
 import { ui, createSpinner, printBox } from '../ui.js';
-import { requestDeviceCode, pollForDeviceToken } from '../device-auth.js';
+import { requestDeviceCode, pollForDeviceToken, type DeviceTokenResult } from '../device-auth.js';
 import { openBrowser } from '../open-browser.js';
 
 // ---------------------------------------------------------------------------
@@ -35,6 +35,7 @@ async function validateAndSave(
   serverUrl: string,
   pat: string,
   label: string,
+  patExpiresAt?: string,
 ): Promise<void> {
   const spinner = createSpinner(`${label}…`);
   spinner.start();
@@ -60,7 +61,7 @@ async function validateAndSave(
 
   spinner.succeed('Token validated');
 
-  saveConfig({ serverUrl, pat });
+  saveConfig({ serverUrl, pat, patExpiresAt });
 
   printBox(
     [
@@ -183,9 +184,9 @@ export function loginCommand(): Command {
       const pollSpinner = createSpinner('Waiting for authorization in browser…');
       pollSpinner.start();
 
-      let accessToken: string;
+      let tokenResult: DeviceTokenResult;
       try {
-        accessToken = await pollForDeviceToken(
+        tokenResult = await pollForDeviceToken(
           serverUrl,
           deviceCode,
           interval,
@@ -205,8 +206,8 @@ export function loginCommand(): Command {
 
       pollSpinner.succeed('Device authorized');
 
-      // Step 5: Validate token and save
-      await validateAndSave(serverUrl, accessToken, 'Verifying token');
+      // Step 5: Validate token and save (include expiry for pre-flight warnings)
+      await validateAndSave(serverUrl, tokenResult.accessToken, 'Verifying token', tokenResult.expiresAt);
     } finally {
       rl.close();
     }

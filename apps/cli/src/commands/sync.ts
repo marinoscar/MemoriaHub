@@ -21,6 +21,7 @@ import { SettingsRepo } from '../repo/settings.js';
 import { SyncEngine } from '../sync/sync-engine.js';
 import { EV } from '../sync/events.js';
 import { renderSyncHeadless } from '../render/headless-sync.js';
+import { runPatPreflight } from '../preflight.js';
 import { ui, isTTY } from '../ui.js';
 
 export function syncCommand(): Command {
@@ -95,6 +96,10 @@ export function syncCommand(): Command {
         folderIds.push(folder.id);
       }
     }
+
+    // Pre-flight: validate the PAT and warn about near-expiry before we start
+    // doing any real work.  A 401 exits immediately with an actionable message.
+    await runPatPreflight(api, cfg);
 
     const engine = new SyncEngine({
       api,

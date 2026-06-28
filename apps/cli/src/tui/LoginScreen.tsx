@@ -23,7 +23,7 @@ import TextInput from 'ink-text-input';
 import * as os from 'os';
 import { ApiClient } from '../api.js';
 import { saveConfig, type CliConfig } from '../config.js';
-import { requestDeviceCode, pollForDeviceToken } from '../device-auth.js';
+import { requestDeviceCode, pollForDeviceToken, type DeviceTokenResult } from '../device-auth.js';
 import { openBrowser } from '../open-browser.js';
 import { BOX_BORDER, success, error as errorColor, warning } from './theme.js';
 
@@ -193,7 +193,7 @@ export function LoginScreen({
 
   // Ref to pass the polled token into the validating effect without adding it
   // to React state (avoids an extra render cycle).
-  const pendingTokenRef = useRef<string>('');
+  const pendingTokenRef = useRef<DeviceTokenResult | null>(null);
 
   // -------------------------------------------------------------------------
   // Step: validating — GET /api/auth/me; save config
@@ -202,11 +202,15 @@ export function LoginScreen({
   useEffect(() => {
     if (step !== 'validating') return;
 
-    const token = pendingTokenRef.current;
-    if (!token) return;
+    const tokenResult = pendingTokenRef.current;
+    if (!tokenResult) return;
 
     const normalised = serverUrl.replace(/\/$/, '');
-    const cfg: CliConfig = { serverUrl: normalised, pat: token };
+    const cfg: CliConfig = {
+      serverUrl: normalised,
+      pat: tokenResult.accessToken,
+      patExpiresAt: tokenResult.expiresAt,
+    };
 
     void (async () => {
       try {

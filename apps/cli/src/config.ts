@@ -7,6 +7,13 @@ export interface CliConfig {
   serverUrl: string;
   pat: string;
   activeCircleId?: string;
+  /**
+   * ISO 8601 expiry timestamp of the stored PAT.  Written by `memoriahub login`
+   * when the device-flow token response includes an expiresIn field.  Used by
+   * the pre-flight check to warn before large imports when the token is nearly
+   * expired.  Absent for tokens created via --token (expiry is unknown).
+   */
+  patExpiresAt?: string;
 }
 
 function configPath(): string {
