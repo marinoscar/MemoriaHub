@@ -708,6 +708,8 @@ Note: Semantic search (pgvector embeddings) requires a pgvector-capable Postgres
 
 Note: The enrichment worker shared by face detection, storage insights computation, auto-tagging, metadata re-extraction, and trash purge is controlled by `ENRICHMENT_WORKER_ENABLED` (default: `true`), `ENRICHMENT_JOB_POLL_MS` (default: `5000`), and `ENRICHMENT_WORKER_CONCURRENCY` (default: `1`). The legacy `FACE_WORKER_ENABLED` and `FACE_JOB_POLL_MS` aliases are still respected for backward compatibility. The `metadata_extraction` job type re-runs the `exif`, `dimensions`, `geocode`, and `video-probe` processors and syncs typed columns directly WITHOUT emitting `OBJECT_PROCESSED_EVENT`, so it does not cascade to auto-tagging, face detection, or burst detection. There is no upload-time enqueue and no per-circle opt-in for metadata extraction. Per-item rerun remains available to circle collaborators; global backfill is now an admin-only endpoint (`POST /api/admin/metadata/backfill`). The `trash_purge` job type is a global job (`mediaItemId: null`, `circleId: null`) that hard-deletes trashed items past the retention cutoff; it is enqueued by an hourly cron and never triggered on upload or by a user rerun.
 
+Note: The rate-limit classifier (`classifyRateLimit`) treats HTTP 429 **and** HTTP 529 (Anthropic "Overloaded") as rate-limit signals that route to the deferral path rather than the normal-failure retry path. `geocode` jobs now **defer** when the active provider signals quota exhaustion (Google `OVER_QUERY_LIMIT` / `RESOURCE_EXHAUSTED`, Nominatim HTTP 429 / 5xx) instead of returning null and being marked `processed` with no geo data. This means items with GPS coordinates will always be retried until geo data is written successfully.
+
 **Upload enrichment trigger:** `MediaService.createMedia` calls `MediaEnrichmentService.enqueueUploadEnrichment(...)` synchronously before returning 201, so `face_detection`, `auto_tagging`, and `burst_detection` job rows exist in the database before any client receives a response — eliminating the timing gap that previously caused CLI uploads to miss enrichment jobs. A single `MediaEnrichmentEnqueueListener` on `OBJECT_PROCESSED_EVENT` acts as an idempotent backstop for any path where processing completes after item registration. Each job type is gated by its global feature flag (`features.faceRecognition`, `features.autoTagging`, `features.burstDetection`, all default off) plus its env kill-switch; clients never enqueue enrichment directly. Metadata columns (`capturedAt`, dimensions, geo) are synced separately via `MediaMetadataSyncService` and are not part of this trigger. Feature flags are read through a 5-second TTL cache on `SystemSettingsService.getSettings()` to avoid per-upload DB hits during bulk imports.
 
 **Enrichment retry and rate-limit backoff:**
@@ -717,6 +719,19 @@ Note: The enrichment worker shared by face detection, storage insights computati
 - `ENRICHMENT_RATELIMIT_BASE_MS` - Base backoff delay in ms for the first rate-limit deferral (default: `30000`)
 - `ENRICHMENT_RATELIMIT_MAX_MS` - Maximum backoff cap in ms for rate-limit deferrals (default: `900000`, i.e. 15 minutes)
 - `ENRICHMENT_RATELIMIT_MAX_HITS` - Maximum rate-limit deferrals before a job is permanently failed; tracked separately from `ENRICHMENT_MAX_ATTEMPTS` (default: `10`)
+- `ENRICHMENT_STUCK_MINUTES` - Threshold in minutes for the automatic stuck-job reset cron (`EnrichmentStuckResetTask`, runs every 10 min); jobs that remain in `running` state beyond this threshold are reset to `pending` so the worker can re-claim them after an OOM kill or process restart (default: `15`); must exceed the longest expected single-job runtime
+
+**Bulk Import Tuning:**
+
+When importing thousands of photos onto a VPS with limited RAM, tune these settings to keep enrichment stable:
+
+- `ENRICHMENT_WORKER_CONCURRENCY` — keep at 1 for AI-bound work (auto-tagging, face detection) during the initial import; the new per-provider throttle gate makes higher values safe once you confirm throughput is stable, but each concurrent job buffers a full decoded image in memory.
+- `NODE_OPTIONS=--max-old-space-size=<MB>` — set to leave headroom above the Node.js heap default (e.g. `--max-old-space-size=512` on a 1 GB VPS); image handlers buffer the full image per job, so heap pressure scales with concurrency.
+- `TAG_MAX_IMAGE_DIM` / `FACE_MAX_IMAGE_DIM` — reduce from the default 1568 to 768–1024 on memory-constrained hosts; lower resolution reduces per-job peak memory at the cost of slightly lower tagging accuracy.
+- `ENRICHMENT_RATELIMIT_MAX_HITS` / `ENRICHMENT_RATELIMIT_MAX_MS` — raise for very large runs where a single provider quota window may take hours to recover; the defaults (10 hits, 15 min max) are designed for short bursts, not sustained 10 000-item backfills.
+- `ENRICHMENT_STUCK_MINUTES` — leave at the default 15 unless you are using a slow face provider where single-item detection takes longer than that; a value too low will reset legitimately-running jobs.
+
+See [Bulk Import Resilience](docs/specs/bulk-import-resilience.md) for the full provider rate-limit classification matrix, stuck-job recovery runbook, and CLI durable resume details.
 
 **Storage (S3 / Cloudflare R2):**
 - `S3_MAX_ATTEMPTS` - Maximum SDK-level retry attempts for server-initiated S3 operations (upload, complete multipart, signed-URL generation, download, delete, head); does not cover presigned part PUTs which are retried client-side by the CLI (default: `5`)
@@ -800,6 +815,7 @@ Detailed specs live under `docs/specs/`:
 - [Geocoding](docs/specs/geocoding.md) — three-provider reverse-geocoding model (offline/nominatim/google), dynamic provider resolution via system setting, encrypted Google credential store, geocode enrichment job type, media_geocode_status lifecycle, app-wide admin backfill
 - [Archive & Trash Bin](docs/specs/archive-trash.md) — two independent soft-state columns (`archivedAt` / `deletedAt`), search-inclusion asymmetry, automatic purge via `trash_purge` enrichment job, dedup-on-restore conflict handling
 - [Storage Provider Configuration](docs/specs/storage-providers.md) — multi-provider credential management, per-object routing with env fallback, copy-only migration model, active-provider selection
+- [Bulk Import Resilience](docs/specs/bulk-import-resilience.md) — dual-path retry model, per-provider throttle gate, stuck-job auto-reset cron, provider rate-limit classification matrix, CLI durable multipart resume, PAT pre-flight, recovery runbook
 
 ## Audits
 
