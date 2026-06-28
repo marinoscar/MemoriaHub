@@ -33,6 +33,18 @@ export interface JobInsightsEtaPerType {
   etcMs: number | null;
 }
 
+export interface JobLifetimeStats {
+  succeeded: number;
+  failed: number;
+  total: number;
+  avgMs: number;
+  samples: number;
+}
+
+export interface JobLifetimeByType extends JobLifetimeStats {
+  type: string;
+}
+
 export interface JobInsights {
   computedAt: string;
   windowDays: number;
@@ -58,8 +70,16 @@ export interface JobInsights {
     basis: 'live' | 'partial' | 'none';
     perType: JobInsightsEtaPerType[];
   };
+  lifetime: {
+    overall: JobLifetimeStats;
+    byType: JobLifetimeByType[];
+  };
 }
 
 export async function getJobInsights(windowDays?: number): Promise<JobInsights> {
   return api.get<JobInsights>('/admin/jobs/insights' + (windowDays ? '?windowDays=' + windowDays : ''));
+}
+
+export async function resetJobHistory(): Promise<{ reset: number }> {
+  return api.post<{ reset: number }>('/admin/jobs/insights/reset-history');
 }

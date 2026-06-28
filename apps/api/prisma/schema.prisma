@@ -776,6 +776,26 @@ model EnrichmentJob {
   @@map("enrichment_jobs")
 }
 
+// Lifetime per-type aggregate of terminal enrichment jobs. The nightly
+// job_history_purge folds the rows it is about to delete into this table (in the
+// same transaction) BEFORE deleting them, so all-time totals and average
+// duration survive history purging for analytics and the insights dashboard.
+// Only counts and total duration are kept (exactly mergeable) — percentiles are
+// not stored here and remain computed live over the recent window.
+model JobStatsRollup {
+  type            String   @id
+  succeededCount  Int      @default(0) @map("succeeded_count")
+  failedCount     Int      @default(0) @map("failed_count")
+  // Sum of (finishedAt - startedAt) in ms over succeeded jobs that had both
+  // timestamps. Stored as double precision (exact for integers up to 2^53 ms).
+  sumDurationMs   Float    @default(0) @map("sum_duration_ms")
+  // Count of succeeded jobs that contributed a duration (avg denominator).
+  durationSamples Int      @default(0) @map("duration_samples")
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("job_stats_rollup")
+}
+
 model MediaFaceStatus {
   id          String              @id @default(uuid()) @db.Uuid
   mediaItemId String              @unique @map("media_item_id") @db.Uuid

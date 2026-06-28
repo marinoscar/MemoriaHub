@@ -130,8 +130,12 @@ describe('EnrichmentAdminService.getInsights', () => {
     // Default count mocks (stuckRunning=0, scheduledCount=0, rateLimited=0, retried=0)
     (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
 
-    // Default $queryRaw: no history
+    // Default $queryRaw: no history. Three $queryRaw calls happen per getInsights
+    // in order: durByType, durOverall, lifeDurByType (all-time live durations).
     (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+
+    // Lifetime rollup of purged rows — default empty so lifetime = live only.
+    (mockPrisma.jobStatsRollup.findMany as jest.Mock).mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -652,6 +656,87 @@ describe('EnrichmentAdminService.getInsights', () => {
       const result = await service.getInsights();
 
       expect(result.live.retried).toBe(7);
+    });
+  });
+
+  // =========================================================================
+  // Lifetime totals (live all-time + purged rollup)
+  // =========================================================================
+
+  describe('lifetime totals', () => {
+    it('merges live all-time counts/durations with the purged rollup', async () => {
+      setupGroupByMocks(mockPrisma, {
+        statusGroups: makeStatusGroups({
+          [JobStatus.succeeded]: 10,
+          [JobStatus.failed]: 2,
+        }),
+        typeStatusGroups: makeTypeStatusGroups([
+          { type: 'face_detection', status: JobStatus.succeeded, count: 10 },
+          { type: 'face_detection', status: JobStatus.failed, count: 2 },
+        ]),
+      });
+      // $queryRaw order: durByType, durOverall, lifeDurByType
+      (mockPrisma.$queryRaw as jest.Mock)
+        .mockResolvedValueOnce(makeDurByType([{ type: 'face_detection', samples: 10, avg_sec: 2 }]))
+        .mockResolvedValueOnce(makeDurOverall(10, 2))
+        // live all-time durations: 10 samples summing 20s (=20000ms)
+        .mockResolvedValueOnce([{ type: 'face_detection', samples: 10, sum_sec: 20 }]);
+      // Purged rollup: 90 succeeded / 8 failed, 90 duration samples summing 180000ms
+      (mockPrisma.jobStatsRollup.findMany as jest.Mock).mockResolvedValue([
+        {
+          type: 'face_detection',
+          succeededCount: 90,
+          failedCount: 8,
+          sumDurationMs: 180_000,
+          durationSamples: 90,
+        },
+      ]);
+
+      const result = await service.getInsights();
+
+      const fd = result.lifetime.byType.find((t) => t.type === 'face_detection');
+      expect(fd).toBeDefined();
+      // 10 live + 90 rollup succeeded; 2 live + 8 rollup failed
+      expect(fd?.succeeded).toBe(100);
+      expect(fd?.failed).toBe(10);
+      expect(fd?.total).toBe(110);
+      // samples: 10 live + 90 rollup = 100; sumMs: 20000 + 180000 = 200000 → avg 2000
+      expect(fd?.samples).toBe(100);
+      expect(fd?.avgMs).toBe(2000);
+
+      // Overall mirrors the single type here
+      expect(result.lifetime.overall.total).toBe(110);
+      expect(result.lifetime.overall.avgMs).toBe(2000);
+    });
+
+    it('reports zero lifetime totals when there is no live or purged history', async () => {
+      setupGroupByMocks(mockPrisma);
+      (mockPrisma.$queryRaw as jest.Mock)
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce(makeDurOverall(0, 0))
+        .mockResolvedValueOnce([]);
+      (mockPrisma.jobStatsRollup.findMany as jest.Mock).mockResolvedValue([]);
+
+      const result = await service.getInsights();
+
+      expect(result.lifetime.overall.total).toBe(0);
+      expect(result.lifetime.overall.avgMs).toBe(0);
+      expect(result.lifetime.byType).toEqual([]);
+    });
+  });
+
+  // =========================================================================
+  // resetHistory
+  // =========================================================================
+
+  describe('resetHistory', () => {
+    it('clears the rollup table and returns the cleared row count', async () => {
+      (mockPrisma.jobStatsRollup.deleteMany as jest.Mock).mockResolvedValue({ count: 4 });
+
+      const result = await service.resetHistory();
+
+      expect(mockPrisma.jobStatsRollup.deleteMany).toHaveBeenCalledWith({});
+      expect(result.reset).toBe(4);
     });
   });
 });

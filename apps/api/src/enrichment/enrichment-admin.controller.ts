@@ -119,6 +119,23 @@ export class EnrichmentAdminController {
   }
 
   // -------------------------------------------------------------------------
+  // POST /admin/jobs/insights/reset-history  (before :id to avoid route conflicts)
+  // -------------------------------------------------------------------------
+
+  @Post('insights/reset-history')
+  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.JOBS_WRITE] })
+  @ApiOperation({
+    summary: 'Reset lifetime job history analytics (Admin)',
+    description:
+      'Clears the JobStatsRollup table (the all-time aggregate of purged job rows). ' +
+      'Live job rows are unaffected. Use to start lifetime analytics fresh.',
+  })
+  @ApiResponse({ status: 201, description: 'Number of per-type rollup rows cleared' })
+  async resetHistory() {
+    return this.adminService.resetHistory();
+  }
+
+  // -------------------------------------------------------------------------
   // POST /admin/jobs/retry-failed  (before :id to avoid route conflicts)
   // -------------------------------------------------------------------------
 
