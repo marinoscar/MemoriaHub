@@ -12,6 +12,12 @@ import { PrismaService } from '../prisma/prisma.service';
 
 export const STUCK_RUNNING_MINUTES = 10;
 
+/** Default rolling window (days) for the duration-history aggregate. */
+export const INSIGHTS_WINDOW_DAYS = 7;
+
+/** Fallback per-job duration (ms) used for ETA when no history exists at all. */
+const ETA_FALLBACK_MS = 5000;
+
 // ---------------------------------------------------------------------------
 // Return shape interfaces
 // ---------------------------------------------------------------------------
@@ -67,6 +73,51 @@ export interface JobListResult {
     pageSize: number;
     totalItems: number;
     totalPages: number;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Job Insights / ETA shapes
+// ---------------------------------------------------------------------------
+
+export interface JobDurationStats {
+  type: string;
+  samples: number;
+  avgMs: number;
+  p50Ms: number;
+  p95Ms: number;
+  throughputPerMin: number;
+}
+
+export interface JobInsights {
+  computedAt: string;
+  windowDays: number;
+  concurrency: number;
+  live: {
+    total: number;
+    byStatus: { pending: number; running: number; succeeded: number; failed: number };
+    pending: number;
+    running: number;
+    failed: number;
+    scheduled: number;
+    rateLimited: number;
+    retried: number;
+    byType: JobStatsByType[];
+  };
+  history: {
+    overall: Omit<JobDurationStats, 'type'>;
+    byType: JobDurationStats[];
+  };
+  eta: {
+    totalRemaining: number;
+    etaMs: number | null;
+    basis: 'live' | 'partial' | 'none';
+    perType: Array<{
+      type: string;
+      remaining: number;
+      avgMs: number | null;
+      etcMs: number | null;
+    }>;
   };
 }
 
@@ -171,6 +222,167 @@ export class EnrichmentAdminService {
     const byType = Array.from(typeMap.values()).sort((a, b) => a.type.localeCompare(b.type));
 
     return { total, byStatus, byType, stuckRunning: stuckCount, scheduled: scheduledCount };
+  }
+
+  // -------------------------------------------------------------------------
+  // getInsights — live counts + duration history + ETA (read-only, lock-safe)
+  // -------------------------------------------------------------------------
+  //
+  // All queries here are pure SELECTs (incl. PERCENTILE_CONT ordered-set
+  // aggregates), which take only a Postgres ACCESS SHARE lock — compatible with
+  // the worker's ROW EXCLUSIVE / FOR UPDATE row claims, so they never block the
+  // worker. The duration scan is bounded to `windowDays` so it never grows with
+  // the unbounded retained history. Computed on demand only (no polling).
+  // -------------------------------------------------------------------------
+
+  async getInsights(windowDays: number = INSIGHTS_WINDOW_DAYS): Promise<JobInsights> {
+    const concurrency = Math.max(
+      1,
+      parseInt(
+        process.env['ENRICHMENT_WORKER_CONCURRENCY'] ??
+          process.env['FACE_WORKER_CONCURRENCY'] ??
+          '1',
+        10,
+      ) || 1,
+    );
+
+    const throughputSince = new Date(Date.now() - 60 * 60 * 1000);
+
+    const [stats, rateLimited, retried, durByType, durOverall, tpByType] =
+      await Promise.all([
+        this.getStats(),
+        this.prisma.enrichmentJob.count({
+          where: {
+            rateLimitHits: { gt: 0 },
+            status: { in: [JobStatus.pending, JobStatus.running] },
+          },
+        }),
+        this.prisma.enrichmentJob.count({ where: { attempts: { gt: 1 } } }),
+        this.prisma.$queryRaw<
+          Array<{ type: string; samples: number; avg_sec: number; p50_sec: number; p95_sec: number }>
+        >(Prisma.sql`
+          SELECT type,
+            COUNT(*)::int AS samples,
+            COALESCE(AVG(EXTRACT(EPOCH FROM (finished_at - started_at))), 0)::float8 AS avg_sec,
+            COALESCE(PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (finished_at - started_at))), 0)::float8 AS p50_sec,
+            COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (finished_at - started_at))), 0)::float8 AS p95_sec
+          FROM enrichment_jobs
+          WHERE status = 'succeeded' AND started_at IS NOT NULL AND finished_at IS NOT NULL
+            AND finished_at >= NOW() - (${windowDays}::int * INTERVAL '1 day')
+          GROUP BY type
+        `),
+        this.prisma.$queryRaw<
+          Array<{ samples: number; avg_sec: number; p50_sec: number; p95_sec: number }>
+        >(Prisma.sql`
+          SELECT
+            COUNT(*)::int AS samples,
+            COALESCE(AVG(EXTRACT(EPOCH FROM (finished_at - started_at))), 0)::float8 AS avg_sec,
+            COALESCE(PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (finished_at - started_at))), 0)::float8 AS p50_sec,
+            COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (finished_at - started_at))), 0)::float8 AS p95_sec
+          FROM enrichment_jobs
+          WHERE status = 'succeeded' AND started_at IS NOT NULL AND finished_at IS NOT NULL
+            AND finished_at >= NOW() - (${windowDays}::int * INTERVAL '1 day')
+        `),
+        this.prisma.enrichmentJob.groupBy({
+          by: ['type'],
+          where: { status: JobStatus.succeeded, finishedAt: { gte: throughputSince } },
+          _count: { id: true },
+        }),
+      ]);
+
+    const secToMs = (s: number): number => Math.round(s * 1000);
+
+    // Throughput per type over the last hour (jobs / minute)
+    const tpMap = new Map<string, number>();
+    for (const row of tpByType) tpMap.set(row.type, row._count.id / 60);
+
+    // Per-type duration history
+    const historyByType: JobDurationStats[] = durByType
+      .map((r) => ({
+        type: r.type,
+        samples: r.samples,
+        avgMs: secToMs(r.avg_sec),
+        p50Ms: secToMs(r.p50_sec),
+        p95Ms: secToMs(r.p95_sec),
+        throughputPerMin: tpMap.get(r.type) ?? 0,
+      }))
+      .sort((a, b) => a.type.localeCompare(b.type));
+
+    const histMap = new Map<string, JobDurationStats>();
+    for (const h of historyByType) histMap.set(h.type, h);
+
+    const o = durOverall[0] ?? { samples: 0, avg_sec: 0, p50_sec: 0, p95_sec: 0 };
+    const overallThroughput =
+      tpByType.reduce((sum, r) => sum + r._count.id, 0) / 60;
+    const overall = {
+      samples: o.samples,
+      avgMs: secToMs(o.avg_sec),
+      p50Ms: secToMs(o.p50_sec),
+      p95Ms: secToMs(o.p95_sec),
+      throughputPerMin: overallThroughput,
+    };
+
+    // -------- ETA --------
+    let totalRemaining = 0;
+    let usedFallback = false;
+    let sumWorkMs = 0;
+    const hasAnyHistory = overall.samples > 0;
+
+    const perType = stats.byType.map((bt) => {
+      const remaining = bt.pending + bt.running;
+      totalRemaining += remaining;
+
+      const typeHist = histMap.get(bt.type);
+      const typeAvg = typeHist && typeHist.samples > 0 ? typeHist.avgMs : null;
+
+      if (!hasAnyHistory) {
+        return { type: bt.type, remaining, avgMs: null, etcMs: null };
+      }
+
+      // Effective per-job avg: type history → overall avg → hard fallback
+      let effectiveAvg = typeAvg;
+      if (effectiveAvg === null) {
+        effectiveAvg = overall.avgMs > 0 ? overall.avgMs : ETA_FALLBACK_MS;
+        if (remaining > 0) usedFallback = true;
+      }
+
+      const etcMs = remaining > 0 ? Math.round((remaining * effectiveAvg) / concurrency) : 0;
+      if (remaining > 0) sumWorkMs += remaining * effectiveAvg;
+
+      return { type: bt.type, remaining, avgMs: typeAvg, etcMs };
+    });
+
+    let etaMs: number | null;
+    let basis: 'live' | 'partial' | 'none';
+    if (totalRemaining === 0) {
+      etaMs = 0;
+      basis = 'live';
+    } else if (!hasAnyHistory) {
+      etaMs = null;
+      basis = 'none';
+    } else {
+      etaMs = Math.round(sumWorkMs / concurrency);
+      basis = usedFallback ? 'partial' : 'live';
+    }
+
+    return {
+      computedAt: new Date().toISOString(),
+      windowDays,
+      concurrency,
+      live: {
+        total: stats.total,
+        byStatus: stats.byStatus,
+        pending: stats.byStatus.pending,
+        running: stats.byStatus.running,
+        failed: stats.byStatus.failed,
+        scheduled: stats.scheduled,
+        rateLimited,
+        retried,
+        byType: stats.byType,
+      },
+      history: { overall, byType: historyByType },
+      eta: { totalRemaining, etaMs, basis, perType },
+    };
   }
 
   // -------------------------------------------------------------------------
