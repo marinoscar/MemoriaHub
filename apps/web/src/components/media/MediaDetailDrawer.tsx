@@ -893,18 +893,31 @@ export function MediaDetailDrawer({
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
             {displayItem.tags.map((tag) => {
               const isSystem = displayItem.systemTags?.includes(tag) ?? false;
-              return isSystem ? (
-                <Tooltip key={tag} title="System tag — applied automatically, cannot be removed">
-                  <Chip
-                    label={tag}
-                    size="small"
-                    color="secondary"
-                    icon={<LockIcon sx={{ fontSize: '0.85rem' }} />}
-                  />
-                </Tooltip>
-              ) : (
-                <Chip key={tag} label={tag} size="small" variant="outlined" />
-              );
+              if (isSystem) {
+                return (
+                  <Tooltip
+                    key={tag}
+                    title="System tag applied automatically. Remove it to re-enable processing for this video — a later scan may re-flag it."
+                  >
+                    <Chip
+                      label={tag}
+                      size="small"
+                      color="secondary"
+                      icon={<LockIcon sx={{ fontSize: '0.85rem' }} />}
+                      {...(tagEditOpen
+                        ? {
+                            onDelete: () => {
+                              if (!editTagsRemove.includes(tag)) {
+                                setEditTagsRemove((prev) => [...prev, tag]);
+                              }
+                            },
+                          }
+                        : {})}
+                    />
+                  </Tooltip>
+                );
+              }
+              return <Chip key={tag} label={tag} size="small" variant="outlined" />;
             })}
           </Box>
         ) : (
@@ -934,7 +947,6 @@ export function MediaDetailDrawer({
               onChange={setEditTagsRemove}
               circleId={item?.circleId}
               disabled={tagSaving}
-              lockedNames={displayItem.systemTags}
             />
             {tagError && <Alert severity="error">{tagError}</Alert>}
             <Stack direction="row" spacing={1}>
