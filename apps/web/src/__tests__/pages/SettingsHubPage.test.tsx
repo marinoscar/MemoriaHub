@@ -183,6 +183,12 @@ describe('SettingsHubPage', () => {
       expect(screen.getByText('Job Queue')).toBeInTheDocument();
     });
 
+    it('renders Job Queue Insights card when user has jobs:read', () => {
+      render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByText('Job Queue Insights')).toBeInTheDocument();
+    });
+
     it('renders Backup card', () => {
       render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
 
@@ -210,6 +216,16 @@ describe('SettingsHubPage', () => {
       render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
 
       expect(screen.queryByText('AI Providers')).not.toBeInTheDocument();
+    });
+
+    it('hides Job Queue Insights when user lacks jobs:read', () => {
+      mockUsePermissions.mockReturnValue(
+        adminPermissionsMock(['system_settings:read', 'users:read', 'ai_settings:read']) as any,
+      );
+
+      render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.queryByText('Job Queue Insights')).not.toBeInTheDocument();
     });
 
     it('always shows Archiving & Deletion (alwaysShow) regardless of permission', () => {
@@ -291,6 +307,17 @@ describe('SettingsHubPage', () => {
 
       await waitFor(() => {
         expect(mockNavigate).toHaveBeenCalledWith('/admin/settings/geo');
+      });
+    });
+
+    it('navigates to /admin/settings/jobs/insights when Job Queue Insights card is clicked', async () => {
+      const user = userEvent.setup();
+      render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await user.click(screen.getByText('Job Queue Insights'));
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/admin/settings/jobs/insights');
       });
     });
 

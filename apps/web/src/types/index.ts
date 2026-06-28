@@ -42,6 +42,12 @@ export interface SystemSettings {
       retentionDays?: number;
     };
   };
+  jobs?: {
+    history?: {
+      retentionDays?: number;
+      purgeEnabled?: boolean;
+    };
+  };
   burst?: {
     timeGapSeconds?: number;
     hashDistance?: number;

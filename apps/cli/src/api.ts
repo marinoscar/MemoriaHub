@@ -75,6 +75,62 @@ export class NetworkError extends Error {
 /** Body substrings that indicate provider throttling even on odd status codes. */
 const THROTTLE_BODY_RE = /SlowDown|ServiceUnavailable|TooManyRequests|Throttl/i;
 
+// ---------------------------------------------------------------------------
+// Job queue types
+// ---------------------------------------------------------------------------
+
+export interface JobInsights {
+  computedAt: string;
+  windowDays: number;
+  concurrency: number;
+  live: {
+    total: number;
+    byStatus: { pending: number; running: number; succeeded: number; failed: number };
+    pending: number;
+    running: number;
+    failed: number;
+    scheduled: number;
+    rateLimited: number;
+    retried: number;
+    byType: Array<{
+      type: string;
+      pending: number;
+      running: number;
+      succeeded: number;
+      failed: number;
+      total: number;
+    }>;
+  };
+  history: {
+    overall: {
+      samples: number;
+      avgMs: number;
+      p50Ms: number;
+      p95Ms: number;
+      throughputPerMin: number;
+    };
+    byType: Array<{
+      type: string;
+      samples: number;
+      avgMs: number;
+      p50Ms: number;
+      p95Ms: number;
+      throughputPerMin: number;
+    }>;
+  };
+  eta: {
+    totalRemaining: number;
+    etaMs: number | null;
+    basis: 'live' | 'partial' | 'none';
+    perType: Array<{
+      type: string;
+      remaining: number;
+      avgMs: number | null;
+      etcMs: number | null;
+    }>;
+  };
+}
+
 export class ApiClient {
   private readonly baseUrl: string;
   private readonly pat: string;
@@ -200,6 +256,12 @@ export class ApiClient {
   async listBackupObjects(circleId?: string): Promise<BackupObjectsResult> {
     const qs = circleId ? `?circleId=${encodeURIComponent(circleId)}` : '';
     return this.get<BackupObjectsResult>(`/api/admin/backup/objects${qs}`);
+  }
+
+  /** Fetch live job queue insights. windowDays defaults to 7 on the server. */
+  getJobInsights(windowDays?: number): Promise<JobInsights> {
+    const qs = windowDays !== undefined ? `?windowDays=${windowDays}` : '';
+    return this.get<JobInsights>(`/api/admin/jobs/insights${qs}`);
   }
 
   /** Parse a successful JSON response, unwrapping the standard { data } envelope. */

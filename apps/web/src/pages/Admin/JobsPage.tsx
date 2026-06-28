@@ -46,6 +46,7 @@ import {
   MoreVert as MoreVertIcon,
   Download as DownloadIcon,
   Schedule as ScheduleIcon,
+  QueryStats as QueryStatsIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useJobs } from '../../hooks/useJobs';
@@ -296,19 +297,40 @@ function JobsPageContent() {
         </Link>
 
         {/* Page header */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <WorkHistoryIcon color="primary" />
-          <Typography variant="h4" component="h1">
-            Job Queue
-          </Typography>
-          {stats && stats.stuckRunning > 0 && (
-            <Chip
-              icon={<WarningIcon />}
-              label={`${stats.stuckRunning} stuck`}
-              color="warning"
-              size="small"
-            />
-          )}
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: { xs: 'flex-start', sm: 'center' },
+            justifyContent: 'space-between',
+            flexDirection: { xs: 'column', sm: 'row' },
+            gap: 1,
+            mb: 1,
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <WorkHistoryIcon color="primary" />
+            <Typography variant="h4" component="h1">
+              Job Queue
+            </Typography>
+            {stats && stats.stuckRunning > 0 && (
+              <Chip
+                icon={<WarningIcon />}
+                label={`${stats.stuckRunning} stuck`}
+                color="warning"
+                size="small"
+              />
+            )}
+          </Box>
+          <Button
+            component={RouterLink}
+            to="/admin/settings/jobs/insights"
+            variant="outlined"
+            size="small"
+            startIcon={<QueryStatsIcon />}
+            sx={{ flexShrink: 0 }}
+          >
+            View insights &amp; ETA
+          </Button>
         </Box>
         <Typography color="text.secondary" sx={{ mb: 3 }}>
           Monitor and manage enrichment job queue. Auto-refreshes every 5 seconds.

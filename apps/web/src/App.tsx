@@ -28,6 +28,7 @@ const AiSettingsPage = lazy(() => import('./pages/Admin/AiSettingsPage'));
 const FaceSettingsPage = lazy(() => import('./pages/Admin/FaceSettingsPage'));
 const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
 const JobsPage = lazy(() => import('./pages/Admin/JobsPage'));
+const JobInsightsPage = lazy(() => import('./pages/Admin/JobInsightsPage'));
 const StorageInsightsPage = lazy(() => import('./pages/Admin/StorageInsightsPage'));
 const StorageProvidersPage = lazy(() => import('./pages/Admin/StorageProvidersPage'));
 const SettingsHubPage = lazy(() => import('./pages/Admin/SettingsHubPage'));
@@ -90,6 +91,7 @@ function AppRoutes() {
                 <Route path="/admin/settings/storage/providers" element={<StorageProvidersPage />} />
                 <Route path="/admin/settings/storage/insights" element={<StorageInsightsPage />} />
                 <Route path="/admin/settings/jobs" element={<JobsPage />} />
+                <Route path="/admin/settings/jobs/insights" element={<JobInsightsPage />} />
                 <Route path="/admin/settings/backup" element={<BackupPage />} />
                 {/* Legacy admin route redirects */}
                 <Route path="/admin/users" element={<Navigate to="/admin/settings/users" replace />} />

@@ -91,6 +91,12 @@ export const systemSettingsSchema = z.object({
     reverseProvider: z.enum(['offline', 'nominatim', 'google']).default('offline'),
     forwardSearchEnabled: z.boolean().default(false),
   }).optional().default({ reverseProvider: 'offline', forwardSearchEnabled: false }),
+  jobs: z.object({
+    history: z.object({
+      retentionDays: z.number().int().min(1).max(365).default(30),
+      purgeEnabled: z.boolean().default(true),
+    }).default({ retentionDays: 30, purgeEnabled: true }),
+  }).optional().default({ history: { retentionDays: 30, purgeEnabled: true } }),
 });
 
 export type SystemSettingsDto = z.infer<typeof systemSettingsSchema>;
@@ -147,5 +153,11 @@ export const systemSettingsPatchSchema = z.object({
   geo: z.object({
     reverseProvider: z.enum(['offline', 'nominatim', 'google']).optional(),
     forwardSearchEnabled: z.boolean().optional(),
+  }).optional(),
+  jobs: z.object({
+    history: z.object({
+      retentionDays: z.number().int().min(1).max(365).optional(),
+      purgeEnabled: z.boolean().optional(),
+    }).optional(),
   }).optional(),
 });
