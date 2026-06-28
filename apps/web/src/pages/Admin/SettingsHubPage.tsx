@@ -21,6 +21,7 @@ import {
   WorkHistory as WorkHistoryIcon,
   Backup as BackupIcon,
   Archive as ArchiveIcon,
+  QueryStats as QueryStatsIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 
@@ -147,6 +148,13 @@ export default function SettingsHubPage() {
           description: 'Monitor enrichment jobs, retry failed items, and reset stuck workers.',
           icon: <WorkHistoryIcon sx={{ fontSize: 40 }} color="primary" />,
           path: '/admin/settings/jobs',
+          permission: 'jobs:read',
+        },
+        {
+          title: 'Job Queue Insights',
+          description: 'Live queue stats, per-type durations, and an ETA for the backlog.',
+          icon: <QueryStatsIcon sx={{ fontSize: 40 }} color="primary" />,
+          path: '/admin/settings/jobs/insights',
           permission: 'jobs:read',
         },
         {
