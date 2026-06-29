@@ -217,6 +217,11 @@ export class SystemSettingsService {
             model: (dto as any).face?.features?.detection?.model ?? current.face?.features?.detection?.model ?? null,
           },
         },
+        video: {
+          enabled: (dto as any).face?.video?.enabled ?? (current as any).face?.video?.enabled ?? true,
+          sampleIntervalSeconds: (dto as any).face?.video?.sampleIntervalSeconds ?? (current as any).face?.video?.sampleIntervalSeconds ?? 5,
+          maxFramesPerVideo: (dto as any).face?.video?.maxFramesPerVideo ?? (current as any).face?.video?.maxFramesPerVideo ?? 60,
+        },
       },
       storage: {
         activeProvider:
@@ -261,6 +266,18 @@ export class SystemSettingsService {
           (current as any).geo?.forwardSearchEnabled ??
           (process.env['GEO_FORWARD_SEARCH_ENABLED'] === 'true'),
       },
+      jobs: {
+        history: {
+          retentionDays:
+            (dto as any).jobs?.history?.retentionDays ??
+            (current as any).jobs?.history?.retentionDays ??
+            30,
+          purgeEnabled:
+            (dto as any).jobs?.history?.purgeEnabled ??
+            (current as any).jobs?.history?.purgeEnabled ??
+            true,
+        },
+      },
     };
 
     // Validate merged result
@@ -301,6 +318,7 @@ export class SystemSettingsService {
       storage: value.storage,
       burst: value.burst,
       geo: value.geo,
+      jobs: value.jobs,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,

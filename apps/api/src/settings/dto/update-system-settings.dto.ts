@@ -63,6 +63,23 @@ export const patchSystemSettingsSchema = z.object({
             .optional(),
         })
         .optional(),
+      video: z
+        .object({
+          enabled: z.boolean().optional(),
+          sampleIntervalSeconds: z.number().int().min(1).max(60).optional(),
+          maxFramesPerVideo: z.number().int().min(1).max(300).optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+  jobs: z
+    .object({
+      history: z
+        .object({
+          retentionDays: z.number().int().min(1).max(365).optional(),
+          purgeEnabled: z.boolean().optional(),
+        })
+        .optional(),
     })
     .optional(),
 });
