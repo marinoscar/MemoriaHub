@@ -174,14 +174,16 @@ function AlbumLightbox({ token, items, index, onClose, onPrev, onNext }: AlbumLi
       onClose={onClose}
       maxWidth={false}
       fullScreen
-      PaperProps={{
-        sx: {
-          backgroundColor: 'rgba(0,0,0,0.95)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          position: 'relative',
+      slotProps={{
+        paper: {
+          sx: {
+            backgroundColor: 'rgba(0,0,0,0.95)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            position: 'relative',
+          },
         },
       }}
     >
