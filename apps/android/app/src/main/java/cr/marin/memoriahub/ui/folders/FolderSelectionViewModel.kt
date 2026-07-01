@@ -59,8 +59,10 @@ class FolderSelectionViewModel @Inject constructor(
             // Deselecting: drop this folder's not-yet-uploaded items so they stop syncing.
             if (!enabled) syncRepository.dropPendingForBuckets(listOf(bucketId))
 
-            // Force a full re-scan so newly selected folders get queued, then kick a sync.
-            appConfigStore.lastScanDateAddedSec = 0
+            // Force a full re-scan so newly selected folders get queued, then kick a
+            // sync. Resetting the persisted marks (rather than flagging the work
+            // request) survives request replacement and process death.
+            appConfigStore.resetScanMarks()
             syncScheduler.syncNow()
         }
     }

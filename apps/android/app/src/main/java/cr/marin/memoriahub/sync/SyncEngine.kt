@@ -70,10 +70,11 @@ class SyncEngine @Inject constructor(
     private val time: TimeProvider,
     private val json: Json,
 ) {
-    suspend fun runSync(trigger: String, fullScan: Boolean = false): SyncSummary {
-        // Crash recovery + discover new/changed media before processing.
+    suspend fun runSync(trigger: String, requestedFull: Boolean = false): SyncSummary {
+        // Crash recovery + discover new/changed media before processing. The scan
+        // planner decides full vs incremental; requestedFull forces full.
         syncRepository.resetStaleActive()
-        syncRepository.reconcile(fullScan = fullScan)
+        syncRepository.reconcile(requestedFull = requestedFull)
         // Auto-retry transient failures each run; exhausted (BLOCKED) rows stay parked.
         syncFileDao.requeueFailed(includeBlocked = false, resetAttempts = false, now = time.nowMillis())
 

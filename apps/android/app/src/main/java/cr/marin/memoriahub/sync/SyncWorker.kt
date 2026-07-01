@@ -42,7 +42,9 @@ class SyncWorker @AssistedInject constructor(
         runCatching { setForeground(getForegroundInfo()) }
 
         return try {
-            val summary = engine.runSync(trigger = trigger, fullScan = trigger == TRIGGER_PERIODIC)
+            // Full vs incremental is the ScanPlanner's call (daily full safety net,
+            // folder changes via reset marks) — no longer tied to the trigger type.
+            val summary = engine.runSync(trigger = trigger)
             // Notification concerns stay out of the engine: alert here when the run
             // just failed items, clear the alert once everything recovered.
             runCatching { notifyIssuesAfterRun(justFailed = summary.failed) }

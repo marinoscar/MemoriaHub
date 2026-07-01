@@ -144,6 +144,40 @@ class AppConfigStore @Inject constructor(
             prefs.edit().putLong(KEY_LAST_SCAN_ADDED, value).apply()
         }
 
+    /** MediaStore generation (primary volume) captured before the last scan; 0 = none. */
+    var lastScanGeneration: Long
+        get() = prefs.getLong(KEY_LAST_SCAN_GENERATION, 0L)
+        set(value) {
+            prefs.edit().putLong(KEY_LAST_SCAN_GENERATION, value).apply()
+        }
+
+    /** MediaStore version token of the last scan; a change means the media DB was rebuilt. */
+    var mediaStoreVersion: String?
+        get() = prefs.getString(KEY_MEDIA_STORE_VERSION, null)
+        set(value) {
+            prefs.edit().putString(KEY_MEDIA_STORE_VERSION, value).apply()
+        }
+
+    /** When the last FULL reconcile (deletion diff) completed. */
+    var lastFullReconcileAtMs: Long
+        get() = prefs.getLong(KEY_LAST_FULL_RECONCILE_AT, 0L)
+        set(value) {
+            prefs.edit().putLong(KEY_LAST_FULL_RECONCILE_AT, value).apply()
+        }
+
+    /**
+     * Durably force the next reconcile to run a full scan (e.g. after a folder-selection
+     * change). Persisted marks survive WorkManager request replacement and process death,
+     * unlike an input-data flag.
+     */
+    fun resetScanMarks() {
+        prefs.edit()
+            .putLong(KEY_LAST_SCAN_ADDED, 0L)
+            .putLong(KEY_LAST_SCAN_GENERATION, 0L)
+            .putLong(KEY_LAST_FULL_RECONCILE_AT, 0L)
+            .apply()
+    }
+
     /** Stable per-install device id sent as MediaItem provenance; created lazily. */
     val deviceId: String
         get() = prefs.getString(KEY_DEVICE_ID, null) ?: java.util.UUID.randomUUID().toString().also {
@@ -155,6 +189,9 @@ class AppConfigStore @Inject constructor(
         const val KEY_TARGET_CIRCLE = "target_circle_id"
         const val KEY_SELECTED_BUCKETS = "selected_bucket_ids"
         const val KEY_LAST_SCAN_ADDED = "last_scan_date_added_sec"
+        const val KEY_LAST_SCAN_GENERATION = "last_scan_generation"
+        const val KEY_MEDIA_STORE_VERSION = "media_store_version"
+        const val KEY_LAST_FULL_RECONCILE_AT = "last_full_reconcile_at_ms"
         const val KEY_DEVICE_ID = "device_id"
         const val KEY_BACKUP_ENABLED = "backup_enabled"
         const val KEY_NOTIFY_REMINDERS = "notify_backup_reminders"

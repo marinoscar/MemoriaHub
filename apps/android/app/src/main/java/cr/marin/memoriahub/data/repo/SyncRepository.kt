@@ -48,17 +48,41 @@ class SyncRepository @Inject constructor(
      * guarantees completeness. New items are queued; edited items (changed size/mtime)
      * are reset and re-queued; unchanged uploaded items are left as-is (fast skip).
      *
-     * @param fullScan when true, ignores the high-water mark and scans the whole bucket.
+     * The [ScanPlanner] decides between a cheap incremental scan (generation marks on
+     * API 30+, DATE_ADDED mark otherwise) and a full scan (first run, folder change,
+     * MediaStore rebuild, or the daily deletion-diff safety net).
+     *
+     * @param requestedFull when true, forces a full scan regardless of marks.
      * @return the number of items newly queued or re-queued.
      */
-    suspend fun reconcile(fullScan: Boolean = false): Int = withContext(Dispatchers.IO) {
+    suspend fun reconcile(requestedFull: Boolean = false): Int = withContext(Dispatchers.IO) {
         // Permission guard: with media access revoked the scan returns empty, which
         // must never advance marks or drive the deletion diff below.
         if (!scanner.canRead()) return@withContext 0
 
-        val since = if (fullScan) 0L else appConfigStore.lastScanDateAddedSec
-        val scanned = scanner.scan(appConfigStore.selectedBucketIds, sinceDateAddedSec = since)
         val now = time.nowMillis()
+        // Capture BEFORE the query: changes landing mid-scan stay above the persisted
+        // marks and get rescanned next run instead of being lost.
+        val currentGeneration = scanner.currentGeneration()
+        val currentVersion = scanner.mediaStoreVersion()
+        val plan = ScanPlanner.plan(
+            requestedFull = requestedFull,
+            generationSupported = currentGeneration != null,
+            storedGeneration = appConfigStore.lastScanGeneration,
+            storedDateAddedSec = appConfigStore.lastScanDateAddedSec,
+            storedVersion = appConfigStore.mediaStoreVersion,
+            currentVersion = currentVersion,
+            lastFullReconcileAtMs = appConfigStore.lastFullReconcileAtMs,
+            nowMs = now,
+        )
+        val scanned = when (plan) {
+            ScanPlan.Full -> scanner.scan(appConfigStore.selectedBucketIds)
+            is ScanPlan.Incremental -> scanner.scan(
+                appConfigStore.selectedBucketIds,
+                sinceDateAddedSec = plan.sinceDateAddedSec,
+                sinceGeneration = plan.sinceGeneration,
+            )
+        }
         var queuedCount = 0
         var maxAdded = appConfigStore.lastScanDateAddedSec
 
@@ -102,7 +126,7 @@ class SyncRepository @Inject constructor(
             // A full scan is a complete universe: pending rows for files that vanished
             // from the device are dropped so they stop retrying and alerting. Synced
             // rows (UPLOADED/SKIPPED) are kept as history.
-            if (fullScan) {
+            if (plan == ScanPlan.Full) {
                 val vanished = computeVanishedPendingIds(
                     scannedIds = scanned.mapTo(HashSet()) { it.mediaStoreId },
                     pending = syncFileDao.getPendingRefs(),
@@ -112,7 +136,13 @@ class SyncRepository @Inject constructor(
             }
         }
 
+        // Persist marks only after the transaction committed.
         appConfigStore.lastScanDateAddedSec = maxAdded
+        currentGeneration?.let { appConfigStore.lastScanGeneration = it }
+        if (plan == ScanPlan.Full) {
+            appConfigStore.lastFullReconcileAtMs = now
+            currentVersion?.let { appConfigStore.mediaStoreVersion = it }
+        }
         queuedCount
     }
 
