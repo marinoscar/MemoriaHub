@@ -6,6 +6,8 @@ import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import cr.marin.memoriahub.core.storage.AppConfigStore
+import cr.marin.memoriahub.core.util.TimeProvider
+import cr.marin.memoriahub.data.repo.SyncRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 
@@ -23,6 +25,8 @@ class SyncWorker @AssistedInject constructor(
     private val scheduler: SyncScheduler,
     private val notifications: SyncNotifications,
     private val appConfigStore: AppConfigStore,
+    private val syncRepository: SyncRepository,
+    private val time: TimeProvider,
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun getForegroundInfo(): ForegroundInfo = notifications.foregroundInfo()
@@ -38,7 +42,10 @@ class SyncWorker @AssistedInject constructor(
         runCatching { setForeground(getForegroundInfo()) }
 
         return try {
-            engine.runSync(trigger = trigger, fullScan = trigger == TRIGGER_PERIODIC)
+            val summary = engine.runSync(trigger = trigger, fullScan = trigger == TRIGGER_PERIODIC)
+            // Notification concerns stay out of the engine: alert here when the run
+            // just failed items, clear the alert once everything recovered.
+            runCatching { notifyIssuesAfterRun(justFailed = summary.failed) }
             Result.success()
         } catch (e: Exception) {
             Result.retry()
@@ -47,6 +54,29 @@ class SyncWorker @AssistedInject constructor(
             if (trigger == TRIGGER_CONTENT) {
                 runCatching { scheduler.armContentObserver() }
             }
+        }
+    }
+
+    private suspend fun notifyIssuesAfterRun(justFailed: Int) {
+        val failureCount = syncRepository.failureCount()
+        if (failureCount == 0) {
+            // Everything recovered (e.g. a retry drained the failures): clear stale alerts.
+            notifications.cancelIssues()
+            return
+        }
+        // Only alert when this run failed items — old BLOCKED rows alone shouldn't
+        // re-nag every 15 minutes; the cooldown covers repeated failing runs.
+        if (justFailed == 0) return
+        val now = time.nowMillis()
+        val shouldNotify = IssueNotificationPolicy.shouldNotify(
+            issuesEnabled = appConfigStore.notifyBackupIssues,
+            failureCount = failureCount,
+            lastNotifiedAtMs = appConfigStore.lastIssueNotifiedAtMs,
+            nowMs = now,
+        )
+        if (shouldNotify) {
+            notifications.showIssues(failureCount)
+            appConfigStore.lastIssueNotifiedAtMs = now
         }
     }
 

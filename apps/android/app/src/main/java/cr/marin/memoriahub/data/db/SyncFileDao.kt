@@ -45,6 +45,9 @@ interface SyncFileDao {
     @Query("SELECT COUNT(*) FROM sync_files WHERE status IN ('QUEUED', 'FAILED')")
     suspend fun pendingWorkCount(): Int
 
+    @Query("SELECT COUNT(*) FROM sync_files WHERE status IN ('FAILED', 'BLOCKED')")
+    suspend fun failureCount(): Int
+
     /** Crash recovery: rows left mid-flight by a killed process return to the queue. */
     @Query(
         "UPDATE sync_files SET status = 'QUEUED', updatedAt = :now " +

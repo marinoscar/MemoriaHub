@@ -102,6 +102,11 @@ class SyncRepository @Inject constructor(
         syncFileDao.pendingWorkCount()
     }
 
+    /** Items currently stuck in FAILED or BLOCKED, for the issue notification. */
+    suspend fun failureCount(): Int = withContext(Dispatchers.IO) {
+        syncFileDao.failureCount()
+    }
+
     /**
      * How many device items are not backed up: media added since the last scan that has
      * no state row yet, plus rows already queued/failed. Used by the backup-off reminder,
