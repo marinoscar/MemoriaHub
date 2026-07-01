@@ -9,6 +9,7 @@ import cr.marin.memoriahub.data.db.SyncFileDao
 import cr.marin.memoriahub.data.db.SyncFileEntity
 import cr.marin.memoriahub.data.db.SyncRunDao
 import cr.marin.memoriahub.data.db.SyncRunEntity
+import cr.marin.memoriahub.data.db.DB_QUERY_CHUNK
 import cr.marin.memoriahub.data.db.SyncStatus
 import cr.marin.memoriahub.data.db.getExistingIdsChunked
 import cr.marin.memoriahub.data.db.getReconcileRowsChunked
@@ -51,6 +52,10 @@ class SyncRepository @Inject constructor(
      * @return the number of items newly queued or re-queued.
      */
     suspend fun reconcile(fullScan: Boolean = false): Int = withContext(Dispatchers.IO) {
+        // Permission guard: with media access revoked the scan returns empty, which
+        // must never advance marks or drive the deletion diff below.
+        if (!scanner.canRead()) return@withContext 0
+
         val since = if (fullScan) 0L else appConfigStore.lastScanDateAddedSec
         val scanned = scanner.scan(appConfigStore.selectedBucketIds, sinceDateAddedSec = since)
         val now = time.nowMillis()
@@ -92,6 +97,18 @@ class SyncRepository @Inject constructor(
                     ReconcileAction.Unchanged -> Unit
                 }
                 maxAdded = max(maxAdded, item.dateAddedSec)
+            }
+
+            // A full scan is a complete universe: pending rows for files that vanished
+            // from the device are dropped so they stop retrying and alerting. Synced
+            // rows (UPLOADED/SKIPPED) are kept as history.
+            if (fullScan) {
+                val vanished = computeVanishedPendingIds(
+                    scannedIds = scanned.mapTo(HashSet()) { it.mediaStoreId },
+                    pending = syncFileDao.getPendingRefs(),
+                    selectedBucketIds = appConfigStore.selectedBucketIds,
+                )
+                vanished.chunked(DB_QUERY_CHUNK).forEach { syncFileDao.deleteByIds(it) }
             }
         }
 

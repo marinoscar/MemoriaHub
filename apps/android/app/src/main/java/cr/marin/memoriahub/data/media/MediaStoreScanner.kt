@@ -1,10 +1,14 @@
 package cr.marin.memoriahub.data.media
 
+import android.Manifest
 import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
+import androidx.core.content.ContextCompat
 import cr.marin.memoriahub.data.db.MediaType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -66,6 +70,22 @@ class MediaStoreScanner @Inject constructor(
         )
         return results
     }
+
+    /**
+     * Whether media can actually be read. Load-bearing guard for the deletion diff:
+     * with permission revoked, scans return empty and a diff would wrongly treat
+     * every pending row as deleted from the device.
+     */
+    fun canRead(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            granted(Manifest.permission.READ_MEDIA_IMAGES) &&
+                granted(Manifest.permission.READ_MEDIA_VIDEO)
+        } else {
+            granted(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+
+    private fun granted(permission: String): Boolean =
+        ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
 
     /**
      * Enumerate distinct device folders (MediaStore buckets) that contain at least one

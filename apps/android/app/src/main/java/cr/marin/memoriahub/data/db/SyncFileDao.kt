@@ -3,6 +3,7 @@ package cr.marin.memoriahub.data.db
 import androidx.room.Dao
 import androidx.room.Query
 import androidx.room.Upsert
+import cr.marin.memoriahub.data.repo.PendingRef
 import cr.marin.memoriahub.data.repo.ReconcileRow
 import kotlinx.coroutines.flow.Flow
 
@@ -36,6 +37,24 @@ interface SyncFileDao {
     /** Which of the given ids already have a state row. Chunk ids ≤ [DB_QUERY_CHUNK]. */
     @Query("SELECT mediaStoreId FROM sync_files WHERE mediaStoreId IN (:ids)")
     suspend fun getExistingIds(ids: List<Long>): List<Long>
+
+    /**
+     * All not-yet-synced rows, for the deletion diff. UPLOADED/SKIPPED rows are
+     * deliberately excluded — they are kept as history even after the device file
+     * is deleted (the server copy exists; re-adds dedup by content hash).
+     */
+    @Query(
+        "SELECT mediaStoreId, bucketId FROM sync_files " +
+            "WHERE status IN ('QUEUED', 'HASHING', 'UPLOADING', 'FAILED', 'BLOCKED')",
+    )
+    suspend fun getPendingRefs(): List<PendingRef>
+
+    /** Delete rows by id. Chunk ids ≤ [DB_QUERY_CHUNK]. */
+    @Query("DELETE FROM sync_files WHERE mediaStoreId IN (:ids)")
+    suspend fun deleteByIds(ids: List<Long>): Int
+
+    @Query("DELETE FROM sync_files WHERE mediaStoreId = :id")
+    suspend fun deleteById(id: Long): Int
 
     @Query("SELECT * FROM sync_files ORDER BY dateAddedSec DESC")
     fun observeAll(): Flow<List<SyncFileEntity>>
