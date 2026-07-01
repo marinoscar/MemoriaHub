@@ -322,4 +322,186 @@ describe('PatchSystemSettingsDto (PATCH)', () => {
       expect(result.ai).toEqual({});
     });
   });
+
+  // Regression: geo / storage / burst were previously missing from
+  // patchSystemSettingsSchema, causing Zod to silently strip them.
+  describe('regression: geo, storage, and burst branches are not stripped', () => {
+    describe('geo branch', () => {
+      it('should preserve geo.forwardSearchEnabled when true', () => {
+        const result = patchSystemSettingsSchema.parse({
+          geo: { forwardSearchEnabled: true },
+        });
+
+        expect(result.geo?.forwardSearchEnabled).toBe(true);
+      });
+
+      it('should preserve geo.forwardSearchEnabled when false (disabling survives)', () => {
+        const result = patchSystemSettingsSchema.parse({
+          geo: { forwardSearchEnabled: false },
+        });
+
+        expect(result.geo?.forwardSearchEnabled).toBe(false);
+      });
+
+      it('should preserve geo.reverseProvider when set to google', () => {
+        const result = patchSystemSettingsSchema.parse({
+          geo: { reverseProvider: 'google' },
+        });
+
+        expect(result.geo?.reverseProvider).toBe('google');
+      });
+
+      it('should preserve geo.reverseProvider when set to offline', () => {
+        const result = patchSystemSettingsSchema.parse({
+          geo: { reverseProvider: 'offline' },
+        });
+
+        expect(result.geo?.reverseProvider).toBe('offline');
+      });
+
+      it('should preserve geo.reverseProvider when set to nominatim', () => {
+        const result = patchSystemSettingsSchema.parse({
+          geo: { reverseProvider: 'nominatim' },
+        });
+
+        expect(result.geo?.reverseProvider).toBe('nominatim');
+      });
+
+      it('should throw when geo.reverseProvider is an invalid enum value', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            geo: { reverseProvider: 'bogus' },
+          }),
+        ).toThrow();
+      });
+
+      it('should accept empty geo block (all sub-fields optional)', () => {
+        const result = patchSystemSettingsSchema.parse({ geo: {} });
+
+        expect(result.geo).toEqual({});
+      });
+    });
+
+    describe('burst branch', () => {
+      it('should preserve all burst fields when valid', () => {
+        const result = patchSystemSettingsSchema.parse({
+          burst: { timeGapSeconds: 20, hashDistance: 5, minGroupSize: 4 },
+        });
+
+        expect(result.burst?.timeGapSeconds).toBe(20);
+        expect(result.burst?.hashDistance).toBe(5);
+        expect(result.burst?.minGroupSize).toBe(4);
+      });
+
+      it('should preserve burst when only timeGapSeconds is supplied', () => {
+        const result = patchSystemSettingsSchema.parse({
+          burst: { timeGapSeconds: 30 },
+        });
+
+        expect(result.burst?.timeGapSeconds).toBe(30);
+      });
+
+      it('should throw when burst.hashDistance is above the max (32)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            burst: { hashDistance: 999 },
+          }),
+        ).toThrow();
+      });
+
+      it('should throw when burst.hashDistance is below the min (0)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            burst: { hashDistance: -1 },
+          }),
+        ).toThrow();
+      });
+
+      it('should throw when burst.timeGapSeconds is above the max (300)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            burst: { timeGapSeconds: 301 },
+          }),
+        ).toThrow();
+      });
+
+      it('should throw when burst.minGroupSize is below the min (2)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            burst: { minGroupSize: 1 },
+          }),
+        ).toThrow();
+      });
+
+      it('should throw when burst.minGroupSize is above the max (20)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            burst: { minGroupSize: 21 },
+          }),
+        ).toThrow();
+      });
+
+      it('should accept empty burst block (all sub-fields optional)', () => {
+        const result = patchSystemSettingsSchema.parse({ burst: {} });
+
+        expect(result.burst).toEqual({});
+      });
+    });
+
+    describe('storage branch', () => {
+      it('should preserve storage.trash.retentionDays', () => {
+        const result = patchSystemSettingsSchema.parse({
+          storage: { trash: { retentionDays: 15 } },
+        });
+
+        expect(result.storage?.trash?.retentionDays).toBe(15);
+      });
+
+      it('should preserve storage.insights.refreshIntervalHours', () => {
+        const result = patchSystemSettingsSchema.parse({
+          storage: { insights: { refreshIntervalHours: 8 } },
+        });
+
+        expect(result.storage?.insights?.refreshIntervalHours).toBe(8);
+      });
+
+      it('should preserve storage.activeProvider', () => {
+        const result = patchSystemSettingsSchema.parse({
+          storage: { activeProvider: 'r2' },
+        });
+
+        expect(result.storage?.activeProvider).toBe('r2');
+      });
+
+      it('should throw when storage.trash.retentionDays is above the max (365)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            storage: { trash: { retentionDays: 366 } },
+          }),
+        ).toThrow();
+      });
+
+      it('should throw when storage.trash.retentionDays is below the min (1)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            storage: { trash: { retentionDays: 0 } },
+          }),
+        ).toThrow();
+      });
+
+      it('should throw when storage.insights.refreshIntervalHours is above the max (168)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            storage: { insights: { refreshIntervalHours: 169 } },
+          }),
+        ).toThrow();
+      });
+
+      it('should accept empty storage block (all sub-fields optional)', () => {
+        const result = patchSystemSettingsSchema.parse({ storage: {} });
+
+        expect(result.storage).toEqual({});
+      });
+    });
+  });
 });
