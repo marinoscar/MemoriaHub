@@ -6,6 +6,7 @@ import cr.marin.memoriahub.core.network.dto.Circle
 import cr.marin.memoriahub.core.storage.AppConfigStore
 import cr.marin.memoriahub.data.repo.AuthRepository
 import cr.marin.memoriahub.data.repo.CircleRepository
+import cr.marin.memoriahub.sync.BackupController
 import cr.marin.memoriahub.sync.SyncScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +22,9 @@ data class SettingsUiState(
     val serverUrl: String? = null,
     val circles: List<Circle> = emptyList(),
     val targetCircleId: String? = null,
+    val backupEnabled: Boolean = false,
+    val remindersEnabled: Boolean = true,
+    val issuesEnabled: Boolean = true,
     val loading: Boolean = true,
     val error: String? = null,
 )
@@ -31,18 +35,25 @@ class SettingsViewModel @Inject constructor(
     private val circleRepository: CircleRepository,
     private val appConfigStore: AppConfigStore,
     private val syncScheduler: SyncScheduler,
+    private val backupController: BackupController,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(
         SettingsUiState(
             serverUrl = appConfigStore.serverUrl,
             targetCircleId = appConfigStore.targetCircleId,
+            backupEnabled = appConfigStore.backupEnabled,
+            remindersEnabled = appConfigStore.notifyBackupReminders,
+            issuesEnabled = appConfigStore.notifyBackupIssues,
         ),
     )
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
 
     init {
         viewModelScope.launch { appConfigStore.targetCircleIdFlow.collect { id -> _state.update { it.copy(targetCircleId = id) } } }
+        viewModelScope.launch { appConfigStore.backupEnabledFlow.collect { on -> _state.update { it.copy(backupEnabled = on) } } }
+        viewModelScope.launch { appConfigStore.notifyBackupRemindersFlow.collect { on -> _state.update { it.copy(remindersEnabled = on) } } }
+        viewModelScope.launch { appConfigStore.notifyBackupIssuesFlow.collect { on -> _state.update { it.copy(issuesEnabled = on) } } }
         load()
     }
 
@@ -70,6 +81,18 @@ class SettingsViewModel @Inject constructor(
 
     fun selectCircle(circleId: String) {
         appConfigStore.setTargetCircleId(circleId)
+    }
+
+    fun setBackupEnabled(enabled: Boolean) {
+        if (enabled) backupController.turnOn() else backupController.turnOff()
+    }
+
+    fun setRemindersEnabled(enabled: Boolean) {
+        appConfigStore.setNotifyBackupReminders(enabled)
+    }
+
+    fun setIssuesEnabled(enabled: Boolean) {
+        appConfigStore.setNotifyBackupIssues(enabled)
     }
 
     fun logout() {
