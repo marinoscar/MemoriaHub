@@ -322,4 +322,50 @@ describe('PatchSystemSettingsDto (PATCH)', () => {
       expect(result.ai).toEqual({});
     });
   });
+
+  describe('previously-stripped fields (regression — Fix: geo/storage/burst/ai fields drifted out of schema)', () => {
+    it('should preserve geo.forwardSearchEnabled=true through a patch parse', () => {
+      const result = patchSystemSettingsSchema.parse({ geo: { forwardSearchEnabled: true } });
+      expect(result.geo?.forwardSearchEnabled).toBe(true);
+    });
+
+    it('should preserve geo.forwardSearchEnabled=false through a patch parse (must not be treated as absent)', () => {
+      const result = patchSystemSettingsSchema.parse({ geo: { forwardSearchEnabled: false } });
+      expect(result.geo?.forwardSearchEnabled).toBe(false);
+    });
+
+    it('should preserve geo.reverseProvider through a patch parse', () => {
+      const result = patchSystemSettingsSchema.parse({ geo: { reverseProvider: 'google' } });
+      expect(result.geo?.reverseProvider).toBe('google');
+    });
+
+    it('should preserve storage.trash.retentionDays through a patch parse', () => {
+      const result = patchSystemSettingsSchema.parse({ storage: { trash: { retentionDays: 45 } } });
+      expect(result.storage?.trash?.retentionDays).toBe(45);
+    });
+
+    it('should preserve burst.minGroupSize through a patch parse', () => {
+      const result = patchSystemSettingsSchema.parse({ burst: { minGroupSize: 5 } });
+      expect(result.burst?.minGroupSize).toBe(5);
+    });
+
+    it('should not inject any default values into an empty patch (geo/storage/burst/jobs all carry .default() on the PUT schema but must not on PATCH)', () => {
+      const result = patchSystemSettingsSchema.parse({});
+      expect(result).toEqual({});
+    });
+
+    it('should preserve ai.features.tagging and ai.features.embedding through a patch parse', () => {
+      const result = patchSystemSettingsSchema.parse({
+        ai: { features: { tagging: { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' } } },
+      });
+      expect(result.ai?.features?.tagging?.provider).toBe('anthropic');
+      expect(result.ai?.features?.tagging?.model).toBe('claude-3-5-sonnet-20241022');
+
+      const result2 = patchSystemSettingsSchema.parse({
+        ai: { features: { embedding: { provider: 'openai', model: 'text-embedding-3-small' } } },
+      });
+      expect(result2.ai?.features?.embedding?.provider).toBe('openai');
+      expect(result2.ai?.features?.embedding?.model).toBe('text-embedding-3-small');
+    });
+  });
 });
