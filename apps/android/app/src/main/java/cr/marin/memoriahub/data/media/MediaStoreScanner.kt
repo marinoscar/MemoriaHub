@@ -53,23 +53,50 @@ class MediaStoreScanner @Inject constructor(
      *   configured — e.g. an existing install that hasn't opened the folder picker), the
      *   legacy [CAMERA_BUCKETS] display-name filter is used so backups keep working. An
      *   empty set scans nothing.
+     * @param sinceGeneration when non-null (API 30+ only; ignored below), items whose
+     *   GENERATION_ADDED or GENERATION_MODIFIED exceed it also match — catching edits
+     *   that keep their DATE_ADDED. OR-combined with [sinceDateAddedSec] so files on
+     *   volumes whose generation counter we don't track are still caught by date.
      */
-    fun scan(selectedBucketIds: Set<String>?, sinceDateAddedSec: Long = 0): List<ScannedMedia> {
+    fun scan(
+        selectedBucketIds: Set<String>?,
+        sinceDateAddedSec: Long = 0,
+        sinceGeneration: Long? = null,
+    ): List<ScannedMedia> {
+        // Generation columns don't exist below API 30 — using them there would throw.
+        val generation = sinceGeneration.takeIf { Build.VERSION.SDK_INT >= Build.VERSION_CODES.R }
         val results = ArrayList<ScannedMedia>()
         results += query(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
             MediaType.PHOTO,
             selectedBucketIds,
             sinceDateAddedSec,
+            generation,
         )
         results += query(
             MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
             MediaType.VIDEO,
             selectedBucketIds,
             sinceDateAddedSec,
+            generation,
         )
         return results
     }
+
+    /**
+     * The primary external volume's current MediaStore generation, captured BEFORE a
+     * scan so mid-scan changes are re-scanned next run rather than lost. Null below
+     * API 30 or when the volume is unavailable (callers fall back to date-added mode).
+     */
+    fun currentGeneration(): Long? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            runCatching { MediaStore.getGeneration(context, MediaStore.VOLUME_EXTERNAL_PRIMARY) }.getOrNull()
+        } else {
+            null
+        }
+
+    /** MediaStore version token; changes when the media DB is rebuilt (generations reset). */
+    fun mediaStoreVersion(): String? = runCatching { MediaStore.getVersion(context) }.getOrNull()
 
     /**
      * Whether media can actually be read. Load-bearing guard for the deletion diff:
@@ -120,6 +147,7 @@ class MediaStoreScanner @Inject constructor(
         type: MediaType,
         selectedBucketIds: Set<String>?,
         sinceDateAddedSec: Long,
+        sinceGeneration: Long? = null,
     ): List<ScannedMedia> {
         val projection = arrayOf(
             MediaStore.MediaColumns._ID,
@@ -133,7 +161,7 @@ class MediaStoreScanner @Inject constructor(
             COL_BUCKET,
         )
 
-        val (selection, args) = buildBucketSelection(selectedBucketIds, sinceDateAddedSec)
+        val (selection, args) = buildSelection(selectedBucketIds, sinceDateAddedSec, sinceGeneration)
         val sortOrder = "${MediaStore.MediaColumns.DATE_ADDED} ASC"
 
         val resolver: ContentResolver = context.contentResolver
@@ -192,17 +220,35 @@ class MediaStoreScanner @Inject constructor(
         const val COL_BUCKET = "bucket_display_name"
         const val COL_BUCKET_ID = "bucket_id"
 
-        /**
-         * Build the MediaStore selection clause and args, optionally bounded by a
-         * DATE_ADDED high-water mark. Extracted for unit testing.
-         *
-         * - `selectedBucketIds == null` → legacy `bucket_display_name IN (CAMERA_BUCKETS)`.
-         * - non-null, non-empty → `bucket_id IN (…)`.
-         * - empty set → `0 = 1` (matches nothing).
-         */
+        // Generation columns exist only on API 30+; callers gate on Build.VERSION.
+        const val COL_GENERATION_ADDED = "generation_added"
+        const val COL_GENERATION_MODIFIED = "generation_modified"
+
+        /** Legacy two-arg form kept for callers/tests; delegates with no generation. */
         internal fun buildBucketSelection(
             selectedBucketIds: Set<String>?,
             sinceDateAddedSec: Long,
+        ): Pair<String, Array<String>> = buildSelection(selectedBucketIds, sinceDateAddedSec, null)
+
+        /**
+         * Build the MediaStore selection clause and args. Extracted for unit testing.
+         *
+         * Bucket filter:
+         * - `selectedBucketIds == null` → legacy `bucket_display_name IN (CAMERA_BUCKETS)`.
+         * - non-null, non-empty → `bucket_id IN (…)`.
+         * - empty set → `0 = 1` (matches nothing).
+         *
+         * Change filter (appended with AND):
+         * - generation + mark → `(generation_added > ? OR generation_modified > ? OR date_added >= ?)`
+         *   — generation catches adds AND edits on the tracked volume; the date branch
+         *   is belt-and-braces for volumes whose generation isn't tracked.
+         * - mark only → `date_added >= ?` (byte-identical to the pre-generation builder).
+         * - generation only → `(generation_added > ? OR generation_modified > ?)`.
+         */
+        internal fun buildSelection(
+            selectedBucketIds: Set<String>?,
+            sinceDateAddedSec: Long,
+            sinceGeneration: Long?,
         ): Pair<String, Array<String>> {
             val selection = StringBuilder()
             val args = ArrayList<String>()
@@ -218,9 +264,24 @@ class MediaStoreScanner @Inject constructor(
                 args.addAll(ids)
             }
 
-            if (sinceDateAddedSec > 0) {
-                selection.append(" AND ${MediaStore.MediaColumns.DATE_ADDED} >= ?")
-                args.add(sinceDateAddedSec.toString())
+            val dateClause = if (sinceDateAddedSec > 0) "${MediaStore.MediaColumns.DATE_ADDED} >= ?" else null
+            val genClause = "$COL_GENERATION_ADDED > ? OR $COL_GENERATION_MODIFIED > ?"
+            when {
+                sinceGeneration != null && dateClause != null -> {
+                    selection.append(" AND ($genClause OR $dateClause)")
+                    args.add(sinceGeneration.toString())
+                    args.add(sinceGeneration.toString())
+                    args.add(sinceDateAddedSec.toString())
+                }
+                sinceGeneration != null -> {
+                    selection.append(" AND ($genClause)")
+                    args.add(sinceGeneration.toString())
+                    args.add(sinceGeneration.toString())
+                }
+                dateClause != null -> {
+                    selection.append(" AND $dateClause")
+                    args.add(sinceDateAddedSec.toString())
+                }
             }
             return selection.toString() to args.toTypedArray()
         }

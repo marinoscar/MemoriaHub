@@ -53,4 +53,56 @@ class MediaStoreScannerTest {
         assertEquals("bucket_id IN (?) AND date_added >= ?", selection)
         assertEquals(listOf("99", "1700"), args.toList())
     }
+
+    @Test
+    fun `date-only selection via buildSelection is byte-identical to the legacy builder`() {
+        val legacy = MediaStoreScanner.buildBucketSelection(linkedSetOf("99"), 1700)
+        val current = MediaStoreScanner.buildSelection(linkedSetOf("99"), 1700, sinceGeneration = null)
+        assertEquals(legacy.first, current.first)
+        assertEquals(legacy.second.toList(), current.second.toList())
+    }
+
+    @Test
+    fun `generation plus mark builds an OR of generation and date bounds`() {
+        val (selection, args) = MediaStoreScanner.buildSelection(
+            selectedBucketIds = linkedSetOf("99"),
+            sinceDateAddedSec = 1700,
+            sinceGeneration = 42,
+        )
+        assertEquals(
+            "bucket_id IN (?) AND " +
+                "(generation_added > ? OR generation_modified > ? OR date_added >= ?)",
+            selection,
+        )
+        assertEquals(listOf("99", "42", "42", "1700"), args.toList())
+    }
+
+    @Test
+    fun `generation without mark builds a generation-only bound`() {
+        val (selection, args) = MediaStoreScanner.buildSelection(
+            selectedBucketIds = linkedSetOf("99"),
+            sinceDateAddedSec = 0,
+            sinceGeneration = 42,
+        )
+        assertEquals(
+            "bucket_id IN (?) AND (generation_added > ? OR generation_modified > ?)",
+            selection,
+        )
+        assertEquals(listOf("99", "42", "42"), args.toList())
+    }
+
+    @Test
+    fun `legacy null selection combines with generation bounds`() {
+        val (selection, args) = MediaStoreScanner.buildSelection(
+            selectedBucketIds = null,
+            sinceDateAddedSec = 1700,
+            sinceGeneration = 42,
+        )
+        assertEquals(
+            "bucket_display_name IN (?, ?, ?) AND " +
+                "(generation_added > ? OR generation_modified > ? OR date_added >= ?)",
+            selection,
+        )
+        assertEquals(listOf("Camera", "DCIM", "Pictures", "42", "42", "1700"), args.toList())
+    }
 }
