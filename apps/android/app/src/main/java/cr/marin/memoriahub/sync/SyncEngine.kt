@@ -70,14 +70,22 @@ class SyncEngine @Inject constructor(
     private val time: TimeProvider,
     private val json: Json,
 ) {
-    suspend fun runSync(trigger: String, requestedFull: Boolean = false): SyncSummary {
-        // Crash recovery + discover new/changed media before processing. The scan
-        // planner decides full vs incremental; requestedFull forces full.
+    /**
+     * Phase 1 — discovery. Crash recovery, reconcile (the scan planner decides full vs
+     * incremental; [requestedFull] forces full), and re-queue of retryable failures.
+     * DB + MediaStore only, no network — safe to run as plain background work; callers
+     * check [SyncRepository.pendingWorkCount] afterwards to decide whether the upload
+     * phase warrants a foreground promotion.
+     */
+    suspend fun prepare(requestedFull: Boolean = false) {
         syncRepository.resetStaleActive()
         syncRepository.reconcile(requestedFull = requestedFull)
         // Auto-retry transient failures each run; exhausted (BLOCKED) rows stay parked.
         syncFileDao.requeueFailed(includeBlocked = false, resetAttempts = false, now = time.nowMillis())
+    }
 
+    /** Phase 2 — upload. Drains the queue and records the run. Call [prepare] first. */
+    suspend fun processQueue(trigger: String): SyncSummary {
         val circleId = circleRepository.resolveTargetCircleId()
         val startedAt = time.nowMillis()
         val runId = syncRunDao.insert(

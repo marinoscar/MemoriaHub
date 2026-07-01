@@ -13,9 +13,10 @@ import dagger.assisted.AssistedInject
 
 /**
  * Runs a full sync pass (reconcile + process the queue) in the background. Promotes
- * to a foreground service so long uploads survive and show progress. Returns
- * [Result.retry] on failure so WorkManager re-runs with its own backoff — the engine
- * itself never throws away unfinished work (it's all persisted in Room).
+ * to a foreground service only when there are uploads to keep alive — the common
+ * nothing-new run stays plain background work (no FGS start, no notification).
+ * Returns [Result.retry] on failure so WorkManager re-runs with its own backoff —
+ * the engine itself never throws away unfinished work (it's all persisted in Room).
  */
 @HiltWorker
 class SyncWorker @AssistedInject constructor(
@@ -29,6 +30,8 @@ class SyncWorker @AssistedInject constructor(
     private val time: TimeProvider,
 ) : CoroutineWorker(appContext, params) {
 
+    // Required even with conditional promotion below: expedited work (WORK_SYNC_NOW)
+    // on API < 31 runs as a foreground service and needs this to exist.
     override suspend fun getForegroundInfo(): ForegroundInfo = notifications.foregroundInfo()
 
     override suspend fun doWork(): Result {
@@ -38,13 +41,16 @@ class SyncWorker @AssistedInject constructor(
         if (!appConfigStore.backupEnabled) return Result.success()
 
         val trigger = inputData.getString(KEY_TRIGGER) ?: TRIGGER_PERIODIC
-        // Best-effort promotion to foreground; the run proceeds regardless.
-        runCatching { setForeground(getForegroundInfo()) }
 
         return try {
-            // Full vs incremental is the ScanPlanner's call (daily full safety net,
-            // folder changes via reset marks) — no longer tied to the trigger type.
-            val summary = engine.runSync(trigger = trigger)
+            // Phase 1 (discovery) is cheap local work — no foreground needed. Only
+            // promote (best-effort) when there are actual uploads to keep alive, so
+            // the common nothing-new periodic run starts no FGS and shows nothing.
+            engine.prepare()
+            if (ForegroundPolicy.shouldPromote(syncRepository.pendingWorkCount())) {
+                runCatching { setForeground(getForegroundInfo()) }
+            }
+            val summary = engine.processQueue(trigger)
             // Notification concerns stay out of the engine: alert here when the run
             // just failed items, clear the alert once everything recovered.
             runCatching { notifyIssuesAfterRun(justFailed = summary.failed) }
