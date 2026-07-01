@@ -19,7 +19,10 @@ class BootReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED && tokenStore.isLoggedIn) {
+            // ensureScheduled is a no-op while backup is off; the reminder check
+            // always survives reboots so gap nudges keep working.
             scheduler.ensureScheduled()
+            scheduler.ensureReminderScheduled()
         }
     }
 }

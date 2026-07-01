@@ -103,6 +103,23 @@ class SyncRepository @Inject constructor(
     }
 
     /**
+     * How many device items are not backed up: media added since the last scan that has
+     * no state row yet, plus rows already queued/failed. Used by the backup-off reminder,
+     * where reconcile doesn't run — so this is a READ-ONLY scan that must not advance
+     * [AppConfigStore.lastScanDateAddedSec] (that high-water mark belongs to the engine).
+     */
+    suspend fun countNotBackedUp(): Int = withContext(Dispatchers.IO) {
+        val scanned = scanner.scan(
+            appConfigStore.selectedBucketIds,
+            sinceDateAddedSec = appConfigStore.lastScanDateAddedSec,
+        )
+        // Items with an existing row are either done (UPLOADED/SKIPPED) or already counted
+        // by pendingWorkCount below; only unseen items are new gap entries.
+        val newItems = scanned.count { syncFileDao.getById(it.mediaStoreId) == null }
+        newItems + syncFileDao.pendingWorkCount()
+    }
+
+    /**
      * Enumerate device folders that contain media, each marked selected per the user's
      * saved selection. When nothing has been configured yet (`selectedBucketIds == null`),
      * the legacy camera folders are shown pre-selected so the default matches current

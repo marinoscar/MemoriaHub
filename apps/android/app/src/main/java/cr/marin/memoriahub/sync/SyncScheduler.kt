@@ -78,6 +78,18 @@ class SyncScheduler @Inject constructor(
     /** Cancels everything this app schedules — used on logout. */
     fun cancelAll() {
         cancelSyncWork()
+        workManager.cancelUniqueWork(WORK_REMINDER)
+    }
+
+    /**
+     * Keeps the daily backup-off reminder check scheduled. Deliberately NOT gated on the
+     * backup toggle — the reminder is what nudges users back after they turn backup off.
+     * Call whenever the user is logged in (app open, boot).
+     */
+    fun ensureReminderScheduled() {
+        val request = PeriodicWorkRequestBuilder<BackupReminderWorker>(Duration.ofHours(REMINDER_HOURS))
+            .build()
+        workManager.enqueueUniquePeriodicWork(WORK_REMINDER, ExistingPeriodicWorkPolicy.KEEP, request)
     }
 
     private fun schedulePeriodic() {
@@ -98,7 +110,9 @@ class SyncScheduler @Inject constructor(
         const val WORK_PERIODIC = "memoriahub-periodic-sync"
         const val WORK_CONTENT_OBSERVER = "memoriahub-content-observer"
         const val WORK_SYNC_NOW = "memoriahub-sync-now"
+        const val WORK_REMINDER = "memoriahub-backup-reminder"
         const val PERIODIC_MINUTES = 15L
+        const val REMINDER_HOURS = 24L
         const val MIN_BACKOFF = 30L
         const val CONTENT_DELAY_SECONDS = 5L
         const val CONTENT_MAX_DELAY_SECONDS = 30L
