@@ -1,13 +1,17 @@
 package cr.marin.memoriahub.data.repo
 
+import androidx.room.withTransaction
 import cr.marin.memoriahub.core.storage.AppConfigStore
 import cr.marin.memoriahub.core.util.TimeProvider
+import cr.marin.memoriahub.data.db.AppDatabase
 import cr.marin.memoriahub.data.db.StatusCount
 import cr.marin.memoriahub.data.db.SyncFileDao
 import cr.marin.memoriahub.data.db.SyncFileEntity
 import cr.marin.memoriahub.data.db.SyncRunDao
 import cr.marin.memoriahub.data.db.SyncRunEntity
 import cr.marin.memoriahub.data.db.SyncStatus
+import cr.marin.memoriahub.data.db.getExistingIdsChunked
+import cr.marin.memoriahub.data.db.getReconcileRowsChunked
 import cr.marin.memoriahub.data.media.MediaStoreScanner
 import cr.marin.memoriahub.data.media.ScannedMedia
 import cr.marin.memoriahub.data.media.MediaStoreScanner.Companion.CAMERA_BUCKETS
@@ -21,6 +25,7 @@ import kotlin.math.max
 @Singleton
 class SyncRepository @Inject constructor(
     private val scanner: MediaStoreScanner,
+    private val db: AppDatabase,
     private val syncFileDao: SyncFileDao,
     private val syncRunDao: SyncRunDao,
     private val appConfigStore: AppConfigStore,
@@ -52,34 +57,42 @@ class SyncRepository @Inject constructor(
         var queuedCount = 0
         var maxAdded = appConfigStore.lastScanDateAddedSec
 
-        for (item in scanned) {
-            val existing = syncFileDao.getById(item.mediaStoreId)
-            when (computeReconcileAction(item, existing?.toReconcileRow())) {
-                ReconcileAction.Queue -> {
-                    syncFileDao.upsert(item.toQueuedEntity(appConfigStore.targetCircleId, now))
-                    queuedCount++
+        db.withTransaction {
+            // One bulk projection load replaces a point query per scanned item; only the
+            // rare changed rows fetch their full entity below.
+            val existingById = syncFileDao.getReconcileRowsChunked(scanned.map { it.mediaStoreId })
+                .associateBy { it.mediaStoreId }
+
+            for (item in scanned) {
+                when (computeReconcileAction(item, existingById[item.mediaStoreId])) {
+                    ReconcileAction.Queue -> {
+                        syncFileDao.upsert(item.toQueuedEntity(appConfigStore.targetCircleId, now))
+                        queuedCount++
+                    }
+                    ReconcileAction.Requeue -> {
+                        // Content changed on device: drop prior upload identity and re-queue.
+                        val existing = syncFileDao.getById(item.mediaStoreId) ?: continue
+                        syncFileDao.upsert(existing.resetForRescan(item, now))
+                        queuedCount++
+                    }
+                    ReconcileAction.RefreshMeta -> {
+                        // Pure metadata refresh; preserve sync status (fast skip).
+                        val existing = syncFileDao.getById(item.mediaStoreId) ?: continue
+                        syncFileDao.upsert(
+                            existing.copy(
+                                contentUri = item.contentUri,
+                                displayName = item.displayName,
+                                bucketId = item.bucketId,
+                                bucket = item.bucket,
+                                dateTakenMs = item.dateTakenMs ?: existing.dateTakenMs,
+                                updatedAt = now,
+                            ),
+                        )
+                    }
+                    ReconcileAction.Unchanged -> Unit
                 }
-                ReconcileAction.Requeue -> {
-                    // Content changed on device: drop prior upload identity and re-queue.
-                    syncFileDao.upsert(existing!!.resetForRescan(item, now))
-                    queuedCount++
-                }
-                ReconcileAction.RefreshMeta -> {
-                    // Pure metadata refresh; preserve sync status (fast skip).
-                    syncFileDao.upsert(
-                        existing!!.copy(
-                            contentUri = item.contentUri,
-                            displayName = item.displayName,
-                            bucketId = item.bucketId,
-                            bucket = item.bucket,
-                            dateTakenMs = item.dateTakenMs ?: existing.dateTakenMs,
-                            updatedAt = now,
-                        ),
-                    )
-                }
-                ReconcileAction.Unchanged -> Unit
+                maxAdded = max(maxAdded, item.dateAddedSec)
             }
-            maxAdded = max(maxAdded, item.dateAddedSec)
         }
 
         appConfigStore.lastScanDateAddedSec = maxAdded
@@ -121,7 +134,8 @@ class SyncRepository @Inject constructor(
         )
         // Items with an existing row are either done (UPLOADED/SKIPPED) or already counted
         // by pendingWorkCount below; only unseen items are new gap entries.
-        val newItems = scanned.count { syncFileDao.getById(it.mediaStoreId) == null }
+        val existingIds = syncFileDao.getExistingIdsChunked(scanned.map { it.mediaStoreId }).toHashSet()
+        val newItems = scanned.count { it.mediaStoreId !in existingIds }
         newItems + syncFileDao.pendingWorkCount()
     }
 
@@ -152,15 +166,6 @@ data class SyncFolder(
     val displayName: String,
     val selected: Boolean,
 )
-
-private fun SyncFileEntity.toReconcileRow(): ReconcileRow =
-    ReconcileRow(
-        mediaStoreId = mediaStoreId,
-        sizeBytes = sizeBytes,
-        mtimeMs = mtimeMs,
-        contentUri = contentUri,
-        displayName = displayName,
-    )
 
 private fun ScannedMedia.toQueuedEntity(circleId: String?, now: Long): SyncFileEntity =
     SyncFileEntity(

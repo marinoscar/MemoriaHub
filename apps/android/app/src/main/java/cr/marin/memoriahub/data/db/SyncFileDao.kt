@@ -3,12 +3,19 @@ package cr.marin.memoriahub.data.db
 import androidx.room.Dao
 import androidx.room.Query
 import androidx.room.Upsert
+import cr.marin.memoriahub.data.repo.ReconcileRow
 import kotlinx.coroutines.flow.Flow
 
 data class StatusCount(
     val status: SyncStatus,
     val count: Int,
 )
+
+/**
+ * SQLite limits bound variables to 999 per statement; `IN (:ids)` queries must be
+ * chunked below that. 900 leaves headroom for any fixed parameters.
+ */
+internal const val DB_QUERY_CHUNK = 900
 
 @Dao
 interface SyncFileDao {
@@ -18,6 +25,17 @@ interface SyncFileDao {
 
     @Query("SELECT * FROM sync_files WHERE mediaStoreId = :id")
     suspend fun getById(id: Long): SyncFileEntity?
+
+    /** Reconcile projection — only the fields the diff compares. Chunk ids ≤ [DB_QUERY_CHUNK]. */
+    @Query(
+        "SELECT mediaStoreId, sizeBytes, mtimeMs, contentUri, displayName FROM sync_files " +
+            "WHERE mediaStoreId IN (:ids)",
+    )
+    suspend fun getReconcileRows(ids: List<Long>): List<ReconcileRow>
+
+    /** Which of the given ids already have a state row. Chunk ids ≤ [DB_QUERY_CHUNK]. */
+    @Query("SELECT mediaStoreId FROM sync_files WHERE mediaStoreId IN (:ids)")
+    suspend fun getExistingIds(ids: List<Long>): List<Long>
 
     @Query("SELECT * FROM sync_files ORDER BY dateAddedSec DESC")
     fun observeAll(): Flow<List<SyncFileEntity>>
@@ -77,3 +95,11 @@ interface SyncFileDao {
     @Query("DELETE FROM sync_files")
     suspend fun clear()
 }
+
+/** Chunked variant of [SyncFileDao.getReconcileRows] for arbitrarily large id lists. */
+suspend fun SyncFileDao.getReconcileRowsChunked(ids: List<Long>): List<ReconcileRow> =
+    ids.chunked(DB_QUERY_CHUNK).flatMap { getReconcileRows(it) }
+
+/** Chunked variant of [SyncFileDao.getExistingIds] for arbitrarily large id lists. */
+suspend fun SyncFileDao.getExistingIdsChunked(ids: List<Long>): List<Long> =
+    ids.chunked(DB_QUERY_CHUNK).flatMap { getExistingIds(it) }
