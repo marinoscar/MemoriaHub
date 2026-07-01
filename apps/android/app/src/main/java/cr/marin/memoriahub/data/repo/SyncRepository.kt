@@ -54,20 +54,20 @@ class SyncRepository @Inject constructor(
 
         for (item in scanned) {
             val existing = syncFileDao.getById(item.mediaStoreId)
-            when {
-                existing == null -> {
+            when (computeReconcileAction(item, existing?.toReconcileRow())) {
+                ReconcileAction.Queue -> {
                     syncFileDao.upsert(item.toQueuedEntity(appConfigStore.targetCircleId, now))
                     queuedCount++
                 }
-                existing.sizeBytes != item.sizeBytes || existing.mtimeMs != item.mtimeMs -> {
+                ReconcileAction.Requeue -> {
                     // Content changed on device: drop prior upload identity and re-queue.
-                    syncFileDao.upsert(existing.resetForRescan(item, now))
+                    syncFileDao.upsert(existing!!.resetForRescan(item, now))
                     queuedCount++
                 }
-                existing.contentUri != item.contentUri || existing.displayName != item.displayName -> {
+                ReconcileAction.RefreshMeta -> {
                     // Pure metadata refresh; preserve sync status (fast skip).
                     syncFileDao.upsert(
-                        existing.copy(
+                        existing!!.copy(
                             contentUri = item.contentUri,
                             displayName = item.displayName,
                             bucketId = item.bucketId,
@@ -77,6 +77,7 @@ class SyncRepository @Inject constructor(
                         ),
                     )
                 }
+                ReconcileAction.Unchanged -> Unit
             }
             maxAdded = max(maxAdded, item.dateAddedSec)
         }
@@ -151,6 +152,15 @@ data class SyncFolder(
     val displayName: String,
     val selected: Boolean,
 )
+
+private fun SyncFileEntity.toReconcileRow(): ReconcileRow =
+    ReconcileRow(
+        mediaStoreId = mediaStoreId,
+        sizeBytes = sizeBytes,
+        mtimeMs = mtimeMs,
+        contentUri = contentUri,
+        displayName = displayName,
+    )
 
 private fun ScannedMedia.toQueuedEntity(circleId: String?, now: Long): SyncFileEntity =
     SyncFileEntity(
