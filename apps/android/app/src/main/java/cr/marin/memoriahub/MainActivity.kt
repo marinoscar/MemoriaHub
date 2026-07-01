@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import cr.marin.memoriahub.sync.SyncNotifications
 import cr.marin.memoriahub.ui.RootDestination
 import cr.marin.memoriahub.ui.RootViewModel
 import cr.marin.memoriahub.ui.auth.DeviceAuthScreen
@@ -24,6 +25,7 @@ import cr.marin.memoriahub.ui.serverurl.ServerUrlScreen
 import cr.marin.memoriahub.data.repo.DeviceAuthRepository
 import cr.marin.memoriahub.ui.theme.MemoriaHubTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.MutableStateFlow
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -32,13 +34,21 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var deviceAuthRepository: DeviceAuthRepository
 
+    /** In-app navigation requests from notification taps; consumed by [MainShell]. */
+    private val navTarget = MutableStateFlow<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         handleDeviceCompleteDeepLink(intent)
+        handleNavTarget(intent)
         setContent {
             MemoriaHubTheme {
-                AppRoot()
+                val target by navTarget.collectAsStateWithLifecycle()
+                AppRoot(
+                    navTarget = target,
+                    onNavTargetConsumed = { navTarget.value = null },
+                )
             }
         }
     }
@@ -47,6 +57,12 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleDeviceCompleteDeepLink(intent)
+        handleNavTarget(intent)
+    }
+
+    private fun handleNavTarget(intent: Intent?) {
+        val target = intent?.getStringExtra(SyncNotifications.EXTRA_NAV_TARGET) ?: return
+        navTarget.value = target
     }
 
     /**
@@ -63,7 +79,11 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun AppRoot(viewModel: RootViewModel = hiltViewModel()) {
+private fun AppRoot(
+    navTarget: String? = null,
+    onNavTargetConsumed: () -> Unit = {},
+    viewModel: RootViewModel = hiltViewModel(),
+) {
     val destination by viewModel.destination.collectAsStateWithLifecycle()
 
     Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
@@ -76,7 +96,11 @@ private fun AppRoot(viewModel: RootViewModel = hiltViewModel()) {
             RootDestination.Auth -> DeviceAuthScreen(modifier = contentModifier)
             RootDestination.Main -> {
                 LaunchedEffect(Unit) { viewModel.onMainVisible() }
-                MainShell(modifier = contentModifier)
+                MainShell(
+                    navTarget = navTarget,
+                    onNavTargetConsumed = onNavTargetConsumed,
+                    modifier = contentModifier,
+                )
             }
         }
     }
