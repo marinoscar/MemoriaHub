@@ -11,6 +11,7 @@ import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import cr.marin.memoriahub.core.storage.AppConfigStore
 import java.time.Duration
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -22,18 +23,25 @@ import javax.inject.Singleton
  *  - on-demand "sync now".
  *
  * All paths run the same idempotent engine, so overlapping triggers are harmless.
+ *
+ * Every sync entry point is gated on the backup toggle here — the single choke point —
+ * so call sites (app open, boot, folder changes, manual sync) become no-ops when the
+ * user has backup turned off.
  */
 @Singleton
 class SyncScheduler @Inject constructor(
     private val workManager: WorkManager,
+    private val appConfigStore: AppConfigStore,
 ) {
     /** Call on login, app open, and boot. */
     fun ensureScheduled() {
+        if (!appConfigStore.backupEnabled) return
         schedulePeriodic()
         armContentObserver()
     }
 
     fun syncNow() {
+        if (!appConfigStore.backupEnabled) return
         val request = OneTimeWorkRequestBuilder<SyncWorker>()
             .setConstraints(networkConstraints())
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
@@ -45,6 +53,7 @@ class SyncScheduler @Inject constructor(
 
     /** (Re)arms the content-observer one-shot so future MediaStore changes wake a sync. */
     fun armContentObserver() {
+        if (!appConfigStore.backupEnabled) return
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .addContentUriTrigger(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true)
@@ -59,10 +68,16 @@ class SyncScheduler @Inject constructor(
         workManager.enqueueUniqueWork(WORK_CONTENT_OBSERVER, ExistingWorkPolicy.REPLACE, request)
     }
 
-    fun cancelAll() {
+    /** Cancels sync work only — used when the user turns backup off. */
+    fun cancelSyncWork() {
         workManager.cancelUniqueWork(WORK_PERIODIC)
         workManager.cancelUniqueWork(WORK_CONTENT_OBSERVER)
         workManager.cancelUniqueWork(WORK_SYNC_NOW)
+    }
+
+    /** Cancels everything this app schedules — used on logout. */
+    fun cancelAll() {
+        cancelSyncWork()
     }
 
     private fun schedulePeriodic() {
