@@ -58,6 +58,12 @@
             </intent-filter>
         </receiver>
 
+        <!-- Notification action buttons (e.g. "Turn on backup" on the reminder). -->
+        <receiver
+            android:name=".sync.NotificationActionReceiver"
+            android:exported="false" />
+
+
         <!-- Default WorkManager initializer is disabled; we provide a Hilt-aware
              WorkerFactory via Configuration.Provider on the Application. -->
         <provider

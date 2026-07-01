@@ -15,12 +15,14 @@ import javax.inject.Singleton
 class BackupController @Inject constructor(
     private val appConfigStore: AppConfigStore,
     private val syncScheduler: SyncScheduler,
+    private val notifications: SyncNotifications,
 ) {
     fun turnOn() {
         // Set the pref first: the scheduler gates every entry point on it.
         appConfigStore.setBackupEnabled(true)
         syncScheduler.ensureScheduled()
         syncScheduler.syncNow()
+        notifications.cancelReminder()
     }
 
     fun turnOff() {
