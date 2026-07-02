@@ -7,7 +7,7 @@
  *   - DB path
  *   - ink-select-input menu
  *
- * If not logged in shows a restricted menu (Login / Factory-reset / Help / Quit only).
+ * If not logged in shows a restricted menu (Login / Help / Quit only).
  */
 
 import React from 'react';
@@ -41,6 +41,8 @@ interface HomeMenuProps {
   identity: string | null;   // email from /api/auth/me, null if not logged in
   activeCircleName?: string | null;
   onSelect: (action: MenuAction) => void;
+  updateInfo?: { updateAvailable: boolean; latestVersion: string | null } | null;
+  currentVersion?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +89,8 @@ export function HomeMenu({
   identity,
   activeCircleName,
   onSelect,
+  updateInfo,
+  currentVersion,
 }: HomeMenuProps): React.ReactElement {
   const isLoggedIn = Boolean(config && identity);
 
@@ -107,6 +111,15 @@ export function HomeMenu({
         ))}
         <Text dimColor>  Import and sync photos/videos to your MemoriaHub server</Text>
       </Box>
+
+      {/* Update-available notice — shown in yellow between the banner and identity box */}
+      {updateInfo?.updateAvailable && (
+        <Box>
+          <Text color="yellow">
+            {`⬆ Update available: ${updateInfo.latestVersion} (you have ${currentVersion ?? '?'}) — run 'git pull' in the MemoriaHub repo and rebuild the CLI`}
+          </Text>
+        </Box>
+      )}
 
       {/* Identity box */}
       <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>

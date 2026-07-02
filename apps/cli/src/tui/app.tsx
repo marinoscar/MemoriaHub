@@ -1,7 +1,7 @@
 /**
  * tui/app.tsx — Root TUI application: screen state machine + launch entry point.
  *
- * Screens: home | login | folders | pickFolders | dashboard | help | status | settings | factoryReset
+ * Screens: home | login | folders | pickFolders | dashboard | help | status | settings
  *
  * launchTui() checks for a real TTY; if non-TTY it prints a message and
  * returns immediately without hanging.  Otherwise it renders <App/> and
@@ -15,6 +15,8 @@ import { loadConfig, type CliConfig } from '../config.js';
 import { openDb } from '../db/database.js';
 import { ApiClient, type Circle } from '../api.js';
 import { factoryReset } from '../reset.js';
+import { SettingsRepo } from '../repo/settings.js';
+import { checkForUpdate, compareSemver } from '../version-check.js';
 import type BetterSqlite3 from 'better-sqlite3';
 
 import { HomeMenu, type MenuAction } from './HomeMenu.js';
@@ -64,9 +66,10 @@ interface AppState {
   identity: string | null;
   db: BetterSqlite3.Database | null;
   circles: Circle[];
+  updateInfo: { updateAvailable: boolean; latestVersion: string | null } | null;
 }
 
-function App(): React.ReactElement {
+function App({ currentVersion }: { currentVersion: string }): React.ReactElement {
   const { exit } = useApp();
 
   const [screen, setScreen] = useState<Screen>({ kind: 'home' });
@@ -75,9 +78,10 @@ function App(): React.ReactElement {
     identity: null,
     db: null,
     circles: [],
+    updateInfo: null,
   });
 
-  // Load config + db + identity on mount
+  // Load config + db + identity on mount; also fire a throttled update check.
   useEffect(() => {
     const cfg = loadConfig();
     const db  = openDb();
@@ -86,7 +90,9 @@ function App(): React.ReactElement {
 
     async function loadIdentity(): Promise<void> {
       if (!cfg) {
-        if (!cancelled) setAppState({ config: null, identity: null, db, circles: [] });
+        if (!cancelled) {
+          setAppState((prev) => ({ ...prev, config: null, identity: null, db, circles: [] }));
+        }
         return;
       }
 
@@ -97,15 +103,51 @@ function App(): React.ReactElement {
           api.listCircles().catch(() => [] as Circle[]),
         ]);
         if (!cancelled) {
-          setAppState({ config: cfg, identity: me.email ?? null, db, circles });
+          setAppState((prev) => ({ ...prev, config: cfg, identity: me.email ?? null, db, circles }));
         }
       } catch {
         // Not logged in / server unreachable
-        if (!cancelled) setAppState({ config: cfg, identity: null, db, circles: [] });
+        if (!cancelled) {
+          setAppState((prev) => ({ ...prev, config: cfg, identity: null, db, circles: [] }));
+        }
+      }
+    }
+
+    // Best-effort update check — throttled to once per 24 h via SettingsRepo cache.
+    async function checkUpdate(): Promise<void> {
+      try {
+        const repo = new SettingsRepo(db);
+        const cache = repo.getUpdateCheckCache();
+
+        let updateInfo: { updateAvailable: boolean; latestVersion: string | null };
+
+        const cacheIsFresh =
+          cache.lastAt !== null &&
+          cache.latestVersion !== null &&
+          Date.now() - new Date(cache.lastAt).getTime() < 24 * 60 * 60 * 1000;
+
+        if (cacheIsFresh && cache.latestVersion !== null) {
+          updateInfo = {
+            updateAvailable: compareSemver(cache.latestVersion, currentVersion) > 0,
+            latestVersion: cache.latestVersion,
+          };
+        } else {
+          updateInfo = await checkForUpdate(currentVersion);
+          if (updateInfo.latestVersion) {
+            repo.setUpdateCheckCache(updateInfo.latestVersion);
+          }
+        }
+
+        if (!cancelled) {
+          setAppState((prev) => ({ ...prev, updateInfo }));
+        }
+      } catch {
+        // Never let an update-check failure affect startup.
       }
     }
 
     void loadIdentity();
+    void checkUpdate();
 
     return () => {
       cancelled = true;
@@ -174,6 +216,8 @@ function App(): React.ReactElement {
           identity={appState.identity}
           activeCircleName={activeCircleName}
           onSelect={handleMenuSelect}
+          updateInfo={appState.updateInfo}
+          currentVersion={currentVersion}
         />
       );
 
@@ -298,6 +342,7 @@ function App(): React.ReactElement {
               identity: null,
               db: freshDb,
               circles: [],
+              updateInfo: appState.updateInfo,
             });
             setScreen({ kind: 'home' });
           }}
@@ -338,7 +383,7 @@ function App(): React.ReactElement {
 // launchTui — public entry point
 // ---------------------------------------------------------------------------
 
-export async function launchTui(_opts?: Record<string, unknown>): Promise<void> {
+export async function launchTui(opts?: { currentVersion?: string }): Promise<void> {
   if (!process.stdout.isTTY) {
     process.stdout.write(
       'The interactive UI needs a real terminal. ' +
@@ -347,6 +392,6 @@ export async function launchTui(_opts?: Record<string, unknown>): Promise<void> 
     return;
   }
 
-  const { waitUntilExit } = render(<App />);
+  const { waitUntilExit } = render(<App currentVersion={opts?.currentVersion ?? '0.0.0'} />);
   await waitUntilExit();
 }
