@@ -1,7 +1,7 @@
 /**
  * tui/app.tsx — Root TUI application: screen state machine + launch entry point.
  *
- * Screens: home | login | folders | pickFolders | dashboard | help | status | settings
+ * Screens: home | login | folders | pickFolders | dashboard | help | status | settings | factoryReset
  *
  * launchTui() checks for a real TTY; if non-TTY it prints a message and
  * returns immediately without hanging.  Otherwise it renders <App/> and
@@ -14,6 +14,7 @@ import { Box, Text, render, useApp, useInput } from 'ink';
 import { loadConfig, type CliConfig } from '../config.js';
 import { openDb } from '../db/database.js';
 import { ApiClient, type Circle } from '../api.js';
+import { factoryReset } from '../reset.js';
 import type BetterSqlite3 from 'better-sqlite3';
 
 import { HomeMenu, type MenuAction } from './HomeMenu.js';
@@ -24,6 +25,7 @@ import { PickFolders } from './PickFolders.js';
 import { SyncDashboard } from './SyncDashboard.js';
 import { StatusScreen } from './StatusScreen.js';
 import { SettingsScreen } from './SettingsScreen.js';
+import { FactoryResetScreen } from './FactoryResetScreen.js';
 import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
@@ -39,7 +41,8 @@ type Screen =
   | { kind: 'dashboard'; all?: boolean; folderIds?: number[]; retryFailedOnly?: boolean }
   | { kind: 'help' }
   | { kind: 'status' }
-  | { kind: 'settings' };
+  | { kind: 'settings' }
+  | { kind: 'factoryReset' };
 
 // ---------------------------------------------------------------------------
 // Small helper: Esc/q key handler (used on help screen)
@@ -138,6 +141,9 @@ function App(): React.ReactElement {
         break;
       case 'help':
         setScreen({ kind: 'help' });
+        break;
+      case 'factory-reset':
+        setScreen({ kind: 'factoryReset' });
         break;
       case 'quit':
         exit();
@@ -276,6 +282,26 @@ function App(): React.ReactElement {
         <SettingsScreen
           db={db}
           onBack={() => setScreen({ kind: 'home' })}
+        />
+      );
+
+    case 'factoryReset':
+      return (
+        <FactoryResetScreen
+          onConfirm={() => {
+            // Close the current DB and delete all local state.
+            factoryReset();
+            // Open a fresh DB so the app stays functional after the reset.
+            const freshDb = openDb();
+            setAppState({
+              config: null,
+              identity: null,
+              db: freshDb,
+              circles: [],
+            });
+            setScreen({ kind: 'home' });
+          }}
+          onCancel={() => setScreen({ kind: 'home' })}
         />
       );
 

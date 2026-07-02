@@ -7,7 +7,7 @@
  *   - DB path
  *   - ink-select-input menu
  *
- * If not logged in shows a restricted menu (Login / Help / Quit only).
+ * If not logged in shows a restricted menu (Login / Factory-reset / Help / Quit only).
  */
 
 import React from 'react';
@@ -31,6 +31,7 @@ export type MenuAction =
   | 'retry'
   | 'settings'
   | 'help'
+  | 'factory-reset'
   | 'quit';
 
 type MenuItem = { label: string; value: MenuAction };
@@ -47,19 +48,20 @@ interface HomeMenuProps {
 // ---------------------------------------------------------------------------
 
 const ALL_ITEMS: MenuItem[] = [
-  { label: 'Login / Change server',    value: 'login'       },
-  { label: 'Manage folders',           value: 'folders'     },
-  { label: 'Manage circles',           value: 'circles'     },
-  { label: 'Sync all folders',         value: 'sync-all'    },
-  { label: 'Sync selected folders',    value: 'sync-select' },
-  { label: 'Status',                   value: 'status'      },
-  { label: 'Retry failed files',       value: 'retry'       },
-  { label: 'Settings',                 value: 'settings'    },
-  { label: 'Help',                     value: 'help'        },
-  { label: 'Quit',                     value: 'quit'        },
+  { label: 'Login / Change server',              value: 'login'         },
+  { label: 'Manage folders',                     value: 'folders'       },
+  { label: 'Manage circles',                     value: 'circles'       },
+  { label: 'Sync all folders',                   value: 'sync-all'      },
+  { label: 'Sync selected folders',              value: 'sync-select'   },
+  { label: 'Status',                             value: 'status'        },
+  { label: 'Retry failed files',                 value: 'retry'         },
+  { label: 'Settings',                           value: 'settings'      },
+  { label: 'Help',                               value: 'help'          },
+  { label: 'Factory reset (delete all local data)', value: 'factory-reset' },
+  { label: 'Quit',                               value: 'quit'          },
 ];
 
-const LOGGED_OUT_ACTIONS: MenuAction[] = ['login', 'help', 'quit'];
+const LOGGED_OUT_ACTIONS: MenuAction[] = ['login', 'factory-reset', 'help', 'quit'];
 
 // ---------------------------------------------------------------------------
 // Banner lines
