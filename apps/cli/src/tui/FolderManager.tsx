@@ -70,7 +70,32 @@ export function FolderManager({ db, onBack }: FolderManagerProps): React.ReactEl
     setSelected((s) => Math.min(s, Math.max(0, updated.length - 1)));
   }, [repo]);
 
+  // Extracted no-arg removal logic — called from the keypress handler.
+  function performRemove(): void {
+    const f = folders[selected];
+    if (!f) { setSubScreen('list'); return; }
+    try {
+      repo.remove(f.id);
+      refresh();
+      setStatusMsg(`Removed folder: ${f.path}`);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    }
+    setSubScreen('list');
+  }
+
   useInput((input, key) => {
+    // Handle confirm-remove via direct keypress — avoids the controlled-input pitfall.
+    if (subScreen === 'confirm-remove') {
+      if (input === 'y' || input === 'Y') {
+        performRemove();
+      } else if (input === 'n' || input === 'N' || key.escape || key.return) {
+        setStatusMsg('Remove cancelled.');
+        setSubScreen('list');
+      }
+      return;
+    }
+
     if (subScreen !== 'list') return;
 
     if (key.escape || input === 'q') { onBack(); return; }
@@ -129,24 +154,6 @@ export function FolderManager({ db, onBack }: FolderManagerProps): React.ReactEl
     setSubScreen('list');
   }
 
-  function handleConfirmRemove(value: string): void {
-    const v = value.trim().toLowerCase();
-    setSubScreen('list');
-    if (v !== 'y' && v !== 'yes') {
-      setStatusMsg('Remove cancelled.');
-      return;
-    }
-    const f = folders[selected];
-    if (!f) return;
-    try {
-      repo.remove(f.id);
-      refresh();
-      setStatusMsg(`Removed folder: ${f.path}`);
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : String(err));
-    }
-  }
-
   // ---- Render sub-screens ----
   if (subScreen === 'add-path') {
     return (
@@ -194,9 +201,8 @@ export function FolderManager({ db, onBack }: FolderManagerProps): React.ReactEl
           <Text>{f?.path ?? '(none)'}</Text>
         </Box>
         <Text dimColor>This removes all file records for this folder from the DB.</Text>
-        <Box flexDirection="row" gap={1} marginTop={1}>
-          <Text dimColor>Confirm [y/n]:</Text>
-          <TextInput value="" onChange={() => {}} onSubmit={handleConfirmRemove} placeholder="n" />
+        <Box marginTop={1}>
+          <Text dimColor>[y] remove   [n/Esc] cancel</Text>
         </Box>
       </Box>
     );
