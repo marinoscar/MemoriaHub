@@ -12,6 +12,7 @@
 import { Command } from 'commander';
 import { getDb } from '../db/database.js';
 import { SettingsRepo } from '../repo/settings.js';
+import { factoryReset } from '../reset.js';
 import { ui } from '../ui.js';
 
 // ---------------------------------------------------------------------------
@@ -137,6 +138,50 @@ function setCmd(): Command {
 }
 
 // ---------------------------------------------------------------------------
+// settings reset
+// ---------------------------------------------------------------------------
+
+function resetCmd(): Command {
+  const cmd = new Command('reset');
+  cmd
+    .description('Factory-reset the CLI: removes config, database, and all local state (irreversible)')
+    .option('--yes', 'Confirm the reset without an interactive prompt');
+
+  cmd.action((opts: { yes?: boolean }) => {
+    if (!opts.yes) {
+      ui.blank();
+      ui.warn('This will permanently delete:');
+      ui.line('    - Server URL and PAT login (config.json)');
+      ui.line('    - Upload history, sync runs, and all settings (memoriahub.db)');
+      ui.line('    - All managed-folder manifests (manifests/)');
+      ui.blank();
+      ui.warn('This action is irreversible. You will need to log in again.');
+      ui.blank();
+      ui.info('Re-run with --yes to confirm:  memoriahub settings reset --yes');
+      ui.blank();
+      process.exit(0);
+    }
+
+    const { removed } = factoryReset();
+
+    ui.blank();
+    if (removed.length === 0) {
+      ui.info('Nothing to remove — local state was already clean.');
+    } else {
+      ui.step('Removed:');
+      for (const p of removed) {
+        ui.line(`  ${p}`);
+      }
+      ui.blank();
+      ui.success('Factory reset complete. Run `memoriahub login` to get started again.');
+    }
+    ui.blank();
+  });
+
+  return cmd;
+}
+
+// ---------------------------------------------------------------------------
 // Export the `settings` command group
 // ---------------------------------------------------------------------------
 
@@ -147,6 +192,7 @@ export function settingsCommand(): Command {
   cmd.addCommand(listCmd());
   cmd.addCommand(getCmd());
   cmd.addCommand(setCmd());
+  cmd.addCommand(resetCmd());
 
   return cmd;
 }
