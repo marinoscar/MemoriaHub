@@ -53,7 +53,7 @@ if (process.argv.length === 2) {
   if (process.stdout.isTTY) {
     // Dynamic import keeps Ink/React out of headless code paths
     const { launchTui } = await import('./tui/app.js');
-    await launchTui();
+    await launchTui({ currentVersion: pkg.version });
     process.exit(0);
   } else {
     program.help();
@@ -66,7 +66,7 @@ program
   .description('Launch the interactive terminal UI (requires a TTY)')
   .action(async () => {
     const { launchTui } = await import('./tui/app.js');
-    await launchTui();
+    await launchTui({ currentVersion: pkg.version });
   });
 
 program.parse(process.argv);
