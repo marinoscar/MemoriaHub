@@ -56,6 +56,17 @@ class SyncNotifications @Inject constructor(
                 ).apply { description = "Alerts you when items fail to back up" },
             )
         }
+        if (manager.getNotificationChannel(CHANNEL_ACCOUNT) == null) {
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ACCOUNT,
+                    "Account",
+                    // HIGH: an expired session silently stops all backup — genuinely urgent,
+                    // unlike reminders. No in-app mute either; system channel control only.
+                    NotificationManager.IMPORTANCE_HIGH,
+                ).apply { description = "Sign-in required and other account alerts" },
+            )
+        }
     }
 
     fun buildNotification(text: String): Notification {
@@ -121,6 +132,32 @@ class SyncNotifications @Inject constructor(
         NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID_ISSUES)
     }
 
+    /**
+     * "Session expired — sign in again" alert. Fired only when the server terminally
+     * rejects the refresh token (never on the user's own logout). Tapping opens the
+     * app, which routes to the sign-in screen automatically while logged out.
+     */
+    fun showSignInRequired() {
+        if (!canNotify()) return
+        ensureChannels()
+        val notification = NotificationCompat.Builder(context, CHANNEL_ACCOUNT)
+            .setContentTitle("Sign in to continue backup")
+            .setContentText("Your session expired. Photos and videos aren't backing up until you sign in again.")
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .bigText("Your session expired. Photos and videos aren't backing up until you sign in again."),
+            )
+            .setSmallIcon(android.R.drawable.stat_sys_warning)
+            .setContentIntent(openAppIntent())
+            .setAutoCancel(true)
+            .build()
+        NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_SIGN_IN, notification)
+    }
+
+    fun cancelSignInRequired() {
+        NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID_SIGN_IN)
+    }
+
     private fun canNotify(): Boolean = NotificationManagerCompat.from(context).areNotificationsEnabled()
 
     private fun openBackupTabIntent(): PendingIntent {
@@ -131,6 +168,19 @@ class SyncNotifications @Inject constructor(
         return PendingIntent.getActivity(
             context,
             REQUEST_OPEN_BACKUP,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    /** Plain app-open — the logged-out root destination is already the sign-in screen. */
+    private fun openAppIntent(): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        return PendingIntent.getActivity(
+            context,
+            REQUEST_OPEN_APP,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -154,12 +204,15 @@ class SyncNotifications @Inject constructor(
         const val CHANNEL_PROGRESS = "sync_channel"
         const val CHANNEL_REMINDERS = "backup_reminders"
         const val CHANNEL_ISSUES = "backup_issues"
+        const val CHANNEL_ACCOUNT = "account"
         const val NOTIFICATION_ID_PROGRESS = 1001
         const val NOTIFICATION_ID_REMINDER = 1002
         const val NOTIFICATION_ID_ISSUES = 1003
+        const val NOTIFICATION_ID_SIGN_IN = 1004
         const val EXTRA_NAV_TARGET = "nav_target"
         const val NAV_TARGET_BACKUP = "backup"
         private const val REQUEST_OPEN_BACKUP = 2001
         private const val REQUEST_TURN_ON = 2002
+        private const val REQUEST_OPEN_APP = 2003
     }
 }

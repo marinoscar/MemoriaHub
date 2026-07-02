@@ -5,6 +5,7 @@ import cr.marin.memoriahub.core.network.dto.ApiEnvelope
 import cr.marin.memoriahub.core.network.dto.RefreshResponse
 import cr.marin.memoriahub.core.storage.AppConfigStore
 import cr.marin.memoriahub.core.util.TimeProvider
+import cr.marin.memoriahub.sync.SyncNotifications
 import kotlinx.serialization.json.Json
 import okhttp3.Authenticator
 import okhttp3.OkHttpClient
@@ -39,6 +40,7 @@ class TokenAuthenticator @Inject constructor(
     private val appConfigStore: AppConfigStore,
     private val json: Json,
     private val time: TimeProvider,
+    private val notifications: SyncNotifications,
 ) : Authenticator {
 
     private val refreshClient: OkHttpClient by lazy {
@@ -81,7 +83,10 @@ class TokenAuthenticator @Inject constructor(
                 }
                 RefreshOutcome.Rejected -> {
                     // The server definitively rejected the refresh token: re-login required.
+                    // This is a session EXPIRY, not a user action — surface it, or backup
+                    // stops silently. The user's own logout never routes through here.
                     tokenStore.clear()
+                    runCatching { notifications.showSignInRequired() }
                     null
                 }
                 RefreshOutcome.Transient -> {
