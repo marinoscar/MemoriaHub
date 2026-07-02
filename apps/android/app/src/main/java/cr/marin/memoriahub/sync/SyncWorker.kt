@@ -5,6 +5,7 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import cr.marin.memoriahub.core.auth.TokenStore
 import cr.marin.memoriahub.core.storage.AppConfigStore
 import cr.marin.memoriahub.core.util.TimeProvider
 import cr.marin.memoriahub.data.repo.SyncRepository
@@ -28,6 +29,7 @@ class SyncWorker @AssistedInject constructor(
     private val appConfigStore: AppConfigStore,
     private val syncRepository: SyncRepository,
     private val time: TimeProvider,
+    private val tokenStore: TokenStore,
 ) : CoroutineWorker(appContext, params) {
 
     // Required even with conditional promotion below: expedited work (WORK_SYNC_NOW)
@@ -35,10 +37,11 @@ class SyncWorker @AssistedInject constructor(
     override suspend fun getForegroundInfo(): ForegroundInfo = notifications.foregroundInfo()
 
     override suspend fun doWork(): Result {
-        // Defensive gate: already-enqueued work (e.g. a content-observer trigger) may race
-        // the user turning backup off. Bail without foreground promotion and without
-        // re-arming the observer.
-        if (!appConfigStore.backupEnabled) return Result.success()
+        // Defensive gates: already-enqueued work (e.g. a content-observer trigger) may
+        // race the user turning backup off; and a logged-out session (expired/revoked)
+        // must stop sync cleanly instead of 401-ing every upload into BLOCKED rows and
+        // false "Backup issues" alerts — the sign-in notification owns that story.
+        if (!appConfigStore.backupEnabled || !tokenStore.isLoggedIn) return Result.success()
 
         val trigger = inputData.getString(KEY_TRIGGER) ?: TRIGGER_PERIODIC
 
