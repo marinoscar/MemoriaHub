@@ -23,6 +23,7 @@ import {
   Archive as ArchiveIcon,
   QueryStats as QueryStatsIcon,
   Public as PublicIcon,
+  MonitorHeart as MonitorHeartIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 
@@ -171,6 +172,13 @@ export default function SettingsHubPage() {
           icon: <PublicIcon sx={{ fontSize: 40 }} color="primary" />,
           path: '/admin/settings/sharing',
           permission: 'shares:manage_any',
+        },
+        {
+          title: 'Doctor',
+          description: 'Run configuration health diagnostics and see required action items',
+          icon: <MonitorHeartIcon sx={{ fontSize: 40 }} color="primary" />,
+          path: '/admin/settings/doctor',
+          permission: 'system_settings:read',
         },
       ],
     },

@@ -24,6 +24,6 @@ import { SettingsModule } from '../settings/settings.module';
     JobHistoryPurgeHandler,
     JobHistoryPurgeTask,
   ],
-  exports: [EnrichmentJobService, EnrichmentHandlerRegistry],
+  exports: [EnrichmentJobService, EnrichmentHandlerRegistry, EnrichmentAdminService],
 })
 export class EnrichmentModule {}

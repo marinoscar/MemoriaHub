@@ -17,6 +17,22 @@ function getEnvInt(key: string, defaultValue: number): number {
   return isNaN(parsed) ? defaultValue : parsed;
 }
 
+/**
+ * Whether the shared enrichment worker is enabled, per env-var kill-switches.
+ * Checks both the current `ENRICHMENT_WORKER_ENABLED` var and the legacy
+ * `FACE_WORKER_ENABLED` alias for backwards compatibility — either one set to
+ * 'false' disables the worker.
+ *
+ * Extracted as a pure function (rather than inlined in onModuleInit) so other
+ * consumers — e.g. DoctorService's diagnostics sweep — can check the same
+ * enabled/disabled state without duplicating the boolean logic.
+ */
+export function isEnrichmentWorkerEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const enrichmentEnabled = env['ENRICHMENT_WORKER_ENABLED'];
+  const faceEnabled = env['FACE_WORKER_ENABLED'];
+  return !(enrichmentEnabled === 'false' || faceEnabled === 'false');
+}
+
 // Normal-failure retry config
 const MAX_ATTEMPTS = getEnvInt('ENRICHMENT_MAX_ATTEMPTS', 3);
 const RETRY_BASE_MS = getEnvInt('ENRICHMENT_RETRY_BASE_MS', 2_000);
@@ -41,9 +57,7 @@ export class EnrichmentJobWorker implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit(): void {
     // Check both new and legacy env vars for backwards compatibility
-    const enrichmentEnabled = process.env['ENRICHMENT_WORKER_ENABLED'];
-    const faceEnabled = process.env['FACE_WORKER_ENABLED'];
-    if (enrichmentEnabled === 'false' || faceEnabled === 'false') {
+    if (!isEnrichmentWorkerEnabled()) {
       this.logger.log('EnrichmentJobWorker disabled via env var');
       return;
     }
