@@ -120,6 +120,6 @@ export class DuplicateController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: RequestUser,
   ) {
-    return this.duplicateService.rerunDuplicateDetection(id, user.id);
+    return this.duplicateService.rerunDuplicateDetection(id, user.id, user.permissions);
   }
 }

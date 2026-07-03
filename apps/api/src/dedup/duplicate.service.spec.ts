@@ -19,7 +19,7 @@
  *    enqueues at priority 0 with reason=rerun
  */
 
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { DuplicateService } from './duplicate.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -862,10 +862,47 @@ describe('DuplicateService', () => {
   // -------------------------------------------------------------------------
 
   describe('rerunDuplicateDetection', () => {
+    it('calls assertCircleAccess with the item circleId and collaborator role', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
+        id: 'media-1',
+        circleId: CIRCLE_ID,
+        deletedAt: null,
+        type: MediaType.photo,
+      });
+      mockEnrichmentJobService.enqueue.mockResolvedValue({
+        id: 'job-rerun-1',
+        status: JobStatus.pending,
+      });
+
+      await service.rerunDuplicateDetection('media-1', USER_ID, PERMS_MEDIA_WRITE);
+
+      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+        USER_ID,
+        CIRCLE_ID,
+        PERMS_MEDIA_WRITE,
+        CircleRole.collaborator,
+      );
+    });
+
+    it('propagates a rejection from assertCircleAccess without enqueueing a job', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
+        id: 'media-1',
+        circleId: CIRCLE_ID,
+        deletedAt: null,
+        type: MediaType.photo,
+      });
+      mockMembership.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('not a circle member'));
+
+      await expect(service.rerunDuplicateDetection('media-1', USER_ID, PERMS_MEDIA_WRITE)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+    });
+
     it('throws NotFoundException when the mediaItem is not found', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(null);
 
-      await expect(service.rerunDuplicateDetection('media-x', USER_ID)).rejects.toThrow(NotFoundException);
+      await expect(service.rerunDuplicateDetection('media-x', USER_ID, PERMS_MEDIA_WRITE)).rejects.toThrow(NotFoundException);
     });
 
     it('throws NotFoundException when the mediaItem is soft-deleted', async () => {
@@ -876,7 +913,7 @@ describe('DuplicateService', () => {
         type: MediaType.photo,
       });
 
-      await expect(service.rerunDuplicateDetection('media-1', USER_ID)).rejects.toThrow(NotFoundException);
+      await expect(service.rerunDuplicateDetection('media-1', USER_ID, PERMS_MEDIA_WRITE)).rejects.toThrow(NotFoundException);
     });
 
     it('throws BadRequestException when the mediaItem is not a photo', async () => {
@@ -887,7 +924,7 @@ describe('DuplicateService', () => {
         type: MediaType.video,
       });
 
-      await expect(service.rerunDuplicateDetection('media-1', USER_ID)).rejects.toThrow(BadRequestException);
+      await expect(service.rerunDuplicateDetection('media-1', USER_ID, PERMS_MEDIA_WRITE)).rejects.toThrow(BadRequestException);
     });
 
     it('enqueues a duplicate_detection job at priority 0 with reason=rerun', async () => {
@@ -902,7 +939,7 @@ describe('DuplicateService', () => {
         status: JobStatus.pending,
       });
 
-      const result = await service.rerunDuplicateDetection('media-1', USER_ID);
+      const result = await service.rerunDuplicateDetection('media-1', USER_ID, PERMS_MEDIA_WRITE);
 
       expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({

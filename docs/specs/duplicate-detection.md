@@ -422,7 +422,7 @@ Mark a group as not actually duplicates; ungroups all members (`duplicateGroupId
 
 Re-enqueue duplicate detection for a single media item at priority 0 (highest).
 
-- **Auth:** `media:write` (system permission only). **Note:** unlike the geocode/metadata-extraction rerun endpoints, this route does not currently perform an explicit per-circle role check via `CircleMembershipService.assertCircleAccess` — any authenticated caller holding the system-level `media:write` permission can trigger a rerun for any media item ID, regardless of circle membership. This diverges from the rest of the per-circle-scoped media endpoints and should be treated as a hardening item (see §14).
+- **Auth:** `media:write` + per-circle `collaborator` role (`CircleMembershipService.assertCircleAccess`), consistent with the geocode and metadata-extraction rerun endpoints.
 - **Response `201`:** `{ "data": { "jobId": "uuid", "status": "pending" } }`.
 - **Response `400`:** item is not a photo.
 - **Response `404`:** item not found or soft-deleted.
@@ -457,7 +457,7 @@ Visual-embedding model availability.
 | `GET /api/media/duplicates/:id` | `media:read` | `viewer` | |
 | `POST /api/media/duplicates/:id/resolve` | `media:write` (+ `media:delete` if `action: 'trash'`) | `collaborator` | |
 | `POST /api/media/duplicates/:id/dismiss` | `media:write` | `collaborator` | |
-| `POST /api/media/:id/duplicates/rerun` | `media:write` | *(not enforced — see §9.5)* | |
+| `POST /api/media/:id/duplicates/rerun` | `media:write` | `collaborator` | |
 | `POST /api/admin/duplicates/backfill` | `system_settings:write` | — (Admin, app-wide) | 400 if feature disabled |
 | `GET /api/admin/duplicates/status` | `system_settings:read` | — (Admin) | |
 
@@ -531,7 +531,7 @@ The scenarios below describe the full coverage this module should have; items al
 - Verify a `viewer` can call the two `GET` endpoints but receives `403` on resolve/dismiss.
 - Verify a `collaborator` without `media:delete` can resolve with `action: 'archive'` but receives `400` (not `403`) attempting `action: 'trash'`.
 - Verify `POST /api/admin/duplicates/backfill` and `GET /api/admin/duplicates/status` return `403` for a non-admin.
-- Given the gap noted in §9.5, add a test asserting the current (unrestricted) behavior of the rerun endpoint so a future fix is a deliberate, visible change rather than a silent regression.
+- The per-circle collaborator check on the rerun endpoint (§9.5) is now covered: `apps/api/src/dedup/duplicate.service.spec.ts`'s `rerunDuplicateDetection` describe block asserts `assertCircleAccess` is called with the correct arguments, and that a rejection from the membership check propagates without enqueueing a job.
 
 ---
 
@@ -539,7 +539,6 @@ The scenarios below describe the full coverage this module should have; items al
 
 | Capability | Notes |
 |------------|-------|
-| Per-circle role enforcement on rerun | `POST /api/media/:id/duplicates/rerun` currently checks only the system-level `media:write` permission (§9.5); align it with the `assertMediaItemAccess`/`assertCircleAccess` pattern used by the geocode and metadata-extraction rerun endpoints |
 | Remaining test coverage | See §13 — `DuplicateDetectionService` has unit coverage; `VisualEmbeddingService`, `DuplicateService`, `DuplicateBackfillService`, the batch handler, and the controllers do not yet |
 | Frontend review queue and admin settings page | See §11 |
 | `halfvec(512)` migration | Escape hatch for libraries beyond ~200 000 photos (§7.1); not needed at current scale |

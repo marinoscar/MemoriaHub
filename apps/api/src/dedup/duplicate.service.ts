@@ -518,7 +518,7 @@ export class DuplicateService {
   // Per-item rerun
   // ---------------------------------------------------------------------------
 
-  async rerunDuplicateDetection(mediaItemId: string, userId: string) {
+  async rerunDuplicateDetection(mediaItemId: string, userId: string, perms: string[]) {
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },
       select: { id: true, circleId: true, deletedAt: true, type: true },
@@ -527,6 +527,8 @@ export class DuplicateService {
     if (!mediaItem || mediaItem.deletedAt) {
       throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
     }
+
+    await this.membership.assertCircleAccess(userId, mediaItem.circleId, perms, CircleRole.collaborator);
 
     if (mediaItem.type !== MediaType.photo) {
       throw new BadRequestException('Duplicate detection only applies to photos');
