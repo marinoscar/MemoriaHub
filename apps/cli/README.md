@@ -424,6 +424,102 @@ All state lives in `~/.memoriahub/memoriahub.db`. The `status` command reads fro
 
 ---
 
+## Scan (dry-run preview)
+
+`scan` is a fully offline, read-only preview of what a `sync` would do. It enumerates every file in a folder, reads lightweight local metadata (EXIF presence, GPS presence) from each file, and persists an immutable snapshot in the local SQLite database (`~/.memoriahub/memoriahub.db`) — the same file `sync` uses, but in dedicated tables that sync never touches. The result is a dashboard report you can revisit later or export to Excel.
+
+`scan`, `scan list`, `scan report`, and `scan export` are entirely local: no PAT and no server connection are required. Only `sync --scan` talks to the server, because it proceeds to actually reconcile and upload.
+
+Full details — data model, metadata scope, and the reconciliation algorithm — are in [docs/specs/cli-scan.md](../../docs/specs/cli-scan.md).
+
+### `memoriahub scan`
+
+```bash
+# Scan all registered folders and show the dashboard/report
+memoriahub scan --all
+
+# Scan a specific folder (auto-registers if not yet known, same as sync)
+memoriahub scan ~/Pictures/Vacation2024
+
+# Recursive scan when auto-registering
+memoriahub scan ~/Pictures -r
+
+# Machine-readable JSON instead of the dashboard/tables
+memoriahub scan --all --json
+
+# Persist the scan without rendering a report
+memoriahub scan --all --no-report
+
+# Override the concurrent file-read worker count for this run
+memoriahub scan --all --concurrency 5
+```
+
+Rendering adapts to context automatically: an Ink dashboard on a TTY, plain tables when piped, or JSON with `--json`.
+
+### `memoriahub scan list`
+
+```bash
+memoriahub scan list
+memoriahub scan list --json
+```
+
+Lists recent scan runs, most recent first.
+
+### `memoriahub scan report`
+
+```bash
+# Re-render the most recent scan
+memoriahub scan report
+
+# Re-render a specific scan by ID
+memoriahub scan report 12
+memoriahub scan report 12 --json
+```
+
+Re-renders a previously stored scan without touching the filesystem again.
+
+### `memoriahub scan export`
+
+```bash
+# Excel workbook: Summary sheet (KPIs/coverage/breakdowns) + Detail sheet (one row per file)
+memoriahub scan export 12 --out scan-report.xlsx
+
+# Flat CSV instead
+memoriahub scan export 12 --out scan-report.csv
+```
+
+The export format is inferred from the `--out` file extension (`--format xlsx|csv` overrides this).
+
+### `memoriahub sync --scan`
+
+```bash
+# Reconcile against a specific scan before syncing
+memoriahub sync ~/Pictures/Vacation2024 --scan 12
+
+# Reconcile against the most recently stored scan
+memoriahub sync --all --scan latest
+```
+
+Compares the live folder state against the scan snapshot (by file size + modified time, not content hashing) and prints a "changes since scan" panel showing added/removed/modified/unchanged counts before proceeding with the upload. A `sync` run without `--scan` behaves exactly as before — no reconciliation.
+
+### Example flow
+
+```bash
+# 1. Preview a folder before committing to a long upload
+memoriahub scan ~/Pictures/Vacation2024
+
+# 2. Review the report again later (e.g. scan ID 12 from step 1)
+memoriahub scan report 12
+
+# 3. Export it to Excel for offline review
+memoriahub scan export 12 --out vacation2024-scan.xlsx
+
+# 4. Sync, reconciling against the scan to see what changed since
+memoriahub sync ~/Pictures/Vacation2024 --scan 12
+```
+
+---
+
 ## Data locations
 
 | Path | Purpose |
