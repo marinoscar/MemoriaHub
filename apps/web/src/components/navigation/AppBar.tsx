@@ -22,7 +22,6 @@ import { useThemeContext } from '../../contexts/ThemeContext';
 import { useCircle } from '../../hooks/useCircle';
 import { useMediaRefresh } from '../../contexts/MediaRefreshContext';
 import { UserMenu } from './UserMenu';
-import { CircleSwitcher } from '../circles/CircleSwitcher';
 import { TopbarSearch } from '../search/TopbarSearch';
 import { MediaUploadDialog } from '../media/MediaUploadDialog';
 import { APP_NAME } from '../../constants/app';
@@ -127,9 +126,6 @@ export function AppBar({ onMenuClick }: AppBarProps) {
               </IconButton>
             )
           )}
-
-          {/* Circle Switcher */}
-          <CircleSwitcher />
 
           {/* Theme Toggle */}
           <IconButton
