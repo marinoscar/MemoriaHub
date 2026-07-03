@@ -19,8 +19,7 @@ import { loadConfig, type CliConfig } from '../config.js';
 import { openDb } from '../db/database.js';
 import { ApiClient, type Circle } from '../api.js';
 import { factoryReset } from '../reset.js';
-import { SettingsRepo } from '../repo/settings.js';
-import { checkForUpdate, compareSemver } from '../version-check.js';
+import { resolveUpdateStatus } from '../version-check.js';
 import type BetterSqlite3 from 'better-sqlite3';
 
 import { HomeMenu } from './HomeMenu.js';
@@ -136,36 +135,12 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
       }
     }
 
-    // Best-effort update check — throttled to once per 24 h via SettingsRepo cache.
+    // Best-effort update check — throttled to once per 24 h via the shared
+    // cache-aware resolver.  Never throws.
     async function checkUpdate(): Promise<void> {
-      try {
-        const repo = new SettingsRepo(db);
-        const cache = repo.getUpdateCheckCache();
-
-        let updateInfo: { updateAvailable: boolean; latestVersion: string | null };
-
-        const cacheIsFresh =
-          cache.lastAt !== null &&
-          cache.latestVersion !== null &&
-          Date.now() - new Date(cache.lastAt).getTime() < 24 * 60 * 60 * 1000;
-
-        if (cacheIsFresh && cache.latestVersion !== null) {
-          updateInfo = {
-            updateAvailable: compareSemver(cache.latestVersion, currentVersion) > 0,
-            latestVersion: cache.latestVersion,
-          };
-        } else {
-          updateInfo = await checkForUpdate(currentVersion);
-          if (updateInfo.latestVersion) {
-            repo.setUpdateCheckCache(updateInfo.latestVersion);
-          }
-        }
-
-        if (!cancelled) {
-          setAppState((prev) => ({ ...prev, updateInfo }));
-        }
-      } catch {
-        // Never let an update-check failure affect startup.
+      const updateInfo = await resolveUpdateStatus(db, currentVersion);
+      if (!cancelled) {
+        setAppState((prev) => ({ ...prev, updateInfo }));
       }
     }
 
@@ -517,6 +492,11 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
           paddingY={2}
         >
           <Text bold color="cyan">MemoriaHub CLI — Help  ·  v{currentVersion}</Text>
+          {appState.updateInfo?.updateAvailable && (
+            <Text color="yellow">
+              ⬆ Update available: {appState.updateInfo.latestVersion} — run 'git pull' in the MemoriaHub repo and rebuild the CLI
+            </Text>
+          )}
           <Text> </Text>
           <Text>Use the interactive menu to manage folders, scan, and run syncs.</Text>
           <Text dimColor>Run `memoriahub` (no args) or `memoriahub menu` to open this UI.</Text>
