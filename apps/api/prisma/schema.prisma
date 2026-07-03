@@ -502,6 +502,7 @@ model MediaItem {
   geoPlaceName   String?   @map("geo_place_name") // POI / landmark / display label
   geoSource      String?   @map("geo_source") // provider that produced it
   geocodedAt     DateTime? @map("geocoded_at") @db.Timestamptz // when reverse geocoding ran; null = not yet geocoded
+  coordSource    String?   @map("coord_source") // provenance of taken_lat/taken_lng: 'exif' | 'manual' | 'inferred'; null = no coordinates
 
   // --- Burst Detection ---
   perceptualHash String? @map("perceptual_hash") // 64-bit dHash stored as unsigned decimal string
