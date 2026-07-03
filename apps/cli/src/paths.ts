@@ -22,3 +22,8 @@ export function dbPath(): string {
 export function manifestsDir(): string {
   return path.join(configDir(), 'manifests');
 }
+
+/** Scan Excel/CSV export directory: ~/.memoriahub/exports/ */
+export function exportsDir(): string {
+  return path.join(configDir(), 'exports');
+}

@@ -15,6 +15,8 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { Box, Text, useInput } from 'ink';
 import Spinner from 'ink-spinner';
 import type BetterSqlite3 from 'better-sqlite3';
@@ -25,6 +27,8 @@ import { buildScanReport, type ScanReport } from '../scan/report.js';
 import { ScanRepo } from '../repo/scans.js';
 import { FolderRepo } from '../repo/folders.js';
 import { SettingsRepo } from '../repo/settings.js';
+import { exportScan } from '../export/scan-export.js';
+import { exportsDir } from '../paths.js';
 import { ScanReportBody } from './ScanDashboard.js';
 import { BOX_BORDER } from './theme.js';
 
@@ -55,6 +59,10 @@ interface ScreenState {
   total: number;
   report: ScanReport | null;
   errorMsg: string | null;
+  /** Excel auto-export state (written under ~/.memoriahub/exports). */
+  exporting: boolean;
+  exportPath: string | null;
+  exportError: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -78,6 +86,9 @@ export function ScanScreen({
     total: 0,
     report: null,
     errorMsg: null,
+    exporting: false,
+    exportPath: null,
+    exportError: null,
   });
 
   // Guard against setState after unmount.
@@ -96,6 +107,31 @@ export function ScanScreen({
     const scans = new ScanRepo(db);
     const folders = new FolderRepo(db);
 
+    // Auto-write an Excel workbook for the scan so the user always has a file
+    // to open — mirrors `scan export`. Idempotent: one file per scan id under
+    // ~/.memoriahub/exports, overwritten on re-view. Never throws.
+    const exportExcel = async (scanId: number, report: ScanReport): Promise<void> => {
+      if (mounted.current) setState((s) => ({ ...s, exporting: true, exportError: null }));
+      try {
+        const dir = exportsDir();
+        fs.mkdirSync(dir, { recursive: true });
+        const outPath = path.join(dir, `scan-${scanId}.xlsx`);
+        const files = scans.listScanFiles(scanId);
+        await exportScan(report, files, outPath, 'xlsx');
+        if (mounted.current) {
+          setState((s) => ({ ...s, exporting: false, exportPath: outPath, exportError: null }));
+        }
+      } catch (err) {
+        if (mounted.current) {
+          setState((s) => ({
+            ...s,
+            exporting: false,
+            exportError: err instanceof Error ? err.message : String(err),
+          }));
+        }
+      }
+    };
+
     // ----- view mode: load the latest completed scan -----
     if (mode === 'view') {
       try {
@@ -105,6 +141,7 @@ export function ScanScreen({
         } else {
           const report = buildScanReport(scans, folders, latest.id);
           setState((s) => ({ ...s, phase: 'report', report }));
+          void exportExcel(latest.id, report);
         }
       } catch (err) {
         setState((s) => ({
@@ -129,6 +166,7 @@ export function ScanScreen({
       try {
         const report = buildScanReport(scans, folders, scanId);
         setState((s) => ({ ...s, phase: 'report', report }));
+        void exportExcel(scanId, report);
       } catch (err) {
         setState((s) => ({
           ...s,
@@ -243,7 +281,19 @@ export function ScanScreen({
   return (
     <Box flexDirection="column" gap={1}>
       <ScanReportBody report={state.report} />
-      <Box paddingX={2}>
+      <Box paddingX={2} flexDirection="column">
+        {state.exporting && (
+          <Box flexDirection="row">
+            <Text color="cyan"><Spinner type="dots" /></Text>
+            <Text dimColor>  Creating Excel export…</Text>
+          </Box>
+        )}
+        {state.exportPath && (
+          <Text color="green">📄 Excel saved: {state.exportPath}</Text>
+        )}
+        {state.exportError && (
+          <Text color="yellow">⚠ Excel export failed: {state.exportError}</Text>
+        )}
         <Text dimColor>[q/Esc] back   [h] home</Text>
       </Box>
     </Box>
