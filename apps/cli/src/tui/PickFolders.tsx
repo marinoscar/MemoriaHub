@@ -26,6 +26,8 @@ interface PickFoldersProps {
   db: BetterSqlite3.Database;
   onConfirm: (folderIds: number[]) => void;
   onBack: () => void;
+  /** Heading shown at the top of the picker. Defaults to the sync wording. */
+  title?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -41,7 +43,8 @@ function truncatePath(p: string, max = 50): string {
 // Component
 // ---------------------------------------------------------------------------
 
-export function PickFolders({ db, onConfirm, onBack }: PickFoldersProps): React.ReactElement {
+export function PickFolders({ db, onConfirm, onBack, title }: PickFoldersProps): React.ReactElement {
+  const heading = title ?? 'Sync Selected Folders';
   const repo = new FolderRepo(db);
   const [folders] = useState<Folder[]>(() => repo.list({ enabledOnly: true }));
   const [cursor, setCursor]   = useState(0);
@@ -85,7 +88,7 @@ export function PickFolders({ db, onConfirm, onBack }: PickFoldersProps): React.
   if (folders.length === 0) {
     return (
       <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
-        <Text bold color="cyan">Sync Selected Folders</Text>
+        <Text bold color="cyan">{heading}</Text>
         <Box marginTop={1}>
           <Text dimColor>No enabled folders found. Use Manage Folders to add and enable folders first.</Text>
         </Box>
@@ -98,7 +101,7 @@ export function PickFolders({ db, onConfirm, onBack }: PickFoldersProps): React.
 
   return (
     <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
-      <Text bold color="cyan">Sync Selected Folders</Text>
+      <Text bold color="cyan">{heading}</Text>
       <Text dimColor>Space to toggle, Enter to confirm</Text>
 
       <Box flexDirection="column" marginTop={1}>

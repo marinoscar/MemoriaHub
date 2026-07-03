@@ -17,6 +17,9 @@ export type MenuActionId =
   | 'sync-all'
   | 'sync-select'
   | 'retry'
+  | 'scan-all'
+  | 'scan-select'
+  | 'scan-report'
   | 'folders'
   | 'circles'
   | 'app-settings'
@@ -63,6 +66,18 @@ export const MENU_TREE: MenuSubmenu = {
         { kind: 'action', label: 'Sync all folders', action: 'sync-all' },
         { kind: 'action', label: 'Sync selected folders', action: 'sync-select' },
         { kind: 'action', label: 'Retry failed files', action: 'retry' },
+      ],
+    },
+    {
+      // Scan is a fully offline dry-run preview — visible even when logged out.
+      kind: 'submenu',
+      id: 'scan',
+      label: 'Scan (dry-run preview)',
+      loggedOut: true,
+      children: [
+        { kind: 'action', label: 'Scan all folders', action: 'scan-all', loggedOut: true },
+        { kind: 'action', label: 'Scan selected folders', action: 'scan-select', loggedOut: true },
+        { kind: 'action', label: 'View last scan report', action: 'scan-report', loggedOut: true },
       ],
     },
     {
