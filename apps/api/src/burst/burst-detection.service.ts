@@ -17,7 +17,7 @@ import { computeAndPersistVisualHash } from '../storage/processing/hash-backfill
  * BigInts is also non-negative and the popcount loop terminates correctly
  * without any masking.
  */
-function hammingDistance(a: bigint, b: bigint): number {
+export function hammingDistance(a: bigint, b: bigint): number {
   let x = a ^ b;
   let count = 0;
   while (x > 0n) {
