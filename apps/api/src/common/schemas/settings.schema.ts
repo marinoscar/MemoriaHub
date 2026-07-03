@@ -43,6 +43,7 @@ export const systemSettingsSchema = z.object({
   //   - autoTagging: AI auto-tagging + description generation
   //   - faceRecognition: face detection / recognition
   //   - burstDetection: burst photo (similar pictures) detection
+  //   - duplicateDetection: near-duplicate photo (visual/hash similarity) detection
   features: z.record(z.string(), z.boolean()),
   ai: z.object({
     features: z.object({
@@ -87,6 +88,11 @@ export const systemSettingsSchema = z.object({
     hashDistance: z.number().int().min(0).max(32).default(10),
     minGroupSize: z.number().int().min(2).max(20).default(3),
   }).optional().default({ timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3 }),
+  dedup: z.object({
+    similarityThreshold: z.number().min(0.80).max(0.995).default(0.96),
+    hashMaxDistance: z.number().int().min(0).max(16).default(6),
+    knnCandidates: z.number().int().min(5).max(50).default(20),
+  }).optional().default({ similarityThreshold: 0.96, hashMaxDistance: 6, knnCandidates: 20 }),
   geo: z.object({
     reverseProvider: z.enum(['offline', 'nominatim', 'google']).default('offline'),
     forwardSearchEnabled: z.boolean().default(false),
@@ -149,6 +155,11 @@ export const systemSettingsPatchSchema = z.object({
     timeGapSeconds: z.number().int().min(1).max(300).optional(),
     hashDistance: z.number().int().min(0).max(32).optional(),
     minGroupSize: z.number().int().min(2).max(20).optional(),
+  }).optional(),
+  dedup: z.object({
+    similarityThreshold: z.number().min(0.80).max(0.995).optional(),
+    hashMaxDistance: z.number().int().min(0).max(16).optional(),
+    knnCandidates: z.number().int().min(5).max(50).optional(),
   }).optional(),
   geo: z.object({
     reverseProvider: z.enum(['offline', 'nominatim', 'google']).optional(),

@@ -29,6 +29,7 @@ export interface SystemSettingsValue {
    *   - autoTagging: AI auto-tagging + description generation
    *   - faceRecognition: face detection / recognition
    *   - burstDetection: burst photo (similar pictures) detection
+   *   - duplicateDetection: near-duplicate photo (visual/hash similarity) detection
    */
   features: {
     [key: string]: boolean;
@@ -76,6 +77,11 @@ export interface SystemSettingsValue {
     hashDistance: number;
     minGroupSize: number;
   };
+  dedup?: {
+    similarityThreshold: number;
+    hashMaxDistance: number;
+    knnCandidates: number;
+  };
   geo?: {
     reverseProvider: 'offline' | 'nominatim' | 'google';
     forwardSearchEnabled: boolean;
@@ -95,6 +101,7 @@ export const FEATURE_KEYS = {
   AUTO_TAGGING: 'autoTagging',
   FACE_RECOGNITION: 'faceRecognition',
   BURST_DETECTION: 'burstDetection',
+  DUPLICATE_DETECTION: 'duplicateDetection',
 } as const;
 
 /**
@@ -121,6 +128,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     [FEATURE_KEYS.AUTO_TAGGING]: false,
     [FEATURE_KEYS.FACE_RECOGNITION]: false,
     [FEATURE_KEYS.BURST_DETECTION]: false,
+    [FEATURE_KEYS.DUPLICATE_DETECTION]: false,
   },
   ai: {
     features: {
@@ -148,6 +156,11 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     timeGapSeconds: 10,
     hashDistance: 10,
     minGroupSize: 3,
+  },
+  dedup: {
+    similarityThreshold: 0.96,
+    hashMaxDistance: 6,
+    knnCandidates: 20,
   },
   geo: {
     reverseProvider: process.env['GEO_PROVIDER'] === 'nominatim' ? 'nominatim' : 'offline',
