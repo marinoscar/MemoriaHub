@@ -4,13 +4,18 @@
  * Unit tests for:
  *   - compareSemver(a, b)  — pure synchronous comparator
  *   - checkForUpdate(currentVersion)  — async fetch with silent error handling
+ *   - resolveUpdateStatus(db, currentVersion)  — cache-aware wrapper around
+ *     checkForUpdate, backed by SettingsRepo / an in-memory SQLite db
  *
  * No real network calls are made: global.fetch is replaced with a jest.fn()
  * before each test and restored afterwards.
  */
 
 import { jest } from '@jest/globals';
-import { compareSemver, checkForUpdate } from '../src/version-check.js';
+import type BetterSqlite3 from 'better-sqlite3';
+import { compareSemver, checkForUpdate, resolveUpdateStatus } from '../src/version-check.js';
+import { openDb } from '../src/db/database.js';
+import { SettingsRepo } from '../src/repo/settings.js';
 
 // ---------------------------------------------------------------------------
 // compareSemver — table-driven tests
@@ -257,5 +262,115 @@ describe('checkForUpdate', () => {
       updateAvailable: false,
       latestVersion: null,
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveUpdateStatus — in-memory DB + mocked global fetch
+// ---------------------------------------------------------------------------
+
+describe('resolveUpdateStatus', () => {
+  const savedFetch: typeof global.fetch = global.fetch;
+  let mockFetch: jest.Mock;
+  let db: BetterSqlite3.Database;
+  let repo: SettingsRepo;
+
+  const HOUR_MS = 60 * 60 * 1000;
+
+  beforeEach(() => {
+    mockFetch = jest.fn();
+    global.fetch = mockFetch as unknown as typeof global.fetch;
+    db = openDb(':memory:');
+    repo = new SettingsRepo(db);
+  });
+
+  afterEach(() => {
+    global.fetch = savedFetch;
+    jest.clearAllMocks();
+    db.close();
+  });
+
+  it('fresh cache with a newer cached version: no fetch, updateAvailable=true', async () => {
+    repo.setUpdateCheckCache('9.9.9');
+
+    const result = await resolveUpdateStatus(db, '1.1.4');
+
+    expect(result).toEqual({ updateAvailable: true, latestVersion: '9.9.9' });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('fresh cache with a version equal to current: no fetch, updateAvailable=false', async () => {
+    repo.setUpdateCheckCache('1.1.4');
+
+    const result = await resolveUpdateStatus(db, '1.1.4');
+
+    expect(result).toEqual({ updateAvailable: false, latestVersion: '1.1.4' });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('stale cache (last checked ~3 days ago): fetches live and updates the cache', async () => {
+    repo.set('update_check_last_at', new Date(Date.now() - 3 * 24 * HOUR_MS).toISOString());
+    repo.set('update_check_latest_version', '1.0.0');
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ version: '2.0.0' }),
+    });
+
+    const result = await resolveUpdateStatus(db, '1.1.4');
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ updateAvailable: true, latestVersion: '2.0.0' });
+    expect(repo.getUpdateCheckCache().latestVersion).toBe('2.0.0');
+  });
+
+  it('no cache at all + fetch rejects: resolves (never throws) to the false/null default', async () => {
+    mockFetch.mockRejectedValue(new Error('Network error'));
+
+    await expect(resolveUpdateStatus(db, '1.1.4')).resolves.toEqual({
+      updateAvailable: false,
+      latestVersion: null,
+    });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('stale cache but fetched version is not newer: still refreshes cache, updateAvailable=false', async () => {
+    repo.set('update_check_last_at', new Date(Date.now() - 3 * 24 * HOUR_MS).toISOString());
+    repo.set('update_check_latest_version', '1.0.0');
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ version: '0.5.0' }),
+    });
+
+    const result = await resolveUpdateStatus(db, '1.1.4');
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ updateAvailable: false, latestVersion: '0.5.0' });
+    // The source unconditionally persists any truthy latestVersion, even a
+    // non-newer one — prove the cache reflects that.
+    expect(repo.getUpdateCheckCache().latestVersion).toBe('0.5.0');
+  });
+
+  it('treats a cache checked 23 hours ago as fresh (inside the 24h TTL): no fetch', async () => {
+    repo.set('update_check_last_at', new Date(Date.now() - 23 * HOUR_MS).toISOString());
+    repo.set('update_check_latest_version', '9.9.9');
+
+    const result = await resolveUpdateStatus(db, '1.1.4');
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(result).toEqual({ updateAvailable: true, latestVersion: '9.9.9' });
+  });
+
+  it('treats a cache checked 25 hours ago as stale (past the 24h TTL): fetches live', async () => {
+    repo.set('update_check_last_at', new Date(Date.now() - 25 * HOUR_MS).toISOString());
+    repo.set('update_check_latest_version', '9.9.9');
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ version: '9.9.9' }),
+    });
+
+    const result = await resolveUpdateStatus(db, '1.1.4');
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ updateAvailable: true, latestVersion: '9.9.9' });
   });
 });
