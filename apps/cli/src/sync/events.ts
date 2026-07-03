@@ -13,6 +13,7 @@ import { EventEmitter } from 'node:events';
 
 export const EV = {
   RUN_START:      'run:start',
+  SCAN_DRIFT:     'scan:drift',
   FOLDER_START:   'folder:start',
   FILE_QUEUED:    'file:queued',
   FILE_START:     'file:start',
@@ -38,6 +39,14 @@ export interface RunStartPayload {
   folderIds: number[];
   total: number;
   dryRun: boolean;
+}
+
+export interface ScanDriftPayload {
+  scanId: number;
+  added: number;
+  removed: number;
+  modified: number;
+  unchanged: number;
 }
 
 export interface FolderStartPayload {
@@ -136,6 +145,7 @@ export interface ErrorPayload {
 
 export interface SyncEngineEvents {
   [EV.RUN_START]:     (payload: RunStartPayload)     => void;
+  [EV.SCAN_DRIFT]:    (payload: ScanDriftPayload)    => void;
   [EV.FOLDER_START]:  (payload: FolderStartPayload)  => void;
   [EV.FILE_QUEUED]:   (payload: FileQueuedPayload)   => void;
   [EV.FILE_START]:    (payload: FileStartPayload)    => void;

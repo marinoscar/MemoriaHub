@@ -21,6 +21,8 @@ import type { FolderRepo } from '../repo/folders.js';
 import type { FileRepo } from '../repo/files.js';
 import type { RunRepo } from '../repo/runs.js';
 import type { SettingsRepo } from '../repo/settings.js';
+import type { ScanRepo } from '../repo/scans.js';
+import { reconcileScan } from '../scan/reconcile.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -48,6 +50,13 @@ export interface SyncOptions {
   trigger: 'cli' | 'menu' | 'retry';
   /** Target circle ID for media registration. Overrides config.activeCircleId. */
   circleId?: string;
+  /**
+   * Reconcile against this prior scan before syncing.  Emits a SCAN_DRIFT event
+   * (added/removed/modified/unchanged since scan time) so the user sees what
+   * changed between the scan and now.  Advisory only — the upload work set is
+   * still built from the live filesystem.  Requires the `scans` dep.
+   */
+  scanId?: number;
 }
 
 export interface SyncRunResult {
@@ -66,6 +75,8 @@ export interface SyncEngineDeps {
   files: FileRepo;
   runs: RunRepo;
   settings: SettingsRepo;
+  /** Optional — required only when SyncOptions.scanId is used for drift detection. */
+  scans?: ScanRepo;
   /** Injectable for testing — defaults to the real uploadFile. */
   uploadFn?: typeof uploadFile;
   /** Injectable for testing — defaults to the real sha256File. */
@@ -94,8 +105,13 @@ function mimeToMediaType(mimeType: string): 'photo' | 'video' {
 // SyncEngine
 // ---------------------------------------------------------------------------
 
+type ResolvedSyncEngineDeps = SyncEngineDeps & {
+  uploadFn: typeof uploadFile;
+  hashFn: typeof sha256File;
+};
+
 export class SyncEngine extends TypedEmitter {
-  private readonly deps: Required<SyncEngineDeps>;
+  private readonly deps: ResolvedSyncEngineDeps;
 
   constructor(deps: SyncEngineDeps) {
     super();
@@ -169,6 +185,32 @@ export class SyncEngine extends TypedEmitter {
     // 2. Crash recovery: reset stale uploading→queued
     // ------------------------------------------------------------------
     files.resetStaleUploading(targetFolderIds);
+
+    // ------------------------------------------------------------------
+    // 2b. Scan drift detection (advisory)
+    // ------------------------------------------------------------------
+    // When --scan is supplied, diff the prior snapshot against the live
+    // filesystem and surface what changed since the scan.  This does NOT alter
+    // the work set — the upload set below is still built from the live tree, so
+    // files added since the scan upload and removed files are skipped.
+    if (opts.scanId !== undefined && this.deps.scans) {
+      try {
+        const drift = reconcileScan(this.deps.scans, folders, opts.scanId);
+        this.emit(EV.SCAN_DRIFT, {
+          scanId: drift.scanId,
+          added: drift.added.length,
+          removed: drift.removed.length,
+          modified: drift.modified.length,
+          unchanged: drift.unchanged,
+        });
+      } catch (err) {
+        // A missing/invalid scan is non-fatal — warn via the error channel and
+        // continue with a normal sync.
+        this.emit(EV.ERROR, {
+          message: `Scan reconcile skipped: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    }
 
     // ------------------------------------------------------------------
     // 3. Build the work set
