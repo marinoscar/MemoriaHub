@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Changed
 
 - **CLI login now uses device authorization (browser approval) and receives a 90-day token; `--token` fallback retained** — running `memoriahub login` initiates the RFC 8628 device-auth flow: the CLI prints a verification URL + user code, best-effort opens a browser, and polls until the user approves the device. The server issues a 90-day Personal Access Token (revocable from the web app under Personal Access Tokens). Use `--server <url>` to skip the URL prompt; use `--token <pat>` for CI/headless environments where an existing PAT is supplied directly.
+- **Interactive menu is now hierarchical with a navigation stack** — the flat action list was restructured into `Sync ▸` / `Reports ▸` / `Settings ▸` / `Tools ▸` submenus; `Esc`/`q` now pops back one level instead of jumping straight to the root menu, and the ASCII banner + connected-server/account identity box render only at the root. The logged-out menu is reduced to Login, Settings ▸ (Factory reset only), Help, and Quit.
 
 ### Added
 
@@ -26,3 +27,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Legacy manifest auto-import** — on first run after upgrade, existing JSON manifests under `~/.memoriahub/manifests/` are imported into SQLite automatically (idempotent, atomic, non-destructive)
 - **ESM migration** — the CLI package is now a pure ESM module (`"type": "module"` in `package.json`); `better-sqlite3` is loaded via `createRequire` for CJS interop
 - **`import` command** (legacy alias) — `memoriahub import <folder>` is preserved as a back-compatibility alias for `sync <folder>`
+- **Extensible reports registry** — a shared registry of report definitions now backs both the TUI's `Reports ▸` submenu and the new headless `reports` command; adding a report to the registry automatically surfaces it in both places
+- **`reports` command** — `memoriahub reports list [--json]` lists available reports; `memoriahub reports show <id> [--json]` runs one (`overview`, `runs`, `storage`, `duplicates`) and prints a table or JSON
+- **"Storage synced" report** — count plus total/average bytes of uploaded media
+- **"Duplicates" report** — files skipped during sync because the server already had identical content, backed by a new persisted `skip_reason` column (migration v6)
+- **Job queue monitor and Backup reachable from the TUI** — `Tools ▸ Job queue monitor` and `Tools ▸ Backup` expose the previously CLI-only `memoriahub jobs` (alias `queue`) and `memoriahub backup` commands from the interactive menu

@@ -392,6 +392,8 @@ The page polls `GET /api/admin/jobs/insights` at a fixed 30-second interval by d
 
 **Requirements:** Admin personal access token (PAT) with `jobs:read` scope, configured via `MEMORIAHUB_TOKEN` environment variable or `--token` flag.
 
+**Interactive entry point:** The CLI's interactive Ink TUI now organizes actions into a hierarchical menu; this dashboard is reachable via `Tools ▸ Job queue monitor` from the menu (previously the dashboard was only reachable as a standalone command). The headless `memoriahub jobs` (alias `queue`) command and all flags below are unchanged.
+
 ### Flags
 
 | Flag | Type | Default | Description |
