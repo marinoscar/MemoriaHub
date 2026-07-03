@@ -51,6 +51,7 @@ export interface MediaItem {
   geoPlaceName: string | null;
   geoSource: string | null;
   geocodedAt: string | null;
+  coordSource: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
@@ -342,5 +343,7 @@ export interface DashboardResponse {
     total: number;
     missingGeo: number;
     pendingBurstGroups?: number;
+    pendingDuplicateGroups?: number;
+    pendingLocationSuggestions?: number;
   };
 }

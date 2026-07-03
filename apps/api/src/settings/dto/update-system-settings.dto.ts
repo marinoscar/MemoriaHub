@@ -104,6 +104,23 @@ export const patchSystemSettingsSchema = z.object({
       minGroupSize: z.number().int().min(2).max(20).optional(),
     })
     .optional(),
+  dedup: z
+    .object({
+      similarityThreshold: z.number().min(0.8).max(0.995).optional(),
+      hashMaxDistance: z.number().int().min(0).max(16).optional(),
+      knnCandidates: z.number().int().min(5).max(50).optional(),
+    })
+    .optional(),
+  locationInference: z
+    .object({
+      maxGapMinutes: z.number().int().min(1).max(1440).optional(),
+      maxExtrapolationGapMinutes: z.number().int().min(1).max(240).optional(),
+      autoApplyMaxGapMinutes: z.number().int().min(0).max(60).optional(),
+      requireSameDevice: z.boolean().optional(),
+      maxAnchorDistanceKm: z.number().min(0.1).max(100).optional(),
+      maxImpliedSpeedKmh: z.number().min(10).max(1000).optional(),
+    })
+    .optional(),
   geo: z
     .object({
       reverseProvider: z.enum(['offline', 'nominatim', 'google']).optional(),

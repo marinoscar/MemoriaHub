@@ -124,6 +124,27 @@ vi.mock('../../../components/media/TagAutocomplete', () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Mock useLocationSuggestions hooks (useSuggestLocation, useItemAutoAppliedSuggestion)
+// — location inference behavior added in commit eba3e6b.
+// ---------------------------------------------------------------------------
+
+vi.mock('../../../hooks/useLocationSuggestions', () => ({
+  useSuggestLocation: vi.fn(),
+  useItemAutoAppliedSuggestion: vi.fn(),
+}));
+
+vi.mock('../../../services/locationSuggestions', () => ({
+  revertLocationSuggestion: vi.fn(),
+}));
+
+import { useSuggestLocation, useItemAutoAppliedSuggestion } from '../../../hooks/useLocationSuggestions';
+import { revertLocationSuggestion } from '../../../services/locationSuggestions';
+
+const mockUseSuggestLocation = vi.mocked(useSuggestLocation);
+const mockUseItemAutoAppliedSuggestion = vi.mocked(useItemAutoAppliedSuggestion);
+const mockRevertLocationSuggestion = vi.mocked(revertLocationSuggestion);
+
+// ---------------------------------------------------------------------------
 // Factories
 // ---------------------------------------------------------------------------
 
@@ -166,6 +187,7 @@ function makeMediaItem(overrides: Partial<MediaItem> = {}): MediaItem {
     metadata: null,
     thumbnailUrl: null,
     downloadUrl: null,
+    coordSource: null,
     ...overrides,
   };
 }
@@ -204,6 +226,10 @@ describe('MediaDetailDrawer', () => {
     mockGetMedia.mockResolvedValue(
       makeMediaItem({ downloadUrl: 'https://cdn.example.com/video.mp4' }),
     );
+    // Default: no active suggest/revert state for location-inference affordances
+    mockUseSuggestLocation.mockReturnValue({ suggest: vi.fn(), loading: false, error: null });
+    mockUseItemAutoAppliedSuggestion.mockReturnValue({ suggestionId: null, loading: false });
+    mockRevertLocationSuggestion.mockResolvedValue({ id: 'suggestion-1', status: 'reverted' });
   });
 
   // -------------------------------------------------------------------------
@@ -791,6 +817,207 @@ describe('MediaDetailDrawer', () => {
         expect(screen.queryByText(/image not available/i)).not.toBeInTheDocument();
         expect(screen.getByRole('img', { name: item.originalFilename })).toBeInTheDocument();
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Location inference — "Location (inferred)" chip + Revert, "Suggest Location"
+  // -------------------------------------------------------------------------
+
+  describe('location inference — inferred coordinate chip and Revert', () => {
+    it('does NOT render the "Location (inferred)" chip when coordSource is null (default)', () => {
+      render(<MediaDetailDrawer {...defaultProps({ coordSource: null })} />);
+
+      expect(screen.queryByText('Location (inferred)')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /revert/i })).not.toBeInTheDocument();
+    });
+
+    it('renders the "Location (inferred)" chip and Revert button when coordSource is "inferred"', () => {
+      mockUseItemAutoAppliedSuggestion.mockReturnValue({ suggestionId: 'suggestion-1', loading: false });
+
+      render(<MediaDetailDrawer {...defaultProps({ coordSource: 'inferred' })} />);
+
+      expect(screen.getByText('Location (inferred)')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /revert/i })).toBeInTheDocument();
+    });
+
+    it('does NOT render the chip for other coordSource values (e.g. "manual")', () => {
+      render(<MediaDetailDrawer {...defaultProps({ coordSource: 'manual' })} />);
+
+      expect(screen.queryByText('Location (inferred)')).not.toBeInTheDocument();
+    });
+
+    it('disables the Revert button until useItemAutoAppliedSuggestion resolves a suggestionId', () => {
+      mockUseItemAutoAppliedSuggestion.mockReturnValue({ suggestionId: null, loading: true });
+
+      render(<MediaDetailDrawer {...defaultProps({ coordSource: 'inferred' })} />);
+
+      expect(screen.getByRole('button', { name: /revert/i })).toBeDisabled();
+    });
+
+    it('enables the Revert button once suggestionId resolves to a non-null value', () => {
+      mockUseItemAutoAppliedSuggestion.mockReturnValue({ suggestionId: 'suggestion-1', loading: false });
+
+      render(<MediaDetailDrawer {...defaultProps({ coordSource: 'inferred' })} />);
+
+      expect(screen.getByRole('button', { name: /revert/i })).not.toBeDisabled();
+    });
+
+    it('clicking Revert calls revertLocationSuggestion(suggestionId), re-fetches getMedia, and calls onItemUpdated with the refreshed item', async () => {
+      mockUseItemAutoAppliedSuggestion.mockReturnValue({ suggestionId: 'suggestion-1', loading: false });
+      const refreshedItem = makeMediaItem({ coordSource: null, takenLat: null, takenLng: null });
+      // mockReset (not just mockResolvedValue) clears any leftover queued
+      // mockResolvedValueOnce entries from earlier tests in this file (e.g.
+      // the stale-response-guard test's unconsumed itemB queue entry, since
+      // itemB's defined downloadUrl means its render never actually calls
+      // getMedia) so this test's revert-triggered getMedia call deterministically
+      // resolves with refreshedItem.
+      mockGetMedia.mockReset();
+      mockGetMedia.mockResolvedValue(refreshedItem);
+      const onItemUpdated = vi.fn();
+      const user = userEvent.setup();
+
+      render(
+        <MediaDetailDrawer {...defaultProps({ coordSource: 'inferred' })} onItemUpdated={onItemUpdated} />,
+      );
+
+      await user.click(screen.getByRole('button', { name: /revert/i }));
+
+      await waitFor(() => {
+        expect(mockRevertLocationSuggestion).toHaveBeenCalledWith('suggestion-1');
+      });
+      await waitFor(() => {
+        expect(mockGetMedia).toHaveBeenCalledWith(ITEM_ID);
+      });
+      await waitFor(() => {
+        expect(onItemUpdated).toHaveBeenCalledWith(refreshedItem);
+      });
+    });
+
+    it('shows an error alert when revertLocationSuggestion rejects', async () => {
+      mockUseItemAutoAppliedSuggestion.mockReturnValue({ suggestionId: 'suggestion-1', loading: false });
+      mockRevertLocationSuggestion.mockRejectedValue(new Error('Revert failed'));
+      const user = userEvent.setup();
+
+      render(<MediaDetailDrawer {...defaultProps({ coordSource: 'inferred' })} />);
+
+      await user.click(screen.getByRole('button', { name: /revert/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Revert failed')).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('location inference — "Suggest Location" button', () => {
+    it('renders for a photo with no coordinates at all', () => {
+      render(<MediaDetailDrawer {...defaultProps({ type: 'photo', takenLat: null, takenLng: null })} />);
+
+      expect(screen.getByRole('button', { name: /suggest location/i })).toBeInTheDocument();
+    });
+
+    it('does NOT render for a photo that already has coordinates', () => {
+      render(<MediaDetailDrawer {...defaultProps({ type: 'photo' })} />);
+
+      expect(screen.queryByRole('button', { name: /suggest location/i })).not.toBeInTheDocument();
+    });
+
+    it('does NOT render for a video, even with no coordinates', () => {
+      render(
+        <MediaDetailDrawer
+          {...defaultProps({ type: 'video', durationMs: 62000, takenLat: null, takenLng: null })}
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /suggest location/i })).not.toBeInTheDocument();
+    });
+
+    it('calls the useSuggestLocation().suggest function when clicked', async () => {
+      const suggest = vi.fn();
+      mockUseSuggestLocation.mockReturnValue({ suggest, loading: false, error: null });
+      const user = userEvent.setup();
+
+      render(<MediaDetailDrawer {...defaultProps({ type: 'photo', takenLat: null, takenLng: null })} />);
+
+      await user.click(screen.getByRole('button', { name: /suggest location/i }));
+
+      expect(suggest).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows the auto-applied outcome message when the callback is invoked with "auto_applied"', async () => {
+      let capturedOnOutcome!: (outcome: string) => void;
+      mockUseSuggestLocation.mockReturnValue({
+        suggest: vi.fn((onOutcome: (outcome: string) => void) => {
+          capturedOnOutcome = onOutcome;
+        }),
+        loading: false,
+        error: null,
+      });
+      const user = userEvent.setup();
+
+      render(<MediaDetailDrawer {...defaultProps({ type: 'photo', takenLat: null, takenLng: null })} />);
+
+      await user.click(screen.getByRole('button', { name: /suggest location/i }));
+      capturedOnOutcome('auto_applied');
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/location automatically applied from nearby photos/i),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it('shows the queued outcome message when the callback is invoked with "queued"', async () => {
+      let capturedOnOutcome!: (outcome: string) => void;
+      mockUseSuggestLocation.mockReturnValue({
+        suggest: vi.fn((onOutcome: (outcome: string) => void) => {
+          capturedOnOutcome = onOutcome;
+        }),
+        loading: false,
+        error: null,
+      });
+      const user = userEvent.setup();
+
+      render(<MediaDetailDrawer {...defaultProps({ type: 'photo', takenLat: null, takenLng: null })} />);
+
+      await user.click(screen.getByRole('button', { name: /suggest location/i }));
+      capturedOnOutcome('queued');
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/location inference queued.*check the location suggestions review queue shortly/i),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it('shows the failure message when the callback is invoked with "error"', async () => {
+      let capturedOnOutcome!: (outcome: string) => void;
+      mockUseSuggestLocation.mockReturnValue({
+        suggest: vi.fn((onOutcome: (outcome: string) => void) => {
+          capturedOnOutcome = onOutcome;
+        }),
+        loading: false,
+        error: null,
+      });
+      const user = userEvent.setup();
+
+      render(<MediaDetailDrawer {...defaultProps({ type: 'photo', takenLat: null, takenLng: null })} />);
+
+      await user.click(screen.getByRole('button', { name: /suggest location/i }));
+      capturedOnOutcome('error');
+
+      await waitFor(() => {
+        expect(screen.getByText(/failed to queue location inference/i)).toBeInTheDocument();
+      });
+    });
+
+    it('shows a loading label and disables the button while suggestLoading is true', () => {
+      mockUseSuggestLocation.mockReturnValue({ suggest: vi.fn(), loading: true, error: null });
+
+      render(<MediaDetailDrawer {...defaultProps({ type: 'photo', takenLat: null, takenLng: null })} />);
+
+      const button = screen.getByRole('button', { name: /suggesting/i });
+      expect(button).toBeDisabled();
     });
   });
 });

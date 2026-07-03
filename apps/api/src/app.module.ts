@@ -25,6 +25,8 @@ import { SearchModule } from './search/search.module';
 import { TaggingModule } from './tagging/tagging.module';
 import { InsightsModule } from './insights/insights.module';
 import { BurstModule } from './burst/burst.module';
+import { DedupModule } from './dedup/dedup.module';
+import { LocationInferenceModule } from './location-inference/location-inference.module';
 import { MetadataModule } from './metadata/metadata.module';
 import { GeoModule } from './geo/geo.module';
 import { StorageSettingsModule } from './storage-settings/storage-settings.module';
@@ -81,6 +83,8 @@ import configuration from './config/configuration';
     InsightsModule,
     DoctorModule,
     BurstModule,
+    DedupModule,
+    LocationInferenceModule,
     MetadataModule,
     GeoModule,
     StorageSettingsModule,

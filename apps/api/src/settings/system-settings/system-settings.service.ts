@@ -26,6 +26,8 @@ export interface ResolvedSettings {
   face: SystemSettingsValue['face'];
   storage: SystemSettingsValue['storage'];
   burst: SystemSettingsValue['burst'];
+  dedup: SystemSettingsValue['dedup'];
+  locationInference: SystemSettingsValue['locationInference'];
   geo: SystemSettingsValue['geo'];
   jobs: SystemSettingsValue['jobs'];
   updatedAt: Date;
@@ -101,6 +103,8 @@ export class SystemSettingsService {
       face: value.face,
       storage: value.storage,
       burst: value.burst,
+      dedup: value.dedup,
+      locationInference: value.locationInference,
       geo: value.geo,
       jobs: value.jobs,
       updatedAt: settings.updatedAt,
@@ -159,6 +163,8 @@ export class SystemSettingsService {
       face: value.face,
       storage: value.storage,
       burst: value.burst,
+      dedup: value.dedup,
+      locationInference: value.locationInference,
       geo: value.geo,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
@@ -256,6 +262,46 @@ export class SystemSettingsService {
           (current as any).burst?.minGroupSize ??
           3,
       },
+      dedup: {
+        similarityThreshold:
+          (dto as any).dedup?.similarityThreshold ??
+          (current as any).dedup?.similarityThreshold ??
+          0.96,
+        hashMaxDistance:
+          (dto as any).dedup?.hashMaxDistance ??
+          (current as any).dedup?.hashMaxDistance ??
+          6,
+        knnCandidates:
+          (dto as any).dedup?.knnCandidates ??
+          (current as any).dedup?.knnCandidates ??
+          20,
+      },
+      locationInference: {
+        maxGapMinutes:
+          (dto as any).locationInference?.maxGapMinutes ??
+          (current as any).locationInference?.maxGapMinutes ??
+          30,
+        maxExtrapolationGapMinutes:
+          (dto as any).locationInference?.maxExtrapolationGapMinutes ??
+          (current as any).locationInference?.maxExtrapolationGapMinutes ??
+          10,
+        autoApplyMaxGapMinutes:
+          (dto as any).locationInference?.autoApplyMaxGapMinutes ??
+          (current as any).locationInference?.autoApplyMaxGapMinutes ??
+          5,
+        requireSameDevice:
+          (dto as any).locationInference?.requireSameDevice ??
+          (current as any).locationInference?.requireSameDevice ??
+          true,
+        maxAnchorDistanceKm:
+          (dto as any).locationInference?.maxAnchorDistanceKm ??
+          (current as any).locationInference?.maxAnchorDistanceKm ??
+          2,
+        maxImpliedSpeedKmh:
+          (dto as any).locationInference?.maxImpliedSpeedKmh ??
+          (current as any).locationInference?.maxImpliedSpeedKmh ??
+          150,
+      },
       geo: {
         reverseProvider:
           (dto as any).geo?.reverseProvider ??
@@ -317,6 +363,8 @@ export class SystemSettingsService {
       face: value.face,
       storage: value.storage,
       burst: value.burst,
+      dedup: value.dedup,
+      locationInference: value.locationInference,
       geo: value.geo,
       jobs: value.jobs,
       updatedAt: settings.updatedAt,

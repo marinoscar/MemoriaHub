@@ -3788,6 +3788,419 @@ Enable or disable burst detection for a circle. Emits `circle:burst_settings_upd
 
 ---
 
+## Media — Duplicate Detection (media:read / media:write / media:delete + per-circle roles)
+
+Near-duplicate detection is a global feature toggle (`features.duplicateDetection`, default off) — see [docs/specs/duplicate-detection.md](specs/duplicate-detection.md) for the full matching-engine design. It catches visually-identical re-uploads (e.g. WhatsApp re-shares: recompressed/resized/filtered copies with a different `contentHash` and stripped EXIF) that exact-hash dedup and burst detection cannot. Nothing is archived or trashed automatically — the system surfaces groups as a review queue and a human confirms which items to keep before any archive/trash action occurs. `GET /api/media/dashboard` gains a `pendingDuplicateGroups` count that contributes to the review-queue section of the dashboard UI; unlike burst groups, there is no minimum-size gate (a duplicate group only ever exists once linked, so `mediaCount >= 2` always holds).
+
+No new RBAC permissions are introduced — the feature reuses `media:read`, `media:write`, and `media:delete` combined with the existing per-circle viewer / collaborator roles, plus `system_settings:read` / `system_settings:write` for the admin endpoints.
+
+---
+
+### GET /media/duplicates
+
+**Permissions:** `media:read` + circle viewer role
+
+List near-duplicate groups for a circle, filtered by status and optionally by `kind`.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `circleId` | UUID | required | Circle to query |
+| `status` | enum | `pending` | `pending` \| `resolved` \| `dismissed` |
+| `kind` | enum | — | Optional filter: `exact_variant` \| `edited` \| `similar` (see Kind Classification in the spec) |
+| `page` | number | 1 | Page number (1-indexed) |
+| `pageSize` | number | 20 | Items per page (max 100) |
+
+**Response:** 200 OK
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "status": "pending",
+      "kind": "exact_variant",
+      "mediaCount": 3,
+      "capturedAt": "2026-06-15T14:32:01.234Z",
+      "suggestedBestItemId": "uuid",
+      "coverThumbnailUrls": ["https://...", "https://..."]
+    }
+  ],
+  "meta": { "total": 8, "page": 1, "pageSize": 20 }
+}
+```
+
+Groups are ordered by `capturedAt ASC, createdAt ASC` (chronological). `coverThumbnailUrls` contains up to 4 signed thumbnail URLs for the first 4 active members. `kind` classification is computed at read time and is not a persisted column.
+
+**Error Cases:**
+- 403 — Caller is not a member of the circle
+
+---
+
+### GET /media/duplicates/:id
+
+**Permissions:** `media:read` + circle viewer role
+
+Get full detail for a single duplicate group: all active members with quality scoring, similarity-to-best, and signed URLs.
+
+**Response:** 200 OK
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "circleId": "uuid",
+    "status": "pending",
+    "kind": "exact_variant",
+    "mediaCount": 3,
+    "capturedAt": "2026-06-15T14:32:01.234Z",
+    "suggestedBestItemId": "uuid",
+    "resolvedById": null,
+    "resolvedAt": null,
+    "members": [
+      {
+        "id": "uuid",
+        "thumbnailUrl": "https://...",
+        "previewUrl": "https://...",
+        "width": 4032,
+        "height": 3024,
+        "fileSize": 2145820,
+        "capturedAt": "2026-06-15T14:32:01.234Z",
+        "cameraMake": "Apple",
+        "cameraModel": "iPhone 14 Pro",
+        "hasGps": true,
+        "contentHash": "a1b2c3d4e5f6",
+        "sharpnessScore": 412.3,
+        "qualityScore": 0.91,
+        "similarityToBest": 0.997,
+        "isSuggestedBest": true
+      }
+    ]
+  }
+}
+```
+
+`previewUrl` is a signed URL to the full original image (not just the thumbnail), for full-resolution comparison. `contentHash` is truncated to the first 12 characters. `similarityToBest` is the member's CLIP cosine similarity against `suggestedBestItemId`'s embedding, or `null` if either side lacks an embedding (degraded mode / hash-only match). `qualityScore` is the read-time best-copy score (see spec §3.3); it is not persisted.
+
+**Error Cases:**
+- 404 — Group not found or caller is not a member of the circle
+
+---
+
+### POST /media/duplicates/:id/resolve
+
+**Permissions:** `media:write` + circle collaborator role (also requires `media:delete` when `action: "trash"`)
+
+Keep the specified members; archive or trash all other members of the group, then mark the group `resolved`. Runs in a single database transaction.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `keepIds` | UUID[] | Yes | IDs of members to keep; must be non-empty and all belong to this group |
+| `action` | enum | Yes | `"archive"` (sets `archivedAt`, reversible) or `"trash"` (sets `deletedAt`, recoverable until `storage.trash.retentionDays` elapses; requires `media:delete`) |
+
+**Example:**
+```json
+{ "keepIds": ["uuid-1"], "action": "trash" }
+```
+
+**Response:** 200 OK
+```json
+{ "data": { "removed": 2, "kept": 1, "action": "trash", "groupStatus": "resolved" } }
+```
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | `keepIds` is empty or contains IDs not in this group, `action: "trash"` requested without `media:delete`, or group is not `pending` |
+| 404 | Group not found |
+
+---
+
+### POST /media/duplicates/:id/dismiss
+
+**Permissions:** `media:write` + circle collaborator role
+
+Mark a duplicate group dismissed — the reviewer considers these items to not actually be duplicates. Clears `duplicateGroupId` on all members; no items are archived or deleted.
+
+**Response:** 200 OK
+```json
+{ "data": { "groupStatus": "dismissed", "ungrouped": 3 } }
+```
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | Group is not in `pending` status |
+| 404 | Group not found |
+
+---
+
+### POST /media/:id/duplicates/rerun
+
+**Permissions:** `media:write`
+
+Re-enqueue duplicate detection for a single media item at priority 0 (highest).
+
+> **Note:** unlike the geocode and metadata-extraction rerun endpoints, this route currently checks only the system-level `media:write` permission — it does not perform an explicit per-circle role check via `CircleMembershipService.assertCircleAccess`. See [docs/specs/duplicate-detection.md](specs/duplicate-detection.md) §9.5/§14.
+
+**Response:** 201 Created
+```json
+{ "data": { "jobId": "uuid", "status": "pending" } }
+```
+
+**Error Cases:**
+- 400 — Item is not a photo
+- 404 — Item not found or soft-deleted
+
+---
+
+### POST /admin/duplicates/backfill
+
+**Permissions:** Admin role + `system_settings:write`
+
+Bulk-enqueue `duplicate_detection_batch` enrichment jobs across **all circles** (not scoped to one circle). Each job carries a chunk of up to 100 media-item IDs — see the spec's Processing and Enrichment Flow section for why backfill is chunked rather than one job per item. Requires `features.duplicateDetection = true`.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `from` | ISO-8601 datetime | No | Inclusive lower bound on `capturedAt` |
+| `to` | ISO-8601 datetime | No | Inclusive upper bound on `capturedAt` |
+| `force` | boolean | No | When `true`, re-enqueue all eligible photos regardless of existing `media_visual_embedding` row. Default `false` (skip already-embedded items). |
+
+**Response:** 201 Created
+```json
+{ "data": { "enqueued": 87, "circles": 4, "estimatedItems": 8412 } }
+```
+
+`enqueued` is the number of `duplicate_detection_batch` job rows created (matches the `/admin/settings/jobs` dashboard `byType` count); `estimatedItems` is the number of individual photos those jobs cover.
+
+**Error Cases:**
+- 400 — `features.duplicateDetection` is `false`
+
+---
+
+### GET /admin/duplicates/status
+
+**Permissions:** Admin role + `system_settings:read`
+
+Get visual-embedding (CLIP) model availability. Useful for confirming the model downloaded successfully or diagnosing why a deployment is silently running dHash-only matching.
+
+**Response:** 200 OK
+```json
+{
+  "data": {
+    "modelAvailable": true,
+    "modelPath": "./data/models/clip-vit-b32-vision-quantized.onnx",
+    "degraded": false,
+    "model": "clip-vit-b32-q8"
+  }
+}
+```
+
+`degraded: true` means the CLIP model could not be loaded and the deployment is running Tier 2 (dHash Hamming distance) matching only.
+
+---
+
+## Location Inference (media:read / media:write + per-circle roles)
+
+Location inference is a global feature toggle (`features.locationInference`, default off) — see [docs/specs/location-inference.md](specs/location-inference.md) for the full algorithm design. It fills in missing GPS coordinates on GPS-less photos by interpolating (two anchors) or extrapolating (one anchor) from chronologically-nearby, same-device photos that already have coordinates. High-confidence two-anchor inferences are auto-applied immediately (`coordSource: 'inferred'`, revertible); everything else is queued as a `pending` `LocationSuggestion` for a human to confirm, adjust, or reject. `GET /api/media/dashboard` gains a `pendingLocationSuggestions` count that contributes to the review-queue section of the dashboard UI.
+
+No new RBAC permissions are introduced — the feature reuses `media:read` and `media:write` combined with the existing per-circle viewer / collaborator roles, plus `system_settings:write` for the admin backfill endpoint.
+
+---
+
+### GET /media/location-suggestions
+
+**Permissions:** `media:read` + circle viewer role
+
+List location suggestions (review queue) for a circle.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `circleId` | UUID | required | Circle to query |
+| `status` | enum | `pending` | `pending` \| `accepted` \| `rejected` \| `auto_applied` \| `reverted` |
+| `page` | number | 1 | Page number (1-indexed) |
+| `pageSize` | number | 20 | Items per page (max 100) |
+| `mediaItemId` | UUID | — | Optional filter to the suggestion for one specific media item |
+
+**Response:** 200 OK
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "mediaItemId": "uuid",
+      "status": "pending",
+      "lat": 9.9333,
+      "lng": -84.0833,
+      "confidence": 0.87,
+      "method": "interpolated",
+      "anchorBeforeId": "uuid",
+      "anchorAfterId": "uuid",
+      "gapBeforeSeconds": 180,
+      "gapAfterSeconds": 240,
+      "anchorDistanceKm": 0.4,
+      "impliedSpeedKmh": 5.7,
+      "capturedAt": "2026-06-15T14:32:01.234Z",
+      "cameraMake": "Apple",
+      "cameraModel": "iPhone 14",
+      "thumbnailUrl": "https://..."
+    }
+  ],
+  "meta": { "total": 12, "page": 1, "pageSize": 20 }
+}
+```
+
+Ordered by `createdAt DESC`. `method` is `"interpolated"` (two anchors — including the anchors-disagree fallback to the nearer-in-time anchor) or `"nearest"` (single-anchor extrapolation). `anchorDistanceKm`/`impliedSpeedKmh` are `null` for the single-anchor case.
+
+**Error Cases:**
+- 403 — Caller is not a member of the circle
+
+---
+
+### POST /media/location-suggestions/:id/accept
+
+**Permissions:** `media:write` + circle collaborator role
+
+Accept a pending suggestion, optionally adjusting the coordinates before writing them.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `lat` | number (-90 to 90) | No | Override latitude. Omit to accept the suggestion's own coordinates unmodified. |
+| `lng` | number (-180 to 180) | No | Override longitude. |
+
+**Behavior:** unmodified (no override, or an override equal to the stored `lat`/`lng`) writes `coordSource: 'inferred'`; an adjusted override writes `coordSource: 'manual'`. Both cases perform a **synchronous** reverse-geocode and write the resulting geo columns in the same update, via the shared `applyLocation()` helper.
+
+**Response:** 200 OK
+```json
+{ "data": { "id": "uuid", "status": "accepted", "lat": 9.9333, "lng": -84.0833, "coordSource": "inferred" } }
+```
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | Suggestion is not `pending` |
+| 404 | Suggestion not found |
+
+---
+
+### POST /media/location-suggestions/:id/reject
+
+**Permissions:** `media:write` + circle collaborator role
+
+Reject a pending suggestion. The rejection is sticky: a later non-forced per-item inference pass (e.g. a future upload-triggered recompute, which cannot occur here since the item already exists, or any other non-`rerun` trigger) will skip an item with a `rejected` suggestion rather than silently recomputing over the rejection. The explicit rerun endpoint (`POST /media/:id/infer-location`) bypasses this and recomputes anyway.
+
+**Response:** 200 OK
+```json
+{ "data": { "id": "uuid", "status": "rejected" } }
+```
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | Suggestion is not `pending` |
+| 404 | Suggestion not found |
+
+---
+
+### POST /media/location-suggestions/:id/revert
+
+**Permissions:** `media:write` + circle collaborator role
+
+Undo an auto-applied inference: clears `takenLat`/`takenLng`, all geo columns, and `coordSource` (via the shared `GEO_CLEAR_COLUMNS` object), and marks the suggestion `reverted`.
+
+> **Note:** only suggestions with status `auto_applied` can be reverted through this endpoint. A suggestion the caller explicitly `accept`-ed is treated as a deliberate human confirmation, not something to revert — clearing an accepted item's location requires the general-purpose bulk "clear location" path instead.
+
+**Response:** 200 OK
+```json
+{ "data": { "id": "uuid", "status": "reverted" } }
+```
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | Suggestion is not `auto_applied` |
+| 404 | Suggestion not found |
+
+---
+
+### POST /media/location-suggestions/bulk-accept
+
+**Permissions:** `media:write` + circle collaborator role
+
+Accept every `pending` suggestion in a circle at or above a confidence floor, in one call. Every accepted suggestion is applied **unmodified** — there is no per-item coordinate override in the bulk path — so every accepted item receives `coordSource: 'inferred'`.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `circleId` | UUID | Yes | Circle to operate on |
+| `minConfidence` | number (0-1) | Yes | Minimum `confidence` for a suggestion to be included |
+
+**Response:** 200 OK
+```json
+{ "data": { "accepted": 14 } }
+```
+
+---
+
+### POST /media/:id/infer-location
+
+**Permissions:** `media:write` + circle collaborator role
+
+Force a fresh location-inference rerun for a single media item, bypassing the rejected-suggestion skip rule. Enqueues a `location_inference` job at priority 0 (highest) with `reason: 'rerun'`.
+
+**Response:** 201 Created
+```json
+{ "data": { "jobId": "uuid", "status": "pending" } }
+```
+
+**Error Cases:**
+- 400 — Item is not a photo
+- 404 — Item not found or soft-deleted
+
+---
+
+### POST /admin/location-inference/backfill
+
+**Permissions:** Admin role + `system_settings:write`
+
+Bulk-enqueue **one** `location_inference` sweep job (`mediaItemId: null`, `payload.mode: 'sweep'`) per eligible circle, across **all circles**. Unlike duplicate detection's backfill, this is never chunked into multiple jobs per circle — a sweep is pure DB read plus in-memory computation (no image download, no ML inference), so a single job comfortably completes a 10,000-photo circle sweep in under a minute, far under the enrichment worker's stuck-job reset threshold. Requires `features.locationInference = true`.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `from` | ISO-8601 datetime | No | Bounds which GPS-less **targets** get processed and written (inclusive). Anchors just outside this range are still used — only target selection is bounded. |
+| `to` | ISO-8601 datetime | No | Same as above, upper bound. |
+| `force` | boolean | No | When `true`, recompute every eligible item including those with an existing `pending` or `rejected` suggestion. Default `false` (skip items that already have any suggestion row). |
+
+**Response:** 201 Created
+```json
+{ "data": { "enqueued": 4, "circles": 5, "estimatedItems": 812 } }
+```
+
+`enqueued` is the number of sweep job rows actually created — this can be lower than `circles` when a circle already has a sweep pending or running (the backfill service skips re-enqueueing in that case). `circles` is the number of circles that had at least one eligible GPS-less item. `estimatedItems` is the total eligible item count across those circles, computed as a byproduct of circle enumeration.
+
+**Error Cases:**
+- 400 — `features.locationInference` is `false`
+
+---
+
 ## AI Settings
 
 All endpoints in this group require the Admin system role plus the listed permission.

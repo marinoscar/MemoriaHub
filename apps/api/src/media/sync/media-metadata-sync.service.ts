@@ -144,6 +144,8 @@ export class MediaMetadataSyncService {
       }
       if (typeof exifMeta['latitude'] === 'number') {
         update.takenLat = exifMeta['latitude'];
+        // Present-only: only stamp provenance when EXIF actually supplied coords in this run.
+        update.coordSource = 'exif';
       }
       if (typeof exifMeta['longitude'] === 'number') {
         update.takenLng = exifMeta['longitude'];

@@ -53,6 +53,19 @@ export interface SystemSettings {
     hashDistance?: number;
     minGroupSize?: number;
   };
+  dedup?: {
+    similarityThreshold?: number;
+    hashMaxDistance?: number;
+    knnCandidates?: number;
+  };
+  locationInference?: {
+    maxGapMinutes?: number;
+    maxExtrapolationGapMinutes?: number;
+    autoApplyMaxGapMinutes?: number;
+    requireSameDevice?: boolean;
+    maxAnchorDistanceKm?: number;
+    maxImpliedSpeedKmh?: number;
+  };
   geo?: {
     reverseProvider?: 'offline' | 'nominatim' | 'google';
     forwardSearchEnabled?: boolean;

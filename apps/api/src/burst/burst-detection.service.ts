@@ -7,8 +7,7 @@ import {
   StorageProvider,
 } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { streamToBuffer } from '../storage/processing/processors/stream-utils';
-import { computeVisualHash } from '../storage/processing/visual-hash.util';
+import { computeAndPersistVisualHash } from '../storage/processing/hash-backfill.util';
 
 /**
  * Computes the Hamming distance between two 64-bit perceptual hashes.
@@ -18,7 +17,7 @@ import { computeVisualHash } from '../storage/processing/visual-hash.util';
  * BigInts is also non-negative and the popcount loop terminates correctly
  * without any masking.
  */
-function hammingDistance(a: bigint, b: bigint): number {
+export function hammingDistance(a: bigint, b: bigint): number {
   let x = a ^ b;
   let count = 0;
   while (x > 0n) {
@@ -51,73 +50,6 @@ export class BurstDetectionService {
     private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
   ) {}
-
-  /**
-   * For legacy photos that were uploaded before the visual-hash processor was
-   * introduced, perceptualHash may be null. This method fetches the image bytes
-   * from storage and computes + persists the hash on demand so the item can
-   * participate in burst grouping.
-   *
-   * This is best-effort: transient storage errors are re-thrown so the
-   * enrichment queue's normal retry logic kicks in; permanently unreadable
-   * images (null result from computeVisualHash) are logged and skipped.
-   *
-   * @returns the computed perceptualHash and sharpnessScore, or null if unavailable
-   */
-  private async computeAndPersistHashOnDemand(
-    mediaItemId: string,
-    storageObjectId: string,
-  ): Promise<{ perceptualHash: bigint; sharpnessScore: number } | null> {
-    // Fetch the StorageObject to get the storageKey
-    const storageObject = await this.prisma.storageObject.findUnique({
-      where: { id: storageObjectId },
-      select: { storageKey: true, storageProvider: true, bucket: true },
-    });
-
-    if (!storageObject?.storageKey) {
-      this.logger.warn(
-        `MediaItem ${mediaItemId}: storageObject ${storageObjectId} not found or has no storageKey; cannot compute hash`,
-      );
-      return null;
-    }
-
-    // Stream the object bytes from the object's own provider+bucket.
-    // Transient errors (network, throttle) propagate so the worker retries.
-    const objectProvider = await this.resolver.getProviderFor(
-      storageObject.storageProvider,
-      storageObject.bucket,
-    );
-    const stream = await objectProvider.download(storageObject.storageKey);
-    const buffer = await streamToBuffer(stream);
-
-    const result = await computeVisualHash(buffer);
-
-    if (!result) {
-      this.logger.warn(
-        `MediaItem ${mediaItemId}: computeVisualHash returned null for key ${storageObject.storageKey}; item will skip hash-based grouping`,
-      );
-      return null;
-    }
-
-    const { perceptualHash, sharpnessScore } = result;
-
-    // Persist the freshly computed values so subsequent runs and recomputeGroupScores
-    // benefit without re-downloading the image.
-    await this.prisma.mediaItem.update({
-      where: { id: mediaItemId },
-      data: {
-        // Store as unsigned decimal string — the TEXT column accepts any uint64.
-        perceptualHash: perceptualHash.toString(),
-        sharpnessScore,
-      },
-    });
-
-    this.logger.log(
-      `MediaItem ${mediaItemId}: on-demand hash computed and persisted (dHash=${perceptualHash}, sharpness=${sharpnessScore.toFixed(2)})`,
-    );
-
-    return { perceptualHash, sharpnessScore };
-  }
 
   async processMediaItem(job: EnrichmentJob): Promise<void> {
     const mediaItemId = job.mediaItemId;
@@ -176,9 +108,12 @@ export class BurstDetectionService {
     // by the existing null-hash guard in Step 4).
     if (item.perceptualHash === null && item.storageObjectId) {
       try {
-        const computed = await this.computeAndPersistHashOnDemand(
+        const computed = await computeAndPersistVisualHash(
+          this.prisma,
+          this.resolver,
           item.id,
           item.storageObjectId,
+          this.logger,
         );
         if (computed) {
           // Convert bigint → unsigned decimal string to match the DB column type.
