@@ -503,5 +503,97 @@ describe('PatchSystemSettingsDto (PATCH)', () => {
         expect(result.storage).toEqual({});
       });
     });
+
+    describe('dedup branch', () => {
+      it('should preserve all dedup fields when valid', () => {
+        const result = patchSystemSettingsSchema.parse({
+          dedup: { similarityThreshold: 0.9, hashMaxDistance: 8, knnCandidates: 30 },
+        });
+
+        expect(result.dedup?.similarityThreshold).toBe(0.9);
+        expect(result.dedup?.hashMaxDistance).toBe(8);
+        expect(result.dedup?.knnCandidates).toBe(30);
+      });
+
+      it('should preserve dedup when only similarityThreshold is supplied', () => {
+        const result = patchSystemSettingsSchema.parse({
+          dedup: { similarityThreshold: 0.92 },
+        });
+
+        expect(result.dedup?.similarityThreshold).toBe(0.92);
+      });
+
+      it('should throw when dedup.similarityThreshold is above the max (0.995)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            dedup: { similarityThreshold: 0.999 },
+          }),
+        ).toThrow();
+      });
+
+      it('should throw when dedup.similarityThreshold is below the min (0.8)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            dedup: { similarityThreshold: 0.5 },
+          }),
+        ).toThrow();
+      });
+
+      it('should throw when dedup.hashMaxDistance is above the max (16)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            dedup: { hashMaxDistance: 17 },
+          }),
+        ).toThrow();
+      });
+
+      it('should throw when dedup.hashMaxDistance is below the min (0)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            dedup: { hashMaxDistance: -1 },
+          }),
+        ).toThrow();
+      });
+
+      it('should throw when dedup.knnCandidates is above the max (50)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            dedup: { knnCandidates: 51 },
+          }),
+        ).toThrow();
+      });
+
+      it('should throw when dedup.knnCandidates is below the min (5)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            dedup: { knnCandidates: 4 },
+          }),
+        ).toThrow();
+      });
+
+      it('should accept empty dedup block (all sub-fields optional)', () => {
+        const result = patchSystemSettingsSchema.parse({ dedup: {} });
+
+        expect(result.dedup).toEqual({});
+      });
+    });
+
+    describe('features.duplicateDetection flag (via the generic features map)', () => {
+      it('should preserve features.duplicateDetection when true', () => {
+        const result = patchSystemSettingsSchema.parse({
+          features: { duplicateDetection: true },
+        });
+
+        expect(result.features?.duplicateDetection).toBe(true);
+      });
+
+      it('should preserve features.duplicateDetection when false (disabling survives)', () => {
+        const result = patchSystemSettingsSchema.parse({
+          features: { duplicateDetection: false },
+        });
+
+        expect(result.features?.duplicateDetection).toBe(false);
+      });
+    });
   });
 });
