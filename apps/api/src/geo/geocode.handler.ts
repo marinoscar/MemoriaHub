@@ -44,15 +44,20 @@ export class GeocodeHandler implements EnrichmentHandler, OnModuleInit {
     await this.upsertStatus(mediaItemId, circleId, MediaMetadataStatusType.processing);
 
     try {
-      if (mediaItem.takenLat == null || mediaItem.takenLng == null) {
-        this.logger.debug(`Geocode job ${job.id}: MediaItem ${mediaItemId} has no GPS; marking processed`);
+      if (!Number.isFinite(mediaItem.takenLat) || !Number.isFinite(mediaItem.takenLng)) {
+        // Skip when coordinates are absent (null) OR non-finite (NaN/Infinity):
+        // typeof NaN === 'number' passes a plain null check, so guard with
+        // Number.isFinite to stop a bad coordinate reaching the geocoder.
+        this.logger.debug(`Geocode job ${job.id}: MediaItem ${mediaItemId} has no usable GPS; marking processed`);
         await this.upsertStatus(mediaItemId, circleId, MediaMetadataStatusType.processed, new Date());
         return;
       }
 
+      // Number.isFinite above guarantees non-null finite numbers at runtime, but
+      // it does not narrow the `number | null` types, so the cast is safe here.
       const { result, source } = await this.geoLocationService.reverseGeocode(
-        mediaItem.takenLat,
-        mediaItem.takenLng,
+        mediaItem.takenLat as number,
+        mediaItem.takenLng as number,
       );
 
       if (result) {
