@@ -1828,6 +1828,11 @@ describe('MediaService', () => {
         geoCountryCode: 'CR',
         geoAdmin1: 'Alajuela',
         geoLocality: 'La Fortuna',
+        // A manual bulk location SET must always write coordSource:'manual' —
+        // never 'inferred' — so location-inference provenance can never leak
+        // onto a human-entered coordinate. See applyLocation() in
+        // media/geo/apply-location.util.ts.
+        coordSource: 'manual',
       });
       expect(updateCall[0].data.geocodedAt).toBeInstanceOf(Date);
     });
@@ -1856,6 +1861,10 @@ describe('MediaService', () => {
         geoPlaceName: null,
         geoSource: null,
         geocodedAt: null,
+        // A bulk location CLEAR must always write coordSource:null — no
+        // leftover provenance value should survive a clear. See
+        // GEO_CLEAR_COLUMNS in media/geo/geo-result.mapper.ts.
+        coordSource: null,
       });
     });
 
