@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render, mockAdminUser } from '../utils/test-utils';
 
@@ -84,8 +84,18 @@ function defaultSettingsMock() {
     removeCredentials: vi.fn().mockResolvedValue(undefined),
     testProvider: vi.fn().mockResolvedValue({ ok: true }),
     getModels: vi.fn().mockResolvedValue(['gpt-4o', 'gpt-4']),
+    getEmbeddingModels: vi.fn().mockResolvedValue([]),
     saveSearchFeature: vi.fn().mockResolvedValue(undefined),
   };
+}
+
+// ---------------------------------------------------------------------------
+// The page renders a "Test" button and a "Save" button in each of the Search
+// Feature, Tagging Feature, and AI Description Search (embedding) sections,
+// so unscoped queries for those labels are ambiguous. Scope to the Search
+// Feature section specifically, matching the intent of these tests.
+function getSearchFeatureSection(): HTMLElement {
+  return screen.getByText('Search Feature').closest('.MuiPaper-root') as HTMLElement;
 }
 
 // ---------------------------------------------------------------------------
@@ -162,8 +172,10 @@ describe('AiSettingsPage — extended coverage', () => {
       await user.click(saveButtons[0]);
 
       await waitFor(() => {
-        expect(screen.getByRole('alert')).toBeInTheDocument();
-        expect(screen.getByText(/network error/i)).toBeInTheDocument();
+        // The page also renders persistent informational <Alert role="alert">
+        // elements in the AI Description Search section, so scope the alert
+        // check to the one containing the actual error message.
+        expect(screen.getByText(/network error/i).closest('[role="alert"]')).toBeInTheDocument();
       });
     });
 
@@ -289,8 +301,10 @@ describe('AiSettingsPage — extended coverage', () => {
       await user.click(screen.getByRole('button', { name: /remove/i }));
 
       await waitFor(() => {
-        expect(screen.getByRole('alert')).toBeInTheDocument();
-        expect(screen.getByText(/delete failed/i)).toBeInTheDocument();
+        // The page also renders persistent informational <Alert role="alert">
+        // elements in the AI Description Search section, so scope the alert
+        // check to the one containing the actual error message.
+        expect(screen.getByText(/delete failed/i).closest('[role="alert"]')).toBeInTheDocument();
       });
     });
 
@@ -333,10 +347,11 @@ describe('AiSettingsPage — extended coverage', () => {
       // Wait for models to be loaded (useEffect fires on mount)
       await waitFor(() => expect(mockGetModels).toHaveBeenCalled());
 
-      // The Search Feature Save button (second Save button after provider Save)
-      const saveButtons = await screen.findAllByRole('button', { name: /^save$/i });
-      // Last save button is the one in the Search Feature section
-      const searchFeatureSave = saveButtons[saveButtons.length - 1];
+      // The page also renders Save buttons in the Tagging Feature and AI
+      // Description Search sections, so scope to the Search Feature section.
+      const searchFeatureSave = await within(getSearchFeatureSection()).findByRole('button', {
+        name: /^save$/i,
+      });
       await user.click(searchFeatureSave);
 
       await waitFor(() => {
@@ -359,8 +374,12 @@ describe('AiSettingsPage — extended coverage', () => {
 
       await waitFor(() => expect(mockGetModels).toHaveBeenCalled());
 
-      const saveButtons = await screen.findAllByRole('button', { name: /^save$/i });
-      await user.click(saveButtons[saveButtons.length - 1]);
+      // The page also renders Save buttons in the Tagging Feature and AI
+      // Description Search sections, so scope to the Search Feature section.
+      const searchFeatureSave = await within(getSearchFeatureSection()).findByRole('button', {
+        name: /^save$/i,
+      });
+      await user.click(searchFeatureSave);
 
       await waitFor(() => {
         expect(screen.getByText(/search feature settings saved/i)).toBeInTheDocument();
@@ -382,12 +401,18 @@ describe('AiSettingsPage — extended coverage', () => {
 
       await waitFor(() => expect(mockGetModels).toHaveBeenCalled());
 
-      const saveButtons = await screen.findAllByRole('button', { name: /^save$/i });
-      await user.click(saveButtons[saveButtons.length - 1]);
+      // The page also renders Save buttons in the Tagging Feature and AI
+      // Description Search sections, so scope to the Search Feature section.
+      const searchFeatureSave = await within(getSearchFeatureSection()).findByRole('button', {
+        name: /^save$/i,
+      });
+      await user.click(searchFeatureSave);
 
       await waitFor(() => {
-        expect(screen.getByRole('alert')).toBeInTheDocument();
-        expect(screen.getByText(/feature save error/i)).toBeInTheDocument();
+        // The page also renders persistent informational <Alert role="alert">
+        // elements in the AI Description Search section, so scope the alert
+        // check to the one containing the actual error message.
+        expect(screen.getByText(/feature save error/i).closest('[role="alert"]')).toBeInTheDocument();
       });
     });
 
@@ -406,8 +431,12 @@ describe('AiSettingsPage — extended coverage', () => {
 
       await waitFor(() => expect(mockGetModels).toHaveBeenCalled());
 
-      const saveButtons = await screen.findAllByRole('button', { name: /^save$/i });
-      await user.click(saveButtons[saveButtons.length - 1]);
+      // The page also renders Save buttons in the Tagging Feature and AI
+      // Description Search sections, so scope to the Search Feature section.
+      const searchFeatureSave = await within(getSearchFeatureSection()).findByRole('button', {
+        name: /^save$/i,
+      });
+      await user.click(searchFeatureSave);
 
       await waitFor(() => {
         expect(screen.getByText(/failed to save search feature/i)).toBeInTheDocument();
@@ -432,7 +461,11 @@ describe('AiSettingsPage — extended coverage', () => {
 
       await waitFor(() => expect(mockGetModels).toHaveBeenCalled());
 
-      const testButton = await screen.findByRole('button', { name: /test/i });
+      // The page also renders "Test" buttons in the Tagging Feature and AI
+      // Description Search sections, so scope to the Search Feature section.
+      const testButton = await within(getSearchFeatureSection()).findByRole('button', {
+        name: /^test$/i,
+      });
       await user.click(testButton);
 
       await waitFor(() => {
@@ -455,7 +488,11 @@ describe('AiSettingsPage — extended coverage', () => {
 
       await waitFor(() => expect(mockGetModels).toHaveBeenCalled());
 
-      const testButton = await screen.findByRole('button', { name: /test/i });
+      // The page also renders "Test" buttons in the Tagging Feature and AI
+      // Description Search sections, so scope to the Search Feature section.
+      const testButton = await within(getSearchFeatureSection()).findByRole('button', {
+        name: /^test$/i,
+      });
       await user.click(testButton);
 
       await waitFor(() => {
