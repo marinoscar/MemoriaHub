@@ -47,10 +47,10 @@ function openRaw(): BetterSqlite3.Database {
 // We do NOT override HOME here — we just use ':memory:' which bypasses the file path.
 
 describe('migrations — fresh :memory: database', () => {
-  it('reaches the latest user_version (6)', () => {
+  it('reaches the latest user_version (7)', () => {
     const db = openDb(':memory:');
     const version = db.pragma('user_version', { simple: true }) as number;
-    expect(version).toBe(6);
+    expect(version).toBe(7);
     db.close();
   });
 
@@ -145,7 +145,7 @@ describe('migrations — fresh :memory: database', () => {
     runMigrations(db);
 
     const version = db.pragma('user_version', { simple: true }) as number;
-    expect(version).toBe(6);
+    expect(version).toBe(7);
 
     const count = (
       db.prepare('SELECT COUNT(*) as cnt FROM settings').get() as { cnt: number }
@@ -171,14 +171,14 @@ describe('migrations — fresh :memory: database', () => {
 
   it('migration 2 is idempotent — re-running on an already-migrated db is a no-op', () => {
     const db = openRaw();
-    // openRaw() already runs all migrations including v2, v3, v4, v5, and v6
+    // openRaw() already runs all migrations including v2, v3, v4, v5, v6, and v7
     const versionBefore = db.pragma('user_version', { simple: true }) as number;
-    expect(versionBefore).toBe(6);
+    expect(versionBefore).toBe(7);
 
     // Re-running must not throw and must not change version
     runMigrations(db);
     const versionAfter = db.pragma('user_version', { simple: true }) as number;
-    expect(versionAfter).toBe(6);
+    expect(versionAfter).toBe(7);
 
     db.close();
   });
@@ -219,25 +219,25 @@ describe('migrations — fresh :memory: database', () => {
     const colsBefore = db.prepare("PRAGMA table_info('folders')").all() as Array<{ name: string }>;
     expect(colsBefore.some((c) => c.name === 'circle_id')).toBe(false);
 
-    // Now run runMigrations — should apply v3, v4, v5, and v6
+    // Now run runMigrations — should apply v3, v4, v5, v6, and v7
     runMigrations(db);
 
     const version = db.pragma('user_version', { simple: true }) as number;
-    expect(version).toBe(6);
+    expect(version).toBe(7);
 
     const colsAfter = db.prepare("PRAGMA table_info('folders')").all() as Array<{ name: string }>;
     expect(colsAfter.some((c) => c.name === 'circle_id')).toBe(true);
     db.close();
   });
 
-  it('migration 3 is idempotent — re-running on a v6 db is a no-op', () => {
+  it('migration 3 is idempotent — re-running on a v7 db is a no-op', () => {
     const db = openRaw();
     const versionBefore = db.pragma('user_version', { simple: true }) as number;
-    expect(versionBefore).toBe(6);
+    expect(versionBefore).toBe(7);
 
     runMigrations(db);
     const versionAfter = db.pragma('user_version', { simple: true }) as number;
-    expect(versionAfter).toBe(6);
+    expect(versionAfter).toBe(7);
 
     db.close();
   });
@@ -281,7 +281,7 @@ describe('migrations — fresh :memory: database', () => {
 
     runMigrations(db);
 
-    expect(db.pragma('user_version', { simple: true }) as number).toBe(6);
+    expect(db.pragma('user_version', { simple: true }) as number).toBe(7);
     for (const { key } of SEED_SETTINGS_V4) {
       const after = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
       expect(after).toBeDefined();
@@ -308,8 +308,10 @@ describe('migrations — fresh :memory: database', () => {
     db.close();
   });
 
-  it('migration 5 (and later) bumps user_version to 6 from a v4 database', () => {
-    // Build a v4 database and verify that running migrations advances to the latest (6).
+  it('migrations 5, 6, and 7 bump user_version to 7 from a v4 database', () => {
+    // Build a v4 database and verify that running migrations advances all the
+    // way to 7 (v5 durable multipart resume, v6 skip_reason, and v7 scan
+    // snapshot tables all apply in the same runMigrations() call).
     const db = new RawDatabase(':memory:') as BetterSqlite3.Database;
     db.pragma('foreign_keys = ON');
     db.exec(CREATE_FOLDERS);
@@ -339,7 +341,7 @@ describe('migrations — fresh :memory: database', () => {
 
     runMigrations(db);
 
-    expect(db.pragma('user_version', { simple: true }) as number).toBe(6);
+    expect(db.pragma('user_version', { simple: true }) as number).toBe(7);
     db.close();
   });
 
@@ -391,6 +393,174 @@ describe('migrations — fresh :memory: database', () => {
     db.pragma('foreign_keys = ON');
 
     db.close();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Migration 6 — scan (pre-sync dry-run) tables
+  // ---------------------------------------------------------------------------
+
+  describe('migration 6 — scan snapshot tables', () => {
+    it('creates the scans table with all expected columns', () => {
+      const db = openDb(':memory:');
+
+      const tableRow = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='scans'")
+        .get();
+      expect(tableRow).toBeTruthy();
+
+      const cols = (
+        db.prepare("PRAGMA table_info('scans')").all() as Array<{ name: string }>
+      ).map((c) => c.name);
+
+      expect(cols).toEqual(
+        expect.arrayContaining([
+          'id',
+          'created_at',
+          'finished_at',
+          'status',
+          'trigger',
+          'folder_ids',
+          'total_files',
+          'total_bytes',
+          'photo_count',
+          'video_count',
+          'exif_count',
+          'gps_count',
+        ]),
+      );
+
+      db.close();
+    });
+
+    it('creates the scan_files table with all expected columns', () => {
+      const db = openDb(':memory:');
+
+      const tableRow = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='scan_files'")
+        .get();
+      expect(tableRow).toBeTruthy();
+
+      const cols = (
+        db.prepare("PRAGMA table_info('scan_files')").all() as Array<{ name: string }>
+      ).map((c) => c.name);
+
+      expect(cols).toEqual(
+        expect.arrayContaining([
+          'id',
+          'scan_id',
+          'folder_id',
+          'file_path',
+          'size_bytes',
+          'mtime_ms',
+          'mime_type',
+          'media_kind',
+          'has_exif',
+          'has_gps',
+          'captured_at',
+          'width',
+          'height',
+          'camera_make',
+          'camera_model',
+          'taken_lat',
+          'taken_lng',
+          'meta_error',
+        ]),
+      );
+
+      db.close();
+    });
+
+    it('creates idx_scans_created_at, idx_scan_files_scan, and idx_scan_files_scan_kind', () => {
+      const db = openDb(':memory:');
+      const indexes = (
+        db
+          .prepare("SELECT name FROM sqlite_master WHERE type='index'")
+          .all() as Array<{ name: string }>
+      ).map((r) => r.name);
+
+      expect(indexes).toContain('idx_scans_created_at');
+      expect(indexes).toContain('idx_scan_files_scan');
+      expect(indexes).toContain('idx_scan_files_scan_kind');
+      db.close();
+    });
+
+    it('upgrades a hand-built v5 database to v6, creating the scan tables', () => {
+      // Build a full v1-v5 database (mirrors the "migration 5 bumps..." test above)
+      // then bump to v5 explicitly, without applying migration 6.
+      const db = new RawDatabase(':memory:') as BetterSqlite3.Database;
+      db.pragma('foreign_keys = ON');
+      db.exec(CREATE_FOLDERS);
+      db.exec(CREATE_FOLDERS_IDX_ENABLED);
+      db.exec(CREATE_FILES);
+      db.exec(CREATE_FILES_IDX_FOLDER_STATUS);
+      db.exec(CREATE_FILES_IDX_STATUS);
+      db.exec(CREATE_FILES_IDX_SHA256);
+      db.exec(CREATE_SYNC_RUNS);
+      db.exec(CREATE_SYNC_RUNS_IDX_STARTED);
+      db.exec(CREATE_SETTINGS);
+      const insert = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+      for (const { key, value } of SEED_SETTINGS) { insert.run(key, value); }
+      db.exec(ALTER_FILES_ADD_MTIME_MS);
+      db.exec(ALTER_FOLDERS_ADD_CIRCLE_ID);
+      for (const { key, value } of SEED_SETTINGS_V4) { insert.run(key, value); }
+      db.exec(ALTER_FILES_ADD_UPLOAD_ID);
+      db.exec(ALTER_FILES_ADD_UPLOAD_PART_SIZE);
+      db.exec(CREATE_FILE_UPLOAD_PARTS);
+      db.exec('PRAGMA user_version = 5');
+
+      // Pre-condition: scans/scan_files do not exist yet.
+      const scansBefore = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='scans'")
+        .get();
+      expect(scansBefore).toBeUndefined();
+      const scanFilesBefore = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='scan_files'")
+        .get();
+      expect(scanFilesBefore).toBeUndefined();
+
+      runMigrations(db);
+
+      expect(db.pragma('user_version', { simple: true }) as number).toBe(7);
+      const scansAfter = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='scans'")
+        .get();
+      expect(scansAfter).toBeTruthy();
+      const scanFilesAfter = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='scan_files'")
+        .get();
+      expect(scanFilesAfter).toBeTruthy();
+
+      db.close();
+    });
+
+    it('is idempotent — re-running on an already-v7 database does not throw, change version, or duplicate tables/indexes', () => {
+      const db = openRaw(); // already at v7
+
+      const versionBefore = db.pragma('user_version', { simple: true }) as number;
+      expect(versionBefore).toBe(7);
+
+      expect(() => runMigrations(db)).not.toThrow();
+
+      const versionAfter = db.pragma('user_version', { simple: true }) as number;
+      expect(versionAfter).toBe(7);
+
+      // Tables still exist exactly once each.
+      const scanTables = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('scans','scan_files')")
+        .all() as Array<{ name: string }>;
+      expect(scanTables).toHaveLength(2);
+
+      // Indexes still exist exactly once each.
+      const scanIndexNames = ['idx_scans_created_at', 'idx_scan_files_scan', 'idx_scan_files_scan_kind'];
+      for (const name of scanIndexNames) {
+        const rows = db
+          .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name = ?")
+          .all(name);
+        expect(rows).toHaveLength(1);
+      }
+
+      db.close();
+    });
   });
 
   it('enables foreign keys (PRAGMA foreign_keys = ON)', () => {

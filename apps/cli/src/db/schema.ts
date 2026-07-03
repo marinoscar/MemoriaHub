@@ -132,3 +132,72 @@ CREATE TABLE IF NOT EXISTS file_upload_parts (
 /** Migration 6: persist why a file was skipped ('dedup' | 'unchanged'). Nullable. */
 export const ALTER_FILES_ADD_SKIP_REASON = `
 ALTER TABLE files ADD COLUMN skip_reason TEXT`;
+
+/**
+ * Migration 7: pre-sync "scan" (dry-run preview).
+ *
+ * A scan is a point-in-time, immutable snapshot of the file set a sync WOULD
+ * process, captured without any uploads.  It is deliberately kept OUT of the
+ * mutable `files` sync ledger (which sync overwrites on every run) so that the
+ * snapshot survives untouched until a later `sync --scan` can diff the folders
+ * against it for change detection.
+ *
+ * `scans` holds one row per scan run with denormalized rollups so `scan list`
+ * is a single cheap SELECT.
+ */
+export const CREATE_SCANS = `
+CREATE TABLE IF NOT EXISTS scans (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at   TEXT    NOT NULL,
+  finished_at  TEXT,
+  status       TEXT    NOT NULL DEFAULT 'running',
+  trigger      TEXT    NOT NULL,
+  folder_ids   TEXT    NOT NULL,
+  total_files  INTEGER NOT NULL DEFAULT 0,
+  total_bytes  INTEGER NOT NULL DEFAULT 0,
+  photo_count  INTEGER NOT NULL DEFAULT 0,
+  video_count  INTEGER NOT NULL DEFAULT 0,
+  exif_count   INTEGER NOT NULL DEFAULT 0,
+  gps_count    INTEGER NOT NULL DEFAULT 0
+)`;
+
+export const CREATE_SCANS_IDX_CREATED = `
+CREATE INDEX IF NOT EXISTS idx_scans_created_at ON scans(created_at)`;
+
+/**
+ * Migration 7: `scan_files` — one immutable snapshot row per file per scan.
+ *
+ * The two metadata flags the scan report is built around are `has_exif` and
+ * `has_gps` (location present inside EXIF).  The remaining metadata columns come
+ * for free from the same exifr parse and are surfaced only in the Excel detail
+ * sheet as bonus analysis columns.  `meta_error` records why extraction failed
+ * for a given file without failing the whole scan.
+ */
+export const CREATE_SCAN_FILES = `
+CREATE TABLE IF NOT EXISTS scan_files (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  scan_id      INTEGER NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
+  folder_id    INTEGER NOT NULL,
+  file_path    TEXT    NOT NULL,
+  size_bytes   INTEGER,
+  mtime_ms     INTEGER,
+  mime_type    TEXT,
+  media_kind   TEXT,
+  has_exif     INTEGER NOT NULL DEFAULT 0,
+  has_gps      INTEGER NOT NULL DEFAULT 0,
+  captured_at  TEXT,
+  width        INTEGER,
+  height       INTEGER,
+  camera_make  TEXT,
+  camera_model TEXT,
+  taken_lat    REAL,
+  taken_lng    REAL,
+  meta_error   TEXT,
+  UNIQUE(scan_id, folder_id, file_path)
+)`;
+
+export const CREATE_SCAN_FILES_IDX_SCAN = `
+CREATE INDEX IF NOT EXISTS idx_scan_files_scan ON scan_files(scan_id)`;
+
+export const CREATE_SCAN_FILES_IDX_SCAN_KIND = `
+CREATE INDEX IF NOT EXISTS idx_scan_files_scan_kind ON scan_files(scan_id, media_kind)`;

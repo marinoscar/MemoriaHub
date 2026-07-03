@@ -23,6 +23,7 @@ import type { SyncEngine } from '../sync/sync-engine.js';
 import {
   EV,
   type RunStartPayload,
+  type ScanDriftPayload,
   type FileFailedPayload,
   type FileDonePayload,
   type FileSkippedPayload,
@@ -119,6 +120,23 @@ export function renderSyncHeadless(engine: SyncEngine): void {
   // ---------------------------------------------------------------------------
   // Event handlers
   // ---------------------------------------------------------------------------
+
+  engine.on(EV.SCAN_DRIFT, (payload: ScanDriftPayload) => {
+    const changed = payload.added + payload.removed + payload.modified;
+    if (changed === 0) {
+      ui.info(
+        `Changes since scan #${payload.scanId}: none — ${payload.unchanged} file(s) unchanged.`,
+      );
+    } else {
+      ui.step(`Changes since scan #${payload.scanId}:`);
+      ui.line(
+        `  ${chalk.green(`+${payload.added} added`)}   ` +
+        `${chalk.yellow(`~${payload.modified} modified`)}   ` +
+        `${chalk.red(`-${payload.removed} removed`)}   ` +
+        `${chalk.dim(`${payload.unchanged} unchanged`)}`,
+      );
+    }
+  });
 
   engine.on(EV.RUN_START, (payload: RunStartPayload) => {
     state.total  = payload.total;

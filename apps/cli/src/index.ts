@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import { loginCommand } from './commands/login.js';
 import { importCommand } from './commands/import.js';
 import { syncCommand } from './commands/sync.js';
+import { scanCommand } from './commands/scan.js';
 import { statusCommand } from './commands/status.js';
 import { foldersCommand } from './commands/folders.js';
 import { circlesCommand } from './commands/circles.js';
@@ -41,6 +42,7 @@ program.addHelpText('beforeAll', () => {
 program.addCommand(loginCommand());
 program.addCommand(importCommand());
 program.addCommand(syncCommand());
+program.addCommand(scanCommand());
 program.addCommand(statusCommand());
 program.addCommand(foldersCommand());
 program.addCommand(circlesCommand());

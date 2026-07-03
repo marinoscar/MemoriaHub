@@ -18,6 +18,7 @@ import { FolderRepo } from '../repo/folders.js';
 import { FileRepo } from '../repo/files.js';
 import { RunRepo } from '../repo/runs.js';
 import { SettingsRepo } from '../repo/settings.js';
+import { ScanRepo } from '../repo/scans.js';
 import { SyncEngine } from '../sync/sync-engine.js';
 import { EV } from '../sync/events.js';
 import { renderSyncHeadless } from '../render/headless-sync.js';
@@ -35,11 +36,12 @@ export function syncCommand(): Command {
     .option('--dry-run', 'Show what would be uploaded without actually uploading', false)
     .option('-r, --recursive', 'Descend into sub-directories (when auto-registering a folder)', false)
     .option('--concurrency <n>', 'Number of concurrent upload workers', parseInt)
-    .option('--circle <id>', 'Target circle ID (overrides active circle in config)');
+    .option('--circle <id>', 'Target circle ID (overrides active circle in config)')
+    .option('--scan <id>', 'Reconcile against a prior scan (id or "latest") and report changes since then');
 
   cmd.action(async (
     folderArgs: string[],
-    options: { all: boolean; dryRun: boolean; recursive: boolean; concurrency?: number; circle?: string },
+    options: { all: boolean; dryRun: boolean; recursive: boolean; concurrency?: number; circle?: string; scan?: string },
   ) => {
     // Validate invocation
     if (folderArgs.length === 0 && !options.all) {
@@ -61,6 +63,27 @@ export function syncCommand(): Command {
     const fileRepo     = new FileRepo(db);
     const runRepo      = new RunRepo(db);
     const settingsRepo = new SettingsRepo(db);
+    const scanRepo     = new ScanRepo(db);
+
+    // Resolve --scan <id|latest> to a numeric scan id for drift reconciliation.
+    let scanId: number | undefined;
+    if (options.scan) {
+      if (options.scan === 'latest') {
+        const latest = scanRepo.latestComplete();
+        if (!latest) {
+          ui.error('No completed scan found. Run `memoriahub scan --all` first.');
+          process.exit(1);
+        }
+        scanId = latest.id;
+      } else {
+        const parsed = parseInt(options.scan, 10);
+        if (isNaN(parsed) || !scanRepo.getScan(parsed)) {
+          ui.error(`Scan not found: ${options.scan}. Run \`memoriahub scan list\` to see available scans.`);
+          process.exit(1);
+        }
+        scanId = parsed;
+      }
+    }
 
     // A single cooldown gate shared by all upload workers: a 429/503 seen by
     // one worker pauses the others. The onTrip callback forwards a UI event
@@ -107,6 +130,7 @@ export function syncCommand(): Command {
       files:   fileRepo,
       runs:    runRepo,
       settings: settingsRepo,
+      scans:   scanRepo,
     });
     engineRef = engine;
 
@@ -119,6 +143,7 @@ export function syncCommand(): Command {
         dryRun:      options.dryRun,
         concurrency: options.concurrency,
         circleId:    options.circle ?? cfg.activeCircleId,
+        scanId,
         trigger:     'cli',
       });
     } catch (err) {
