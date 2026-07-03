@@ -14,6 +14,7 @@ import { backupCommand } from './commands/backup.js';
 import { jobsCommand } from './commands/jobs.js';
 import { reportsCommand } from './commands/reports.js';
 import { printBanner } from './ui.js';
+import { printHeadlessUpdateNotice } from './update-notice.js';
 
 // ESM-safe package.json read: createRequire allows require() in ESM modules.
 // dist/index.js → ../package.json resolves to apps/cli/package.json at runtime.
@@ -72,5 +73,16 @@ program
     const { launchTui } = await import('./tui/app.js');
     await launchTui({ currentVersion: pkg.version });
   });
+
+// Headless command invocation (a subcommand was given): surface a throttled,
+// cached "update available" notice on stderr before running. Skipped for
+// help/version flags so `--version`/`--help` stay instant and side-effect-free.
+const argvRest = process.argv.slice(2);
+const isHelpOrVersion = argvRest.some((a) =>
+  ['-h', '--help', '-V', '--version', 'help'].includes(a),
+);
+if (!isHelpOrVersion) {
+  await printHeadlessUpdateNotice(pkg.version);
+}
 
 program.parse(process.argv);
