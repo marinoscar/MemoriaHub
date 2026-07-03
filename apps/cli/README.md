@@ -477,6 +477,8 @@ All state lives in `~/.memoriahub/memoriahub.db`. The `status` command reads fro
 
 `scan`, `scan list`, `scan report`, and `scan export` are entirely local: no PAT and no server connection are required. Only `sync --scan` talks to the server, because it proceeds to actually reconcile and upload.
 
+Running or viewing a scan from the interactive menu (**Scan ▸ Scan all folders / Scan selected folders / View last scan report** in `memoriahub menu`) also auto-creates an Excel workbook at `~/.memoriahub/exports/scan-<id>.xlsx` and prints its absolute path afterward; the file is overwritten on re-view (one per scan ID, no duplicates) and a failed export only shows a warning rather than blocking the report from rendering. (The headless `scan` command does not auto-export — use `scan export <id> --out <file>` for that.)
+
 Full details — data model, metadata scope, and the reconciliation algorithm — are in [docs/specs/cli-scan.md](../../docs/specs/cli-scan.md).
 
 ### `memoriahub scan`
@@ -574,6 +576,7 @@ memoriahub sync ~/Pictures/Vacation2024 --scan 12
 | `~/.memoriahub/config.json` | Server URL and PAT (mode 0600) |
 | `~/.memoriahub/memoriahub.db` | SQLite sync state database |
 | `~/.memoriahub/manifests/` | Legacy per-folder JSON manifests (preserved, read-only after migration) |
+| `~/.memoriahub/exports/` | Auto-exported scan report workbooks, one `.xlsx` per scan ID (see [Scan](#scan-dry-run-preview)) |
 | `~/.memoriahub/app/` | Installed CLI app (dist + node_modules) |
 | `~/.local/bin/memoriahub` | Shell shim |
 

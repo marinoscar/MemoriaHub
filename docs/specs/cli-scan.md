@@ -233,6 +233,10 @@ Two sheets:
 
 Hand-rolled RFC-4180 CSV writer — no additional dependency. Intended as a lightweight, dependency-free alternative for tooling that just needs a flat per-file table rather than a formatted workbook.
 
+### TUI Auto-Export
+
+The interactive menu (`memoriahub menu` → Scan) automatically writes an Excel workbook whenever a scan is run or an existing scan report is viewed from that menu, saving to a fixed, per-scan-id path: `~/.memoriahub/exports/scan-<id>.xlsx`. After the report renders, the dashboard prints the absolute path on a green line: `📄 Excel saved: <path>`. This is separate from the `scan export <id> --out <file>` command above — the TUI auto-export path is fixed/derived from the scan ID, whereas `scan export --out` lets the caller choose the destination file. The auto-export is idempotent (re-viewing the same scan overwrites the same file rather than creating duplicates) and non-fatal on failure (a warning is shown, but the scan report still renders regardless of export success or failure).
+
 ---
 
 ## 7. Scan-to-Sync Reconciliation
