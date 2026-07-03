@@ -862,8 +862,12 @@ describe('JobsPage', () => {
 
       render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
 
+      // The per-row status Chip label is exactly "backing off" (lowercase),
+      // while the "Backing off" filter toggle label always renders in the
+      // filters bar above the table — match the exact lowercase chip text so
+      // the two elements don't collide.
       await waitFor(() => {
-        expect(screen.getByText(/backing off/i)).toBeInTheDocument();
+        expect(screen.getByText('backing off')).toBeInTheDocument();
       });
     });
 
@@ -877,7 +881,9 @@ describe('JobsPage', () => {
         expect(screen.getByText('face_detection')).toBeInTheDocument();
       });
 
-      expect(screen.queryByText(/backing off/i)).not.toBeInTheDocument();
+      // Exact lowercase match targets only the per-row Chip — the "Backing
+      // off" filter toggle label (capitalized) always renders regardless.
+      expect(screen.queryByText('backing off')).not.toBeInTheDocument();
     });
 
     it('does not show the backoff chip for a failed job even if scheduledFor is set', async () => {
@@ -891,7 +897,9 @@ describe('JobsPage', () => {
         expect(screen.getByText('face_detection')).toBeInTheDocument();
       });
 
-      expect(screen.queryByText(/backing off/i)).not.toBeInTheDocument();
+      // Exact lowercase match targets only the per-row Chip — the "Backing
+      // off" filter toggle label (capitalized) always renders regardless.
+      expect(screen.queryByText('backing off')).not.toBeInTheDocument();
     });
   });
 
@@ -915,7 +923,12 @@ describe('JobsPage', () => {
 
       render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      const toggle = await screen.findByRole('checkbox', { name: /backing off/i });
+      // MUI's Switch input renders with role="switch" (not the native
+      // "checkbox" role) since the current MUI version. Its accessible name
+      // comes from the wrapping Tooltip's `title` text ("Show only pending
+      // jobs currently waiting on backoff…"), not the visible "Backing off"
+      // label, so match on a substring of the tooltip text instead.
+      const toggle = await screen.findByRole('switch', { name: /waiting on backoff/i });
       await user.click(toggle);
 
       expect(setFilters).toHaveBeenCalledWith(
@@ -931,7 +944,12 @@ describe('JobsPage', () => {
       render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
 
       // Enable then disable
-      const toggle = await screen.findByRole('checkbox', { name: /backing off/i });
+      // MUI's Switch input renders with role="switch" (not the native
+      // "checkbox" role) since the current MUI version. Its accessible name
+      // comes from the wrapping Tooltip's `title` text ("Show only pending
+      // jobs currently waiting on backoff…"), not the visible "Backing off"
+      // label, so match on a substring of the tooltip text instead.
+      const toggle = await screen.findByRole('switch', { name: /waiting on backoff/i });
       await user.click(toggle); // on
       await user.click(toggle); // off
 

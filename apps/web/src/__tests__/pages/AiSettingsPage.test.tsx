@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render, mockAdminUser } from '../utils/test-utils';
 
@@ -71,6 +71,7 @@ function defaultSettingsMock() {
     removeCredentials: vi.fn().mockResolvedValue(undefined),
     testProvider: vi.fn().mockResolvedValue({ ok: true }),
     getModels: vi.fn().mockResolvedValue(['gpt-4o', 'gpt-4']),
+    getEmbeddingModels: vi.fn().mockResolvedValue([]),
     saveSearchFeature: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -208,8 +209,11 @@ describe('AiSettingsPage', () => {
       render(<AiSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
 
       // Wait for models to load (useEffect fires on mount)
+      // Scope to the Search Feature section — the Tagging Feature section
+      // below it also renders a "Test" button, so an unscoped query is ambiguous.
+      const searchSection = screen.getByText('Search Feature').closest('.MuiPaper-root') as HTMLElement;
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: /test/i })).toBeInTheDocument();
+        expect(within(searchSection).getByRole('button', { name: /^test$/i })).toBeInTheDocument();
       });
     });
 
@@ -232,8 +236,11 @@ describe('AiSettingsPage', () => {
       });
 
       // The settings have features.search.model = 'gpt-4o' — pre-populated
-      // The Test button should be enabled after model is available
-      const testButton = await screen.findByRole('button', { name: /test/i });
+      // The Test button should be enabled after model is available.
+      // Scope to the Search Feature section — the Tagging Feature section
+      // below it also renders a "Test" button, so an unscoped query is ambiguous.
+      const searchSection = screen.getByText('Search Feature').closest('.MuiPaper-root') as HTMLElement;
+      const testButton = await within(searchSection).findByRole('button', { name: /^test$/i });
 
       await user.click(testButton);
 
@@ -261,7 +268,10 @@ describe('AiSettingsPage', () => {
 
       await waitFor(() => expect(mockGetModels).toHaveBeenCalled());
 
-      const testButton = await screen.findByRole('button', { name: /test/i });
+      // Scope to the Search Feature section — the Tagging Feature section
+      // below it also renders a "Test" button, so an unscoped query is ambiguous.
+      const searchSection = screen.getByText('Search Feature').closest('.MuiPaper-root') as HTMLElement;
+      const testButton = await within(searchSection).findByRole('button', { name: /^test$/i });
       await user.click(testButton);
 
       await waitFor(() => {
