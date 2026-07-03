@@ -76,11 +76,14 @@ export class LocationSuggestionService {
   // ---------------------------------------------------------------------------
 
   async listSuggestions(query: LocationSuggestionQueryDto, userId: string, perms: string[]) {
-    const { circleId, status, page, pageSize } = query;
+    const { circleId, status, page, pageSize, mediaItemId } = query;
 
     await this.membership.assertCircleAccess(userId, circleId, perms, CircleRole.viewer);
 
-    const where = { circleId, status: status as LocationSuggestionStatus };
+    const where: Prisma.LocationSuggestionWhereInput = { circleId, status: status as LocationSuggestionStatus };
+    if (mediaItemId) {
+      where.mediaItemId = mediaItemId;
+    }
 
     const [total, suggestions] = await Promise.all([
       this.prisma.locationSuggestion.count({ where }),

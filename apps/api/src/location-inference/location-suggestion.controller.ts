@@ -41,6 +41,7 @@ export class LocationSuggestionController {
   })
   @ApiQuery({ name: 'page', type: Number, required: false })
   @ApiQuery({ name: 'pageSize', type: Number, required: false })
+  @ApiQuery({ name: 'mediaItemId', type: String, required: false, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Location suggestions listed' })
   async listSuggestions(@Query() query: LocationSuggestionQueryDto, @CurrentUser() user: RequestUser) {
     return this.locationSuggestionService.listSuggestions(query, user.id, user.permissions);

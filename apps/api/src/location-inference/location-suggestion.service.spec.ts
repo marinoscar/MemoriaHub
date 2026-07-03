@@ -187,6 +187,37 @@ describe('LocationSuggestionService', () => {
       expect(result.items[0].thumbnailUrl).toBeNull();
       expect(mockStorageProvider.getSignedDownloadUrl).not.toHaveBeenCalled();
     });
+
+    it('includes mediaItemId in the where clause when provided', async () => {
+      (mockPrisma.locationSuggestion.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.locationSuggestion.findMany as jest.Mock).mockResolvedValue([]);
+
+      await service.listSuggestions(makeQuery({ mediaItemId: MEDIA_ID }), USER_ID, PERMS);
+
+      expect(mockPrisma.locationSuggestion.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ mediaItemId: MEDIA_ID }),
+        }),
+      );
+      expect(mockPrisma.locationSuggestion.count).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ mediaItemId: MEDIA_ID }),
+        }),
+      );
+    });
+
+    it('omits mediaItemId from the where clause when not provided', async () => {
+      (mockPrisma.locationSuggestion.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.locationSuggestion.findMany as jest.Mock).mockResolvedValue([]);
+
+      await service.listSuggestions(makeQuery(), USER_ID, PERMS);
+
+      expect(mockPrisma.locationSuggestion.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { circleId: CIRCLE_ID, status: LocationSuggestionStatus.pending },
+        }),
+      );
+    });
   });
 
   // -------------------------------------------------------------------------
