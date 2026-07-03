@@ -29,6 +29,7 @@ import { MetadataModule } from './metadata/metadata.module';
 import { GeoModule } from './geo/geo.module';
 import { StorageSettingsModule } from './storage-settings/storage-settings.module';
 import { ShareModule } from './share/share.module';
+import { DoctorModule } from './doctor/doctor.module';
 import { LoggerModule } from './common/logger/logger.module';
 import { TestAuthModule } from './test-auth/test-auth.module';
 
@@ -78,6 +79,7 @@ import configuration from './config/configuration';
     SearchModule,
     TaggingModule,
     InsightsModule,
+    DoctorModule,
     BurstModule,
     MetadataModule,
     GeoModule,
