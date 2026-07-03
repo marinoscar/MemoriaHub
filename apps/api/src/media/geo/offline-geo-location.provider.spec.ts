@@ -204,6 +204,23 @@ describe('OfflineGeoLocationProvider', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Non-finite coordinate guard
+  // -------------------------------------------------------------------------
+
+  describe('reverseGeocode with non-finite coordinates', () => {
+    it.each([
+      ['NaN lat and lng', NaN, NaN],
+      ['null lat and lng', null as unknown as number, null as unknown as number],
+      ['undefined lat and lng', undefined as unknown as number, undefined as unknown as number],
+    ])('returns null for %s without calling the underlying geocoder lookUp', async (_label, lat, lng) => {
+      const result = await provider.reverseGeocode(lat, lng);
+
+      expect(result).toBeNull();
+      expect(geocoderMock.lookUp).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Other mapped fields (smoke-check the rest of the shape)
   // -------------------------------------------------------------------------
 

@@ -30,6 +30,15 @@ export class NominatimGeoLocationProvider implements GeoLocationProvider {
   }
 
   async reverseGeocode(lat: number, lng: number): Promise<GeoLocationResult | null> {
+    // Defensive guard mirroring GeoLocationService's choke point: a non-finite
+    // coordinate (NaN/Infinity) must never reach the Nominatim HTTP call.
+    // Duplicated here so the guard applies regardless of which wrapper calls
+    // this provider directly.
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      this.logger.debug(`reverseGeocode called with non-finite coordinates (${lat}, ${lng}); returning null`);
+      return null;
+    }
+
     const url =
       `${this.baseUrl}/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=14&addressdetails=1`;
 

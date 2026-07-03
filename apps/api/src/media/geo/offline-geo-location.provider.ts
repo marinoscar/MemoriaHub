@@ -88,6 +88,15 @@ export class OfflineGeoLocationProvider implements GeoLocationProvider, OnModule
   }
 
   async reverseGeocode(lat: number, lng: number): Promise<GeoLocationResult | null> {
+    // Defensive guard mirroring GeoLocationService's choke point: the offline
+    // kd-tree geocoder has no "no location" concept and returns a bogus nearest
+    // city (Talnakh, RU) for a NaN input. Duplicated here so the guard applies
+    // regardless of which wrapper calls this provider directly.
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      this.logger.debug(`reverseGeocode called with non-finite coordinates (${lat}, ${lng}); returning null`);
+      return null;
+    }
+
     try {
       await this.ensureInitialized();
 
