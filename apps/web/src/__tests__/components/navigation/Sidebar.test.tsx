@@ -216,9 +216,9 @@ describe('Sidebar', () => {
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
       // Only items with visible: true should be rendered
-      // Non-admin: Photos, Explore, Map, Sharing, People, Review Bursts, Review Duplicates, Archive, Trash, User Settings
+      // Non-admin: Photos, Explore, Map, Sharing, People, Review Bursts, Review Duplicates, Location Suggestions, Archive, Trash, User Settings
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(menuButtons).toHaveLength(10);
+      expect(menuButtons).toHaveLength(11);
     });
 
     it('should show all menu items when user is admin', () => {
@@ -240,11 +240,12 @@ describe('Sidebar', () => {
       // After the settings refactor the admin section collapses from many individual links
       // to a single "Settings" hub entry.
       // Admin layout (no albums in test): Photos, Explore, Map, Sharing,
-      //                                   People, Review Bursts, Review Duplicates, Archive, Trash,
+      //                                   People, Review Bursts, Review Duplicates, Location Suggestions,
+      //                                   Archive, Trash,
       //                                   Settings (admin hub),
       //                                   User Settings
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(menuButtons).toHaveLength(11);
+      expect(menuButtons).toHaveLength(12);
     });
 
     it('should dynamically update menu items when isAdmin changes', () => {
@@ -591,10 +592,10 @@ describe('Sidebar', () => {
       });
 
       // After the settings refactor, admin sees: Photos, Explore, Map, Sharing,
-      //   People, Review Bursts, Review Duplicates, Archive, Trash, Settings (admin hub),
-      //   User Settings — 11 total
+      //   People, Review Bursts, Review Duplicates, Location Suggestions, Archive, Trash,
+      //   Settings (admin hub), User Settings — 12 total
       const icons = container.querySelectorAll('.MuiListItemIcon-root');
-      expect(icons).toHaveLength(11);
+      expect(icons).toHaveLength(12);
     });
 
     it('should highlight icon for selected menu item', () => {
