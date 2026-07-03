@@ -47,10 +47,10 @@ function openRaw(): BetterSqlite3.Database {
 // We do NOT override HOME here — we just use ':memory:' which bypasses the file path.
 
 describe('migrations — fresh :memory: database', () => {
-  it('reaches the latest user_version (5)', () => {
+  it('reaches the latest user_version (6)', () => {
     const db = openDb(':memory:');
     const version = db.pragma('user_version', { simple: true }) as number;
-    expect(version).toBe(5);
+    expect(version).toBe(6);
     db.close();
   });
 
@@ -141,11 +141,11 @@ describe('migrations — fresh :memory: database', () => {
     // Use raw DB so importLegacyManifests does not interfere with the settings count.
     const db = openRaw();
 
-    // Run again — should be a no-op (version already at 5, all seeds use INSERT OR IGNORE)
+    // Run again — should be a no-op (version already at 6, all seeds use INSERT OR IGNORE)
     runMigrations(db);
 
     const version = db.pragma('user_version', { simple: true }) as number;
-    expect(version).toBe(5);
+    expect(version).toBe(6);
 
     const count = (
       db.prepare('SELECT COUNT(*) as cnt FROM settings').get() as { cnt: number }
@@ -171,14 +171,14 @@ describe('migrations — fresh :memory: database', () => {
 
   it('migration 2 is idempotent — re-running on an already-migrated db is a no-op', () => {
     const db = openRaw();
-    // openRaw() already runs all migrations including v2, v3, v4, and v5
+    // openRaw() already runs all migrations including v2, v3, v4, v5, and v6
     const versionBefore = db.pragma('user_version', { simple: true }) as number;
-    expect(versionBefore).toBe(5);
+    expect(versionBefore).toBe(6);
 
     // Re-running must not throw and must not change version
     runMigrations(db);
     const versionAfter = db.pragma('user_version', { simple: true }) as number;
-    expect(versionAfter).toBe(5);
+    expect(versionAfter).toBe(6);
 
     db.close();
   });
@@ -219,25 +219,25 @@ describe('migrations — fresh :memory: database', () => {
     const colsBefore = db.prepare("PRAGMA table_info('folders')").all() as Array<{ name: string }>;
     expect(colsBefore.some((c) => c.name === 'circle_id')).toBe(false);
 
-    // Now run runMigrations — should apply v3, v4, and v5
+    // Now run runMigrations — should apply v3, v4, v5, and v6
     runMigrations(db);
 
     const version = db.pragma('user_version', { simple: true }) as number;
-    expect(version).toBe(5);
+    expect(version).toBe(6);
 
     const colsAfter = db.prepare("PRAGMA table_info('folders')").all() as Array<{ name: string }>;
     expect(colsAfter.some((c) => c.name === 'circle_id')).toBe(true);
     db.close();
   });
 
-  it('migration 3 is idempotent — re-running on a v5 db is a no-op', () => {
+  it('migration 3 is idempotent — re-running on a v6 db is a no-op', () => {
     const db = openRaw();
     const versionBefore = db.pragma('user_version', { simple: true }) as number;
-    expect(versionBefore).toBe(5);
+    expect(versionBefore).toBe(6);
 
     runMigrations(db);
     const versionAfter = db.pragma('user_version', { simple: true }) as number;
-    expect(versionAfter).toBe(5);
+    expect(versionAfter).toBe(6);
 
     db.close();
   });
@@ -281,7 +281,7 @@ describe('migrations — fresh :memory: database', () => {
 
     runMigrations(db);
 
-    expect(db.pragma('user_version', { simple: true }) as number).toBe(5);
+    expect(db.pragma('user_version', { simple: true }) as number).toBe(6);
     for (const { key } of SEED_SETTINGS_V4) {
       const after = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
       expect(after).toBeDefined();
@@ -308,8 +308,8 @@ describe('migrations — fresh :memory: database', () => {
     db.close();
   });
 
-  it('migration 5 bumps user_version to 5 from a v4 database', () => {
-    // Build a v4 database and verify that running migrations advances to 5.
+  it('migration 5 (and later) bumps user_version to 6 from a v4 database', () => {
+    // Build a v4 database and verify that running migrations advances to the latest (6).
     const db = new RawDatabase(':memory:') as BetterSqlite3.Database;
     db.pragma('foreign_keys = ON');
     db.exec(CREATE_FOLDERS);
@@ -339,7 +339,7 @@ describe('migrations — fresh :memory: database', () => {
 
     runMigrations(db);
 
-    expect(db.pragma('user_version', { simple: true }) as number).toBe(5);
+    expect(db.pragma('user_version', { simple: true }) as number).toBe(6);
     db.close();
   });
 
