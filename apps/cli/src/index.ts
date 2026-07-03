@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import { loginCommand } from './commands/login.js';
 import { importCommand } from './commands/import.js';
 import { syncCommand } from './commands/sync.js';
+import { scanCommand } from './commands/scan.js';
 import { statusCommand } from './commands/status.js';
 import { foldersCommand } from './commands/folders.js';
 import { circlesCommand } from './commands/circles.js';
@@ -11,6 +12,7 @@ import { retryCommand } from './commands/retry.js';
 import { settingsCommand } from './commands/settings.js';
 import { backupCommand } from './commands/backup.js';
 import { jobsCommand } from './commands/jobs.js';
+import { reportsCommand } from './commands/reports.js';
 import { printBanner } from './ui.js';
 
 // ESM-safe package.json read: createRequire allows require() in ESM modules.
@@ -40,6 +42,7 @@ program.addHelpText('beforeAll', () => {
 program.addCommand(loginCommand());
 program.addCommand(importCommand());
 program.addCommand(syncCommand());
+program.addCommand(scanCommand());
 program.addCommand(statusCommand());
 program.addCommand(foldersCommand());
 program.addCommand(circlesCommand());
@@ -47,6 +50,7 @@ program.addCommand(retryCommand());
 program.addCommand(settingsCommand());
 program.addCommand(backupCommand());
 program.addCommand(jobsCommand());
+program.addCommand(reportsCommand());
 
 // Bare invocation: if TTY launch TUI, else show help
 if (process.argv.length === 2) {

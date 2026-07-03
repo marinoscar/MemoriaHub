@@ -25,6 +25,12 @@ import {
   ALTER_FILES_ADD_UPLOAD_ID,
   ALTER_FILES_ADD_UPLOAD_PART_SIZE,
   CREATE_FILE_UPLOAD_PARTS,
+  ALTER_FILES_ADD_SKIP_REASON,
+  CREATE_SCANS,
+  CREATE_SCANS_IDX_CREATED,
+  CREATE_SCAN_FILES,
+  CREATE_SCAN_FILES_IDX_SCAN,
+  CREATE_SCAN_FILES_IDX_SCAN_KIND,
 } from './schema.js';
 
 interface Migration {
@@ -103,6 +109,28 @@ const MIGRATIONS: Migration[] = [
       // after a presigned PUT succeeds, so a crash leaves behind exactly the
       // parts that were confirmed by the storage provider.
       db.exec(CREATE_FILE_UPLOAD_PARTS);
+    },
+  },
+  {
+    version: 6,
+    up(db: BetterSqlite3.Database): void {
+      // Add skip_reason column: persists why a file was skipped ('dedup' when
+      // the server already had the content, 'unchanged' when the file matched
+      // a prior successful upload). Nullable — existing rows get NULL, and
+      // rows skipped before this migration simply have no recorded reason.
+      db.exec(ALTER_FILES_ADD_SKIP_REASON);
+    },
+  },
+  {
+    version: 7,
+    up(db: BetterSqlite3.Database): void {
+      // Add the pre-sync scan snapshot tables.  These are new, independent
+      // tables (no changes to `files`) so existing sync data is untouched.
+      db.exec(CREATE_SCANS);
+      db.exec(CREATE_SCANS_IDX_CREATED);
+      db.exec(CREATE_SCAN_FILES);
+      db.exec(CREATE_SCAN_FILES_IDX_SCAN);
+      db.exec(CREATE_SCAN_FILES_IDX_SCAN_KIND);
     },
   },
 ];

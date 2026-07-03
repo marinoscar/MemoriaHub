@@ -132,23 +132,36 @@ memoriahub menu
 
 When run in a non-TTY context (piped output, CI), bare invocation falls back to printing help.
 
-The home menu displays the ASCII banner, your connected server and account, the DB path, and a navigable list of actions:
+The root menu displays the ASCII banner, your connected server and account, the DB path, and a navigable hierarchical list of actions. Items marked `▸` are submenus:
 
 ```
   Login / Change server
-  Manage folders
-  Sync all folders
-  Sync selected folders
-  Status
-  Retry failed files
-  Settings
+  Sync ▸
+    Sync all folders
+    Sync selected folders
+    Retry failed files
+  Reports ▸
+    Folder overview
+    Recent runs
+    Storage synced
+    Duplicates
+  Settings ▸
+    Manage folders
+    Manage circles
+    App settings
+    Factory reset (delete all local data)
+  Tools ▸
+    Job queue monitor
+    Backup
   Help
   Quit
 ```
 
-When not logged in, only Login, Help, and Quit are shown.
+When not logged in, only Login, Settings ▸ (Factory reset only), Help, and Quit are shown.
 
-Navigate with arrow keys and Enter. Every item in the menu is the interactive equivalent of a direct CLI command.
+Navigate with arrow keys and Enter — selecting a `▸` item descends one level into its submenu. Press `Esc` or `q` to go back one level (not all the way to the root). The ASCII banner and the connected-server/account identity box render only on the root menu; submenus instead show a breadcrumb trail, e.g. `Menu › Sync`. Every item in the menu is the interactive equivalent of a direct CLI command.
+
+The Reports submenu is generated from a shared reports registry (see [`memoriahub reports`](#memoriahub-reports) below), so it grows automatically as new reports are added — no menu wiring is required per report.
 
 ### (b) Direct commands
 
@@ -227,19 +240,25 @@ The CLI validates any token (device-issued or manually supplied) by calling `GET
 | Command | Flags | Description | Menu equivalent |
 |---------|-------|-------------|-----------------|
 | `login` | `--server <url>` / `--token <pat>` | Authenticate via browser device-auth flow (default) or with an existing PAT (`--token`, CI/headless) | Login / Change server |
-| `folders add <path>` | `-r, --recursive` / `--disabled` | Register a folder in the managed registry | Manage folders → [a] add |
-| `folders list` | `--json` | List all registered folders | Manage folders |
-| `folders remove <id\|path>` | (none) | Remove a folder and cascade-delete its file records | Manage folders → [d] remove |
-| `folders enable <id\|path>` | (none) | Re-enable a disabled folder | Manage folders → [e] toggle |
-| `folders disable <id\|path>` | (none) | Disable a folder (skipped during sync) | Manage folders → [e] toggle |
-| `sync [folder...] --all` | `--all` / `--dry-run` / `-r, --recursive` / `--concurrency <n>` | Incremental sync of registered or specified folders | Sync all folders / Sync selected folders |
-| `status` | `--runs` / `--json` | Show per-folder sync status or recent run history | Status |
-| `retry` | `--all` / `--folder <id\|path>` / `--force` | Retry failed uploads; `--force` resets files blocked at the attempts cap | Retry failed files |
-| `settings list` | (none) | Print all settings and their current values | Settings |
-| `settings get <key>` | (none) | Get the current value of one setting | Settings |
-| `settings set <key> <value>` | (none) | Set a setting value | Settings |
+| `folders add <path>` | `-r, --recursive` / `--disabled` | Register a folder in the managed registry | Settings ▸ Manage folders → [a] add |
+| `folders list` | `--json` | List all registered folders | Settings ▸ Manage folders |
+| `folders remove <id\|path>` | (none) | Remove a folder and cascade-delete its file records | Settings ▸ Manage folders → [d] remove |
+| `folders enable <id\|path>` | (none) | Re-enable a disabled folder | Settings ▸ Manage folders → [e] toggle |
+| `folders disable <id\|path>` | (none) | Disable a folder (skipped during sync) | Settings ▸ Manage folders → [e] toggle |
+| `sync [folder...] --all` | `--all` / `--dry-run` / `-r, --recursive` / `--concurrency <n>` | Incremental sync of registered or specified folders | Sync ▸ Sync all folders / Sync selected folders |
+| `status` | `--runs` / `--json` | Quick per-folder sync status or recent run history; covers the same underlying data as `reports show overview` / `reports show runs`, just with a fixed, non-extensible output shape | Reports ▸ Folder overview / Recent runs |
+| `retry` | `--all` / `--folder <id\|path>` / `--force` | Retry failed uploads; `--force` resets files blocked at the attempts cap | Sync ▸ Retry failed files |
+| `settings list` | (none) | Print all settings and their current values | Settings ▸ App settings |
+| `settings get <key>` | (none) | Get the current value of one setting | Settings ▸ App settings |
+| `settings set <key> <value>` | (none) | Set a setting value | Settings ▸ App settings |
+| `reports list` | `--json` | List available reports (id, label, description) from the shared reports registry | Reports ▸ |
+| `reports show <id>` | `--json` | Run one report (`overview`, `runs`, `storage`, `duplicates`) and print a table (or JSON with `--json`) | Reports ▸ |
+| `jobs` (alias `queue`) | `--interval <sec>` / `--once` / `--json` / `--window <days>` | Live job queue dashboard (server load, ETA); requires an Admin PAT with `jobs:read` | Tools ▸ Job queue monitor |
+| `backup` | `--circle <id>` / `--all` / `--dest <path>` | Pull media blobs from the server to a local directory; requires an Admin PAT | Tools ▸ Backup |
 | `import <folder>` | `-r, --recursive` / `--dry-run` | One-shot import alias for `sync <folder>` (legacy back-compat) | — |
 | `menu` | (none) | Launch the interactive terminal UI (requires a TTY) | — |
+
+`circles list` / `circles use <id>` (set the active circle for uploads) are available as direct commands and are reachable interactively via Settings ▸ Manage circles.
 
 ---
 
@@ -362,6 +381,34 @@ all concurrent workers back off together when any one of them is throttled, so a
 bulk `sync` won't hammer a rate-limited endpoint. The sync output shows a
 `Rate limited — slowing down…` notice while a cooldown window is active.
 
+### `memoriahub reports`
+
+```bash
+# List available reports
+memoriahub reports list
+memoriahub reports list --json
+
+# Run a single report
+memoriahub reports show overview
+memoriahub reports show runs
+memoriahub reports show storage
+memoriahub reports show duplicates
+
+# Machine-readable JSON ({id, label, columns, rows, summary})
+memoriahub reports show storage --json
+```
+
+Reports are defined in a shared registry (`apps/cli/src/reports/`) used by both this headless command and the TUI's `Reports ▸` submenu, so the submenu grows automatically as new reports are registered — no separate menu wiring is needed. An unknown `<id>` prints an error to stderr and exits with code 1.
+
+Built-in reports:
+
+| ID | Label | Description |
+|----|-------|-------------|
+| `overview` | Folder overview | Same per-folder summary as `memoriahub status` |
+| `runs` | Recent runs | Same run history as `memoriahub status --runs` |
+| `storage` | Storage synced | Count plus total/average bytes of uploaded media |
+| `duplicates` | Duplicates | Files skipped during sync because the server already had identical content (backed by a persisted `skip_reason` column) |
+
 ### `memoriahub import <folder>` (legacy alias)
 
 ```bash
@@ -424,6 +471,102 @@ All state lives in `~/.memoriahub/memoriahub.db`. The `status` command reads fro
 
 ---
 
+## Scan (dry-run preview)
+
+`scan` is a fully offline, read-only preview of what a `sync` would do. It enumerates every file in a folder, reads lightweight local metadata (EXIF presence, GPS presence) from each file, and persists an immutable snapshot in the local SQLite database (`~/.memoriahub/memoriahub.db`) — the same file `sync` uses, but in dedicated tables that sync never touches. The result is a dashboard report you can revisit later or export to Excel.
+
+`scan`, `scan list`, `scan report`, and `scan export` are entirely local: no PAT and no server connection are required. Only `sync --scan` talks to the server, because it proceeds to actually reconcile and upload.
+
+Full details — data model, metadata scope, and the reconciliation algorithm — are in [docs/specs/cli-scan.md](../../docs/specs/cli-scan.md).
+
+### `memoriahub scan`
+
+```bash
+# Scan all registered folders and show the dashboard/report
+memoriahub scan --all
+
+# Scan a specific folder (auto-registers if not yet known, same as sync)
+memoriahub scan ~/Pictures/Vacation2024
+
+# Recursive scan when auto-registering
+memoriahub scan ~/Pictures -r
+
+# Machine-readable JSON instead of the dashboard/tables
+memoriahub scan --all --json
+
+# Persist the scan without rendering a report
+memoriahub scan --all --no-report
+
+# Override the concurrent file-read worker count for this run
+memoriahub scan --all --concurrency 5
+```
+
+Rendering adapts to context automatically: an Ink dashboard on a TTY, plain tables when piped, or JSON with `--json`.
+
+### `memoriahub scan list`
+
+```bash
+memoriahub scan list
+memoriahub scan list --json
+```
+
+Lists recent scan runs, most recent first.
+
+### `memoriahub scan report`
+
+```bash
+# Re-render the most recent scan
+memoriahub scan report
+
+# Re-render a specific scan by ID
+memoriahub scan report 12
+memoriahub scan report 12 --json
+```
+
+Re-renders a previously stored scan without touching the filesystem again.
+
+### `memoriahub scan export`
+
+```bash
+# Excel workbook: Summary sheet (KPIs/coverage/breakdowns) + Detail sheet (one row per file)
+memoriahub scan export 12 --out scan-report.xlsx
+
+# Flat CSV instead
+memoriahub scan export 12 --out scan-report.csv
+```
+
+The export format is inferred from the `--out` file extension (`--format xlsx|csv` overrides this).
+
+### `memoriahub sync --scan`
+
+```bash
+# Reconcile against a specific scan before syncing
+memoriahub sync ~/Pictures/Vacation2024 --scan 12
+
+# Reconcile against the most recently stored scan
+memoriahub sync --all --scan latest
+```
+
+Compares the live folder state against the scan snapshot (by file size + modified time, not content hashing) and prints a "changes since scan" panel showing added/removed/modified/unchanged counts before proceeding with the upload. A `sync` run without `--scan` behaves exactly as before — no reconciliation.
+
+### Example flow
+
+```bash
+# 1. Preview a folder before committing to a long upload
+memoriahub scan ~/Pictures/Vacation2024
+
+# 2. Review the report again later (e.g. scan ID 12 from step 1)
+memoriahub scan report 12
+
+# 3. Export it to Excel for offline review
+memoriahub scan export 12 --out vacation2024-scan.xlsx
+
+# 4. Sync, reconciling against the scan to see what changed since
+memoriahub sync ~/Pictures/Vacation2024 --scan 12
+```
+
+---
+
 ## Data locations
 
 | Path | Purpose |
@@ -455,6 +598,8 @@ After migration, use `memoriahub status` and `memoriahub folders list` to confir
 ### Overview
 
 Running `memoriahub` in a TTY (or `memoriahub menu`) launches a full-screen terminal UI built with Ink (React for the terminal). Every screen is navigable with the keyboard; no mouse required.
+
+Menu navigation is hierarchical, backed by a navigation stack: pressing Enter on a `▸` submenu item pushes onto the stack, and `Esc`/`q` pops one level rather than jumping back to the root menu. The screens documented below (sync dashboard, folder picker, folder manager) are unchanged by this restructuring — only how you reach them from the menu has changed.
 
 ### Sync dashboard layout
 

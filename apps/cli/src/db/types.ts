@@ -34,6 +34,8 @@ export interface FileRecord {
   status: FileStatus;
   attempt_count: number;
   last_error: string | null;
+  /** Why the file was skipped: 'dedup' (server already had the content) or 'unchanged' (matched a prior successful upload). Null when not skipped or not recorded. */
+  skip_reason: 'dedup' | 'unchanged' | null;
   media_item_id: string | null;
   storage_object_id: string | null;
   size_bytes: number | null;
@@ -84,4 +86,49 @@ export interface FileCounts {
   skipped: number;
   failed: number;
   total: number;
+}
+
+// ---------------------------------------------------------------------------
+// Scans (pre-sync dry-run snapshots)
+// ---------------------------------------------------------------------------
+
+export type ScanStatus = 'running' | 'complete' | 'error';
+
+/** Photo vs. video classification derived from the file's MIME type. */
+export type MediaKind = 'photo' | 'video';
+
+export interface Scan {
+  id: number;
+  created_at: string;       // ISO 8601
+  finished_at: string | null;
+  status: ScanStatus;
+  trigger: string;
+  folder_ids: string;       // JSON-encoded number[]
+  total_files: number;
+  total_bytes: number;
+  photo_count: number;
+  video_count: number;
+  exif_count: number;
+  gps_count: number;
+}
+
+export interface ScanFile {
+  id: number;
+  scan_id: number;
+  folder_id: number;
+  file_path: string;
+  size_bytes: number | null;
+  mtime_ms: number | null;
+  mime_type: string | null;
+  media_kind: MediaKind | null;
+  has_exif: boolean;
+  has_gps: boolean;
+  captured_at: string | null;
+  width: number | null;
+  height: number | null;
+  camera_make: string | null;
+  camera_model: string | null;
+  taken_lat: number | null;
+  taken_lng: number | null;
+  meta_error: string | null;
 }
