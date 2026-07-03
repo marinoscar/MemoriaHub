@@ -932,4 +932,78 @@ describe('Sidebar', () => {
       // keepMounted: false ensures drawer content unmounts when closed
     });
   });
+
+  describe('Utilities Section', () => {
+    it('renders a "Utilities" subheader', () => {
+      vi.mocked(usePermissions).mockReturnValue({
+        permissions: new Set(),
+        roles: new Set(),
+        hasPermission: vi.fn(),
+        hasAnyPermission: vi.fn(),
+        hasAllPermissions: vi.fn(),
+        hasRole: vi.fn(),
+        hasAnyRole: vi.fn(),
+        isAdmin: false,
+      });
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.getByText('Utilities')).toBeInTheDocument();
+    });
+
+    it('renders Review Bursts, Review Duplicates, and Location Suggestions as descendants of the Utilities list', () => {
+      vi.mocked(usePermissions).mockReturnValue({
+        permissions: new Set(),
+        roles: new Set(),
+        hasPermission: vi.fn(),
+        hasAnyPermission: vi.fn(),
+        hasAllPermissions: vi.fn(),
+        hasRole: vi.fn(),
+        hasAnyRole: vi.fn(),
+        isAdmin: false,
+      });
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.getByText('Review Bursts')).toBeInTheDocument();
+      expect(screen.getByText('Review Duplicates')).toBeInTheDocument();
+      expect(screen.getByText('Location Suggestions')).toBeInTheDocument();
+
+      const utilitiesSubheader = screen.getByText('Utilities');
+      const utilitiesList = utilitiesSubheader.closest('.MuiList-root');
+      expect(utilitiesList).not.toBeNull();
+      expect(utilitiesList!.textContent).toContain('Review Bursts');
+      expect(utilitiesList!.textContent).toContain('Review Duplicates');
+      expect(utilitiesList!.textContent).toContain('Location Suggestions');
+    });
+
+    it('no longer includes Review Bursts, Review Duplicates, or Location Suggestions under the Library list', () => {
+      vi.mocked(usePermissions).mockReturnValue({
+        permissions: new Set(),
+        roles: new Set(),
+        hasPermission: vi.fn(),
+        hasAnyPermission: vi.fn(),
+        hasAllPermissions: vi.fn(),
+        hasRole: vi.fn(),
+        hasAnyRole: vi.fn(),
+        isAdmin: false,
+      });
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      const librarySubheader = screen.getByText('Library');
+      const libraryList = librarySubheader.closest('.MuiList-root');
+      expect(libraryList).not.toBeNull();
+
+      // Library retains People, Archive, Trash
+      expect(libraryList!.textContent).toContain('People');
+      expect(libraryList!.textContent).toContain('Archive');
+      expect(libraryList!.textContent).toContain('Trash');
+
+      // The three utility items moved out of Library
+      expect(libraryList!.textContent).not.toContain('Review Bursts');
+      expect(libraryList!.textContent).not.toContain('Review Duplicates');
+      expect(libraryList!.textContent).not.toContain('Location Suggestions');
+    });
+  });
 });

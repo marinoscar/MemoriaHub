@@ -9,9 +9,60 @@ vi.mock('../../../hooks/usePermissions', () => ({
   usePermissions: vi.fn(),
 }));
 
+// Mock useCircle hook (test-utils' default MockCircleProvider only supplies a
+// single circle, which isn't enough to exercise multi-circle selection UI)
+vi.mock('../../../hooks/useCircle', () => ({
+  useCircle: vi.fn(),
+}));
+
+// Mock react-router-dom's useNavigate so we can assert on "Manage Circles" navigation
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual('react-router-dom');
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
+
 import { usePermissions } from '../../../hooks/usePermissions';
+import { useCircle } from '../../../hooks/useCircle';
 
 const mockUsePermissions = vi.mocked(usePermissions);
+const mockUseCircle = vi.mocked(useCircle);
+
+const mockCircle1 = {
+  id: 'circle-1',
+  name: 'Personal Library',
+  description: null,
+  ownerId: 'test-user-id',
+  isPersonal: true,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
+const mockCircle2 = {
+  id: 'circle-2',
+  name: 'Family Circle',
+  description: 'Our family',
+  ownerId: 'test-user-id',
+  isPersonal: false,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
+function makeCircleDefaults(overrides: Record<string, unknown> = {}) {
+  return {
+    circles: [mockCircle1, mockCircle2],
+    activeCircle: mockCircle1,
+    activeCircleId: 'circle-1',
+    activeCircleRole: 'circle_admin' as const,
+    loading: false,
+    setActiveCircle: vi.fn().mockResolvedValue(undefined),
+    refreshCircles: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
 
 describe('UserMenu', () => {
   beforeEach(() => {
@@ -29,6 +80,8 @@ describe('UserMenu', () => {
       hasAnyRole: vi.fn(),
       isAdmin: false,
     });
+
+    mockUseCircle.mockReturnValue(makeCircleDefaults());
   });
 
   describe('Rendering', () => {
@@ -354,6 +407,85 @@ describe('UserMenu', () => {
       await waitFor(() => {
         const systemSettingsItem = screen.getByRole('menuitem', { name: /system settings/i });
         expect(systemSettingsItem).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Circle Section', () => {
+    it('shows a "Manage Circles" menu item', async () => {
+      const user = userEvent.setup();
+
+      render(<UserMenu />);
+
+      await user.click(screen.getByRole('button'));
+
+      await waitFor(() => {
+        expect(screen.getByRole('menuitem', { name: /manage circles/i })).toBeInTheDocument();
+      });
+    });
+
+    it('shows both circle names as menu items', async () => {
+      const user = userEvent.setup();
+
+      render(<UserMenu />);
+
+      await user.click(screen.getByRole('button'));
+
+      await waitFor(() => {
+        expect(screen.getByRole('menuitem', { name: /personal library/i })).toBeInTheDocument();
+      });
+      expect(screen.getByRole('menuitem', { name: /family circle/i })).toBeInTheDocument();
+    });
+
+    it('calls setActiveCircle with the clicked circle id', async () => {
+      const setActiveCircle = vi.fn().mockResolvedValue(undefined);
+      mockUseCircle.mockReturnValue(makeCircleDefaults({ setActiveCircle }));
+
+      const user = userEvent.setup();
+
+      render(<UserMenu />);
+
+      await user.click(screen.getByRole('button'));
+
+      const familyItem = await screen.findByRole('menuitem', { name: /family circle/i });
+      await user.click(familyItem);
+
+      await waitFor(() => {
+        expect(setActiveCircle).toHaveBeenCalledWith('circle-2');
+      });
+    });
+
+    it('shows a disabled "No circles yet" item when circles list is empty', async () => {
+      mockUseCircle.mockReturnValue(makeCircleDefaults({ circles: [] }));
+
+      const user = userEvent.setup();
+
+      render(<UserMenu />);
+
+      await user.click(screen.getByRole('button'));
+
+      await waitFor(() => {
+        expect(screen.getByText('No circles yet')).toBeInTheDocument();
+      });
+    });
+
+    it('navigates to /circles when "Manage Circles" is clicked', async () => {
+      const user = userEvent.setup();
+
+      render(<UserMenu />);
+
+      await user.click(screen.getByRole('button'));
+
+      const manageItem = await screen.findByRole('menuitem', { name: /manage circles/i });
+      await user.click(manageItem);
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/circles');
+      });
+
+      // Menu should also close after navigation
+      await waitFor(() => {
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
       });
     });
   });
