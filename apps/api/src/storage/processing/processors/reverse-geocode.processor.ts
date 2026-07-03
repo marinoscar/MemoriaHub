@@ -64,14 +64,23 @@ export class ReverseGeocodeProcessor implements ObjectProcessor {
       const lat = gps?.['latitude'] ?? gps?.['GPSLatitude'];
       const lng = gps?.['longitude'] ?? gps?.['GPSLongitude'];
 
-      if (typeof lat !== 'number' || typeof lng !== 'number') {
-        // No GPS present — clean no-op
+      // Guard with Number.isFinite (not typeof): `typeof NaN === 'number'` is true,
+      // so a computed NaN latitude/longitude (e.g. exifr's result for an empty GPS
+      // block written by phones with location off) would otherwise slip through and
+      // be handed to the offline geocoder, which returns a bogus nearest city.
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        // No usable GPS present — clean no-op
         this.logger.debug(`No GPS data for object ${object.id}; skipping geocode`);
         return { success: true, metadata: {} };
       }
 
-      // Step 2: Call geo location service (dynamic provider selection)
-      const { result, source } = await this.geoLocationService.reverseGeocode(lat, lng);
+      // Step 2: Call geo location service (dynamic provider selection).
+      // Number.isFinite does not narrow `unknown`, but it guarantees a real
+      // finite number at runtime, so the cast is safe.
+      const { result, source } = await this.geoLocationService.reverseGeocode(
+        lat as number,
+        lng as number,
+      );
 
       if (!result) {
         this.logger.debug(`Geo provider returned null for object ${object.id} (${lat}, ${lng})`);

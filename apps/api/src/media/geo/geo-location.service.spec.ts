@@ -102,6 +102,40 @@ describe('GeoLocationService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Non-finite coordinate guard (choke point for all providers)
+  // -------------------------------------------------------------------------
+
+  describe('when called with non-finite coordinates', () => {
+    beforeEach(() => {
+      mockSystemSettings.getSettings.mockResolvedValue({});
+    });
+
+    it.each([
+      ['NaN lat', NaN, -84.0907],
+      ['NaN lng', 9.9281, NaN],
+      ['both NaN', NaN, NaN],
+      ['null lat', null as unknown as number, -84.0907],
+      ['undefined lng', 9.9281, undefined as unknown as number],
+      ['Infinity lat', Infinity, -84.0907],
+      ['-Infinity lng', 9.9281, -Infinity],
+    ])('short-circuits to a null result for %s', async (_label, lat, lng) => {
+      const { result, source } = await service.reverseGeocode(lat, lng);
+
+      expect(result).toBeNull();
+      expect(source).toBe('none');
+    });
+
+    it('does not read system settings or call any provider', async () => {
+      await service.reverseGeocode(NaN, NaN);
+
+      expect(mockSystemSettings.getSettings).not.toHaveBeenCalled();
+      expect(mockOffline.reverseGeocode).not.toHaveBeenCalled();
+      expect(mockNominatim.reverseGeocode).not.toHaveBeenCalled();
+      expect(mockGoogle.reverseGeocodeWithKey).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Default: offline
   // -------------------------------------------------------------------------
 
