@@ -185,11 +185,9 @@ export function useSuggestLocation(mediaId: string, onRefresh: () => void) {
 // useItemAutoAppliedSuggestion — resolves the LocationSuggestion row backing
 // an item whose coordSource === 'inferred', so the drawer's Revert action can
 // call POST /location-suggestions/:id/revert (the id there is the SUGGESTION
-// id, not the media item id). There is no "find suggestion by mediaItemId"
-// endpoint, so this scans the most recent page of auto_applied suggestions
-// for the circle (bounded to pageSize entries) — sufficient for a freshly
-// auto-applied item, but a suggestion older than the last `pageSize`
-// auto-applies in the circle won't be found and Revert will be disabled.
+// id, not the media item id). Uses the `mediaItemId` query param on
+// GET /media/location-suggestions for an exact, server-side lookup — no
+// client-side scanning of a bounded page of results.
 // ---------------------------------------------------------------------------
 
 export function useItemAutoAppliedSuggestion(circleId: string, mediaItemId: string, enabled: boolean) {
@@ -203,11 +201,10 @@ export function useItemAutoAppliedSuggestion(circleId: string, mediaItemId: stri
     }
     let cancelled = false;
     setLoading(true);
-    listLocationSuggestions({ circleId, status: 'auto_applied', pageSize: 100 })
+    listLocationSuggestions({ circleId, mediaItemId, status: 'auto_applied', page: 1, pageSize: 1 })
       .then((result) => {
         if (cancelled) return;
-        const match = result.items.find((s) => s.mediaItemId === mediaItemId);
-        setSuggestionId(match?.id ?? null);
+        setSuggestionId(result.items[0]?.id ?? null);
       })
       .catch(() => {
         if (!cancelled) setSuggestionId(null);

@@ -58,11 +58,13 @@ export interface InferLocationResult {
 
 export async function listLocationSuggestions(params: {
   circleId: string;
+  mediaItemId?: string;
   status?: LocationSuggestionStatus;
   page?: number;
   pageSize?: number;
 }): Promise<LocationSuggestionListResponse> {
   const p = new URLSearchParams({ circleId: params.circleId });
+  if (params.mediaItemId) p.set('mediaItemId', params.mediaItemId);
   if (params.status) p.set('status', params.status);
   if (params.page) p.set('page', String(params.page));
   if (params.pageSize) p.set('pageSize', String(params.pageSize));
