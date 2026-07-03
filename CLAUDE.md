@@ -887,6 +887,7 @@ Post-implementation audit records live under `docs/audits/`:
 | `database-dev` | PostgreSQL, Prisma | **ANY** database work: schema changes, migrations, seeds, queries |
 | `testing-dev` | Jest, Supertest, RTL | **ANY** testing: unit tests, integration tests, typecheck, test fixtures |
 | `docs-dev` | Technical documentation | **ANY** documentation: ARCHITECTURE.md, SECURITY.md, API.md, README updates |
+| `ops-dev` | Routine operations (Haiku) | Rebuilding/restarting containers, running Prisma migrations, running typecheck. NEVER for state-changing git operations |
 
 ### Mandatory Delegation Rules
 
@@ -895,6 +896,7 @@ Post-implementation audit records live under `docs/audits/`:
 3. **Database/Prisma changes** → ALWAYS use `database-dev`
 4. **Writing or updating tests** → ALWAYS use `testing-dev`
 5. **Documentation updates** → ALWAYS use `docs-dev`
+6. **Routine ops (container rebuilds, migrations, typecheck)** → use `ops-dev`. IMPORTANT: `ops-dev` must NEVER perform state-changing git operations (pull, merge, push, commit, worktree management, branch operations) — those are always handled by the main agent directly, and `ops-dev` is instructed to refuse them
 
 ### Multi-Domain Tasks
 
@@ -923,6 +925,9 @@ For tasks spanning multiple domains, you MUST invoke multiple agents sequentiall
 
 # Documentation work - MUST use docs-dev
 "Use docs-dev to update SECURITY.md with new auth flow"
+
+# Routine ops - use ops-dev (never for git operations)
+"Use ops-dev to rebuild the api container and run migrations"
 ```
 
 ### What You Should NOT Do Directly
