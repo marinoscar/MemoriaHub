@@ -346,6 +346,56 @@ export class FileRepo {
   }
 
   /**
+   * Aggregate size + count of successfully uploaded files across the given
+   * folder IDs (all folders if empty).  `avgBytes` is the rounded mean size.
+   */
+  storageSummary(
+    folderIds: number[] = [],
+  ): { items: number; totalBytes: number; avgBytes: number } {
+    let sql = `
+      SELECT
+        COUNT(*)                    AS items,
+        COALESCE(SUM(size_bytes), 0) AS totalBytes
+      FROM files
+      WHERE status = 'uploaded'`;
+    const params: number[] = [];
+
+    if (folderIds.length > 0) {
+      const placeholders = folderIds.map(() => '?').join(', ');
+      sql += ` AND folder_id IN (${placeholders})`;
+      params.push(...folderIds);
+    }
+
+    const row = this.db.prepare(sql).get(...params) as {
+      items: number;
+      totalBytes: number;
+    };
+    const items = row.items;
+    const totalBytes = row.totalBytes;
+    const avgBytes = items ? Math.round(totalBytes / items) : 0;
+    return { items, totalBytes, avgBytes };
+  }
+
+  /**
+   * List files skipped because the server already had identical content
+   * (skip_reason = 'dedup'), across the given folder IDs (all folders if empty).
+   */
+  duplicates(folderIds: number[] = []): FileRecord[] {
+    let sql = `SELECT * FROM files WHERE status = 'skipped' AND skip_reason = 'dedup'`;
+    const params: number[] = [];
+
+    if (folderIds.length > 0) {
+      const placeholders = folderIds.map(() => '?').join(', ');
+      sql += ` AND folder_id IN (${placeholders})`;
+      params.push(...folderIds);
+    }
+    sql += ' ORDER BY id';
+
+    const rows = this.db.prepare(sql).all(...params) as FileRow[];
+    return rows.map(rowToFile);
+  }
+
+  /**
    * Reset any files stuck in `uploading` status back to `queued`.
    * Called on startup to recover from interrupted sync sessions.
    * Optionally scoped to specific folder IDs.
