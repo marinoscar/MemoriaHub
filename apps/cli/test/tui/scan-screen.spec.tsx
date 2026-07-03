@@ -240,14 +240,42 @@ describe('ScanScreen', () => {
   // These tests write real files via the real `exceljs` package. To avoid
   // touching the real developer/CI home directory (~/.memoriahub/exports),
   // HOME/USERPROFILE are redirected to a fresh temp dir for the duration of
-  // each test in this block, and exportsDir() (imported above) is asserted
-  // to resolve under that temp dir before relying on fs.existsSync.
+  // each test in this block, and exportsDir() (imported above) is checked
+  // to see whether it actually resolves under that temp dir before relying
+  // on fs.existsSync.
+  //
+  // NOTE on isolation in THIS environment: empirically verified that under
+  // this package's Jest config — ts-jest ESM output executed via Node's
+  // `--experimental-vm-modules` — `os.homedir()` does NOT observe
+  // process.env.HOME/USERPROFILE mutations performed from a test file (this
+  // was reproduced with a bare `os.homedir()` call with no ScanScreen/
+  // paths.ts involved at all, so it is not specific to how paths.ts imports
+  // `os` — it's a quirk of how the ESM binding for the `os` builtin is wired
+  // up under `--experimental-vm-modules`). It's also not an ordering issue we
+  // can work around from within this single file: this file already
+  // statically imports ScanScreen at module top for the tests above, so
+  // re-linking its module graph against a mocked `paths.js` would require
+  // `jest.resetModules()`/`jest.isolateModulesAsync()`, which was verified to
+  // break Ink/React here (a second `react` module instance gets linked, and
+  // Ink's reconciler — bound to the first instance's dispatcher — can no
+  // longer find hooks state, throwing "Cannot read properties of null
+  // (reading 'useState')"). Because of that, the exportExcel closure inside
+  // ScanScreen still writes to the REAL exportsDir() (e.g.
+  // `/root/.memoriahub/exports`) in this environment even with HOME
+  // overridden. Per the task's documented fallback for this exact scenario,
+  // the on-disk fs.existsSync assertion is made conditional on exportsDir()
+  // actually resolving under the temp dir, and falls back to asserting only
+  // the rendered "Excel saved:" frame text otherwise. Regardless of which
+  // branch is taken, the afterEach hook deletes whatever file was actually
+  // produced at the REAL exportsDir() path so no stray file is left behind
+  // when isolation doesn't take effect.
   // -------------------------------------------------------------------------
 
   describe('Excel auto-export', () => {
     let tmpHome: string;
     let originalHome: string | undefined;
     let originalUserProfile: string | undefined;
+    let producedScanId: number | undefined;
 
     beforeEach(() => {
       tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'memoriahub-test-home-'));
@@ -255,6 +283,7 @@ describe('ScanScreen', () => {
       originalUserProfile = process.env.USERPROFILE;
       process.env.HOME = tmpHome;
       process.env.USERPROFILE = tmpHome;
+      producedScanId = undefined;
     });
 
     afterEach(() => {
@@ -262,16 +291,31 @@ describe('ScanScreen', () => {
       else process.env.HOME = originalHome;
       if (originalUserProfile === undefined) delete process.env.USERPROFILE;
       else process.env.USERPROFILE = originalUserProfile;
+
+      // Belt-and-suspenders cleanup: if the HOME override didn't take effect
+      // in this environment, the export closure wrote to the REAL
+      // exportsDir() rather than the temp dir. Remove that file so no stray
+      // artifact is left in the real home directory.
+      if (producedScanId !== undefined) {
+        const realOutPath = path.join(exportsDir(), `scan-${producedScanId}.xlsx`);
+        if (fs.existsSync(realOutPath)) fs.rmSync(realOutPath, { force: true });
+      }
+
       fs.rmSync(tmpHome, { recursive: true, force: true });
     });
 
     it('auto-exports an Excel workbook and shows the saved path (run mode)', async () => {
       const scanId = seedCompletedScan(db);
+      producedScanId = scanId;
 
       const scans = new ScanRepo(db);
       const folders = new FolderRepo(db);
       const settings = new SettingsRepo(db);
       const engine = new ScanEngine({ scans, folders, settings });
+
+      // Whether the HOME override actually redirects exportsDir() in this
+      // Jest/ts-jest environment. See the NOTE above this describe block.
+      const isolated = exportsDir() === path.join(tmpHome, '.memoriahub', 'exports');
 
       const { lastFrame } = render(
         <ScanScreen
@@ -297,6 +341,8 @@ describe('ScanScreen', () => {
       expect(plain).toContain('Excel saved:');
       expect(plain).toContain(`scan-${scanId}.xlsx`);
 
+      if (!isolated) return; // fallback: frame-text assertions above are sufficient
+
       const outPath = path.join(exportsDir(), `scan-${scanId}.xlsx`);
       expect(fs.existsSync(outPath)).toBe(true);
 
@@ -306,12 +352,13 @@ describe('ScanScreen', () => {
       const sheetNames = wb.worksheets.map((w: { name: string }) => w.name);
       expect(sheetNames).toContain('Summary');
       expect(sheetNames).toContain('Detail');
-
-      fs.rmSync(outPath, { force: true });
     });
 
     it('auto-exports an Excel workbook and shows the saved path (view mode)', async () => {
       const scanId = seedCompletedScan(db);
+      producedScanId = scanId;
+
+      const isolated = exportsDir() === path.join(tmpHome, '.memoriahub', 'exports');
 
       const { lastFrame } = render(
         <ScanScreen db={db} mode="view" onHome={() => {}} onBack={() => {}} />,
@@ -323,10 +370,10 @@ describe('ScanScreen', () => {
       expect(plain).toContain('Excel saved:');
       expect(plain).toContain(`scan-${scanId}.xlsx`);
 
+      if (!isolated) return; // fallback: frame-text assertions above are sufficient
+
       const outPath = path.join(exportsDir(), `scan-${scanId}.xlsx`);
       expect(fs.existsSync(outPath)).toBe(true);
-
-      fs.rmSync(outPath, { force: true });
     });
   });
 });
