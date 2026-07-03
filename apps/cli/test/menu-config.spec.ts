@@ -25,12 +25,13 @@ describe('menu-config', () => {
   // ---------------------------------------------------------------------------
 
   describe('visibleChildren', () => {
-    it('returns all 7 top-level nodes when logged in', () => {
+    it('returns all 8 top-level nodes when logged in', () => {
       const nodes = visibleChildren(MENU_TREE, true);
-      expect(nodes).toHaveLength(7);
+      expect(nodes).toHaveLength(8);
       expect(labels(nodes)).toEqual([
         'Login / Change server',
         'Sync',
+        'Scan (dry-run preview)',
         'Reports',
         'Settings',
         'Tools',
@@ -39,10 +40,11 @@ describe('menu-config', () => {
       ]);
     });
 
-    it('returns exactly [Login, Settings, Help, Quit] when logged out', () => {
+    it('returns exactly [Login, Scan, Settings, Help, Quit] when logged out', () => {
       const nodes = visibleChildren(MENU_TREE, false);
       expect(labels(nodes)).toEqual([
         'Login / Change server',
+        'Scan (dry-run preview)',
         'Settings',
         'Help',
         'Quit',
@@ -105,6 +107,18 @@ describe('menu-config', () => {
         'Sync selected folders',
         'Retry failed files',
       ]);
+    });
+
+    it('finds the scan submenu with its 3 loggedOut action children', () => {
+      const scan = findSubmenu('scan');
+      expect(scan).toBeDefined();
+      expect(scan!.children.every((c) => c.kind === 'action')).toBe(true);
+      const actions = scan!.children.map((c) =>
+        c.kind === 'action' ? c.action : null,
+      );
+      expect(actions).toEqual(['scan-all', 'scan-select', 'scan-report']);
+      const nodes = visibleChildren(scan!, false);
+      expect(nodes).toHaveLength(3);
     });
 
     it('returns a reports submenu whose children match the report registry ids', () => {

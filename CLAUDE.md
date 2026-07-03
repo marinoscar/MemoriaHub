@@ -100,6 +100,16 @@ Assume the branch already exists and is checked out. Do **not** create branches 
 
 ---
 
+### CLI Versioning Rule (MANDATORY)
+Every time a **new feature or improvement** is added to the CLI (`apps/cli`), bump the CLI version by
+**one increment on the last (patch) digit** in `apps/cli/package.json` — e.g. `1.1.2 → 1.1.3`, then
+`1.1.3 → 1.1.4` for the next feature. After editing the version, sync the lockfile with
+`npm install --package-lock-only` (from the repo root). The CLI reads its version from `package.json`
+at runtime, so no source constant needs changing. Pure bug-fix-only changes may reuse the same bump
+discipline at your discretion, but every feature/improvement MUST carry a version bump.
+
+---
+
 ### Commit Message Standard (MANDATORY: Conventional Commits)
 Use this format:
 

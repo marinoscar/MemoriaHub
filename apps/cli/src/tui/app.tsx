@@ -30,6 +30,7 @@ import { FolderManager } from './FolderManager.js';
 import { CircleManager } from './CircleManager.js';
 import { PickFolders } from './PickFolders.js';
 import { SyncDashboard } from './SyncDashboard.js';
+import { ScanScreen } from './ScanScreen.js';
 import { ReportView } from './ReportView.js';
 import { SettingsScreen } from './SettingsScreen.js';
 import { FactoryResetScreen } from './FactoryResetScreen.js';
@@ -53,8 +54,10 @@ type Screen =
   | { kind: 'login' }
   | { kind: 'folders' }
   | { kind: 'circles' }
-  | { kind: 'pickFolders' }
+  | { kind: 'pickFolders'; purpose?: 'sync' | 'scan' }
   | { kind: 'dashboard'; all?: boolean; folderIds?: number[]; retryFailedOnly?: boolean }
+  | { kind: 'scan'; all?: boolean; folderIds?: number[] }
+  | { kind: 'scanReport' }
   | { kind: 'help' }
   | { kind: 'settings' }
   | { kind: 'factoryReset' }
@@ -224,6 +227,15 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
       case 'retry':
         push({ kind: 'screen', screen: { kind: 'dashboard', all: true, retryFailedOnly: true } });
         break;
+      case 'scan-all':
+        push({ kind: 'screen', screen: { kind: 'scan', all: true } });
+        break;
+      case 'scan-select':
+        push({ kind: 'screen', screen: { kind: 'pickFolders', purpose: 'scan' } });
+        break;
+      case 'scan-report':
+        push({ kind: 'screen', screen: { kind: 'scanReport' } });
+        break;
       case 'jobs':
         push({ kind: 'screen', screen: { kind: 'jobs' } });
         break;
@@ -378,16 +390,42 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
         />
       );
 
-    case 'pickFolders':
+    case 'pickFolders': {
+      const purpose = screen.purpose ?? 'sync';
       return (
         <PickFolders
           db={db}
+          title={purpose === 'scan' ? 'Scan Selected Folders' : undefined}
           onConfirm={(folderIds) =>
-            setStack((prev) => [...prev, { kind: 'screen', screen: { kind: 'dashboard', folderIds } }])
+            setStack((prev) => [
+              ...prev,
+              {
+                kind: 'screen',
+                screen:
+                  purpose === 'scan'
+                    ? { kind: 'scan', folderIds }
+                    : { kind: 'dashboard', folderIds },
+              },
+            ])
           }
           onBack={pop}
         />
       );
+    }
+
+    case 'scan':
+      return (
+        <ScanScreen
+          db={db}
+          all={screen.all}
+          folderIds={screen.folderIds}
+          onHome={resetToRoot}
+          onBack={pop}
+        />
+      );
+
+    case 'scanReport':
+      return <ScanScreen db={db} mode="view" onHome={resetToRoot} onBack={pop} />;
 
     case 'dashboard':
       if (!config) {
@@ -478,18 +516,22 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
           paddingX={3}
           paddingY={2}
         >
-          <Text bold color="cyan">MemoriaHub CLI — Help</Text>
+          <Text bold color="cyan">MemoriaHub CLI — Help  ·  v{currentVersion}</Text>
           <Text> </Text>
-          <Text>Use the interactive menu to manage folders and run syncs.</Text>
+          <Text>Use the interactive menu to manage folders, scan, and run syncs.</Text>
+          <Text dimColor>Run `memoriahub` (no args) or `memoriahub menu` to open this UI.</Text>
           <Text> </Text>
           <Text dimColor>Headless commands (bypass TUI):</Text>
           <Text>  memoriahub login      Configure server + PAT</Text>
+          <Text>  memoriahub import     Import a folder once (add + sync)</Text>
+          <Text>  memoriahub sync       Run a sync (add --scan to reconcile a prior scan)</Text>
+          <Text>  memoriahub scan       Dry-run preview: report what a sync would do</Text>
+          <Text>  memoriahub status     Show sync status and counts</Text>
           <Text>  memoriahub folders    Manage watched folders</Text>
           <Text>  memoriahub circles    Manage active circle</Text>
-          <Text>  memoriahub sync       Run a sync</Text>
-          <Text>  memoriahub reports    Show reports (overview, runs, storage, duplicates)</Text>
           <Text>  memoriahub retry      Retry failed files</Text>
           <Text>  memoriahub jobs       Live job queue monitor</Text>
+          <Text>  memoriahub reports    Show reports (overview, runs, storage, duplicates)</Text>
           <Text>  memoriahub backup     Back up circle media to a local folder</Text>
           <Text>  memoriahub settings   Manage settings</Text>
           <Text> </Text>

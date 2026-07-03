@@ -71,14 +71,19 @@ function CoverageMeter(props: {
 // ScanDashboard component
 // ---------------------------------------------------------------------------
 
-export function ScanDashboard(props: ScanDashboardProps): React.ReactElement {
-  const { report, serverUrl } = props;
-  const { exit } = useApp();
-
-  useInput((input, key) => {
-    if (input === 'q' || key.escape || key.return) exit();
-  });
-
+/**
+ * ScanReportBody — the presentational report (header, KPI band, coverage meters,
+ * breakdown tables) WITHOUT any footer or key handling.  Shared by the headless
+ * ScanDashboard (scan command) and the app-hosted ScanScreen (interactive menu)
+ * so both surfaces render an identical report.
+ */
+export function ScanReportBody({
+  report,
+  serverUrl,
+}: {
+  report: ScanReport;
+  serverUrl?: string;
+}): React.ReactElement {
   const { scan, kpis, coverage, byFolder, byCamera, largest } = report;
 
   const serverLabel = serverUrl
@@ -206,7 +211,25 @@ export function ScanDashboard(props: ScanDashboardProps): React.ReactElement {
         </Box>
       )}
 
-      {/* 7. Footer */}
+    </Box>
+  );
+}
+
+export function ScanDashboard(props: ScanDashboardProps): React.ReactElement {
+  const { report, serverUrl } = props;
+  const { exit } = useApp();
+
+  useInput((input, key) => {
+    if (input === 'q' || key.escape || key.return) exit();
+  });
+
+  const { scan } = report;
+
+  return (
+    <Box flexDirection="column" gap={1}>
+      <ScanReportBody report={report} serverUrl={serverUrl} />
+
+      {/* Footer */}
       <Box paddingX={2}>
         <Text dimColor>
           scanned in {formatDuration(scan.finished_at && scan.created_at
@@ -215,7 +238,6 @@ export function ScanDashboard(props: ScanDashboardProps): React.ReactElement {
           {'   ·   '}[q] quit
         </Text>
       </Box>
-
     </Box>
   );
 }
