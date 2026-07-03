@@ -35,6 +35,7 @@ const SettingsHubPage = lazy(() => import('./pages/Admin/SettingsHubPage'));
 const TaggingSettingsPage = lazy(() => import('./pages/Admin/TaggingSettingsPage'));
 const BurstsSettingsPage = lazy(() => import('./pages/Admin/BurstsSettingsPage'));
 const DuplicatesSettingsPage = lazy(() => import('./pages/Admin/DuplicatesSettingsPage'));
+const LocationInferenceSettingsPage = lazy(() => import('./pages/Admin/LocationInferenceSettingsPage'));
 const SearchPage = lazy(() => import('./pages/SearchPage'));
 const PeoplePage = lazy(() => import('./pages/People/PeoplePage'));
 const AlbumsPage = lazy(() => import('./pages/Albums'));
@@ -95,6 +96,7 @@ function AppRoutes() {
                 <Route path="/admin/settings/face" element={<FaceSettingsPage />} />
                 <Route path="/admin/settings/bursts" element={<BurstsSettingsPage />} />
                 <Route path="/admin/settings/duplicates" element={<DuplicatesSettingsPage />} />
+                <Route path="/admin/settings/location-inference" element={<LocationInferenceSettingsPage />} />
                 <Route path="/admin/settings/geo" element={<GeoSettingsPage />} />
                 <Route path="/admin/settings/storage/providers" element={<StorageProvidersPage />} />
                 <Route path="/admin/settings/storage/insights" element={<StorageInsightsPage />} />
