@@ -30,6 +30,7 @@ interface FileRow {
   first_seen_at: string;
   updated_at: string;
   uploaded_at: string | null;
+  skip_reason: string | null;
 }
 
 /** A completed multipart upload part as persisted in file_upload_parts. */
@@ -57,6 +58,7 @@ function rowToFile(row: FileRow): FileRecord {
     first_seen_at: row.first_seen_at,
     updated_at: row.updated_at,
     uploaded_at: row.uploaded_at,
+    skip_reason: (row.skip_reason as 'dedup' | 'unchanged' | null) ?? null,
   };
 }
 
@@ -77,6 +79,7 @@ export interface FilePatch {
   uploaded_at?: string | null;
   last_error?: string | null;
   attempt_count?: number;
+  skip_reason?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -108,8 +111,8 @@ export class FileRepo {
           `INSERT INTO files
              (folder_id, file_path, sha256, status, media_item_id,
               storage_object_id, size_bytes, mime_type, mtime_ms, first_seen_at, updated_at,
-              uploaded_at, last_error, attempt_count)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              uploaded_at, last_error, attempt_count, skip_reason)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           folderId,
@@ -126,6 +129,7 @@ export class FileRepo {
           fields.uploaded_at ?? null,
           fields.last_error ?? null,
           fields.attempt_count ?? 0,
+          fields.skip_reason ?? null,
         );
     } catch {
       // UNIQUE constraint violation — update existing row with supplied fields.
@@ -150,6 +154,7 @@ export class FileRepo {
       apply('uploaded_at', 'uploaded_at');
       apply('last_error', 'last_error');
       apply('attempt_count', 'attempt_count');
+      apply('skip_reason', 'skip_reason');
 
       params.push(folderId, filePath);
       this.db
@@ -198,6 +203,7 @@ export class FileRepo {
     apply('uploaded_at', 'uploaded_at');
     apply('last_error', 'last_error');
     apply('attempt_count', 'attempt_count');
+    apply('skip_reason', 'skip_reason');
 
     params.push(id);
     this.db

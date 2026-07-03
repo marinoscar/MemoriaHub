@@ -401,7 +401,11 @@ export class SyncEngine extends TypedEmitter {
         if (dedupMediaId !== null) {
           // Already on server — skip
           if (!isDryRun) {
-            files.setStatus(fileId, 'skipped', { sha256, media_item_id: dedupMediaId });
+            files.setStatus(fileId, 'skipped', {
+              sha256,
+              media_item_id: dedupMediaId,
+              skip_reason: 'dedup',
+            });
           } else {
             // dry-run: revert status to queued (keep side-effect-free on file rows)
             files.setStatus(fileId, 'queued', { sha256 });
@@ -502,6 +506,7 @@ export class SyncEngine extends TypedEmitter {
             sha256,
             media_item_id: mediaItem.id,
             storage_object_id: objectId,
+            skip_reason: 'dedup',
           });
           this.emit(EV.FILE_SKIPPED, { fileId, path: filePath, reason: 'dedup' });
           this._emitProgress(files, targetFolderIds, total);
