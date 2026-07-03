@@ -14,8 +14,6 @@ import { Navigate, Link as RouterLink } from 'react-router-dom';
 import { usePermissions } from '../hooks/usePermissions';
 import { useSystemSettings } from '../hooks/useSystemSettings';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
-import { SystemSettingsEditor } from '../components/admin/SystemSettingsEditor';
-import { FeatureFlagsList } from '../components/admin/FeatureFlagsList';
 import { UISettings } from '../components/admin/UISettings';
 import { StorageSettings } from '../components/admin/StorageSettings';
 import { resetJobHistory } from '../services/jobInsights';
@@ -111,9 +109,7 @@ export default function SystemSettingsPage() {
               sx={{ borderBottom: 1, borderColor: 'divider' }}
             >
               <Tab label="UI Settings" />
-              <Tab label="Feature Flags" />
               <Tab label="Storage" />
-              <Tab label="Advanced (JSON)" />
             </Tabs>
 
             <Box sx={{ p: 3 }}>
@@ -126,28 +122,12 @@ export default function SystemSettingsPage() {
               </TabPanel>
 
               <TabPanel value={tabIndex} index={1}>
-                <FeatureFlagsList
-                  flags={settings.features}
-                  onSave={(features) => handleSave('features', features)}
-                  disabled={!canWrite || isSaving}
-                />
-              </TabPanel>
-
-              <TabPanel value={tabIndex} index={2}>
                 <StorageSettings
                   settings={settings.storage}
                   jobsSettings={settings.jobs}
                   onSave={(storage) => handleSave('storage', storage)}
                   onSaveJobs={(jobs) => handleSave('jobs', jobs)}
                   onResetHistory={canWrite ? () => resetJobHistory().then(() => undefined) : undefined}
-                  disabled={!canWrite || isSaving}
-                />
-              </TabPanel>
-
-              <TabPanel value={tabIndex} index={3}>
-                <SystemSettingsEditor
-                  settings={settings}
-                  onSave={updateSettings}
                   disabled={!canWrite || isSaving}
                 />
               </TabPanel>
