@@ -207,6 +207,37 @@ describe('GeocodeHandler', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Non-finite GPS coordinates (NaN slips past a plain null check)
+  // -------------------------------------------------------------------------
+
+  describe('when mediaItem has non-finite takenLat/takenLng', () => {
+    it.each([
+      ['NaN lat', NaN, -84.0907],
+      ['NaN lng', 9.9281, NaN],
+      ['both NaN', NaN, NaN],
+      ['Infinity lat', Infinity, -84.0907],
+    ])('marks status processed without calling the geocoder for %s', async (_label, takenLat, takenLng) => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({
+        id: 'media-1',
+        takenLat,
+        takenLng,
+        circleId: 'circle-1',
+        deletedAt: null,
+      } as any);
+      mockPrisma.mediaGeocodeStatus.upsert.mockResolvedValue({} as any);
+
+      await handler.process(makeJob());
+
+      expect(mockGeoLocationService.reverseGeocode).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaItem.update).not.toHaveBeenCalled();
+
+      const calls = mockPrisma.mediaGeocodeStatus.upsert.mock.calls;
+      const finalStatus = calls[calls.length - 1][0];
+      expect(finalStatus.update.status).toBe(MediaMetadataStatusType.processed);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Happy path — successful geocoding
   // -------------------------------------------------------------------------
 
