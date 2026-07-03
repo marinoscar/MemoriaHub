@@ -44,6 +44,7 @@ const BurstsPage = lazy(() => import('./pages/Bursts/BurstsPage'));
 const BurstGroupPage = lazy(() => import('./pages/Bursts/BurstGroupPage'));
 const DuplicatesPage = lazy(() => import('./pages/Duplicates/DuplicatesPage'));
 const DuplicateGroupPage = lazy(() => import('./pages/Duplicates/DuplicateGroupPage'));
+const LocationSuggestionsPage = lazy(() => import('./pages/LocationSuggestions/LocationSuggestionsPage'));
 const ArchivePage = lazy(() => import('./pages/Archive/ArchivePage'));
 const TrashPage = lazy(() => import('./pages/Trash/TrashPage'));
 const PublicSharePage = lazy(() => import('./pages/Public/PublicSharePage'));
@@ -119,6 +120,7 @@ function AppRoutes() {
                 <Route path="/bursts/:id" element={<BurstGroupPage />} />
                 <Route path="/duplicates" element={<DuplicatesPage />} />
                 <Route path="/duplicates/:id" element={<DuplicateGroupPage />} />
+                <Route path="/location-suggestions" element={<LocationSuggestionsPage />} />
                 <Route path="/archive" element={<ArchivePage />} />
                 <Route path="/trash" element={<TrashPage />} />
               </Route>
