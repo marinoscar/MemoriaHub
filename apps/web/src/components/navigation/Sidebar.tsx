@@ -77,7 +77,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     { label: 'Photos', icon: <HomeIcon />, path: '/' },
     { label: 'Explore', icon: <ExploreIcon />, path: '/search' },
     { label: 'Map', icon: <MapIcon />, path: '/map' },
-    { label: 'Sharing', icon: <GroupWorkIcon />, path: '/circles' },
+    { label: 'Circles', icon: <GroupWorkIcon />, path: '/circles' },
   ];
 
   const libraryItems: NavItemDef[] = [
