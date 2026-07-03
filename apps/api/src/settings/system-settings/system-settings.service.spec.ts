@@ -127,6 +127,7 @@ describe('SystemSettingsService', () => {
         storage: DEFAULT_SYSTEM_SETTINGS.storage,
         burst: DEFAULT_SYSTEM_SETTINGS.burst,
         dedup: DEFAULT_SYSTEM_SETTINGS.dedup,
+        locationInference: DEFAULT_SYSTEM_SETTINGS.locationInference,
         geo: DEFAULT_SYSTEM_SETTINGS.geo,
         jobs: DEFAULT_SYSTEM_SETTINGS.jobs,
       };
@@ -221,6 +222,7 @@ describe('SystemSettingsService', () => {
         storage: DEFAULT_SYSTEM_SETTINGS.storage,
         burst: DEFAULT_SYSTEM_SETTINGS.burst,
         dedup: DEFAULT_SYSTEM_SETTINGS.dedup,
+        locationInference: DEFAULT_SYSTEM_SETTINGS.locationInference,
         geo: DEFAULT_SYSTEM_SETTINGS.geo,
         jobs: DEFAULT_SYSTEM_SETTINGS.jobs,
       };
