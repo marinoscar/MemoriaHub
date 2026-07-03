@@ -9,6 +9,7 @@ import {
 import {
   PhotoLibrary as PhotoLibraryIcon,
   BurstMode as BurstModeIcon,
+  ContentCopy as ContentCopyIcon,
 } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
 import { useCircle } from '../hooks/useCircle';
@@ -71,6 +72,23 @@ export default function HomePage() {
           sx={{ mx: { xs: 2, md: 3 }, mt: 2 }}
         >
           {data.counts.pendingBurstGroups} burst group{data.counts.pendingBurstGroups !== 1 ? 's' : ''} ready to review
+        </Alert>
+      )}
+
+      {/* Pending duplicate groups banner */}
+      {data?.counts?.pendingDuplicateGroups != null && data.counts.pendingDuplicateGroups > 0 && (
+        <Alert
+          severity="info"
+          icon={<ContentCopyIcon />}
+          action={
+            <Button size="small" component={RouterLink} to="/duplicates">
+              Review
+            </Button>
+          }
+          sx={{ mx: { xs: 2, md: 3 }, mt: 2 }}
+        >
+          {data.counts.pendingDuplicateGroups} duplicate group
+          {data.counts.pendingDuplicateGroups !== 1 ? 's' : ''} ready to review
         </Alert>
       )}
 

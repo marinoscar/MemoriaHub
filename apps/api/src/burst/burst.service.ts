@@ -14,6 +14,8 @@ import {
   StorageProvider,
 } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { FEATURE_KEYS } from '../common/types/settings.types';
 import { BurstQueryDto } from './dto/burst-query.dto';
 import { ResolveBurstDto } from './dto/resolve-burst.dto';
 
@@ -28,7 +30,38 @@ export class BurstService {
     @Inject(STORAGE_PROVIDER)
     private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
+    private readonly systemSettings: SystemSettingsService,
   ) {}
+
+  /**
+   * Re-enqueue duplicate_detection (priority 10, reason rerun) for a set of
+   * media items after a burst group is resolved or dismissed — surviving /
+   * ungrouped items were previously excluded from dedup matching while their
+   * burst group was pending. Best-effort: gated by the duplicateDetection
+   * feature flag, never throws (a dedup re-enqueue failure must not fail the
+   * burst resolve/dismiss action).
+   */
+  private async reenqueueDuplicateDetection(circleId: string, mediaItemIds: string[]): Promise<void> {
+    if (mediaItemIds.length === 0) return;
+    try {
+      const dedupOn = await this.systemSettings.isFeatureEnabled(FEATURE_KEYS.DUPLICATE_DETECTION);
+      if (!dedupOn) return;
+
+      for (const mediaItemId of mediaItemIds) {
+        await this.enrichmentJobService.enqueue({
+          type: 'duplicate_detection',
+          mediaItemId,
+          circleId,
+          reason: JobReason.rerun,
+          priority: 10,
+        });
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Failed to re-enqueue duplicate_detection after burst resolution: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Private helpers
@@ -276,6 +309,11 @@ export class BurstService {
       `Burst group ${id} resolved by user ${userId}: kept=${dto.keepIds.length}, deleted=${deleteIds.length}`,
     );
 
+    // Surviving (kept) items were excluded from dedup matching while this
+    // burst group was pending — now that it's resolved, let them compete for
+    // duplicate matches again.
+    await this.reenqueueDuplicateDetection(group.circleId, dto.keepIds);
+
     return {
       data: {
         deleted: deleteIds.length,
@@ -332,6 +370,10 @@ export class BurstService {
     ]);
 
     this.logger.log(`Burst group ${id} dismissed by user ${userId}: ungrouped ${memberCount} items`);
+
+    // All members are ungrouped (none deleted) — let them compete for
+    // duplicate matches now that the burst group is no longer pending.
+    await this.reenqueueDuplicateDetection(group.circleId, group.items.map((i) => i.id));
 
     return {
       data: {

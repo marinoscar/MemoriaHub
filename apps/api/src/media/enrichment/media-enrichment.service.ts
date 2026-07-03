@@ -65,6 +65,7 @@ export class MediaEnrichmentService {
       const taggingOn = settings.features?.['autoTagging'] === true;
       const faceOn = settings.features?.['faceRecognition'] === true;
       const burstOn = settings.features?.['burstDetection'] === true;
+      const dedupOn = settings.features?.['duplicateDetection'] === true;
       const videoFaceOn = settings.face?.video?.enabled !== false;
 
       // Pre-compute env kill-switches once (exact expressions from old listeners).
@@ -72,6 +73,7 @@ export class MediaEnrichmentService {
       const faceAutoDetect = process.env['FACE_AUTO_DETECT'] ?? 'true';
       const faceKilled = faceAutoDetect === 'false';
       const burstKilled = process.env['BURST_DETECTION_ENABLED'] === 'false';
+      const dedupKilled = process.env['DUPLICATE_DETECTION_ENABLED'] === 'false';
 
       const enqueued: string[] = [];
       const skipped: string[] = [];
@@ -182,6 +184,25 @@ export class MediaEnrichmentService {
       } else if (item.type === MediaType.photo) {
         const reason = !burstOn ? 'feature disabled' : 'BURST_DETECTION_ENABLED=false';
         skipped.push(`burst_detection(${reason})`);
+      }
+
+      // ------------------------------------------------------------------
+      // Duplicate detection — photos only; no status upsert (by design,
+      // mirrors burst_detection which has no per-item status table either)
+      // ------------------------------------------------------------------
+      if (item.type === MediaType.photo && dedupOn && !dedupKilled) {
+        const job = await this.enrichmentJobService.enqueue({
+          type: 'duplicate_detection',
+          mediaItemId: item.id,
+          circleId: item.circleId,
+          reason: JobReason.upload,
+          priority: 10,
+        });
+
+        enqueued.push(`duplicate_detection(job=${job.id})`);
+      } else if (item.type === MediaType.photo) {
+        const reason = !dedupOn ? 'feature disabled' : 'DUPLICATE_DETECTION_ENABLED=false';
+        skipped.push(`duplicate_detection(${reason})`);
       }
 
       this.logger.log(

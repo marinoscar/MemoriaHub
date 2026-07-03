@@ -25,6 +25,11 @@ vi.mock('../../hooks/useCircle', () => ({
   useCircle: vi.fn(),
 }));
 
+// useDashboard drives the pending burst/duplicate review-queue banners.
+vi.mock('../../hooks/useDashboard', () => ({
+  useDashboard: vi.fn(),
+}));
+
 // Mock MediaGallery so its internal useInfiniteMedia / listMedia calls never fire.
 vi.mock('../../components/media/MediaGallery', () => ({
   MediaGallery: vi.fn(({ emptyState }: { emptyState?: React.ReactNode }) => (
@@ -38,8 +43,10 @@ vi.mock('../../components/media/MediaGallery', () => ({
 
 import HomePage from '../../pages/HomePage';
 import { useCircle } from '../../hooks/useCircle';
+import { useDashboard } from '../../hooks/useDashboard';
 
 const mockUseCircle = vi.mocked(useCircle);
+const mockUseDashboard = vi.mocked(useDashboard);
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -98,6 +105,14 @@ function setupCircleLoading() {
 describe('HomePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no dashboard data, so no review-queue banners render unless a
+    // test explicitly overrides this.
+    mockUseDashboard.mockReturnValue({
+      data: null,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -183,6 +198,127 @@ describe('HomePage', () => {
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
       expect(screen.getByRole('link', { name: /go to circles/i })).toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // e) Pending duplicate groups banner (driven by counts.pendingDuplicateGroups)
+  // -------------------------------------------------------------------------
+  describe('Pending duplicate groups banner', () => {
+    it('does not render the banner when pendingDuplicateGroups is 0', () => {
+      setupActiveCircle();
+      mockUseDashboard.mockReturnValue({
+        data: {
+          onThisDay: [],
+          recent: [],
+          favorites: [],
+          counts: { total: 10, missingGeo: 0, pendingDuplicateGroups: 0 },
+        },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      expect(screen.queryByText(/ready to review/i)).not.toBeInTheDocument();
+    });
+
+    it('does not render the banner when pendingDuplicateGroups is absent', () => {
+      setupActiveCircle();
+      mockUseDashboard.mockReturnValue({
+        data: {
+          onThisDay: [],
+          recent: [],
+          favorites: [],
+          counts: { total: 10, missingGeo: 0 },
+        },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      expect(screen.queryByText(/duplicate group.*ready to review/i)).not.toBeInTheDocument();
+    });
+
+    it('renders the banner with a singular label when pendingDuplicateGroups is 1', () => {
+      setupActiveCircle();
+      mockUseDashboard.mockReturnValue({
+        data: {
+          onThisDay: [],
+          recent: [],
+          favorites: [],
+          counts: { total: 10, missingGeo: 0, pendingDuplicateGroups: 1 },
+        },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      expect(screen.getByText(/1 duplicate group ready to review/i)).toBeInTheDocument();
+    });
+
+    it('renders the banner with a plural label when pendingDuplicateGroups > 1', () => {
+      setupActiveCircle();
+      mockUseDashboard.mockReturnValue({
+        data: {
+          onThisDay: [],
+          recent: [],
+          favorites: [],
+          counts: { total: 10, missingGeo: 0, pendingDuplicateGroups: 5 },
+        },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      expect(screen.getByText(/5 duplicate groups ready to review/i)).toBeInTheDocument();
+    });
+
+    it('renders a "Review" link pointing to /duplicates', () => {
+      setupActiveCircle();
+      mockUseDashboard.mockReturnValue({
+        data: {
+          onThisDay: [],
+          recent: [],
+          favorites: [],
+          counts: { total: 10, missingGeo: 0, pendingDuplicateGroups: 3 },
+        },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      const reviewLink = screen.getByRole('link', { name: /review/i });
+      expect(reviewLink).toHaveAttribute('href', '/duplicates');
+    });
+
+    it('renders both the burst and duplicate banners together without collision', () => {
+      setupActiveCircle();
+      mockUseDashboard.mockReturnValue({
+        data: {
+          onThisDay: [],
+          recent: [],
+          favorites: [],
+          counts: { total: 10, missingGeo: 0, pendingBurstGroups: 2, pendingDuplicateGroups: 4 },
+        },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      expect(screen.getByText(/2 burst groups ready to review/i)).toBeInTheDocument();
+      expect(screen.getByText(/4 duplicate groups ready to review/i)).toBeInTheDocument();
     });
   });
 });

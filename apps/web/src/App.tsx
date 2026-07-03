@@ -35,6 +35,7 @@ const StorageProvidersPage = lazy(() => import('./pages/Admin/StorageProvidersPa
 const SettingsHubPage = lazy(() => import('./pages/Admin/SettingsHubPage'));
 const TaggingSettingsPage = lazy(() => import('./pages/Admin/TaggingSettingsPage'));
 const BurstsSettingsPage = lazy(() => import('./pages/Admin/BurstsSettingsPage'));
+const DuplicatesSettingsPage = lazy(() => import('./pages/Admin/DuplicatesSettingsPage'));
 const ArchivingSettingsPage = lazy(() => import('./pages/Admin/ArchivingSettingsPage'));
 const SearchPage = lazy(() => import('./pages/SearchPage'));
 const PeoplePage = lazy(() => import('./pages/People/PeoplePage'));
@@ -43,6 +44,8 @@ const AlbumPage = lazy(() => import('./pages/Albums/AlbumPage'));
 const TagsBrowsePage = lazy(() => import('./pages/Tags'));
 const BurstsPage = lazy(() => import('./pages/Bursts/BurstsPage'));
 const BurstGroupPage = lazy(() => import('./pages/Bursts/BurstGroupPage'));
+const DuplicatesPage = lazy(() => import('./pages/Duplicates/DuplicatesPage'));
+const DuplicateGroupPage = lazy(() => import('./pages/Duplicates/DuplicateGroupPage'));
 const ArchivePage = lazy(() => import('./pages/Archive/ArchivePage'));
 const TrashPage = lazy(() => import('./pages/Trash/TrashPage'));
 const PublicSharePage = lazy(() => import('./pages/Public/PublicSharePage'));
@@ -92,6 +95,7 @@ function AppRoutes() {
                 <Route path="/admin/settings/tagging" element={<TaggingSettingsPage />} />
                 <Route path="/admin/settings/face" element={<FaceSettingsPage />} />
                 <Route path="/admin/settings/bursts" element={<BurstsSettingsPage />} />
+                <Route path="/admin/settings/duplicates" element={<DuplicatesSettingsPage />} />
                 <Route path="/admin/settings/archiving" element={<ArchivingSettingsPage />} />
                 <Route path="/admin/settings/geo" element={<GeoSettingsPage />} />
                 <Route path="/admin/settings/storage/providers" element={<StorageProvidersPage />} />
@@ -117,6 +121,8 @@ function AppRoutes() {
                 <Route path="/albums/:albumId" element={<AlbumPage />} />
                 <Route path="/bursts" element={<BurstsPage />} />
                 <Route path="/bursts/:id" element={<BurstGroupPage />} />
+                <Route path="/duplicates" element={<DuplicatesPage />} />
+                <Route path="/duplicates/:id" element={<DuplicateGroupPage />} />
                 <Route path="/archive" element={<ArchivePage />} />
                 <Route path="/trash" element={<TrashPage />} />
               </Route>

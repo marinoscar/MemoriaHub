@@ -116,10 +116,19 @@ describe('SystemSettingsService', () => {
         },
       };
 
-      // systemSettingsSchema.parse adds face with defaults when omitted
+      // systemSettingsSchema.parse fills in every optional top-level branch
+      // with its default when omitted from the DTO — not just `face`. This
+      // fixture must mirror ALL of those defaults (face, storage, burst,
+      // dedup, geo, jobs) or the toHaveBeenCalledWith assertion below drifts
+      // out of sync every time a new default branch is added to the schema.
       const expectedParsed = {
         ...newSettings,
-        face: { features: { detection: { provider: null, model: null } } },
+        face: DEFAULT_SYSTEM_SETTINGS.face,
+        storage: DEFAULT_SYSTEM_SETTINGS.storage,
+        burst: DEFAULT_SYSTEM_SETTINGS.burst,
+        dedup: DEFAULT_SYSTEM_SETTINGS.dedup,
+        geo: DEFAULT_SYSTEM_SETTINGS.geo,
+        jobs: DEFAULT_SYSTEM_SETTINGS.jobs,
       };
 
       mockPrisma.systemSettings.upsert.mockResolvedValue({
@@ -203,11 +212,17 @@ describe('SystemSettingsService', () => {
         },
       };
 
-      // systemSettingsSchema.parse adds face with defaults — the validated
-      // object (not the original DTO) is stored in the audit event.
+      // systemSettingsSchema.parse fills in every optional top-level branch
+      // with its default when omitted — the validated object (not the
+      // original DTO) is stored in the audit event.
       const expectedValidated = {
         ...newSettings,
-        face: { features: { detection: { provider: null, model: null } } },
+        face: DEFAULT_SYSTEM_SETTINGS.face,
+        storage: DEFAULT_SYSTEM_SETTINGS.storage,
+        burst: DEFAULT_SYSTEM_SETTINGS.burst,
+        dedup: DEFAULT_SYSTEM_SETTINGS.dedup,
+        geo: DEFAULT_SYSTEM_SETTINGS.geo,
+        jobs: DEFAULT_SYSTEM_SETTINGS.jobs,
       };
 
       mockPrisma.systemSettings.upsert.mockResolvedValue({

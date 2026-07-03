@@ -30,6 +30,7 @@ import {
   BurstMode as BurstModeIcon,
   Archive as ArchiveOutlinedIcon,
   Delete as DeleteOutlineIcon,
+  ContentCopy as ContentCopyIcon,
   WorkHistory as WorkHistoryIcon,
   Insights as InsightsIcon,
   Public as PublicIcon,
@@ -86,6 +87,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const libraryItems: NavItemDef[] = [
     { label: 'People', icon: <GroupsIcon />, path: '/people' },
     { label: 'Review Bursts', icon: <BurstModeIcon />, path: '/bursts' },
+    { label: 'Review Duplicates', icon: <ContentCopyIcon />, path: '/duplicates' },
     { label: 'Archive', icon: <ArchiveOutlinedIcon />, path: '/archive' },
     { label: 'Trash', icon: <DeleteOutlineIcon />, path: '/trash' },
   ];

@@ -21,6 +21,7 @@ import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { BurstGroupStatus, CircleRole, MediaType } from '@prisma/client';
 import { BurstQueryDto } from './dto/burst-query.dto';
@@ -147,11 +148,15 @@ describe('BurstService', () => {
   let mockEnrichmentJobService: { enqueue: jest.Mock };
   let mockStorageProvider: { getSignedDownloadUrl: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
+  let mockSystemSettings: { isFeatureEnabled: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
     mockMembership = { assertCircleAccess: jest.fn().mockResolvedValue(undefined) };
     mockEnrichmentJobService = { enqueue: jest.fn() };
+    // Default: duplicateDetection feature disabled, so the re-enqueue helper
+    // in resolve/dismiss is a no-op unless a test explicitly enables it.
+    mockSystemSettings = { isFeatureEnabled: jest.fn().mockResolvedValue(false) };
     mockStorageProvider = {
       getSignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/signed-url'),
     };
@@ -183,6 +188,7 @@ describe('BurstService', () => {
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: StorageProviderResolver, useValue: mockResolver },
+        { provide: SystemSettingsService, useValue: mockSystemSettings },
       ],
     }).compile();
 

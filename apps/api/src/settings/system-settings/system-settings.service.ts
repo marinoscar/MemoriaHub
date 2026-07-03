@@ -26,6 +26,7 @@ export interface ResolvedSettings {
   face: SystemSettingsValue['face'];
   storage: SystemSettingsValue['storage'];
   burst: SystemSettingsValue['burst'];
+  dedup: SystemSettingsValue['dedup'];
   geo: SystemSettingsValue['geo'];
   jobs: SystemSettingsValue['jobs'];
   updatedAt: Date;
@@ -101,6 +102,7 @@ export class SystemSettingsService {
       face: value.face,
       storage: value.storage,
       burst: value.burst,
+      dedup: value.dedup,
       geo: value.geo,
       jobs: value.jobs,
       updatedAt: settings.updatedAt,
@@ -159,6 +161,7 @@ export class SystemSettingsService {
       face: value.face,
       storage: value.storage,
       burst: value.burst,
+      dedup: value.dedup,
       geo: value.geo,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
@@ -256,6 +259,20 @@ export class SystemSettingsService {
           (current as any).burst?.minGroupSize ??
           3,
       },
+      dedup: {
+        similarityThreshold:
+          (dto as any).dedup?.similarityThreshold ??
+          (current as any).dedup?.similarityThreshold ??
+          0.96,
+        hashMaxDistance:
+          (dto as any).dedup?.hashMaxDistance ??
+          (current as any).dedup?.hashMaxDistance ??
+          6,
+        knnCandidates:
+          (dto as any).dedup?.knnCandidates ??
+          (current as any).dedup?.knnCandidates ??
+          20,
+      },
       geo: {
         reverseProvider:
           (dto as any).geo?.reverseProvider ??
@@ -317,6 +334,7 @@ export class SystemSettingsService {
       face: value.face,
       storage: value.storage,
       burst: value.burst,
+      dedup: value.dedup,
       geo: value.geo,
       jobs: value.jobs,
       updatedAt: settings.updatedAt,

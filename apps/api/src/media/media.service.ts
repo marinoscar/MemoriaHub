@@ -6,7 +6,7 @@ import {
   BadRequestException,
   Inject,
 } from '@nestjs/common';
-import { Prisma, BurstGroupStatus } from '@prisma/client';
+import { Prisma, BurstGroupStatus, DuplicateGroupStatus } from '@prisma/client';
 import { CircleRole } from '@prisma/client';
 import { FastifyReply } from 'fastify';
 import { stringify as csvStringify } from 'csv-stringify';
@@ -1335,7 +1335,15 @@ export class MediaService {
     const burstConfig = burstValue['burst'] as { minGroupSize?: number } | undefined;
     const burstMinGroupSize = burstConfig?.minGroupSize ?? 3;
 
-    const [onThisDayItems, recentItems, favoriteItems, totalCount, missingGeoCount, pendingBurstGroupsCount] =
+    const [
+      onThisDayItems,
+      recentItems,
+      favoriteItems,
+      totalCount,
+      missingGeoCount,
+      pendingBurstGroupsCount,
+      pendingDuplicateGroupsCount,
+    ] =
       await Promise.all([
         onThisDayIds.length > 0
           ? this.prisma.mediaItem.findMany({
@@ -1362,6 +1370,12 @@ export class MediaService {
             circleId,
             status: BurstGroupStatus.pending,
             mediaCount: { gte: burstMinGroupSize },
+          },
+        }),
+        this.prisma.duplicateGroup.count({
+          where: {
+            circleId,
+            status: DuplicateGroupStatus.pending,
           },
         }),
       ]);
@@ -1396,6 +1410,7 @@ export class MediaService {
         missingGeo: missingGeoCount,
       },
       pendingBurstGroups: pendingBurstGroupsCount,
+      pendingDuplicateGroups: pendingDuplicateGroupsCount,
     };
   }
 
