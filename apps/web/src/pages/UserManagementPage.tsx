@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Container, Typography, Box, Tabs, Tab, Paper } from '@mui/material';
-import { Navigate } from 'react-router-dom';
+import { Container, Typography, Box, Tabs, Tab, Paper, Link } from '@mui/material';
+import { Navigate, Link as RouterLink } from 'react-router-dom';
 import { usePermissions } from '../hooks/usePermissions';
 import { UserList } from '../components/admin/UserList';
 import { AllowlistTable } from '../components/admin/AllowlistTable';
@@ -31,6 +31,16 @@ export default function UserManagementPage() {
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: 4 }}>
+        <Link
+          component={RouterLink}
+          to="/admin/settings"
+          underline="hover"
+          variant="body2"
+          sx={{ display: 'inline-block', mb: 2 }}
+        >
+          &larr; Back to Settings
+        </Link>
+
         <Typography variant="h4" component="h1" gutterBottom>
           User Management
         </Typography>

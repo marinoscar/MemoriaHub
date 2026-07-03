@@ -29,12 +29,14 @@ const FaceSettingsPage = lazy(() => import('./pages/Admin/FaceSettingsPage'));
 const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
 const JobsPage = lazy(() => import('./pages/Admin/JobsPage'));
 const JobInsightsPage = lazy(() => import('./pages/Admin/JobInsightsPage'));
+const DoctorPage = lazy(() => import('./pages/Admin/DoctorPage'));
 const StorageInsightsPage = lazy(() => import('./pages/Admin/StorageInsightsPage'));
 const StorageProvidersPage = lazy(() => import('./pages/Admin/StorageProvidersPage'));
 const SettingsHubPage = lazy(() => import('./pages/Admin/SettingsHubPage'));
 const TaggingSettingsPage = lazy(() => import('./pages/Admin/TaggingSettingsPage'));
 const BurstsSettingsPage = lazy(() => import('./pages/Admin/BurstsSettingsPage'));
 const DuplicatesSettingsPage = lazy(() => import('./pages/Admin/DuplicatesSettingsPage'));
+const ArchivingSettingsPage = lazy(() => import('./pages/Admin/ArchivingSettingsPage'));
 const SearchPage = lazy(() => import('./pages/SearchPage'));
 const PeoplePage = lazy(() => import('./pages/People/PeoplePage'));
 const AlbumsPage = lazy(() => import('./pages/Albums'));
@@ -94,11 +96,13 @@ function AppRoutes() {
                 <Route path="/admin/settings/face" element={<FaceSettingsPage />} />
                 <Route path="/admin/settings/bursts" element={<BurstsSettingsPage />} />
                 <Route path="/admin/settings/duplicates" element={<DuplicatesSettingsPage />} />
+                <Route path="/admin/settings/archiving" element={<ArchivingSettingsPage />} />
                 <Route path="/admin/settings/geo" element={<GeoSettingsPage />} />
                 <Route path="/admin/settings/storage/providers" element={<StorageProvidersPage />} />
                 <Route path="/admin/settings/storage/insights" element={<StorageInsightsPage />} />
                 <Route path="/admin/settings/jobs" element={<JobsPage />} />
                 <Route path="/admin/settings/jobs/insights" element={<JobInsightsPage />} />
+                <Route path="/admin/settings/doctor" element={<DoctorPage />} />
                 <Route path="/admin/settings/backup" element={<BackupPage />} />
                 <Route path="/admin/settings/sharing" element={<PublicSharesPage />} />
                 {/* Legacy admin route redirects */}

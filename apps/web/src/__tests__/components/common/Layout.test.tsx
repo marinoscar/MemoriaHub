@@ -23,6 +23,7 @@ vi.mock('../../../components/navigation/Sidebar', () => ({
       </button>
     </div>
   )),
+  DRAWER_WIDTH: 240,
 }));
 
 // Mock react-router-dom Outlet

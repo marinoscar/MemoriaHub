@@ -332,6 +332,10 @@ Metrics are precomputed into a snapshot table on a configurable schedule (defaul
 - `GET /api/admin/insights` (system_settings:read) - Return the latest precomputed storage metrics snapshot plus a `refresh` object describing the in-flight job state; `{ status: 'ready'|'empty', metrics|null, computedAt|null, durationMs|null, refresh: { state: 'idle'|'pending'|'running'|'failed', jobId: uuid|null, lastError: string|null } }` — byte fields in `metrics` are STRINGS (BigInt-safe), counts are numbers
 - `POST /api/admin/insights/refresh` (system_settings:write) - Enqueue a `storage_insights` enrichment job at priority 0 (highest; pre-empts any scheduled job) and return IMMEDIATELY: `{ jobId: uuid, state: 'pending'|'running' }`; body-less; computation is async — poll `GET /api/admin/insights` until `refresh.state` becomes `idle` or `failed`
 
+### Admin: Doctor / Diagnostics (Admin role + system_settings:read)
+On-demand configuration health sweep across ~20 checks in 7 sections (core, auth, storage, AI, face, geo, jobs); reuses each domain's existing "test connection" service for live provider connectivity and surfaces feature-flag/provider inconsistencies (e.g. a feature enabled with no provider configured). No new permission, nothing persisted, no cron — a fresh report is computed on every call. See [Doctor Diagnostics spec](docs/specs/doctor.md).
+- `POST /api/admin/doctor/run` (system_settings:read) - Run all diagnostics and return a `DoctorReport` { computedAt, durationMs, summary:{ok,warning,error,skipped,total}, sections:[{ key, label, status, checks:[{ key, label, status, message, actionItem?, durationMs }] }] }; runs live provider connectivity tests (AI/face/geo/storage), a pgvector probe, feature-flag/provider consistency checks, and job-queue health; nothing persisted; each check has a 10s timeout
+
 ### Admin: Job Queue (Admin role + jobs:read / jobs:write)
 An admin dashboard at `/admin/settings/jobs` provides monitoring and control over the generic `enrichment_jobs` queue (used by face detection, storage insights computation, and all future enrichment handlers).
 - `GET /api/admin/jobs/stats` (jobs:read) - Queue stats: total, byStatus, byType breakdown, stuckRunning count, and `scheduled` (count of pending jobs currently in backoff, i.e. `scheduledFor > now`)
@@ -510,6 +514,7 @@ Sub-pages:
 - `/admin/settings/jobs/insights` — job queue insights & ETA dashboard (jobs:read); KPI cards + per-type duration/throughput table; reachable from the Settings hub Operations group and from a "View insights & ETA" link on the Job Queue page
 - `/admin/settings/backup` — backup configuration and run history
 - `/admin/settings/sharing` — public share management; per-row and bulk revoke/set-expiration/delete for all shares across the app (shares:manage_any)
+- `/admin/settings/doctor` — configuration health diagnostics (Doctor); runs live checks and shows action items
 
 ### Storage Provider Configuration (Admin only — storage_settings:read / storage_settings:write)
 Admins can configure multiple object-storage providers (AWS S3, Cloudflare R2, local disk), test connectivity, choose the ACTIVE provider for new uploads, and migrate existing objects between providers (COPY-ONLY: bytes are copied and the object is repointed; the source file is left in place as a fallback). Objects on different providers are served simultaneously via per-object routing.
@@ -879,6 +884,7 @@ Detailed specs live under `docs/specs/`:
 - [Job Queue Insights](docs/specs/job-insights.md) — on-demand live aggregate, lock-safety rationale, ETA formula and basis semantics, web dashboard, CLI TUI, nightly job_history_purge retention model
 - [Public Media Sharing](docs/specs/public-sharing.md) — token-based unauthenticated access, byte-proxy rationale, metadata-stripping contract, EXIF/GPS limitation, RBAC, enumeration-resistant 404 policy, archived/trashed item handling
 - [Near-Duplicate Detection](docs/specs/duplicate-detection.md) — two-tier CLIP ViT-B/32 visual embedding + dHash matching, union-find grouping with burst-overlap exclusion rules, read-time best-copy scoring and kind classification, CLIP model lifecycle and degraded mode, chunked backfill job architecture, database footprint and archive/trash lifecycle
+- [Doctor Diagnostics](docs/specs/doctor.md) — on-demand configuration health sweep, 20-check catalog across 7 sections, status semantics, `runCheck` concurrency/timeout/exception-normalization design, reuse of existing settings test-connection services
 
 ## Audits
 
@@ -904,6 +910,7 @@ Post-implementation audit records live under `docs/audits/`:
 | `database-dev` | PostgreSQL, Prisma | **ANY** database work: schema changes, migrations, seeds, queries |
 | `testing-dev` | Jest, Supertest, RTL | **ANY** testing: unit tests, integration tests, typecheck, test fixtures |
 | `docs-dev` | Technical documentation | **ANY** documentation: ARCHITECTURE.md, SECURITY.md, API.md, README updates |
+| `ops-dev` | Routine operations (Haiku) | Rebuilding/restarting containers, running Prisma migrations, running typecheck. NEVER for state-changing git operations |
 
 ### Mandatory Delegation Rules
 
@@ -912,6 +919,7 @@ Post-implementation audit records live under `docs/audits/`:
 3. **Database/Prisma changes** → ALWAYS use `database-dev`
 4. **Writing or updating tests** → ALWAYS use `testing-dev`
 5. **Documentation updates** → ALWAYS use `docs-dev`
+6. **Routine ops (container rebuilds, migrations, typecheck)** → use `ops-dev`. IMPORTANT: `ops-dev` must NEVER perform state-changing git operations (pull, merge, push, commit, worktree management, branch operations) — those are always handled by the main agent directly, and `ops-dev` is instructed to refuse them
 
 ### Multi-Domain Tasks
 
@@ -940,6 +948,9 @@ For tasks spanning multiple domains, you MUST invoke multiple agents sequentiall
 
 # Documentation work - MUST use docs-dev
 "Use docs-dev to update SECURITY.md with new auth flow"
+
+# Routine ops - use ops-dev (never for git operations)
+"Use ops-dev to rebuild the api container and run migrations"
 ```
 
 ### What You Should NOT Do Directly
