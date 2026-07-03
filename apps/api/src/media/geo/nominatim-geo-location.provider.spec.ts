@@ -175,6 +175,25 @@ describe('NominatimGeoLocationProvider', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Non-finite coordinate guard
+  // -------------------------------------------------------------------------
+
+  describe('reverseGeocode with non-finite coordinates', () => {
+    it.each([
+      ['NaN lat and lng', NaN, NaN],
+      ['null lat and lng', null as unknown as number, null as unknown as number],
+      ['undefined lat and lng', undefined as unknown as number, undefined as unknown as number],
+    ])('returns null for %s without calling fetch', async (_label, lat, lng) => {
+      fetchSpy = jest.spyOn(global, 'fetch');
+
+      const result = await provider.reverseGeocode(lat, lng);
+
+      expect(result).toBeNull();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Rate-limit / server error — must throw RateLimitError
   // -------------------------------------------------------------------------
 
