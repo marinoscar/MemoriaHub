@@ -29,6 +29,7 @@ interface UseLocationSuggestionsResult {
   }) => Promise<void>;
   accept: (id: string, lat?: number, lng?: number) => Promise<AcceptLocationSuggestionResult>;
   reject: (id: string) => Promise<RejectRevertResult>;
+  revert: (id: string) => Promise<RejectRevertResult>;
   bulkAccept: (circleId: string, minConfidence: number) => Promise<BulkAcceptResult>;
   actingIds: Set<string>;
   bulkAccepting: boolean;
@@ -79,6 +80,8 @@ export function useLocationSuggestions(): UseLocationSuggestionsResult {
 
   const reject = useCallback((id: string) => withActing(id, () => rejectLocationSuggestion(id)), [withActing]);
 
+  const revert = useCallback((id: string) => withActing(id, () => revertLocationSuggestion(id)), [withActing]);
+
   const bulkAccept = useCallback(async (circleId: string, minConfidence: number) => {
     setBulkAccepting(true);
     try {
@@ -88,7 +91,19 @@ export function useLocationSuggestions(): UseLocationSuggestionsResult {
     }
   }, []);
 
-  return { items, meta, isLoading, error, fetchSuggestions, accept, reject, bulkAccept, actingIds, bulkAccepting };
+  return {
+    items,
+    meta,
+    isLoading,
+    error,
+    fetchSuggestions,
+    accept,
+    reject,
+    revert,
+    bulkAccept,
+    actingIds,
+    bulkAccepting,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -164,4 +179,46 @@ export function useSuggestLocation(mediaId: string, onRefresh: () => void) {
   );
 
   return { suggest, loading, error };
+}
+
+// ---------------------------------------------------------------------------
+// useItemAutoAppliedSuggestion — resolves the LocationSuggestion row backing
+// an item whose coordSource === 'inferred', so the drawer's Revert action can
+// call POST /location-suggestions/:id/revert (the id there is the SUGGESTION
+// id, not the media item id). There is no "find suggestion by mediaItemId"
+// endpoint, so this scans the most recent page of auto_applied suggestions
+// for the circle (bounded to pageSize entries) — sufficient for a freshly
+// auto-applied item, but a suggestion older than the last `pageSize`
+// auto-applies in the circle won't be found and Revert will be disabled.
+// ---------------------------------------------------------------------------
+
+export function useItemAutoAppliedSuggestion(circleId: string, mediaItemId: string, enabled: boolean) {
+  const [suggestionId, setSuggestionId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!enabled || !circleId || !mediaItemId) {
+      setSuggestionId(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    listLocationSuggestions({ circleId, status: 'auto_applied', pageSize: 100 })
+      .then((result) => {
+        if (cancelled) return;
+        const match = result.items.find((s) => s.mediaItemId === mediaItemId);
+        setSuggestionId(match?.id ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setSuggestionId(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [circleId, mediaItemId, enabled]);
+
+  return { suggestionId, loading };
 }
