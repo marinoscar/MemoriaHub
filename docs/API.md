@@ -4007,6 +4007,200 @@ Get visual-embedding (CLIP) model availability. Useful for confirming the model 
 
 ---
 
+## Location Inference (media:read / media:write + per-circle roles)
+
+Location inference is a global feature toggle (`features.locationInference`, default off) — see [docs/specs/location-inference.md](specs/location-inference.md) for the full algorithm design. It fills in missing GPS coordinates on GPS-less photos by interpolating (two anchors) or extrapolating (one anchor) from chronologically-nearby, same-device photos that already have coordinates. High-confidence two-anchor inferences are auto-applied immediately (`coordSource: 'inferred'`, revertible); everything else is queued as a `pending` `LocationSuggestion` for a human to confirm, adjust, or reject. `GET /api/media/dashboard` gains a `pendingLocationSuggestions` count that contributes to the review-queue section of the dashboard UI.
+
+No new RBAC permissions are introduced — the feature reuses `media:read` and `media:write` combined with the existing per-circle viewer / collaborator roles, plus `system_settings:write` for the admin backfill endpoint.
+
+---
+
+### GET /media/location-suggestions
+
+**Permissions:** `media:read` + circle viewer role
+
+List location suggestions (review queue) for a circle.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `circleId` | UUID | required | Circle to query |
+| `status` | enum | `pending` | `pending` \| `accepted` \| `rejected` \| `auto_applied` \| `reverted` |
+| `page` | number | 1 | Page number (1-indexed) |
+| `pageSize` | number | 20 | Items per page (max 100) |
+| `mediaItemId` | UUID | — | Optional filter to the suggestion for one specific media item |
+
+**Response:** 200 OK
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "mediaItemId": "uuid",
+      "status": "pending",
+      "lat": 9.9333,
+      "lng": -84.0833,
+      "confidence": 0.87,
+      "method": "interpolated",
+      "anchorBeforeId": "uuid",
+      "anchorAfterId": "uuid",
+      "gapBeforeSeconds": 180,
+      "gapAfterSeconds": 240,
+      "anchorDistanceKm": 0.4,
+      "impliedSpeedKmh": 5.7,
+      "capturedAt": "2026-06-15T14:32:01.234Z",
+      "cameraMake": "Apple",
+      "cameraModel": "iPhone 14",
+      "thumbnailUrl": "https://..."
+    }
+  ],
+  "meta": { "total": 12, "page": 1, "pageSize": 20 }
+}
+```
+
+Ordered by `createdAt DESC`. `method` is `"interpolated"` (two anchors — including the anchors-disagree fallback to the nearer-in-time anchor) or `"nearest"` (single-anchor extrapolation). `anchorDistanceKm`/`impliedSpeedKmh` are `null` for the single-anchor case.
+
+**Error Cases:**
+- 403 — Caller is not a member of the circle
+
+---
+
+### POST /media/location-suggestions/:id/accept
+
+**Permissions:** `media:write` + circle collaborator role
+
+Accept a pending suggestion, optionally adjusting the coordinates before writing them.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `lat` | number (-90 to 90) | No | Override latitude. Omit to accept the suggestion's own coordinates unmodified. |
+| `lng` | number (-180 to 180) | No | Override longitude. |
+
+**Behavior:** unmodified (no override, or an override equal to the stored `lat`/`lng`) writes `coordSource: 'inferred'`; an adjusted override writes `coordSource: 'manual'`. Both cases perform a **synchronous** reverse-geocode and write the resulting geo columns in the same update, via the shared `applyLocation()` helper.
+
+**Response:** 200 OK
+```json
+{ "data": { "id": "uuid", "status": "accepted", "lat": 9.9333, "lng": -84.0833, "coordSource": "inferred" } }
+```
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | Suggestion is not `pending` |
+| 404 | Suggestion not found |
+
+---
+
+### POST /media/location-suggestions/:id/reject
+
+**Permissions:** `media:write` + circle collaborator role
+
+Reject a pending suggestion. The rejection is sticky: a later non-forced per-item inference pass (e.g. a future upload-triggered recompute, which cannot occur here since the item already exists, or any other non-`rerun` trigger) will skip an item with a `rejected` suggestion rather than silently recomputing over the rejection. The explicit rerun endpoint (`POST /media/:id/infer-location`) bypasses this and recomputes anyway.
+
+**Response:** 200 OK
+```json
+{ "data": { "id": "uuid", "status": "rejected" } }
+```
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | Suggestion is not `pending` |
+| 404 | Suggestion not found |
+
+---
+
+### POST /media/location-suggestions/:id/revert
+
+**Permissions:** `media:write` + circle collaborator role
+
+Undo an auto-applied inference: clears `takenLat`/`takenLng`, all geo columns, and `coordSource` (via the shared `GEO_CLEAR_COLUMNS` object), and marks the suggestion `reverted`.
+
+> **Note:** only suggestions with status `auto_applied` can be reverted through this endpoint. A suggestion the caller explicitly `accept`-ed is treated as a deliberate human confirmation, not something to revert — clearing an accepted item's location requires the general-purpose bulk "clear location" path instead.
+
+**Response:** 200 OK
+```json
+{ "data": { "id": "uuid", "status": "reverted" } }
+```
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | Suggestion is not `auto_applied` |
+| 404 | Suggestion not found |
+
+---
+
+### POST /media/location-suggestions/bulk-accept
+
+**Permissions:** `media:write` + circle collaborator role
+
+Accept every `pending` suggestion in a circle at or above a confidence floor, in one call. Every accepted suggestion is applied **unmodified** — there is no per-item coordinate override in the bulk path — so every accepted item receives `coordSource: 'inferred'`.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `circleId` | UUID | Yes | Circle to operate on |
+| `minConfidence` | number (0-1) | Yes | Minimum `confidence` for a suggestion to be included |
+
+**Response:** 200 OK
+```json
+{ "data": { "accepted": 14 } }
+```
+
+---
+
+### POST /media/:id/infer-location
+
+**Permissions:** `media:write` + circle collaborator role
+
+Force a fresh location-inference rerun for a single media item, bypassing the rejected-suggestion skip rule. Enqueues a `location_inference` job at priority 0 (highest) with `reason: 'rerun'`.
+
+**Response:** 201 Created
+```json
+{ "data": { "jobId": "uuid", "status": "pending" } }
+```
+
+**Error Cases:**
+- 400 — Item is not a photo
+- 404 — Item not found or soft-deleted
+
+---
+
+### POST /admin/location-inference/backfill
+
+**Permissions:** Admin role + `system_settings:write`
+
+Bulk-enqueue **one** `location_inference` sweep job (`mediaItemId: null`, `payload.mode: 'sweep'`) per eligible circle, across **all circles**. Unlike duplicate detection's backfill, this is never chunked into multiple jobs per circle — a sweep is pure DB read plus in-memory computation (no image download, no ML inference), so a single job comfortably completes a 10,000-photo circle sweep in under a minute, far under the enrichment worker's stuck-job reset threshold. Requires `features.locationInference = true`.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `from` | ISO-8601 datetime | No | Bounds which GPS-less **targets** get processed and written (inclusive). Anchors just outside this range are still used — only target selection is bounded. |
+| `to` | ISO-8601 datetime | No | Same as above, upper bound. |
+| `force` | boolean | No | When `true`, recompute every eligible item including those with an existing `pending` or `rejected` suggestion. Default `false` (skip items that already have any suggestion row). |
+
+**Response:** 201 Created
+```json
+{ "data": { "enqueued": 4, "circles": 5, "estimatedItems": 812 } }
+```
+
+`enqueued` is the number of sweep job rows actually created — this can be lower than `circles` when a circle already has a sweep pending or running (the backfill service skips re-enqueueing in that case). `circles` is the number of circles that had at least one eligible GPS-less item. `estimatedItems` is the total eligible item count across those circles, computed as a byproduct of circle enumeration.
+
+**Error Cases:**
+- 400 — `features.locationInference` is `false`
+
+---
+
 ## AI Settings
 
 All endpoints in this group require the Admin system role plus the listed permission.
