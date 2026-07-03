@@ -66,6 +66,7 @@ export class MediaEnrichmentService {
       const faceOn = settings.features?.['faceRecognition'] === true;
       const burstOn = settings.features?.['burstDetection'] === true;
       const dedupOn = settings.features?.['duplicateDetection'] === true;
+      const locationInferenceOn = settings.features?.['locationInference'] === true;
       const videoFaceOn = settings.face?.video?.enabled !== false;
 
       // Pre-compute env kill-switches once (exact expressions from old listeners).
@@ -74,6 +75,7 @@ export class MediaEnrichmentService {
       const faceKilled = faceAutoDetect === 'false';
       const burstKilled = process.env['BURST_DETECTION_ENABLED'] === 'false';
       const dedupKilled = process.env['DUPLICATE_DETECTION_ENABLED'] === 'false';
+      const locationInferenceKilled = process.env['LOCATION_INFERENCE_ENABLED'] === 'false';
 
       const enqueued: string[] = [];
       const skipped: string[] = [];
@@ -203,6 +205,23 @@ export class MediaEnrichmentService {
       } else if (item.type === MediaType.photo) {
         const reason = !dedupOn ? 'feature disabled' : 'DUPLICATE_DETECTION_ENABLED=false';
         skipped.push(`duplicate_detection(${reason})`);
+      }
+
+      // ------------------------------------------------------------------
+      // Location inference — photos only; no status upsert (mirrors burst_detection)
+      // ------------------------------------------------------------------
+      if (item.type === MediaType.photo && locationInferenceOn && !locationInferenceKilled) {
+        const job = await this.enrichmentJobService.enqueue({
+          type: 'location_inference',
+          mediaItemId: item.id,
+          circleId: item.circleId,
+          reason: JobReason.upload,
+          priority: 10,
+        });
+        enqueued.push(`location_inference(job=${job.id})`);
+      } else if (item.type === MediaType.photo) {
+        const reason = !locationInferenceOn ? 'feature disabled' : 'LOCATION_INFERENCE_ENABLED=false';
+        skipped.push(`location_inference(${reason})`);
       }
 
       this.logger.log(

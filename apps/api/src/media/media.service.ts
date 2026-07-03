@@ -6,7 +6,7 @@ import {
   BadRequestException,
   Inject,
 } from '@nestjs/common';
-import { Prisma, BurstGroupStatus, DuplicateGroupStatus } from '@prisma/client';
+import { Prisma, BurstGroupStatus, DuplicateGroupStatus, LocationSuggestionStatus } from '@prisma/client';
 import { CircleRole } from '@prisma/client';
 import { FastifyReply } from 'fastify';
 import { stringify as csvStringify } from 'csv-stringify';
@@ -1344,6 +1344,7 @@ export class MediaService {
       missingGeoCount,
       pendingBurstGroupsCount,
       pendingDuplicateGroupsCount,
+      pendingLocationSuggestionsCount,
     ] =
       await Promise.all([
         onThisDayIds.length > 0
@@ -1379,6 +1380,12 @@ export class MediaService {
             status: DuplicateGroupStatus.pending,
           },
         }),
+        this.prisma.locationSuggestion.count({
+          where: {
+            circleId,
+            status: LocationSuggestionStatus.pending,
+          },
+        }),
       ]);
 
     const [onThisDay, recent, favorites] = await Promise.all([
@@ -1412,6 +1419,7 @@ export class MediaService {
       },
       pendingBurstGroups: pendingBurstGroupsCount,
       pendingDuplicateGroups: pendingDuplicateGroupsCount,
+      pendingLocationSuggestions: pendingLocationSuggestionsCount,
     };
   }
 
