@@ -54,7 +54,7 @@ import {
 } from '../../services/media';
 import { VideoPlayer } from './VideoPlayer';
 import { LocationMiniMap } from './LocationMiniMap';
-import { LocationPickerMap } from './LocationPickerMap';
+import { LocationSearchPicker } from './LocationSearchPicker';
 import { TagAutocomplete } from './TagAutocomplete';
 import { FaceThumbnails } from './FaceThumbnails';
 import { VideoFacePanel } from './VideoFacePanel';
@@ -828,10 +828,15 @@ export function MediaDetailDrawer({
         {/* Inline location editor */}
         {locationEditOpen && (
           <Box sx={{ mt: 1 }}>
-            <LocationPickerMap
+            <LocationSearchPicker
               value={editPinLocation}
               onChange={setEditPinLocation}
-              height={220}
+              height={240}
+              center={
+                displayItem.takenLat !== null && displayItem.takenLng !== null
+                  ? [displayItem.takenLat, displayItem.takenLng]
+                  : undefined
+              }
             />
             {locationError && <Alert severity="error" sx={{ mt: 1 }}>{locationError}</Alert>}
             <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
