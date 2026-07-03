@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-03
+
 ### Changed
 
 - **CLI login now uses device authorization (browser approval) and receives a 90-day token; `--token` fallback retained** — running `memoriahub login` initiates the RFC 8628 device-auth flow: the CLI prints a verification URL + user code, best-effort opens a browser, and polls until the user approves the device. The server issues a 90-day Personal Access Token (revocable from the web app under Personal Access Tokens). Use `--server <url>` to skip the URL prompt; use `--token <pat>` for CI/headless environments where an existing PAT is supplied directly.
