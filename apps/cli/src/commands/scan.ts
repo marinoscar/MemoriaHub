@@ -27,6 +27,7 @@ import {
   renderScanReportHeadless,
   renderScanReportJson,
 } from '../render/headless-scan.js';
+import { registerScanExport } from './scan-export.js';
 import { ui, isTTY, createSpinner } from '../ui.js';
 import { formatBytes } from '../format-bytes.js';
 
@@ -216,7 +217,8 @@ export function scanCommand(): Command {
       await showReport(scanId, scanRepo, folderRepo, { json: opts.json });
     });
 
-  // scan export <id> --out <file> [--format xlsx|csv] is wired in scan-export.ts
+  // scan export <id> --out <file> [--format xlsx|csv]
+  registerScanExport(cmd);
 
   return cmd;
 }
