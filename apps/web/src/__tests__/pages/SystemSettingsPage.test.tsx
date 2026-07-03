@@ -168,16 +168,19 @@ describe('SystemSettingsPage', () => {
   });
 
   describe('Tabs', () => {
-    it('should display all tabs', async () => {
+    it('should display only the UI Settings and Storage tabs', async () => {
       render(<SystemSettingsPage />, {
         wrapperOptions: { user: mockAdminUser },
       });
 
       await waitFor(() => {
         expect(screen.getByRole('tab', { name: /ui settings/i })).toBeInTheDocument();
-        expect(screen.getByRole('tab', { name: /feature flags/i })).toBeInTheDocument();
-        expect(screen.getByRole('tab', { name: /advanced.*json/i })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: /storage/i })).toBeInTheDocument();
       });
+
+      expect(screen.queryByRole('tab', { name: /feature flags/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('tab', { name: /advanced.*json/i })).not.toBeInTheDocument();
+      expect(screen.getAllByRole('tab')).toHaveLength(2);
     });
 
     it('should switch tabs on click', async () => {
@@ -188,13 +191,28 @@ describe('SystemSettingsPage', () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByRole('tab', { name: /feature flags/i })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: /storage/i })).toBeInTheDocument();
       });
 
-      const featureFlagsTab = screen.getByRole('tab', { name: /feature flags/i });
-      await user.click(featureFlagsTab);
+      const storageTab = screen.getByRole('tab', { name: /storage/i });
+      await user.click(storageTab);
 
-      expect(featureFlagsTab).toHaveAttribute('aria-selected', 'true');
+      expect(storageTab).toHaveAttribute('aria-selected', 'true');
+    });
+  });
+
+  describe('Breadcrumb', () => {
+    it('should render a "Back to Settings" link to /admin/settings', async () => {
+      render(<SystemSettingsPage />, {
+        wrapperOptions: { user: mockAdminUser },
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/back to settings/i)).toBeInTheDocument();
+      });
+
+      const link = screen.getByText(/back to settings/i).closest('a');
+      expect(link).toHaveAttribute('href', '/admin/settings');
     });
   });
 
@@ -212,43 +230,6 @@ describe('SystemSettingsPage', () => {
     });
   });
 
-
-  describe('Feature Flags Tab', () => {
-    it('should display feature flags', async () => {
-      const user = userEvent.setup();
-
-      mockUseSystemSettings.mockReturnValue({
-        settings: {
-          ui: { allowUserThemeOverride: true },
-          features: {
-            betaFeature: true,
-            newDashboard: false,
-          },
-          updatedAt: new Date().toISOString(),
-          updatedBy: null,
-          version: 1,
-        },
-        isLoading: false,
-        error: null,
-        isSaving: false,
-        updateSettings: vi.fn(),
-        replaceSettings: vi.fn(),
-        refresh: vi.fn(),
-      });
-
-      render(<SystemSettingsPage />, {
-        wrapperOptions: { user: mockAdminUser },
-      });
-
-      await waitFor(() => {
-        expect(screen.getByRole('tab', { name: /feature flags/i })).toBeInTheDocument();
-      });
-
-      await user.click(screen.getByRole('tab', { name: /feature flags/i }));
-
-      // Feature flags should be visible
-    });
-  });
 
   describe('Version Display', () => {
     it('should display last updated info when available', async () => {
