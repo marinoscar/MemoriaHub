@@ -364,6 +364,25 @@ export class ScanRepo {
   }
 
   /**
+   * Additional coverage counts not stored on the rollup row: how many files
+   * carry a capture timestamp, and how many hit a metadata-extraction error.
+   */
+  coverageExtras(scanId: number): { capturedAtCount: number; metaErrorCount: number } {
+    const row = this.db
+      .prepare<[number], { captured_at_count: number; meta_error_count: number }>(
+        `SELECT
+           COALESCE(SUM(captured_at IS NOT NULL), 0) AS captured_at_count,
+           COALESCE(SUM(meta_error IS NOT NULL), 0)  AS meta_error_count
+         FROM scan_files WHERE scan_id = ?`,
+      )
+      .get(scanId);
+    return {
+      capturedAtCount: row?.captured_at_count ?? 0,
+      metaErrorCount: row?.meta_error_count ?? 0,
+    };
+  }
+
+  /**
    * Top-N largest files in a scan (by size).
    */
   largestFiles(scanId: number, limit = 10): ScanFile[] {
