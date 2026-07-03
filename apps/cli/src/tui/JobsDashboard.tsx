@@ -26,6 +26,12 @@ export interface JobsDashboardProps {
   intervalMs: number;
   windowDays: number;
   serverUrl?: string;
+  /**
+   * When provided, q/Esc calls this instead of exiting the whole app. Used when
+   * the dashboard is mounted as a screen inside the TUI navigation stack; the
+   * standalone `memoriahub jobs` command omits it and keeps exit-on-quit.
+   */
+  onBack?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -51,7 +57,7 @@ function truncateType(s: string, max: number): string {
 // ---------------------------------------------------------------------------
 
 export function JobsDashboard(props: JobsDashboardProps): React.ReactElement {
-  const { api, intervalMs, windowDays, serverUrl } = props;
+  const { api, intervalMs, windowDays, serverUrl, onBack } = props;
   const { exit } = useApp();
 
   // Main data state
@@ -110,7 +116,10 @@ export function JobsDashboard(props: JobsDashboardProps): React.ReactElement {
 
   // Key handling
   useInput((input, key) => {
-    if (input === 'q' || key.escape) { exit(); return; }
+    if (input === 'q' || key.escape) {
+      if (onBack) { onBack(); } else { exit(); }
+      return;
+    }
     if (input === 'r') { void doFetchRef.current(); }
   });
 

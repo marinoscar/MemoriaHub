@@ -34,6 +34,8 @@ export interface FileRecord {
   status: FileStatus;
   attempt_count: number;
   last_error: string | null;
+  /** Why the file was skipped: 'dedup' (server already had the content) or 'unchanged' (matched a prior successful upload). Null when not skipped or not recorded. */
+  skip_reason: 'dedup' | 'unchanged' | null;
   media_item_id: string | null;
   storage_object_id: string | null;
   size_bytes: number | null;

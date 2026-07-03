@@ -128,3 +128,7 @@ CREATE TABLE IF NOT EXISTS file_upload_parts (
   etag         TEXT    NOT NULL,
   PRIMARY KEY (file_id, part_number)
 )`;
+
+/** Migration 6: persist why a file was skipped ('dedup' | 'unchanged'). Nullable. */
+export const ALTER_FILES_ADD_SKIP_REASON = `
+ALTER TABLE files ADD COLUMN skip_reason TEXT`;

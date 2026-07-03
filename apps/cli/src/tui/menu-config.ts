@@ -1,0 +1,159 @@
+/**
+ * tui/menu-config.ts — Hierarchical menu tree, gating, and navigation helpers.
+ *
+ * Pure data + pure functions (no JSX/React) so the tree and its visibility /
+ * lookup / breadcrumb logic are trivially unit-testable and shared between the
+ * root HomeMenu chrome and the generic Menu submenu renderer.
+ */
+
+import { REPORTS } from '../reports/registry.js';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export type MenuActionId =
+  | 'login'
+  | 'sync-all'
+  | 'sync-select'
+  | 'retry'
+  | 'folders'
+  | 'circles'
+  | 'app-settings'
+  | 'factory-reset'
+  | 'jobs'
+  | 'backup'
+  | 'help'
+  | 'quit'
+  | `report:${string}`;
+
+export interface MenuLeaf {
+  kind: 'action';
+  label: string;
+  action: MenuActionId;
+  /** Visible when logged out (default false → requires login). */
+  loggedOut?: boolean;
+}
+
+export interface MenuSubmenu {
+  kind: 'submenu';
+  id: string;
+  label: string;
+  children: MenuNode[];
+  loggedOut?: boolean;
+}
+
+export type MenuNode = MenuLeaf | MenuSubmenu;
+
+// ---------------------------------------------------------------------------
+// Tree
+// ---------------------------------------------------------------------------
+
+export const MENU_TREE: MenuSubmenu = {
+  kind: 'submenu',
+  id: 'root',
+  label: 'Menu',
+  children: [
+    { kind: 'action', label: 'Login / Change server', action: 'login', loggedOut: true },
+    {
+      kind: 'submenu',
+      id: 'sync',
+      label: 'Sync',
+      children: [
+        { kind: 'action', label: 'Sync all folders', action: 'sync-all' },
+        { kind: 'action', label: 'Sync selected folders', action: 'sync-select' },
+        { kind: 'action', label: 'Retry failed files', action: 'retry' },
+      ],
+    },
+    {
+      kind: 'submenu',
+      id: 'reports',
+      label: 'Reports',
+      children: REPORTS.map(
+        (r): MenuLeaf => ({ kind: 'action', label: r.label, action: `report:${r.id}` }),
+      ),
+    },
+    {
+      kind: 'submenu',
+      id: 'settings',
+      label: 'Settings',
+      children: [
+        { kind: 'action', label: 'Manage folders', action: 'folders' },
+        { kind: 'action', label: 'Manage circles', action: 'circles' },
+        { kind: 'action', label: 'App settings', action: 'app-settings' },
+        {
+          kind: 'action',
+          label: 'Factory reset (delete all local data)',
+          action: 'factory-reset',
+          loggedOut: true,
+        },
+      ],
+    },
+    {
+      kind: 'submenu',
+      id: 'tools',
+      label: 'Tools',
+      children: [
+        { kind: 'action', label: 'Job queue monitor', action: 'jobs' },
+        { kind: 'action', label: 'Backup', action: 'backup' },
+      ],
+    },
+    { kind: 'action', label: 'Help', action: 'help', loggedOut: true },
+    { kind: 'action', label: 'Quit', action: 'quit', loggedOut: true },
+  ],
+};
+
+// ---------------------------------------------------------------------------
+// Helpers (pure, unit-testable)
+// ---------------------------------------------------------------------------
+
+/**
+ * Children of `node` visible for the current login state.
+ * A leaf is visible when `loggedOut || isLoggedIn`.
+ * A submenu is visible when it has ≥1 visible child (recursively).
+ */
+export function visibleChildren(node: MenuSubmenu, isLoggedIn: boolean): MenuNode[] {
+  return node.children.filter((child) => {
+    if (child.kind === 'action') {
+      return Boolean(child.loggedOut) || isLoggedIn;
+    }
+    // submenu → visible only if it has at least one visible descendant
+    return visibleChildren(child, isLoggedIn).length > 0;
+  });
+}
+
+/** Depth-first search from the root for a submenu with the given id. */
+export function findSubmenu(id: string): MenuSubmenu | undefined {
+  function walk(node: MenuSubmenu): MenuSubmenu | undefined {
+    if (node.id === id) return node;
+    for (const child of node.children) {
+      if (child.kind === 'submenu') {
+        const found = walk(child);
+        if (found) return found;
+      }
+    }
+    return undefined;
+  }
+  return walk(MENU_TREE);
+}
+
+/**
+ * Breadcrumb path from the root to the submenu with the given id, joined with
+ * ' › '. Root → 'Menu'; sync → 'Menu › Sync'. Falls back to the root label
+ * when the id is not found.
+ */
+export function breadcrumb(id: string): string {
+  function walk(node: MenuSubmenu, trail: string[]): string[] | undefined {
+    const here = [...trail, node.label];
+    if (node.id === id) return here;
+    for (const child of node.children) {
+      if (child.kind === 'submenu') {
+        const found = walk(child, here);
+        if (found) return found;
+      }
+    }
+    return undefined;
+  }
+  const path = walk(MENU_TREE, []);
+  return (path ?? [MENU_TREE.label]).join(' › ');
+}
