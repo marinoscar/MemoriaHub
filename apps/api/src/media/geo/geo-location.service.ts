@@ -20,6 +20,15 @@ export class GeoLocationService {
   ) {}
 
   async reverseGeocode(lat: number, lng: number): Promise<{ result: GeoLocationResult | null; source: string }> {
+    // Defensive choke point for every provider (offline/nominatim/google) and every
+    // caller: a non-finite coordinate (NaN/Infinity) must never reach a provider.
+    // The offline kd-tree geocoder has no "no location" concept and returns a bogus
+    // nearest city (Talnakh, RU) for a NaN input; short-circuit to an empty result.
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      this.logger.debug(`reverseGeocode called with non-finite coordinates (${lat}, ${lng}); returning null`);
+      return { result: null, source: 'none' };
+    }
+
     const settings = await this.systemSettings.getSettings();
     const activeProvider = (settings as any).geo?.reverseProvider ?? process.env['GEO_PROVIDER'] ?? 'offline';
 
