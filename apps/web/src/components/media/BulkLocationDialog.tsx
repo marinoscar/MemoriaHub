@@ -98,12 +98,14 @@ export function BulkLocationDialog({
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
         <Box sx={{ mt: 1 }}>
-          <LocationSearchPicker
-            value={pinLocation}
-            onChange={handlePinChange}
-            center={mapCenter ?? undefined}
-            disabled={saving}
-          />
+          {open && (
+            <LocationSearchPicker
+              value={pinLocation}
+              onChange={handlePinChange}
+              center={mapCenter ?? undefined}
+              disabled={saving}
+            />
+          )}
         </Box>
       </DialogContent>
       <DialogActions sx={{ justifyContent: 'space-between', px: 3, pb: 2 }}>

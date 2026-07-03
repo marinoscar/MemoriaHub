@@ -81,12 +81,14 @@ export function AdjustLocationDialog({ open, suggestion, onClose, onSuccess }: A
           adjusted; leaving it unchanged confirms the inferred coordinates.
         </Typography>
 
-        <LocationSearchPicker
-          value={pinLocation}
-          onChange={handlePinChange}
-          center={mapCenter ?? undefined}
-          disabled={saving}
-        />
+        {open && (
+          <LocationSearchPicker
+            value={pinLocation}
+            onChange={handlePinChange}
+            center={mapCenter ?? undefined}
+            disabled={saving}
+          />
+        )}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={saving}>
