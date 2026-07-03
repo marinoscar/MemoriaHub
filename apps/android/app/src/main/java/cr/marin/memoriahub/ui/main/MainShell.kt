@@ -18,6 +18,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +35,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import cr.marin.memoriahub.sync.SyncNotifications
 import cr.marin.memoriahub.ui.folders.FolderSelectionScreen
 import cr.marin.memoriahub.ui.photos.PhotosScreen
 import cr.marin.memoriahub.ui.settings.SettingsScreen
@@ -49,7 +51,11 @@ private enum class Tab(val route: String, val label: String, val icon: ImageVect
 private const val ROUTE_FOLDERS = "folders"
 
 @Composable
-fun MainShell(modifier: Modifier = Modifier) {
+fun MainShell(
+    modifier: Modifier = Modifier,
+    navTarget: String? = null,
+    onNavTargetConsumed: () -> Unit = {},
+) {
     val context = LocalContext.current
     var granted by remember { mutableStateOf(hasMediaReadPermission(context)) }
     val launcher = rememberLauncherForActivityResult(
@@ -62,6 +68,19 @@ fun MainShell(modifier: Modifier = Modifier) {
     }
 
     val navController = rememberNavController()
+
+    // Notification taps request a tab by name (e.g. "backup" → the Backup status screen).
+    LaunchedEffect(navTarget) {
+        if (navTarget == SyncNotifications.NAV_TARGET_BACKUP) {
+            navController.navigate(Tab.Sync.route) {
+                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+        if (navTarget != null) onNavTargetConsumed()
+    }
+
     Scaffold(
         modifier = modifier,
         bottomBar = {
@@ -86,18 +105,21 @@ fun MainShell(modifier: Modifier = Modifier) {
             }
         },
     ) { padding ->
-        NavHost(
-            navController = navController,
-            startDestination = Tab.Photos.route,
-            modifier = Modifier.padding(padding),
-        ) {
-            composable(Tab.Photos.route) { PhotosScreen() }
-            composable(Tab.Sync.route) { SyncStatusScreen() }
-            composable(Tab.Settings.route) {
-                SettingsScreen(onOpenFolders = { navController.navigate(ROUTE_FOLDERS) })
-            }
-            composable(ROUTE_FOLDERS) {
-                FolderSelectionScreen(onBack = { navController.popBackStack() })
+        Column(modifier = Modifier.padding(padding)) {
+            // Persists across all tabs: the off state must be unmissable everywhere.
+            BackupOffBanner()
+            NavHost(
+                navController = navController,
+                startDestination = Tab.Photos.route,
+            ) {
+                composable(Tab.Photos.route) { PhotosScreen() }
+                composable(Tab.Sync.route) { SyncStatusScreen() }
+                composable(Tab.Settings.route) {
+                    SettingsScreen(onOpenFolders = { navController.navigate(ROUTE_FOLDERS) })
+                }
+                composable(ROUTE_FOLDERS) {
+                    FolderSelectionScreen(onBack = { navController.popBackStack() })
+                }
             }
         }
     }

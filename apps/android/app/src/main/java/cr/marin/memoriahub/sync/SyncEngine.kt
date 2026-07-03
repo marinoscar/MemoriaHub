@@ -44,9 +44,11 @@ data class SyncSummary(
     val uploaded: Int = 0,
     val skipped: Int = 0,
     val failed: Int = 0,
+    /** Files that vanished from the device mid-queue — a non-event, never counted as failed. */
+    val gone: Int = 0,
 )
 
-private enum class Outcome { UPLOADED, SKIPPED, FAILED }
+private enum class Outcome { UPLOADED, SKIPPED, FAILED, GONE }
 
 /**
  * The robust per-file upload pipeline and run orchestrator, mirroring the CLI sync
@@ -68,13 +70,22 @@ class SyncEngine @Inject constructor(
     private val time: TimeProvider,
     private val json: Json,
 ) {
-    suspend fun runSync(trigger: String, fullScan: Boolean = false): SyncSummary {
-        // Crash recovery + discover new/changed media before processing.
+    /**
+     * Phase 1 — discovery. Crash recovery, reconcile (the scan planner decides full vs
+     * incremental; [requestedFull] forces full), and re-queue of retryable failures.
+     * DB + MediaStore only, no network — safe to run as plain background work; callers
+     * check [SyncRepository.pendingWorkCount] afterwards to decide whether the upload
+     * phase warrants a foreground promotion.
+     */
+    suspend fun prepare(requestedFull: Boolean = false) {
         syncRepository.resetStaleActive()
-        syncRepository.reconcile(fullScan = fullScan)
+        syncRepository.reconcile(requestedFull = requestedFull)
         // Auto-retry transient failures each run; exhausted (BLOCKED) rows stay parked.
         syncFileDao.requeueFailed(includeBlocked = false, resetAttempts = false, now = time.nowMillis())
+    }
 
+    /** Phase 2 — upload. Drains the queue and records the run. Call [prepare] first. */
+    suspend fun processQueue(trigger: String): SyncSummary {
         val circleId = circleRepository.resolveTargetCircleId()
         val startedAt = time.nowMillis()
         val runId = syncRunDao.insert(
@@ -84,6 +95,7 @@ class SyncEngine @Inject constructor(
         var uploaded = 0
         var skipped = 0
         var failed = 0
+        var gone = 0
 
         if (circleId != null) {
             val semaphore = Semaphore(CONCURRENCY)
@@ -101,12 +113,15 @@ class SyncEngine @Inject constructor(
                             Outcome.UPLOADED -> uploaded++
                             Outcome.SKIPPED -> skipped++
                             Outcome.FAILED -> failed++
+                            Outcome.GONE -> gone++
                         }
                     }
                 }
             }
         }
 
+        // Gone files are excluded from the persisted run counts (schema unchanged):
+        // a file deleted from the device before upload is a non-event, not a failure.
         val total = uploaded + skipped + failed
         syncRunDao.update(
             SyncRunEntity(
@@ -120,7 +135,7 @@ class SyncEngine @Inject constructor(
                 failed = failed,
             ),
         )
-        return SyncSummary(total, uploaded, skipped, failed)
+        return SyncSummary(total, uploaded, skipped, failed, gone)
     }
 
     private suspend fun processOne(entity: SyncFileEntity, circleId: String): Outcome {
@@ -136,7 +151,10 @@ class SyncEngine @Inject constructor(
         return try {
             val uri = Uri.parse(current.contentUri)
             val size = if (current.sizeBytes > 0) current.sizeBytes else fileSize(uri)
-            if (size <= 0) throw IOException("File is empty or unreadable")
+            if (size <= 0) {
+                if (isGoneFromMediaStore(uri)) return dropGone(current)
+                throw IOException("File is empty or unreadable")
+            }
 
             // 1. Hash (reuse cached when available).
             val sha = current.sha256 ?: hashFile(uri)
@@ -172,9 +190,33 @@ class SyncEngine @Inject constructor(
             // 5. Register as a circle MediaItem.
             val outcome = registerMedia(current, circleId, completed.objectId, sha, size)
             outcome
+        } catch (e: java.io.FileNotFoundException) {
+            // Deleted on-device mid-queue. Confirm before dropping — a transient
+            // permission problem must not silently erase queue rows.
+            if (isGoneFromMediaStore(Uri.parse(current.contentUri))) dropGone(current) else failOne(current, e)
         } catch (e: Exception) {
             failOne(current, e)
         }
+    }
+
+    /**
+     * True only when MediaStore positively confirms the item no longer exists.
+     * Any query error (SecurityException, provider hiccup) → NOT confirmed →
+     * the caller takes the normal failure path instead of deleting state.
+     */
+    private fun isGoneFromMediaStore(uri: Uri): Boolean = runCatching {
+        context.contentResolver.query(
+            uri,
+            arrayOf(android.provider.MediaStore.MediaColumns._ID),
+            null,
+            null,
+            null,
+        )?.use { it.count == 0 } ?: true
+    }.getOrDefault(false)
+
+    private suspend fun dropGone(entity: SyncFileEntity): Outcome {
+        syncFileDao.deleteById(entity.mediaStoreId)
+        return Outcome.GONE
     }
 
     private suspend fun uploadParts(

@@ -1,10 +1,27 @@
 package cr.marin.memoriahub.core.network
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TokenAuthenticatorTest {
+
+    @Test
+    fun `only explicit auth rejections are terminal for the refresh token`() {
+        assertTrue(TokenAuthenticator.isTerminalRefreshStatus(401))
+        assertTrue(TokenAuthenticator.isTerminalRefreshStatus(403))
+    }
+
+    @Test
+    fun `server trouble and throttling never condemn the refresh token`() {
+        assertFalse(TokenAuthenticator.isTerminalRefreshStatus(429))
+        assertFalse(TokenAuthenticator.isTerminalRefreshStatus(500))
+        assertFalse(TokenAuthenticator.isTerminalRefreshStatus(502))
+        assertFalse(TokenAuthenticator.isTerminalRefreshStatus(503))
+        assertFalse(TokenAuthenticator.isTerminalRefreshStatus(504))
+    }
 
     @Test
     fun `extracts rotated refresh token from Set-Cookie`() {

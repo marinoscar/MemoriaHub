@@ -28,8 +28,10 @@ class RootViewModel @Inject constructor(
     fun onMainVisible() {
         if (scheduledThisProcess) return
         scheduledThisProcess = true
+        // No-ops while backup is off; the reminder check below always stays scheduled.
         syncScheduler.ensureScheduled()
         syncScheduler.syncNow()
+        syncScheduler.ensureReminderScheduled()
     }
 
     val destination: StateFlow<RootDestination> =

@@ -1,13 +1,18 @@
 package cr.marin.memoriahub.data.repo
 
+import androidx.room.withTransaction
 import cr.marin.memoriahub.core.storage.AppConfigStore
 import cr.marin.memoriahub.core.util.TimeProvider
+import cr.marin.memoriahub.data.db.AppDatabase
 import cr.marin.memoriahub.data.db.StatusCount
 import cr.marin.memoriahub.data.db.SyncFileDao
 import cr.marin.memoriahub.data.db.SyncFileEntity
 import cr.marin.memoriahub.data.db.SyncRunDao
 import cr.marin.memoriahub.data.db.SyncRunEntity
+import cr.marin.memoriahub.data.db.DB_QUERY_CHUNK
 import cr.marin.memoriahub.data.db.SyncStatus
+import cr.marin.memoriahub.data.db.getExistingIdsChunked
+import cr.marin.memoriahub.data.db.getReconcileRowsChunked
 import cr.marin.memoriahub.data.media.MediaStoreScanner
 import cr.marin.memoriahub.data.media.ScannedMedia
 import cr.marin.memoriahub.data.media.MediaStoreScanner.Companion.CAMERA_BUCKETS
@@ -21,6 +26,7 @@ import kotlin.math.max
 @Singleton
 class SyncRepository @Inject constructor(
     private val scanner: MediaStoreScanner,
+    private val db: AppDatabase,
     private val syncFileDao: SyncFileDao,
     private val syncRunDao: SyncRunDao,
     private val appConfigStore: AppConfigStore,
@@ -42,46 +48,101 @@ class SyncRepository @Inject constructor(
      * guarantees completeness. New items are queued; edited items (changed size/mtime)
      * are reset and re-queued; unchanged uploaded items are left as-is (fast skip).
      *
-     * @param fullScan when true, ignores the high-water mark and scans the whole bucket.
+     * The [ScanPlanner] decides between a cheap incremental scan (generation marks on
+     * API 30+, DATE_ADDED mark otherwise) and a full scan (first run, folder change,
+     * MediaStore rebuild, or the daily deletion-diff safety net).
+     *
+     * @param requestedFull when true, forces a full scan regardless of marks.
      * @return the number of items newly queued or re-queued.
      */
-    suspend fun reconcile(fullScan: Boolean = false): Int = withContext(Dispatchers.IO) {
-        val since = if (fullScan) 0L else appConfigStore.lastScanDateAddedSec
-        val scanned = scanner.scan(appConfigStore.selectedBucketIds, sinceDateAddedSec = since)
+    suspend fun reconcile(requestedFull: Boolean = false): Int = withContext(Dispatchers.IO) {
+        // Permission guard: with media access revoked the scan returns empty, which
+        // must never advance marks or drive the deletion diff below.
+        if (!scanner.canRead()) return@withContext 0
+
         val now = time.nowMillis()
+        // Capture BEFORE the query: changes landing mid-scan stay above the persisted
+        // marks and get rescanned next run instead of being lost.
+        val currentGeneration = scanner.currentGeneration()
+        val currentVersion = scanner.mediaStoreVersion()
+        val plan = ScanPlanner.plan(
+            requestedFull = requestedFull,
+            generationSupported = currentGeneration != null,
+            storedGeneration = appConfigStore.lastScanGeneration,
+            storedDateAddedSec = appConfigStore.lastScanDateAddedSec,
+            storedVersion = appConfigStore.mediaStoreVersion,
+            currentVersion = currentVersion,
+            lastFullReconcileAtMs = appConfigStore.lastFullReconcileAtMs,
+            nowMs = now,
+        )
+        val scanned = when (plan) {
+            ScanPlan.Full -> scanner.scan(appConfigStore.selectedBucketIds)
+            is ScanPlan.Incremental -> scanner.scan(
+                appConfigStore.selectedBucketIds,
+                sinceDateAddedSec = plan.sinceDateAddedSec,
+                sinceGeneration = plan.sinceGeneration,
+            )
+        }
         var queuedCount = 0
         var maxAdded = appConfigStore.lastScanDateAddedSec
 
-        for (item in scanned) {
-            val existing = syncFileDao.getById(item.mediaStoreId)
-            when {
-                existing == null -> {
-                    syncFileDao.upsert(item.toQueuedEntity(appConfigStore.targetCircleId, now))
-                    queuedCount++
+        db.withTransaction {
+            // One bulk projection load replaces a point query per scanned item; only the
+            // rare changed rows fetch their full entity below.
+            val existingById = syncFileDao.getReconcileRowsChunked(scanned.map { it.mediaStoreId })
+                .associateBy { it.mediaStoreId }
+
+            for (item in scanned) {
+                when (computeReconcileAction(item, existingById[item.mediaStoreId])) {
+                    ReconcileAction.Queue -> {
+                        syncFileDao.upsert(item.toQueuedEntity(appConfigStore.targetCircleId, now))
+                        queuedCount++
+                    }
+                    ReconcileAction.Requeue -> {
+                        // Content changed on device: drop prior upload identity and re-queue.
+                        val existing = syncFileDao.getById(item.mediaStoreId) ?: continue
+                        syncFileDao.upsert(existing.resetForRescan(item, now))
+                        queuedCount++
+                    }
+                    ReconcileAction.RefreshMeta -> {
+                        // Pure metadata refresh; preserve sync status (fast skip).
+                        val existing = syncFileDao.getById(item.mediaStoreId) ?: continue
+                        syncFileDao.upsert(
+                            existing.copy(
+                                contentUri = item.contentUri,
+                                displayName = item.displayName,
+                                bucketId = item.bucketId,
+                                bucket = item.bucket,
+                                dateTakenMs = item.dateTakenMs ?: existing.dateTakenMs,
+                                updatedAt = now,
+                            ),
+                        )
+                    }
+                    ReconcileAction.Unchanged -> Unit
                 }
-                existing.sizeBytes != item.sizeBytes || existing.mtimeMs != item.mtimeMs -> {
-                    // Content changed on device: drop prior upload identity and re-queue.
-                    syncFileDao.upsert(existing.resetForRescan(item, now))
-                    queuedCount++
-                }
-                existing.contentUri != item.contentUri || existing.displayName != item.displayName -> {
-                    // Pure metadata refresh; preserve sync status (fast skip).
-                    syncFileDao.upsert(
-                        existing.copy(
-                            contentUri = item.contentUri,
-                            displayName = item.displayName,
-                            bucketId = item.bucketId,
-                            bucket = item.bucket,
-                            dateTakenMs = item.dateTakenMs ?: existing.dateTakenMs,
-                            updatedAt = now,
-                        ),
-                    )
-                }
+                maxAdded = max(maxAdded, item.dateAddedSec)
             }
-            maxAdded = max(maxAdded, item.dateAddedSec)
+
+            // A full scan is a complete universe: pending rows for files that vanished
+            // from the device are dropped so they stop retrying and alerting. Synced
+            // rows (UPLOADED/SKIPPED) are kept as history.
+            if (plan == ScanPlan.Full) {
+                val vanished = computeVanishedPendingIds(
+                    scannedIds = scanned.mapTo(HashSet()) { it.mediaStoreId },
+                    pending = syncFileDao.getPendingRefs(),
+                    selectedBucketIds = appConfigStore.selectedBucketIds,
+                )
+                vanished.chunked(DB_QUERY_CHUNK).forEach { syncFileDao.deleteByIds(it) }
+            }
         }
 
+        // Persist marks only after the transaction committed.
         appConfigStore.lastScanDateAddedSec = maxAdded
+        currentGeneration?.let { appConfigStore.lastScanGeneration = it }
+        if (plan == ScanPlan.Full) {
+            appConfigStore.lastFullReconcileAtMs = now
+            currentVersion?.let { appConfigStore.mediaStoreVersion = it }
+        }
         queuedCount
     }
 
@@ -100,6 +161,29 @@ class SyncRepository @Inject constructor(
 
     suspend fun pendingWorkCount(): Int = withContext(Dispatchers.IO) {
         syncFileDao.pendingWorkCount()
+    }
+
+    /** Items currently stuck in FAILED or BLOCKED, for the issue notification. */
+    suspend fun failureCount(): Int = withContext(Dispatchers.IO) {
+        syncFileDao.failureCount()
+    }
+
+    /**
+     * How many device items are not backed up: media added since the last scan that has
+     * no state row yet, plus rows already queued/failed. Used by the backup-off reminder,
+     * where reconcile doesn't run — so this is a READ-ONLY scan that must not advance
+     * [AppConfigStore.lastScanDateAddedSec] (that high-water mark belongs to the engine).
+     */
+    suspend fun countNotBackedUp(): Int = withContext(Dispatchers.IO) {
+        val scanned = scanner.scan(
+            appConfigStore.selectedBucketIds,
+            sinceDateAddedSec = appConfigStore.lastScanDateAddedSec,
+        )
+        // Items with an existing row are either done (UPLOADED/SKIPPED) or already counted
+        // by pendingWorkCount below; only unseen items are new gap entries.
+        val existingIds = syncFileDao.getExistingIdsChunked(scanned.map { it.mediaStoreId }).toHashSet()
+        val newItems = scanned.count { it.mediaStoreId !in existingIds }
+        newItems + syncFileDao.pendingWorkCount()
     }
 
     /**

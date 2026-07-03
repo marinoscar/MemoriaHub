@@ -82,6 +82,34 @@ export const patchSystemSettingsSchema = z.object({
         .optional(),
     })
     .optional(),
+  storage: z
+    .object({
+      activeProvider: z.string().optional(),
+      insights: z
+        .object({
+          refreshIntervalHours: z.number().int().min(1).max(168).optional(),
+        })
+        .optional(),
+      trash: z
+        .object({
+          retentionDays: z.number().int().min(1).max(365).optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+  burst: z
+    .object({
+      timeGapSeconds: z.number().int().min(1).max(300).optional(),
+      hashDistance: z.number().int().min(0).max(32).optional(),
+      minGroupSize: z.number().int().min(2).max(20).optional(),
+    })
+    .optional(),
+  geo: z
+    .object({
+      reverseProvider: z.enum(['offline', 'nominatim', 'google']).optional(),
+      forwardSearchEnabled: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 export class PatchSystemSettingsDto extends createZodDto(

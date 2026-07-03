@@ -11,6 +11,8 @@ import cr.marin.memoriahub.core.network.dto.DeviceCodeResponse
 import cr.marin.memoriahub.core.network.dto.DeviceTokenRequest
 import cr.marin.memoriahub.core.network.parseApiError
 import cr.marin.memoriahub.core.util.TimeProvider
+import cr.marin.memoriahub.sync.SyncNotifications
+import cr.marin.memoriahub.sync.SyncScheduler
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
@@ -33,6 +35,9 @@ class DeviceAuthRepository @Inject constructor(
     private val tokenStore: TokenStore,
     private val time: TimeProvider,
     private val json: Json,
+    private val notifications: SyncNotifications,
+    private val syncRepository: SyncRepository,
+    private val syncScheduler: SyncScheduler,
 ) {
     /**
      * Signals an out-of-band request to poll immediately instead of waiting for the
@@ -85,6 +90,17 @@ class DeviceAuthRepository @Inject constructor(
                     expiresInSeconds = tokens.expiresIn,
                     nowMillis = time.nowMillis(),
                 )
+                // The session is back — any lingering "sign in again" alert is stale.
+                runCatching { notifications.cancelSignInRequired() }
+                // Resume backup without waiting for a manual "Retry failed": items that
+                // 401-ed into FAILED/BLOCKED during the auth gap are requeued with fresh
+                // attempts, and sync restarts immediately. All scheduler calls no-op when
+                // backup is off; a resume hiccup must never fail the login itself.
+                runCatching {
+                    syncRepository.requeueFailed(includeBlocked = true)
+                    syncScheduler.ensureScheduled()
+                    syncScheduler.syncNow()
+                }
                 val user = authApi.getMe().data
                 emit(DeviceAuthEvent.Authorized(user))
                 return@flow

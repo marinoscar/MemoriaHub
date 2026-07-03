@@ -47,12 +47,19 @@ fun SyncStatusScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Button(onClick = viewModel::syncNow, modifier = Modifier.weight(1f)) {
-                Text("Sync now")
+            if (state.backupEnabled) {
+                Button(onClick = viewModel::syncNow, modifier = Modifier.weight(1f)) {
+                    Text("Sync now")
+                }
+            } else {
+                // Notification taps land here; give them a direct fix-it action.
+                Button(onClick = viewModel::turnOnBackup, modifier = Modifier.weight(1f)) {
+                    Text("Turn on backup")
+                }
             }
             OutlinedButton(
                 onClick = viewModel::retryFailed,
-                enabled = state.failed > 0,
+                enabled = state.backupEnabled && state.failed > 0,
                 modifier = Modifier.weight(1f),
             ) {
                 Text("Retry failed")
