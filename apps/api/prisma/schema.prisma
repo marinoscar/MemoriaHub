@@ -979,6 +979,7 @@ model DuplicateGroup {
   status              DuplicateGroupStatus @default(pending)
   suggestedBestItemId String?              @map("suggested_best_item_id") @db.Uuid
   mediaCount          Int                  @default(0) @map("media_count")
+  capturedAt          DateTime?            @map("captured_at") @db.Timestamptz
   resolvedById        String?              @map("resolved_by_id") @db.Uuid
   resolvedAt          DateTime?            @map("resolved_at") @db.Timestamptz
   createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz
