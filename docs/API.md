@@ -3788,6 +3788,225 @@ Enable or disable burst detection for a circle. Emits `circle:burst_settings_upd
 
 ---
 
+## Media — Duplicate Detection (media:read / media:write / media:delete + per-circle roles)
+
+Near-duplicate detection is a global feature toggle (`features.duplicateDetection`, default off) — see [docs/specs/duplicate-detection.md](specs/duplicate-detection.md) for the full matching-engine design. It catches visually-identical re-uploads (e.g. WhatsApp re-shares: recompressed/resized/filtered copies with a different `contentHash` and stripped EXIF) that exact-hash dedup and burst detection cannot. Nothing is archived or trashed automatically — the system surfaces groups as a review queue and a human confirms which items to keep before any archive/trash action occurs. `GET /api/media/dashboard` gains a `pendingDuplicateGroups` count that contributes to the review-queue section of the dashboard UI; unlike burst groups, there is no minimum-size gate (a duplicate group only ever exists once linked, so `mediaCount >= 2` always holds).
+
+No new RBAC permissions are introduced — the feature reuses `media:read`, `media:write`, and `media:delete` combined with the existing per-circle viewer / collaborator roles, plus `system_settings:read` / `system_settings:write` for the admin endpoints.
+
+---
+
+### GET /media/duplicates
+
+**Permissions:** `media:read` + circle viewer role
+
+List near-duplicate groups for a circle, filtered by status and optionally by `kind`.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `circleId` | UUID | required | Circle to query |
+| `status` | enum | `pending` | `pending` \| `resolved` \| `dismissed` |
+| `kind` | enum | — | Optional filter: `exact_variant` \| `edited` \| `similar` (see Kind Classification in the spec) |
+| `page` | number | 1 | Page number (1-indexed) |
+| `pageSize` | number | 20 | Items per page (max 100) |
+
+**Response:** 200 OK
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "status": "pending",
+      "kind": "exact_variant",
+      "mediaCount": 3,
+      "capturedAt": "2026-06-15T14:32:01.234Z",
+      "suggestedBestItemId": "uuid",
+      "coverThumbnailUrls": ["https://...", "https://..."]
+    }
+  ],
+  "meta": { "total": 8, "page": 1, "pageSize": 20 }
+}
+```
+
+Groups are ordered by `capturedAt ASC, createdAt ASC` (chronological). `coverThumbnailUrls` contains up to 4 signed thumbnail URLs for the first 4 active members. `kind` classification is computed at read time and is not a persisted column.
+
+**Error Cases:**
+- 403 — Caller is not a member of the circle
+
+---
+
+### GET /media/duplicates/:id
+
+**Permissions:** `media:read` + circle viewer role
+
+Get full detail for a single duplicate group: all active members with quality scoring, similarity-to-best, and signed URLs.
+
+**Response:** 200 OK
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "circleId": "uuid",
+    "status": "pending",
+    "kind": "exact_variant",
+    "mediaCount": 3,
+    "capturedAt": "2026-06-15T14:32:01.234Z",
+    "suggestedBestItemId": "uuid",
+    "resolvedById": null,
+    "resolvedAt": null,
+    "members": [
+      {
+        "id": "uuid",
+        "thumbnailUrl": "https://...",
+        "previewUrl": "https://...",
+        "width": 4032,
+        "height": 3024,
+        "fileSize": 2145820,
+        "capturedAt": "2026-06-15T14:32:01.234Z",
+        "cameraMake": "Apple",
+        "cameraModel": "iPhone 14 Pro",
+        "hasGps": true,
+        "contentHash": "a1b2c3d4e5f6",
+        "sharpnessScore": 412.3,
+        "qualityScore": 0.91,
+        "similarityToBest": 0.997,
+        "isSuggestedBest": true
+      }
+    ]
+  }
+}
+```
+
+`previewUrl` is a signed URL to the full original image (not just the thumbnail), for full-resolution comparison. `contentHash` is truncated to the first 12 characters. `similarityToBest` is the member's CLIP cosine similarity against `suggestedBestItemId`'s embedding, or `null` if either side lacks an embedding (degraded mode / hash-only match). `qualityScore` is the read-time best-copy score (see spec §3.3); it is not persisted.
+
+**Error Cases:**
+- 404 — Group not found or caller is not a member of the circle
+
+---
+
+### POST /media/duplicates/:id/resolve
+
+**Permissions:** `media:write` + circle collaborator role (also requires `media:delete` when `action: "trash"`)
+
+Keep the specified members; archive or trash all other members of the group, then mark the group `resolved`. Runs in a single database transaction.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `keepIds` | UUID[] | Yes | IDs of members to keep; must be non-empty and all belong to this group |
+| `action` | enum | Yes | `"archive"` (sets `archivedAt`, reversible) or `"trash"` (sets `deletedAt`, recoverable until `storage.trash.retentionDays` elapses; requires `media:delete`) |
+
+**Example:**
+```json
+{ "keepIds": ["uuid-1"], "action": "trash" }
+```
+
+**Response:** 200 OK
+```json
+{ "data": { "removed": 2, "kept": 1, "action": "trash", "groupStatus": "resolved" } }
+```
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | `keepIds` is empty or contains IDs not in this group, `action: "trash"` requested without `media:delete`, or group is not `pending` |
+| 404 | Group not found |
+
+---
+
+### POST /media/duplicates/:id/dismiss
+
+**Permissions:** `media:write` + circle collaborator role
+
+Mark a duplicate group dismissed — the reviewer considers these items to not actually be duplicates. Clears `duplicateGroupId` on all members; no items are archived or deleted.
+
+**Response:** 200 OK
+```json
+{ "data": { "groupStatus": "dismissed", "ungrouped": 3 } }
+```
+
+**Error Cases:**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | Group is not in `pending` status |
+| 404 | Group not found |
+
+---
+
+### POST /media/:id/duplicates/rerun
+
+**Permissions:** `media:write`
+
+Re-enqueue duplicate detection for a single media item at priority 0 (highest).
+
+> **Note:** unlike the geocode and metadata-extraction rerun endpoints, this route currently checks only the system-level `media:write` permission — it does not perform an explicit per-circle role check via `CircleMembershipService.assertCircleAccess`. See [docs/specs/duplicate-detection.md](specs/duplicate-detection.md) §9.5/§14.
+
+**Response:** 201 Created
+```json
+{ "data": { "jobId": "uuid", "status": "pending" } }
+```
+
+**Error Cases:**
+- 400 — Item is not a photo
+- 404 — Item not found or soft-deleted
+
+---
+
+### POST /admin/duplicates/backfill
+
+**Permissions:** Admin role + `system_settings:write`
+
+Bulk-enqueue `duplicate_detection_batch` enrichment jobs across **all circles** (not scoped to one circle). Each job carries a chunk of up to 100 media-item IDs — see the spec's Processing and Enrichment Flow section for why backfill is chunked rather than one job per item. Requires `features.duplicateDetection = true`.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `from` | ISO-8601 datetime | No | Inclusive lower bound on `capturedAt` |
+| `to` | ISO-8601 datetime | No | Inclusive upper bound on `capturedAt` |
+| `force` | boolean | No | When `true`, re-enqueue all eligible photos regardless of existing `media_visual_embedding` row. Default `false` (skip already-embedded items). |
+
+**Response:** 201 Created
+```json
+{ "data": { "enqueued": 87, "circles": 4, "estimatedItems": 8412 } }
+```
+
+`enqueued` is the number of `duplicate_detection_batch` job rows created (matches the `/admin/settings/jobs` dashboard `byType` count); `estimatedItems` is the number of individual photos those jobs cover.
+
+**Error Cases:**
+- 400 — `features.duplicateDetection` is `false`
+
+---
+
+### GET /admin/duplicates/status
+
+**Permissions:** Admin role + `system_settings:read`
+
+Get visual-embedding (CLIP) model availability. Useful for confirming the model downloaded successfully or diagnosing why a deployment is silently running dHash-only matching.
+
+**Response:** 200 OK
+```json
+{
+  "data": {
+    "modelAvailable": true,
+    "modelPath": "./data/models/clip-vit-b32-vision-quantized.onnx",
+    "degraded": false,
+    "model": "clip-vit-b32-q8"
+  }
+}
+```
+
+`degraded: true` means the CLIP model could not be loaded and the deployment is running Tier 2 (dHash Hamming distance) matching only.
+
+---
+
 ## AI Settings
 
 All endpoints in this group require the Admin system role plus the listed permission.
