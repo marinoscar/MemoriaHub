@@ -321,4 +321,136 @@ describe('HomePage', () => {
       expect(screen.getByText(/4 duplicate groups ready to review/i)).toBeInTheDocument();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // f) Pending location suggestions banner (driven by counts.pendingLocationSuggestions)
+  // -------------------------------------------------------------------------
+  describe('Pending location suggestions banner', () => {
+    it('does not render the banner when pendingLocationSuggestions is 0', () => {
+      setupActiveCircle();
+      mockUseDashboard.mockReturnValue({
+        data: {
+          onThisDay: [],
+          recent: [],
+          favorites: [],
+          counts: { total: 10, missingGeo: 0, pendingLocationSuggestions: 0 },
+        },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      expect(screen.queryByText(/location suggestion.*ready to review/i)).not.toBeInTheDocument();
+    });
+
+    it('does not render the banner when pendingLocationSuggestions is absent', () => {
+      setupActiveCircle();
+      mockUseDashboard.mockReturnValue({
+        data: {
+          onThisDay: [],
+          recent: [],
+          favorites: [],
+          counts: { total: 10, missingGeo: 0 },
+        },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      expect(screen.queryByText(/location suggestion.*ready to review/i)).not.toBeInTheDocument();
+    });
+
+    it('renders the banner with a singular label when pendingLocationSuggestions is 1', () => {
+      setupActiveCircle();
+      mockUseDashboard.mockReturnValue({
+        data: {
+          onThisDay: [],
+          recent: [],
+          favorites: [],
+          counts: { total: 10, missingGeo: 0, pendingLocationSuggestions: 1 },
+        },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      expect(screen.getByText(/1 location suggestion ready to review/i)).toBeInTheDocument();
+    });
+
+    it('renders the banner with a plural label when pendingLocationSuggestions > 1', () => {
+      setupActiveCircle();
+      mockUseDashboard.mockReturnValue({
+        data: {
+          onThisDay: [],
+          recent: [],
+          favorites: [],
+          counts: { total: 10, missingGeo: 0, pendingLocationSuggestions: 6 },
+        },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      expect(screen.getByText(/6 location suggestions ready to review/i)).toBeInTheDocument();
+    });
+
+    it('renders a "Review" link pointing to /location-suggestions', () => {
+      setupActiveCircle();
+      mockUseDashboard.mockReturnValue({
+        data: {
+          onThisDay: [],
+          recent: [],
+          favorites: [],
+          counts: { total: 10, missingGeo: 0, pendingLocationSuggestions: 3 },
+        },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      const reviewLink = screen.getByRole('link', { name: /review/i });
+      expect(reviewLink).toHaveAttribute('href', '/location-suggestions');
+    });
+
+    it('renders the burst, duplicate, and location-suggestion banners together without collision', () => {
+      setupActiveCircle();
+      mockUseDashboard.mockReturnValue({
+        data: {
+          onThisDay: [],
+          recent: [],
+          favorites: [],
+          counts: {
+            total: 10,
+            missingGeo: 0,
+            pendingBurstGroups: 2,
+            pendingDuplicateGroups: 4,
+            pendingLocationSuggestions: 7,
+          },
+        },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      expect(screen.getByText(/2 burst groups ready to review/i)).toBeInTheDocument();
+      expect(screen.getByText(/4 duplicate groups ready to review/i)).toBeInTheDocument();
+      expect(screen.getByText(/7 location suggestions ready to review/i)).toBeInTheDocument();
+
+      const reviewLinks = screen.getAllByRole('link', { name: /review/i });
+      const hrefs = reviewLinks.map((link) => link.getAttribute('href'));
+      expect(hrefs).toEqual(expect.arrayContaining(['/bursts', '/duplicates', '/location-suggestions']));
+    });
+  });
 });
