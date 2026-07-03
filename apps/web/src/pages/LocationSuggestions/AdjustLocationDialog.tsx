@@ -1,26 +1,19 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
   Button,
-  TextField,
-  Box,
   Typography,
   CircularProgress,
   Alert,
   Stack,
-  Autocomplete,
-  InputAdornment,
 } from '@mui/material';
-import { EditLocationAlt as EditLocationAltIcon, Search as SearchIcon } from '@mui/icons-material';
-import { LocationPickerMap } from '../../components/media/LocationPickerMap';
-import { searchPlaces, reverseGeocode } from '../../services/media';
+import { EditLocationAlt as EditLocationAltIcon } from '@mui/icons-material';
+import { LocationSearchPicker } from '../../components/media/LocationSearchPicker';
 import { acceptLocationSuggestion } from '../../services/locationSuggestions';
-import type { GeoSearchResult, GeoReverseResult } from '../../types/media';
 import type { LocationSuggestionSummary } from '../../services/locationSuggestions';
-import { ApiError } from '../../services/api';
 
 interface AdjustLocationDialogProps {
   open: boolean;
@@ -30,93 +23,27 @@ interface AdjustLocationDialogProps {
 }
 
 export function AdjustLocationDialog({ open, suggestion, onClose, onSuccess }: AdjustLocationDialogProps) {
-  const [inputValue, setInputValue] = useState('');
-  const [options, setOptions] = useState<GeoSearchResult[]>([]);
-  const [autocompleteValue, setAutocompleteValue] = useState<GeoSearchResult | null>(null);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [searchDisabled, setSearchDisabled] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-
   const [pinLocation, setPinLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [mapCenter, setMapCenter] = useState<[number, number] | null>(null);
-  const [geoPreview, setGeoPreview] = useState<GeoReverseResult | null>(null);
-  const [geoLoading, setGeoLoading] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   // Seed the pin at the suggested coordinates whenever the dialog opens.
   useEffect(() => {
     if (!open) {
-      setInputValue('');
-      setOptions([]);
-      setAutocompleteValue(null);
       setPinLocation(null);
       setMapCenter(null);
-      setGeoPreview(null);
       setError(null);
-      setSearchError(null);
-      setSearchDisabled(false);
       return;
     }
     setPinLocation({ lat: suggestion.lat, lng: suggestion.lng });
     setMapCenter([suggestion.lat, suggestion.lng]);
-    setGeoLoading(true);
-    reverseGeocode(suggestion.lat, suggestion.lng)
-      .then((result) => setGeoPreview(result))
-      .catch(() => setGeoPreview(null))
-      .finally(() => setGeoLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, suggestion.id]);
 
-  const handleInputChange = useCallback(
-    (_event: React.SyntheticEvent, value: string) => {
-      setInputValue(value);
-      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-      if (!value.trim() || value.trim().length < 2 || searchDisabled) {
-        setOptions([]);
-        return;
-      }
-      searchDebounceRef.current = setTimeout(() => {
-        setSearchLoading(true);
-        searchPlaces(value, 8)
-          .then((results) => setOptions(results))
-          .catch((err) => {
-            if (err instanceof ApiError && err.status === 503) {
-              setSearchDisabled(true);
-              setOptions([]);
-            } else {
-              setSearchError('Search failed');
-            }
-          })
-          .finally(() => setSearchLoading(false));
-      }, 400);
-    },
-    [searchDisabled],
-  );
-
-  const handleSelectResult = useCallback((result: GeoSearchResult) => {
-    setPinLocation({ lat: result.lat, lng: result.lng });
-    setMapCenter([result.lat, result.lng]);
-  }, []);
-
-  const handleAutocompleteChange = useCallback(
-    (_event: React.SyntheticEvent, selected: GeoSearchResult | null) => {
-      setAutocompleteValue(selected);
-      if (selected) handleSelectResult(selected);
-    },
-    [handleSelectResult],
-  );
-
   const handlePinChange = useCallback((latlng: { lat: number; lng: number }) => {
     setPinLocation(latlng);
-    setGeoLoading(true);
-    reverseGeocode(latlng.lat, latlng.lng)
-      .then((result) => setGeoPreview(result))
-      .catch(() => setGeoPreview(null))
-      .finally(() => setGeoLoading(false));
   }, []);
 
   const handleApply = useCallback(async () => {
@@ -133,10 +60,6 @@ export function AdjustLocationDialog({ open, suggestion, onClose, onSuccess }: A
       setSaving(false);
     }
   }, [pinLocation, suggestion.id, suggestion.lat, suggestion.lng, onSuccess]);
-
-  const geoLabel = geoPreview
-    ? [geoPreview.locality, geoPreview.admin1, geoPreview.country].filter(Boolean).join(', ')
-    : null;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -158,72 +81,12 @@ export function AdjustLocationDialog({ open, suggestion, onClose, onSuccess }: A
           adjusted; leaving it unchanged confirms the inferred coordinates.
         </Typography>
 
-        {!searchDisabled ? (
-          <Box sx={{ mb: 2 }}>
-            <Autocomplete<GeoSearchResult, false, false, false>
-              options={options}
-              value={autocompleteValue}
-              inputValue={inputValue}
-              loading={searchLoading}
-              filterOptions={(x) => x}
-              getOptionLabel={(opt) => opt.label}
-              isOptionEqualToValue={(opt, val) => opt.label === val.label && opt.lat === val.lat}
-              onInputChange={handleInputChange}
-              onChange={handleAutocompleteChange}
-              noOptionsText="No results found"
-              loadingText="Searching..."
-              disabled={saving}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="Search place"
-                  size="small"
-                  error={!!searchError}
-                  helperText={searchError ?? undefined}
-                  slotProps={{
-                    ...params.slotProps,
-                    input: {
-                      ...params.slotProps.input,
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          {searchLoading ? (
-                            <CircularProgress size={16} />
-                          ) : (
-                            <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />
-                          )}
-                        </InputAdornment>
-                      ),
-                    },
-                  }}
-                />
-              )}
-            />
-          </Box>
-        ) : (
-          <Alert severity="info" sx={{ mb: 2 }}>
-            Place search unavailable — drop a pin on the map.
-          </Alert>
-        )}
-
-        <LocationPickerMap value={pinLocation} onChange={handlePinChange} height={280} center={mapCenter ?? undefined} />
-
-        {(geoLoading || geoLabel || pinLocation) && (
-          <Box sx={{ mt: 1.5, p: 1.5, backgroundColor: 'action.hover', borderRadius: 1 }}>
-            {geoLoading ? (
-              <Stack direction="row" sx={{ alignItems: 'center' }} spacing={1}>
-                <CircularProgress size={14} />
-                <Typography variant="caption">Looking up location...</Typography>
-              </Stack>
-            ) : pinLocation ? (
-              <>
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                  Pin: {pinLocation.lat.toFixed(5)}, {pinLocation.lng.toFixed(5)}
-                </Typography>
-                {geoLabel && <Typography variant="body2" sx={{ fontWeight: 500 }}>{geoLabel}</Typography>}
-              </>
-            ) : null}
-          </Box>
-        )}
+        <LocationSearchPicker
+          value={pinLocation}
+          onChange={handlePinChange}
+          center={mapCenter ?? undefined}
+          disabled={saving}
+        />
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={saving}>
