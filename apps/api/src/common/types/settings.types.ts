@@ -30,6 +30,7 @@ export interface SystemSettingsValue {
    *   - faceRecognition: face detection / recognition
    *   - burstDetection: burst photo (similar pictures) detection
    *   - duplicateDetection: near-duplicate photo (visual/hash similarity) detection
+   *   - locationInference: interpolate/extrapolate missing GPS coords from timeline anchors
    */
   features: {
     [key: string]: boolean;
@@ -82,6 +83,14 @@ export interface SystemSettingsValue {
     hashMaxDistance: number;
     knnCandidates: number;
   };
+  locationInference?: {
+    maxGapMinutes: number;
+    maxExtrapolationGapMinutes: number;
+    autoApplyMaxGapMinutes: number;
+    requireSameDevice: boolean;
+    maxAnchorDistanceKm: number;
+    maxImpliedSpeedKmh: number;
+  };
   geo?: {
     reverseProvider: 'offline' | 'nominatim' | 'google';
     forwardSearchEnabled: boolean;
@@ -102,6 +111,7 @@ export const FEATURE_KEYS = {
   FACE_RECOGNITION: 'faceRecognition',
   BURST_DETECTION: 'burstDetection',
   DUPLICATE_DETECTION: 'duplicateDetection',
+  LOCATION_INFERENCE: 'locationInference',
 } as const;
 
 /**
@@ -129,6 +139,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     [FEATURE_KEYS.FACE_RECOGNITION]: false,
     [FEATURE_KEYS.BURST_DETECTION]: false,
     [FEATURE_KEYS.DUPLICATE_DETECTION]: false,
+    [FEATURE_KEYS.LOCATION_INFERENCE]: false,
   },
   ai: {
     features: {
@@ -161,6 +172,14 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     similarityThreshold: 0.96,
     hashMaxDistance: 6,
     knnCandidates: 20,
+  },
+  locationInference: {
+    maxGapMinutes: 30,
+    maxExtrapolationGapMinutes: 10,
+    autoApplyMaxGapMinutes: 5,
+    requireSameDevice: true,
+    maxAnchorDistanceKm: 2,
+    maxImpliedSpeedKmh: 150,
   },
   geo: {
     reverseProvider: process.env['GEO_PROVIDER'] === 'nominatim' ? 'nominatim' : 'offline',

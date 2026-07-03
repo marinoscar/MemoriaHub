@@ -36,6 +36,7 @@ const SettingsHubPage = lazy(() => import('./pages/Admin/SettingsHubPage'));
 const TaggingSettingsPage = lazy(() => import('./pages/Admin/TaggingSettingsPage'));
 const BurstsSettingsPage = lazy(() => import('./pages/Admin/BurstsSettingsPage'));
 const DuplicatesSettingsPage = lazy(() => import('./pages/Admin/DuplicatesSettingsPage'));
+const LocationInferenceSettingsPage = lazy(() => import('./pages/Admin/LocationInferenceSettingsPage'));
 const ArchivingSettingsPage = lazy(() => import('./pages/Admin/ArchivingSettingsPage'));
 const SearchPage = lazy(() => import('./pages/SearchPage'));
 const PeoplePage = lazy(() => import('./pages/People/PeoplePage'));
@@ -46,6 +47,7 @@ const BurstsPage = lazy(() => import('./pages/Bursts/BurstsPage'));
 const BurstGroupPage = lazy(() => import('./pages/Bursts/BurstGroupPage'));
 const DuplicatesPage = lazy(() => import('./pages/Duplicates/DuplicatesPage'));
 const DuplicateGroupPage = lazy(() => import('./pages/Duplicates/DuplicateGroupPage'));
+const LocationSuggestionsPage = lazy(() => import('./pages/LocationSuggestions/LocationSuggestionsPage'));
 const ArchivePage = lazy(() => import('./pages/Archive/ArchivePage'));
 const TrashPage = lazy(() => import('./pages/Trash/TrashPage'));
 const PublicSharePage = lazy(() => import('./pages/Public/PublicSharePage'));
@@ -96,6 +98,7 @@ function AppRoutes() {
                 <Route path="/admin/settings/face" element={<FaceSettingsPage />} />
                 <Route path="/admin/settings/bursts" element={<BurstsSettingsPage />} />
                 <Route path="/admin/settings/duplicates" element={<DuplicatesSettingsPage />} />
+                <Route path="/admin/settings/location-inference" element={<LocationInferenceSettingsPage />} />
                 <Route path="/admin/settings/archiving" element={<ArchivingSettingsPage />} />
                 <Route path="/admin/settings/geo" element={<GeoSettingsPage />} />
                 <Route path="/admin/settings/storage/providers" element={<StorageProvidersPage />} />
@@ -123,6 +126,7 @@ function AppRoutes() {
                 <Route path="/bursts/:id" element={<BurstGroupPage />} />
                 <Route path="/duplicates" element={<DuplicatesPage />} />
                 <Route path="/duplicates/:id" element={<DuplicateGroupPage />} />
+                <Route path="/location-suggestions" element={<LocationSuggestionsPage />} />
                 <Route path="/archive" element={<ArchivePage />} />
                 <Route path="/trash" element={<TrashPage />} />
               </Route>

@@ -6,7 +6,7 @@ import {
   BadRequestException,
   Inject,
 } from '@nestjs/common';
-import { Prisma, BurstGroupStatus, DuplicateGroupStatus } from '@prisma/client';
+import { Prisma, BurstGroupStatus, DuplicateGroupStatus, LocationSuggestionStatus } from '@prisma/client';
 import { CircleRole } from '@prisma/client';
 import { FastifyReply } from 'fastify';
 import { stringify as csvStringify } from 'csv-stringify';
@@ -42,7 +42,8 @@ import { ListTrashQueryDto } from './dto/list-trash-query.dto';
 import { RestoreFromTrashDto } from './dto/restore-from-trash.dto';
 import { DeleteForeverDto } from './dto/delete-forever.dto';
 import { EmptyTrashDto } from './dto/empty-trash.dto';
-import { geoResultToMediaColumns, GEO_CLEAR_COLUMNS } from './geo/geo-result.mapper';
+import { GEO_CLEAR_COLUMNS } from './geo/geo-result.mapper';
+import { applyLocation } from './geo/apply-location.util';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 
@@ -1343,6 +1344,7 @@ export class MediaService {
       missingGeoCount,
       pendingBurstGroupsCount,
       pendingDuplicateGroupsCount,
+      pendingLocationSuggestionsCount,
     ] =
       await Promise.all([
         onThisDayIds.length > 0
@@ -1378,6 +1380,12 @@ export class MediaService {
             status: DuplicateGroupStatus.pending,
           },
         }),
+        this.prisma.locationSuggestion.count({
+          where: {
+            circleId,
+            status: LocationSuggestionStatus.pending,
+          },
+        }),
       ]);
 
     const [onThisDay, recent, favorites] = await Promise.all([
@@ -1411,6 +1419,7 @@ export class MediaService {
       },
       pendingBurstGroups: pendingBurstGroupsCount,
       pendingDuplicateGroups: pendingDuplicateGroupsCount,
+      pendingLocationSuggestions: pendingLocationSuggestionsCount,
     };
   }
 
@@ -1431,13 +1440,7 @@ export class MediaService {
       Object.assign(data, GEO_CLEAR_COLUMNS);
     } else if (dto.set.location !== undefined) {
       const { lat, lng, altitude } = dto.set.location;
-      const result = await this.geoProvider.reverseGeocode(lat, lng);
-      Object.assign(data, {
-        takenLat: lat,
-        takenLng: lng,
-        takenAltitude: altitude ?? null,
-        ...geoResultToMediaColumns(result ?? {}, 'manual'),
-      });
+      Object.assign(data, await applyLocation(this.geoProvider, lat, lng, altitude, 'manual'));
     }
 
     if (dto.set.capturedAt !== undefined) {

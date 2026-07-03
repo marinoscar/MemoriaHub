@@ -31,6 +31,7 @@ import {
   Archive as ArchiveOutlinedIcon,
   Delete as DeleteOutlineIcon,
   ContentCopy as ContentCopyIcon,
+  MyLocation as MyLocationIcon,
   WorkHistory as WorkHistoryIcon,
   Insights as InsightsIcon,
   Public as PublicIcon,
@@ -88,6 +89,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     { label: 'People', icon: <GroupsIcon />, path: '/people' },
     { label: 'Review Bursts', icon: <BurstModeIcon />, path: '/bursts' },
     { label: 'Review Duplicates', icon: <ContentCopyIcon />, path: '/duplicates' },
+    { label: 'Location Suggestions', icon: <MyLocationIcon />, path: '/location-suggestions' },
     { label: 'Archive', icon: <ArchiveOutlinedIcon />, path: '/archive' },
     { label: 'Trash', icon: <DeleteOutlineIcon />, path: '/trash' },
   ];

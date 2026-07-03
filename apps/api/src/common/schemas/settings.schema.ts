@@ -44,6 +44,7 @@ export const systemSettingsSchema = z.object({
   //   - faceRecognition: face detection / recognition
   //   - burstDetection: burst photo (similar pictures) detection
   //   - duplicateDetection: near-duplicate photo (visual/hash similarity) detection
+  //   - locationInference: interpolate/extrapolate missing GPS coords from timeline anchors
   features: z.record(z.string(), z.boolean()),
   ai: z.object({
     features: z.object({
@@ -93,6 +94,21 @@ export const systemSettingsSchema = z.object({
     hashMaxDistance: z.number().int().min(0).max(16).default(6),
     knnCandidates: z.number().int().min(5).max(50).default(20),
   }).optional().default({ similarityThreshold: 0.96, hashMaxDistance: 6, knnCandidates: 20 }),
+  locationInference: z.object({
+    maxGapMinutes: z.number().int().min(1).max(1440).default(30),
+    maxExtrapolationGapMinutes: z.number().int().min(1).max(240).default(10),
+    autoApplyMaxGapMinutes: z.number().int().min(0).max(60).default(5),
+    requireSameDevice: z.boolean().default(true),
+    maxAnchorDistanceKm: z.number().min(0.1).max(100).default(2),
+    maxImpliedSpeedKmh: z.number().min(10).max(1000).default(150),
+  }).optional().default({
+    maxGapMinutes: 30,
+    maxExtrapolationGapMinutes: 10,
+    autoApplyMaxGapMinutes: 5,
+    requireSameDevice: true,
+    maxAnchorDistanceKm: 2,
+    maxImpliedSpeedKmh: 150,
+  }),
   geo: z.object({
     reverseProvider: z.enum(['offline', 'nominatim', 'google']).default('offline'),
     forwardSearchEnabled: z.boolean().default(false),
@@ -160,6 +176,14 @@ export const systemSettingsPatchSchema = z.object({
     similarityThreshold: z.number().min(0.80).max(0.995).optional(),
     hashMaxDistance: z.number().int().min(0).max(16).optional(),
     knnCandidates: z.number().int().min(5).max(50).optional(),
+  }).optional(),
+  locationInference: z.object({
+    maxGapMinutes: z.number().int().min(1).max(1440).optional(),
+    maxExtrapolationGapMinutes: z.number().int().min(1).max(240).optional(),
+    autoApplyMaxGapMinutes: z.number().int().min(0).max(60).optional(),
+    requireSameDevice: z.boolean().optional(),
+    maxAnchorDistanceKm: z.number().min(0.1).max(100).optional(),
+    maxImpliedSpeedKmh: z.number().min(10).max(1000).optional(),
   }).optional(),
   geo: z.object({
     reverseProvider: z.enum(['offline', 'nominatim', 'google']).optional(),
