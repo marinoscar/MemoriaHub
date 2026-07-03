@@ -114,7 +114,16 @@ export async function readMediaMetadata(
         reviveValues: true,
         sanitize: true,
       })
-      .catch(() => undefined);
+      .catch((e: unknown) => {
+        // Re-throw genuine I/O errors (missing/unreadable/dir) so they surface
+        // in the `error` field per this module's contract; treat a parse failure
+        // on a readable-but-unsupported/no-EXIF file as simply "no EXIF".
+        const code = (e as NodeJS.ErrnoException)?.code;
+        if (code && ['ENOENT', 'EACCES', 'EISDIR', 'EPERM', 'ENOTDIR'].includes(code)) {
+          throw e;
+        }
+        return undefined;
+      });
 
     // No EXIF at all (screenshots, web graphics, stripped files) — normal.
     if (!raw || Object.keys(raw).length === 0) {
