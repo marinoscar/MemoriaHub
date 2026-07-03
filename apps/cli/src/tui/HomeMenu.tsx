@@ -31,6 +31,7 @@ export type MenuAction =
   | 'retry'
   | 'settings'
   | 'help'
+  | 'factory-reset'
   | 'quit';
 
 type MenuItem = { label: string; value: MenuAction };
@@ -40,6 +41,8 @@ interface HomeMenuProps {
   identity: string | null;   // email from /api/auth/me, null if not logged in
   activeCircleName?: string | null;
   onSelect: (action: MenuAction) => void;
+  updateInfo?: { updateAvailable: boolean; latestVersion: string | null } | null;
+  currentVersion?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -47,19 +50,20 @@ interface HomeMenuProps {
 // ---------------------------------------------------------------------------
 
 const ALL_ITEMS: MenuItem[] = [
-  { label: 'Login / Change server',    value: 'login'       },
-  { label: 'Manage folders',           value: 'folders'     },
-  { label: 'Manage circles',           value: 'circles'     },
-  { label: 'Sync all folders',         value: 'sync-all'    },
-  { label: 'Sync selected folders',    value: 'sync-select' },
-  { label: 'Status',                   value: 'status'      },
-  { label: 'Retry failed files',       value: 'retry'       },
-  { label: 'Settings',                 value: 'settings'    },
-  { label: 'Help',                     value: 'help'        },
-  { label: 'Quit',                     value: 'quit'        },
+  { label: 'Login / Change server',              value: 'login'         },
+  { label: 'Manage folders',                     value: 'folders'       },
+  { label: 'Manage circles',                     value: 'circles'       },
+  { label: 'Sync all folders',                   value: 'sync-all'      },
+  { label: 'Sync selected folders',              value: 'sync-select'   },
+  { label: 'Status',                             value: 'status'        },
+  { label: 'Retry failed files',                 value: 'retry'         },
+  { label: 'Settings',                           value: 'settings'      },
+  { label: 'Help',                               value: 'help'          },
+  { label: 'Factory reset (delete all local data)', value: 'factory-reset' },
+  { label: 'Quit',                               value: 'quit'          },
 ];
 
-const LOGGED_OUT_ACTIONS: MenuAction[] = ['login', 'help', 'quit'];
+const LOGGED_OUT_ACTIONS: MenuAction[] = ['login', 'factory-reset', 'help', 'quit'];
 
 // ---------------------------------------------------------------------------
 // Banner lines
@@ -85,6 +89,8 @@ export function HomeMenu({
   identity,
   activeCircleName,
   onSelect,
+  updateInfo,
+  currentVersion,
 }: HomeMenuProps): React.ReactElement {
   const isLoggedIn = Boolean(config && identity);
 
@@ -105,6 +111,15 @@ export function HomeMenu({
         ))}
         <Text dimColor>  Import and sync photos/videos to your MemoriaHub server</Text>
       </Box>
+
+      {/* Update-available notice — shown in yellow between the banner and identity box */}
+      {updateInfo?.updateAvailable && (
+        <Box>
+          <Text color="yellow">
+            {`⬆ Update available: ${updateInfo.latestVersion} (you have ${currentVersion ?? '?'}) — run 'git pull' in the MemoriaHub repo and rebuild the CLI`}
+          </Text>
+        </Box>
+      )}
 
       {/* Identity box */}
       <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>

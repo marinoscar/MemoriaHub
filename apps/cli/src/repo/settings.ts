@@ -111,4 +111,28 @@ export class SettingsRepo {
       maxCooldownMs: this.rateLimitMaxCooldownMs(),
     };
   }
+
+  // ---------------------------------------------------------------------------
+  // Update-check throttle cache (keys: update_check_last_at, update_check_latest_version)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Read the cached update-check result.
+   * Returns `{ lastAt: null, latestVersion: null }` when no check has been run yet.
+   */
+  getUpdateCheckCache(): { lastAt: string | null; latestVersion: string | null } {
+    return {
+      lastAt: this.get<string | null>('update_check_last_at', null),
+      latestVersion: this.get<string | null>('update_check_latest_version', null),
+    };
+  }
+
+  /**
+   * Persist the result of a successful update check.
+   * Stamps `update_check_last_at` with the current ISO 8601 timestamp.
+   */
+  setUpdateCheckCache(latestVersion: string): void {
+    this.set('update_check_last_at', new Date().toISOString());
+    this.set('update_check_latest_version', latestVersion);
+  }
 }
