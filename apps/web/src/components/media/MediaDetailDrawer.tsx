@@ -35,6 +35,8 @@ import {
   Unarchive as UnarchiveIcon,
   Delete as DeleteIcon,
   IosShare as IosShareIcon,
+  Undo as UndoIcon,
+  MyLocation as MyLocationIcon,
 } from '@mui/icons-material';
 import { ShareDialog } from '../share/ShareDialog';
 import { useTheme } from '@mui/material/styles';
@@ -62,6 +64,8 @@ import { useMediaTags } from '../../hooks/useMediaTags';
 import type { MediaTagStatusType } from '../../services/tagging';
 import { useMediaMetadata } from '../../hooks/useMediaMetadata';
 import type { MediaMetadataStatusType } from '../../services/metadata';
+import { useSuggestLocation, useItemAutoAppliedSuggestion } from '../../hooks/useLocationSuggestions';
+import { revertLocationSuggestion } from '../../services/locationSuggestions';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -433,6 +437,52 @@ export function MediaDetailDrawer({
   // Always called (rules of hooks) but guarded by empty string when not a video.
   const videoFacesResult = useMediaFaces(item?.type === 'video' ? (item?.id ?? '') : '');
 
+  // Location inference — "Suggest location" (no coords) and "Revert" (inferred coords).
+  const [suggestOutcomeMsg, setSuggestOutcomeMsg] = useState<string | null>(null);
+  const [revertLoading, setRevertLoading] = useState(false);
+  const [revertError, setRevertError] = useState<string | null>(null);
+
+  const { suggest: suggestLocation, loading: suggestLoading } = useSuggestLocation(
+    item?.id ?? '',
+    onRefreshTags,
+  );
+
+  const isInferred = (fullItem ?? item)?.coordSource === 'inferred';
+  const { suggestionId: inferredSuggestionId } = useItemAutoAppliedSuggestion(
+    item?.circleId ?? '',
+    item?.id ?? '',
+    isInferred,
+  );
+
+  const handleSuggestLocation = useCallback(() => {
+    setSuggestOutcomeMsg(null);
+    void suggestLocation((outcome) => {
+      if (outcome === 'auto_applied') {
+        setSuggestOutcomeMsg('Location automatically applied from nearby photos');
+      } else if (outcome === 'queued') {
+        setSuggestOutcomeMsg('Location inference queued — check the Location Suggestions review queue shortly');
+      } else {
+        setSuggestOutcomeMsg('Failed to queue location inference');
+      }
+    });
+  }, [suggestLocation]);
+
+  const handleRevertLocation = useCallback(async () => {
+    if (!inferredSuggestionId || !item) return;
+    setRevertLoading(true);
+    setRevertError(null);
+    try {
+      await revertLocationSuggestion(inferredSuggestionId);
+      const refreshed = await getMedia(item.id);
+      setFullItem(refreshed);
+      onItemUpdated(refreshed);
+    } catch (err) {
+      setRevertError(err instanceof Error ? err.message : 'Failed to revert inferred location');
+    } finally {
+      setRevertLoading(false);
+    }
+  }, [inferredSuggestionId, item, onItemUpdated]);
+
   if (!item) return null;
 
   // Use the full item (with downloadUrl) when available; fall back to the list item.
@@ -686,6 +736,30 @@ export function MediaDetailDrawer({
             }
           />
         )}
+
+        {/* Location provenance — inferred coordinates can be reverted */}
+        {isInferred && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mt: 0.5, mb: 0.5 }}>
+            <Chip label="Location (inferred)" size="small" color="info" variant="outlined" />
+            <Button
+              size="small"
+              variant="text"
+              color="inherit"
+              startIcon={revertLoading ? <CircularProgress size={12} /> : <UndoIcon fontSize="small" />}
+              disabled={!inferredSuggestionId || revertLoading}
+              onClick={() => void handleRevertLocation()}
+              sx={{ minHeight: 32 }}
+            >
+              Revert
+            </Button>
+          </Box>
+        )}
+        {revertError && (
+          <Alert severity="error" sx={{ mb: 1 }} onClose={() => setRevertError(null)}>
+            {revertError}
+          </Alert>
+        )}
+
         <MetaRow label="Altitude" value={item.takenAltitude !== null ? `${item.takenAltitude} m` : null} />
         <MetaRow label="Camera" value={[item.cameraMake, item.cameraModel].filter(Boolean).join(' ')} />
         <MetaRow label="Content Hash" value={item.contentHash} />
@@ -712,7 +786,7 @@ export function MediaDetailDrawer({
         )}
 
         {/* Edit Location affordance */}
-        <Box sx={{ mt: 1, mb: 0.5 }}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1, mb: 0.5 }}>
           <Button
             size="small"
             variant="outlined"
@@ -729,7 +803,27 @@ export function MediaDetailDrawer({
           >
             {displayItem.takenLat !== null ? 'Edit Location' : 'Set Location'}
           </Button>
-        </Box>
+
+          {/* Suggest location — only offered for photos with no coordinates yet */}
+          {displayItem.type === 'photo' && displayItem.takenLat === null && displayItem.takenLng === null && (
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={suggestLoading ? <CircularProgress size={14} /> : <MyLocationIcon />}
+              disabled={suggestLoading}
+              onClick={handleSuggestLocation}
+              sx={{ minHeight: 44, width: { xs: '100%', sm: 'auto' } }}
+            >
+              {suggestLoading ? 'Suggesting…' : 'Suggest Location'}
+            </Button>
+          )}
+        </Stack>
+
+        {suggestOutcomeMsg && (
+          <Alert severity="info" sx={{ mb: 1 }} onClose={() => setSuggestOutcomeMsg(null)}>
+            {suggestOutcomeMsg}
+          </Alert>
+        )}
 
         {/* Inline location editor */}
         {locationEditOpen && (
