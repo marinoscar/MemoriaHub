@@ -216,7 +216,7 @@ describe('Sidebar', () => {
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
       // Only items with visible: true should be rendered
-      // Non-admin: Photos, Explore, Map, Sharing, People, Review Bursts, Archive, Trash, User Settings
+      // Non-admin: Photos, Explore, Map, Circles, People, Review Bursts, Archive, Trash, User Settings
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
       expect(menuButtons).toHaveLength(9);
     });
@@ -238,8 +238,9 @@ describe('Sidebar', () => {
       });
 
       // After the settings refactor the admin section collapses from many individual links
-      // to a single "Settings" hub entry.
-      // Admin layout (no albums in test): Photos, Explore, Map, Sharing,
+      // to a single "Settings" hub entry (plus permission-gated items when hasPermission
+      // is unconfigured/false, as in this test).
+      // Admin layout (no albums in test): Photos, Explore, Map, Circles,
       //                                   People, Review Bursts, Archive, Trash,
       //                                   Settings (admin hub),
       //                                   User Settings
@@ -440,8 +441,9 @@ describe('Sidebar', () => {
       });
 
       // Use container query + fireEvent to bypass MUI modal aria-hidden wrapping
-      // After the settings refactor the admin section is a single "Settings" entry.
-      // Admin layout (no albums): Photos(0), Explore(1), Map(2), Sharing(3),
+      // After the settings refactor the admin section is a single "Settings" entry
+      // (hasPermission is unconfigured/false here, so no extra gated items render).
+      // Admin layout (no albums): Photos(0), Explore(1), Map(2), Circles(3),
       //                           People(4), Review Bursts(5), Archive(6), Trash(7),
       //                           Settings — admin hub(8),
       //                           User Settings(9)
@@ -452,6 +454,139 @@ describe('Sidebar', () => {
       await waitFor(() => {
         expect(mockNavigate).toHaveBeenCalledWith('/admin/settings');
       });
+    });
+  });
+
+  describe('Permission-Gated Admin Nav Items', () => {
+    it('does not render Job Queue, Storage Insights, or Public Sharing when admin lacks the gating permissions', () => {
+      vi.mocked(usePermissions).mockReturnValue({
+        permissions: new Set(),
+        roles: new Set(['admin']),
+        hasPermission: vi.fn().mockReturnValue(false),
+        hasAnyPermission: vi.fn(),
+        hasAllPermissions: vi.fn(),
+        hasRole: vi.fn(),
+        hasAnyRole: vi.fn(),
+        isAdmin: true,
+      });
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />, {
+        wrapperOptions: { user: mockAdminUser },
+      });
+
+      expect(container.textContent).not.toContain('Job Queue');
+      expect(container.textContent).not.toContain('Storage Insights');
+      expect(container.textContent).not.toContain('Public Sharing');
+    });
+
+    it('renders Job Queue when admin has jobs:read', async () => {
+      vi.mocked(usePermissions).mockReturnValue({
+        permissions: new Set(['jobs:read']),
+        roles: new Set(['admin']),
+        hasPermission: (perm: string) => perm === 'jobs:read',
+        hasAnyPermission: vi.fn(),
+        hasAllPermissions: vi.fn(),
+        hasRole: vi.fn(),
+        hasAnyRole: vi.fn(),
+        isAdmin: true,
+      });
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />, {
+        wrapperOptions: { user: mockAdminUser },
+      });
+
+      expect(container.textContent).toContain('Job Queue');
+      expect(container.textContent).not.toContain('Storage Insights');
+      expect(container.textContent).not.toContain('Public Sharing');
+
+      const jobQueueButton = screen.getByText('Job Queue').closest('.MuiListItemButton-root') as HTMLElement;
+      fireEvent.click(jobQueueButton);
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/admin/settings/jobs');
+      });
+    });
+
+    it('renders Storage Insights when admin has system_settings:read', async () => {
+      vi.mocked(usePermissions).mockReturnValue({
+        permissions: new Set(['system_settings:read']),
+        roles: new Set(['admin']),
+        hasPermission: (perm: string) => perm === 'system_settings:read',
+        hasAnyPermission: vi.fn(),
+        hasAllPermissions: vi.fn(),
+        hasRole: vi.fn(),
+        hasAnyRole: vi.fn(),
+        isAdmin: true,
+      });
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />, {
+        wrapperOptions: { user: mockAdminUser },
+      });
+
+      expect(container.textContent).toContain('Storage Insights');
+
+      const storageInsightsButton = screen
+        .getByText('Storage Insights')
+        .closest('.MuiListItemButton-root') as HTMLElement;
+      fireEvent.click(storageInsightsButton);
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/admin/settings/storage/insights');
+      });
+    });
+
+    it('renders Public Sharing when admin has shares:manage_any', async () => {
+      vi.mocked(usePermissions).mockReturnValue({
+        permissions: new Set(['shares:manage_any']),
+        roles: new Set(['admin']),
+        hasPermission: (perm: string) => perm === 'shares:manage_any',
+        hasAnyPermission: vi.fn(),
+        hasAllPermissions: vi.fn(),
+        hasRole: vi.fn(),
+        hasAnyRole: vi.fn(),
+        isAdmin: true,
+      });
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />, {
+        wrapperOptions: { user: mockAdminUser },
+      });
+
+      expect(container.textContent).toContain('Public Sharing');
+
+      const publicSharingButton = screen
+        .getByText('Public Sharing')
+        .closest('.MuiListItemButton-root') as HTMLElement;
+      fireEvent.click(publicSharingButton);
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/admin/settings/sharing');
+      });
+    });
+
+    it('renders all three gated items together when admin has all three permissions', () => {
+      vi.mocked(usePermissions).mockReturnValue({
+        permissions: new Set(['jobs:read', 'system_settings:read', 'shares:manage_any']),
+        roles: new Set(['admin']),
+        hasPermission: (perm: string) =>
+          ['jobs:read', 'system_settings:read', 'shares:manage_any'].includes(perm),
+        hasAnyPermission: vi.fn(),
+        hasAllPermissions: vi.fn(),
+        hasRole: vi.fn(),
+        hasAnyRole: vi.fn(),
+        isAdmin: true,
+      });
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />, {
+        wrapperOptions: { user: mockAdminUser },
+      });
+
+      expect(container.textContent).toContain('Job Queue');
+      expect(container.textContent).toContain('Storage Insights');
+      expect(container.textContent).toContain('Public Sharing');
+
+      // Settings(0) hub + 3 gated items + User Settings pinned at bottom
+      const buttons = container.querySelectorAll('.MuiListItemButton-root');
+      expect(buttons).toHaveLength(13);
     });
   });
 
@@ -591,8 +726,9 @@ describe('Sidebar', () => {
         wrapperOptions: { user: mockAdminUser },
       });
 
-      // After the settings refactor, admin sees: Photos, Explore, Map, Sharing,
+      // After the settings refactor, admin sees: Photos, Explore, Map, Circles,
       //   People, Review Bursts, Archive, Trash, Settings (admin hub), User Settings — 10 total
+      // (hasPermission is unconfigured/false here, so no extra gated items render).
       const icons = container.querySelectorAll('.MuiListItemIcon-root');
       expect(icons).toHaveLength(10);
     });

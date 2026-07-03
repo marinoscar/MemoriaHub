@@ -69,10 +69,10 @@ export default function SettingsHubPage() {
         },
         {
           title: 'Archiving & Deletion',
-          description: 'Configure automatic archiving schedules and permanent deletion policies.',
+          description: 'Manage the Trash retention period and review how archiving and deletion work.',
           icon: <ArchiveIcon sx={{ fontSize: 40 }} color="primary" />,
-          disabled: true,
-          alwaysShow: true,
+          path: '/admin/settings/archiving',
+          permission: 'system_settings:read',
         },
       ],
     },

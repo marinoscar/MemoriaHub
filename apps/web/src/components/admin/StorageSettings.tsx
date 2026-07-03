@@ -13,10 +13,6 @@ const DEFAULT_REFRESH_HOURS = 4;
 const MIN_REFRESH_HOURS = 1;
 const MAX_REFRESH_HOURS = 168; // 1 week
 
-const DEFAULT_RETENTION_DAYS = 30;
-const MIN_RETENTION_DAYS = 1;
-const MAX_RETENTION_DAYS = 365;
-
 const DEFAULT_JOB_RETENTION_DAYS = 30;
 const MIN_JOB_RETENTION_DAYS = 1;
 const MAX_JOB_RETENTION_DAYS = 365;
@@ -55,13 +51,9 @@ interface StorageSettingsProps {
 
 export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, onResetHistory, disabled }: StorageSettingsProps) {
   const initialHours = settings?.insights?.refreshIntervalHours ?? DEFAULT_REFRESH_HOURS;
-  const initialRetentionDays = settings?.trash?.retentionDays ?? DEFAULT_RETENTION_DAYS;
 
   const [refreshHours, setRefreshHours] = useState<number>(initialHours);
   const [refreshError, setRefreshError] = useState<string | null>(null);
-
-  const [retentionDays, setRetentionDays] = useState<number>(initialRetentionDays);
-  const [retentionError, setRetentionError] = useState<string | null>(null);
 
   const [isSaving, setIsSaving] = useState(false);
 
@@ -79,7 +71,6 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, on
 
   useEffect(() => {
     setRefreshHours(settings?.insights?.refreshIntervalHours ?? DEFAULT_REFRESH_HOURS);
-    setRetentionDays(settings?.trash?.retentionDays ?? DEFAULT_RETENTION_DAYS);
   }, [settings]);
 
   useEffect(() => {
@@ -87,12 +78,9 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, on
     setJobPurgeEnabled(jobsSettings?.history?.purgeEnabled ?? true);
   }, [jobsSettings]);
 
-  const hasInsightsChanges =
+  const hasChanges =
     refreshHours !== (settings?.insights?.refreshIntervalHours ?? DEFAULT_REFRESH_HOURS);
-  const hasTrashChanges =
-    retentionDays !== (settings?.trash?.retentionDays ?? DEFAULT_RETENTION_DAYS);
-  const hasChanges = hasInsightsChanges || hasTrashChanges;
-  const hasErrors = !!refreshError || !!retentionError;
+  const hasErrors = !!refreshError;
 
   const hasJobRetentionChanges =
     jobRetentionDays !== (jobsSettings?.history?.retentionDays ?? DEFAULT_JOB_RETENTION_DAYS);
@@ -107,16 +95,6 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, on
       setRefreshError(`Must be between ${MIN_REFRESH_HOURS} and ${MAX_REFRESH_HOURS}`);
     } else {
       setRefreshError(null);
-    }
-  };
-
-  const handleRetentionChange = (raw: string) => {
-    const val = parseInt(raw, 10);
-    setRetentionDays(isNaN(val) ? 0 : val);
-    if (isNaN(val) || val < MIN_RETENTION_DAYS || val > MAX_RETENTION_DAYS) {
-      setRetentionError(`Must be between ${MIN_RETENTION_DAYS} and ${MAX_RETENTION_DAYS}`);
-    } else {
-      setRetentionError(null);
     }
   };
 
@@ -136,7 +114,6 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, on
     try {
       await onSave({
         insights: { refreshIntervalHours: refreshHours },
-        trash: { retentionDays },
       });
     } finally {
       setIsSaving(false);
@@ -195,27 +172,6 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, on
         slotProps={{ htmlInput: { min: MIN_REFRESH_HOURS, max: MAX_REFRESH_HOURS, step: 1 } }}
         sx={{ width: 320 }}
       />
-
-      <Box sx={{ mt: 3, mb: 1 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
-          Trash
-        </Typography>
-
-        <TextField
-          label="Trash retention period (days)"
-          type="number"
-          value={retentionDays}
-          onChange={(e) => handleRetentionChange(e.target.value)}
-          disabled={disabled}
-          error={!!retentionError}
-          helperText={
-            retentionError ??
-            `How long deleted items are kept in Trash before permanent deletion. Default: ${DEFAULT_RETENTION_DAYS} days.`
-          }
-          slotProps={{ htmlInput: { min: MIN_RETENTION_DAYS, max: MAX_RETENTION_DAYS, step: 1 } }}
-          sx={{ width: 320 }}
-        />
-      </Box>
 
       <Box sx={{ mt: 3 }}>
         <Button

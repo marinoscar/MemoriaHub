@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Link as RouterLink } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -29,6 +29,7 @@ import {
   TextField,
   Tabs,
   Tab,
+  Link,
 } from '@mui/material';
 import {
   ContentCopy as CopyIcon,
@@ -405,6 +406,16 @@ function PublicSharesPageContent() {
 
   return (
     <Box sx={{ p: { xs: 2, md: 4 } }}>
+      <Link
+        component={RouterLink}
+        to="/admin/settings"
+        underline="hover"
+        variant="body2"
+        sx={{ display: 'inline-block', mb: 2 }}
+      >
+        &larr; Back to Settings
+      </Link>
+
       {/* Header */}
       <Stack direction="row" spacing={2} sx={{ mb: 3, alignItems: 'center' }}>
         <PublicIcon color="primary" sx={{ fontSize: 32 }} />

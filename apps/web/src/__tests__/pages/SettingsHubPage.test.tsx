@@ -146,11 +146,11 @@ describe('SettingsHubPage', () => {
       expect(screen.getByText('Users & Allowlist')).toBeInTheDocument();
     });
 
-    it('renders Archiving & Deletion as a "Coming soon" disabled card', () => {
+    it('renders Archiving & Deletion as an enabled card (not "Coming soon")', () => {
       render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
 
       expect(screen.getByText('Archiving & Deletion')).toBeInTheDocument();
-      expect(screen.getByText('Coming soon')).toBeInTheDocument();
+      expect(screen.queryByText('Coming soon')).not.toBeInTheDocument();
     });
 
     it('renders AI Providers card', () => {
@@ -228,9 +228,18 @@ describe('SettingsHubPage', () => {
       expect(screen.queryByText('Job Queue Insights')).not.toBeInTheDocument();
     });
 
-    it('always shows Archiving & Deletion (alwaysShow) regardless of permission', () => {
-      // Even with no permissions, the alwaysShow card is rendered
+    it('hides Archiving & Deletion when user lacks system_settings:read', () => {
       mockUsePermissions.mockReturnValue(adminPermissionsMock([]) as any);
+
+      render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.queryByText('Archiving & Deletion')).not.toBeInTheDocument();
+    });
+
+    it('shows Archiving & Deletion when user has system_settings:read', () => {
+      mockUsePermissions.mockReturnValue(
+        adminPermissionsMock(['system_settings:read']) as any,
+      );
 
       render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
 
@@ -321,16 +330,15 @@ describe('SettingsHubPage', () => {
       });
     });
 
-    it('does NOT navigate when Archiving & Deletion (disabled) card is clicked', async () => {
+    it('navigates to /admin/settings/archiving when Archiving & Deletion card is clicked', async () => {
       const user = userEvent.setup();
       render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      // Disabled card has no CardActionArea — click the card content directly
-      const archivingText = screen.getByText('Archiving & Deletion');
-      await user.click(archivingText);
+      await user.click(screen.getByText('Archiving & Deletion'));
 
-      // Navigate should not have been called
-      expect(mockNavigate).not.toHaveBeenCalled();
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/admin/settings/archiving');
+      });
     });
   });
 });
