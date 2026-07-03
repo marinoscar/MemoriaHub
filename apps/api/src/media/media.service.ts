@@ -42,7 +42,8 @@ import { ListTrashQueryDto } from './dto/list-trash-query.dto';
 import { RestoreFromTrashDto } from './dto/restore-from-trash.dto';
 import { DeleteForeverDto } from './dto/delete-forever.dto';
 import { EmptyTrashDto } from './dto/empty-trash.dto';
-import { geoResultToMediaColumns, GEO_CLEAR_COLUMNS } from './geo/geo-result.mapper';
+import { GEO_CLEAR_COLUMNS } from './geo/geo-result.mapper';
+import { applyLocation } from './geo/apply-location.util';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 
@@ -1431,13 +1432,7 @@ export class MediaService {
       Object.assign(data, GEO_CLEAR_COLUMNS);
     } else if (dto.set.location !== undefined) {
       const { lat, lng, altitude } = dto.set.location;
-      const result = await this.geoProvider.reverseGeocode(lat, lng);
-      Object.assign(data, {
-        takenLat: lat,
-        takenLng: lng,
-        takenAltitude: altitude ?? null,
-        ...geoResultToMediaColumns(result ?? {}, 'manual'),
-      });
+      Object.assign(data, await applyLocation(this.geoProvider, lat, lng, altitude, 'manual'));
     }
 
     if (dto.set.capturedAt !== undefined) {

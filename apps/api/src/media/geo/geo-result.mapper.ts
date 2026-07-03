@@ -37,4 +37,5 @@ export const GEO_CLEAR_COLUMNS = {
   geoPlaceName: null,
   geoSource: null,
   geocodedAt: null,
+  coordSource: null,
 } as const;
