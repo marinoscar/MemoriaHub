@@ -21,6 +21,9 @@
  */
 
 import React from 'react';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { render, cleanup } from 'ink-testing-library';
 import { ScanScreen } from '../../src/tui/ScanScreen.js';
 import { ScanEngine } from '../../src/scan/scan-engine.js';
@@ -29,6 +32,7 @@ import { ScanRepo, type ScanTotals } from '../../src/repo/scans.js';
 import { FolderRepo } from '../../src/repo/folders.js';
 import { SettingsRepo } from '../../src/repo/settings.js';
 import { openDb } from '../../src/db/database.js';
+import { exportsDir } from '../../src/paths.js';
 import type BetterSqlite3 from 'better-sqlite3';
 
 // ---------------------------------------------------------------------------
@@ -228,5 +232,101 @@ describe('ScanScreen', () => {
     const plain = stripAnsi(lastFrame()!);
     expect(plain).toContain('Scan failed');
     expect(plain).toContain('boom');
+  });
+
+  // -------------------------------------------------------------------------
+  // Auto-export to Excel (report phase, run + view modes)
+  //
+  // These tests write real files via the real `exceljs` package. To avoid
+  // touching the real developer/CI home directory (~/.memoriahub/exports),
+  // HOME/USERPROFILE are redirected to a fresh temp dir for the duration of
+  // each test in this block, and exportsDir() (imported above) is asserted
+  // to resolve under that temp dir before relying on fs.existsSync.
+  // -------------------------------------------------------------------------
+
+  describe('Excel auto-export', () => {
+    let tmpHome: string;
+    let originalHome: string | undefined;
+    let originalUserProfile: string | undefined;
+
+    beforeEach(() => {
+      tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'memoriahub-test-home-'));
+      originalHome = process.env.HOME;
+      originalUserProfile = process.env.USERPROFILE;
+      process.env.HOME = tmpHome;
+      process.env.USERPROFILE = tmpHome;
+    });
+
+    afterEach(() => {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = originalUserProfile;
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    });
+
+    it('auto-exports an Excel workbook and shows the saved path (run mode)', async () => {
+      const scanId = seedCompletedScan(db);
+
+      const scans = new ScanRepo(db);
+      const folders = new FolderRepo(db);
+      const settings = new SettingsRepo(db);
+      const engine = new ScanEngine({ scans, folders, settings });
+
+      const { lastFrame } = render(
+        <ScanScreen
+          db={db}
+          mode="run"
+          onHome={() => {}}
+          onBack={() => {}}
+          _engineForTesting={engine}
+        />,
+      );
+
+      engine.emit(SCAN_EV.SCAN_DONE, {
+        scanId,
+        totals: scans.computeTotals(scanId),
+        durationMs: 1,
+      });
+
+      // exceljs writeFile is real async file I/O — give it more than the
+      // default 50ms settle.
+      await flushAsync(300);
+
+      const plain = stripAnsi(lastFrame()!);
+      expect(plain).toContain('Excel saved:');
+      expect(plain).toContain(`scan-${scanId}.xlsx`);
+
+      const outPath = path.join(exportsDir(), `scan-${scanId}.xlsx`);
+      expect(fs.existsSync(outPath)).toBe(true);
+
+      const ExcelJS = (await import('exceljs')).default;
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.readFile(outPath);
+      const sheetNames = wb.worksheets.map((w: { name: string }) => w.name);
+      expect(sheetNames).toContain('Summary');
+      expect(sheetNames).toContain('Detail');
+
+      fs.rmSync(outPath, { force: true });
+    });
+
+    it('auto-exports an Excel workbook and shows the saved path (view mode)', async () => {
+      const scanId = seedCompletedScan(db);
+
+      const { lastFrame } = render(
+        <ScanScreen db={db} mode="view" onHome={() => {}} onBack={() => {}} />,
+      );
+
+      await flushAsync(300);
+
+      const plain = stripAnsi(lastFrame()!);
+      expect(plain).toContain('Excel saved:');
+      expect(plain).toContain(`scan-${scanId}.xlsx`);
+
+      const outPath = path.join(exportsDir(), `scan-${scanId}.xlsx`);
+      expect(fs.existsSync(outPath)).toBe(true);
+
+      fs.rmSync(outPath, { force: true });
+    });
   });
 });
