@@ -16,54 +16,22 @@ import SelectInput from 'ink-select-input';
 import type { CliConfig } from '../config.js';
 import { dbPath } from '../paths.js';
 import { BOX_BORDER, brandColorize, dim } from './theme.js';
+import { MENU_TREE, visibleChildren, type MenuNode } from './menu-config.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type MenuAction =
-  | 'login'
-  | 'folders'
-  | 'circles'
-  | 'sync-all'
-  | 'sync-select'
-  | 'status'
-  | 'retry'
-  | 'settings'
-  | 'help'
-  | 'factory-reset'
-  | 'quit';
-
-type MenuItem = { label: string; value: MenuAction };
+type MenuItem = { label: string; value: string; node: MenuNode };
 
 interface HomeMenuProps {
   config: CliConfig | null;
   identity: string | null;   // email from /api/auth/me, null if not logged in
   activeCircleName?: string | null;
-  onSelect: (action: MenuAction) => void;
+  onSelect: (node: MenuNode) => void;
   updateInfo?: { updateAvailable: boolean; latestVersion: string | null } | null;
   currentVersion?: string;
 }
-
-// ---------------------------------------------------------------------------
-// Menu items
-// ---------------------------------------------------------------------------
-
-const ALL_ITEMS: MenuItem[] = [
-  { label: 'Login / Change server',              value: 'login'         },
-  { label: 'Manage folders',                     value: 'folders'       },
-  { label: 'Manage circles',                     value: 'circles'       },
-  { label: 'Sync all folders',                   value: 'sync-all'      },
-  { label: 'Sync selected folders',              value: 'sync-select'   },
-  { label: 'Status',                             value: 'status'        },
-  { label: 'Retry failed files',                 value: 'retry'         },
-  { label: 'Settings',                           value: 'settings'      },
-  { label: 'Help',                               value: 'help'          },
-  { label: 'Factory reset (delete all local data)', value: 'factory-reset' },
-  { label: 'Quit',                               value: 'quit'          },
-];
-
-const LOGGED_OUT_ACTIONS: MenuAction[] = ['login', 'factory-reset', 'help', 'quit'];
 
 // ---------------------------------------------------------------------------
 // Banner lines
@@ -94,12 +62,17 @@ export function HomeMenu({
 }: HomeMenuProps): React.ReactElement {
   const isLoggedIn = Boolean(config && identity);
 
-  const items: MenuItem[] = ALL_ITEMS.filter(
-    (item) => isLoggedIn || LOGGED_OUT_ACTIONS.includes(item.value),
-  );
+  const nodes = visibleChildren(MENU_TREE, isLoggedIn);
 
-  function handleSelect(item: MenuItem): void {
-    onSelect(item.value);
+  const items: MenuItem[] = nodes.map((node, i) => ({
+    label: node.kind === 'submenu' ? `${node.label} ▸` : node.label,
+    value: String(i),
+    node,
+  }));
+
+  function handleSelect(item: { value: string }): void {
+    const match = items.find((it) => it.value === item.value);
+    if (match) onSelect(match.node);
   }
 
   return (

@@ -1,11 +1,15 @@
 /**
- * tui/app.tsx — Root TUI application: screen state machine + launch entry point.
+ * tui/app.tsx — Root TUI application: hierarchical menu + navigation stack.
  *
- * Screens: home | login | folders | pickFolders | dashboard | help | status | settings
+ * Navigation is a stack of frames: each frame is either a menu (identified by
+ * a submenu id in the menu tree) or a concrete screen. The root frame is the
+ * 'root' menu (rendered by HomeMenu with the full banner/identity chrome).
+ * Non-root menus render via the generic <Menu>. Every screen's onBack pops one
+ * frame instead of jumping straight home, so nesting is preserved.
  *
  * launchTui() checks for a real TTY; if non-TTY it prints a message and
- * returns immediately without hanging.  Otherwise it renders <App/> and
- * awaits Ink's waitUntilExit().
+ * returns immediately without hanging. Otherwise it renders <App/> and awaits
+ * Ink's waitUntilExit().
  */
 
 import React, { useState, useEffect } from 'react';
@@ -19,35 +23,51 @@ import { SettingsRepo } from '../repo/settings.js';
 import { checkForUpdate, compareSemver } from '../version-check.js';
 import type BetterSqlite3 from 'better-sqlite3';
 
-import { HomeMenu, type MenuAction } from './HomeMenu.js';
+import { HomeMenu } from './HomeMenu.js';
+import { Menu } from './Menu.js';
 import { LoginScreen } from './LoginScreen.js';
 import { FolderManager } from './FolderManager.js';
 import { CircleManager } from './CircleManager.js';
 import { PickFolders } from './PickFolders.js';
 import { SyncDashboard } from './SyncDashboard.js';
-import { StatusScreen } from './StatusScreen.js';
+import { ReportView } from './ReportView.js';
 import { SettingsScreen } from './SettingsScreen.js';
 import { FactoryResetScreen } from './FactoryResetScreen.js';
+import { BackupScreen } from './BackupScreen.js';
+import { JobsDashboard } from './JobsDashboard.js';
 import { BOX_BORDER } from './theme.js';
+import {
+  MENU_TREE,
+  findSubmenu,
+  visibleChildren,
+  breadcrumb,
+  type MenuNode,
+  type MenuActionId,
+} from './menu-config.js';
 
 // ---------------------------------------------------------------------------
-// Screen types
+// Screen + navigation types
 // ---------------------------------------------------------------------------
 
 type Screen =
-  | { kind: 'home' }
   | { kind: 'login' }
   | { kind: 'folders' }
   | { kind: 'circles' }
   | { kind: 'pickFolders' }
   | { kind: 'dashboard'; all?: boolean; folderIds?: number[]; retryFailedOnly?: boolean }
   | { kind: 'help' }
-  | { kind: 'status' }
   | { kind: 'settings' }
-  | { kind: 'factoryReset' };
+  | { kind: 'factoryReset' }
+  | { kind: 'report'; reportId: string }
+  | { kind: 'jobs' }
+  | { kind: 'backup' };
+
+type NavFrame =
+  | { kind: 'menu'; menuId: string }
+  | { kind: 'screen'; screen: Screen };
 
 // ---------------------------------------------------------------------------
-// Small helper: Esc/q key handler (used on help screen)
+// Small helper: Esc/q key handler (used on help + not-logged-in fallbacks)
 // ---------------------------------------------------------------------------
 
 function KeyHandler({ onBack }: { onBack: () => void }): null {
@@ -72,7 +92,7 @@ interface AppState {
 function App({ currentVersion }: { currentVersion: string }): React.ReactElement {
   const { exit } = useApp();
 
-  const [screen, setScreen] = useState<Screen>({ kind: 'home' });
+  const [stack, setStack] = useState<NavFrame[]>([{ kind: 'menu', menuId: 'root' }]);
   const [appState, setAppState] = useState<AppState>({
     config: null,
     identity: null,
@@ -154,38 +174,64 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
     };
   }, []);
 
-  // ---- Home menu ----
-  function handleMenuSelect(action: MenuAction): void {
+  // -------------------------------------------------------------------------
+  // Navigation helpers
+  // -------------------------------------------------------------------------
+
+  function push(frame: NavFrame): void {
+    setStack((prev) => [...prev, frame]);
+  }
+
+  function pop(): void {
+    setStack((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
+  }
+
+  function resetToRoot(): void {
+    setStack([{ kind: 'menu', menuId: 'root' }]);
+  }
+
+  // -------------------------------------------------------------------------
+  // Menu selection
+  // -------------------------------------------------------------------------
+
+  function openAction(action: MenuActionId): void {
+    if (action.startsWith('report:')) {
+      push({ kind: 'screen', screen: { kind: 'report', reportId: action.slice('report:'.length) } });
+      return;
+    }
     switch (action) {
       case 'login':
-        setScreen({ kind: 'login' });
+        push({ kind: 'screen', screen: { kind: 'login' } });
         break;
       case 'folders':
-        setScreen({ kind: 'folders' });
+        push({ kind: 'screen', screen: { kind: 'folders' } });
         break;
       case 'circles':
-        setScreen({ kind: 'circles' });
+        push({ kind: 'screen', screen: { kind: 'circles' } });
         break;
-      case 'sync-all':
-        setScreen({ kind: 'dashboard', all: true });
-        break;
-      case 'sync-select':
-        setScreen({ kind: 'pickFolders' });
-        break;
-      case 'retry':
-        setScreen({ kind: 'dashboard', all: true, retryFailedOnly: true });
-        break;
-      case 'status':
-        setScreen({ kind: 'status' });
-        break;
-      case 'settings':
-        setScreen({ kind: 'settings' });
-        break;
-      case 'help':
-        setScreen({ kind: 'help' });
+      case 'app-settings':
+        push({ kind: 'screen', screen: { kind: 'settings' } });
         break;
       case 'factory-reset':
-        setScreen({ kind: 'factoryReset' });
+        push({ kind: 'screen', screen: { kind: 'factoryReset' } });
+        break;
+      case 'sync-all':
+        push({ kind: 'screen', screen: { kind: 'dashboard', all: true } });
+        break;
+      case 'sync-select':
+        push({ kind: 'screen', screen: { kind: 'pickFolders' } });
+        break;
+      case 'retry':
+        push({ kind: 'screen', screen: { kind: 'dashboard', all: true, retryFailedOnly: true } });
+        break;
+      case 'jobs':
+        push({ kind: 'screen', screen: { kind: 'jobs' } });
+        break;
+      case 'backup':
+        push({ kind: 'screen', screen: { kind: 'backup' } });
+        break;
+      case 'help':
+        push({ kind: 'screen', screen: { kind: 'help' } });
         break;
       case 'quit':
         exit();
@@ -193,7 +239,37 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
     }
   }
 
-  // ---- If db not ready yet, show loading ----
+  function handleSelect(node: MenuNode): void {
+    if (node.kind === 'submenu') {
+      push({ kind: 'menu', menuId: node.id });
+    } else {
+      openAction(node.action);
+    }
+  }
+
+  // Encode a menu node into a stable string value for the generic <Menu>.
+  function toItem(node: MenuNode): { label: string; value: string } {
+    if (node.kind === 'submenu') {
+      return { label: `${node.label} ▸`, value: `submenu:${node.id}` };
+    }
+    return { label: node.label, value: `action:${node.action}` };
+  }
+
+  function selectChild(menuId: string, value: string): void {
+    const submenu = findSubmenu(menuId);
+    if (!submenu) return;
+    const sep = value.indexOf(':');
+    const kind = value.slice(0, sep);
+    const rest = value.slice(sep + 1);
+    const node = visibleChildren(submenu, isLoggedIn).find((c) =>
+      c.kind === 'submenu' ? kind === 'submenu' && c.id === rest : kind === 'action' && c.action === rest,
+    );
+    if (node) handleSelect(node);
+  }
+
+  // -------------------------------------------------------------------------
+  // If db not ready yet, show loading
+  // -------------------------------------------------------------------------
   if (!appState.db) {
     return (
       <Box paddingX={1}>
@@ -203,28 +279,52 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
   }
 
   const db = appState.db;
+  const { config, identity } = appState;
+  const isLoggedIn = Boolean(config && identity);
 
   const activeCircleName =
-    appState.circles.find((c) => c.id === appState.config?.activeCircleId)?.name ?? null;
+    appState.circles.find((c) => c.id === config?.activeCircleId)?.name ?? null;
 
-  // ---- Screen routing ----
-  switch (screen.kind) {
-    case 'home':
+  // -------------------------------------------------------------------------
+  // Render only the TOP frame
+  // -------------------------------------------------------------------------
+  const top = stack[stack.length - 1];
+
+  if (top.kind === 'menu') {
+    if (top.menuId === 'root') {
       return (
         <HomeMenu
-          config={appState.config}
-          identity={appState.identity}
+          config={config}
+          identity={identity}
           activeCircleName={activeCircleName}
-          onSelect={handleMenuSelect}
+          onSelect={handleSelect}
           updateInfo={appState.updateInfo}
           currentVersion={currentVersion}
         />
       );
+    }
 
+    const submenu = findSubmenu(top.menuId);
+    const items = submenu ? visibleChildren(submenu, isLoggedIn).map(toItem) : [];
+    return (
+      <Menu
+        title={breadcrumb(top.menuId)}
+        subtitle="Use arrow keys and Enter to navigate"
+        items={items}
+        onSelect={(value) => selectChild(top.menuId, value)}
+        onBack={pop}
+      />
+    );
+  }
+
+  // top.kind === 'screen'
+  const screen = top.screen;
+
+  switch (screen.kind) {
     case 'login':
       return (
         <LoginScreen
-          initialConfig={appState.config}
+          initialConfig={config}
           onDone={(cfg) => {
             setAppState((prev) => ({ ...prev, config: cfg }));
             // Re-fetch identity and circles after successful login
@@ -241,33 +341,28 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
                 }));
               })
               .catch(() => {})
-              .finally(() => setScreen({ kind: 'home' }));
+              .finally(() => resetToRoot());
           }}
-          onBack={() => setScreen({ kind: 'home' })}
+          onBack={pop}
         />
       );
 
     case 'folders':
-      return (
-        <FolderManager
-          db={db}
-          onBack={() => setScreen({ kind: 'home' })}
-        />
-      );
+      return <FolderManager db={db} onBack={pop} />;
 
     case 'circles':
-      if (!appState.config) {
+      if (!config) {
         return (
           <Box paddingX={1} flexDirection="column" gap={1}>
             <Text color="yellow">Not logged in. Please login first.</Text>
             <Text dimColor>Press q to go back.</Text>
-            <KeyHandler onBack={() => setScreen({ kind: 'home' })} />
+            <KeyHandler onBack={pop} />
           </Box>
         );
       }
       return (
         <CircleManager
-          config={appState.config}
+          config={config}
           onConfigChange={(cfg) => setAppState((prev) => ({ ...prev, config: cfg }))}
           onBack={() => {
             // Refresh circles after returning (user may have changed active circle)
@@ -278,7 +373,7 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
                 setAppState((prev) => ({ ...prev, circles }));
               }).catch(() => {});
             }
-            setScreen({ kind: 'home' });
+            pop();
           }}
         />
       );
@@ -287,47 +382,71 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
       return (
         <PickFolders
           db={db}
-          onConfirm={(folderIds) => setScreen({ kind: 'dashboard', folderIds })}
-          onBack={() => setScreen({ kind: 'home' })}
+          onConfirm={(folderIds) =>
+            setStack((prev) => [...prev, { kind: 'screen', screen: { kind: 'dashboard', folderIds } }])
+          }
+          onBack={pop}
         />
       );
 
     case 'dashboard':
-      if (!appState.config) {
+      if (!config) {
         return (
           <Box paddingX={1} flexDirection="column" gap={1}>
             <Text color="yellow">Not logged in. Please login first.</Text>
             <Text dimColor>Press q to go back.</Text>
-            <KeyHandler onBack={() => setScreen({ kind: 'home' })} />
+            <KeyHandler onBack={pop} />
           </Box>
         );
       }
       return (
         <SyncDashboard
-          config={appState.config}
+          config={config}
           db={db}
           all={screen.all}
           folderIds={screen.folderIds}
           retryFailedOnly={screen.retryFailedOnly}
-          onHome={() => setScreen({ kind: 'home' })}
+          onHome={resetToRoot}
         />
       );
 
-    case 'status':
+    case 'report':
+      return <ReportView db={db} reportId={screen.reportId} onBack={pop} />;
+
+    case 'jobs':
+      if (!config) {
+        return (
+          <Box paddingX={1} flexDirection="column" gap={1}>
+            <Text color="yellow">Not logged in. Please login first.</Text>
+            <Text dimColor>Press q to go back.</Text>
+            <KeyHandler onBack={pop} />
+          </Box>
+        );
+      }
       return (
-        <StatusScreen
-          db={db}
-          onBack={() => setScreen({ kind: 'home' })}
+        <JobsDashboard
+          api={new ApiClient(config)}
+          intervalMs={5000}
+          windowDays={7}
+          serverUrl={config.serverUrl}
+          onBack={pop}
         />
       );
+
+    case 'backup':
+      if (!config) {
+        return (
+          <Box paddingX={1} flexDirection="column" gap={1}>
+            <Text color="yellow">Not logged in. Please login first.</Text>
+            <Text dimColor>Press q to go back.</Text>
+            <KeyHandler onBack={pop} />
+          </Box>
+        );
+      }
+      return <BackupScreen config={config} onBack={pop} />;
 
     case 'settings':
-      return (
-        <SettingsScreen
-          db={db}
-          onBack={() => setScreen({ kind: 'home' })}
-        />
-      );
+      return <SettingsScreen db={db} onBack={pop} />;
 
     case 'factoryReset':
       return (
@@ -344,9 +463,9 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
               circles: [],
               updateInfo: appState.updateInfo,
             });
-            setScreen({ kind: 'home' });
+            resetToRoot();
           }}
-          onCancel={() => setScreen({ kind: 'home' })}
+          onCancel={pop}
         />
       );
 
@@ -368,12 +487,14 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
           <Text>  memoriahub folders    Manage watched folders</Text>
           <Text>  memoriahub circles    Manage active circle</Text>
           <Text>  memoriahub sync       Run a sync</Text>
-          <Text>  memoriahub status     Show sync status</Text>
+          <Text>  memoriahub reports    Show reports (overview, runs, storage, duplicates)</Text>
           <Text>  memoriahub retry      Retry failed files</Text>
+          <Text>  memoriahub jobs       Live job queue monitor</Text>
+          <Text>  memoriahub backup     Back up circle media to a local folder</Text>
           <Text>  memoriahub settings   Manage settings</Text>
           <Text> </Text>
-          <Text dimColor>[Esc/q] back to home</Text>
-          <KeyHandler onBack={() => setScreen({ kind: 'home' })} />
+          <Text dimColor>[Esc/q] back</Text>
+          <KeyHandler onBack={pop} />
         </Box>
       );
   }
