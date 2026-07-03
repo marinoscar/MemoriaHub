@@ -284,14 +284,34 @@ describe('MediaLibraryPage', () => {
     });
 
     it('should render separate group headers for items in different months', () => {
+      // Use mid-month, midday UTC timestamps (not midnight) so the local
+      // calendar date/month stays put across every real-world timezone —
+      // a UTC-midnight timestamp would roll back into the previous day (and
+      // potentially the previous month) in timezones west of UTC.
+      const capturedAt1 = '2024-06-15T12:00:00.000Z';
+      const capturedAt2 = '2024-05-15T12:00:00.000Z';
       const items = [
-        makeMediaItem('m1', { capturedAt: '2024-06-01T00:00:00.000Z' }),
-        makeMediaItem('m2', { capturedAt: '2024-05-15T00:00:00.000Z' }),
+        makeMediaItem('m1', { capturedAt: capturedAt1 }),
+        makeMediaItem('m2', { capturedAt: capturedAt2 }),
       ];
       mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
       render(<MediaLibraryPage />);
-      expect(screen.getByText(/june 2024/i)).toBeInTheDocument();
-      expect(screen.getByText(/may 2024/i)).toBeInTheDocument();
+      // Compute the expected label the same way groupByYearMonth() does
+      // (toLocaleDateString(undefined, ...) — system locale) rather than
+      // hardcoding "June 2024" / "May 2024", so the assertion holds under
+      // any system locale while still meaningfully verifying that the two
+      // items land in two distinct month groups.
+      const label1 = new Date(capturedAt1).toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'long',
+      });
+      const label2 = new Date(capturedAt2).toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'long',
+      });
+      expect(label1).not.toBe(label2);
+      expect(screen.getByText(label1)).toBeInTheDocument();
+      expect(screen.getByText(label2)).toBeInTheDocument();
     });
 
     it('should render an "Unknown Date" group for items with null capturedAt', () => {
