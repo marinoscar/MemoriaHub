@@ -14,6 +14,6 @@ import { CirclesModule } from '../circles/circles.module';
   imports: [GeoLocationModule, SettingsModule, EnrichmentModule, CirclesModule],
   controllers: [GeoSettingsController, GeocodeAdminController, GeocodeMediaController],
   providers: [GeoSettingsService, GeocodeBackfillService, GeocodeHandler],
-  exports: [GeocodeBackfillService],
+  exports: [GeocodeBackfillService, GeoSettingsService],
 })
 export class GeoModule {}

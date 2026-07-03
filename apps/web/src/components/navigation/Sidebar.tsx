@@ -32,6 +32,9 @@ import {
   Delete as DeleteOutlineIcon,
   ContentCopy as ContentCopyIcon,
   MyLocation as MyLocationIcon,
+  WorkHistory as WorkHistoryIcon,
+  Insights as InsightsIcon,
+  Public as PublicIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -62,7 +65,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const isDesktop = useMediaQuery(theme.breakpoints.up('md'));
   const navigate = useNavigate();
   const location = useLocation();
-  const { isAdmin } = usePermissions();
+  const { isAdmin, hasPermission } = usePermissions();
   const { activeCircle, activeCircleId, activeCircleRole } = useCircle();
   const { albums, isLoading: albumsLoading, fetchAlbums } = useAlbums();
   const [createAlbumOpen, setCreateAlbumOpen] = useState(false);
@@ -79,7 +82,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     { label: 'Photos', icon: <HomeIcon />, path: '/' },
     { label: 'Explore', icon: <ExploreIcon />, path: '/search' },
     { label: 'Map', icon: <MapIcon />, path: '/map' },
-    { label: 'Sharing', icon: <GroupWorkIcon />, path: '/circles' },
+    { label: 'Circles', icon: <GroupWorkIcon />, path: '/circles' },
   ];
 
   const libraryItems: NavItemDef[] = [
@@ -93,6 +96,15 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
   const adminItems: NavItemDef[] = [
     { label: 'Settings', icon: <AdminIcon />, path: '/admin/settings' },
+    ...(hasPermission('jobs:read')
+      ? [{ label: 'Job Queue', icon: <WorkHistoryIcon />, path: '/admin/settings/jobs' }]
+      : []),
+    ...(hasPermission('system_settings:read')
+      ? [{ label: 'Storage Insights', icon: <InsightsIcon />, path: '/admin/settings/storage/insights' }]
+      : []),
+    ...(hasPermission('shares:manage_any')
+      ? [{ label: 'Public Sharing', icon: <PublicIcon />, path: '/admin/settings/sharing' }]
+      : []),
   ];
 
   const handleNavigate = useCallback(

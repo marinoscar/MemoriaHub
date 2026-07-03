@@ -437,7 +437,10 @@ describe('MediaGallery', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByAltText('Photo s1')).toBeInTheDocument();
+        // MediaGallery renders alt={item.originalFilename}; makeItem() defaults
+        // originalFilename to `file-${id}.jpg`, i.e. "file-s1.jpg" here — not
+        // the literal "Photo s1" the component has never produced.
+        expect(screen.getByAltText('file-s1.jpg')).toBeInTheDocument();
       });
 
       // The sentinel is an empty <Box sx={{ height: 1 }}> rendered after the last group.
