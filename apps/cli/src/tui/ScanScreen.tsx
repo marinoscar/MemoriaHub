@@ -47,7 +47,7 @@ export interface ScanScreenProps {
   _engineForTesting?: ScanEngine;
 }
 
-type Phase = 'running' | 'report' | 'empty' | 'error';
+type Phase = 'loading' | 'running' | 'report' | 'empty' | 'error';
 
 interface ScreenState {
   phase: Phase;
@@ -71,7 +71,9 @@ export function ScanScreen({
   _engineForTesting,
 }: ScanScreenProps): React.ReactElement {
   const [state, setState] = useState<ScreenState>({
-    phase: mode === 'view' ? 'report' : 'running',
+    // 'view' starts in a neutral loading state until the mount effect resolves
+    // the latest scan (→ report/empty/error); 'run' starts scanning.
+    phase: mode === 'view' ? 'loading' : 'running',
     scanned: 0,
     total: 0,
     report: null,
@@ -82,8 +84,8 @@ export function ScanScreen({
   const mounted = useRef(true);
 
   useInput((input, key) => {
-    // Ignore keys while a scan is actively running.
-    if (state.phase === 'running') return;
+    // Ignore keys while a scan is actively running or the view is loading.
+    if (state.phase === 'running' || state.phase === 'loading') return;
     if (input === 'q' || key.escape) { onBack(); return; }
     if (input === 'h') { onHome(); return; }
   });
@@ -171,6 +173,15 @@ export function ScanScreen({
   // Render
   // -------------------------------------------------------------------------
 
+  if (state.phase === 'loading') {
+    return (
+      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="row" paddingX={2} paddingY={1}>
+        <Text color="cyan"><Spinner type="dots" /></Text>
+        <Text dimColor>  Loading latest scan…</Text>
+      </Box>
+    );
+  }
+
   if (state.phase === 'running') {
     return (
       <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
@@ -205,7 +216,7 @@ export function ScanScreen({
     );
   }
 
-  if (state.phase === 'error' || !state.report) {
+  if (state.phase === 'error') {
     return (
       <Box borderStyle={BOX_BORDER} borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="red">Scan failed</Text>
@@ -219,7 +230,16 @@ export function ScanScreen({
     );
   }
 
-  // report phase
+  // report phase — render the report (guard against an unexpected null)
+  if (!state.report) {
+    return (
+      <Box borderStyle={BOX_BORDER} borderColor="cyan" paddingX={2} paddingY={1}>
+        <Text color="cyan"><Spinner type="dots" /></Text>
+        <Text dimColor>  Building report…</Text>
+      </Box>
+    );
+  }
+
   return (
     <Box flexDirection="column" gap={1}>
       <ScanReportBody report={state.report} />
