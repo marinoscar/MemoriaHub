@@ -14,7 +14,7 @@ import { extname } from 'path';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
-import { CircleRole } from '@prisma/client';
+import { CircleRole, StorageObject } from '@prisma/client';
 import { CircleMembershipService } from '../../circles/circle-membership.service';
 import { STORAGE_PROVIDER } from '../providers/storage-provider.interface';
 import type { StorageProvider } from '../providers/storage-provider.interface';
@@ -409,43 +409,59 @@ export class ObjectsService {
   }
 
   /**
-   * Simple upload for smaller files
+   * Create a StorageObject from a server-side readable stream.
+   *
+   * This is the reusable core shared by {@link simpleUpload} (browser multipart
+   * upload) and server-initiated ingest paths such as the OneDrive importer,
+   * which stream bytes pulled from an external source directly into the active
+   * storage provider without a browser round-trip.
+   *
+   * Behaviour mirrors the original simpleUpload flow exactly: generate an
+   * `uploads/<ts>/<uuid><ext>` key, resolve the active provider, stream-upload,
+   * persist a `processing` StorageObject row, emit OBJECT_UPLOADED_EVENT for
+   * post-processing, and write an audit event. `contentLength` is intentionally
+   * not forwarded to the provider so lib-storage streams via multipart the same
+   * way the browser upload path does; `size` (when known) only seeds the
+   * StorageObject row and is corrected by post-processing.
    */
-  async simpleUpload(
-    file: MultipartFile,
-    userId: string,
-  ): Promise<ObjectResponseDto> {
-    const { filename, mimetype, file: stream } = file;
+  async createObjectFromStream(params: {
+    stream: Readable;
+    mimeType: string;
+    originalName: string;
+    size?: number;
+    uploadedById: string;
+    auditUploadType?: string;
+  }): Promise<StorageObject> {
+    const { stream, mimeType, originalName, size, uploadedById } = params;
 
     // Generate storage key
     const timestamp = Date.now();
     const uuid = randomUUID();
-    const extension = extname(filename);
+    const extension = extname(originalName);
     const storageKey = `uploads/${timestamp}/${uuid}${extension}`;
 
-    this.logger.log(`Simple upload starting: ${filename}`);
+    this.logger.log(`Server-side upload starting: ${originalName}`);
 
     // Resolve the active storage provider dynamically from system settings.
     const { id: activeProviderId, provider: activeProvider } =
       await this.resolver.getActiveProvider();
 
-    // Upload to storage
+    // Upload to storage. contentLength is not forwarded — stream via multipart.
     const result = await activeProvider.upload(storageKey, stream, {
-      mimeType: mimetype,
+      mimeType,
     });
 
-    // We don't know the size until after upload for streams
-    // Use a default size of 0, should be updated in post-processing
+    // Size may be unknown (0) until post-processing for streamed uploads.
     const storageObject = await this.prisma.storageObject.create({
       data: {
-        name: filename,
-        size: BigInt(0), // Will be updated by post-processing
-        mimeType: mimetype,
+        name: originalName,
+        size: BigInt(size ?? 0),
+        mimeType,
         storageKey,
         storageProvider: activeProviderId,
         bucket: result.bucket,
         status: 'processing',
-        uploadedById: userId,
+        uploadedById,
       },
     });
 
@@ -456,13 +472,33 @@ export class ObjectsService {
     );
 
     // Create audit event
-    await this.createAuditEvent(userId, 'storage:upload:complete', storageObject.id, {
+    await this.createAuditEvent(uploadedById, 'storage:upload:complete', storageObject.id, {
       name: storageObject.name,
       mimeType: storageObject.mimeType,
-      uploadType: 'simple',
+      uploadType: params.auditUploadType ?? 'server-stream',
     });
 
-    this.logger.log(`Simple upload completed: ${storageObject.id}`);
+    this.logger.log(`Server-side upload completed: ${storageObject.id}`);
+
+    return storageObject;
+  }
+
+  /**
+   * Simple upload for smaller files
+   */
+  async simpleUpload(
+    file: MultipartFile,
+    userId: string,
+  ): Promise<ObjectResponseDto> {
+    const { filename, mimetype, file: stream } = file;
+
+    const storageObject = await this.createObjectFromStream({
+      stream,
+      mimeType: mimetype,
+      originalName: filename,
+      uploadedById: userId,
+      auditUploadType: 'simple',
+    });
 
     return this.mapToResponseDto(storageObject);
   }

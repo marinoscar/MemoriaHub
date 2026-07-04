@@ -1,7 +1,10 @@
 import {
   Controller,
   Get,
+  Post,
   Delete,
+  Body,
+  Param,
   Query,
   Req,
   Res,
@@ -16,6 +19,7 @@ import {
   ApiOperation,
   ApiResponse,
   ApiQuery,
+  ApiParam,
 } from '@nestjs/swagger';
 import { FastifyReply } from 'fastify';
 import { Auth } from '../auth/decorators/auth.decorator';
@@ -30,6 +34,7 @@ import {
 } from '../auth/utils/oauth-state.util';
 import { MicrosoftGraphClient } from './microsoft-graph.client';
 import { OneDriveConnectionService } from './onedrive-connection.service';
+import { OneDriveImportService } from './onedrive-import.service';
 import {
   OneDriveConnectionExpiredError,
   OneDriveNotConnectedError,
@@ -39,6 +44,11 @@ import {
   OneDriveConnectionStatusDto,
   OneDriveFolderDto,
 } from './dto/onedrive.dto';
+import {
+  ListImportRunsQueryDto,
+  StartImportDto,
+  StartImportResponseDto,
+} from './dto/onedrive-import.dto';
 
 const ONEDRIVE_FEATURE = 'oneDriveImport';
 /** Frontend surface the OAuth callback redirects back to. */
@@ -53,6 +63,7 @@ export class OneDriveController {
     private readonly configService: ConfigService,
     private readonly graphClient: MicrosoftGraphClient,
     private readonly connectionService: OneDriveConnectionService,
+    private readonly importService: OneDriveImportService,
     private readonly systemSettings: SystemSettingsService,
   ) {}
 
@@ -216,5 +227,81 @@ export class OneDriveController {
       }
       throw error;
     }
+  }
+
+  /**
+   * POST /onedrive/import
+   * Start a background import of a OneDrive folder into a target circle. Requires
+   * the caller's per-circle collaborator role; 409 if an active run exists.
+   */
+  @Post('import')
+  @Auth({ permissions: [PERMISSIONS.ONEDRIVE_CONNECT] })
+  @ApiOperation({
+    summary: 'Start a OneDrive import',
+    description:
+      'Enumerates eligible image/video files under the selected folder (recursively when ' +
+      'requested), creates an import run, and fans out one enrichment job per file. Requires ' +
+      'the caller to hold the collaborator role (or higher) on the target circle. Returns 409 ' +
+      'if the caller already has an active import run.',
+  })
+  @ApiResponse({ status: 201, type: StartImportResponseDto })
+  @ApiResponse({ status: 400, description: 'Feature disabled or no OneDrive connection' })
+  @ApiResponse({ status: 403, description: 'Caller lacks collaborator access to the circle' })
+  @ApiResponse({ status: 409, description: 'An active import run already exists' })
+  async startImport(
+    @CurrentUser() user: RequestUser,
+    @Body() body: StartImportDto,
+  ): Promise<StartImportResponseDto> {
+    return this.importService.startImport(user.id, user.permissions, {
+      circleId: body.circleId,
+      remoteFolderPath: body.remoteFolderPath,
+      recursive: body.recursive,
+    });
+  }
+
+  /**
+   * GET /onedrive/import/runs?page=&pageSize=
+   * List the caller's own import runs, newest first.
+   */
+  @Get('import/runs')
+  @Auth({ permissions: [PERMISSIONS.ONEDRIVE_CONNECT] })
+  @ApiOperation({ summary: 'List the caller\'s OneDrive import runs' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number })
+  @ApiResponse({ status: 200, description: 'Paginated list of the caller\'s import runs' })
+  async listImportRuns(
+    @CurrentUser() user: RequestUser,
+    @Query() query: ListImportRunsQueryDto,
+  ) {
+    return this.importService.listRuns(user.id, query.page, query.pageSize);
+  }
+
+  /**
+   * GET /onedrive/import/runs/:id
+   * Get a single run's detail with recomputed per-status item counts.
+   */
+  @Get('import/runs/:id')
+  @Auth({ permissions: [PERMISSIONS.ONEDRIVE_CONNECT] })
+  @ApiOperation({ summary: 'Get a OneDrive import run with recomputed item counts' })
+  @ApiParam({ name: 'id', description: 'Import run id' })
+  @ApiResponse({ status: 200, description: 'Run detail with imported/failed/skipped/pending/running counts' })
+  @ApiResponse({ status: 404, description: 'Run not found or not owned by the caller' })
+  async getImportRun(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.importService.getRun(user.id, id);
+  }
+
+  /**
+   * POST /onedrive/import/runs/:id/cancel
+   * Cancel a pending/running run. In-flight item jobs detect the cancellation and
+   * skip gracefully; already-terminal runs are a no-op.
+   */
+  @Post('import/runs/:id/cancel')
+  @Auth({ permissions: [PERMISSIONS.ONEDRIVE_CONNECT] })
+  @ApiOperation({ summary: 'Cancel a OneDrive import run' })
+  @ApiParam({ name: 'id', description: 'Import run id' })
+  @ApiResponse({ status: 201, description: 'Run cancelled (or already terminal)' })
+  @ApiResponse({ status: 404, description: 'Run not found or not owned by the caller' })
+  async cancelImportRun(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.importService.cancelRun(user.id, id);
   }
 }

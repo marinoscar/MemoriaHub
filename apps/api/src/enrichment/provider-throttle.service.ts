@@ -78,6 +78,11 @@ export class ProviderThrottleService {
         return 'geocode';
       case 'face_detection':
         return 'face';
+      case 'onedrive_import':
+        // A Microsoft Graph 429 on one per-item import job backs off sibling
+        // onedrive_import jobs in the same run instead of each independently
+        // hammering Graph. See docs/specs/onedrive-import.md §3.
+        return 'onedrive';
       default:
         // storage_migration, storage_insights, trash_purge, metadata_extraction,
         // burst_detection — local or already AWS-SDK-retried; not throttled here.
