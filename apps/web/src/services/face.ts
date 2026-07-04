@@ -347,6 +347,8 @@ export interface UnassignedFaceDto {
   createdAt: string;
   /** Signed URL of the representative video frame JPEG used for face crops. Null for photos. */
   faceThumbnailUrl: string | null;
+  /** Archive timestamp; null when the face is live (not archived). */
+  hiddenAt: string | null;
 }
 
 export interface UnassignedFacesResponse {
@@ -360,12 +362,38 @@ export interface UnassignedFacesResponse {
 
 export async function listUnassignedFaces(
   circleId: string,
-  opts?: { page?: number; pageSize?: number },
+  opts?: { page?: number; pageSize?: number; archived?: boolean },
 ): Promise<UnassignedFacesResponse> {
   const p = new URLSearchParams({ circleId });
   if (opts?.page) p.set('page', String(opts.page));
   if (opts?.pageSize) p.set('pageSize', String(opts.pageSize));
+  if (opts?.archived) p.set('archived', 'true');
   return api.get<UnassignedFacesResponse>(`/people/unassigned?${p.toString()}`);
+}
+
+// ---------------------------------------------------------------------------
+// Bulk hide / unhide / purge — individual faces
+// ---------------------------------------------------------------------------
+
+export async function bulkHideFaces(
+  circleId: string,
+  ids: string[],
+): Promise<{ hidden: number }> {
+  return api.patch<{ hidden: number }>('/people/faces/bulk/hide', { circleId, ids });
+}
+
+export async function bulkUnhideFaces(
+  circleId: string,
+  ids: string[],
+): Promise<{ unhidden: number }> {
+  return api.patch<{ unhidden: number }>('/people/faces/bulk/unhide', { circleId, ids });
+}
+
+export async function purgeFaces(
+  circleId: string,
+  ids: string[],
+): Promise<{ deleted: number }> {
+  return api.post<{ deleted: number }>('/people/faces/bulk/purge', { circleId, ids });
 }
 
 // ---------------------------------------------------------------------------
