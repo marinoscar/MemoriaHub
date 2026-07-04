@@ -171,6 +171,11 @@ export function LocationSearchPicker({
             noOptionsText="No results found"
             loadingText="Searching..."
             disabled={disabled}
+            slotProps={{
+              popper: {
+                sx: { zIndex: (theme) => theme.zIndex.modal + 2 },
+              },
+            }}
             renderInput={(params) => (
               <TextField
                 {...params}
