@@ -34,7 +34,9 @@ vi.mock('../../hooks/usePeople', () => ({
 }));
 
 vi.mock('../../services/media', () => ({
-  getExplorePlaces: vi.fn().mockResolvedValue([]),
+  getExploreLocations: vi
+    .fn()
+    .mockResolvedValue({ countries: [], regions: [], cities: [] }),
   getExploreTags: vi.fn().mockResolvedValue([]),
 }));
 
@@ -45,6 +47,15 @@ vi.mock('../../components/media/MediaGallery', () => ({
 vi.mock('../../components/search/SearchPanel', () => ({
   SearchPanel: vi.fn(() => null),
 }));
+
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>();
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Imports after mocks
@@ -106,6 +117,7 @@ function defaultPeopleMock() {
 describe('SearchPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockNavigate.mockClear();
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
     mockUseCircle.mockReturnValue(defaultCircleMock() as any);
     mockUseSearch.mockReturnValue(defaultSearchMock() as any);
@@ -134,9 +146,11 @@ describe('SearchPage', () => {
   // Explore view (default state — no results, no active search)
   // -------------------------------------------------------------------------
   describe('Explore rows', () => {
-    it('shows Places and Tags explore row headers', () => {
+    it('shows Countries, Regions, Cities, and Tags explore row headers', () => {
       render(<SearchPage />);
-      expect(screen.getByText('Places')).toBeInTheDocument();
+      expect(screen.getByText('Countries')).toBeInTheDocument();
+      expect(screen.getByText('Regions')).toBeInTheDocument();
+      expect(screen.getByText('Cities')).toBeInTheDocument();
       expect(screen.getByText('Tags')).toBeInTheDocument();
     });
 
@@ -161,17 +175,36 @@ describe('SearchPage', () => {
       expect(screen.queryByTestId('media-gallery')).not.toBeInTheDocument();
     });
 
-    it('shows "View all in map" button for the Places section', async () => {
-      const { getExplorePlaces } = await import('../../services/media');
-      vi.mocked(getExplorePlaces).mockResolvedValue([
-        { name: 'Rome', count: 4, coverThumbnailUrl: null },
-      ]);
+    it('shows "See all places" button for the Countries section when countries are loaded', async () => {
+      const { getExploreLocations } = await import('../../services/media');
+      vi.mocked(getExploreLocations).mockResolvedValue({
+        countries: [{ name: 'Rome', countryCode: 'IT', count: 4, coverThumbnailUrl: null }],
+        regions: [],
+        cities: [],
+      });
 
       render(<SearchPage />);
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: /view all in map/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /see all places/i })).toBeInTheDocument();
       });
+    });
+
+    it('navigates to /places when "See all places" is clicked', async () => {
+      const { getExploreLocations } = await import('../../services/media');
+      vi.mocked(getExploreLocations).mockResolvedValue({
+        countries: [{ name: 'Rome', countryCode: 'IT', count: 4, coverThumbnailUrl: null }],
+        regions: [],
+        cities: [],
+      });
+
+      const user = userEvent.setup();
+      render(<SearchPage />);
+
+      const seeAllButton = await screen.findByRole('button', { name: /see all places/i });
+      await user.click(seeAllButton);
+
+      expect(mockNavigate).toHaveBeenCalledWith('/places');
     });
 
     it('shows "View all" button for the Tags section when tags are loaded', async () => {
@@ -236,7 +269,9 @@ describe('SearchPage', () => {
 
       render(<SearchPage />);
 
-      expect(screen.queryByText('Places')).not.toBeInTheDocument();
+      expect(screen.queryByText('Countries')).not.toBeInTheDocument();
+      expect(screen.queryByText('Regions')).not.toBeInTheDocument();
+      expect(screen.queryByText('Cities')).not.toBeInTheDocument();
       expect(screen.queryByText('Tags')).not.toBeInTheDocument();
     });
 
@@ -341,16 +376,48 @@ describe('SearchPage', () => {
   // Explore data loaded from service
   // -------------------------------------------------------------------------
   describe('Explore data', () => {
-    it('shows Places from the explore endpoint', async () => {
-      const { getExplorePlaces } = await import('../../services/media');
-      vi.mocked(getExplorePlaces).mockResolvedValue([
-        { name: 'Paris', count: 10, coverThumbnailUrl: null },
-      ]);
+    it('shows Countries from the explore endpoint', async () => {
+      const { getExploreLocations } = await import('../../services/media');
+      vi.mocked(getExploreLocations).mockResolvedValue({
+        countries: [{ name: 'Paris', countryCode: 'FR', count: 10, coverThumbnailUrl: null }],
+        regions: [],
+        cities: [],
+      });
 
       render(<SearchPage />);
 
       await waitFor(() => {
         expect(screen.getByText('Paris')).toBeInTheDocument();
+      });
+    });
+
+    it('shows Regions from the explore endpoint', async () => {
+      const { getExploreLocations } = await import('../../services/media');
+      vi.mocked(getExploreLocations).mockResolvedValue({
+        countries: [],
+        regions: [{ name: 'Provence', count: 6, coverThumbnailUrl: null }],
+        cities: [],
+      });
+
+      render(<SearchPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Provence')).toBeInTheDocument();
+      });
+    });
+
+    it('shows Cities from the explore endpoint', async () => {
+      const { getExploreLocations } = await import('../../services/media');
+      vi.mocked(getExploreLocations).mockResolvedValue({
+        countries: [],
+        regions: [],
+        cities: [{ name: 'Nice', count: 3, coverThumbnailUrl: null }],
+      });
+
+      render(<SearchPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Nice')).toBeInTheDocument();
       });
     });
 

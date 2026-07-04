@@ -32,9 +32,11 @@ vi.mock('../../hooks/usePeople', () => ({
 }));
 
 vi.mock('../../services/media', () => ({
-  getExplorePlaces: vi.fn().mockResolvedValue([
-    { name: 'Paris', count: 10, coverThumbnailUrl: null },
-  ]),
+  getExploreLocations: vi.fn().mockResolvedValue({
+    countries: [{ name: 'Paris', countryCode: 'FR', count: 10, coverThumbnailUrl: null }],
+    regions: [],
+    cities: [],
+  }),
   getExploreTags: vi.fn().mockResolvedValue([
     { name: 'beach', count: 5, coverThumbnailUrl: null },
   ]),
@@ -165,7 +167,7 @@ describe('SearchPage — extended coverage', () => {
       render(<SearchPage />);
 
       // Explore rows visible, no gallery
-      expect(screen.getByText('Places')).toBeInTheDocument();
+      expect(screen.getByText('Countries')).toBeInTheDocument();
       expect(screen.queryByTestId('media-gallery')).not.toBeInTheDocument();
     });
   });
@@ -204,7 +206,7 @@ describe('SearchPage — extended coverage', () => {
   // Explore section
   // -------------------------------------------------------------------------
   describe('Explore section', () => {
-    it('shows Places and Tags from explore endpoints', async () => {
+    it('shows Countries and Tags from explore endpoints', async () => {
       render(<SearchPage />);
 
       await waitFor(() => {
@@ -218,7 +220,7 @@ describe('SearchPage — extended coverage', () => {
 
       render(<SearchPage />);
 
-      expect(screen.queryByText('Places')).not.toBeInTheDocument();
+      expect(screen.queryByText('Countries')).not.toBeInTheDocument();
       expect(screen.queryByText('Tags')).not.toBeInTheDocument();
     });
 
@@ -232,7 +234,7 @@ describe('SearchPage — extended coverage', () => {
       render(<SearchPage />);
 
       // When searching (results view branch), explore rows should NOT be rendered.
-      expect(screen.queryByText('Places')).not.toBeInTheDocument();
+      expect(screen.queryByText('Countries')).not.toBeInTheDocument();
     });
   });
 

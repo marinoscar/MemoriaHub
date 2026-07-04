@@ -20,6 +20,7 @@ import { PERMISSIONS } from '../common/constants/roles.constants';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { PERMISSIONS_KEY } from '../auth/decorators/permissions.decorator';
 import type { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import type { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
 import type { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
@@ -85,6 +86,8 @@ const mockMediaService = {
   reverseGeocodeOnDemand: jest.fn(),
   searchPlaces: jest.fn(),
   getDashboard: jest.fn(),
+  exploreLocations: jest.fn(),
+  exploreLocationLevel: jest.fn(),
 };
 
 // ---------------------------------------------------------------------------
@@ -342,6 +345,116 @@ describe('MediaController', () => {
         query.limit,
       );
       expect(result).toBe(expectedResult);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // exploreLocations handler
+  // -------------------------------------------------------------------------
+
+  describe('exploreLocations', () => {
+    it('should call mediaService.exploreLocations with circleId, user id, and permissions', async () => {
+      const user = makeUser({
+        id: 'user-77',
+        permissions: [PERMISSIONS.MEDIA_READ],
+      });
+      const expectedResult = {
+        countries: [{ name: 'Costa Rica', countryCode: 'CR', count: 5, coverThumbnailUrl: null }],
+        regions: [],
+        cities: [],
+      };
+      mockMediaService.exploreLocations.mockResolvedValue(expectedResult);
+
+      const result = await controller.exploreLocations('circle-1', user);
+
+      expect(mockMediaService.exploreLocations).toHaveBeenCalledTimes(1);
+      expect(mockMediaService.exploreLocations).toHaveBeenCalledWith(
+        'circle-1',
+        user.id,
+        user.permissions,
+      );
+      expect(result).toBe(expectedResult);
+    });
+
+    it('should forward the exact user id and permissions to the service', async () => {
+      const adminUser = makeUser({
+        id: 'admin-1',
+        permissions: [PERMISSIONS.MEDIA_READ, PERMISSIONS.MEDIA_READ_ANY],
+      });
+      mockMediaService.exploreLocations.mockResolvedValue({
+        countries: [],
+        regions: [],
+        cities: [],
+      });
+
+      await controller.exploreLocations('circle-9', adminUser);
+
+      expect(mockMediaService.exploreLocations).toHaveBeenCalledWith(
+        'circle-9',
+        'admin-1',
+        expect.arrayContaining([PERMISSIONS.MEDIA_READ_ANY]),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // exploreLocationLevel handler
+  // -------------------------------------------------------------------------
+
+  describe('exploreLocationLevel', () => {
+    it('should call mediaService.exploreLocationLevel with level, circleId, user id, and permissions', async () => {
+      const user = makeUser();
+      const expectedResult = [
+        { name: 'Costa Rica', countryCode: 'CR', count: 5, coverThumbnailUrl: null },
+      ];
+      mockMediaService.exploreLocationLevel.mockResolvedValue(expectedResult);
+
+      const result = await controller.exploreLocationLevel('countries', 'circle-1', user);
+
+      expect(mockMediaService.exploreLocationLevel).toHaveBeenCalledTimes(1);
+      expect(mockMediaService.exploreLocationLevel).toHaveBeenCalledWith(
+        'circle-1',
+        'countries',
+        user.id,
+        user.permissions,
+      );
+      expect(result).toBe(expectedResult);
+    });
+
+    it('forwards the :level route param verbatim (validation happens in the service)', async () => {
+      const user = makeUser();
+      mockMediaService.exploreLocationLevel.mockResolvedValue([]);
+
+      await controller.exploreLocationLevel('cities', 'circle-2', user);
+
+      expect(mockMediaService.exploreLocationLevel).toHaveBeenCalledWith(
+        'circle-2',
+        'cities',
+        user.id,
+        user.permissions,
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // @Auth metadata wiring — explore/locations routes
+  // -------------------------------------------------------------------------
+
+  describe('@Auth metadata wiring — explore/locations routes', () => {
+    it('exploreLocations requires MEDIA_READ permission', () => {
+      const permissions: string[] = Reflect.getMetadata(
+        PERMISSIONS_KEY,
+        controller.exploreLocations,
+      );
+      expect(permissions).toContain(PERMISSIONS.MEDIA_READ);
+    });
+
+    it('exploreLocationLevel requires MEDIA_READ permission', () => {
+      const permissions: string[] = Reflect.getMetadata(
+        PERMISSIONS_KEY,
+        controller.exploreLocationLevel,
+      );
+      expect(permissions).toContain(PERMISSIONS.MEDIA_READ);
     });
   });
 

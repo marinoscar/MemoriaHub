@@ -813,4 +813,92 @@ describe('MediaLibraryPage', () => {
       );
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Tiered Places / Tags deep-link filter seeding
+  // (mounting at /media?country=|region=|locality=|tag= from PlacesOverviewPage,
+  // LevelBrowsePage, or the SearchPage Explore rows must seed the matching
+  // filter state so the very first fetchMedia call already includes it.)
+  // -------------------------------------------------------------------------
+
+  describe('location and tag deep-link filters', () => {
+    it('seeds the country filter from ?country= and forwards it to fetchMedia', async () => {
+      const fetchMedia = vi.fn().mockResolvedValue([]);
+      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
+      render(<MediaLibraryPage />, {
+        wrapperOptions: { route: '/?country=France' },
+      });
+
+      expect(fetchMedia).toHaveBeenCalledWith(
+        expect.objectContaining({ country: 'France' }),
+      );
+    });
+
+    it('seeds the region filter from ?region= and forwards it to fetchMedia', async () => {
+      const fetchMedia = vi.fn().mockResolvedValue([]);
+      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
+      render(<MediaLibraryPage />, {
+        wrapperOptions: { route: '/?region=Guanacaste' },
+      });
+
+      expect(fetchMedia).toHaveBeenCalledWith(
+        expect.objectContaining({ region: 'Guanacaste' }),
+      );
+    });
+
+    it('seeds the locality filter from ?locality= and forwards it to fetchMedia', async () => {
+      const fetchMedia = vi.fn().mockResolvedValue([]);
+      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
+      render(<MediaLibraryPage />, {
+        wrapperOptions: { route: '/?locality=Liberia' },
+      });
+
+      expect(fetchMedia).toHaveBeenCalledWith(
+        expect.objectContaining({ locality: 'Liberia' }),
+      );
+    });
+
+    it('seeds the tag filter from ?tag= as a single-element selection and forwards it to fetchMedia', async () => {
+      const fetchMedia = vi.fn().mockResolvedValue([]);
+      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
+      render(<MediaLibraryPage />, {
+        wrapperOptions: { route: '/?tag=beach' },
+      });
+
+      expect(fetchMedia).toHaveBeenCalledWith(
+        expect.objectContaining({ tag: 'beach' }),
+      );
+    });
+
+    it('does not forward country/region/locality/tag params when absent from the URL', () => {
+      const fetchMedia = vi.fn().mockResolvedValue([]);
+      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
+      render(<MediaLibraryPage />);
+
+      expect(fetchMedia).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          country: expect.anything(),
+          region: expect.anything(),
+          locality: expect.anything(),
+          tag: expect.anything(),
+        }),
+      );
+    });
+
+    it('shows the seeded tag as a selected (filled) chip once tags load', async () => {
+      const fetchMedia = vi.fn().mockResolvedValue([]);
+      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
+      mockListTags.mockResolvedValue([
+        { id: 'tag-1', name: 'beach', count: 3 },
+        { id: 'tag-2', name: 'sunset', count: 1 },
+      ]);
+      render(<MediaLibraryPage />, {
+        wrapperOptions: { route: '/?tag=beach' },
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/beach \(3\)/i)).toBeInTheDocument();
+      });
+    });
+  });
 });
