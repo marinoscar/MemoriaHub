@@ -129,6 +129,7 @@ export class VideoFaceDetectionHandler implements EnrichmentHandler, OnModuleIni
           durationMs: true,
           width: true,
           height: true,
+          socialMediaSource: true,
           storageObject: {
             select: {
               storageKey: true,
@@ -145,6 +146,24 @@ export class VideoFaceDetectionHandler implements EnrichmentHandler, OnModuleIni
         this.logger.error(`VideoFaceJob ${job.id}: ${errMsg}`);
         await this.core.markFailed(job.mediaItemId, providerKey, modelVersion, errMsg);
         throw new Error(errMsg);
+      }
+
+      // --- 3b. Skip social-media re-uploads ---
+      // Videos flagged as social-media re-uploads (TikTok/Instagram/Facebook)
+      // are not personal footage; skip face detection entirely without even
+      // downloading the video. Mark no_faces so the item reads as processed.
+      if (mediaItem.socialMediaSource) {
+        this.logger.log(
+          `VideoFaceJob ${job.id}: skipping video face detection — flagged social media (${mediaItem.socialMediaSource})`,
+        );
+        await this.core.markStatus(
+          job.mediaItemId,
+          MediaFaceStatusType.no_faces,
+          0,
+          providerKey,
+          modelVersion,
+        );
+        return;
       }
 
       // --- 4. Read face.video settings ---

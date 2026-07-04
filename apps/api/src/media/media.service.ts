@@ -678,11 +678,17 @@ export class MediaService {
         update: {},
       });
 
-      // Upsert MediaTag join; create as manual, promote ai→manual on conflict
+      // Upsert MediaTag join; create as manual. On conflict, promote only an
+      // AI-applied row to manual — never downgrade a 'system' row (e.g. the
+      // social-media detection tags) or touch an existing 'manual' row.
       await this.prisma.mediaTag.upsert({
         where: { tagId_mediaItemId: { tagId: tag.id, mediaItemId: item.id } },
         create: { tagId: tag.id, mediaItemId: item.id, source: 'manual' },
-        update: { source: 'manual' },
+        update: {},
+      });
+      await this.prisma.mediaTag.updateMany({
+        where: { tagId: tag.id, mediaItemId: item.id, source: 'ai' },
+        data: { source: 'manual' },
       });
 
       result.push({ tagId: tag.id, name: tag.name });

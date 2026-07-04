@@ -30,6 +30,9 @@ export class FaceBackfillService {
         circleId,
         type: { in: [MediaType.photo, MediaType.video] },
         deletedAt: null,
+        // Exclude videos flagged as social-media re-uploads. Photos never carry
+        // a socialMediaSource, so this predicate leaves the photo set untouched.
+        socialMediaSource: null,
         ...dateWhere,
         ...(force
           ? {}
