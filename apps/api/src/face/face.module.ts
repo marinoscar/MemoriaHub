@@ -36,6 +36,6 @@ import { MediaModule } from '../media/media.module';
     VideoFrameExtractionService,
     VideoFaceDetectionHandler,
   ],
-  exports: [FaceSettingsService, FaceProviderRegistry, FaceMatchingService, FaceClusteringService],
+  exports: [FaceSettingsService, FaceProviderRegistry, FaceMatchingService, FaceClusteringService, VideoFrameExtractionService],
 })
 export class FaceModule {}
