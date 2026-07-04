@@ -78,6 +78,7 @@ function makeScanFile(overrides: Partial<ScanFile> = {}): ScanFile {
     has_exif: true,
     has_gps: true,
     captured_at: '2026-01-01T00:00:00.000Z',
+    captured_at_source: 'exif',
     width: 4000,
     height: 3000,
     camera_make: 'Apple',
@@ -166,6 +167,7 @@ describe('exportScan', () => {
         'Has EXIF',
         'Has location',
         'Captured at',
+        'Date source',
         'Width',
         'Height',
         'Camera make',
@@ -208,9 +210,9 @@ describe('exportScan', () => {
       // Sub-MB file keeps 2-decimal precision (512 KB = 0.5 MB).
       expect(detail.getRow(3).getCell(3).value).toBe(0.5);
 
-      // Width (col 9) thousand separators; Latitude (col 13) six decimals.
-      expect(row2.getCell(9).numFmt).toBe('#,##0');
-      expect(row2.getCell(13).numFmt).toBe('0.000000');
+      // Width (col 10) thousand separators; Latitude (col 14) six decimals.
+      expect(row2.getCell(10).numFmt).toBe('#,##0');
+      expect(row2.getCell(14).numFmt).toBe('0.000000');
 
       // Captured at (col 8): a real Excel datetime, not a string.
       expect(row2.getCell(8).value instanceof Date).toBe(true);
@@ -239,6 +241,28 @@ describe('exportScan', () => {
       expect(createdIsDate).toBe(true);
       expect(createdFmt).toBe('yyyy-mm-dd hh:mm:ss');
     });
+
+    it('renders the Date source column as "File timestamp" for source=file and "EXIF" for source=exif', async () => {
+      const report = makeReport();
+      const files: ScanFile[] = [
+        makeScanFile({ id: 1, file_path: '/tmp/report-folder/from-file.jpg', captured_at_source: 'file' }),
+        makeScanFile({ id: 2, file_path: '/tmp/report-folder/from-exif.jpg', captured_at_source: 'exif' }),
+        makeScanFile({ id: 3, file_path: '/tmp/report-folder/no-source.jpg', captured_at_source: null }),
+      ];
+
+      const outPath = path.join(tmpDir, 'date-source.xlsx');
+      await exportScan(report, files, outPath, 'xlsx');
+
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.readFile(outPath);
+      const detail = workbook.getWorksheet('Detail')!;
+
+      // Date source is column 9 (right after Captured at, col 8).
+      expect(detail.getRow(1).getCell(9).value).toBe('Date source');
+      expect(detail.getRow(2).getCell(9).value).toBe('File timestamp');
+      expect(detail.getRow(3).getCell(9).value).toBe('EXIF');
+      expect(detail.getRow(4).getCell(9).value).toBe('');
+    });
   });
 
   describe('csv', () => {
@@ -261,11 +285,28 @@ describe('exportScan', () => {
 
       expect(lines).toHaveLength(files.length + 1);
       expect(lines[0]).toBe(
-        'File path,Folder ID,Size (MB),MIME type,Media kind,Has EXIF,Has location,Captured at,Width,Height,Camera make,Camera model,Latitude,Longitude,Meta error',
+        'File path,Folder ID,Size (MB),MIME type,Media kind,Has EXIF,Has location,Captured at,Date source,Width,Height,Camera make,Camera model,Latitude,Longitude,Meta error',
       );
 
       // The row for the comma-containing path must be RFC-4180 quoted.
       expect(lines[1]).toContain('"/tmp/photos, vacation/img.jpg"');
+    });
+
+    it('includes "File timestamp" and "EXIF" values in the Date source column', async () => {
+      const report = makeReport();
+      const files: ScanFile[] = [
+        makeScanFile({ id: 1, file_path: '/tmp/report-folder/csv-file.jpg', captured_at_source: 'file' }),
+        makeScanFile({ id: 2, file_path: '/tmp/report-folder/csv-exif.jpg', captured_at_source: 'exif' }),
+      ];
+
+      const outPath = path.join(tmpDir, 'date-source.csv');
+      await exportScan(report, files, outPath, 'csv');
+
+      const content = fs.readFileSync(outPath, 'utf8');
+      const lines = content.split('\n').filter((l) => l.length > 0);
+
+      expect(lines[1]).toContain(',File timestamp,');
+      expect(lines[2]).toContain(',EXIF,');
     });
   });
 });
