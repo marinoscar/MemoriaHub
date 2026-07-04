@@ -17,6 +17,7 @@ import { Box, Text, useInput } from 'ink';
 import type BetterSqlite3 from 'better-sqlite3';
 
 import { SyncEngine } from '../sync/sync-engine.js';
+import { SyncReportCollector, writeSyncReport } from '../sync/sync-report.js';
 import {
   EV,
   type RunProgressCounts,
@@ -72,6 +73,10 @@ interface DashboardState {
   errorMsg: string | null;
   /** Set while the cooldown gate is throttling requests; null otherwise. */
   throttleDelayMs: number | null;
+  /** Excel run-report auto-export state. */
+  exporting: boolean;
+  exportPath: string | null;
+  exportError: string | null;
 }
 
 const EMPTY_COUNTS: RunProgressCounts = {
@@ -105,7 +110,13 @@ export function SyncDashboard({
     durationMs: 0,
     errorMsg: null,
     throttleDelayMs: null,
+    exporting: false,
+    exportPath: null,
+    exportError: null,
   });
+
+  // Collector that builds the Excel run report (real runs only, not test engine).
+  const collectorRef = useRef<SyncReportCollector | null>(null);
 
   // Throttle accumulator for run:progress
   const pendingCounts = useRef<RunProgressCounts | null>(null);
@@ -151,6 +162,11 @@ export function SyncDashboard({
       });
       engine = new SyncEngine({ api, folders, files, runs, settings });
       engineRef = engine;
+
+      // Collect per-file outcomes so we can auto-write an Excel run report.
+      const collector = new SyncReportCollector(files, folders, runs);
+      collector.attach(engine);
+      collectorRef.current = collector;
     }
 
     // run:start
@@ -266,6 +282,20 @@ export function SyncDashboard({
         },
         total: payload.stats.uploaded + payload.stats.skipped + payload.stats.failed,
       }));
+
+      // Auto-write the Excel run report and surface its path in the Summary.
+      const collector = collectorRef.current;
+      if (collector) {
+        setState((prev) => ({ ...prev, exporting: true }));
+        void writeSyncReport(collector).then((res) => {
+          setState((prev) => ({
+            ...prev,
+            exporting: false,
+            exportPath: res.ok ? res.path : null,
+            exportError: res.ok ? null : res.error,
+          }));
+        });
+      }
     });
 
     // rate:limited — show a throttle indicator, auto-clear after the window
@@ -304,7 +334,7 @@ export function SyncDashboard({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { counts, total, activeFiles, logEvents, failures, isDone, doneStats, durationMs, runId, errorMsg, throttleDelayMs } = state;
+  const { counts, total, activeFiles, logEvents, failures, isDone, doneStats, durationMs, runId, errorMsg, throttleDelayMs, exporting, exportPath, exportError } = state;
 
   // Error state
   if (errorMsg) {
@@ -325,6 +355,9 @@ export function SyncDashboard({
         stats={doneStats}
         durationMs={durationMs}
         failures={failures}
+        exporting={exporting}
+        exportPath={exportPath}
+        exportError={exportError}
         onHome={onHome}
         onRetry={() => {
           // Re-navigate: just go home and let user pick "retry failed"

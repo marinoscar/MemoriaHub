@@ -20,6 +20,7 @@ import { RunRepo } from '../repo/runs.js';
 import { SettingsRepo } from '../repo/settings.js';
 import { ScanRepo } from '../repo/scans.js';
 import { SyncEngine } from '../sync/sync-engine.js';
+import { SyncReportCollector, writeSyncReport } from '../sync/sync-report.js';
 import { EV } from '../sync/events.js';
 import { renderSyncHeadless } from '../render/headless-sync.js';
 import { runPatPreflight } from '../preflight.js';
@@ -134,6 +135,10 @@ export function syncCommand(): Command {
     });
     engineRef = engine;
 
+    // Collect per-file outcomes so we can write an Excel report for the run.
+    const collector = new SyncReportCollector(fileRepo, folderRepo, runRepo);
+    collector.attach(engine);
+
     renderSyncHeadless(engine);
 
     try {
@@ -150,6 +155,14 @@ export function syncCommand(): Command {
       const msg = err instanceof Error ? err.message : String(err);
       ui.error(msg);
       process.exit(1);
+    }
+
+    // Auto-write the Excel run report and print its location.
+    const report = await writeSyncReport(collector);
+    if (report.ok) {
+      ui.success(`Excel report: ${report.path}`);
+    } else {
+      ui.warn(`Excel report not created: ${report.error}`);
     }
   });
 

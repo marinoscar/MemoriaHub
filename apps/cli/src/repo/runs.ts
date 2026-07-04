@@ -100,6 +100,16 @@ export class RunRepo {
   }
 
   /**
+   * Get a single sync run by ID.  Returns null if not found.
+   */
+  getById(id: number): SyncRun | null {
+    const row = this.db
+      .prepare<[number], SyncRunRow>('SELECT * FROM sync_runs WHERE id = ?')
+      .get(id);
+    return row ? rowToRun(row) : null;
+  }
+
+  /**
    * List recent sync runs, newest first.
    * @param limit  Maximum number of rows to return (default 20).
    */

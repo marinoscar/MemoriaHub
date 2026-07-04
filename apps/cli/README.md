@@ -580,7 +580,7 @@ memoriahub sync ~/Pictures/Vacation2024 --scan 12
 | `~/.memoriahub/config.json` | Server URL and PAT (mode 0600) |
 | `~/.memoriahub/memoriahub.db` | SQLite sync state database |
 | `~/.memoriahub/manifests/` | Legacy per-folder JSON manifests (preserved, read-only after migration) |
-| `~/.memoriahub/exports/` | Auto-exported scan report workbooks, one `.xlsx` per scan ID (see [Scan](#scan-dry-run-preview)) |
+| `~/.memoriahub/exports/` | Auto-exported Excel workbooks: `scan-<id>.xlsx` per scan (see [Scan](#scan-dry-run-preview)) and `sync-<runId>.xlsx` per completed sync run (see [After sync](#after-sync)) |
 | `~/.memoriahub/app/` | Installed CLI app (dist + node_modules) |
 | `~/.local/bin/memoriahub` | Shell shim |
 
@@ -666,6 +666,8 @@ The progress meter is a 56-character block-grid bar (similar to the `/context` m
 ### After sync
 
 When a run completes, the dashboard transitions to a summary screen showing uploaded, skipped, and failed counts, the run duration, and a list of any failed files. From the summary you can return to the home menu to retry.
+
+Every completed sync run also auto-creates an Excel workbook at `~/.memoriahub/exports/sync-<runId>.xlsx` and prints its absolute path — from both the interactive dashboard summary and the headless `memoriahub sync` command. The workbook has two sheets: a **Summary** sheet (run metadata — run ID, trigger, dry-run flag, start/finish timestamps as real dates, duration, and totals with uploaded size in MB) and a **Detail** sheet (one row per processed file: path, status, detail/reason, size in MB, MIME type, media kind, media item ID, and SHA-256 prefix). Sizes are formatted in MB with two decimals and timestamps are stored as real spreadsheet dates. A failed export only shows a warning; it never blocks the run from completing.
 
 ---
 

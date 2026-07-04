@@ -14,20 +14,9 @@
 import * as fs from 'node:fs';
 import type { ScanReport } from '../scan/report.js';
 import type { ScanFile } from '../db/types.js';
+import { DATE_FMT, MB_FMT, bytesToMb } from './xlsx-format.js';
 
 export type ExportFormat = 'xlsx' | 'csv';
-
-/** Excel datetime number format applied to date columns/cells. */
-const DATE_FMT = 'yyyy-mm-dd hh:mm:ss';
-
-/** Excel number format for megabyte sizes: thousands separator + 2 decimals. */
-const MB_FMT = '#,##0.00';
-
-/** Convert a byte count to megabytes, rounded to 2 decimals (null passes through). */
-function bytesToMb(bytes: number | null | undefined): number | null {
-  if (bytes === null || bytes === undefined) return null;
-  return Math.round((bytes / (1024 * 1024)) * 100) / 100;
-}
 
 // exceljs is CJS; normalize the default-interop shape.
 type ExcelJsModule = typeof import('exceljs');
