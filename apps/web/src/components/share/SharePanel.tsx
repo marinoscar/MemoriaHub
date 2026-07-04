@@ -316,8 +316,7 @@ export function SharePanel({ target, onRequestClose }: SharePanelProps) {
       <Stack
         direction="row"
         spacing={1}
-        justifyContent="flex-end"
-        sx={{ mt: 2, flexWrap: 'wrap' }}
+        sx={{ mt: 2, flexWrap: 'wrap', justifyContent: 'flex-end' }}
       >
         {!share ? (
           <>
