@@ -12,7 +12,7 @@
  * face recognition is controlled globally from admin settings.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils/test-utils';
 
@@ -27,6 +27,13 @@ vi.mock('../../hooks/usePeople', () => ({
 
 vi.mock('../../services/media', () => ({
   listMedia: vi.fn().mockResolvedValue({ items: [], meta: {} }),
+  // Used by UnassignedFacesSection's FaceThumbGrid to resolve fallback
+  // thumbnails when a face has no faceThumbnailUrl of its own.
+  getMedia: vi.fn().mockResolvedValue({
+    id: 'media-1',
+    thumbnailUrl: 'https://example.com/thumb.jpg',
+    downloadUrl: null,
+  }),
 }));
 
 vi.mock('../../services/face', () => ({
@@ -44,6 +51,18 @@ vi.mock('../../services/face', () => ({
   bulkHidePeople: vi.fn().mockResolvedValue({ hidden: 0 }),
   bulkUnhidePeople: vi.fn().mockResolvedValue({ unhidden: 0 }),
   purgePeople: vi.fn().mockResolvedValue({ deleted: 0 }),
+  // useUnassignedFaces (used by UnassignedFacesSection) is NOT mocked as a
+  // hook — it's the real implementation — so its underlying service calls
+  // must be stubbed here. Default: no live or archived faces, so the section
+  // renders nothing (matches pre-existing test expectations elsewhere in
+  // this file that don't care about unassigned faces).
+  listUnassignedFaces: vi.fn().mockResolvedValue({
+    items: [],
+    meta: { page: 1, pageSize: 50, totalItems: 0, totalPages: 0 },
+  }),
+  bulkHideFaces: vi.fn().mockResolvedValue({ hidden: 0 }),
+  bulkUnhideFaces: vi.fn().mockResolvedValue({ unhidden: 0 }),
+  purgeFaces: vi.fn().mockResolvedValue({ deleted: 0 }),
 }));
 
 vi.mock('react-router-dom', async (importOriginal) => {
@@ -65,12 +84,29 @@ import * as faceService from '../../services/face';
 const mockUsePeople = vi.mocked(usePeople);
 const mockUsePerson = vi.mocked(usePerson);
 const mockDeleteCircleBiometrics = vi.mocked(faceService.deleteCircleBiometrics);
+const mockListUnassignedFaces = vi.mocked(faceService.listUnassignedFaces);
+const mockBulkHideFaces = vi.mocked(faceService.bulkHideFaces);
+const mockBulkUnhideFaces = vi.mocked(faceService.bulkUnhideFaces);
+const mockPurgeFaces = vi.mocked(faceService.purgeFaces);
 
 // ---------------------------------------------------------------------------
 // Default mock return values
 // ---------------------------------------------------------------------------
 
-import type { PersonListItem, PersonDetail } from '../../services/face';
+import type { PersonListItem, PersonDetail, UnassignedFaceDto } from '../../services/face';
+
+function makeUnassignedFace(overrides: Partial<UnassignedFaceDto> = {}): UnassignedFaceDto {
+  return {
+    faceId: 'face-1',
+    mediaItemId: 'media-1',
+    boundingBox: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
+    confidence: 0.9,
+    createdAt: new Date().toISOString(),
+    faceThumbnailUrl: 'https://example.com/face-1.jpg',
+    hiddenAt: null,
+    ...overrides,
+  };
+}
 
 function makePerson(id: string, name: string | null = 'Alice', isUnlabeled = false): PersonListItem {
   return {
@@ -430,6 +466,125 @@ describe('PeoplePage', () => {
       // PurgePeopleDialog should open
       await waitFor(() => {
         expect(screen.getByRole('heading', { name: /delete permanently/i })).toBeInTheDocument();
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('UnassignedFacesSection — archive / restore / delete individual faces', () => {
+    it('archiving selected faces calls bulkHideFaces and refreshes the unassigned lists', async () => {
+      const liveFace = makeUnassignedFace({ faceId: 'face-1' });
+      mockListUnassignedFaces.mockImplementation(async (_circleId, opts) => {
+        if (opts?.archived) {
+          return { items: [], meta: { page: 1, pageSize: 50, totalItems: 0, totalPages: 0 } };
+        }
+        return { items: [liveFace], meta: { page: 1, pageSize: 50, totalItems: 1, totalPages: 1 } };
+      });
+      mockBulkHideFaces.mockResolvedValue({ hidden: 1 });
+
+      const user = userEvent.setup();
+      render(<PeoplePage />);
+
+      await screen.findByText(/unassigned faces \(1\)/i);
+
+      // Select the single live face via its checkbox
+      const checkbox = screen.getByRole('checkbox');
+      await user.click(checkbox);
+
+      const archiveBtn = await screen.findByRole('button', { name: /^archive$/i });
+      await user.click(archiveBtn);
+
+      await waitFor(() => {
+        expect(mockBulkHideFaces).toHaveBeenCalledWith('circle-1', ['face-1']);
+      });
+
+      // Both the live and archived unassigned-face lists are refreshed after archiving:
+      // 2 initial mount calls (live + archived) + 2 refresh calls = 4.
+      await waitFor(() => {
+        expect(mockListUnassignedFaces.mock.calls.length).toBeGreaterThanOrEqual(4);
+      });
+    });
+
+    it('the archived faces sub-view fetches with archived:true and renders archived faces', async () => {
+      const archivedFace = makeUnassignedFace({ faceId: 'face-a', mediaItemId: 'media-a' });
+      mockListUnassignedFaces.mockImplementation(async (_circleId, opts) => {
+        if (opts?.archived) {
+          return { items: [archivedFace], meta: { page: 1, pageSize: 50, totalItems: 1, totalPages: 1 } };
+        }
+        return { items: [], meta: { page: 1, pageSize: 50, totalItems: 0, totalPages: 0 } };
+      });
+
+      const user = userEvent.setup();
+      render(<PeoplePage />);
+
+      const showBtn = await screen.findByRole('button', { name: /show archived faces/i });
+      await user.click(showBtn);
+
+      // The archived face grid renders with a selectable checkbox once expanded
+      await waitFor(() => {
+        expect(screen.getByRole('checkbox')).toBeInTheDocument();
+      });
+
+      expect(mockListUnassignedFaces).toHaveBeenCalledWith(
+        'circle-1',
+        expect.objectContaining({ archived: true }),
+      );
+    });
+
+    it('restore calls bulkUnhideFaces with the selected archived face ids', async () => {
+      const archivedFace = makeUnassignedFace({ faceId: 'face-a', mediaItemId: 'media-a' });
+      mockListUnassignedFaces.mockImplementation(async (_circleId, opts) => {
+        if (opts?.archived) {
+          return { items: [archivedFace], meta: { page: 1, pageSize: 50, totalItems: 1, totalPages: 1 } };
+        }
+        return { items: [], meta: { page: 1, pageSize: 50, totalItems: 0, totalPages: 0 } };
+      });
+      mockBulkUnhideFaces.mockResolvedValue({ unhidden: 1 });
+
+      const user = userEvent.setup();
+      render(<PeoplePage />);
+
+      await user.click(await screen.findByRole('button', { name: /show archived faces/i }));
+      const checkbox = await screen.findByRole('checkbox');
+      await user.click(checkbox);
+
+      const restoreBtn = await screen.findByRole('button', { name: /^restore$/i });
+      await user.click(restoreBtn);
+
+      await waitFor(() => {
+        expect(mockBulkUnhideFaces).toHaveBeenCalledWith('circle-1', ['face-a']);
+      });
+    });
+
+    it('"Delete permanently" opens the confirm dialog and calls purgeFaces on confirm', async () => {
+      const archivedFace = makeUnassignedFace({ faceId: 'face-a', mediaItemId: 'media-a' });
+      mockListUnassignedFaces.mockImplementation(async (_circleId, opts) => {
+        if (opts?.archived) {
+          return { items: [archivedFace], meta: { page: 1, pageSize: 50, totalItems: 1, totalPages: 1 } };
+        }
+        return { items: [], meta: { page: 1, pageSize: 50, totalItems: 0, totalPages: 0 } };
+      });
+      mockPurgeFaces.mockResolvedValue({ deleted: 1 });
+
+      const user = userEvent.setup();
+      render(<PeoplePage />);
+
+      await user.click(await screen.findByRole('button', { name: /show archived faces/i }));
+      const checkbox = await screen.findByRole('checkbox');
+      await user.click(checkbox);
+
+      // Opens the dialog — does not call purgeFaces yet
+      await user.click(screen.getByRole('button', { name: /delete permanently/i }));
+      expect(mockPurgeFaces).not.toHaveBeenCalled();
+
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByRole('heading', { name: /delete permanently\?/i })).toBeInTheDocument();
+
+      // Confirm inside the dialog (scoped query avoids matching the trigger button)
+      await user.click(within(dialog).getByRole('button', { name: /delete permanently/i }));
+
+      await waitFor(() => {
+        expect(mockPurgeFaces).toHaveBeenCalledWith('circle-1', ['face-a']);
       });
     });
   });

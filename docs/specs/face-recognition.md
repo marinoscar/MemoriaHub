@@ -2,8 +2,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 3.4 |
-| **Last Updated** | June 2026 |
+| **Version** | 3.5 |
+| **Last Updated** | July 2026 |
 | **Status** | All phases implemented |
 
 ---
@@ -17,7 +17,7 @@
 5. [Detection Pipeline Step by Step](#5-detection-pipeline-step-by-step)
 6. [Video Face Detection](#6-video-face-detection)
 7. [Recognition: Embeddings, Matching, and Clustering](#7-recognition-embeddings-matching-and-clustering)
-8. [People, Labeling, and Merge](#8-people-labeling-and-merge) (includes Manual People Association, Hide, and Purge)
+8. [People, Labeling, and Merge](#8-people-labeling-and-merge) (includes Manual People Association, Hide, Purge, and Individual Face Archive)
 9. [Image Quality and Resolution](#9-image-quality-and-resolution)
 10. [EXIF Orientation](#10-exif-orientation)
 11. [Global Feature Toggle and Biometric Privacy](#11-global-feature-toggle-and-biometric-privacy)
@@ -453,7 +453,7 @@ Manually assigned faces (`manuallyAssigned=true`) are not overwritten by subsequ
 
 ### Unassigned Faces
 
-`GET /api/people/unassigned?circleId=&page=&pageSize=` returns faces where `personId=null` and the associated `mediaItem.deletedAt=null`.
+`GET /api/people/unassigned?circleId=&page=&pageSize=&archived=` returns faces where `personId=null` and the associated `mediaItem.deletedAt=null`. The `archived` boolean param (added alongside individual-face archive support, see [Individual Face Archive and Purge](#individual-face-archive-and-purge-unassigned-faces) below) defaults to excluding archived faces; pass `archived=true` to list only archived ones. Response items include `hiddenAt`.
 
 ### Merge
 
@@ -570,6 +570,51 @@ The People page (`/people`) gains two tabs:
 - **Hidden** — persons with `hiddenAt IS NOT NULL`; shows a count badge. Each card has an unhide action and a permanent-delete confirm dialog that calls `POST /api/people/bulk/purge`.
 
 In the default People tab, each named person card and each unknown cluster card shows a hide action (eye-off icon). A selection-mode bulk toolbar exposes hide for multiple selected persons in one call.
+
+### Individual Face Archive and Purge (Unassigned Faces)
+
+The same hide/purge pattern used for `Person` records (above) is also available one level down, on individual **unassigned** faces (`personId=null`) inside the Unassigned Faces pool. This lets a user dismiss a stray detection — a stranger in the background, a false-positive crop, a pet's face a provider mistook for human — without waiting for it to be clustered or named first. Assigned faces (`personId` set) are not covered by these endpoints; they are managed through their `Person` via the hide/purge flow in [Hide and Purge](#hide-and-purge) above.
+
+#### Archive (reversible)
+
+`PATCH /api/people/faces/bulk/hide` body `{ circleId, ids[] }` (face ids, 1–500, `collaborator` role):
+
+Sets `Face.hiddenAt = now()` on each listed face. The endpoint only operates on faces where `personId=null`; it does not touch assigned faces. Archived faces:
+
+- Are excluded from `GET /api/people/unassigned?circleId=&...` by default (the endpoint's live/archived split works exactly like the person-level `hidden` split — see [Unassigned Faces](#unassigned-faces) above).
+- Are **not** deleted. The `Face` row and its embedding are preserved.
+- Are excluded from `POST /api/people/cluster` candidate selection, so an archived stray never gets re-surfaced into a new provisional `Person` on a subsequent clustering pass. This is the main reason archive exists as a distinct step before purge: it gives clustering a durable "not a real face" signal without destroying the row, in case the decision needs to be reversed.
+- Do not affect any media item's visibility, tags, or search results — archiving a face is a People-surface filter only, exactly like person-level hide.
+
+`PATCH /api/people/faces/bulk/unhide` body `{ circleId, ids[] }` (1–500, `collaborator` role) clears `hiddenAt`, returning the face to the live unassigned pool (and back into future clustering candidacy).
+
+#### Purge (permanent)
+
+`POST /api/people/faces/bulk/purge` body `{ circleId, ids[] }` (1–500, `media:delete` + `collaborator` role):
+
+Hard-deletes the listed `Face` rows. Unlike person purge, there is no associated `Person` record to remove — these are unassigned faces. This reclaims the storage of the `embedding` column (128-d to 1024-d float arrays, depending on provider), which is the only sizable payload on a `Face` row. After purge:
+
+- The face no longer appears in any query, including the archived sub-view.
+- An `auto_tagging` enrichment job is re-enqueued for each affected media item, so descriptions and embeddings are recomputed without the deleted face's context (mirrors person purge).
+- Photos and media items are never deleted or otherwise modified — only the `Face` row is removed.
+
+**Archive-first UX:** the frontend does not expose permanent delete directly from the live Unassigned Faces list. A face must first be archived; permanent delete is only reachable from within the "Archived faces" sub-view, behind a confirm dialog. This mirrors the two-step person Hide → Hidden tab → purge flow and prevents accidental irreversible deletes from the primary review surface.
+
+#### Comparison
+
+| Action | `Face.hiddenAt` | Row | Excluded from clustering | Media visible | Reversible | Permission |
+|--------|-----------------|-----|---------------------------|----------------|------------|------------|
+| Archive | set | preserved | yes | yes | yes (unhide) | `media:write` + collaborator |
+| Purge | — | hard-deleted | n/a (gone) | yes | no | `media:delete` + collaborator |
+
+#### Endpoints
+
+| Method | Path | Permission | Per-circle Role | Description |
+|--------|------|------------|-----------------|-------------|
+| `PATCH` | `/api/people/faces/bulk/hide` | `media:write` | collaborator | Archive 1–500 unassigned faces; sets `Face.hiddenAt`; body `{ circleId, ids[] }`; returns `{ hidden: number }` |
+| `PATCH` | `/api/people/faces/bulk/unhide` | `media:write` | collaborator | Restore 1–500 archived unassigned faces; clears `Face.hiddenAt`; body `{ circleId, ids[] }`; returns `{ unhidden: number }` |
+| `POST` | `/api/people/faces/bulk/purge` | `media:delete` | collaborator | Permanently hard-delete 1–500 unassigned `Face` rows; reclaims `embedding` storage; re-enqueues `auto_tagging` for affected media; body `{ circleId, ids[] }`; returns `{ deleted: number }` |
+| `GET` | `/api/people/unassigned?archived=` | `media:read` | viewer | `archived=true` lists only archived faces; default excludes them |
 
 ---
 
@@ -691,9 +736,10 @@ One row per detected face in a media item.
 | `videoTimestampMs` | Int? | Representative appearance time in ms from video start; null for photos. Added in migration `20260627000000_face_video_columns`. |
 | `videoTimestamps` | Int[] | All sampled frame timestamps (ms) where this identity cluster was observed; empty array for photos. Feeds video-scrubber markers in the UI. |
 | `frameThumbnailKey` | Text? | Storage key of the saved representative-frame JPEG under `video-faces/{mediaItemId}/{uuid}.jpg`; null for photos. Signed on `GET /api/media/:id/faces` and returned as `faceThumbnailUrl`. |
+| `hiddenAt` | DateTime? | Archive timestamp for **unassigned** (`personId=null`) faces only, mirroring `Person.hiddenAt`. Non-null = archived (excluded from the unassigned-faces list and from clustering); null = live. Set/cleared via `PATCH /api/people/faces/bulk/hide` / `/unhide`. Added in migration `20260704000000_add_face_hidden_at`. See [Individual Face Archive and Purge](#individual-face-archive-and-purge-unassigned-faces). |
 | `createdAt` | DateTime | |
 
-Indices: `circleId`, `mediaItemId`, `personId`, `externalFaceId`.
+Indices: `circleId`, `mediaItemId`, `personId`, `externalFaceId`, `(circleId, hiddenAt)` (added alongside `people(circleId, hiddenAt)` in migration `20260704000000_add_face_hidden_at`).
 
 ### people
 
@@ -713,6 +759,8 @@ Per-circle identity records.
 | `hiddenAt` | DateTime? | Hide timestamp (migration `20260628000000_person_hidden_at`); non-null = hidden from People UI surfaces; null = visible; independent of `deletedAt` |
 
 Active persons are those with `deletedAt=null` and `mergedIntoId=null`. Hidden persons additionally have `hiddenAt IS NOT NULL`; they remain active (their faces match and their media is reachable) but are excluded from the default People page listing and Unknown Faces review queue.
+
+Index: `(circleId, hiddenAt)`, added alongside `faces(circleId, hiddenAt)` in migration `20260704000000_add_face_hidden_at` (the earlier `20260628000000_person_hidden_at` migration added the column; the composite index arrived with the face-level feature).
 
 ### face_provider_credentials
 
@@ -807,7 +855,7 @@ The per-circle `faceRecognitionEnabled` column was dropped from the `circles` ta
 | Method | Path | Permission | Per-circle Role | Description |
 |--------|------|------------|-----------------|-------------|
 | `GET` | `/api/people` | `media:read` | viewer | List people; `?circleId=&includeUnlabeled=&page=&pageSize=` |
-| `GET` | `/api/people/unassigned` | `media:read` | viewer | Faces with no person assigned |
+| `GET` | `/api/people/unassigned` | `media:read` | viewer | Faces with no person assigned; `?circleId=&page=&pageSize=&archived=` — `archived` defaults to excluding archived faces, `archived=true` lists only archived ones |
 | `GET` | `/api/people/:id` | `media:read` | viewer | Person with associated faces |
 | `POST` | `/api/people` | `media:write` | collaborator | Create person; optional initial `faceIds[]` |
 | `PATCH` | `/api/people/:id` | `media:write` | collaborator | Rename or set cover face |
@@ -820,6 +868,9 @@ The per-circle `faceRecognitionEnabled` column was dropped from the `circles` ta
 | `PATCH` | `/api/people/bulk/unhide` | `media:write` | collaborator | Unhide 1–500 persons; clears `hiddenAt`; body `{ circleId, ids[] }`; returns `{ unhidden: number }` |
 | `POST` | `/api/people/bulk/purge` | `media:delete` | collaborator | Permanently hard-delete 1–500 Person + Face rows; re-enqueues `auto_tagging` for affected media; body `{ circleId, ids[] }`; returns `{ deleted: number }` |
 | `GET` | `/api/people?hidden=true` | `media:read` | viewer | List ONLY hidden persons in a circle; response items include `hiddenAt`; default list excludes hidden persons |
+| `PATCH` | `/api/people/faces/bulk/hide` | `media:write` | collaborator | Archive 1–500 unassigned (`personId=null`) faces; sets `Face.hiddenAt`; excluded from clustering; body `{ circleId, ids[] }`; returns `{ hidden: number }` |
+| `PATCH` | `/api/people/faces/bulk/unhide` | `media:write` | collaborator | Restore 1–500 archived unassigned faces; clears `Face.hiddenAt`; body `{ circleId, ids[] }`; returns `{ unhidden: number }` |
+| `POST` | `/api/people/faces/bulk/purge` | `media:delete` | collaborator | Permanently hard-delete 1–500 unassigned `Face` rows; reclaims `embedding` storage; re-enqueues `auto_tagging`; body `{ circleId, ids[] }`; returns `{ deleted: number }` |
 
 ### Media Filter
 
@@ -959,3 +1010,4 @@ A job stuck in `running` status indicates the worker crashed or the container re
 | 3.2 | June 2026 | AI Assistant | Per-circle opt-in removed — face recognition is now a global system setting (`features.faceRecognition`); per-circle backfill replaced by global admin endpoint; circle face-settings endpoints removed; biometrics erase no longer clears per-circle flag |
 | 3.3 | June 2026 | AI Assistant | Added §6 Video Face Detection: `video_face_detection` job type, `VideoFrameExtractionService` frame-sampling algorithm, cross-frame dedup, `face.video.*` settings, enqueue routing table, new `Face` columns (`videoTimestampMs`, `videoTimestamps`, `frameThumbnailKey`), `faceThumbnailUrl` in faces API, and known signing limitation on multi-provider setups |
 | 3.4 | June 2026 | AI Assistant | Added Hide/Purge subsection in §8: `Person.hiddenAt` column (migration `20260628000000_person_hidden_at`), bulk hide/unhide/purge endpoints, search-inclusion asymmetry, audit events, and frontend People/Hidden tab integration |
+| 3.5 | July 2026 | AI Assistant | Added Individual Face Archive and Purge subsection in §8: `Face.hiddenAt` column and `(circleId, hiddenAt)` indexes on both `faces` and `people` (migration `20260704000000_add_face_hidden_at`), `PATCH /api/people/faces/bulk/hide`/`unhide` and `POST /api/people/faces/bulk/purge` endpoints scoped to unassigned (`personId=null`) faces, `archived` param on `GET /api/people/unassigned`, clustering-exclusion behavior, and archive-first permanent-delete UX |

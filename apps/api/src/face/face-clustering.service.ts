@@ -46,6 +46,8 @@ export class FaceClusteringService {
       where: {
         circleId,
         personId: null,
+        // Never re-surface archived (hidden) faces into a new Person cluster.
+        hiddenAt: null,
       },
       select: { id: true, embedding: true },
     });

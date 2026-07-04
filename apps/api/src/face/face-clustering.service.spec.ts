@@ -195,7 +195,7 @@ describe('FaceClusteringService', () => {
   // -------------------------------------------------------------------------
 
   describe('idempotency', () => {
-    it('only loads faces with personId: null', async () => {
+    it('only loads faces with personId: null and hiddenAt: null (excludes archived faces)', async () => {
       (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
 
       await service.clusterUnknownFaces('circle-1', 'user-1');
@@ -204,6 +204,7 @@ describe('FaceClusteringService', () => {
         where: {
           circleId: 'circle-1',
           personId: null,
+          hiddenAt: null,
         },
         select: { id: true, embedding: true },
       });

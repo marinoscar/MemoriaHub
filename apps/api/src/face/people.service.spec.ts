@@ -901,6 +901,107 @@ describe('PeopleService', () => {
       expect(result.meta.pageSize).toBe(20);
       expect(result.meta.totalPages).toBe(1);
     });
+
+    // -----------------------------------------------------------------------
+    // archived filtering (face archive/purge feature)
+    // -----------------------------------------------------------------------
+
+    describe('archived filtering', () => {
+      it('defaults to hiddenAt: null when archived is not provided (excludes archived faces)', async () => {
+        (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.face.count as jest.Mock).mockResolvedValue(0);
+
+        await service.listUnassignedFaces(USER_ID, PERMS, {
+          circleId: CIRCLE_ID,
+          page: 1,
+          pageSize: 20,
+        } as any);
+
+        const findManyCall = (mockPrisma.face.findMany as jest.Mock).mock.calls[0][0];
+        expect(findManyCall.where.hiddenAt).toBeNull();
+      });
+
+      it('defaults to hiddenAt: null when archived is explicitly false', async () => {
+        (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.face.count as jest.Mock).mockResolvedValue(0);
+
+        await service.listUnassignedFaces(USER_ID, PERMS, {
+          circleId: CIRCLE_ID,
+          archived: false,
+          page: 1,
+          pageSize: 20,
+        } as any);
+
+        const findManyCall = (mockPrisma.face.findMany as jest.Mock).mock.calls[0][0];
+        expect(findManyCall.where.hiddenAt).toBeNull();
+      });
+
+      it('returns only hidden (archived) faces when archived=true (hiddenAt: { not: null })', async () => {
+        const archivedFace = makeUnassignedFace({ id: 'face-archived-1' });
+        (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([archivedFace]);
+        (mockPrisma.face.count as jest.Mock).mockResolvedValue(1);
+
+        const result = await service.listUnassignedFaces(USER_ID, PERMS, {
+          circleId: CIRCLE_ID,
+          archived: true,
+          page: 1,
+          pageSize: 20,
+        } as any);
+
+        const findManyCall = (mockPrisma.face.findMany as jest.Mock).mock.calls[0][0];
+        expect(findManyCall.where.hiddenAt).toEqual({ not: null });
+        expect(result.items).toHaveLength(1);
+      });
+
+      it('still scopes archived query to personId: null and the circle', async () => {
+        (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.face.count as jest.Mock).mockResolvedValue(0);
+
+        await service.listUnassignedFaces(USER_ID, PERMS, {
+          circleId: CIRCLE_ID,
+          archived: true,
+          page: 1,
+          pageSize: 20,
+        } as any);
+
+        const findManyCall = (mockPrisma.face.findMany as jest.Mock).mock.calls[0][0];
+        expect(findManyCall.where).toMatchObject({
+          personId: null,
+          circleId: CIRCLE_ID,
+          hiddenAt: { not: null },
+        });
+      });
+
+      it('includes hiddenAt in the returned item shape', async () => {
+        const hiddenAt = new Date();
+        const archivedFace = makeUnassignedFace({ id: 'face-archived-2', hiddenAt });
+        (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([archivedFace]);
+        (mockPrisma.face.count as jest.Mock).mockResolvedValue(1);
+
+        const result = await service.listUnassignedFaces(USER_ID, PERMS, {
+          circleId: CIRCLE_ID,
+          archived: true,
+          page: 1,
+          pageSize: 20,
+        } as any);
+
+        expect(result.items[0].hiddenAt).toEqual(hiddenAt);
+      });
+
+      it('live (non-archived) items report hiddenAt: null', async () => {
+        const liveFace = makeUnassignedFace({ hiddenAt: null });
+        (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([liveFace]);
+        (mockPrisma.face.count as jest.Mock).mockResolvedValue(1);
+
+        const result = await service.listUnassignedFaces(USER_ID, PERMS, {
+          circleId: CIRCLE_ID,
+          page: 1,
+          pageSize: 20,
+        } as any);
+
+        expect(result.items[0].hiddenAt).toBeNull();
+      });
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -2438,6 +2539,283 @@ describe('PeopleService', () => {
       setupPurgeMocks(2);
 
       const result = await service.purgePeople(dto, USER_ID, PERMS);
+
+      expect(result).toEqual({ deleted: 2 });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // hideFaces  (archive individual unassigned faces)
+  // -------------------------------------------------------------------------
+
+  describe('hideFaces', () => {
+    const dto = { circleId: CIRCLE_ID, ids: [FACE_ID] } as any;
+
+    beforeEach(() => {
+      (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({ id: 'audit-1' });
+    });
+
+    it('calls assertCircleAccess with collaborator role', async () => {
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+      await service.hideFaces(dto, USER_ID, PERMS);
+
+      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+        USER_ID,
+        CIRCLE_ID,
+        PERMS,
+        'collaborator',
+      );
+    });
+
+    it('calls face.updateMany with hiddenAt set and correct where clause (scoped to personId: null)', async () => {
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+      await service.hideFaces(dto, USER_ID, PERMS);
+
+      const call = (mockPrisma.face.updateMany as jest.Mock).mock.calls[0][0];
+      expect(call.where).toMatchObject({
+        id: { in: [FACE_ID] },
+        circleId: CIRCLE_ID,
+        personId: null,
+        hiddenAt: null,
+      });
+      expect(call.data.hiddenAt).toBeInstanceOf(Date);
+    });
+
+    it('an assigned face id (personId set) is NOT hidden — where clause excludes it via personId: null', async () => {
+      // updateMany's where requires personId: null; Prisma would return count: 0
+      // for a face whose personId is non-null even though its id was requested.
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+      const result = await service.hideFaces(
+        { circleId: CIRCLE_ID, ids: [FACE_ID] } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      const call = (mockPrisma.face.updateMany as jest.Mock).mock.calls[0][0];
+      expect(call.where.personId).toBeNull();
+      expect(result).toEqual({ hidden: 0 });
+    });
+
+    it('returns { hidden: count }', async () => {
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 3 });
+
+      const result = await service.hideFaces(dto, USER_ID, PERMS);
+
+      expect(result).toEqual({ hidden: 3 });
+    });
+
+    it('scopes update to the provided circleId only', async () => {
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+      await service.hideFaces({ circleId: CIRCLE_ID, ids: ['f1', 'f2'] } as any, USER_ID, PERMS);
+
+      const call = (mockPrisma.face.updateMany as jest.Mock).mock.calls[0][0];
+      expect(call.where.circleId).toBe(CIRCLE_ID);
+      expect(call.where.id).toEqual({ in: ['f1', 'f2'] });
+    });
+
+    it('writes a face:hide audit event with correct fields', async () => {
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+
+      await service.hideFaces(dto, USER_ID, PERMS);
+
+      expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            actorUserId: USER_ID,
+            action: 'face:hide',
+            targetType: 'face',
+            targetId: FACE_ID,
+            meta: expect.objectContaining({ circleId: CIRCLE_ID, ids: [FACE_ID], count: 2 }),
+          }),
+        }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // unhideFaces  (unarchive individual unassigned faces)
+  // -------------------------------------------------------------------------
+
+  describe('unhideFaces', () => {
+    const dto = { circleId: CIRCLE_ID, ids: [FACE_ID] } as any;
+
+    beforeEach(() => {
+      (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({ id: 'audit-1' });
+    });
+
+    it('calls assertCircleAccess with collaborator role', async () => {
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+      await service.unhideFaces(dto, USER_ID, PERMS);
+
+      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+        USER_ID,
+        CIRCLE_ID,
+        PERMS,
+        'collaborator',
+      );
+    });
+
+    it('calls face.updateMany clearing hiddenAt, scoped to personId: null and hiddenAt: { not: null }', async () => {
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+
+      await service.unhideFaces(dto, USER_ID, PERMS);
+
+      const call = (mockPrisma.face.updateMany as jest.Mock).mock.calls[0][0];
+      expect(call.where).toMatchObject({
+        id: { in: [FACE_ID] },
+        circleId: CIRCLE_ID,
+        personId: null,
+        hiddenAt: { not: null },
+      });
+      expect(call.data.hiddenAt).toBeNull();
+    });
+
+    it('an assigned face id (personId set) is NOT unhidden — where clause excludes it via personId: null', async () => {
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+      const result = await service.unhideFaces(
+        { circleId: CIRCLE_ID, ids: [FACE_ID] } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      const call = (mockPrisma.face.updateMany as jest.Mock).mock.calls[0][0];
+      expect(call.where.personId).toBeNull();
+      expect(result).toEqual({ unhidden: 0 });
+    });
+
+    it('returns { unhidden: count }', async () => {
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+
+      const result = await service.unhideFaces(dto, USER_ID, PERMS);
+
+      expect(result).toEqual({ unhidden: 2 });
+    });
+
+    it('writes a face:unhide audit event with correct fields', async () => {
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+
+      await service.unhideFaces(dto, USER_ID, PERMS);
+
+      expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            actorUserId: USER_ID,
+            action: 'face:unhide',
+            targetType: 'face',
+            targetId: FACE_ID,
+            meta: expect.objectContaining({ circleId: CIRCLE_ID, ids: [FACE_ID], count: 2 }),
+          }),
+        }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // purgeFaces  (permanently delete individual faces)
+  // -------------------------------------------------------------------------
+
+  describe('purgeFaces', () => {
+    const dto = { circleId: CIRCLE_ID, ids: [FACE_ID] } as any;
+
+    function setupPurgeFacesMocks(deletedCount = 1, affectedFaces: any[] = []) {
+      // face.findMany for affected media items lookup (BEFORE the transaction)
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue(affectedFaces);
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb: any) => {
+        return cb(mockPrisma);
+      });
+      (mockPrisma.face.deleteMany as jest.Mock).mockResolvedValue({ count: deletedCount });
+      (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({ id: 'audit-1' });
+    }
+
+    it('calls assertCircleAccess with collaborator role', async () => {
+      setupPurgeFacesMocks();
+
+      await service.purgeFaces(dto, USER_ID, PERMS);
+
+      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+        USER_ID,
+        CIRCLE_ID,
+        PERMS,
+        'collaborator',
+      );
+    });
+
+    it('hard-deletes Face rows scoped to id-in-list and circleId (NOT scoped to personId: null)', async () => {
+      setupPurgeFacesMocks();
+
+      await service.purgeFaces(dto, USER_ID, PERMS);
+
+      expect(mockPrisma.face.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: [FACE_ID] }, circleId: CIRCLE_ID },
+      });
+      const call = (mockPrisma.face.deleteMany as jest.Mock).mock.calls[0][0];
+      expect(call.where.personId).toBeUndefined();
+    });
+
+    it('writes a face:purge audit event inside the transaction', async () => {
+      setupPurgeFacesMocks();
+
+      await service.purgeFaces(dto, USER_ID, PERMS);
+
+      expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            action: 'face:purge',
+            actorUserId: USER_ID,
+            targetType: 'face',
+            targetId: FACE_ID,
+          }),
+        }),
+      );
+    });
+
+    it('does NOT call mediaItem.deleteMany (photos are preserved)', async () => {
+      setupPurgeFacesMocks();
+
+      await service.purgeFaces(dto, USER_ID, PERMS);
+
+      expect(mockPrisma.mediaItem.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('re-enqueues auto_tagging for affected media items after purge', async () => {
+      mockSystemSettings.isFeatureEnabled.mockResolvedValue(true);
+      setupPurgeFacesMocks(1, [
+        {
+          mediaItemId: MEDIA_ID,
+          mediaItem: { circleId: CIRCLE_ID },
+        },
+      ]);
+
+      await service.purgeFaces(dto, USER_ID, PERMS);
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'auto_tagging',
+          mediaItemId: MEDIA_ID,
+          circleId: CIRCLE_ID,
+        }),
+      );
+    });
+
+    it('does not enqueue auto_tagging when there are no affected media items', async () => {
+      mockSystemSettings.isFeatureEnabled.mockResolvedValue(true);
+      setupPurgeFacesMocks(1, []);
+
+      await service.purgeFaces(dto, USER_ID, PERMS);
+
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('returns { deleted: count }', async () => {
+      setupPurgeFacesMocks(2);
+
+      const result = await service.purgeFaces(dto, USER_ID, PERMS);
 
       expect(result).toEqual({ deleted: 2 });
     });
