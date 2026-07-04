@@ -245,7 +245,7 @@ The CLI validates any token (device-issued or manually supplied) by calling `GET
 | `folders remove <id\|path>` | (none) | Remove a folder and cascade-delete its file records | Settings ▸ Manage folders → [d] remove |
 | `folders enable <id\|path>` | (none) | Re-enable a disabled folder | Settings ▸ Manage folders → [e] toggle |
 | `folders disable <id\|path>` | (none) | Disable a folder (skipped during sync) | Settings ▸ Manage folders → [e] toggle |
-| `sync [folder...] --all` | `--all` / `--dry-run` / `-r, --recursive` / `--concurrency <n>` | Incremental sync of registered or specified folders | Sync ▸ Sync all folders / Sync selected folders |
+| `sync [folder...] --all` | `--all` / `--dry-run` / `-r, --recursive` / `--concurrency <n>` / `--from <date>` / `--to <date>` | Incremental sync of registered or specified folders | Sync ▸ Sync all folders / Sync selected folders |
 | `status` | `--runs` / `--json` | Quick per-folder sync status or recent run history; covers the same underlying data as `reports show overview` / `reports show runs`, just with a fixed, non-extensible output shape | Reports ▸ Folder overview / Recent runs |
 | `retry` | `--all` / `--folder <id\|path>` / `--force` | Retry failed uploads; `--force` resets files blocked at the attempts cap | Sync ▸ Retry failed files |
 | `settings list` | (none) | Print all settings and their current values | Settings ▸ App settings |
@@ -320,9 +320,24 @@ memoriahub sync --all --dry-run
 
 # Override the concurrent upload worker count for this run
 memoriahub sync --all --concurrency 5
+
+# Restrict the run to files captured in a date range
+memoriahub sync ~/Photos --from 2023-01-01 --to 2023-12-31
+
+# Later, sync everything else — files outside the earlier range are not re-processed
+memoriahub sync ~/Photos
 ```
 
 Passing folder paths directly to `sync` auto-registers any path not already in the registry. The `-r` flag sets the recursive flag on newly registered folders.
+
+| Flag | Description |
+|------|-------------|
+| `--from <date>` | Only include files captured on or after this date (`YYYY-MM-DD` or full ISO 8601) |
+| `--to <date>` | Only include files captured on or before this date (`YYYY-MM-DD` or full ISO 8601) |
+
+`--from` and `--to` are independent — pass either one alone or both together. Both bounds are **inclusive** and apply to the **start/end of that calendar day in the machine's local timezone** (`--from` = 00:00:00 local, `--to` = 23:59:59.999 local). A file's capture date is resolved using the same source ladder described in [Capture-date inference](#capture-date-inference) (EXIF `DateTimeOriginal` → `CreateDate` → `ModifyDate`, falling back to the oldest filesystem timestamp); a file whose date cannot be determined at all is excluded from a filtered run.
+
+Because out-of-range files are recorded as `skipped` rather than `uploaded` (see [Date range filtering](#date-range-filtering) below), a later unfiltered `memoriahub sync ~/Photos` picks them up and uploads them normally — filtering never permanently excludes a file, and it never causes already-uploaded files to be re-processed.
 
 ### `memoriahub status`
 
@@ -441,6 +456,12 @@ Three checks prevent redundant uploads:
 
 **Server-side dedup backstop:** After a successful upload the CLI sends `contentHash` as part of the `POST /api/media` registration request. The server enforces a partial unique index on `(circle_id, content_hash)` for active items, so if two CLI sessions upload the same file concurrently into the same circle only one `MediaItem` is created. Dedup is scoped to the circle, not the uploading user: two different users uploading the same file into the same circle will be flagged as duplicates, but uploading the same file into two different circles will not be. The server returns `deduplicated: true` on the response when this happens; the CLI records the file as `skipped` (dedup) rather than `uploaded` so the local database accurately reflects that the file is already represented in the library.
 
+### Date range filtering
+
+`sync --from <date>` and `sync --to <date>` (see [`memoriahub sync`](#memoriahub-sync)) restrict a run's work-set to files whose inferred capture date falls in the requested range. Filtering happens before the dedup checks above and only ever narrows which files are *considered* — it never changes how an included file is deduplicated.
+
+Files outside the requested range are recorded as `skipped` with skip reason `out_of_range` ("out of date range" in status output and reports), a new reason alongside the unchanged-skip and server dedup paths above. Critically, out-of-range files are **not** marked `uploaded`, so they are not "used up" by a filtered run: a later `memoriahub sync` with no `--from`/`--to` re-evaluates them from scratch and uploads them normally. Files already uploaded during an earlier filtered run stay protected on subsequent runs the same way any already-uploaded file does — via the unchanged-skip fast path and server-side content-hash dedup. Applying or removing the date filter across runs is therefore always safe: it can only affect which files are considered in a given run, never cause duplicate uploads or permanently exclude a file.
+
 ### Upload and registration
 
 Files that pass both checks are uploaded via the server's resumable multipart upload API (init → upload parts → complete). After a successful upload the file is registered as a `MediaItem` on the server and its status is set to `uploaded` in the local DB.
@@ -462,7 +483,7 @@ Each file row in the `files` table moves through these statuses:
 | `queued` | Discovered and waiting to be processed |
 | `uploading` | Currently being uploaded (in-progress) |
 | `uploaded` | Successfully uploaded and registered |
-| `skipped` | Duplicate on server or unchanged since last sync |
+| `skipped` | Duplicate on server, unchanged since last sync, or outside a `--from`/`--to` date range |
 | `failed` | Upload failed; `attempt_count` and `last_error` are recorded |
 
 ### Retry and attempts cap
@@ -660,6 +681,10 @@ The progress meter is a 56-character block-grid bar (similar to the `/context` m
 ### Folder picker
 
 "Sync selected folders" opens a checkbox picker. Use `Space` to toggle folders, `a`/`n` to select/deselect all, and `Enter` to start the sync with the checked folders.
+
+### Date range filter
+
+Both **Sync all folders** and **Sync selected folders** proceed to a "Date range filter" step before the sync starts. Enter optional From/To dates (`YYYY-MM-DD`); a live preview line updates as you type — `Syncing: all dates` when both fields are blank, or `Syncing: 2023-01-01 -> 2023-12-31` once a bound is set. Leaving both blank syncs all dates, matching the headless default. The [sync dashboard](#sync-dashboard-layout) shows the active range in its header while the run is in progress.
 
 ### Folder manager
 

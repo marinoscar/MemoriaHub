@@ -178,6 +178,12 @@ Primary key is `(file_id, part_number)` — re-saving the same part is safe via 
 
 The SHA-256 of each file is computed locally and sent to the server. The server deduplicates on `(circle_id, content_hash)`. Uploading the same file twice is safe and returns the existing `media_item_id`. The CLI marks the file `uploaded` on any 2xx including the deduplicated case.
 
+### Capture-date range filter (new — `--from`/`--to`)
+
+`memoriahub sync` accepts optional `--from <date>` and `--to <date>` flags that restrict the run's work-set to files whose capture date falls within an **inclusive, local-timezone** range (`--from` = start of that day, `--to` = end of that day, machine local time). Either bound may be supplied alone. Capture date is resolved via the same source ladder as `resolveCapturedAt` in `apps/cli/src/metadata.ts` (EXIF `DateTimeOriginal` → `CreateDate` → `ModifyDate`, falling back to filesystem timestamps) — see the CLI README's [Capture-date inference](../../apps/cli/README.md#capture-date-inference) section for the full algorithm. A file whose date cannot be determined at all is excluded from a filtered run.
+
+**Why this is safe:** the filter only gates work-set *inclusion* — it does not introduce a new terminal ledger status. A file outside the requested range is written as `status = 'skipped'` with `skip_reason = 'out_of_range'`, alongside the existing dedup skip path. Because out-of-range files are never marked `uploaded`, they are not consumed by a filtered run: a later unfiltered `memoriahub sync` re-evaluates them from scratch and uploads them normally. Files already uploaded during an earlier filtered run remain protected on the next run by the two mechanisms already documented above — the unchanged-skip fast path (size match short-circuits before any network call) and server-side `(circle_id, content_hash)` dedup (see [Content-hash dedup (pre-existing)](#content-hash-dedup-pre-existing)). Net effect: applying or removing the date filter across runs can only change which files are *considered* for upload in a given run — it never causes a duplicate upload and never permanently excludes a file.
+
 ### PAT pre-flight (new — `runPatPreflight`)
 
 Runs before every `sync` or `retry` command:
