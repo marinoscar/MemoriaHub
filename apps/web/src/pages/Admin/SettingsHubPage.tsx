@@ -26,6 +26,7 @@ import {
   QueryStats as QueryStatsIcon,
   Public as PublicIcon,
   MonitorHeart as MonitorHeartIcon,
+  Movie as MovieIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 
@@ -115,6 +116,13 @@ export default function SettingsHubPage() {
           description: 'Tune visual-duplicate matching sensitivity and run global backfills.',
           icon: <ContentCopyIcon sx={{ fontSize: 40 }} color="primary" />,
           path: '/admin/settings/duplicates',
+          permission: 'system_settings:read',
+        },
+        {
+          title: 'Social Media Detection',
+          description: 'Detect TikTok/Instagram/Facebook videos and skip enrichment',
+          icon: <MovieIcon sx={{ fontSize: 40 }} color="primary" />,
+          path: '/admin/settings/social-media',
           permission: 'system_settings:read',
         },
       ],
