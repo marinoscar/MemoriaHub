@@ -14,6 +14,7 @@ import * as path from 'node:path';
 import { TypedEmitter, EV } from './events.js';
 import { runPool } from './worker-pool.js';
 import { enumerateFiles } from '../files.js';
+import { resolveCapturedAt } from '../metadata.js';
 import { sha256File } from '../hash.js';
 import { uploadFile, type UploadPersistence } from '../upload.js';
 import { ApiError, type ApiClient } from '../api.js';
@@ -530,8 +531,13 @@ export class SyncEngine extends TypedEmitter {
         const { objectId } = uploadResult;
 
         // --- Register as MediaItem (include contentHash for server-side dedup) ---
+        // Resolve the capture date: EXIF "date taken" when present, otherwise the
+        // oldest of the file's created/modified/accessed stamps. A real EXIF date
+        // found server-side still wins (metadata sync is present-only). Sending
+        // originalCreatedAt records the file's creation time as provenance.
         const basename = path.basename(filePath);
         const type = mimeToMediaType(mimeType);
+        const cap = await resolveCapturedAt(filePath, mimeType);
         const mediaItem = await api.post<MediaItem>('/api/media', {
           storageObjectId: objectId,
           type,
@@ -539,6 +545,8 @@ export class SyncEngine extends TypedEmitter {
           originalFilename: basename,
           contentHash: sha256,
           circleId: resolvedCircleId,
+          ...(cap.capturedAt ? { capturedAt: cap.capturedAt } : {}),
+          ...(cap.originalCreatedAt ? { originalCreatedAt: cap.originalCreatedAt } : {}),
         });
 
         // If the server deduplicated (race: another device registered same content first),
