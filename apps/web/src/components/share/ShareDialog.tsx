@@ -23,7 +23,7 @@ import {
   ContentCopy as ContentCopyIcon,
   LinkOff as LinkOffIcon,
 } from '@mui/icons-material';
-import type { SelectChangeEvent } from '@mui/material';
+import type { SelectChangeEvent, Theme } from '@mui/material';
 import type { MediaShare, ShareTargetType } from '../../types/sharing';
 import { createShare, updateShare, revokeShare } from '../../services/shareService';
 
@@ -178,7 +178,13 @@ export function ShareDialog({ open, onClose, target }: ShareDialogProps) {
 
   return (
     <>
-      <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+      <Dialog
+        open={open}
+        onClose={handleClose}
+        maxWidth="sm"
+        fullWidth
+        sx={{ zIndex: (theme: Theme) => theme.zIndex.modal + 2 }}
+      >
         <DialogTitle>Share publicly</DialogTitle>
 
         <DialogContent>
