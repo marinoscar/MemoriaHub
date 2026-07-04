@@ -310,7 +310,7 @@ export class DoctorService {
           SELECT 1 AS ok FROM pg_extension WHERE extname = 'vector'
         `,
         this.prisma.$queryRaw<Array<{ t: string | null }>>`
-          SELECT to_regclass('public.media_item_embedding') AS t
+          SELECT to_regclass('public.media_item_embedding')::text AS t
         `,
       ]);
 
