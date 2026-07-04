@@ -17,6 +17,9 @@ import type { ScanFile } from '../db/types.js';
 
 export type ExportFormat = 'xlsx' | 'csv';
 
+/** Excel datetime number format applied to date columns/cells. */
+const DATE_FMT = 'yyyy-mm-dd hh:mm:ss';
+
 // exceljs is CJS; normalize the default-interop shape.
 type ExcelJsModule = typeof import('exceljs');
 async function getExcelJs(): Promise<ExcelJsModule> {
@@ -108,6 +111,19 @@ async function exportXlsx(
     row.getCell(1).font = { bold: true };
     if (numFmt) row.getCell(2).numFmt = numFmt;
   };
+  // Write a value cell as a real Excel date when the ISO string parses, so it
+  // renders and sorts as a datetime rather than plain text.
+  const kvDate = (label: string, iso: string | null): void => {
+    const row = summary.addRow([label]);
+    row.getCell(1).font = { bold: true };
+    const d = iso ? new Date(iso) : null;
+    if (d && !isNaN(d.getTime())) {
+      row.getCell(2).value = d;
+      row.getCell(2).numFmt = DATE_FMT;
+    } else {
+      row.getCell(2).value = iso ?? '';
+    }
+  };
   const section = (title: string): void => {
     const row = summary.addRow([title]);
     row.getCell(1).font = { bold: true, size: 13 };
@@ -121,8 +137,8 @@ async function exportXlsx(
 
   section('Scan');
   kv('Scan ID', scan.id);
-  kv('Created at', scan.created_at);
-  kv('Finished at', scan.finished_at ?? '');
+  kvDate('Created at', scan.created_at);
+  kvDate('Finished at', scan.finished_at ?? null);
   kv('Status', scan.status);
   summary.addRow([]);
 
@@ -181,6 +197,21 @@ async function exportXlsx(
   detail.getColumn('height').numFmt = '#,##0';
   detail.getColumn('takenLat').numFmt = '0.000000';
   detail.getColumn('takenLng').numFmt = '0.000000';
+
+  // Captured at: convert the ISO string to a real Excel datetime so it renders
+  // and sorts as a date. Left as text when the value is missing/unparseable.
+  const capturedCol = DETAIL_COLUMNS.findIndex((c) => c.key === 'capturedAt') + 1;
+  detail.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) return; // header
+    const cell = row.getCell(capturedCol);
+    if (typeof cell.value === 'string' && cell.value) {
+      const d = new Date(cell.value);
+      if (!isNaN(d.getTime())) {
+        cell.value = d;
+        cell.numFmt = DATE_FMT;
+      }
+    }
+  });
 
   await wb.xlsx.writeFile(outPath);
 }
