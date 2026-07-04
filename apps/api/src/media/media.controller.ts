@@ -120,6 +120,103 @@ export class MediaController {
   }
 
   /**
+   * GET /api/media/explore/locations
+   */
+  @Get('explore/locations')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({
+    summary: 'Explore: tiered locations (top countries, regions, cities) with counts and cover thumbnails',
+  })
+  @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
+  @ApiResponse({
+    status: 200,
+    description: 'Top 12 countries, regions, and cities by item count, each with a cover thumbnail',
+    schema: {
+      type: 'object',
+      properties: {
+        countries: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              countryCode: { type: 'string', nullable: true },
+              count: { type: 'number' },
+              coverThumbnailUrl: { type: 'string', nullable: true },
+            },
+          },
+        },
+        regions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              count: { type: 'number' },
+              coverThumbnailUrl: { type: 'string', nullable: true },
+            },
+          },
+        },
+        cities: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              count: { type: 'number' },
+              coverThumbnailUrl: { type: 'string', nullable: true },
+            },
+          },
+        },
+      },
+    },
+  })
+  async exploreLocations(
+    @Query('circleId') circleId: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.exploreLocations(circleId, user.id, user.permissions);
+  }
+
+  /**
+   * GET /api/media/explore/locations/:level
+   *
+   * Full list for one location tier (countries | regions | cities), ordered by
+   * item count descending and capped at 500.  Scoped under `explore/locations/`
+   * so it never shadows the `/:id` media route.
+   */
+  @Get('explore/locations/:level')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({
+    summary: 'Explore: full list for one location tier (countries|regions|cities)',
+  })
+  @ApiParam({ name: 'level', enum: ['countries', 'regions', 'cities'] })
+  @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
+  @ApiResponse({
+    status: 200,
+    description: 'Full list for the requested tier ordered by item count desc (max 500)',
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          countryCode: { type: 'string', nullable: true },
+          count: { type: 'number' },
+          coverThumbnailUrl: { type: 'string', nullable: true },
+        },
+      },
+    },
+  })
+  async exploreLocationLevel(
+    @Param('level') level: string,
+    @Query('circleId') circleId: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.exploreLocationLevel(circleId, level, user.id, user.permissions);
+  }
+
+  /**
    * GET /api/media/facets/locations
    *
    * Returns the distinct geo hierarchy (Country → Region → Locality) present
