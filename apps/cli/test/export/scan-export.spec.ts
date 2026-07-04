@@ -160,7 +160,7 @@ describe('exportScan', () => {
       const expectedHeaders = [
         'File path',
         'Folder ID',
-        'Size (bytes)',
+        'Size (MB)',
         'MIME type',
         'Media kind',
         'Has EXIF',
@@ -183,9 +183,13 @@ describe('exportScan', () => {
       expect(detail.rowCount).toBe(files.length + 1);
     });
 
-    it('number-formats size/coordinates and writes real Excel dates', async () => {
+    it('reports size in MB (2 decimals), formats coordinates, and writes real Excel dates', async () => {
       const report = makeReport();
-      const files: ScanFile[] = [makeScanFile({ id: 1 })];
+      // 5 MB exactly (5 * 1024 * 1024) and a sub-MB file to check decimals.
+      const files: ScanFile[] = [
+        makeScanFile({ id: 1, size_bytes: 5 * 1024 * 1024 }),
+        makeScanFile({ id: 2, file_path: '/tmp/report-folder/small.jpg', size_bytes: 512 * 1024 }),
+      ];
 
       const outPath = path.join(tmpDir, 'formatted.xlsx');
       await exportScan(report, files, outPath, 'xlsx');
@@ -196,10 +200,13 @@ describe('exportScan', () => {
       const detail = workbook.getWorksheet('Detail')!;
       const row2 = detail.getRow(2);
 
-      // Size (col 3): thousand separators, value stays numeric (sortable).
-      expect(row2.getCell(3).numFmt).toBe('#,##0');
+      // Size (col 3): megabytes with 2 decimals, value stays numeric (sortable).
+      expect(detail.getRow(1).getCell(3).value).toBe('Size (MB)');
+      expect(row2.getCell(3).numFmt).toBe('#,##0.00');
       expect(typeof row2.getCell(3).value).toBe('number');
-      expect(row2.getCell(3).value).toBe(2000);
+      expect(row2.getCell(3).value).toBe(5); // 5 MB
+      // Sub-MB file keeps 2-decimal precision (512 KB = 0.5 MB).
+      expect(detail.getRow(3).getCell(3).value).toBe(0.5);
 
       // Width (col 9) thousand separators; Latitude (col 13) six decimals.
       expect(row2.getCell(9).numFmt).toBe('#,##0');
@@ -209,26 +216,26 @@ describe('exportScan', () => {
       expect(row2.getCell(8).value instanceof Date).toBe(true);
       expect(row2.getCell(8).numFmt).toBe('yyyy-mm-dd hh:mm:ss');
 
-      // Summary: Total bytes numeric w/ separators; Created at a real date.
+      // Summary: Total size (MB) numeric w/ 2 decimals; Created at a real date.
       const summary = workbook.getWorksheet('Summary')!;
-      let totalBytesFmt: string | undefined;
-      let totalBytesIsNumber = false;
+      let totalSizeFmt: string | undefined;
+      let totalSizeIsNumber = false;
       let createdIsDate = false;
       let createdFmt: string | undefined;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       summary.eachRow((r: any) => {
         const label = r.getCell(1).value;
-        if (label === 'Total bytes') {
-          totalBytesFmt = r.getCell(2).numFmt;
-          totalBytesIsNumber = typeof r.getCell(2).value === 'number';
+        if (label === 'Total size (MB)') {
+          totalSizeFmt = r.getCell(2).numFmt;
+          totalSizeIsNumber = typeof r.getCell(2).value === 'number';
         }
         if (label === 'Created at') {
           createdIsDate = r.getCell(2).value instanceof Date;
           createdFmt = r.getCell(2).numFmt;
         }
       });
-      expect(totalBytesFmt).toBe('#,##0');
-      expect(totalBytesIsNumber).toBe(true);
+      expect(totalSizeFmt).toBe('#,##0.00');
+      expect(totalSizeIsNumber).toBe(true);
       expect(createdIsDate).toBe(true);
       expect(createdFmt).toBe('yyyy-mm-dd hh:mm:ss');
     });
@@ -254,7 +261,7 @@ describe('exportScan', () => {
 
       expect(lines).toHaveLength(files.length + 1);
       expect(lines[0]).toBe(
-        'File path,Folder ID,Size (bytes),MIME type,Media kind,Has EXIF,Has location,Captured at,Width,Height,Camera make,Camera model,Latitude,Longitude,Meta error',
+        'File path,Folder ID,Size (MB),MIME type,Media kind,Has EXIF,Has location,Captured at,Width,Height,Camera make,Camera model,Latitude,Longitude,Meta error',
       );
 
       // The row for the comma-containing path must be RFC-4180 quoted.

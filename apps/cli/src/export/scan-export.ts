@@ -20,6 +20,15 @@ export type ExportFormat = 'xlsx' | 'csv';
 /** Excel datetime number format applied to date columns/cells. */
 const DATE_FMT = 'yyyy-mm-dd hh:mm:ss';
 
+/** Excel number format for megabyte sizes: thousands separator + 2 decimals. */
+const MB_FMT = '#,##0.00';
+
+/** Convert a byte count to megabytes, rounded to 2 decimals (null passes through). */
+function bytesToMb(bytes: number | null | undefined): number | null {
+  if (bytes === null || bytes === undefined) return null;
+  return Math.round((bytes / (1024 * 1024)) * 100) / 100;
+}
+
 // exceljs is CJS; normalize the default-interop shape.
 type ExcelJsModule = typeof import('exceljs');
 async function getExcelJs(): Promise<ExcelJsModule> {
@@ -31,7 +40,7 @@ async function getExcelJs(): Promise<ExcelJsModule> {
 const DETAIL_COLUMNS: Array<{ header: string; key: keyof ScanFileRowView; width: number }> = [
   { header: 'File path', key: 'filePath', width: 60 },
   { header: 'Folder ID', key: 'folderId', width: 10 },
-  { header: 'Size (bytes)', key: 'sizeBytes', width: 14 },
+  { header: 'Size (MB)', key: 'sizeMb', width: 12 },
   { header: 'MIME type', key: 'mimeType', width: 16 },
   { header: 'Media kind', key: 'mediaKind', width: 12 },
   { header: 'Has EXIF', key: 'hasExif', width: 10 },
@@ -49,7 +58,7 @@ const DETAIL_COLUMNS: Array<{ header: string; key: keyof ScanFileRowView; width:
 interface ScanFileRowView {
   filePath: string;
   folderId: number;
-  sizeBytes: number | null;
+  sizeMb: number | null;
   mimeType: string | null;
   mediaKind: string | null;
   hasExif: string;
@@ -68,7 +77,7 @@ function toRowView(f: ScanFile): ScanFileRowView {
   return {
     filePath: f.file_path,
     folderId: f.folder_id,
-    sizeBytes: f.size_bytes,
+    sizeMb: bytesToMb(f.size_bytes),
     mimeType: f.mime_type,
     mediaKind: f.media_kind,
     hasExif: f.has_exif ? 'yes' : 'no',
@@ -146,9 +155,9 @@ async function exportXlsx(
   kv('Total files', kpis.totalFiles, '#,##0');
   kv('Photos', kpis.photoCount, '#,##0');
   kv('Videos', kpis.videoCount, '#,##0');
-  kv('Total bytes', kpis.totalBytes, '#,##0');
-  kv('Photo bytes', kpis.photoBytes, '#,##0');
-  kv('Video bytes', kpis.videoBytes, '#,##0');
+  kv('Total size (MB)', bytesToMb(kpis.totalBytes) ?? 0, MB_FMT);
+  kv('Photo size (MB)', bytesToMb(kpis.photoBytes) ?? 0, MB_FMT);
+  kv('Video size (MB)', bytesToMb(kpis.videoBytes) ?? 0, MB_FMT);
   summary.addRow([]);
 
   section('Metadata coverage');
@@ -160,12 +169,12 @@ async function exportXlsx(
 
   if (report.byFolder.length > 0) {
     section('By folder');
-    const head = summary.addRow(['Folder', 'Files', 'Bytes']);
+    const head = summary.addRow(['Folder', 'Files', 'Size (MB)']);
     head.font = { bold: true };
     for (const f of report.byFolder) {
-      const row = summary.addRow([f.path, f.count, f.bytes]);
+      const row = summary.addRow([f.path, f.count, bytesToMb(f.bytes) ?? 0]);
       row.getCell(2).numFmt = '#,##0';
-      row.getCell(3).numFmt = '#,##0';
+      row.getCell(3).numFmt = MB_FMT;
     }
     summary.addRow([]);
   }
@@ -190,9 +199,10 @@ async function exportXlsx(
     detail.addRow(toRowView(f));
   }
 
-  // Number formats: byte size + pixel dimensions get thousand separators;
-  // GPS coordinates keep 6 decimal places. Values remain numeric (sortable).
-  detail.getColumn('sizeBytes').numFmt = '#,##0';
+  // Number formats: size (MB) shows 2 decimals + thousand separators; pixel
+  // dimensions get thousand separators; GPS coordinates keep 6 decimal places.
+  // Values remain numeric (sortable).
+  detail.getColumn('sizeMb').numFmt = MB_FMT;
   detail.getColumn('width').numFmt = '#,##0';
   detail.getColumn('height').numFmt = '#,##0';
   detail.getColumn('takenLat').numFmt = '0.000000';
