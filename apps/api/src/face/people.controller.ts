@@ -35,6 +35,7 @@ import {
   ClusterDto,
   ListUnassignedFacesQueryDto,
   BulkPeopleDto,
+  BulkFacesDto,
 } from './dto/people.dto';
 import { MergePeopleDto } from './dto/merge-people.dto';
 
@@ -129,6 +130,7 @@ export class PeopleController {
   @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'List unassigned (personId=null) faces in a circle (paginated)' })
   @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
+  @ApiQuery({ name: 'archived', required: false, type: Boolean, description: 'When true, return only archived (hidden) unassigned faces instead of the live unassigned pool' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'pageSize', required: false, type: Number })
   @ApiResponse({ status: 200, description: 'Paginated list of unassigned faces' })
@@ -203,6 +205,73 @@ export class PeopleController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.peopleService.purgePeople(dto, user.id, user.permissions);
+  }
+
+  /**
+   * PATCH /api/people/faces/bulk/hide
+   * Bulk archive (hide) individual unassigned faces. Requires collaborator role.
+   * NOTE: Literal 'faces' segment — MUST be declared before GET/PATCH/DELETE :id
+   * and before the :id/faces param routes to avoid Fastify route shadowing.
+   */
+  @Patch('faces/bulk/hide')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Bulk archive (hide) unassigned faces (collaborator+)',
+    description:
+      'Sets hiddenAt on 1–500 unassigned faces in a circle. Archived faces are excluded from ' +
+      'the default unassigned-faces list and never re-surfaced by clustering. Use ' +
+      'GET /people/unassigned?archived=true to retrieve them.',
+  })
+  @ApiResponse({ status: 200, description: 'Returns { hidden: number }' })
+  @ApiResponse({ status: 403, description: 'Access denied (collaborator required)' })
+  async hideFaces(
+    @Body() dto: BulkFacesDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.peopleService.hideFaces(dto, user.id, user.permissions);
+  }
+
+  /**
+   * PATCH /api/people/faces/bulk/unhide
+   * Bulk unarchive (clear hiddenAt) individual unassigned faces. Requires collaborator role.
+   */
+  @Patch('faces/bulk/unhide')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Bulk unarchive (unhide) unassigned faces (collaborator+)',
+    description: 'Clears hiddenAt on 1–500 archived unassigned faces in a circle.',
+  })
+  @ApiResponse({ status: 200, description: 'Returns { unhidden: number }' })
+  @ApiResponse({ status: 403, description: 'Access denied (collaborator required)' })
+  async unhideFaces(
+    @Body() dto: BulkFacesDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.peopleService.unhideFaces(dto, user.id, user.permissions);
+  }
+
+  /**
+   * POST /api/people/faces/bulk/purge
+   * Permanent hard-delete of individual Face rows. Requires media:delete permission.
+   */
+  @Post('faces/bulk/purge')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Permanently purge individual faces (media:delete + collaborator)',
+    description:
+      'Hard-deletes 1–500 Face rows (reclaims embedding storage). Photos/media items are NOT ' +
+      'deleted. Affected media items are re-queued for auto-tagging.',
+  })
+  @ApiResponse({ status: 200, description: 'Returns { deleted: number }' })
+  @ApiResponse({ status: 403, description: 'Access denied (collaborator + media:delete required)' })
+  async purgeFaces(
+    @Body() dto: BulkFacesDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.peopleService.purgeFaces(dto, user.id, user.permissions);
   }
 
   /**

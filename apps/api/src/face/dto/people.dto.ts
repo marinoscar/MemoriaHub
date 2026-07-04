@@ -97,6 +97,10 @@ export class ClusterDto extends createZodDto(clusterSchema) {}
 
 export const listUnassignedFacesQuerySchema = z.object({
   circleId: z.string().uuid(),
+  archived: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true'),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(50),
 });
@@ -113,3 +117,10 @@ export const bulkPeopleSchema = z.object({
 });
 
 export class BulkPeopleDto extends createZodDto(bulkPeopleSchema) {}
+
+// ---------------------------------------------------------------------------
+// BulkFacesDto  (identical { circleId, ids[] } shape; alias for face bulk ops
+// so controller/service signatures read as face-scoped rather than people-scoped)
+// ---------------------------------------------------------------------------
+
+export class BulkFacesDto extends createZodDto(bulkPeopleSchema) {}
