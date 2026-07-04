@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
+| **Version** | 1.1 |
 | **Last Updated** | July 2026 |
 | **Status** | Implemented (backend complete; UI not yet implemented) |
 
@@ -155,12 +155,33 @@ Both gates are defense-in-depth on top of the gate-then-fan-out ordering, not a 
 
 Every metadata/filename match carries `method: 'metadata'` or `method: 'filename'` respectively in the resulting `DetectionResult`, matching the rule's `source`.
 
+#### Caption, hashtag, and @mention rules
+
+Download apps commonly name the saved file after the original post's caption (e.g. `Every man wants this!! #fypシ #reels #dating @empoweredtok on TT.mp4`), and sometimes also copy that same caption into container text tags. Personal camera-captured filenames (`IMG_1234.MOV`, `PXL_20260704_120000.mp4`, `VID-20260704-WA0001.mp4`, `MVI_0031.MOV`) never contain hashtags or @mentions, which makes a hashtag/@mention in either location a high-precision social-media signal — one the prior literal-word/downloader-app rules above missed. This specifically closes the Instagram/cross-post gap: a re-share that has had its own platform-specific container markers stripped by an intermediate re-share step still carries its caption in the filename.
+
+`detectCaptionSignal(input)` implements this and is folded into `detectTier1` — its result competes on confidence against the metadata/filename rule winner above; whichever is higher wins. It scans the filename first, then caption text harvested from container tags (`title`, `comment`, `description`, `synopsis`, `keywords`, `artist`, `album`, `author` format tags, plus every value in every stream-tag bag), attributing `method: 'filename'` or `method: 'metadata'` depending on which source produced the match.
+
+| Rule ID | Platform | Confidence | Signal |
+|---|---|---|---|
+| `caption-tt-token` | TikTok | 0.90 | A TikTok platform token: `#fyp*`/`#foryou*` (prefix match, so `#fypシ`, `#fypage`, `#foryoupage` all hit), `#tiktok`, `#ttok`, `#capcut`, the phrase `on tt`, or an @mention ending in `tok` (e.g. `@empoweredtok`) |
+| `caption-ig-token` | Instagram | 0.90 | An Instagram platform token: `#reel`/`#reels`, `#instagram`, `#igreel`, `#insta`, or the phrase `ig reel` |
+| `caption-fb-token` | Facebook | 0.90 | A Facebook platform token: `#facebook`, `#fbreel`/`#fbreels`, or the phrase `fb reel` |
+| `caption-generic` | `other` | 0.90 | No platform token, but ≥2 hashtags, OR ≥1 hashtag + an @mention, OR ≥1 hashtag + a multi-word phrase |
+| `caption-single-hashtag` | `other` | 0.85 | Exactly one lone hashtag (none of the `caption-generic` conditions met) |
+
+When platform token patterns are tied on hit count, tie-break order is `tiktok` > `instagram` > `facebook`.
+
+A lone @mention with **no** hashtag and no platform token is **not** classified by `detectCaptionSignal` — it instead fires the `heur-caption-mention` suspicion heuristic below, routing the item to Tier 2 OCR rather than an immediate classification.
+
+> **Note:** Hashtag counting excludes purely-numeric hashtags (`#1`, `#2`, `#23`) — a hashtag only counts toward `caption-generic`/`caption-single-hashtag` if it contains at least one Unicode letter. This precision guard specifically prevents filenames like `Take #2.mp4` or `Photo #1.mp4` (common for numbered family-video exports) from being miscounted as social captions.
+
 #### Suspicion heuristics (never produce a result on their own — only recommend Tier 2)
 
 | Heuristic ID | Signal |
 |---|---|
 | `heur-portrait-short` | Portrait aspect ratio (`height/width >= 1.6`), duration ≤ 180 s, **no** device-capture tags (`com.apple.quicktime.make/model`, `com.android.*`), **and** `creation_time` is missing, unparseable, or resolves to the Unix epoch (1970) — the classic profile of a re-encoded short-form clip with metadata stripped |
 | `heur-reshare-filename` | Filename matches a messaging-app re-share pattern: `^VID-\d{8}-WA\d{4}` (WhatsApp) or `^video_\d{4}-\d{2}-\d{2}[_ ]` (Telegram-style) |
+| `heur-caption-mention` | Filename or caption metadata contains an @mention but zero hashtags and no platform token — routes to Tier 2 OCR only, never classifies on its own |
 
 ### 3.2 Tier 2 — OCR Watermark Reading
 
@@ -175,6 +196,9 @@ When Tier 1 is inconclusive but suspicious, `SocialMediaOcrService.recognizeVide
 | `facebook` | Facebook | 0.85 | `ocr-facebook-word` |
 | `reels?` (bare word) | Instagram | 0.60 | `ocr-reels-corroborate` — **always sub-threshold**, corroboration only, never a standalone match |
 | `@[a-z0-9_.]{3,24}` (username) | `other` | 0.50 (0.75 if a suspicion heuristic also fired) | `ocr-username` — only added when no platform word is already present; a platform word's own confidence is not boosted by a co-occurring username |
+| TikTok platform token (§3.1) visible on screen | TikTok | 0.90 | `ocr-tiktok-token` — the same `#fyp*`/`#foryou*`/`#tiktok`/`#ttok`/`#capcut`/`on tt`/`@...tok` patterns as the Tier-1 caption rules, applied to OCR'd text (e.g. an `@user...tok` handle visible in frame) |
+| Instagram platform token (§3.1) visible on screen | Instagram | 0.90 | `ocr-instagram-token` — the same `#reel(s)`/`#instagram`/`#igreel`/`#insta`/`ig reel` patterns as the Tier-1 caption rules, applied to OCR'd text (e.g. a `#reels` watermark) |
+| Facebook platform token (§3.1) visible on screen | Facebook | 0.90 | `ocr-facebook-token` — the same `#facebook`/`#fbreel(s)`/`fb reel` patterns as the Tier-1 caption rules, applied to OCR'd text |
 
 The highest-confidence candidate is returned as a `DetectionResult` (`method: 'ocr'`) only if it meets `minConfidence`; otherwise `detectFromOcr` returns `null` and the video is classified clean.
 
@@ -377,6 +401,10 @@ The hardest case for this feature is a video that was **already** re-shared thro
 
 This is a deliberate **precision-over-recall** design choice: the rule catalog is tuned so that a positive detection is very likely correct (high per-rule confidence values, a 0.8 default threshold), accepting that some heavily-obscured re-shares will be missed (classified clean) rather than risk mis-flagging a genuine home video.
 
+The caption/hashtag/@mention signal (§3.1, `detectCaptionSignal`) is specifically how a cross-posted Instagram download still gets caught even when it has had its own container markers stripped by an intermediate re-share/download step: the caption and its hashtags typically survive in the saved filename even when platform-specific metadata tags do not, so a cross-posted file can still trip `caption-ig-token`/`caption-generic` purely on filename inspection.
+
+**Cross-post platform attribution is best-effort, not a guarantee.** A video may legitimately carry multiple platforms' tokens at once — for example, a TikTok clip re-shared to Instagram can carry both `#fyp` and `#reels` in the same caption/filename. The umbrella `Social Media` tag is always applied regardless of which platform wins, but the specific platform tag (`TikTok`/`Instagram`/`Facebook`) is attributed to whichever platform's signal is strongest (or wins the tie-break when counts are equal, per §3.1) — it does not necessarily reflect the video's true platform of origin.
+
 ### 9.3 Detaching the Tag Does Not Restore Enrichment
 
 If a user manually removes the `Social Media` tag from a flagged item (rather than using the rerun endpoint), `media_items.social_media_source` is **not** cleared — the tag and the gating column are independent. `VideoFaceDetectionHandler` will continue to skip face detection for that item until a rerun (`POST /api/media/:id/social-media/rerun`) reclassifies it, because the gate checks `socialMediaSource`, not the presence/absence of the tag. This is intentional: tag removal is a display-only action a user might take for organizational reasons, while a rerun is the explicit signal that reclassification (and, if the outcome is clean, fan-out to face detection) should occur.
@@ -458,3 +486,4 @@ The `system` tag source (§4.3) ensures a user's own manual tagging is never sil
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | July 2026 | AI Assistant | Initial specification, documenting the shipped implementation: gate-then-fan-out video routing, two-tier (metadata/filename + OCR) detection engine, `media_social_status` / `social_media_source` / `MediaTagSource.system` data model, settings and env configuration, the four API endpoints, Doctor integration, degraded-mode and precision-over-recall rationale, and known test-coverage gaps |
+| 1.1 | July 2026 | AI Assistant | Documented the new Tier-1 caption/hashtag/@mention signal (`detectCaptionSignal`, rules `caption-tt-token`/`caption-ig-token`/`caption-fb-token`/`caption-generic`/`caption-single-hashtag`, numeric-hashtag exclusion guard), the new `heur-caption-mention` suspicion heuristic, the three corresponding Tier-2 OCR platform-token signals (`ocr-tiktok-token`/`ocr-instagram-token`/`ocr-facebook-token`), and the Instagram cross-post detection rationale plus cross-post platform-attribution caveat in §9.2 |
