@@ -95,19 +95,23 @@ export async function checkForUpdate(
  * Resolve the update status for the current version, using the on-disk cache to
  * avoid hitting GitHub more than once per `CACHE_TTL_MS`.
  *
- * - If a fresh cached `latestVersion` exists, computes `updateAvailable` from it
- *   without any network call.
+ * - With `opts.force` (default false), always performs a live `checkForUpdate`
+ *   regardless of the cache — used by the interactive TUI so opening the menu
+ *   always reflects the newest published version instead of a stale cached one
+ *   (a single fetch per launch is cheap; the throttle only matters for the
+ *   headless per-command notice).
+ * - Otherwise, if a fresh cached `latestVersion` exists, computes
+ *   `updateAvailable` from it without any network call.
  * - Otherwise performs a live `checkForUpdate` and stores the result.
  *
- * Never throws — any failure resolves to `{ updateAvailable: false,
+ * Either way, a successful live check refreshes the cache so other surfaces
+ * benefit. Never throws — any failure resolves to `{ updateAvailable: false,
  * latestVersion: null }` so a slow/unreachable network never blocks the CLI.
- *
- * Shared by the interactive TUI (app.tsx) and the headless update notice so
- * both surfaces agree and share the same 24 h throttle.
  */
 export async function resolveUpdateStatus(
   db: BetterSqlite3.Database,
   currentVersion: string,
+  opts: { force?: boolean } = {},
 ): Promise<UpdateStatus> {
   try {
     const repo = new SettingsRepo(db);
@@ -118,7 +122,7 @@ export async function resolveUpdateStatus(
       cache.latestVersion !== null &&
       Date.now() - new Date(cache.lastAt).getTime() < CACHE_TTL_MS;
 
-    if (cacheIsFresh && cache.latestVersion !== null) {
+    if (!opts.force && cacheIsFresh && cache.latestVersion !== null) {
       return {
         updateAvailable: compareSemver(cache.latestVersion, currentVersion) > 0,
         latestVersion: cache.latestVersion,

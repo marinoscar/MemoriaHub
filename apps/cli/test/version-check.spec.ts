@@ -308,6 +308,22 @@ describe('resolveUpdateStatus', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it('force: fetches live even when the cache is fresh, surfacing a newer release', async () => {
+    // Reproduces the TUI bug: a fresh cache of the version-at-install would
+    // otherwise mask a newer published version for up to 24h. force bypasses it.
+    repo.setUpdateCheckCache('1.1.7'); // fresh cache of the installed version
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ version: '1.1.8' }),
+    });
+
+    const result = await resolveUpdateStatus(db, '1.1.7', { force: true });
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ updateAvailable: true, latestVersion: '1.1.8' });
+    expect(repo.getUpdateCheckCache().latestVersion).toBe('1.1.8');
+  });
+
   it('stale cache (last checked ~3 days ago): fetches live and updates the cache', async () => {
     repo.set('update_check_last_at', new Date(Date.now() - 3 * 24 * HOUR_MS).toISOString());
     repo.set('update_check_latest_version', '1.0.0');

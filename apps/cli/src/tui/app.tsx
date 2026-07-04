@@ -135,10 +135,12 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
       }
     }
 
-    // Best-effort update check — throttled to once per 24 h via the shared
-    // cache-aware resolver.  Never throws.
+    // Best-effort update check — the interactive UI checks GitHub live on each
+    // launch (force) so the banner/Help always reflect the newest published
+    // version rather than a stale cached one. Refreshes the shared cache for
+    // the headless notice. Never throws.
     async function checkUpdate(): Promise<void> {
-      const updateInfo = await resolveUpdateStatus(db, currentVersion);
+      const updateInfo = await resolveUpdateStatus(db, currentVersion, { force: true });
       if (!cancelled) {
         setAppState((prev) => ({ ...prev, updateInfo }));
       }
