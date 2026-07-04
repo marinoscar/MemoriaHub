@@ -387,7 +387,10 @@ export default function MediaLibraryPage() {
   const { albums, fetchAlbums } = useAlbums();
 
   const [tags, setTags] = useState<TagItem[]>([]);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  // Seed a single tag filter from URL deep-link (e.g. /media?tag=beach)
+  const [selectedTags, setSelectedTags] = useState<string[]>(
+    searchParams.get('tag') ? [searchParams.get('tag')!] : [],
+  );
 
   // Filter state
   const [showFilters, setShowFilters] = useState(false);
@@ -416,10 +419,10 @@ export default function MediaLibraryPage() {
   // Multi-person filter
   const [peopleFilter, setPeopleFilter] = useState<{ ids: string[]; mode: 'any' | 'all' }>({ ids: [], mode: 'any' });
 
-  // Location drill-down
-  const [filterCountry, setFilterCountry] = useState('');
-  const [filterRegion, setFilterRegion] = useState('');
-  const [filterLocality, setFilterLocality] = useState('');
+  // Location drill-down (seeded from URL deep-links, e.g. /media?locality=…)
+  const [filterCountry, setFilterCountry] = useState(searchParams.get('country') || '');
+  const [filterRegion, setFilterRegion] = useState(searchParams.get('region') || '');
+  const [filterLocality, setFilterLocality] = useState(searchParams.get('locality') || '');
   const [locationSearch, setLocationSearch] = useState('');
 
   // Drawer / dialog
