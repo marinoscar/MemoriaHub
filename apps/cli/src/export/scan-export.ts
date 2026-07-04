@@ -13,10 +13,19 @@
 
 import * as fs from 'node:fs';
 import type { ScanReport } from '../scan/report.js';
-import type { ScanFile } from '../db/types.js';
+import type { ScanFile, CaptureDateSource } from '../db/types.js';
 import { DATE_FMT, MB_FMT, bytesToMb } from './xlsx-format.js';
 
 export type ExportFormat = 'xlsx' | 'csv';
+
+/** Human-readable label for the capture-date provenance column. */
+function captureSourceLabel(source: CaptureDateSource | null): string {
+  switch (source) {
+    case 'exif': return 'EXIF';
+    case 'file': return 'File timestamp';
+    default:     return '';
+  }
+}
 
 // exceljs is CJS; normalize the default-interop shape.
 type ExcelJsModule = typeof import('exceljs');
@@ -35,6 +44,7 @@ const DETAIL_COLUMNS: Array<{ header: string; key: keyof ScanFileRowView; width:
   { header: 'Has EXIF', key: 'hasExif', width: 10 },
   { header: 'Has location', key: 'hasGps', width: 12 },
   { header: 'Captured at', key: 'capturedAt', width: 22 },
+  { header: 'Date source', key: 'capturedAtSource', width: 14 },
   { header: 'Width', key: 'width', width: 8 },
   { header: 'Height', key: 'height', width: 8 },
   { header: 'Camera make', key: 'cameraMake', width: 16 },
@@ -53,6 +63,7 @@ interface ScanFileRowView {
   hasExif: string;
   hasGps: string;
   capturedAt: string | null;
+  capturedAtSource: string;
   width: number | null;
   height: number | null;
   cameraMake: string | null;
@@ -72,6 +83,7 @@ function toRowView(f: ScanFile): ScanFileRowView {
     hasExif: f.has_exif ? 'yes' : 'no',
     hasGps: f.has_gps ? 'yes' : 'no',
     capturedAt: f.captured_at,
+    capturedAtSource: captureSourceLabel(f.captured_at_source),
     width: f.width,
     height: f.height,
     cameraMake: f.camera_make,

@@ -201,3 +201,13 @@ CREATE INDEX IF NOT EXISTS idx_scan_files_scan ON scan_files(scan_id)`;
 
 export const CREATE_SCAN_FILES_IDX_SCAN_KIND = `
 CREATE INDEX IF NOT EXISTS idx_scan_files_scan_kind ON scan_files(scan_id, media_kind)`;
+
+/**
+ * Migration v8: provenance for scan_files.captured_at.  Records whether the
+ * captured_at value came from real EXIF ('exif'), was inferred from the oldest
+ * of the file's created/modified/accessed stamps ('file'), or is unavailable
+ * ('none') — so the scan preview never presents a guessed date as if it were
+ * a real EXIF date.
+ */
+export const ALTER_SCAN_FILES_ADD_CAPTURED_AT_SOURCE = `
+ALTER TABLE scan_files ADD COLUMN captured_at_source TEXT`;

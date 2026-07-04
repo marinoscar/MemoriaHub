@@ -11,7 +11,7 @@
  */
 
 import type BetterSqlite3 from 'better-sqlite3';
-import type { Scan, ScanFile, ScanStatus, MediaKind } from '../db/types.js';
+import type { Scan, ScanFile, ScanStatus, MediaKind, CaptureDateSource } from '../db/types.js';
 
 // ---------------------------------------------------------------------------
 // Raw row types from SQLite (booleans stored as 0/1)
@@ -50,6 +50,7 @@ interface ScanFileRow {
   camera_model: string | null;
   taken_lat: number | null;
   taken_lng: number | null;
+  captured_at_source: string | null;
   meta_error: string | null;
 }
 
@@ -89,6 +90,7 @@ function rowToScanFile(row: ScanFileRow): ScanFile {
     camera_model: row.camera_model,
     taken_lat: row.taken_lat,
     taken_lng: row.taken_lng,
+    captured_at_source: (row.captured_at_source as CaptureDateSource | null) ?? null,
     meta_error: row.meta_error,
   };
 }
@@ -113,6 +115,7 @@ export interface ScanFileInput {
   cameraModel?: string | null;
   takenLat?: number | null;
   takenLng?: number | null;
+  capturedAtSource?: CaptureDateSource | null;
   metaError?: string | null;
 }
 
@@ -175,8 +178,9 @@ export class ScanRepo {
         `INSERT INTO scan_files
            (scan_id, folder_id, file_path, size_bytes, mtime_ms, mime_type,
             media_kind, has_exif, has_gps, captured_at, width, height,
-            camera_make, camera_model, taken_lat, taken_lng, meta_error)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            camera_make, camera_model, taken_lat, taken_lng,
+            captured_at_source, meta_error)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         scanId,
@@ -195,6 +199,7 @@ export class ScanRepo {
         input.cameraModel ?? null,
         input.takenLat ?? null,
         input.takenLng ?? null,
+        input.capturedAtSource ?? null,
         input.metaError ?? null,
       );
   }
