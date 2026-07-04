@@ -135,6 +135,113 @@ function creationTimeMissingOrEpoch(input: VideoDetectionInput): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Caption-signal helpers
+// ---------------------------------------------------------------------------
+//
+// Download apps name the saved file after the post caption and sometimes stuff
+// the caption into container text tags too, e.g.
+//   "Every man wants this!! #fyp #reels @empoweredtok on TT.mp4"
+// Personal camera footage filenames NEVER contain hashtags or @mentions (they
+// are "IMG_1234.MOV", "PXL_20260704_120000.mp4", "VID-20260704-WA0001.mp4",
+// "MVI_0031.MOV").  So a hashtag or @mention — in the filename OR in a container
+// text tag — is a high-precision social-media signal.
+
+/** Container tag keys download apps commonly stuff a post caption into. */
+const TEXT_TAG_KEYS = ['title', 'comment', 'description', 'synopsis', 'keywords', 'artist', 'album', 'author'];
+
+/**
+ * The two caption text sources for an input:
+ * - `filenameText`: the raw filename (download apps name files after the caption).
+ * - `metaText`: caption text harvested from container tags — the TEXT_TAG_KEYS
+ *   values of the format bag PLUS, to be robust, ALL values of every stream tag
+ *   bag (a caption may land in an unexpected stream tag), space-joined.
+ */
+function captionSources(input: VideoDetectionInput): { filenameText: string; metaText: string } {
+  const parts: string[] = [];
+  const ft = input.formatTags ?? {};
+  for (const key of TEXT_TAG_KEYS) {
+    const v = ft[key];
+    if (typeof v === 'string' && v.length > 0) parts.push(v);
+  }
+  for (const bag of input.streamTags ?? []) {
+    for (const v of Object.values(bag)) {
+      if (typeof v === 'string' && v.length > 0) parts.push(v);
+    }
+  }
+  return { filenameText: fileName(input), metaText: parts.join(' ') };
+}
+
+/** Unicode hashtag token: '#' followed by ≥1 letter/number/underscore. */
+const HASHTAG_RE = /#[\p{L}\p{N}_]+/gu;
+
+/**
+ * Number of hashtag tokens in `text` that contain at least one Unicode letter.
+ *
+ * Purely-numeric/underscore hashtags (`#1`, `#23`, `#_`) are excluded by design:
+ * real social hashtags always contain a letter (`#reels`, `#fyp`, `#dating`,
+ * `#fypシ`), whereas "number N" filenames (`Take #2.mp4`, `Photo #1.mp4`,
+ * `Birthday #3.mov`) do not — counting those would cause false positives.
+ */
+function countHashtags(text: string): number {
+  const m = text.match(HASHTAG_RE);
+  if (!m) return 0;
+  return m.filter(tag => /\p{L}/u.test(tag)).length;
+}
+
+/** @mention token: '@' followed by 2–30 of [a-z0-9_.] (case-insensitive). */
+const MENTION_RE = /@[a-z0-9_.]{2,30}/gi;
+
+/** True if `text` contains an @mention token. */
+function hasMention(text: string): boolean {
+  MENTION_RE.lastIndex = 0; // reset — MENTION_RE carries the global flag.
+  return MENTION_RE.test(text);
+}
+
+/**
+ * Per-platform caption/OCR token patterns (case-insensitive, non-global so
+ * `.test()` is stateless).  These are distinctive social-media hashtags/phrases,
+ * not generic words — high precision by construction.
+ */
+const PLATFORM_TOKEN_PATTERNS: Record<'tiktok' | 'instagram' | 'facebook', RegExp[]> = {
+  // `#fyp` is a prefix, so `#fypシ`, `#fypage`, `#foryou`, `#foryoupage` all hit.
+  tiktok: [/#fyp|#foryou/i, /#tiktok\b/i, /#ttok\b/i, /#capcut\b/i, /\bon tt\b/i, /@[a-z0-9_.]*tok\b/i],
+  instagram: [/#reels?\b/i, /#instagram\b/i, /#igreel\b/i, /#insta\b/i, /\big reel/i],
+  facebook: [/#facebook\b/i, /#fbreels?\b/i, /\bfb reel/i],
+};
+
+/**
+ * Count how many of each platform's token patterns fire in `text`.  Counts
+ * patterns that match (not total occurrences) — simpler, and enough to rank the
+ * most-likely platform.
+ */
+function platformTokenHits(text: string): { tiktok: number; instagram: number; facebook: number } {
+  const count = (pats: RegExp[]): number => pats.reduce((n, re) => (re.test(text) ? n + 1 : n), 0);
+  return {
+    tiktok: count(PLATFORM_TOKEN_PATTERNS.tiktok),
+    instagram: count(PLATFORM_TOKEN_PATTERNS.instagram),
+    facebook: count(PLATFORM_TOKEN_PATTERNS.facebook),
+  };
+}
+
+/** Pick the most-hit platform; tie-break order tiktok > instagram > facebook. */
+function pickPlatform(hits: {
+  tiktok: number;
+  instagram: number;
+  facebook: number;
+}): 'tiktok' | 'instagram' | 'facebook' {
+  const ordered: Array<['tiktok' | 'instagram' | 'facebook', number]> = [
+    ['tiktok', hits.tiktok],
+    ['instagram', hits.instagram],
+    ['facebook', hits.facebook],
+  ];
+  let best = ordered[0];
+  for (const entry of ordered) {
+    if (entry[1] > best[1]) best = entry; // strictly-greater keeps the earlier on ties
+  }
+  return best[0];
+}
+
+// ---------------------------------------------------------------------------
 // Rule catalogs (data-driven)
 // ---------------------------------------------------------------------------
 
@@ -296,6 +403,21 @@ const SUSPICION_HEURISTICS: SuspicionHeuristic[] = [
       return /^VID-\d{8}-WA\d{4}/i.test(name) || /^video_\d{4}-\d{2}-\d{2}[_ ]/i.test(name);
     },
   },
+  {
+    // A lone @mention (no hashtag, no platform token) in the filename or caption
+    // tags is weak on its own — don't auto-classify it (see detectCaptionSignal
+    // case (d)); route it to the Tier-2 OCR pass instead.
+    id: 'heur-caption-mention',
+    match: input => {
+      const { filenameText, metaText } = captionSources(input);
+      return [filenameText, metaText].some(text => {
+        if (!text) return false;
+        const hits = platformTokenHits(text);
+        const hasPlatformToken = hits.tiktok + hits.instagram + hits.facebook > 0;
+        return hasMention(text) && countHashtags(text) === 0 && !hasPlatformToken;
+      });
+    },
+  },
 ];
 
 /** Normalize OCR text: lowercase, strip diacritics, collapse whitespace. */
@@ -334,22 +456,32 @@ export class SocialMediaDetectorService {
     input: VideoDetectionInput,
     minConfidence = 0.8,
   ): { result: DetectionResult | null; recommendTier2: boolean } {
-    let best: DetectionRule | null = null;
+    let bestRule: DetectionRule | null = null;
     for (const rule of [...METADATA_RULES, ...FILENAME_RULES]) {
       if (!safeMatch(rule.match, input)) continue;
-      if (best === null || rule.confidence > best.confidence) best = rule;
+      if (bestRule === null || rule.confidence > bestRule.confidence) bestRule = rule;
+    }
+
+    // Normalize the winning rule (if any) into a DetectionResult candidate so it
+    // competes on confidence against the caption signal below.
+    let best: DetectionResult | null = bestRule
+      ? {
+          platform: bestRule.platform,
+          method: bestRule.source === 'metadata' ? 'metadata' : 'filename',
+          confidence: bestRule.confidence,
+          matchedRule: bestRule.id,
+        }
+      : null;
+
+    // Fold in the caption signal (hashtags / @mentions / platform tokens in the
+    // filename or container text tags); it competes like any other candidate.
+    const caption = this.detectCaptionSignal(input);
+    if (caption && (best === null || caption.confidence > best.confidence)) {
+      best = caption;
     }
 
     if (best && best.confidence >= minConfidence) {
-      return {
-        result: {
-          platform: best.platform,
-          method: best.source === 'metadata' ? 'metadata' : 'filename',
-          confidence: best.confidence,
-          matchedRule: best.id,
-        },
-        recommendTier2: false,
-      };
+      return { result: best, recommendTier2: false };
     }
 
     const inGreyZone = best !== null && best.confidence >= 0.6 && best.confidence < minConfidence;
@@ -359,6 +491,68 @@ export class SocialMediaDetectorService {
       return { result: null, recommendTier2: true };
     }
     return { result: null, recommendTier2: false };
+  }
+
+  /**
+   * Caption-signal detection — a high-precision Tier-1 companion.
+   *
+   * Download apps name the saved file after the post caption (and sometimes copy
+   * the caption into container text tags), so hashtags / @mentions / platform
+   * tokens there are a strong social-media signal that generic filename/metadata
+   * rules miss (e.g. cross-posted Instagram/TikTok downloads).
+   *
+   * The filename is analyzed FIRST, then the container caption tags, so the
+   * returned `method` is attributed correctly.  For each non-empty source:
+   * - (a) any platform token → the most-hit platform (tie-break tt > ig > fb) at
+   *   0.9, `matchedRule: 'caption-<tt|ig|fb>-token'`.
+   * - (b) a clear generic caption (≥2 hashtags, or ≥1 hashtag with an @mention,
+   *   or ≥1 hashtag alongside a multi-word phrase) → platform 'other' at 0.9,
+   *   `matchedRule: 'caption-generic'`.
+   * - (c) exactly one lone hashtag → platform 'other' at 0.85,
+   *   `matchedRule: 'caption-single-hashtag'`.
+   * - (d) an @mention only (no hashtag, no platform token) → NOT returned here;
+   *   the `heur-caption-mention` suspicion heuristic routes it to Tier-2 OCR.
+   *
+   * Returns the first source's DetectionResult, or null when neither source
+   * produced one.
+   */
+  detectCaptionSignal(input: VideoDetectionInput): DetectionResult | null {
+    const { filenameText, metaText } = captionSources(input);
+    const sources: Array<{ text: string; method: DetectionMethod }> = [
+      { text: filenameText, method: 'filename' },
+      { text: metaText, method: 'metadata' },
+    ];
+
+    for (const { text, method } of sources) {
+      if (!text) continue;
+
+      const hits = platformTokenHits(text);
+      const hashtags = countHashtags(text);
+      const mention = hasMention(text);
+
+      // (a) Explicit platform token → attribute to the most-hit platform.
+      if (hits.tiktok + hits.instagram + hits.facebook > 0) {
+        const platform = pickPlatform(hits);
+        const suffix = platform === 'tiktok' ? 'tt' : platform === 'instagram' ? 'ig' : 'fb';
+        return { platform, method, confidence: 0.9, matchedRule: `caption-${suffix}-token` };
+      }
+
+      // (b) Strong generic caption signal — no platform token, but clearly a
+      //     caption (multiple hashtags, or a hashtag plus a mention/phrase).
+      const multiWordPhrase = /[a-z]{2,}\s+[a-z]{2,}/i.test(text);
+      if (hashtags >= 2 || (hashtags >= 1 && mention) || (hashtags >= 1 && multiWordPhrase)) {
+        return { platform: 'other', method, confidence: 0.9, matchedRule: 'caption-generic' };
+      }
+
+      // (c) A single lone hashtag — weaker, but still a social signal.
+      if (hashtags === 1) {
+        return { platform: 'other', method, confidence: 0.85, matchedRule: 'caption-single-hashtag' };
+      }
+
+      // (d) Mention-only → fall through (handled by heur-caption-mention).
+    }
+
+    return null;
   }
 
   /**
@@ -398,6 +592,19 @@ export class SocialMediaDetectorService {
     if (/\breels?\b/.test(joined)) {
       // Corroboration only — below threshold, so never a standalone result.
       candidates.push({ platform: 'instagram', confidence: 0.6, matchedRule: 'ocr-reels-corroborate' });
+    }
+
+    // Distinctive on-screen platform tokens (e.g. a "#reels" watermark or an
+    // "@user…tok" handle) count as strong per-platform candidates too.
+    const tokenHits = platformTokenHits(joined);
+    if (tokenHits.tiktok > 0) {
+      candidates.push({ platform: 'tiktok', confidence: 0.9, matchedRule: 'ocr-tiktok-token' });
+    }
+    if (tokenHits.instagram > 0) {
+      candidates.push({ platform: 'instagram', confidence: 0.9, matchedRule: 'ocr-instagram-token' });
+    }
+    if (tokenHits.facebook > 0) {
+      candidates.push({ platform: 'facebook', confidence: 0.9, matchedRule: 'ocr-facebook-token' });
     }
 
     const hasUsername = /@[a-z0-9_.]{3,24}/.test(joined);
