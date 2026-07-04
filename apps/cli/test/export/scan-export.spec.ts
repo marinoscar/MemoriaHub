@@ -182,6 +182,56 @@ describe('exportScan', () => {
       // header row + one row per file
       expect(detail.rowCount).toBe(files.length + 1);
     });
+
+    it('number-formats size/coordinates and writes real Excel dates', async () => {
+      const report = makeReport();
+      const files: ScanFile[] = [makeScanFile({ id: 1 })];
+
+      const outPath = path.join(tmpDir, 'formatted.xlsx');
+      await exportScan(report, files, outPath, 'xlsx');
+
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.readFile(outPath);
+
+      const detail = workbook.getWorksheet('Detail')!;
+      const row2 = detail.getRow(2);
+
+      // Size (col 3): thousand separators, value stays numeric (sortable).
+      expect(row2.getCell(3).numFmt).toBe('#,##0');
+      expect(typeof row2.getCell(3).value).toBe('number');
+      expect(row2.getCell(3).value).toBe(2000);
+
+      // Width (col 9) thousand separators; Latitude (col 13) six decimals.
+      expect(row2.getCell(9).numFmt).toBe('#,##0');
+      expect(row2.getCell(13).numFmt).toBe('0.000000');
+
+      // Captured at (col 8): a real Excel datetime, not a string.
+      expect(row2.getCell(8).value instanceof Date).toBe(true);
+      expect(row2.getCell(8).numFmt).toBe('yyyy-mm-dd hh:mm:ss');
+
+      // Summary: Total bytes numeric w/ separators; Created at a real date.
+      const summary = workbook.getWorksheet('Summary')!;
+      let totalBytesFmt: string | undefined;
+      let totalBytesIsNumber = false;
+      let createdIsDate = false;
+      let createdFmt: string | undefined;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      summary.eachRow((r: any) => {
+        const label = r.getCell(1).value;
+        if (label === 'Total bytes') {
+          totalBytesFmt = r.getCell(2).numFmt;
+          totalBytesIsNumber = typeof r.getCell(2).value === 'number';
+        }
+        if (label === 'Created at') {
+          createdIsDate = r.getCell(2).value instanceof Date;
+          createdFmt = r.getCell(2).numFmt;
+        }
+      });
+      expect(totalBytesFmt).toBe('#,##0');
+      expect(totalBytesIsNumber).toBe(true);
+      expect(createdIsDate).toBe(true);
+      expect(createdFmt).toBe('yyyy-mm-dd hh:mm:ss');
+    });
   });
 
   describe('csv', () => {
