@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Readable } from 'stream';
 import { RateLimitError, parseRetryAfterMs } from '../enrichment/rate-limit.error';
 import { OneDriveConnectionExpiredError } from './onedrive.errors';
 
@@ -213,7 +214,11 @@ export class MicrosoftGraphClient {
         const mimeType = raw.file?.mimeType ?? null;
 
         if (opts.foldersOnly && !isFolder) continue;
-        if (opts.imagesAndVideosOnly && !isFolder && !this.isImageOrVideo(mimeType)) continue;
+        // imagesAndVideosOnly returns ONLY image/video FILES — folders and other
+        // file types are both excluded. Callers that need folders (e.g. the
+        // recursive enumeration in OneDriveImportService) omit this option and
+        // partition the unfiltered listing on `isFolder` themselves.
+        if (opts.imagesAndVideosOnly && (isFolder || !this.isImageOrVideo(mimeType))) continue;
 
         items.push({
           id: raw.id,
@@ -233,18 +238,17 @@ export class MicrosoftGraphClient {
 
   /**
    * Download a DriveItem's content. Graph returns a redirect to a
-   * pre-authenticated URL; `fetch` follows it by default. Returns the response
-   * body as a Node readable stream.
+   * pre-authenticated URL; `fetch` follows it by default. The WHATWG
+   * ReadableStream returned by `fetch` is converted to a Node {@link Readable}
+   * here at the HTTP boundary, so callers always consume a Node stream.
    */
-  async downloadContent(accessToken: string, itemId: string): Promise<NodeJS.ReadableStream> {
+  async downloadContent(accessToken: string, itemId: string): Promise<Readable> {
     const url = `${MicrosoftGraphClient.GRAPH_BASE}/me/drive/items/${encodeURIComponent(itemId)}/content`;
     const response = await this.graphGet(url, accessToken);
     if (!response.body) {
       throw new Error(`Microsoft Graph returned an empty body for item ${itemId}`);
     }
-    // The WHATWG ReadableStream from fetch is consumable as a Node stream via
-    // Readable.fromWeb by the caller; expose it typed as a Node readable stream.
-    return response.body as unknown as NodeJS.ReadableStream;
+    return Readable.fromWeb(response.body as any);
   }
 
   /**

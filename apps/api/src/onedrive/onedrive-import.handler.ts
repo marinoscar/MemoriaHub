@@ -23,8 +23,7 @@
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { Readable, Transform } from 'stream';
-import type { ReadableStream as NodeWebReadableStream } from 'stream/web';
+import { Transform } from 'stream';
 import {
   EnrichmentJob,
   OneDriveImportItemStatus,
@@ -183,20 +182,26 @@ export class OneDriveImportHandler implements EnrichmentHandler, OnModuleInit {
     // RateLimitError on a 429 from the token endpoint).
     const accessToken = await this.connectionService.getFreshAccessToken(run.userId);
 
-    // Download content — Graph returns a web ReadableStream (typed as a Node
-    // readable by the client). Convert to a Node stream for the uploader.
-    const downloaded = await this.graphClient.downloadContent(accessToken, item.remoteItemId);
-    const sourceStream = Readable.fromWeb(downloaded as unknown as NodeWebReadableStream);
+    // Download content — the Graph client performs the web→Node stream
+    // conversion at the HTTP boundary and returns a Node Readable directly.
+    const sourceStream = await this.graphClient.downloadContent(accessToken, item.remoteItemId);
 
     // Compute the SHA-256 digest as bytes flow through — never buffer the whole
     // file. The Transform updates the hash and passes each chunk straight into
-    // the uploader; once provider.upload() resolves the stream is fully
-    // consumed, so hash.digest() is final and safe to read.
+    // the uploader. The digest is finalized in `flush`, which runs exactly once
+    // after the last chunk has been hashed and before the readable side ends —
+    // so digest() is always strictly after every update(), independent of when
+    // the uploader drains the stream (avoids ERR_CRYPTO_HASH_FINALIZED).
     const hash = createHash('sha256');
+    let contentHash = '';
     const hashing = new Transform({
       transform(chunk: Buffer, _enc, cb) {
         hash.update(chunk);
         cb(null, chunk);
+      },
+      flush(cb) {
+        contentHash = hash.digest('hex');
+        cb();
       },
     });
     // Forward source errors so the upload rejects instead of hanging.
@@ -213,7 +218,6 @@ export class OneDriveImportHandler implements EnrichmentHandler, OnModuleInit {
       auditUploadType: 'onedrive_import',
     });
 
-    const contentHash = hash.digest('hex');
     const type: 'photo' | 'video' = mimeType.startsWith('video/') ? 'video' : 'photo';
 
     // Resolve the user's permissions exactly as an HTTP request would (same
