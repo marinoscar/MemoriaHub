@@ -8,6 +8,7 @@ import { FaceModule } from '../face/face.module';
 import { GeoModule } from '../geo/geo.module';
 import { StorageSettingsModule } from '../storage-settings/storage-settings.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
+import { SocialMediaModule } from '../social-media/social-media.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { EnrichmentModule } from '../enrichment/enrichment.module';
     GeoModule,
     StorageSettingsModule,
     EnrichmentModule,
+    SocialMediaModule,
   ],
   controllers: [DoctorController],
   providers: [DoctorService],

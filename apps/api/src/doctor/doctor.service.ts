@@ -20,6 +20,7 @@ import { GeoSettingsService } from '../geo/geo-settings.service';
 import { StorageSettingsService } from '../storage-settings/storage-settings.service';
 import { EnrichmentAdminService } from '../enrichment/enrichment-admin.service';
 import { isEnrichmentWorkerEnabled } from '../enrichment/enrichment-job.worker';
+import { SocialMediaOcrService } from '../social-media/social-media-ocr.service';
 import {
   DoctorCheck,
   DoctorCheckStatus,
@@ -64,6 +65,7 @@ export class DoctorService {
     private readonly geoSettings: GeoSettingsService,
     private readonly storageSettings: StorageSettingsService,
     private readonly enrichmentAdmin: EnrichmentAdminService,
+    private readonly socialMediaOcr: SocialMediaOcrService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -106,6 +108,11 @@ export class DoctorService {
         key: 'ai.flagConsistency',
         label: 'Auto-tagging flag consistency',
         fn: () => this.checkAiFlagConsistency(settings),
+      },
+      {
+        key: 'ai.socialMedia',
+        label: 'Social media detection',
+        fn: () => this.checkSocialMedia(settings),
       },
       // Face
       { key: 'face.detection', label: 'Face detection provider', fn: () => this.checkFaceDetection(settings) },
@@ -161,7 +168,7 @@ export class DoctorService {
       {
         key: 'ai',
         label: 'AI & Enrichment',
-        checkKeys: ['ai.search', 'ai.tagging', 'ai.embedding', 'ai.flagConsistency'],
+        checkKeys: ['ai.search', 'ai.tagging', 'ai.embedding', 'ai.flagConsistency', 'ai.socialMedia'],
       },
       {
         key: 'face',
@@ -548,6 +555,67 @@ export class DoctorService {
     }
 
     return { status: 'ok', message: 'Auto-Tagging flag and provider configuration are consistent.' };
+  }
+
+  private async checkSocialMedia(settings: ResolvedSettings): Promise<CheckOutcome> {
+    if (settings.features?.['socialMediaDetection'] !== true) {
+      return { status: 'skipped', message: 'Social media detection disabled' };
+    }
+
+    if (process.env['SOCIAL_MEDIA_DETECTION_ENABLED'] === 'false') {
+      return {
+        status: 'warning',
+        message:
+          'Feature enabled in settings but SOCIAL_MEDIA_DETECTION_ENABLED=false overrides it',
+        actionItem: 'Remove or set SOCIAL_MEDIA_DETECTION_ENABLED=true',
+      };
+    }
+
+    const cfg = settings.socialMedia;
+
+    // Range validation of the socialMedia.* tunables.
+    const rangeErrors: string[] = [];
+    if (cfg) {
+      if (cfg.ocrMaxFrames < 2 || cfg.ocrMaxFrames > 6) {
+        rangeErrors.push(`ocrMaxFrames=${cfg.ocrMaxFrames} (expected 2–6)`);
+      }
+      if (cfg.ocrTimeoutSeconds < 10 || cfg.ocrTimeoutSeconds > 300) {
+        rangeErrors.push(`ocrTimeoutSeconds=${cfg.ocrTimeoutSeconds} (expected 10–300)`);
+      }
+      if (cfg.minConfidence < 0.5 || cfg.minConfidence > 1.0) {
+        rangeErrors.push(`minConfidence=${cfg.minConfidence} (expected 0.5–1.0)`);
+      }
+    }
+    if (rangeErrors.length > 0) {
+      return {
+        status: 'warning',
+        message: `Social media detection setting(s) out of range: ${rangeErrors.join(', ')}`,
+        actionItem: 'Correct the social media detection parameters in Admin Settings.',
+      };
+    }
+
+    if (cfg?.ocrEnabled === false) {
+      return {
+        status: 'ok',
+        message: 'Tier-1 (metadata/filename) only — OCR disabled in settings',
+      };
+    }
+
+    // Feature on + OCR enabled → probe the OCR model availability.
+    const ocrStatus = await this.socialMediaOcr.getStatus();
+    if (ocrStatus.ocrAvailable && !ocrStatus.degraded) {
+      return {
+        status: 'ok',
+        message: 'Two-tier detection operational (metadata/filename + OCR)',
+      };
+    }
+
+    return {
+      status: 'warning',
+      message: 'Running Tier-1 only — OCR model unavailable (degraded)',
+      actionItem:
+        'Ensure MODELS_DIR/tesseract is writable and traineddata can be fetched or pre-placed',
+    };
   }
 
   // ===========================================================================
