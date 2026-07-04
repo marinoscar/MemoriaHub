@@ -89,6 +89,27 @@ print_box() {
 }
 
 # ---------------------------------------------------------------------------
+# Environment detection helpers
+# ---------------------------------------------------------------------------
+# Detect Windows Subsystem for Linux (WSL 1 or 2). WSL exports WSL_DISTRO_NAME
+# and the kernel release / /proc/version advertise "microsoft" or "WSL".
+is_wsl() {
+  [[ -n "${WSL_DISTRO_NAME:-}" ]] && return 0
+  grep -qiE '(microsoft|wsl)' /proc/version 2>/dev/null && return 0
+  uname -r 2>/dev/null | grep -qiE '(microsoft|wsl)' && return 0
+  return 1
+}
+
+# Best-effort guess at the interactive shell's rc file so PATH guidance points
+# at the right place. Defaults to ~/.bashrc (the WSL default shell).
+detect_shell_rc() {
+  case "${SHELL:-}" in
+    */zsh) printf '%s' "$HOME/.zshrc" ;;
+    *)     printf '%s' "$HOME/.bashrc" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
 MEMORIAHUB_REPO="${MEMORIAHUB_REPO:-https://github.com/marinoscar/MemoriaHub.git}"
@@ -463,7 +484,15 @@ ok "Shim written: $BIN_SHIM"
 # ---------------------------------------------------------------------------
 # Step 6: PATH check
 # ---------------------------------------------------------------------------
-if ! echo ":$PATH:" | grep -q ":$MEMORIAHUB_BIN_DIR:"; then
+BIN_ON_PATH=0
+if echo ":$PATH:" | grep -q ":$MEMORIAHUB_BIN_DIR:"; then
+  BIN_ON_PATH=1
+fi
+
+# Plain PATH guidance for non-WSL shells. WSL users get a dedicated, nicer
+# call-out box printed after the completion summary (see below), so we skip
+# this generic block for them to avoid duplicate messaging.
+if [[ "$BIN_ON_PATH" != "1" ]] && ! is_wsl; then
   warn "$MEMORIAHUB_BIN_DIR is not on your PATH"
   printf '\n'
   info "Add the following line to your shell config (~/.bashrc or ~/.zshrc):"
@@ -513,3 +542,31 @@ print_box "Installation Complete" \
   "  memoriahub login" \
   "  memoriahub import ~/Pictures/MyAlbum" \
   "  memoriahub --help"
+
+# ---------------------------------------------------------------------------
+# Step 8: Windows / WSL PATH call-out
+# ---------------------------------------------------------------------------
+# On Windows 11 + WSL the default shell rarely has ~/.local/bin on PATH, so the
+# freshly-installed `memoriahub` command is "not found" until the user appends
+# it. Print an explicit, copy-pasteable box with the exact two commands.
+if is_wsl && [[ "$BIN_ON_PATH" != "1" ]]; then
+  RC_FILE="$(detect_shell_rc)"
+  RC_SHORT="${RC_FILE/#"$HOME"/\~}"
+  printf '\n'
+  print_box "Windows 11 · WSL — one more step" \
+    "Detected Windows Subsystem for Linux (WSL)." \
+    "" \
+    "The 'memoriahub' command was installed to:" \
+    "$MEMORIAHUB_BIN_DIR" \
+    "but that directory is not on your PATH yet, so" \
+    "your shell reports 'command not found'." \
+    "" \
+    "Run these two commands to finish setup:" \
+    "" \
+    "echo 'export PATH=\"\$PATH:$MEMORIAHUB_BIN_DIR\"' >> $RC_SHORT" \
+    "source $RC_SHORT" \
+    "" \
+    "Then verify it works:" \
+    "memoriahub --version"
+  printf '\n'
+fi
