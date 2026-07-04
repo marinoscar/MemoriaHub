@@ -14,7 +14,7 @@ import * as path from 'node:path';
 import { TypedEmitter, EV } from './events.js';
 import { runPool } from './worker-pool.js';
 import { enumerateFiles } from '../files.js';
-import { resolveCapturedAt } from '../metadata.js';
+import { resolveCapturedAt, type ResolvedCaptureDate } from '../metadata.js';
 import { sha256File } from '../hash.js';
 import { uploadFile, type UploadPersistence } from '../upload.js';
 import { ApiError, type ApiClient } from '../api.js';
@@ -58,6 +58,18 @@ export interface SyncOptions {
    * still built from the live filesystem.  Requires the `scans` dep.
    */
   scanId?: number;
+  /**
+   * Inclusive lower bound (epoch ms) on a file's resolved capture date. Files
+   * captured before this are skipped (FILE_SKIPPED reason 'out_of_range').
+   * undefined = unbounded on this side.
+   */
+  fromMs?: number;
+  /**
+   * Inclusive upper bound (epoch ms) on a file's resolved capture date. Files
+   * captured after this are skipped (FILE_SKIPPED reason 'out_of_range').
+   * undefined = unbounded on this side.
+   */
+  toMs?: number;
 }
 
 export interface SyncRunResult {
@@ -219,7 +231,12 @@ export class SyncEngine extends TypedEmitter {
     const workList: Array<{ fileId: number; filePath: string; mimeType: string; folderId: number }> = [];
     // Track per-file stat info so the worker can reuse cached hashes.
     const fileStatCache = new Map<number, { sizeBytes: number; mtimeMs: number }>();
+    // Cache the resolved capture date computed during date-range filtering so the
+    // worker's register step can reuse it instead of re-parsing EXIF.
+    const captureDateCache = new Map<number, ResolvedCaptureDate>();
     let unchangedSkippedCount = 0;
+    let outOfRangeSkippedCount = 0;
+    const dateFilterActive = opts.fromMs != null || opts.toMs != null;
 
     if (opts.retryFailedOnly) {
       // Retry path: collect failed (and optionally blocked) file records
@@ -295,6 +312,28 @@ export class SyncEngine extends TypedEmitter {
             continue;
           }
 
+          // Capture-date range filter: only resolve the date when a range is
+          // active so the no-filter path stays byte-for-byte unchanged in cost.
+          if (dateFilterActive) {
+            const cap = await resolveCapturedAt(filePath, mimeType);
+            const capMs = cap.capturedAt ? Date.parse(cap.capturedAt) : NaN;
+            if (
+              Number.isNaN(capMs) ||
+              (opts.fromMs != null && capMs < opts.fromMs) ||
+              (opts.toMs != null && capMs > opts.toMs)
+            ) {
+              outOfRangeSkippedCount++;
+              this.emit(EV.FILE_SKIPPED, {
+                fileId: rec.id,
+                path: filePath,
+                reason: 'out_of_range',
+              });
+              continue;
+            }
+            // In range — keep the resolved date for reuse in the register step.
+            captureDateCache.set(rec.id, cap);
+          }
+
           // Stash the stat for the worker so it can check the mtime cache
           if (sizeBytes !== null && mtimeMs !== null) {
             fileStatCache.set(rec.id, { sizeBytes, mtimeMs });
@@ -311,7 +350,7 @@ export class SyncEngine extends TypedEmitter {
     // ------------------------------------------------------------------
     // 4. Start the run record
     // ------------------------------------------------------------------
-    const total = workList.length + unchangedSkippedCount;
+    const total = workList.length + unchangedSkippedCount + outOfRangeSkippedCount;
     const runId = runs.startRun({
       trigger: opts.trigger,
       folderIds: targetFolderIds,
@@ -537,7 +576,10 @@ export class SyncEngine extends TypedEmitter {
         // originalCreatedAt records the file's creation time as provenance.
         const basename = path.basename(filePath);
         const type = mimeToMediaType(mimeType);
-        const cap = await resolveCapturedAt(filePath, mimeType);
+        // Reuse the date resolved during range filtering when available; otherwise
+        // resolve it now (the no-filter path, unchanged from before).
+        const cap =
+          captureDateCache.get(fileId) ?? (await resolveCapturedAt(filePath, mimeType));
         const mediaItem = await api.post<MediaItem>('/api/media', {
           storageObjectId: objectId,
           type,
@@ -630,7 +672,7 @@ export class SyncEngine extends TypedEmitter {
     const totalCounts = files.counts(targetFolderIds);
     const stats = {
       uploaded: totalCounts.uploaded,
-      skipped:  totalCounts.skipped + unchangedSkippedCount,
+      skipped:  totalCounts.skipped + unchangedSkippedCount + outOfRangeSkippedCount,
       failed:   totalCounts.failed,
     };
 

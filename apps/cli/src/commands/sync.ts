@@ -21,6 +21,7 @@ import { SettingsRepo } from '../repo/settings.js';
 import { ScanRepo } from '../repo/scans.js';
 import { SyncEngine } from '../sync/sync-engine.js';
 import { SyncReportCollector, writeSyncReport } from '../sync/sync-report.js';
+import { parseDateRange, describeRange } from '../sync/date-range.js';
 import { EV } from '../sync/events.js';
 import { renderSyncHeadless } from '../render/headless-sync.js';
 import { runPatPreflight } from '../preflight.js';
@@ -38,11 +39,13 @@ export function syncCommand(): Command {
     .option('-r, --recursive', 'Descend into sub-directories (when auto-registering a folder)', false)
     .option('--concurrency <n>', 'Number of concurrent upload workers', parseInt)
     .option('--circle <id>', 'Target circle ID (overrides active circle in config)')
-    .option('--scan <id>', 'Reconcile against a prior scan (id or "latest") and report changes since then');
+    .option('--scan <id>', 'Reconcile against a prior scan (id or "latest") and report changes since then')
+    .option('--from <date>', 'Only sync media captured on/after this date (YYYY-MM-DD, local, inclusive)')
+    .option('--to <date>', 'Only sync media captured on/before this date (YYYY-MM-DD, local, inclusive)');
 
   cmd.action(async (
     folderArgs: string[],
-    options: { all: boolean; dryRun: boolean; recursive: boolean; concurrency?: number; circle?: string; scan?: string },
+    options: { all: boolean; dryRun: boolean; recursive: boolean; concurrency?: number; circle?: string; scan?: string; from?: string; to?: string },
   ) => {
     // Validate invocation
     if (folderArgs.length === 0 && !options.all) {
@@ -85,6 +88,16 @@ export function syncCommand(): Command {
         scanId = parsed;
       }
     }
+
+    // Parse the optional capture-date range filter (--from / --to).
+    let range: { fromMs?: number; toMs?: number };
+    try {
+      range = parseDateRange(options.from, options.to);
+    } catch (err) {
+      ui.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+    const hasDateFilter = range.fromMs !== undefined || range.toMs !== undefined;
 
     // A single cooldown gate shared by all upload workers: a 429/503 seen by
     // one worker pauses the others. The onTrip callback forwards a UI event
@@ -141,6 +154,10 @@ export function syncCommand(): Command {
 
     renderSyncHeadless(engine);
 
+    if (hasDateFilter) {
+      ui.info(`Date filter: ${describeRange(range)}`);
+    }
+
     try {
       await engine.run({
         folderIds,
@@ -149,6 +166,8 @@ export function syncCommand(): Command {
         concurrency: options.concurrency,
         circleId:    options.circle ?? cfg.activeCircleId,
         scanId,
+        fromMs:      range.fromMs,
+        toMs:        range.toMs,
         trigger:     'cli',
       });
     } catch (err) {
