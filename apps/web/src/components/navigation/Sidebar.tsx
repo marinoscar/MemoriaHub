@@ -87,11 +87,14 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
   const libraryItems: NavItemDef[] = [
     { label: 'People', icon: <GroupsIcon />, path: '/people' },
+    { label: 'Archive', icon: <ArchiveOutlinedIcon />, path: '/archive' },
+    { label: 'Trash', icon: <DeleteOutlineIcon />, path: '/trash' },
+  ];
+
+  const utilitiesItems: NavItemDef[] = [
     { label: 'Review Bursts', icon: <BurstModeIcon />, path: '/bursts' },
     { label: 'Review Duplicates', icon: <ContentCopyIcon />, path: '/duplicates' },
     { label: 'Location Suggestions', icon: <MyLocationIcon />, path: '/location-suggestions' },
-    { label: 'Archive', icon: <ArchiveOutlinedIcon />, path: '/archive' },
-    { label: 'Trash', icon: <DeleteOutlineIcon />, path: '/trash' },
   ];
 
   const adminItems: NavItemDef[] = [
@@ -185,6 +188,21 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           }
         >
           {libraryItems.map((item) => (
+            <NavItem key={item.path} item={item} />
+          ))}
+        </List>
+
+        {/* UTILITIES section */}
+        <List
+          dense
+          disablePadding
+          subheader={
+            <ListSubheader disableSticky sx={subheaderSx}>
+              Utilities
+            </ListSubheader>
+          }
+        >
+          {utilitiesItems.map((item) => (
             <NavItem key={item.path} item={item} />
           ))}
         </List>

@@ -14,15 +14,18 @@ import {
   Settings as SettingsIcon,
   AdminPanelSettings as AdminIcon,
   Logout as LogoutIcon,
+  GroupWork as CircleIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions } from '../../hooks/usePermissions';
+import { useCircle } from '../../hooks/useCircle';
 
 export function UserMenu() {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const { user, logout } = useAuth();
   const { hasPermission } = usePermissions();
+  const { circles, activeCircle, setActiveCircle } = useCircle();
   const navigate = useNavigate();
 
   const open = Boolean(anchorEl);
@@ -93,6 +96,43 @@ export function UserMenu() {
             {user.email}
           </Typography>
         </Box>
+
+        <Divider />
+
+        {/* Circle Section */}
+        <Typography
+          variant="overline"
+          sx={{ px: 2, pt: 1, display: 'block' }}
+          color="text.secondary"
+        >
+          Circle
+        </Typography>
+
+        {circles.length === 0 ? (
+          <MenuItem disabled>
+            <ListItemText>No circles yet</ListItemText>
+          </MenuItem>
+        ) : (
+          circles.map((c) => (
+            <MenuItem
+              key={c.id}
+              selected={c.id === activeCircle?.id}
+              onClick={() => void setActiveCircle(c.id)}
+            >
+              <ListItemIcon>
+                <CircleIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>{c.name}</ListItemText>
+            </MenuItem>
+          ))
+        )}
+
+        <MenuItem onClick={() => handleNavigate('/circles')}>
+          <ListItemIcon>
+            <CircleIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Manage Circles</ListItemText>
+        </MenuItem>
 
         <Divider />
 

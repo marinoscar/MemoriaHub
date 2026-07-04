@@ -17,21 +17,44 @@ import {
   Alert,
   Chip,
 } from '@mui/material';
-import { Add as AddIcon, GroupWork as CircleIcon } from '@mui/icons-material';
+import {
+  Add as AddIcon,
+  GroupWork as CircleIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon,
+} from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useCircles } from '../../hooks/useCircles';
 import { useCircleContext } from '../../contexts/CircleContext';
+import { usePermissions } from '../../hooks/usePermissions';
+import { useAuth } from '../../contexts/AuthContext';
+import type { Circle } from '../../types/circles';
 
 export default function CircleListPage() {
   const navigate = useNavigate();
-  const { circles, loading, error, fetchCircles, addCircle } = useCircles();
-  const { refreshCircles } = useCircleContext();
+  const { circles, loading, error, fetchCircles, addCircle, editCircle, removeCircle } =
+    useCircles();
+  const { refreshCircles, activeCircleId } = useCircleContext();
+  const { isAdmin } = usePermissions();
+  const { user } = useAuth();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState('');
   const [createDescription, setCreateDescription] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  // Edit dialog state (single shared dialog, target held in `editing`)
+  const [editing, setEditing] = useState<Circle | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // Delete confirmation dialog state
+  const [deleting, setDeleting] = useState<Circle | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     void fetchCircles();
@@ -64,6 +87,64 @@ export default function CircleListPage() {
     setCreateDescription('');
     setCreateError(null);
   }, [creating]);
+
+  const handleEditOpen = useCallback((circle: Circle) => {
+    setEditing(circle);
+    setEditName(circle.name);
+    setEditDescription(circle.description ?? '');
+    setEditError(null);
+  }, []);
+
+  const handleEditClose = useCallback(() => {
+    if (saving) return;
+    setEditing(null);
+    setEditName('');
+    setEditDescription('');
+    setEditError(null);
+  }, [saving]);
+
+  const handleEditSave = useCallback(async () => {
+    if (!editing || !editName.trim()) return;
+    setSaving(true);
+    setEditError(null);
+    try {
+      await editCircle(editing.id, {
+        name: editName.trim(),
+        description: editDescription.trim() || undefined,
+      });
+      await refreshCircles();
+      await fetchCircles();
+      setEditing(null);
+      setEditName('');
+      setEditDescription('');
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Failed to update circle');
+    } finally {
+      setSaving(false);
+    }
+  }, [editing, editName, editDescription, editCircle, refreshCircles, fetchCircles]);
+
+  const handleDeleteClose = useCallback(() => {
+    if (deleteBusy) return;
+    setDeleting(null);
+    setDeleteError(null);
+  }, [deleteBusy]);
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!deleting) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await removeCircle(deleting.id);
+      await refreshCircles();
+      await fetchCircles();
+      setDeleting(null);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete circle');
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [deleting, removeCircle, refreshCircles, fetchCircles]);
 
   return (
     <Container maxWidth="lg" sx={{ py: 3 }}>
@@ -125,7 +206,9 @@ export default function CircleListPage() {
       {/* Circle grid */}
       {!loading && circles.length > 0 && (
         <Grid container spacing={2}>
-          {circles.map((circle) => (
+          {circles.map((circle) => {
+            const canManage = isAdmin || circle.ownerId === user?.id;
+            return (
             <Grid key={circle.id} size={{ xs: 12, sm: 6, md: 4 }}>
               <Card variant="outlined" sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <CardContent sx={{ flex: 1 }}>
@@ -133,6 +216,9 @@ export default function CircleListPage() {
                     <Typography variant="h6" component="div" noWrap sx={{ flex: 1 }}>
                       {circle.name}
                     </Typography>
+                    {circle.id === activeCircleId && (
+                      <Chip label="Active" size="small" color="success" />
+                    )}
                     {circle.isPersonal && (
                       <Chip label="Personal" size="small" color="primary" variant="outlined" />
                     )}
@@ -150,10 +236,30 @@ export default function CircleListPage() {
                   <Button size="small" onClick={() => navigate(`/circles/${circle.id}`)}>
                     View
                   </Button>
+                  {canManage && (
+                    <Button
+                      size="small"
+                      startIcon={<EditIcon />}
+                      onClick={() => handleEditOpen(circle)}
+                    >
+                      Edit
+                    </Button>
+                  )}
+                  {canManage && !circle.isPersonal && (
+                    <Button
+                      size="small"
+                      color="error"
+                      startIcon={<DeleteIcon />}
+                      onClick={() => setDeleting(circle)}
+                    >
+                      Delete
+                    </Button>
+                  )}
                 </CardActions>
               </Card>
             </Grid>
-          ))}
+            );
+          })}
         </Grid>
       )}
 
@@ -198,6 +304,81 @@ export default function CircleListPage() {
             startIcon={creating ? <CircularProgress size={16} /> : undefined}
           >
             {creating ? 'Creating...' : 'Create'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit dialog */}
+      <Dialog open={editing !== null} onClose={handleEditClose} maxWidth="sm" fullWidth>
+        <DialogTitle>Edit Circle</DialogTitle>
+        <DialogContent>
+          {editError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {editError}
+            </Alert>
+          )}
+          <TextField
+            autoFocus
+            label="Circle name"
+            fullWidth
+            required
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            sx={{ mt: 1, mb: 2 }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !saving) void handleEditSave();
+            }}
+          />
+          <TextField
+            label="Description (optional)"
+            fullWidth
+            multiline
+            rows={3}
+            value={editDescription}
+            onChange={(e) => setEditDescription(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleEditClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => void handleEditSave()}
+            disabled={saving || !editName.trim()}
+            startIcon={saving ? <CircularProgress size={16} /> : undefined}
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={deleting !== null} onClose={handleDeleteClose} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete Circle</DialogTitle>
+        <DialogContent>
+          {deleteError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {deleteError}
+            </Alert>
+          )}
+          <Typography variant="body2">
+            Are you sure you want to delete{' '}
+            <strong>{deleting?.name}</strong>? This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleDeleteClose} disabled={deleteBusy}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={() => void handleDeleteConfirm()}
+            disabled={deleteBusy}
+            startIcon={deleteBusy ? <CircularProgress size={16} /> : undefined}
+          >
+            {deleteBusy ? 'Deleting...' : 'Delete'}
           </Button>
         </DialogActions>
       </Dialog>
