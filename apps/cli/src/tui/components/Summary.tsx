@@ -25,6 +25,10 @@ interface SummaryProps {
   stats: RunStats;
   durationMs: number;
   failures: SummaryFailure[];
+  /** Excel run-report auto-export state. */
+  exporting?: boolean;
+  exportPath?: string | null;
+  exportError?: string | null;
   onHome: () => void;
   onRetry: () => void;
 }
@@ -51,6 +55,9 @@ export function Summary({
   stats,
   durationMs,
   failures,
+  exporting,
+  exportPath,
+  exportError,
   onHome,
   onRetry,
 }: SummaryProps): React.ReactElement {
@@ -115,6 +122,13 @@ export function Summary({
           )}
         </Box>
       )}
+
+      {/* Excel run report */}
+      <Box flexDirection="column" paddingLeft={1}>
+        {exporting && <Text dimColor>Creating Excel report…</Text>}
+        {exportPath && <Text color="green">📄 Excel report: {exportPath}</Text>}
+        {exportError && <Text color="yellow">⚠ Excel report failed: {exportError}</Text>}
+      </Box>
 
       {/* Key hints */}
       <Box flexDirection="row" gap={3} paddingLeft={1}>
