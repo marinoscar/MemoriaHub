@@ -1994,6 +1994,232 @@ export class MediaService {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Explore: tiered location browsing
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Run the shared geo groupBy used by both tiered-location endpoints.
+   *
+   * A single Prisma groupBy over the four geo columns gives us per-combination
+   * counts, which we then fold into per-tier maps in application code.  This is
+   * intentionally NOT the full-metadata scan explorePlaces performs — covers
+   * are fetched lazily per surviving group in {@link buildLocationLevel}.
+   */
+  private fetchGeoGroupRows(circleId: string) {
+    return this.prisma.mediaItem.groupBy({
+      by: ['geoCountry', 'geoCountryCode', 'geoAdmin1', 'geoLocality'],
+      where: {
+        circleId,
+        deletedAt: null,
+        // archivedAt: null aligns tiered location browsing with the other
+        // browse surfaces (Home, Albums, People, Map), which all hide archived
+        // items.  This is an intentional divergence from facetsLocations
+        // (search facets), which omits this filter because search includes
+        // archived items by default.
+        archivedAt: null,
+        geoCountry: { not: null },
+      },
+      _count: { _all: true },
+    });
+  }
+
+  /**
+   * Fold the shared groupBy rows into a single tier (countries | regions |
+   * cities), sort by count desc, slice to `cap`, then fetch one cover
+   * thumbnail per surviving group via a bounded, indexed findFirst.
+   *
+   * Cover work is O(surviving groups) single-row lookups — never a scan of
+   * every item's metadata.
+   */
+  private async buildLocationLevel(
+    rows: Awaited<ReturnType<MediaService['fetchGeoGroupRows']>>,
+    circleId: string,
+    level: 'countries' | 'regions' | 'cities',
+    cap: number,
+  ): Promise<
+    Array<{
+      name: string;
+      countryCode: string | null;
+      count: number;
+      coverThumbnailUrl: string | null;
+    }>
+  > {
+    const map = new Map<
+      string,
+      { name: string; countryCode: string | null; count: number }
+    >();
+
+    for (const row of rows) {
+      const count = row._count._all;
+
+      if (level === 'countries') {
+        const country = row.geoCountry;
+        if (!country) continue; // filtered NOT NULL above; guard for types
+        // Key by geoCountryCode (indexed) when present so cover lookups can use
+        // the index; fall back to the display name when the code is missing.
+        const key = row.geoCountryCode ?? country;
+        const existing = map.get(key);
+        if (existing) {
+          existing.count += count;
+        } else {
+          map.set(key, {
+            name: country,
+            countryCode: row.geoCountryCode ?? null,
+            count,
+          });
+        }
+      } else if (level === 'regions') {
+        const region = row.geoAdmin1;
+        if (!region) continue;
+        const existing = map.get(region);
+        if (existing) existing.count += count;
+        else map.set(region, { name: region, countryCode: null, count });
+      } else {
+        const city = row.geoLocality;
+        if (!city) continue;
+        const existing = map.get(city);
+        if (existing) existing.count += count;
+        else map.set(city, { name: city, countryCode: null, count });
+      }
+    }
+
+    const sorted = Array.from(map.values())
+      .sort((a, b) => b.count - a.count)
+      .slice(0, cap);
+
+    // One bounded, indexed cover lookup per surviving group, run in parallel.
+    return Promise.all(
+      sorted.map(async (entry) => {
+        const where: Prisma.MediaItemWhereInput = {
+          circleId,
+          deletedAt: null,
+          archivedAt: null,
+        };
+        if (level === 'countries') {
+          // Prefer the indexed countryCode; fall back to display name.
+          if (entry.countryCode) where.geoCountryCode = entry.countryCode;
+          else where.geoCountry = entry.name;
+        } else if (level === 'regions') {
+          where.geoAdmin1 = entry.name;
+        } else {
+          where.geoLocality = entry.name;
+        }
+
+        const cover = await this.prisma.mediaItem.findFirst({
+          where,
+          orderBy: { capturedAt: 'desc' },
+          select: { metadata: true },
+        });
+
+        return {
+          name: entry.name,
+          countryCode: entry.countryCode,
+          count: entry.count,
+          coverThumbnailUrl: await this.signThumb(cover?.metadata ?? null),
+        };
+      }),
+    );
+  }
+
+  /**
+   * Explore: tiered location browsing.  Returns the top 12 countries, regions,
+   * and cities in the circle (by item count desc), each with a cover
+   * thumbnail.  Countries carry a `countryCode`; regions and cities do not.
+   */
+  async exploreLocations(
+    circleId: string,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{
+    countries: Array<{
+      name: string;
+      countryCode: string | null;
+      count: number;
+      coverThumbnailUrl: string | null;
+    }>;
+    regions: Array<{ name: string; count: number; coverThumbnailUrl: string | null }>;
+    cities: Array<{ name: string; count: number; coverThumbnailUrl: string | null }>;
+  }> {
+    await this.circleMembershipService.assertCircleAccess(
+      userId,
+      circleId,
+      userPermissions,
+      'viewer' as CircleRole,
+    );
+
+    const rows = await this.fetchGeoGroupRows(circleId);
+
+    const [countries, regions, cities] = await Promise.all([
+      this.buildLocationLevel(rows, circleId, 'countries', 12),
+      this.buildLocationLevel(rows, circleId, 'regions', 12),
+      this.buildLocationLevel(rows, circleId, 'cities', 12),
+    ]);
+
+    return {
+      countries,
+      // regions/cities carry no meaningful countryCode; drop it from the shape.
+      regions: regions.map(({ name, count, coverThumbnailUrl }) => ({
+        name,
+        count,
+        coverThumbnailUrl,
+      })),
+      cities: cities.map(({ name, count, coverThumbnailUrl }) => ({
+        name,
+        count,
+        coverThumbnailUrl,
+      })),
+    };
+  }
+
+  /**
+   * Explore: full list for a single location tier, capped at 500 and sorted by
+   * count desc.  `level` must be one of countries | regions | cities.
+   */
+  async exploreLocationLevel(
+    circleId: string,
+    level: string,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<
+    Array<{
+      name: string;
+      countryCode?: string | null;
+      count: number;
+      coverThumbnailUrl: string | null;
+    }>
+  > {
+    const allowed = ['countries', 'regions', 'cities'] as const;
+    if (!(allowed as readonly string[]).includes(level)) {
+      throw new BadRequestException(
+        `Invalid location level '${level}'. Must be one of: ${allowed.join(', ')}`,
+      );
+    }
+
+    await this.circleMembershipService.assertCircleAccess(
+      userId,
+      circleId,
+      userPermissions,
+      'viewer' as CircleRole,
+    );
+
+    const rows = await this.fetchGeoGroupRows(circleId);
+    const items = await this.buildLocationLevel(
+      rows,
+      circleId,
+      level as 'countries' | 'regions' | 'cities',
+      500,
+    );
+
+    // Countries expose countryCode; regions/cities omit it for a cleaner payload.
+    if (level === 'countries') return items;
+    return items.map(({ name, count, coverThumbnailUrl }) => ({
+      name,
+      count,
+      coverThumbnailUrl,
+    }));
+  }
+
   /**
    * Fetch an Album and enforce ownership/any-permission.
    */
