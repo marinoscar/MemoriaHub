@@ -30,6 +30,7 @@ import { FileRepo } from '../repo/files.js';
 import { RunRepo } from '../repo/runs.js';
 import { SettingsRepo } from '../repo/settings.js';
 import type { CliConfig } from '../config.js';
+import { describeRange } from '../sync/date-range.js';
 
 import { StatusLine } from './components/StatusLine.js';
 import { ContextMeter } from './components/ContextMeter.js';
@@ -50,6 +51,10 @@ export interface SyncDashboardProps {
   folderIds?: number[];
   /** When true, engine is invoked with retryFailedOnly=true and trigger='retry'. */
   retryFailedOnly?: boolean;
+  /** Inclusive capture-date lower bound (epoch ms); undefined = unbounded. */
+  fromMs?: number;
+  /** Inclusive capture-date upper bound (epoch ms); undefined = unbounded. */
+  toMs?: number;
   onHome: () => void;
   /**
    * Optional pre-built engine instance for tests.
@@ -95,6 +100,8 @@ export function SyncDashboard({
   all,
   folderIds,
   retryFailedOnly,
+  fromMs,
+  toMs,
   onHome,
   _engineForTesting,
 }: SyncDashboardProps): React.ReactElement {
@@ -322,6 +329,8 @@ export function SyncDashboard({
         folderIds: folderIds ?? [],
         retryFailedOnly: retryFailedOnly ?? false,
         circleId: config.activeCircleId,
+        fromMs,
+        toMs,
       }).catch(() => {
         // Fatal errors emitted via EV.ERROR already
       });
@@ -377,10 +386,12 @@ export function SyncDashboard({
 
   const dashboardTitle = retryFailedOnly ? 'Retry' : 'Sync';
 
+  const hasDateFilter = fromMs != null || toMs != null;
+
   return (
     <Box flexDirection="column" gap={1}>
       {/* Header */}
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" paddingX={1}>
+      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={1}>
         <StatusLine
           serverUrl={serverHost}
           folderCount={folderCount}
@@ -388,6 +399,9 @@ export function SyncDashboard({
           durationMs={durationMs}
           title={dashboardTitle}
         />
+        {hasDateFilter && (
+          <Text dimColor>Filter: {describeRange({ fromMs, toMs })}</Text>
+        )}
       </Box>
 
       {/* Context meter */}

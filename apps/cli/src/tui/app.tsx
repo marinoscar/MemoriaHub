@@ -28,6 +28,7 @@ import { LoginScreen } from './LoginScreen.js';
 import { FolderManager } from './FolderManager.js';
 import { CircleManager } from './CircleManager.js';
 import { PickFolders } from './PickFolders.js';
+import { DateRangeFilter } from './DateRangeFilter.js';
 import { SyncDashboard } from './SyncDashboard.js';
 import { ScanScreen } from './ScanScreen.js';
 import { ReportView } from './ReportView.js';
@@ -54,7 +55,8 @@ type Screen =
   | { kind: 'folders' }
   | { kind: 'circles' }
   | { kind: 'pickFolders'; purpose?: 'sync' | 'scan' }
-  | { kind: 'dashboard'; all?: boolean; folderIds?: number[]; retryFailedOnly?: boolean }
+  | { kind: 'dateRange'; all?: boolean; folderIds?: number[] }
+  | { kind: 'dashboard'; all?: boolean; folderIds?: number[]; retryFailedOnly?: boolean; fromMs?: number; toMs?: number }
   | { kind: 'scan'; all?: boolean; folderIds?: number[] }
   | { kind: 'scanReport' }
   | { kind: 'help' }
@@ -196,7 +198,7 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
         push({ kind: 'screen', screen: { kind: 'factoryReset' } });
         break;
       case 'sync-all':
-        push({ kind: 'screen', screen: { kind: 'dashboard', all: true } });
+        push({ kind: 'screen', screen: { kind: 'dateRange', all: true } });
         break;
       case 'sync-select':
         push({ kind: 'screen', screen: { kind: 'pickFolders' } });
@@ -381,7 +383,7 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
                 screen:
                   purpose === 'scan'
                     ? { kind: 'scan', folderIds }
-                    : { kind: 'dashboard', folderIds },
+                    : { kind: 'dateRange', folderIds },
               },
             ])
           }
@@ -389,6 +391,25 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
         />
       );
     }
+
+    case 'dateRange':
+      return (
+        <DateRangeFilter
+          onApply={(r) =>
+            push({
+              kind: 'screen',
+              screen: {
+                kind: 'dashboard',
+                all: screen.all,
+                folderIds: screen.folderIds,
+                fromMs: r.fromMs,
+                toMs: r.toMs,
+              },
+            })
+          }
+          onBack={pop}
+        />
+      );
 
     case 'scan':
       return (
@@ -421,6 +442,8 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
           all={screen.all}
           folderIds={screen.folderIds}
           retryFailedOnly={screen.retryFailedOnly}
+          fromMs={screen.fromMs}
+          toMs={screen.toMs}
           onHome={resetToRoot}
         />
       );

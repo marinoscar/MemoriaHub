@@ -42,6 +42,16 @@ function truncate(s: string, max: number): string {
   return s.slice(0, max - 1) + '…';
 }
 
+/** Human-friendly labels for known skip reasons; falls back to the raw value. */
+const REASON_LABELS: Record<string, string> = {
+  out_of_range: 'out of date range',
+};
+
+function reasonLabel(reason?: string): string {
+  if (!reason) return 'skipped';
+  return REASON_LABELS[reason] ?? reason;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -72,7 +82,7 @@ export function EventLog({
               <Box key={ev.id} flexDirection="row" gap={1}>
                 <Text color="blue">{GLYPHS.retry}</Text>
                 <Text dimColor>{name}</Text>
-                <Text dimColor>({ev.reason ?? 'skipped'})</Text>
+                <Text dimColor>({reasonLabel(ev.reason)})</Text>
               </Box>
             );
           case 'failed':
