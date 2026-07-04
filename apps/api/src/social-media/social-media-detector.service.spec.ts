@@ -449,4 +449,223 @@ describe('SocialMediaDetectorService', () => {
       });
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // detectCaptionSignal / detectTier1 — caption & hashtag/mention detection
+  //
+  // Download apps name saved files after the post caption (and sometimes stuff
+  // the caption into container text tags), so a hashtag / @mention / platform
+  // token in either place is a high-precision social-media signal that the
+  // generic metadata/filename rules above miss entirely.
+  // ---------------------------------------------------------------------------
+  describe('caption/hashtag signal — detectTier1 positives (real-world captions)', () => {
+    it('detects the real-world example caption filename as TikTok (3 tt tokens outrank 1 ig token)', () => {
+      const filename =
+        'Every man wants this!! #fypシ #reels #dating #emilywking #relationshipadvice @empoweredtok on TT.mp4';
+      const input = baseInput({ filename });
+
+      const { result, recommendTier2 } = detector.detectTier1(input);
+
+      expect(result).toEqual({
+        platform: 'tiktok',
+        method: 'filename',
+        confidence: 0.9,
+        matchedRule: 'caption-tt-token',
+      });
+      expect(recommendTier2).toBe(false);
+
+      // Direct precision check: the caption signal alone (no other rule involved)
+      // produces the exact same result.
+      expect(detector.detectCaptionSignal(input)).toEqual(result);
+    });
+
+    it('detects a lone "#reels" in the filename as Instagram (caption-ig-token)', () => {
+      const { result } = detector.detectTier1(baseInput({ filename: 'myvid #reels.mp4' }));
+
+      expect(result).toEqual({
+        platform: 'instagram',
+        method: 'filename',
+        confidence: 0.9,
+        matchedRule: 'caption-ig-token',
+      });
+    });
+
+    it('detects a lone "#fyp" in the filename as TikTok (caption-tt-token)', () => {
+      const { result } = detector.detectTier1(baseInput({ filename: 'clip #fyp.mp4' }));
+
+      expect(result).toEqual({
+        platform: 'tiktok',
+        method: 'filename',
+        confidence: 0.9,
+        matchedRule: 'caption-tt-token',
+      });
+    });
+
+    it('detects the phrase "on TT" in the filename as TikTok (caption-tt-token)', () => {
+      const { result } = detector.detectTier1(baseInput({ filename: 'party clip on TT.mp4' }));
+
+      expect(result).toEqual({
+        platform: 'tiktok',
+        method: 'filename',
+        confidence: 0.9,
+        matchedRule: 'caption-tt-token',
+      });
+    });
+
+    it('detects an "@...tok" handle in the filename as TikTok (caption-tt-token)', () => {
+      const { result } = detector.detectTier1(baseInput({ filename: '@something_tok.mp4' }));
+
+      expect(result).toEqual({
+        platform: 'tiktok',
+        method: 'filename',
+        confidence: 0.9,
+        matchedRule: 'caption-tt-token',
+      });
+    });
+
+    it('detects a caption stuffed into container metadata (description tag), not the filename, via 2 hashtags (caption-generic)', () => {
+      const input = baseInput({
+        filename: 'video.mp4',
+        formatTags: { description: 'love this #summer #vacation @friend' },
+      });
+
+      const { result, recommendTier2 } = detector.detectTier1(input);
+
+      expect(result).toEqual({
+        platform: 'other',
+        method: 'metadata',
+        confidence: 0.9,
+        matchedRule: 'caption-generic',
+      });
+      expect(recommendTier2).toBe(false);
+    });
+
+    it('detects a generic caption filename with 2 hashtags and no platform token (caption-generic)', () => {
+      const { result } = detector.detectTier1(
+        baseInput({ filename: 'Best day ever #love #family.mp4' }),
+      );
+
+      expect(result).toEqual({
+        platform: 'other',
+        method: 'filename',
+        confidence: 0.9,
+        matchedRule: 'caption-generic',
+      });
+    });
+
+    it('detects a single lone hashtag in the filename (caption-single-hashtag) at confidence 0.85', () => {
+      const { result, recommendTier2 } = detector.detectTier1(
+        baseInput({ filename: 'sunset #golden.mp4' }),
+      );
+
+      expect(result).toEqual({
+        platform: 'other',
+        method: 'filename',
+        confidence: 0.85,
+        matchedRule: 'caption-single-hashtag',
+      });
+      expect(recommendTier2).toBe(false);
+    });
+  });
+
+  describe('caption/hashtag signal — negatives (must not classify)', () => {
+    it.each([
+      ['Take #2.mp4'],
+      ['Photo #1.mp4'],
+      ['Birthday #3.mov'],
+    ])(
+      'treats a purely numeric hashtag as no signal at all: %s (precision regression guard)',
+      filename => {
+        const { result, recommendTier2 } = detector.detectTier1(baseInput({ filename }));
+
+        expect(result).toBeNull();
+        expect(recommendTier2).toBe(false);
+        // Direct precision check: the numeric hashtag never produces a caption
+        // candidate in the first place (not just suppressed downstream).
+        expect(detector.detectCaptionSignal(baseInput({ filename }))).toBeNull();
+      },
+    );
+
+    it.each([['PXL_20260704_120000.mp4'], ['MVI_0031.MOV'], ['C0001.MP4']])(
+      'does not flag a plain camera-named file with no hashtag/mention: %s',
+      filename => {
+        const { result, recommendTier2 } = detector.detectTier1(baseInput({ filename }));
+
+        expect(result).toBeNull();
+        expect(recommendTier2).toBe(false);
+      },
+    );
+
+    it('does not flag camera-descriptive text stuffed in title/comment tags (no hashtag/mention present)', () => {
+      const input = baseInput({
+        filename: 'clip.mp4',
+        formatTags: { title: 'iPhone', comment: 'GoPro' },
+      });
+
+      const { result, recommendTier2 } = detector.detectTier1(input);
+
+      expect(result).toBeNull();
+      expect(recommendTier2).toBe(false);
+    });
+
+    it('does not classify a plain multi-word filename with no hashtag or mention (multi-word phrase alone is not enough)', () => {
+      const { result, recommendTier2 } = detector.detectTier1(
+        baseInput({ filename: 'Family vacation 2026.mp4' }),
+      );
+
+      expect(result).toBeNull();
+      expect(recommendTier2).toBe(false);
+    });
+  });
+
+  describe('caption/hashtag signal — tier-2 routing for a lone @mention (heur-caption-mention)', () => {
+    it('routes a lone @mention filename (no hashtag, no platform token) to tier-2 OCR without classifying it', () => {
+      const { result, recommendTier2 } = detector.detectTier1(baseInput({ filename: '@home.mp4' }));
+
+      expect(result).toBeNull();
+      expect(recommendTier2).toBe(true);
+    });
+
+    it('routes a lone @mention found only in container metadata (no hashtag) to tier-2 OCR without classifying it', () => {
+      const input = baseInput({
+        filename: 'clip.mp4',
+        formatTags: { comment: 'follow @someone' },
+      });
+
+      const { result, recommendTier2 } = detector.detectTier1(input);
+
+      expect(result).toBeNull();
+      expect(recommendTier2).toBe(true);
+    });
+  });
+
+  describe('detectFromOcr — platform-token candidates (caption tokens on-screen)', () => {
+    it('detects Instagram from a bare "#reels" OCR token (ocr-instagram-token)', () => {
+      const result = detector.detectFromOcr(['#reels'], baseInput());
+
+      expect(result).toEqual({
+        platform: 'instagram',
+        method: 'ocr',
+        confidence: 0.9,
+        matchedRule: 'ocr-instagram-token',
+      });
+    });
+
+    it('detects TikTok from a bare "@creator_tok" OCR handle (ocr-tiktok-token)', () => {
+      const result = detector.detectFromOcr(['@creator_tok'], baseInput());
+
+      expect(result).toEqual({
+        platform: 'tiktok',
+        method: 'ocr',
+        confidence: 0.9,
+        matchedRule: 'ocr-tiktok-token',
+      });
+    });
+
+    it('still returns null for a plain "@grandma" OCR mention with no platform token/word (no regression)', () => {
+      const result = detector.detectFromOcr(['@grandma'], baseInput());
+
+      expect(result).toBeNull();
+    });
+  });
 });
