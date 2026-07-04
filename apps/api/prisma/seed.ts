@@ -91,6 +91,9 @@ const PERMISSIONS = [
   // Sharing (Admin + Contributor; manage_any = Admin only)
   { name: 'shares:manage', description: 'Create, list, update, and revoke own shares' },
   { name: 'shares:manage_any', description: 'Admin: manage any user\'s shares' },
+
+  // OneDrive Data Import (personal action — granted to all system roles)
+  { name: 'onedrive:connect', description: 'Connect a personal Microsoft OneDrive account and import media' },
 ] as const;
 
 // Role to permissions mapping
@@ -141,6 +144,8 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     // Sharing: admin can manage any share
     'shares:manage',
     'shares:manage_any',
+    // OneDrive Import: personal action available to all roles
+    'onedrive:connect',
   ],
   contributor: [
     'user_settings:read',
@@ -157,6 +162,8 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'search:use',
     // Sharing: contributors can manage their own shares
     'shares:manage',
+    // OneDrive Import: personal action available to all roles
+    'onedrive:connect',
   ],
   viewer: [
     'user_settings:read',
@@ -170,6 +177,8 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'circles:write',
     // Search: viewers can use AI search
     'search:use',
+    // OneDrive Import: personal action available to all roles
+    'onedrive:connect',
   ],
 };
 

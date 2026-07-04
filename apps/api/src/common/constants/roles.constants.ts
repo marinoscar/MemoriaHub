@@ -82,6 +82,9 @@ export const PERMISSIONS = {
   // Sharing (Admin + Contributor; manage_any = Admin only)
   SHARES_MANAGE: 'shares:manage',
   SHARES_MANAGE_ANY: 'shares:manage_any',
+
+  // OneDrive Data Import (personal action — granted to all system roles)
+  ONEDRIVE_CONNECT: 'onedrive:connect',
 } as const;
 
 export type PermissionName = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

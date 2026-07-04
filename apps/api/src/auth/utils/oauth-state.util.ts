@@ -77,3 +77,69 @@ export function decodeOAuthState(
     return { returnTo: null };
   }
 }
+
+// =============================================================================
+// Connect-flow OAuth state (data-access grant, not login)
+// =============================================================================
+//
+// The OneDrive "connect" flow starts from an authenticated in-app request (we
+// know the caller's userId), redirects the browser to Microsoft, and receives a
+// public callback that carries NO app JWT. The signed state is therefore how the
+// callback recovers *which MemoriaHub user* initiated the connect — it must be
+// tamper-proof so a forged callback cannot bind a Microsoft account to an
+// arbitrary user. Same HMAC-SHA256 + nonce construction as encodeOAuthState,
+// with the userId added to the signed payload.
+
+/**
+ * Encodes a signed OAuth `state` for the connect flow, carrying the initiating
+ * MemoriaHub `userId` and an optional sanitized same-site `returnTo` path.
+ *
+ * Format: `base64url(JSON.stringify({ userId, returnTo, nonce })) + '.' + HMAC_SHA256(payload, secret)`
+ */
+export function encodeConnectState(
+  params: { userId: string; returnTo?: string | null },
+  secret: string,
+): string {
+  const nonce = randomBytes(16).toString('hex');
+  const returnTo = sanitizeReturnTo(params.returnTo ?? null);
+  const payload = Buffer.from(
+    JSON.stringify({ userId: params.userId, returnTo, nonce }),
+  ).toString('base64url');
+  const signature = createHmac('sha256', secret).update(payload).digest('base64url');
+  return `${payload}.${signature}`;
+}
+
+/**
+ * Decodes and verifies a signed connect-flow `state` produced by
+ * `encodeConnectState`. Returns `{ userId: null, returnTo: null }` when the
+ * signature is invalid, the state is absent/malformed, or the payload lacks a
+ * usable `userId`.
+ */
+export function decodeConnectState(
+  state: unknown,
+  secret: string,
+): { userId: string | null; returnTo: string | null } {
+  const invalid = { userId: null, returnTo: null };
+  if (typeof state !== 'string' || !state) return invalid;
+
+  const dotIndex = state.lastIndexOf('.');
+  if (dotIndex === -1) return invalid;
+
+  const payload = state.substring(0, dotIndex);
+  const signature = state.substring(dotIndex + 1);
+
+  const expectedSignature = createHmac('sha256', secret).update(payload).digest('base64url');
+  if (signature !== expectedSignature) return invalid;
+
+  try {
+    const json = JSON.parse(Buffer.from(payload, 'base64url').toString()) as unknown;
+    if (typeof json !== 'object' || json === null) return invalid;
+    const record = json as Record<string, unknown>;
+    const userId = typeof record['userId'] === 'string' && record['userId'] ? record['userId'] : null;
+    if (!userId) return invalid;
+    const returnTo = sanitizeReturnTo(record['returnTo']);
+    return { userId, returnTo };
+  } catch {
+    return invalid;
+  }
+}

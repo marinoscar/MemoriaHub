@@ -44,6 +44,14 @@ export default () => {
     callbackUrl: process.env.GOOGLE_CALLBACK_URL,
   },
 
+  // OAuth - Microsoft (OneDrive Data Import)
+  microsoft: {
+    clientId: process.env.MICROSOFT_CLIENT_ID,
+    clientSecret: process.env.MICROSOFT_CLIENT_SECRET,
+    tenant: process.env.MICROSOFT_TENANT || 'common',
+    redirectUri: process.env.MICROSOFT_OAUTH_REDIRECT_URI,
+  },
+
   // Admin bootstrap
   initialAdminEmail: process.env.INITIAL_ADMIN_EMAIL,
 
