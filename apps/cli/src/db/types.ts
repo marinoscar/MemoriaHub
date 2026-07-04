@@ -97,6 +97,13 @@ export type ScanStatus = 'running' | 'complete' | 'error';
 /** Photo vs. video classification derived from the file's MIME type. */
 export type MediaKind = 'photo' | 'video';
 
+/**
+ * Provenance of a resolved capture date: real EXIF ('exif'), inferred from the
+ * oldest of the file's created/modified/accessed stamps ('file'), or
+ * unavailable ('none').
+ */
+export type CaptureDateSource = 'exif' | 'file' | 'none';
+
 export interface Scan {
   id: number;
   created_at: string;       // ISO 8601
@@ -130,5 +137,6 @@ export interface ScanFile {
   camera_model: string | null;
   taken_lat: number | null;
   taken_lng: number | null;
+  captured_at_source: CaptureDateSource | null;
   meta_error: string | null;
 }

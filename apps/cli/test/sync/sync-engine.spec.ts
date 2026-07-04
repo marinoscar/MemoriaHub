@@ -886,6 +886,33 @@ describe('SyncEngine', () => {
       });
     });
 
+    it('includes capturedAt and originalCreatedAt in the POST /api/media body (resolveCapturedAt fallback)', async () => {
+      // The test fixture is a fake JPEG header with no real EXIF, so
+      // resolveCapturedAt() falls back to the filesystem-timestamp path
+      // (source='file') — capturedAt and originalCreatedAt are still non-null,
+      // since they come from statSync rather than EXIF.
+      writeTmpJpeg(tmpDir, 'captured-at.jpg');
+
+      const postFn = mockResolving({ id: 'media-captured-at' });
+      const ctx = makeEngine(
+        db,
+        {
+          get: mockResolving({ items: [] }),
+          post: postFn,
+        },
+        makeUploadFn('obj-captured-at'),
+      );
+
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
+      await ctx.engine.run({ trigger: 'cli', folderIds: [folder.id] });
+
+      expect(postFn).toHaveBeenCalledTimes(1);
+      const callArgs = postFn.mock.calls[0] as [string, Record<string, unknown>];
+      expect(callArgs[0]).toBe('/api/media');
+      expect(typeof callArgs[1].capturedAt).toBe('string');
+      expect(typeof callArgs[1].originalCreatedAt).toBe('string');
+    });
+
     it('sets status=skipped (reason=dedup) when register returns deduplicated:true', async () => {
       writeTmpJpeg(tmpDir, 'server-dedup.jpg');
 

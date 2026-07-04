@@ -26,6 +26,11 @@ import {
   ALTER_FILES_ADD_UPLOAD_ID,
   ALTER_FILES_ADD_UPLOAD_PART_SIZE,
   CREATE_FILE_UPLOAD_PARTS,
+  CREATE_SCANS,
+  CREATE_SCANS_IDX_CREATED,
+  CREATE_SCAN_FILES,
+  CREATE_SCAN_FILES_IDX_SCAN,
+  CREATE_SCAN_FILES_IDX_SCAN_KIND,
 } from '../../src/db/schema.js';
 import type BetterSqlite3 from 'better-sqlite3';
 
@@ -47,10 +52,10 @@ function openRaw(): BetterSqlite3.Database {
 // We do NOT override HOME here — we just use ':memory:' which bypasses the file path.
 
 describe('migrations — fresh :memory: database', () => {
-  it('reaches the latest user_version (7)', () => {
+  it('reaches the latest user_version (8)', () => {
     const db = openDb(':memory:');
     const version = db.pragma('user_version', { simple: true }) as number;
-    expect(version).toBe(7);
+    expect(version).toBe(8);
     db.close();
   });
 
@@ -145,7 +150,7 @@ describe('migrations — fresh :memory: database', () => {
     runMigrations(db);
 
     const version = db.pragma('user_version', { simple: true }) as number;
-    expect(version).toBe(7);
+    expect(version).toBe(8);
 
     const count = (
       db.prepare('SELECT COUNT(*) as cnt FROM settings').get() as { cnt: number }
@@ -171,14 +176,14 @@ describe('migrations — fresh :memory: database', () => {
 
   it('migration 2 is idempotent — re-running on an already-migrated db is a no-op', () => {
     const db = openRaw();
-    // openRaw() already runs all migrations including v2, v3, v4, v5, v6, and v7
+    // openRaw() already runs all migrations including v2, v3, v4, v5, v6, v7, and v8
     const versionBefore = db.pragma('user_version', { simple: true }) as number;
-    expect(versionBefore).toBe(7);
+    expect(versionBefore).toBe(8);
 
     // Re-running must not throw and must not change version
     runMigrations(db);
     const versionAfter = db.pragma('user_version', { simple: true }) as number;
-    expect(versionAfter).toBe(7);
+    expect(versionAfter).toBe(8);
 
     db.close();
   });
@@ -219,25 +224,25 @@ describe('migrations — fresh :memory: database', () => {
     const colsBefore = db.prepare("PRAGMA table_info('folders')").all() as Array<{ name: string }>;
     expect(colsBefore.some((c) => c.name === 'circle_id')).toBe(false);
 
-    // Now run runMigrations — should apply v3, v4, v5, v6, and v7
+    // Now run runMigrations — should apply v3, v4, v5, v6, v7, and v8
     runMigrations(db);
 
     const version = db.pragma('user_version', { simple: true }) as number;
-    expect(version).toBe(7);
+    expect(version).toBe(8);
 
     const colsAfter = db.prepare("PRAGMA table_info('folders')").all() as Array<{ name: string }>;
     expect(colsAfter.some((c) => c.name === 'circle_id')).toBe(true);
     db.close();
   });
 
-  it('migration 3 is idempotent — re-running on a v7 db is a no-op', () => {
+  it('migration 3 is idempotent — re-running on a v8 db is a no-op', () => {
     const db = openRaw();
     const versionBefore = db.pragma('user_version', { simple: true }) as number;
-    expect(versionBefore).toBe(7);
+    expect(versionBefore).toBe(8);
 
     runMigrations(db);
     const versionAfter = db.pragma('user_version', { simple: true }) as number;
-    expect(versionAfter).toBe(7);
+    expect(versionAfter).toBe(8);
 
     db.close();
   });
@@ -281,7 +286,7 @@ describe('migrations — fresh :memory: database', () => {
 
     runMigrations(db);
 
-    expect(db.pragma('user_version', { simple: true }) as number).toBe(7);
+    expect(db.pragma('user_version', { simple: true }) as number).toBe(8);
     for (const { key } of SEED_SETTINGS_V4) {
       const after = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
       expect(after).toBeDefined();
@@ -308,10 +313,11 @@ describe('migrations — fresh :memory: database', () => {
     db.close();
   });
 
-  it('migrations 5, 6, and 7 bump user_version to 7 from a v4 database', () => {
+  it('migrations 5, 6, 7, and 8 bump user_version to 8 from a v4 database', () => {
     // Build a v4 database and verify that running migrations advances all the
-    // way to 7 (v5 durable multipart resume, v6 skip_reason, and v7 scan
-    // snapshot tables all apply in the same runMigrations() call).
+    // way to 8 (v5 durable multipart resume, v6 skip_reason, v7 scan snapshot
+    // tables, and v8 captured_at_source all apply in the same runMigrations()
+    // call).
     const db = new RawDatabase(':memory:') as BetterSqlite3.Database;
     db.pragma('foreign_keys = ON');
     db.exec(CREATE_FOLDERS);
@@ -341,7 +347,7 @@ describe('migrations — fresh :memory: database', () => {
 
     runMigrations(db);
 
-    expect(db.pragma('user_version', { simple: true }) as number).toBe(7);
+    expect(db.pragma('user_version', { simple: true }) as number).toBe(8);
     db.close();
   });
 
@@ -470,6 +476,21 @@ describe('migrations — fresh :memory: database', () => {
       db.close();
     });
 
+    it('fresh database: scan_files has a nullable captured_at_source column (v8)', () => {
+      const db = openDb(':memory:');
+
+      const cols = db
+        .prepare("PRAGMA table_info('scan_files')")
+        .all() as Array<{ name: string; type: string; notnull: number }>;
+
+      const col = cols.find((c) => c.name === 'captured_at_source');
+      expect(col).toBeDefined();
+      expect(col!.type).toBe('TEXT');
+      expect(col!.notnull).toBe(0);
+
+      db.close();
+    });
+
     it('creates idx_scans_created_at, idx_scan_files_scan, and idx_scan_files_scan_kind', () => {
       const db = openDb(':memory:');
       const indexes = (
@@ -520,7 +541,7 @@ describe('migrations — fresh :memory: database', () => {
 
       runMigrations(db);
 
-      expect(db.pragma('user_version', { simple: true }) as number).toBe(7);
+      expect(db.pragma('user_version', { simple: true }) as number).toBe(8);
       const scansAfter = db
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='scans'")
         .get();
@@ -533,16 +554,60 @@ describe('migrations — fresh :memory: database', () => {
       db.close();
     });
 
-    it('is idempotent — re-running on an already-v7 database does not throw, change version, or duplicate tables/indexes', () => {
-      const db = openRaw(); // already at v7
+    it('upgrades a hand-built v7 database to v8, adding captured_at_source to scan_files', () => {
+      // Build a full v1-v7 database (mirrors the "upgrades a hand-built v5
+      // database to v6" test above, plus the v7 scan tables) then bump to v7
+      // explicitly, without applying migration 8.
+      const db = new RawDatabase(':memory:') as BetterSqlite3.Database;
+      db.pragma('foreign_keys = ON');
+      db.exec(CREATE_FOLDERS);
+      db.exec(CREATE_FOLDERS_IDX_ENABLED);
+      db.exec(CREATE_FILES);
+      db.exec(CREATE_FILES_IDX_FOLDER_STATUS);
+      db.exec(CREATE_FILES_IDX_STATUS);
+      db.exec(CREATE_FILES_IDX_SHA256);
+      db.exec(CREATE_SYNC_RUNS);
+      db.exec(CREATE_SYNC_RUNS_IDX_STARTED);
+      db.exec(CREATE_SETTINGS);
+      const insert = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+      for (const { key, value } of SEED_SETTINGS) { insert.run(key, value); }
+      db.exec(ALTER_FILES_ADD_MTIME_MS);
+      db.exec(ALTER_FOLDERS_ADD_CIRCLE_ID);
+      for (const { key, value } of SEED_SETTINGS_V4) { insert.run(key, value); }
+      db.exec(ALTER_FILES_ADD_UPLOAD_ID);
+      db.exec(ALTER_FILES_ADD_UPLOAD_PART_SIZE);
+      db.exec(CREATE_FILE_UPLOAD_PARTS);
+      db.exec(CREATE_SCANS);
+      db.exec(CREATE_SCANS_IDX_CREATED);
+      db.exec(CREATE_SCAN_FILES);
+      db.exec(CREATE_SCAN_FILES_IDX_SCAN);
+      db.exec(CREATE_SCAN_FILES_IDX_SCAN_KIND);
+      db.exec('PRAGMA user_version = 7');
+
+      // Pre-condition: no captured_at_source column yet.
+      const colsBefore = db.prepare("PRAGMA table_info('scan_files')").all() as Array<{ name: string }>;
+      expect(colsBefore.some((c) => c.name === 'captured_at_source')).toBe(false);
+
+      runMigrations(db);
+
+      const version = db.pragma('user_version', { simple: true }) as number;
+      expect(version).toBe(8);
+
+      const colsAfter = db.prepare("PRAGMA table_info('scan_files')").all() as Array<{ name: string }>;
+      expect(colsAfter.some((c) => c.name === 'captured_at_source')).toBe(true);
+      db.close();
+    });
+
+    it('is idempotent — re-running on an already-v8 database does not throw, change version, or duplicate tables/indexes', () => {
+      const db = openRaw(); // already at v8
 
       const versionBefore = db.pragma('user_version', { simple: true }) as number;
-      expect(versionBefore).toBe(7);
+      expect(versionBefore).toBe(8);
 
       expect(() => runMigrations(db)).not.toThrow();
 
       const versionAfter = db.pragma('user_version', { simple: true }) as number;
-      expect(versionAfter).toBe(7);
+      expect(versionAfter).toBe(8);
 
       // Tables still exist exactly once each.
       const scanTables = db

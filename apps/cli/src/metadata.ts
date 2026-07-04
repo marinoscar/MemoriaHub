@@ -16,7 +16,9 @@
  * enumerateFiles().
  */
 
-import type { MediaKind } from './db/types.js';
+import * as fs from 'node:fs';
+
+import type { MediaKind, CaptureDateSource } from './db/types.js';
 
 // exifr ships ES-module and CJS builds; use dynamic import so both resolve.
 type ExifrModule = {
@@ -154,4 +156,84 @@ export async function readMediaMetadata(
     const message = err instanceof Error ? err.message : String(err);
     return emptyMetadata('photo', message);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Capture-date inference from filesystem timestamps
+// ---------------------------------------------------------------------------
+
+export interface ResolvedCaptureDate {
+  /** Best capture timestamp (ISO 8601): EXIF when present, else oldest file stamp. */
+  capturedAt: string | null;
+  /** Where `capturedAt` came from. */
+  source: CaptureDateSource;
+  /** The file's creation time (birthtime, ISO 8601) for provenance, or null. */
+  originalCreatedAt: string | null;
+}
+
+/**
+ * Read a file's filesystem timestamps and return both the OLDEST of
+ * created (birthtime) / modified (mtime) / accessed (atime), and the birthtime
+ * on its own.
+ *
+ * Picking the oldest is deliberate: copying or moving files bumps some stamps to
+ * "now", so the oldest surviving stamp is the best guess at the true original
+ * date.  Values that are non-finite, `<= 0` (some filesystems report an unknown
+ * birthtime as the epoch), or absurdly in the future (clock skew) are ignored.
+ *
+ * Never throws — a missing/unreadable file yields `{ oldestIso: null, birthtimeIso: null }`.
+ */
+export function oldestFileTimestamp(
+  filePath: string,
+): { oldestIso: string | null; birthtimeIso: string | null } {
+  try {
+    const st = fs.statSync(filePath);
+    const maxValid = Date.now() + 24 * 60 * 60 * 1000; // now + 24h skew guard
+    const valid = (ms: number): boolean =>
+      typeof ms === 'number' && isFinite(ms) && ms > 0 && ms <= maxValid;
+
+    const candidates = [st.birthtimeMs, st.mtimeMs, st.atimeMs].filter(valid);
+    const oldestIso = candidates.length
+      ? new Date(Math.min(...candidates)).toISOString()
+      : null;
+    const birthtimeIso = valid(st.birthtimeMs)
+      ? new Date(st.birthtimeMs).toISOString()
+      : null;
+    return { oldestIso, birthtimeIso };
+  } catch {
+    return { oldestIso: null, birthtimeIso: null };
+  }
+}
+
+/**
+ * Resolve the best capture date for a media file: the EXIF date taken when
+ * present, otherwise the oldest of the file's created/modified/accessed stamps.
+ *
+ * @param filePath        Absolute path to the file.
+ * @param mimeType        MIME type resolved from the extension.
+ * @param exifCapturedAt  Optional pre-parsed EXIF capture date (ISO 8601 | null).
+ *                        Pass it from a prior `readMediaMetadata` call (e.g. the
+ *                        scan path) to avoid a second exifr parse; omit it and
+ *                        this function reads EXIF itself.
+ */
+export async function resolveCapturedAt(
+  filePath: string,
+  mimeType: string,
+  exifCapturedAt?: string | null,
+): Promise<ResolvedCaptureDate> {
+  let exif = exifCapturedAt;
+  if (exif === undefined) {
+    exif = (await readMediaMetadata(filePath, mimeType)).capturedAt;
+  }
+
+  const { oldestIso, birthtimeIso } = oldestFileTimestamp(filePath);
+
+  if (exif) {
+    return { capturedAt: exif, source: 'exif', originalCreatedAt: birthtimeIso };
+  }
+  return {
+    capturedAt: oldestIso,
+    source: oldestIso ? 'file' : 'none',
+    originalCreatedAt: birthtimeIso,
+  };
 }

@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { readMediaMetadata } from '../src/metadata.js';
+import { readMediaMetadata, oldestFileTimestamp, resolveCapturedAt } from '../src/metadata.js';
 
 // ESM test file — no __dirname available; resolve relative to the process cwd,
 // which Jest sets to the package root (apps/cli) per jest.config.js rootDir.
@@ -100,5 +100,101 @@ describe('readMediaMetadata', () => {
       expect(meta.hasGps).toBe(false);
       expect(meta.error).not.toBeNull();
     });
+  });
+});
+
+/**
+ * oldestFileTimestamp() — reads the OLDEST of birthtime/mtime/atime from disk.
+ * Mirrors the temp-file setup pattern used in test/hash.spec.ts.
+ */
+describe('oldestFileTimestamp', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mh-metadata-oldest-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns the older of a known-old mtime and a recent atime as oldestIso', () => {
+    const filePath = path.join(tmpDir, 'old-mtime.bin');
+    fs.writeFileSync(filePath, Buffer.from('hello'));
+
+    // mtime deliberately far in the past; atime deliberately recent.
+    const oldMtime = new Date('2020-01-01T00:00:00.000Z');
+    const recentAtime = new Date();
+    fs.utimesSync(filePath, recentAtime, oldMtime);
+
+    const { oldestIso, birthtimeIso } = oldestFileTimestamp(filePath);
+
+    expect(oldestIso).not.toBeNull();
+    // The oldest surviving stamp must be the mtime we set (older than atime).
+    expect(new Date(oldestIso!).getTime()).toBeLessThanOrEqual(oldMtime.getTime() + 1000);
+    // birthtimeIso is a type/relationship check only — exact value is fs-dependent.
+    expect(birthtimeIso === null || typeof birthtimeIso === 'string').toBe(true);
+  });
+
+  it('returns {oldestIso:null, birthtimeIso:null} for a missing path', () => {
+    const missingPath = path.join(tmpDir, 'does-not-exist.bin');
+
+    const result = oldestFileTimestamp(missingPath);
+
+    expect(result).toEqual({ oldestIso: null, birthtimeIso: null });
+  });
+});
+
+/**
+ * resolveCapturedAt() — EXIF-first capture-date resolution with a filesystem
+ * fallback. Mirrors the temp-file setup pattern used in test/hash.spec.ts.
+ */
+describe('resolveCapturedAt', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mh-metadata-resolve-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('uses the supplied EXIF date when the 3rd arg is a real ISO string (source=exif)', async () => {
+    const filePath = path.join(tmpDir, 'has-exif.jpg');
+    fs.writeFileSync(filePath, Buffer.from('irrelevant bytes'));
+
+    const exifIso = '2019-06-15T12:00:00.000Z';
+    const result = await resolveCapturedAt(filePath, 'image/jpeg', exifIso);
+
+    expect(result.source).toBe('exif');
+    expect(result.capturedAt).toBe(exifIso);
+  });
+
+  it('falls back to the oldest file timestamp when the 3rd arg is null (source=file)', async () => {
+    const filePath = path.join(tmpDir, 'no-exif.jpg');
+    fs.writeFileSync(filePath, Buffer.from('irrelevant bytes'));
+
+    const oldMtime = new Date('2018-03-10T00:00:00.000Z');
+    fs.utimesSync(filePath, new Date(), oldMtime);
+
+    const result = await resolveCapturedAt(filePath, 'image/jpeg', null);
+
+    expect(result.source).toBe('file');
+    expect(result.capturedAt).not.toBeNull();
+    const { oldestIso } = oldestFileTimestamp(filePath);
+    expect(result.capturedAt).toBe(oldestIso);
+  });
+
+  it('always populates originalCreatedAt (birthtime) when the file exists', async () => {
+    const filePath = path.join(tmpDir, 'birthtime-check.jpg');
+    fs.writeFileSync(filePath, Buffer.from('irrelevant bytes'));
+
+    const result = await resolveCapturedAt(filePath, 'image/jpeg', '2021-01-01T00:00:00.000Z');
+    const { birthtimeIso } = oldestFileTimestamp(filePath);
+
+    // Type/relationship check only — exact value is fs-dependent.
+    expect(result.originalCreatedAt).toBe(birthtimeIso);
+    expect(result.originalCreatedAt === null || typeof result.originalCreatedAt === 'string').toBe(true);
   });
 });

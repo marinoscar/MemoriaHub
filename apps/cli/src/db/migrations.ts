@@ -31,6 +31,7 @@ import {
   CREATE_SCAN_FILES,
   CREATE_SCAN_FILES_IDX_SCAN,
   CREATE_SCAN_FILES_IDX_SCAN_KIND,
+  ALTER_SCAN_FILES_ADD_CAPTURED_AT_SOURCE,
 } from './schema.js';
 
 interface Migration {
@@ -131,6 +132,16 @@ const MIGRATIONS: Migration[] = [
       db.exec(CREATE_SCAN_FILES);
       db.exec(CREATE_SCAN_FILES_IDX_SCAN);
       db.exec(CREATE_SCAN_FILES_IDX_SCAN_KIND);
+    },
+  },
+  {
+    version: 8,
+    up(db: BetterSqlite3.Database): void {
+      // Add captured_at_source to scan_files: records whether captured_at came
+      // from EXIF, was inferred from filesystem timestamps, or is unavailable,
+      // so the scan preview never presents a guessed date as a real EXIF date.
+      // Nullable — existing scan rows get NULL (unknown provenance).
+      db.exec(ALTER_SCAN_FILES_ADD_CAPTURED_AT_SOURCE);
     },
   },
 ];

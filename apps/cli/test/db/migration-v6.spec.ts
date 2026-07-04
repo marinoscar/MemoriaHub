@@ -22,10 +22,11 @@ describe('migration 6 — skip_reason column', () => {
   });
 
   it('reaches the latest user_version on a fresh database (skip_reason added at v6)', () => {
-    // A fresh DB runs the full migration chain; the latest version is 7 (the v7
-    // scan snapshot tables land after this v6 skip_reason migration).
+    // A fresh DB runs the full migration chain; the latest version is 8 (the v7
+    // scan snapshot tables and the v8 captured_at_source column both land after
+    // this v6 skip_reason migration).
     const version = db.pragma('user_version', { simple: true }) as number;
-    expect(version).toBe(7);
+    expect(version).toBe(8);
   });
 
   it('adds a nullable skip_reason column to the files table', () => {

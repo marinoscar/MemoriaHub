@@ -445,6 +445,14 @@ Three checks prevent redundant uploads:
 
 Files that pass both checks are uploaded via the server's resumable multipart upload API (init → upload parts → complete). After a successful upload the file is registered as a `MediaItem` on the server and its status is set to `uploaded` in the local DB.
 
+### Capture-date inference
+
+When a file has no EXIF date taken (`DateTimeOriginal` / `CreateDate` / `ModifyDate`), the CLI infers one from the file's filesystem timestamps rather than leaving `capturedAt` unset. The **oldest** of the file's created (birthtime), modified (mtime), and accessed (atime) timestamps is used — copying or moving a file tends to bump some of these to "now", so the oldest surviving stamp is the best available guess at the original capture time. Invalid or unusable timestamps (epoch 0, or values in the future due to clock skew) are ignored; if no usable stamp exists at all, `capturedAt` is left unset.
+
+A genuine EXIF date always takes priority — inference only fills the gap when EXIF has none, and never overrides a real EXIF date even if the server later re-extracts metadata (metadata sync is present-only).
+
+This happens automatically during `memoriahub sync` uploads, with no new flags to opt in. Alongside `capturedAt`, the CLI also sends `originalCreatedAt` (the file's creation time) as a provenance field. The offline `scan` preview (see [Scan](#scan-dry-run-preview) below) surfaces the same inferred date, and its Excel/CSV export adds a **Date source** column to the Detail sheet — `EXIF`, `File timestamp`, or blank — so guessed dates are clearly distinguished from real EXIF dates.
+
 ### Per-file status lifecycle
 
 Each file row in the `files` table moves through these statuses:
@@ -542,6 +550,8 @@ memoriahub scan export 12 --out scan-report.csv
 ```
 
 The export format is inferred from the `--out` file extension (`--format xlsx|csv` overrides this).
+
+The Detail sheet includes a **Date source** column (`EXIF`, `File timestamp`, or blank) showing whether each file's date came from real EXIF metadata or was inferred from filesystem timestamps — see [Capture-date inference](#capture-date-inference).
 
 ### `memoriahub sync --scan`
 

@@ -16,7 +16,7 @@ import * as fs from 'node:fs';
 import { ScanTypedEmitter, SCAN_EV } from './events.js';
 import { runPool } from '../sync/worker-pool.js';
 import { enumerateFiles } from '../files.js';
-import { readMediaMetadata } from '../metadata.js';
+import { readMediaMetadata, resolveCapturedAt } from '../metadata.js';
 import type { ScanRepo } from '../repo/scans.js';
 import type { FolderRepo } from '../repo/folders.js';
 import type { SettingsRepo } from '../repo/settings.js';
@@ -164,6 +164,13 @@ export class ScanEngine extends ScanTypedEmitter {
 
       const meta = await this.deps.metadataFn(filePath, mimeType);
 
+      // Resolve the capture date the same way sync will: EXIF when present,
+      // otherwise the oldest of the file's created/modified/accessed stamps.
+      // Pass meta.capturedAt so we don't parse EXIF a second time. Storing the
+      // source keeps the preview honest — guessed dates are labelled, not
+      // presented as real EXIF.
+      const cap = await resolveCapturedAt(filePath, mimeType, meta.capturedAt);
+
       scans.insertScanFile(scanId, {
         folderId,
         filePath,
@@ -173,13 +180,14 @@ export class ScanEngine extends ScanTypedEmitter {
         mediaKind: meta.mediaKind,
         hasExif: meta.hasExif,
         hasGps: meta.hasGps,
-        capturedAt: meta.capturedAt,
+        capturedAt: cap.capturedAt,
         width: meta.width,
         height: meta.height,
         cameraMake: meta.cameraMake,
         cameraModel: meta.cameraModel,
         takenLat: meta.takenLat,
         takenLng: meta.takenLng,
+        capturedAtSource: cap.source,
         metaError: meta.error,
       });
 
