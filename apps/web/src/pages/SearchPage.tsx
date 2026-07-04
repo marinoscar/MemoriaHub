@@ -24,17 +24,20 @@ import {
 import {
   Person as PersonIcon,
   Place as PlaceIcon,
+  Public as PublicIcon,
   LocalOffer as TagIcon,
 } from '@mui/icons-material';
 import { useCircle } from '../hooks/useCircle';
 import { usePeople } from '../hooks/usePeople';
-import { getExplorePlaces, getExploreTags } from '../services/media';
-import type { ExploreItem } from '../services/media';
+import { getExploreLocations, getExploreTags } from '../services/media';
+import type { ExploreItem, ExploreLocations } from '../services/media';
 import type { PersonListItem } from '../services/face';
 import { MediaGallery } from '../components/media/MediaGallery';
 import { PersonAvatar } from '../components/people/PersonAvatar';
 import { useSearch } from '../contexts/SearchContext';
 import { ExploreCarousel } from '../components/search/ExploreCarousel';
+import { renderLocationTile } from './Places/LocationTile';
+import type { ExploreLocationItem } from '../services/media';
 
 // ---------------------------------------------------------------------------
 // Tile renderers (presentational helpers)
@@ -78,79 +81,6 @@ function renderPersonTile(
         }}
       >
         {person.name}
-      </Typography>
-    </Box>
-  );
-}
-
-function renderPlaceTile(
-  place: ExploreItem,
-  navigate: ReturnType<typeof useNavigate>,
-) {
-  return (
-    <Box
-      onClick={() => navigate(`/media?locality=${encodeURIComponent(place.name)}`)}
-      sx={{
-        flexShrink: 0,
-        width: 96,
-        cursor: 'pointer',
-        borderRadius: 2,
-        overflow: 'hidden',
-        '&:hover': { opacity: 0.85 },
-      }}
-      role="button"
-      aria-label={`Browse photos from ${place.name}`}
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ')
-          navigate(`/media?locality=${encodeURIComponent(place.name)}`);
-      }}
-    >
-      <Box
-        sx={{
-          width: 96,
-          height: 96,
-          bgcolor: 'action.hover',
-          borderRadius: 2,
-          overflow: 'hidden',
-        }}
-      >
-        {place.coverThumbnailUrl ? (
-          <Box
-            component="img"
-            src={place.coverThumbnailUrl}
-            alt={place.name}
-            sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-          />
-        ) : (
-          <Box
-            sx={{
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <PlaceIcon sx={{ color: 'text.disabled', fontSize: 32 }} />
-          </Box>
-        )}
-      </Box>
-      <Typography
-        variant="caption"
-        sx={{
-          display: 'block',
-          mt: 0.5,
-          px: 0.5,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {place.name}
-      </Typography>
-      <Typography variant="caption" color="text.secondary" sx={{ px: 0.5 }}>
-        {place.count}
       </Typography>
     </Box>
   );
@@ -240,20 +170,24 @@ export default function SearchPage() {
   const { results, isSearching, error, clearSearch } = useSearch();
 
   // Explore data (shown when no results)
-  const [places, setPlaces] = useState<ExploreItem[]>([]);
+  const [locations, setLocations] = useState<ExploreLocations>({
+    countries: [],
+    regions: [],
+    cities: [],
+  });
   const [tags, setTags] = useState<ExploreItem[]>([]);
-  const [placesLoading, setPlacesLoading] = useState(false);
+  const [locationsLoading, setLocationsLoading] = useState(false);
   const [tagsLoading, setTagsLoading] = useState(false);
 
   useEffect(() => {
     if (!activeCircle) return;
     const id = activeCircle.id;
 
-    setPlacesLoading(true);
-    getExplorePlaces(id)
-      .then((data) => setPlaces(data))
-      .catch(() => setPlaces([]))
-      .finally(() => setPlacesLoading(false));
+    setLocationsLoading(true);
+    getExploreLocations(id)
+      .then((data) => setLocations(data))
+      .catch(() => setLocations({ countries: [], regions: [], cities: [] }))
+      .finally(() => setLocationsLoading(false));
 
     setTagsLoading(true);
     getExploreTags(id)
@@ -354,18 +288,42 @@ export default function SearchPage() {
         />
       )}
 
-      {/* Places */}
-      <ExploreCarousel<ExploreItem>
-        title="Places"
-        icon={<PlaceIcon sx={{ color: 'text.secondary' }} />}
-        loading={placesLoading}
-        items={places}
+      {/* Countries */}
+      <ExploreCarousel<ExploreLocationItem>
+        title="Countries"
+        icon={<PublicIcon sx={{ color: 'text.secondary' }} />}
+        loading={locationsLoading}
+        items={locations.countries}
         itemWidth={96}
         gap={12}
-        keyOf={(pl) => pl.name}
-        renderItem={(pl) => renderPlaceTile(pl, navigate)}
-        viewAllLabel="View all in map"
-        onViewAll={() => navigate('/map')}
+        keyOf={(c) => c.name}
+        renderItem={(c) => renderLocationTile(c, navigate, 'country')}
+        viewAllLabel="See all places"
+        onViewAll={() => navigate('/places')}
+      />
+
+      {/* Regions */}
+      <ExploreCarousel<ExploreLocationItem>
+        title="Regions"
+        icon={<PlaceIcon sx={{ color: 'text.secondary' }} />}
+        loading={locationsLoading}
+        items={locations.regions}
+        itemWidth={96}
+        gap={12}
+        keyOf={(r) => r.name}
+        renderItem={(r) => renderLocationTile(r, navigate, 'region')}
+      />
+
+      {/* Cities */}
+      <ExploreCarousel<ExploreLocationItem>
+        title="Cities"
+        icon={<PlaceIcon sx={{ color: 'text.secondary' }} />}
+        loading={locationsLoading}
+        items={locations.cities}
+        itemWidth={96}
+        gap={12}
+        keyOf={(c) => c.name}
+        renderItem={(c) => renderLocationTile(c, navigate, 'locality')}
       />
 
       {/* Tags */}

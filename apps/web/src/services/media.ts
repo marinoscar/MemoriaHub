@@ -410,6 +410,38 @@ export async function getExploreTags(circleId: string): Promise<ExploreItem[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Explore — tiered locations (Countries / Regions / Cities)
+// ---------------------------------------------------------------------------
+
+export interface ExploreLocationItem {
+  name: string;
+  countryCode?: string | null;
+  count: number;
+  coverThumbnailUrl: string | null;
+}
+
+export interface ExploreLocations {
+  countries: ExploreLocationItem[];
+  regions: ExploreLocationItem[];
+  cities: ExploreLocationItem[];
+}
+
+export async function getExploreLocations(circleId: string): Promise<ExploreLocations> {
+  return api.get<ExploreLocations>(
+    `/media/explore/locations?circleId=${encodeURIComponent(circleId)}`,
+  );
+}
+
+export async function getExploreLocationLevel(
+  circleId: string,
+  level: 'countries' | 'regions' | 'cities',
+): Promise<ExploreLocationItem[]> {
+  return api.get<ExploreLocationItem[]>(
+    `/media/explore/locations/${level}?circleId=${encodeURIComponent(circleId)}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Location facets (for SearchPanel cascading pick-lists)
 // ---------------------------------------------------------------------------
 
