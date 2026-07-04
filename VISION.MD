@@ -401,6 +401,10 @@ The user should be able to review these files and decide whether to delete, arch
 
 This capability is important because many media libraries become noisy over time. MemoriaHub should help users focus on what matters most.
 
+**Shipped: social-media video detection.** The first slice of this vision to ship targets the "downloaded TikTok videos" and "reposted social media videos" bullets above. A two-tier, fully on-server classifier (`features.socialMediaDetection`, off by default) inspects every uploaded video: Tier 1 reads container metadata (TikTok/Instagram/Facebook export markers, downloader-app filename signatures) and Tier 2 falls back to local OCR of the first/last frames when Tier 1 is inconclusive but suspicious (portrait, short, no device-capture tags, or a WhatsApp/Telegram re-share filename). A confident match applies a "Social Media" tag plus a platform tag (TikTok/Instagram/Facebook) and skips face detection and every other enrichment step that would otherwise run on the video — no compute is wasted analyzing content that was never personally captured.
+
+Consistent with the "review and decide" principle above, detection is deliberately **non-destructive**: nothing is archived or deleted automatically. The user finds flagged videos by searching or browsing with the `Social Media` tag (`?tag=Social+Media`) and then archives or deletes them manually through the existing bulk-action toolbar — the same review-then-act workflow already used for burst photos and near-duplicates. See [docs/specs/social-media-detection.md](docs/specs/social-media-detection.md) for the full design.
+
 ## Memory Prioritization
 
 MemoriaHub should be focused on preserving family memories, not simply storing every media file a user has ever downloaded.

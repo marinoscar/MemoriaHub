@@ -2,8 +2,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.2 |
-| **Last Updated** | June 2026 |
+| **Version** | 1.4 |
+| **Last Updated** | July 2026 |
 
 ---
 
@@ -741,6 +741,16 @@ The following handlers are registered in the current production codebase. Each i
 | `storage_insights` | `InsightsModule` | global (`mediaItemId: null`) | hourly cron (`InsightsRefreshTask`) | Interval-gated; manual via `POST /api/admin/insights/refresh`; see [storage-insights.md](storage-insights.md) |
 | `trash_purge` | `MediaModule` | global (`mediaItemId: null`) | hourly cron (`TrashPurgeTask`) | Hard-deletes trashed `media_items` past `storage.trash.retentionDays` cutoff; see [archive-trash.md](archive-trash.md) |
 | `job_history_purge` | `EnrichmentModule` | global (`mediaItemId: null`) | nightly cron (`JobHistoryPurgeTask`, midnight) | Batch-deletes terminal `enrichment_jobs` rows (`succeeded`/`failed`) with `finishedAt` older than `jobs.history.retentionDays`; 5 000-row batches; pending/running rows never deleted; gated by `jobs.history.purgeEnabled`; see [job-insights.md](job-insights.md) |
+| `social_media_detection` | `SocialMediaModule` | per media item (video only) | upload event (videos, when enabled) + rerun + backfill | Gate for `video_face_detection` — see "Gate-then-fan-out pattern" below; two-tier (ffprobe metadata/filename + on-server OCR) classifier for TikTok/Instagram/Facebook re-shares; see [social-media-detection.md](social-media-detection.md) |
+
+### Gate-then-fan-out pattern (video enrichment)
+
+`social_media_detection` is a variant on the standard per-item handler shape: it is not just another independent enrichment type running alongside the others, it is a **gate** in front of `video_face_detection`. When `features.socialMediaDetection` is on, a video upload enqueues `social_media_detection` INSTEAD OF `video_face_detection` directly. The handler classifies the video (metadata/filename rules, falling back to OCR when inconclusive) and then either:
+
+- **Detected** — applies tags and stops; `video_face_detection` is never enqueued for that item, saving the face-detection compute entirely.
+- **Clean** — enqueues the withheld `video_face_detection` job itself, via `MediaEnrichmentService.enqueueVideoPostDetectionEnrichment(item, reason)`, mapping priority from the original triggering reason (`rerun` → 0, `upload` → 20, `backfill` → 100) so the fanned-out job inherits the same urgency class.
+
+When the feature is off (or killed via `SOCIAL_MEDIA_DETECTION_ENABLED=false`), the upload path enqueues `video_face_detection` directly — behavior is unchanged from before this feature existed. This "withhold, classify, then conditionally fan out the next job" shape is unique to this handler among the table above; every other handler here runs independently once enqueued. See [social-media-detection.md §2](social-media-detection.md#2-gate-then-fan-out-processing-flow) for the full flow diagram and the defensive gates (`VideoFaceDetectionHandler`, `FaceBackfillService`) that also protect against a flagged video re-entering face-detection compute.
 
 ### Global handler pattern
 
@@ -776,3 +786,4 @@ Each of these would: implement `EnrichmentHandler`, self-register via `onModuleI
 | 1.1 | June 2026 | AI Assistant | Rate-limit & scheduled backoff: new `scheduledFor`, `rateLimitedAt`, `rateLimitHits` columns; two-path retry model; `RateLimitError` detection; new env knobs; updated claim query; admin stats `scheduled` field; job list `scheduled=true` filter and new item fields |
 | 1.2 | June 2026 | AI Assistant | Upload enrichment trigger model (Section 10): synchronous enqueue in `createMedia` via `MediaEnrichmentService`; single backstop `MediaEnrichmentEnqueueListener`; gating table with feature flags and env kill-switches; feature-flag caching; metadata sync separation; client-never-enqueues principle |
 | 1.3 | June 2026 | AI Assistant | Registered handlers reference (Section 15): add `job_history_purge` global handler — nightly cron purge of terminal job rows past retention cutoff |
+| 1.4 | July 2026 | AI Assistant | Registered handlers reference (Section 15): add `social_media_detection` handler and the new "Gate-then-fan-out pattern" subsection describing how it withholds and conditionally re-enqueues `video_face_detection` |
