@@ -22,6 +22,7 @@ import { FaceSettingsService } from '../face/face-settings.service';
 import { GeoSettingsService } from '../geo/geo-settings.service';
 import { StorageSettingsService } from '../storage-settings/storage-settings.service';
 import { EnrichmentAdminService } from '../enrichment/enrichment-admin.service';
+import { SocialMediaOcrService } from '../social-media/social-media-ocr.service';
 import {
   createMockPrismaService,
   MockPrismaService,
@@ -156,6 +157,7 @@ describe('DoctorService', () => {
   let mockGeoSettings: jest.Mocked<Pick<GeoSettingsService, 'testProvider'>>;
   let mockStorageSettings: jest.Mocked<Pick<StorageSettingsService, 'testConnection'>>;
   let mockEnrichmentAdmin: jest.Mocked<Pick<EnrichmentAdminService, 'getStats'>>;
+  let mockSocialMediaOcr: jest.Mocked<Pick<SocialMediaOcrService, 'getStatus'>>;
   const ORIGINAL_ENV = { ...process.env };
 
   beforeEach(async () => {
@@ -166,6 +168,7 @@ describe('DoctorService', () => {
     mockGeoSettings = { testProvider: jest.fn() };
     mockStorageSettings = { testConnection: jest.fn() };
     mockEnrichmentAdmin = { getStats: jest.fn() };
+    mockSocialMediaOcr = { getStatus: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -177,6 +180,7 @@ describe('DoctorService', () => {
         { provide: GeoSettingsService, useValue: mockGeoSettings },
         { provide: StorageSettingsService, useValue: mockStorageSettings },
         { provide: EnrichmentAdminService, useValue: mockEnrichmentAdmin },
+        { provide: SocialMediaOcrService, useValue: mockSocialMediaOcr },
       ],
     }).compile();
 
@@ -256,7 +260,7 @@ describe('DoctorService', () => {
       }
     });
 
-    it('includes all 20 documented checks across the 7 sections', async () => {
+    it('includes all 21 documented checks across the 7 sections', async () => {
       const report = await service.runDiagnostics();
 
       const allKeys = report.sections.flatMap((s) => s.checks.map((c) => c.key));
@@ -275,6 +279,7 @@ describe('DoctorService', () => {
         'ai.tagging',
         'ai.embedding',
         'ai.flagConsistency',
+        'ai.socialMedia',
         'face.detection',
         'face.flagConsistency',
         'geo.reverseProvider',
@@ -324,7 +329,7 @@ describe('DoctorService', () => {
       // Unrelated checks are unaffected.
       expect(findCheck(report, 'core.database').status).toBe('ok');
       expect(findCheck(report, 'ai.search').status).toBe('ok');
-      expect(report.summary.total).toBe(20);
+      expect(report.summary.total).toBe(21);
     });
   });
 
@@ -364,7 +369,7 @@ describe('DoctorService', () => {
         // The rest of the report still completed normally.
         expect(findCheck(report, 'core.database').status).toBe('ok');
         expect(findCheck(report, 'ai.search').status).toBe('ok');
-        expect(report.summary.total).toBe(20);
+        expect(report.summary.total).toBe(21);
       } finally {
         jest.useRealTimers();
       }
@@ -562,6 +567,84 @@ describe('DoctorService', () => {
 
       const report = await service.runDiagnostics();
       expect(findCheck(report, 'face.flagConsistency').status).toBe('skipped');
+    });
+  });
+
+  describe('ai.socialMedia', () => {
+    beforeEach(() => {
+      process.env = healthyEnv();
+      mockQueryRawByText(mockPrisma, healthyQueryRawHandlers());
+      (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
+        provider: 's3',
+        enabled: true,
+      });
+      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
+      mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
+      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
+      mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
+      mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
+    });
+
+    it('is status:skipped when social media detection is disabled', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(makeSettings());
+
+      const report = await service.runDiagnostics();
+      expect(findCheck(report, 'ai.socialMedia').status).toBe('skipped');
+      expect(mockSocialMediaOcr.getStatus).not.toHaveBeenCalled();
+    });
+
+    it('is status:ok (two-tier operational) when the feature is on, OCR enabled, and the model is available', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeSettings({
+          features: { autoTagging: false, faceRecognition: false, burstDetection: false, socialMediaDetection: true } as any,
+          socialMedia: {
+            ocrEnabled: true,
+            ocrLanguages: ['eng'],
+            ocrMaxFrames: 4,
+            ocrTimeoutSeconds: 60,
+            minConfidence: 0.8,
+          },
+        }),
+      );
+      mockSocialMediaOcr.getStatus.mockResolvedValue({
+        ocrAvailable: true,
+        degraded: false,
+        modelPath: '/models/tesseract',
+        languages: ['eng'],
+      });
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'ai.socialMedia');
+      expect(check.status).toBe('ok');
+      expect(check.message).toContain('Two-tier');
+    });
+
+    it('is status:warning (degraded) when OCR is enabled but the model is unavailable', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeSettings({
+          features: { autoTagging: false, faceRecognition: false, burstDetection: false, socialMediaDetection: true } as any,
+          socialMedia: {
+            ocrEnabled: true,
+            ocrLanguages: ['eng'],
+            ocrMaxFrames: 4,
+            ocrTimeoutSeconds: 60,
+            minConfidence: 0.8,
+          },
+        }),
+      );
+      mockSocialMediaOcr.getStatus.mockResolvedValue({
+        ocrAvailable: false,
+        degraded: true,
+        modelPath: '/models/tesseract',
+        languages: ['eng'],
+      });
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'ai.socialMedia');
+      expect(check.status).toBe('warning');
+      expect(check.message).toContain('degraded');
     });
   });
 

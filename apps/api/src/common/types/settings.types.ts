@@ -31,6 +31,7 @@ export interface SystemSettingsValue {
    *   - burstDetection: burst photo (similar pictures) detection
    *   - duplicateDetection: near-duplicate photo (visual/hash similarity) detection
    *   - locationInference: interpolate/extrapolate missing GPS coords from timeline anchors
+   *   - socialMediaDetection: social-media video detection (OCR-based)
    */
   features: {
     [key: string]: boolean;
@@ -91,6 +92,13 @@ export interface SystemSettingsValue {
     maxAnchorDistanceKm: number;
     maxImpliedSpeedKmh: number;
   };
+  socialMedia?: {
+    ocrEnabled: boolean;
+    ocrLanguages: string[];
+    ocrMaxFrames: number;
+    ocrTimeoutSeconds: number;
+    minConfidence: number;
+  };
   geo?: {
     reverseProvider: 'offline' | 'nominatim' | 'google';
     forwardSearchEnabled: boolean;
@@ -112,6 +120,7 @@ export const FEATURE_KEYS = {
   BURST_DETECTION: 'burstDetection',
   DUPLICATE_DETECTION: 'duplicateDetection',
   LOCATION_INFERENCE: 'locationInference',
+  SOCIAL_MEDIA_DETECTION: 'socialMediaDetection',
 } as const;
 
 /**
@@ -140,6 +149,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     [FEATURE_KEYS.BURST_DETECTION]: false,
     [FEATURE_KEYS.DUPLICATE_DETECTION]: false,
     [FEATURE_KEYS.LOCATION_INFERENCE]: false,
+    [FEATURE_KEYS.SOCIAL_MEDIA_DETECTION]: false,
   },
   ai: {
     features: {
@@ -180,6 +190,13 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     requireSameDevice: true,
     maxAnchorDistanceKm: 2,
     maxImpliedSpeedKmh: 150,
+  },
+  socialMedia: {
+    ocrEnabled: true,
+    ocrLanguages: ['eng'],
+    ocrMaxFrames: 4,
+    ocrTimeoutSeconds: 60,
+    minConfidence: 0.8,
   },
   geo: {
     reverseProvider: process.env['GEO_PROVIDER'] === 'nominatim' ? 'nominatim' : 'offline',

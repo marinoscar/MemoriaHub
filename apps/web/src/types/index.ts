@@ -77,6 +77,13 @@ export interface SystemSettings {
       maxFramesPerVideo?: number;
     };
   };
+  socialMedia?: {
+    ocrEnabled?: boolean;
+    ocrLanguages?: string[];
+    ocrMaxFrames?: number;
+    ocrTimeoutSeconds?: number;
+    minConfidence?: number;
+  };
   updatedAt: string;
   updatedBy: { id: string; email: string } | null;
   version: number;

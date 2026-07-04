@@ -121,6 +121,15 @@ export const patchSystemSettingsSchema = z.object({
       maxImpliedSpeedKmh: z.number().min(10).max(1000).optional(),
     })
     .optional(),
+  socialMedia: z
+    .object({
+      ocrEnabled: z.boolean().optional(),
+      ocrLanguages: z.array(z.string().min(1)).min(1).max(5).optional(),
+      ocrMaxFrames: z.number().int().min(2).max(6).optional(),
+      ocrTimeoutSeconds: z.number().int().min(10).max(300).optional(),
+      minConfidence: z.number().min(0.5).max(1.0).optional(),
+    })
+    .optional(),
   geo: z
     .object({
       reverseProvider: z.enum(['offline', 'nominatim', 'google']).optional(),

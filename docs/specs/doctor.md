@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
+| **Version** | 1.1 |
 | **Last Updated** | July 2026 |
 | **Status** | Implemented |
 
@@ -24,7 +24,7 @@
 
 ## 1. Overview and Goals
 
-Doctor is an admin-only, on-demand configuration health sweep. A single button click (or `POST` call) runs roughly twenty checks across core infrastructure, authentication, storage, AI, face recognition, geo, and the job queue, and returns a structured `DoctorReport`. It exists to give admins one place to verify that the application is correctly configured — instead of manually cross-checking environment variables, system settings, and provider credentials across half a dozen separate admin pages.
+Doctor is an admin-only, on-demand configuration health sweep. A single button click (or `POST` call) runs twenty-one checks across core infrastructure, authentication, storage, AI, face recognition, geo, and the job queue, and returns a structured `DoctorReport`. It exists to give admins one place to verify that the application is correctly configured — instead of manually cross-checking environment variables, system settings, and provider credentials across half a dozen separate admin pages.
 
 A common failure mode Doctor is designed to catch: a feature flag is turned on (e.g. `features.autoTagging`) but the corresponding provider was never configured, so uploads silently enqueue jobs that will fail forever. Doctor's flag-consistency checks surface this class of misconfiguration directly, with an actionable next step.
 
@@ -82,7 +82,7 @@ Example response (`POST /api/admin/doctor/run`):
 {
   "computedAt": "2026-07-03T12:00:00.000Z",
   "durationMs": 842,
-  "summary": { "ok": 16, "warning": 2, "error": 1, "skipped": 1, "total": 20 },
+  "summary": { "ok": 17, "warning": 2, "error": 1, "skipped": 1, "total": 21 },
   "sections": [
     {
       "key": "ai",
@@ -124,7 +124,7 @@ Example response (`POST /api/admin/doctor/run`):
 
 ## 4. Check Catalog
 
-Twenty checks across seven sections, defined in `DoctorService.runDiagnostics()` (`apps/api/src/doctor/doctor.service.ts`). Section status is the worst of its listed checks.
+Twenty-one checks across seven sections, defined in `DoctorService.runDiagnostics()` (`apps/api/src/doctor/doctor.service.ts`). Section status is the worst of its listed checks.
 
 ### Core (`core`)
 
@@ -159,6 +159,7 @@ Twenty checks across seven sections, defined in `DoctorService.runDiagnostics()`
 | `ai.tagging` | Auto-tagging provider | Same live test against `ai.features.tagging`; `skipped` if not configured | `error` — same action item as above |
 | `ai.embedding` | Text embedding provider | Live test via `AiSettingsService.testEmbedding()` against `ai.features.embedding`; `skipped` if not configured; downgrades to `warning` if the provider returns a dimension `warning` | `error` — same action item as above |
 | `ai.flagConsistency` | Auto-tagging flag consistency | Cross-checks `features.autoTagging` against whether a tagging provider is configured | `error` if flag on / no provider — "Configure a tagging provider or disable the Auto-Tagging feature flag."; `warning` if provider configured / flag off — "Enable Auto-Tagging in Admin Settings → Tagging if desired." |
+| `ai.socialMedia` | Social media detection | `skipped` if `features.socialMediaDetection` is off; `warning` if the env kill-switch `SOCIAL_MEDIA_DETECTION_ENABLED=false` overrides an enabled flag, or if any `socialMedia.*` tunable is out of its documented range; otherwise probes `SocialMediaOcrService.getStatus()` — `ok` "Two-tier detection operational" when the OCR worker is healthy (or `ok` "Tier-1 (metadata/filename) only" when `socialMedia.ocrEnabled` is off), `warning` "Running Tier-1 only — OCR model unavailable (degraded)" when the OCR worker failed to initialize | `warning` — "Remove or set SOCIAL_MEDIA_DETECTION_ENABLED=true" / "Correct the social media detection parameters in Admin Settings." / "Ensure MODELS_DIR/tesseract is writable and traineddata can be fetched or pre-placed" |
 
 ### Face Recognition (`face`)
 
@@ -322,3 +323,4 @@ Because `settings` is fetched once and reused across all checks, if an admin cha
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | July 2026 | AI Assistant | Initial specification |
+| 1.1 | July 2026 | AI Assistant | Add `ai.socialMedia` check (AI & Enrichment section) covering the social-media video detection feature flag, env override, `socialMedia.*` range validation, and OCR degraded-mode probing; check catalog is now twenty-one checks |

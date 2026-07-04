@@ -30,6 +30,7 @@ MemoriaHub is a personal media-ownership platform that gives families full contr
 - **Resumable Uploads**: Multipart upload with pre-signed URLs and event-driven post-upload processing pipeline
 - **Personal Access Tokens**: Long-lived tokens for CLI tools, scripts, and automation workflows
 - **Metadata-First**: All media metadata stored in typed columns and queryable; exportable in JSON and CSV
+- **Social-Media Video Detection**: Two-tier (container-metadata/filename + on-server OCR) classifier flags TikTok/Instagram/Facebook re-shares with a "Social Media" + platform tag, skips face detection on them, and leaves archive/delete to the user via tag search
 
 ### Foundation
 - **Authentication**: Google OAuth 2.0 with JWT access tokens and refresh token rotation

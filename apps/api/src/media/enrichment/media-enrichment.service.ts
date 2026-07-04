@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { MediaType, JobReason, MediaTagStatusType, MediaFaceStatusType } from '@prisma/client';
+import { MediaType, JobReason, MediaTagStatusType, MediaFaceStatusType, MediaSocialStatusType } from '@prisma/client';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 
@@ -67,7 +67,7 @@ export class MediaEnrichmentService {
       const burstOn = settings.features?.['burstDetection'] === true;
       const dedupOn = settings.features?.['duplicateDetection'] === true;
       const locationInferenceOn = settings.features?.['locationInference'] === true;
-      const videoFaceOn = settings.face?.video?.enabled !== false;
+      const socialOn = settings.features?.['socialMediaDetection'] === true;
 
       // Pre-compute env kill-switches once (exact expressions from old listeners).
       const autoTagKilled = process.env['AUTO_TAG_ENABLED'] === 'false';
@@ -76,6 +76,7 @@ export class MediaEnrichmentService {
       const burstKilled = process.env['BURST_DETECTION_ENABLED'] === 'false';
       const dedupKilled = process.env['DUPLICATE_DETECTION_ENABLED'] === 'false';
       const locationInferenceKilled = process.env['LOCATION_INFERENCE_ENABLED'] === 'false';
+      const socialKilled = process.env['SOCIAL_MEDIA_DETECTION_ENABLED'] === 'false';
 
       const enqueued: string[] = [];
       const skipped: string[] = [];
@@ -112,7 +113,7 @@ export class MediaEnrichmentService {
       }
 
       // ------------------------------------------------------------------
-      // Face detection — photo path (priority 10) vs video path (priority 20)
+      // Face detection — photo path (priority 10)
       // ------------------------------------------------------------------
       if (item.type === MediaType.photo && faceOn && !faceKilled) {
         const job = await this.enrichmentJobService.enqueue({
@@ -136,38 +137,50 @@ export class MediaEnrichmentService {
         });
 
         enqueued.push(`face_detection(job=${job.id})`);
-      } else if (item.type === MediaType.video && faceOn && !faceKilled && videoFaceOn) {
-        // Video face detection uses a higher priority number (20) so cheap photo
-        // face jobs drain first and a long video cannot head-of-line-block them.
-        const job = await this.enrichmentJobService.enqueue({
-          type: 'video_face_detection',
-          mediaItemId: item.id,
-          circleId: item.circleId,
-          reason: JobReason.upload,
-          priority: 20,
-        });
-
-        await this.prisma.mediaFaceStatus.upsert({
-          where: { mediaItemId: item.id },
-          create: {
-            mediaItemId: item.id,
-            status: MediaFaceStatusType.pending,
-            faceCount: 0,
-          },
-          update: {
-            status: MediaFaceStatusType.pending,
-          },
-        });
-
-        enqueued.push(`video_face_detection(job=${job.id})`);
-      } else if (item.type === MediaType.photo || item.type === MediaType.video) {
-        // Only log skip for face-eligible types
-        const reason = !faceOn
-          ? 'feature disabled'
-          : !videoFaceOn && item.type === MediaType.video
-            ? 'face.video.enabled=false'
-            : 'FACE_AUTO_DETECT=false';
+      } else if (item.type === MediaType.photo) {
+        const reason = !faceOn ? 'feature disabled' : 'FACE_AUTO_DETECT=false';
         skipped.push(`face_detection(${reason})`);
+      }
+
+      // ------------------------------------------------------------------
+      // Video routing — social-media detection first, else video face detection
+      // ------------------------------------------------------------------
+      // When social-media detection is enabled we run it FIRST and withhold
+      // video_face_detection until classification clears the item: the social
+      // handler fans out the post-detection enrichment on its clean path (and
+      // skips it entirely for detected social re-uploads). When social detection
+      // is off, video_face_detection is enqueued directly — unchanged behavior.
+      if (item.type === MediaType.video) {
+        if (socialOn && !socialKilled) {
+          const job = await this.enrichmentJobService.enqueue({
+            type: 'social_media_detection',
+            mediaItemId: item.id,
+            circleId: item.circleId,
+            reason: JobReason.upload,
+            priority: 10,
+          });
+
+          await this.prisma.mediaSocialStatus.upsert({
+            where: { mediaItemId: item.id },
+            create: {
+              mediaItemId: item.id,
+              status: MediaSocialStatusType.pending,
+            },
+            update: {
+              status: MediaSocialStatusType.pending,
+            },
+          });
+
+          enqueued.push(`social_media_detection(job=${job.id})`);
+        } else {
+          // Social detection off — preserve prior behavior: enqueue video face
+          // detection directly (priority 20 for upload). Pass the already-read
+          // settings so the video path still performs a single getSettings call.
+          await this.enqueueVideoPostDetectionEnrichment(item, JobReason.upload, settings);
+          skipped.push(
+            `social_media_detection(${socialKilled ? 'SOCIAL_MEDIA_DETECTION_ENABLED=false' : 'feature disabled'})`,
+          );
+        }
       }
 
       // ------------------------------------------------------------------
@@ -233,6 +246,83 @@ export class MediaEnrichmentService {
         `MediaEnrichmentService.enqueueUploadEnrichment failed for MediaItem ${item.id}: ${message}`,
       );
       // Never rethrow — enrichment failure must not fail the parent createMedia call.
+    }
+  }
+
+  /**
+   * Enqueue the post-classification video enrichment (video_face_detection) that
+   * is withheld while social-media detection is pending.
+   *
+   * Called:
+   *   - directly from the upload path when social-media detection is OFF (so
+   *     behavior is unchanged), and
+   *   - from SocialMediaDetectionHandler on the CLEAN path once a video has been
+   *     confirmed not to be a social re-upload.
+   *
+   * Guarded by the same faceRecognition / face.video.enabled / FACE_AUTO_DETECT
+   * checks as the upload router. Priority is mapped from the job reason:
+   * rerun → 0, upload → 20, backfill → 100.
+   */
+  async enqueueVideoPostDetectionEnrichment(
+    item: EnrichmentMediaItem,
+    reason: JobReason,
+    resolvedSettings?: Awaited<ReturnType<SystemSettingsService['getSettings']>>,
+  ): Promise<void> {
+    try {
+      if (item.deletedAt) return;
+      if (item.type !== MediaType.video) return;
+
+      // Reuse the caller's already-resolved settings when provided (upload path)
+      // to avoid a redundant read; the social handler calls without them.
+      const settings = resolvedSettings ?? (await this.systemSettings.getSettings());
+      const faceOn = settings.features?.['faceRecognition'] === true;
+      const videoFaceOn = settings.face?.video?.enabled !== false;
+      const faceKilled = (process.env['FACE_AUTO_DETECT'] ?? 'true') === 'false';
+
+      if (!faceOn || faceKilled || !videoFaceOn) {
+        const why = !faceOn
+          ? 'feature disabled'
+          : faceKilled
+            ? 'FACE_AUTO_DETECT=false'
+            : 'face.video.enabled=false';
+        this.logger.debug(
+          `MediaItem ${item.id} (video) post-detection enrichment skipped: ${why}`,
+        );
+        return;
+      }
+
+      const priority =
+        reason === JobReason.rerun ? 0 : reason === JobReason.backfill ? 100 : 20;
+
+      const job = await this.enrichmentJobService.enqueue({
+        type: 'video_face_detection',
+        mediaItemId: item.id,
+        circleId: item.circleId,
+        reason,
+        priority,
+      });
+
+      await this.prisma.mediaFaceStatus.upsert({
+        where: { mediaItemId: item.id },
+        create: {
+          mediaItemId: item.id,
+          status: MediaFaceStatusType.pending,
+          faceCount: 0,
+        },
+        update: {
+          status: MediaFaceStatusType.pending,
+        },
+      });
+
+      this.logger.log(
+        `MediaItem ${item.id} (video) post-detection enrichment: enqueued video_face_detection(job=${job.id}, reason=${reason}, priority=${priority})`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `MediaEnrichmentService.enqueueVideoPostDetectionEnrichment failed for MediaItem ${item.id}: ${message}`,
+      );
+      // Never rethrow — enrichment enqueue failure must not fail the caller.
     }
   }
 

@@ -4007,6 +4007,108 @@ Get visual-embedding (CLIP) model availability. Useful for confirming the model 
 
 ---
 
+## Media — Social Media Detection (media:read / media:write + per-circle roles)
+
+Social-media video detection is a global feature toggle (`features.socialMediaDetection`, default off) — see [docs/specs/social-media-detection.md](specs/social-media-detection.md) for the full two-tier algorithm design. It classifies uploaded videos as clean or re-shared from TikTok/Instagram/Facebook using ffprobe container-metadata/filename rules (Tier 1) with an on-server OCR fallback (Tier 2) when Tier 1 is inconclusive but suspicious. Detected videos are tagged "Social Media" plus a platform tag and skip all further video enrichment (face detection); nothing is deleted or archived automatically — the user finds flagged videos via tag search and acts on them manually. Video-only.
+
+### GET /media/:id/social-media/status
+
+**Permissions:** `media:read`
+
+Get the per-item detection status.
+
+**Response:** 200 OK
+```json
+{
+  "data": {
+    "status": "processed",
+    "isSocialMedia": true,
+    "platform": "tiktok",
+    "detectionMethod": "metadata",
+    "confidence": 0.98,
+    "matchedRule": "tt-comment-vid",
+    "processedAt": "2026-07-04T12:00:00.000Z",
+    "lastError": null
+  }
+}
+```
+
+Returns a synthetic `{ status: "not_processed", isSocialMedia: false, platform: null, detectionMethod: null, confidence: null, matchedRule: null, processedAt: null, lastError: null }` when no status row exists yet.
+
+**Error Cases:**
+- 404 — Item not found or soft-deleted
+
+---
+
+### POST /media/:id/social-media/rerun
+
+**Permissions:** `media:write` + per-circle `collaborator` role
+
+Re-enqueue social-media detection for a single media item at priority 0 (highest).
+
+**Response:** 201 Created
+```json
+{ "data": { "jobId": "uuid", "status": "pending" } }
+```
+
+**Error Cases:**
+- 400 — `features.socialMediaDetection` is `false`
+- 404 — Item not found or soft-deleted
+
+---
+
+### POST /admin/social-media/backfill
+
+**Permissions:** Admin role + `system_settings:write`
+
+Bulk-enqueue `social_media_detection` jobs across **all circles**, video items only. Requires `features.socialMediaDetection = true`.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `from` | ISO-8601 datetime | No | Inclusive lower bound on `capturedAt` |
+| `to` | ISO-8601 datetime | No | Inclusive upper bound on `capturedAt` |
+| `force` | boolean | No | When `true`, re-enqueue all eligible videos regardless of existing `media_social_status`. Default `false` (skip items whose status is already `processed`). |
+
+**Response:** 201 Created
+```json
+{ "data": { "enqueued": 42, "circles": 4 } }
+```
+
+`enqueued` is the number of `social_media_detection` job rows created across every circle (matches the `/admin/settings/jobs` dashboard `byType` count for this type).
+
+**Error Cases:**
+- 400 — `features.socialMediaDetection` is `false`
+
+---
+
+### GET /admin/social-media/status
+
+**Permissions:** Admin role + `system_settings:read`
+
+Get OCR (Tier 2) model availability and effective configuration — the social-media-detection analog of `GET /admin/duplicates/status`.
+
+**Response:** 200 OK
+```json
+{
+  "data": {
+    "ocrEnabled": true,
+    "ocrAvailable": true,
+    "degraded": false,
+    "modelPath": "./data/models/tesseract",
+    "languages": ["eng"],
+    "minConfidence": 0.8,
+    "ocrMaxFrames": 4,
+    "ocrTimeoutSeconds": 60
+  }
+}
+```
+
+`degraded: true` means the tesseract OCR worker could not be initialized and the deployment is running Tier 1 (metadata/filename) matching only.
+
+---
+
 ## Location Inference (media:read / media:write + per-circle roles)
 
 Location inference is a global feature toggle (`features.locationInference`, default off) — see [docs/specs/location-inference.md](specs/location-inference.md) for the full algorithm design. It fills in missing GPS coordinates on GPS-less photos by interpolating (two anchors) or extrapolating (one anchor) from chronologically-nearby, same-device photos that already have coordinates. High-confidence two-anchor inferences are auto-applied immediately (`coordSource: 'inferred'`, revertible); everything else is queued as a `pending` `LocationSuggestion` for a human to confirm, adjust, or reject. `GET /api/media/dashboard` gains a `pendingLocationSuggestions` count that contributes to the review-queue section of the dashboard UI.

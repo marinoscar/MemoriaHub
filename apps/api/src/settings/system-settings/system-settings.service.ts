@@ -28,6 +28,7 @@ export interface ResolvedSettings {
   burst: SystemSettingsValue['burst'];
   dedup: SystemSettingsValue['dedup'];
   locationInference: SystemSettingsValue['locationInference'];
+  socialMedia: SystemSettingsValue['socialMedia'];
   geo: SystemSettingsValue['geo'];
   jobs: SystemSettingsValue['jobs'];
   updatedAt: Date;
@@ -105,6 +106,7 @@ export class SystemSettingsService {
       burst: value.burst,
       dedup: value.dedup,
       locationInference: value.locationInference,
+      socialMedia: value.socialMedia,
       geo: value.geo,
       jobs: value.jobs,
       updatedAt: settings.updatedAt,
@@ -165,6 +167,7 @@ export class SystemSettingsService {
       burst: value.burst,
       dedup: value.dedup,
       locationInference: value.locationInference,
+      socialMedia: value.socialMedia,
       geo: value.geo,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
@@ -302,6 +305,28 @@ export class SystemSettingsService {
           (current as any).locationInference?.maxImpliedSpeedKmh ??
           150,
       },
+      socialMedia: {
+        ocrEnabled:
+          (dto as any).socialMedia?.ocrEnabled ??
+          (current as any).socialMedia?.ocrEnabled ??
+          true,
+        ocrLanguages:
+          (dto as any).socialMedia?.ocrLanguages ??
+          (current as any).socialMedia?.ocrLanguages ??
+          ['eng'],
+        ocrMaxFrames:
+          (dto as any).socialMedia?.ocrMaxFrames ??
+          (current as any).socialMedia?.ocrMaxFrames ??
+          4,
+        ocrTimeoutSeconds:
+          (dto as any).socialMedia?.ocrTimeoutSeconds ??
+          (current as any).socialMedia?.ocrTimeoutSeconds ??
+          60,
+        minConfidence:
+          (dto as any).socialMedia?.minConfidence ??
+          (current as any).socialMedia?.minConfidence ??
+          0.8,
+      },
       geo: {
         reverseProvider:
           (dto as any).geo?.reverseProvider ??
@@ -365,6 +390,7 @@ export class SystemSettingsService {
       burst: value.burst,
       dedup: value.dedup,
       locationInference: value.locationInference,
+      socialMedia: value.socialMedia,
       geo: value.geo,
       jobs: value.jobs,
       updatedAt: settings.updatedAt,

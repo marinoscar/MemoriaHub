@@ -5,12 +5,13 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
-import * as ffmpeg from 'fluent-ffmpeg';
 import { ObjectProcessor, ObjectProcessorResult } from '../object-processor.interface';
 import { streamToBuffer } from './stream-utils';
+import { probeVideoFile, extractContainerMetadata } from './ffprobe.util';
 
 /**
- * VideoProbeProcessor — extracts duration, dimensions, and codec from video files.
+ * VideoProbeProcessor — extracts duration, dimensions, codec, and container
+ * metadata from video files.
  *
  * Name:     video-probe
  * Priority: 20
@@ -19,18 +20,25 @@ import { streamToBuffer } from './stream-utils';
  * ffprobe requires a seekable file path, so this processor:
  *   1. Buffers the download stream.
  *   2. Writes to a temp file in os.tmpdir().
- *   3. Runs ffprobe against the temp file.
+ *   3. Runs ffprobe against the temp file (via the shared ffprobe.util).
  *   4. Deletes the temp file in a finally block.
  *
  * Requires ffmpeg/ffprobe to be installed in the container (see Dockerfile).
  *
  * Writes: { durationMs: number, width: number, height: number, codec: string,
- *           capturedAt?: string }
+ *           capturedAt?: string, formatName?: string,
+ *           formatTags: Record<string,string>,
+ *           streamTags: Array<Record<string,string>> }
  *
  * capturedAt is an ISO-8601 string derived from the video's creation_time tag
  * (format.tags.creation_time, or the video-stream's tags.creation_time).  Only
  * written when the tag is present and parseable as a valid date; invalid or
  * missing values are silently omitted.
+ *
+ * formatName, formatTags, and streamTags carry the container-level metadata used
+ * by the social-media video detection feature.  Tag collections have lowercased
+ * keys, string-coerced values, and are size-capped to keep storage_object
+ * metadata compact (see ffprobe.util).
  */
 @Injectable()
 export class VideoProbeProcessor implements ObjectProcessor {
@@ -56,20 +64,14 @@ export class VideoProbeProcessor implements ObjectProcessor {
       await fs.writeFile(tmpPath, buffer);
 
       // Run ffprobe
-      const probeData = await this.probe(tmpPath);
+      const probeData = await probeVideoFile(tmpPath);
 
-      const videoStream = probeData.streams?.find(s => s.codec_type === 'video');
-      const durationSec = probeData.format?.duration;
-
-      const durationMs =
-        durationSec !== undefined ? Math.round(parseFloat(String(durationSec)) * 1000) : undefined;
-
-      const width = videoStream?.width;
-      const height = videoStream?.height;
-      const codec = videoStream?.codec_name;
+      const container = extractContainerMetadata(probeData);
+      const { durationMs, width, height, codec, formatName, formatTags, streamTags } = container;
 
       // --- creation_time → capturedAt ---
       // Prefer format-level tag; fall back to the video stream's tag.
+      const videoStream = probeData.streams?.find(s => s.codec_type === 'video');
       const rawCreationTime: unknown =
         probeData.format?.tags?.['creation_time'] ??
         videoStream?.tags?.['creation_time'];
@@ -88,10 +90,14 @@ export class VideoProbeProcessor implements ObjectProcessor {
       if (typeof height === 'number') metadata['height'] = height;
       if (typeof codec === 'string') metadata['codec'] = codec;
       if (capturedAt !== undefined) metadata['capturedAt'] = capturedAt;
+      if (formatName !== undefined) metadata['formatName'] = formatName;
+      metadata['formatTags'] = formatTags;
+      metadata['streamTags'] = streamTags;
 
       this.logger.debug(
         `video-probe for object ${object.id}: ${durationMs}ms ${width}x${height} ${codec}` +
-          (capturedAt ? ` capturedAt=${capturedAt}` : ''),
+          (capturedAt ? ` capturedAt=${capturedAt}` : '') +
+          (formatName ? ` format=${formatName}` : ''),
       );
 
       return { success: true, metadata };
@@ -104,14 +110,5 @@ export class VideoProbeProcessor implements ObjectProcessor {
         // Ignore errors when cleaning up the temp file
       });
     }
-  }
-
-  private probe(filePath: string): Promise<ffmpeg.FfprobeData> {
-    return new Promise<ffmpeg.FfprobeData>((resolve, reject) => {
-      ffmpeg.ffprobe(filePath, (err, data) => {
-        if (err) reject(err);
-        else resolve(data);
-      });
-    });
   }
 }

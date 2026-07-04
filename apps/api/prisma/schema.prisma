@@ -507,6 +507,7 @@ model MediaItem {
   geoSource      String?   @map("geo_source") // provider that produced it
   geocodedAt     DateTime? @map("geocoded_at") @db.Timestamptz // when reverse geocoding ran; null = not yet geocoded
   coordSource    String?   @map("coord_source") // provenance of taken_lat/taken_lng: 'exif' | 'manual' | 'inferred'; null = no coordinates
+  socialMediaSource String? @map("social_media_source") // detected re-upload source: 'tiktok' | 'instagram' | 'facebook' | 'other'; null = clean/unknown. Written only by the social_media_detection handler; used to gate video enrichment.
 
   // --- Burst Detection ---
   perceptualHash String? @map("perceptual_hash") // 64-bit dHash stored as unsigned decimal string
@@ -544,6 +545,8 @@ model MediaItem {
   shares                 MediaShare[]
   // Location Inference relations
   locationSuggestion     LocationSuggestion?
+  // Social Media Detection relations
+  socialStatus           MediaSocialStatus?
 
   @@index([circleId])
   @@index([addedById])
@@ -628,6 +631,7 @@ model Tag {
 enum MediaTagSource {
   manual
   ai
+  system
 }
 
 model MediaTag {
@@ -1211,4 +1215,42 @@ model MediaShare {
   @@index([mediaItemId])
   @@index([albumId])
   @@map("media_shares")
+}
+
+// =============================================================================
+// Social Media Video Detection
+// =============================================================================
+
+enum MediaSocialStatusType {
+  not_processed
+  pending
+  processing
+  processed
+  failed
+}
+
+// MediaSocialStatus tracks per-item detection of social-media re-uploads
+// (e.g. TikTok/Instagram/Facebook re-shares) via metadata/filename/OCR heuristics.
+// isSocialMedia + platform + detectionMethod + matchedRule mirror the writer's
+// decision; media_items.social_media_source (see MediaItem) is the queryable,
+// denormalized outcome column used to gate video enrichment.
+model MediaSocialStatus {
+  id              String                @id @default(uuid()) @db.Uuid
+  mediaItemId     String                @unique @map("media_item_id") @db.Uuid
+  status          MediaSocialStatusType @default(not_processed)
+  isSocialMedia   Boolean               @default(false) @map("is_social_media")
+  platform        String? // 'tiktok' | 'instagram' | 'facebook' | 'other'
+  detectionMethod String?               @map("detection_method") // 'metadata' | 'filename' | 'ocr'
+  confidence      Float?
+  matchedRule     String?               @map("matched_rule")
+  processedAt     DateTime?             @map("processed_at") @db.Timestamptz
+  lastError       String?               @map("last_error")
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime              @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  mediaItem MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@map("media_social_status")
 }

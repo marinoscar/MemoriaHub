@@ -1018,20 +1018,35 @@ describe('MediaService', () => {
       expect(result).toHaveLength(2);
     });
 
-    it('creates MediaTag with source=manual and updates source to manual (manual source is set on both sides)', async () => {
+    it('creates MediaTag with source=manual and promotes only ai rows to manual (never downgrades system/manual)', async () => {
       const item = makeMediaItem({ addedById: 'user-1' });
       const tag = makeTag({ name: 'nature' });
 
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
       mockPrisma.tag.upsert.mockResolvedValue(tag as any);
       mockPrisma.mediaTag.upsert.mockResolvedValue({} as any);
+      mockPrisma.mediaTag.updateMany.mockResolvedValue({ count: 0 } as any);
 
       await service.attachTags(item.id, { names: ['nature'] }, 'user-1', ownPerms);
 
+      // Create as manual; update is a no-op so an existing system/manual row is
+      // never downgraded on conflict.
       expect(mockPrisma.mediaTag.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           create: expect.objectContaining({ source: 'manual' }),
-          update: expect.objectContaining({ source: 'manual' }),
+          update: {},
+        }),
+      );
+
+      // A scoped updateMany promotes only source='ai' rows to 'manual'.
+      expect(mockPrisma.mediaTag.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tagId: tag.id,
+            mediaItemId: item.id,
+            source: 'ai',
+          }),
+          data: { source: 'manual' },
         }),
       );
     });
