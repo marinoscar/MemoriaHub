@@ -995,7 +995,6 @@ function UnassignedFacesSection({
     void refreshArchived();
     const onFocus = () => {
       void refresh();
-      void refreshArchived();
     };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
