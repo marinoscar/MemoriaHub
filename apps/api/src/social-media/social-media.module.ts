@@ -3,10 +3,14 @@ import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { SettingsModule } from '../settings/settings.module';
 import { FaceModule } from '../face/face.module';
 import { MediaModule } from '../media/media.module';
+import { CirclesModule } from '../circles/circles.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 import { SocialMediaDetectorService } from './social-media-detector.service';
 import { SocialMediaOcrService } from './social-media-ocr.service';
 import { SocialMediaDetectionHandler } from './social-media-detection.handler';
+import { SocialMediaBackfillService } from './social-media-backfill.service';
+import { SocialMediaMediaController } from './social-media-media.controller';
+import { AdminSocialMediaController } from './admin-social-media.controller';
 
 /**
  * SocialMediaModule
@@ -31,12 +35,15 @@ import { SocialMediaDetectionHandler } from './social-media-detection.handler';
     SettingsModule,
     FaceModule,
     MediaModule,
+    CirclesModule,
     StorageProvidersModule,
   ],
+  controllers: [SocialMediaMediaController, AdminSocialMediaController],
   providers: [
     SocialMediaDetectorService,
     SocialMediaOcrService,
     SocialMediaDetectionHandler,
+    SocialMediaBackfillService,
   ],
   exports: [SocialMediaOcrService, SocialMediaDetectorService],
 })
