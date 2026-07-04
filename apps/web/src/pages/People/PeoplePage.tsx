@@ -1416,8 +1416,6 @@ interface PeopleBulkToolbarProps {
   circleId: string;
   onClear: () => void;
   onSelectAll: () => void;
-  onSuccess: (message: string) => void;
-  onError: (message: string) => void;
   /** If true, show Unhide + Purge actions instead of Hide */
   hiddenMode?: boolean;
   onHideSelected: () => Promise<void>;
@@ -1430,8 +1428,6 @@ function PeopleBulkToolbar({
   allIds,
   onClear,
   onSelectAll,
-  onSuccess: _onSuccess,
-  onError: _onError,
   hiddenMode,
   onHideSelected,
   onUnhideSelected,
@@ -1637,8 +1633,6 @@ function HiddenPeopleView({
           circleId={circleId}
           onClear={handleClearSelection}
           onSelectAll={handleSelectAll}
-          onSuccess={onSuccess}
-          onError={onError}
           hiddenMode
           onHideSelected={async () => { /* no-op in hidden view */ }}
           onUnhideSelected={handleUnhideSelected}
@@ -1739,9 +1733,6 @@ export default function PeoplePage() {
     deletedPeople: number;
   } | null>(null);
 
-  // Purge dialog for bulk selection on People tab
-  const [bulkPurgeDialogOpen, setBulkPurgeDialogOpen] = useState(false);
-
   const canCluster =
     activeCircleRole === 'circle_admin' || activeCircleRole === 'collaborator';
 
@@ -1821,7 +1812,7 @@ export default function PeoplePage() {
     const hideFunc = person.isUnlabeled ? hideUnlabeled : hidePeople;
     try {
       const result = await hideFunc([person.id]);
-      showSuccess(`Hidden ${result.hidden} person. Refresh to see updated count.`);
+      showSuccess(`Hidden ${result.hidden} person${result.hidden !== 1 ? 's' : ''}`);
       await Promise.all([refreshLabeled(), refreshUnlabeled(), refreshHidden()]);
     } catch (err) {
       showError(err instanceof Error ? err.message : 'Failed to hide');
@@ -1988,12 +1979,10 @@ export default function PeoplePage() {
               circleId={activeCircleId}
               onClear={handleClearSelection}
               onSelectAll={handleSelectAll}
-              onSuccess={showSuccess}
-              onError={showError}
               hiddenMode={false}
               onHideSelected={handleHideSelected}
               onUnhideSelected={async () => { /* no-op */ }}
-              onPurgeSelected={() => setBulkPurgeDialogOpen(true)}
+              onPurgeSelected={() => { /* no-op: main tab does not offer purge */ }}
             />
           )}
 
@@ -2130,18 +2119,6 @@ export default function PeoplePage() {
           onDeleted={handleBiometricsDeleted}
         />
       )}
-
-      {/* Bulk purge confirm dialog (main tab) */}
-      <PurgePeopleDialog
-        open={bulkPurgeDialogOpen}
-        count={selectedIds.size}
-        onClose={() => setBulkPurgeDialogOpen(false)}
-        onConfirm={async () => {
-          // Not used from main tab — purge is only in hidden view
-          // Keep this wired in case we add it to selection later
-          setBulkPurgeDialogOpen(false);
-        }}
-      />
 
       {/* Snackbar feedback */}
       <Snackbar
