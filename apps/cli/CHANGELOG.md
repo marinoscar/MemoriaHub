@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 
 - **Sync runs auto-export an Excel report** — every completed `sync` run now writes `~/.memoriahub/exports/sync-<runId>.xlsx` and prints its absolute path, from both the interactive dashboard summary and the headless command (mirroring the existing scan auto-export). The workbook has a **Summary** sheet (run metadata + totals, uploaded size in MB, timestamps as real dates) and a **Detail** sheet (one row per processed file: path, status, detail, size in MB, MIME type, media kind, media item ID, SHA-256 prefix). A failed export only warns and never blocks the run.
+- **Capture-date inference for EXIF-less files** — when a file has no EXIF date taken, `sync` now infers `capturedAt` from the oldest of the file's created, modified, and accessed filesystem timestamps (oldest survives file copies/moves best) and sends the file's creation time as `originalCreatedAt` for provenance. A genuine EXIF date always takes priority and is never overridden, even if the server later re-extracts metadata. The offline `scan` preview shows the same inferred date, and the scan export's Detail sheet gains a **Date source** column (`EXIF` / `File timestamp` / blank).
 
 ## [1.1.0] - 2026-07-03
 
