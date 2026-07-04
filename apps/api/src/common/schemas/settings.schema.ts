@@ -45,6 +45,7 @@ export const systemSettingsSchema = z.object({
   //   - burstDetection: burst photo (similar pictures) detection
   //   - duplicateDetection: near-duplicate photo (visual/hash similarity) detection
   //   - locationInference: interpolate/extrapolate missing GPS coords from timeline anchors
+  //   - socialMediaDetection: social-media video detection (OCR-based)
   features: z.record(z.string(), z.boolean()),
   ai: z.object({
     features: z.object({
@@ -108,6 +109,19 @@ export const systemSettingsSchema = z.object({
     requireSameDevice: true,
     maxAnchorDistanceKm: 2,
     maxImpliedSpeedKmh: 150,
+  }),
+  socialMedia: z.object({
+    ocrEnabled: z.boolean().default(true),
+    ocrLanguages: z.array(z.string().min(1)).min(1).max(5).default(['eng']),
+    ocrMaxFrames: z.number().int().min(2).max(6).default(4),
+    ocrTimeoutSeconds: z.number().int().min(10).max(300).default(60),
+    minConfidence: z.number().min(0.5).max(1.0).default(0.8),
+  }).optional().default({
+    ocrEnabled: true,
+    ocrLanguages: ['eng'],
+    ocrMaxFrames: 4,
+    ocrTimeoutSeconds: 60,
+    minConfidence: 0.8,
   }),
   geo: z.object({
     reverseProvider: z.enum(['offline', 'nominatim', 'google']).default('offline'),
@@ -184,6 +198,13 @@ export const systemSettingsPatchSchema = z.object({
     requireSameDevice: z.boolean().optional(),
     maxAnchorDistanceKm: z.number().min(0.1).max(100).optional(),
     maxImpliedSpeedKmh: z.number().min(10).max(1000).optional(),
+  }).optional(),
+  socialMedia: z.object({
+    ocrEnabled: z.boolean().optional(),
+    ocrLanguages: z.array(z.string().min(1)).min(1).max(5).optional(),
+    ocrMaxFrames: z.number().int().min(2).max(6).optional(),
+    ocrTimeoutSeconds: z.number().int().min(10).max(300).optional(),
+    minConfidence: z.number().min(0.5).max(1.0).optional(),
   }).optional(),
   geo: z.object({
     reverseProvider: z.enum(['offline', 'nominatim', 'google']).optional(),
