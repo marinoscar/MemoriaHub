@@ -12,6 +12,7 @@ import {
   Tooltip,
   Stack,
   Chip,
+  Collapse,
   useMediaQuery,
   Dialog,
   DialogTitle,
@@ -38,7 +39,7 @@ import {
   Undo as UndoIcon,
   MyLocation as MyLocationIcon,
 } from '@mui/icons-material';
-import { ShareDialog } from '../share/ShareDialog';
+import { SharePanel } from '../share/SharePanel';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
 import type { MediaPlayerInstance } from '@vidstack/react';
@@ -200,8 +201,10 @@ export function MediaDetailDrawer({
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // Share dialog state
-  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  // Inline share panel state — rendered inline inside the Drawer (NOT a Modal)
+  // to avoid the nested-modal focus-trap freeze that a portaled Dialog exhibits
+  // when opened as a sibling of the temporary Drawer.
+  const [sharePanelOpen, setSharePanelOpen] = useState(false);
 
   // Image load state
   const [imgError, setImgError] = useState(false);
@@ -243,8 +246,11 @@ export function MediaDetailDrawer({
       setEditTagsRemove([]);
       setTagSuccess(null);
       setSelectedFaceId(null);
+      setSharePanelOpen(false);
       return;
     }
+    // Collapse the share panel whenever a different item is shown.
+    setSharePanelOpen(false);
     // If the list item already carries downloadUrl (e.g. after an edit), skip fetch.
     if (item.downloadUrl !== undefined) {
       setFullItem(item);
@@ -550,13 +556,39 @@ export function MediaDetailDrawer({
           </Tooltip>
         )}
 
-        {/* Share publicly */}
+        {/* Share publicly — toggles the inline share panel below the header */}
         <Tooltip title="Share publicly">
-          <IconButton onClick={() => setShareDialogOpen(true)} aria-label="Share publicly">
+          <IconButton
+            onClick={() => setSharePanelOpen((prev) => !prev)}
+            aria-label="Share publicly"
+            color={sharePanelOpen ? 'primary' : 'default'}
+          >
             <IosShareIcon />
           </IconButton>
         </Tooltip>
       </Box>
+
+      {/* Inline share panel — rendered as a normal DOM node inside the Drawer
+          (NOT a Dialog/Modal) so it does not trigger the nested focus-trap that
+          grays out and freezes a portaled Dialog opened over a temporary Drawer. */}
+      <Collapse in={sharePanelOpen} mountOnEnter unmountOnExit>
+        <Box
+          sx={{
+            px: 2,
+            py: 1.5,
+            borderBottom: `1px solid ${theme.palette.divider}`,
+            backgroundColor: theme.palette.action.hover,
+          }}
+        >
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            Share publicly
+          </Typography>
+          <SharePanel
+            target={{ type: 'media_item', id: item.id }}
+            onRequestClose={() => setSharePanelOpen(false)}
+          />
+        </Box>
+      </Collapse>
 
       {/* Preview — branches on media type */}
       {displayItem.type === 'video' ? (
@@ -1079,15 +1111,6 @@ export function MediaDetailDrawer({
           </Button>
         </Stack>
       </Box>
-
-      {/* Share dialog */}
-      {item && (
-        <ShareDialog
-          open={shareDialogOpen}
-          onClose={() => setShareDialogOpen(false)}
-          target={{ type: 'media_item', id: item.id }}
-        />
-      )}
 
       {/* Move to Trash confirm dialog */}
       <Dialog open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)} maxWidth="xs" fullWidth>

@@ -699,6 +699,49 @@ describe('MediaDetailDrawer', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Inline share panel — the share button toggles SharePanel INLINE inside the
+  // Drawer rather than opening a portaled Dialog (which would trip the
+  // nested-modal focus-trap freeze). See fix/inline-share-panel.
+  // -------------------------------------------------------------------------
+
+  describe('inline share panel', () => {
+    it('does not render the share panel until the share button is clicked', () => {
+      render(<MediaDetailDrawer {...defaultProps()} />);
+      // The Make public action lives inside SharePanel — absent until toggled.
+      expect(screen.queryByRole('button', { name: /make public/i })).not.toBeInTheDocument();
+    });
+
+    it('renders the share panel inline when the share button is clicked', async () => {
+      const user = userEvent.setup();
+      render(<MediaDetailDrawer {...defaultProps()} />);
+
+      await user.click(screen.getByRole('button', { name: /share publicly/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /make public/i })).toBeInTheDocument();
+      });
+      // The share heading is rendered inline within the drawer content.
+      expect(screen.getAllByText(/share publicly/i).length).toBeGreaterThan(0);
+    });
+
+    it('collapses the share panel when toggled off again', async () => {
+      const user = userEvent.setup();
+      render(<MediaDetailDrawer {...defaultProps()} />);
+
+      const shareButton = screen.getByRole('button', { name: /share publicly/i });
+      await user.click(shareButton);
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /make public/i })).toBeInTheDocument();
+      });
+
+      await user.click(shareButton);
+      await waitFor(() => {
+        expect(screen.queryByRole('button', { name: /make public/i })).not.toBeInTheDocument();
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Null item guard
   // -------------------------------------------------------------------------
 
