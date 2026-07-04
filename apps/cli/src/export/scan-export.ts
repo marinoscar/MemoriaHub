@@ -103,9 +103,10 @@ async function exportXlsx(
   // --- Summary sheet ---
   const summary = wb.addWorksheet('Summary');
   const { scan, kpis, coverage } = report;
-  const kv = (label: string, value: string | number): void => {
+  const kv = (label: string, value: string | number, numFmt?: string): void => {
     const row = summary.addRow([label, value]);
     row.getCell(1).font = { bold: true };
+    if (numFmt) row.getCell(2).numFmt = numFmt;
   };
   const section = (title: string): void => {
     const row = summary.addRow([title]);
@@ -126,12 +127,12 @@ async function exportXlsx(
   summary.addRow([]);
 
   section('Totals');
-  kv('Total files', kpis.totalFiles);
-  kv('Photos', kpis.photoCount);
-  kv('Videos', kpis.videoCount);
-  kv('Total bytes', kpis.totalBytes);
-  kv('Photo bytes', kpis.photoBytes);
-  kv('Video bytes', kpis.videoBytes);
+  kv('Total files', kpis.totalFiles, '#,##0');
+  kv('Photos', kpis.photoCount, '#,##0');
+  kv('Videos', kpis.videoCount, '#,##0');
+  kv('Total bytes', kpis.totalBytes, '#,##0');
+  kv('Photo bytes', kpis.photoBytes, '#,##0');
+  kv('Video bytes', kpis.videoBytes, '#,##0');
   summary.addRow([]);
 
   section('Metadata coverage');
@@ -145,7 +146,11 @@ async function exportXlsx(
     section('By folder');
     const head = summary.addRow(['Folder', 'Files', 'Bytes']);
     head.font = { bold: true };
-    for (const f of report.byFolder) summary.addRow([f.path, f.count, f.bytes]);
+    for (const f of report.byFolder) {
+      const row = summary.addRow([f.path, f.count, f.bytes]);
+      row.getCell(2).numFmt = '#,##0';
+      row.getCell(3).numFmt = '#,##0';
+    }
     summary.addRow([]);
   }
 
@@ -153,7 +158,10 @@ async function exportXlsx(
     section('By camera');
     const head = summary.addRow(['Make / Model', 'Files']);
     head.font = { bold: true };
-    for (const c of report.byCamera) summary.addRow([c.label, c.count]);
+    for (const c of report.byCamera) {
+      const row = summary.addRow([c.label, c.count]);
+      row.getCell(2).numFmt = '#,##0';
+    }
     summary.addRow([]);
   }
 
@@ -165,6 +173,14 @@ async function exportXlsx(
   for (const f of files) {
     detail.addRow(toRowView(f));
   }
+
+  // Number formats: byte size + pixel dimensions get thousand separators;
+  // GPS coordinates keep 6 decimal places. Values remain numeric (sortable).
+  detail.getColumn('sizeBytes').numFmt = '#,##0';
+  detail.getColumn('width').numFmt = '#,##0';
+  detail.getColumn('height').numFmt = '#,##0';
+  detail.getColumn('takenLat').numFmt = '0.000000';
+  detail.getColumn('takenLng').numFmt = '0.000000';
 
   await wb.xlsx.writeFile(outPath);
 }
