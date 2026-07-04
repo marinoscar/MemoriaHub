@@ -287,7 +287,7 @@ export class DoctorService {
   private async checkMigrations(): Promise<CheckOutcome> {
     try {
       const rows = await this.prisma.$queryRaw<Array<{ n: number }>>`
-        SELECT count(*)::int AS n FROM _prisma_migrations WHERE finished_at IS NULL
+        SELECT count(*)::int AS n FROM _prisma_migrations WHERE finished_at IS NULL AND rolled_back_at IS NULL
       `;
       const n = rows[0]?.n ?? 0;
       if (n > 0) {
@@ -310,7 +310,7 @@ export class DoctorService {
           SELECT 1 AS ok FROM pg_extension WHERE extname = 'vector'
         `,
         this.prisma.$queryRaw<Array<{ t: string | null }>>`
-          SELECT to_regclass('public.media_item_embedding') AS t
+          SELECT to_regclass('public.media_item_embedding')::text AS t
         `,
       ]);
 
