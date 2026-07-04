@@ -22,10 +22,20 @@ import { exportSyncReport } from '../export/sync-export.js';
 
 export type SyncFileStatus = 'uploaded' | 'skipped' | 'failed' | 'would-upload';
 
+/** Map a FILE_SKIPPED reason to the label recorded in the Excel report. */
+function skipReasonLabel(reason: 'dedup' | 'unchanged' | 'out_of_range'): string {
+  switch (reason) {
+    case 'dedup':        return 'dedup';
+    case 'unchanged':    return 'unchanged';
+    case 'out_of_range': return 'out of date range';
+    default:             return reason;
+  }
+}
+
 export interface SyncFileRow {
   filePath: string;
   status: SyncFileStatus;
-  /** Skip reason ('dedup' | 'unchanged') or failure message; null otherwise. */
+  /** Skip reason ('dedup' | 'unchanged' | 'out of date range') or failure message; null otherwise. */
   detail: string | null;
   sizeBytes: number | null;
   mimeType: string | null;
@@ -88,7 +98,7 @@ export class SyncReportCollector {
       });
     });
     engine.on(EV.FILE_SKIPPED, (p) => {
-      this.outcomes.set(p.fileId, { status: 'skipped', detail: p.reason });
+      this.outcomes.set(p.fileId, { status: 'skipped', detail: skipReasonLabel(p.reason) });
     });
     engine.on(EV.FILE_FAILED, (p) => {
       this.outcomes.set(p.fileId, { status: 'failed', detail: p.error });

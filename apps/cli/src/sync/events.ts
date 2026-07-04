@@ -74,7 +74,7 @@ export interface FileProgressPayload {
 export interface FileSkippedPayload {
   fileId: number;
   path: string;
-  reason: 'dedup' | 'unchanged';
+  reason: 'dedup' | 'unchanged' | 'out_of_range';
 }
 
 export interface FileDonePayload {

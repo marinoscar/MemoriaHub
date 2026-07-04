@@ -49,6 +49,16 @@ interface RendererState {
   rows: FileSummaryRow[];
 }
 
+/** Human-readable label for a FILE_SKIPPED reason (shown in the summary table). */
+function skipReasonLabel(reason: FileSkippedPayload['reason']): string {
+  switch (reason) {
+    case 'dedup':        return 'dedup';
+    case 'unchanged':    return 'unchanged';
+    case 'out_of_range': return 'out of date range';
+    default:             return reason;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // renderSyncHeadless
 // ---------------------------------------------------------------------------
@@ -223,7 +233,7 @@ export function renderSyncHeadless(engine: SyncEngine): void {
     state.rows.push({
       file: payload.path,
       status: 'skipped',
-      detail: payload.reason,
+      detail: skipReasonLabel(payload.reason),
     });
 
     advanceBar();
