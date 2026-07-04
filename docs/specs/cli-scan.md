@@ -189,6 +189,26 @@ Metadata is read via `exifr` — the monorepo's standard EXIF-reading library, a
 
 **No content hashing.** Scan deliberately does not compute a SHA-256 (or any) content hash for any file, unlike `sync`'s hash-cache and server dedup pre-check (see [Bulk Import Resilience](bulk-import-resilience.md)). Content hashing remains a sync-time-only operation. This is why scan-to-sync change detection (Section 7) relies on size + mtime comparison rather than hash comparison — the scan snapshot simply does not have hashes to compare against.
 
+### Supported Formats
+
+File discovery for `scan` (and `sync`) is extension-based only (case-insensitive) — there is no content sniffing of file bytes to determine type. A file's extension is looked up in the `MIME_BY_EXT` map (`apps/cli/src/files.ts`); if the extension is not a key in that map, the file is skipped entirely and never appears in the scan (or the sync it previews). Photo vs. video classification is decided purely by whether the resolved MIME type starts with `image/` or `video/` — there is no additional format-specific logic beyond that prefix check.
+
+The supported extensions:
+
+**Images — common raster:** jpg, jpeg, jpe, jif, jfif, png, gif, bmp, dib, webp, tif, tiff
+
+**Images — modern / next-gen:** heic, heif, hif, avif, jxl, jp2, j2k, jpf, jpx
+
+**Images — editor / misc:** psd, tga, pcx
+
+**Images — camera RAW:** dng, cr2, cr3, crw, nef, nrw, arw, srf, sr2, orf, rw2, raw, raf, pef, dcr, kdc, mrw, 3fr, fff, mef, mos, iiq, erf, x3f, srw, rwl, gpr
+
+**Videos — modern:** mp4, m4v, mov, qt, webm, mkv, ogv
+
+**Videos — legacy / camcorder / broadcast:** avi, divx, wmv, asf, flv, f4v, mpg, mpeg, mpe, m1v, m2v, mpv, mp2, vob, 3gp, 3g2, mts, m2ts, m2t, ts, mxf, dv, dif, rm, rmvb, amv
+
+The list intentionally casts a wide net — modern formats alongside legacy/camcorder/broadcast formats — so that old-device photo and video libraries can still be scanned, synced, and backed up. Successfully scanning (and later syncing/backing up) a file with an exotic extension is **not** a guarantee that a server-side thumbnail/preview will be generated for it; thumbnailing and EXIF extraction for unusual formats is a separate downstream concern from discovery, and may be limited or absent.
+
 ---
 
 ## 5. Report and Dashboard

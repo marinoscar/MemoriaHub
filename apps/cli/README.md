@@ -481,6 +481,10 @@ Running or viewing a scan from the interactive menu (**Scan ▸ Scan all folders
 
 Full details — data model, metadata scope, and the reconciliation algorithm — are in [docs/specs/cli-scan.md](../../docs/specs/cli-scan.md).
 
+### Supported media formats
+
+`scan` and `sync` discover files by extension only (case-insensitive) — there's no content sniffing. Coverage is broad: common raster images (JPEG, PNG, GIF, BMP, WebP, TIFF), modern formats (HEIC/HEIF, AVIF, JPEG 2000, JPEG XL), a wide range of camera RAW formats (DNG, CR2/CR3, NEF, ARW, ORF, RW2, RAF, and more), modern video containers (MP4, WebM, MKV), and legacy/camcorder/broadcast video formats (AVI, MOV, MPEG/MPG, VOB, WMV, 3GP, MTS/M2TS, FLV). See [Supported Formats](../../docs/specs/cli-scan.md#supported-formats) in the Scan spec for the full extension list.
+
 ### `memoriahub scan`
 
 ```bash
