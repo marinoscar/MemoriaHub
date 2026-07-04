@@ -62,6 +62,7 @@ export function TagAutocomplete({
       onChange={handleChange}
       disabled={disabled}
       renderValue={renderValue}
+      slotProps={{ popper: { sx: { zIndex: (theme) => theme.zIndex.modal + 2 } } }}
       renderInput={(params) => (
         <TextField
           {...params}

@@ -1113,7 +1113,13 @@ export function MediaDetailDrawer({
       </Box>
 
       {/* Move to Trash confirm dialog */}
-      <Dialog open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)} maxWidth="xs" fullWidth>
+      <Dialog
+        open={deleteConfirmOpen}
+        onClose={() => setDeleteConfirmOpen(false)}
+        maxWidth="xs"
+        fullWidth
+        sx={{ zIndex: (theme: Theme) => theme.zIndex.modal + 2 }}
+      >
         <DialogTitle>Move to Trash?</DialogTitle>
         <DialogContent>
           <Typography variant="body2">

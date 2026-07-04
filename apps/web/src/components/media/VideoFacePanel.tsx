@@ -390,6 +390,7 @@ export function VideoFacePanel({
             }}
             disabled={addingPerson}
             size="small"
+            slotProps={{ popper: { sx: { zIndex: (theme) => theme.zIndex.modal + 2 } } }}
             renderInput={(params) => (
               <TextField
                 {...params}

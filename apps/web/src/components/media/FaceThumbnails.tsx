@@ -165,7 +165,13 @@ function AssignFaceDialog({
     p.name ?? `Unlabeled (${p.id.slice(0, 6)})`;
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="xs"
+      fullWidth
+      sx={{ zIndex: (theme) => theme.zIndex.modal + 2 }}
+    >
       <DialogTitle>
         {isAssigned ? 'Reassign or Unassign Face' : 'Assign Face to Person'}
       </DialogTitle>
@@ -223,6 +229,7 @@ function AssignFaceDialog({
             <TextField {...params} size="small" label="Select person" sx={{ mb: 1 }} />
           )}
           sx={{ mb: 1 }}
+          slotProps={{ popper: { sx: { zIndex: (theme) => theme.zIndex.modal + 3 } } }}
         />
         <Button
           fullWidth
@@ -474,6 +481,7 @@ export function FaceThumbnails({
             }}
             disabled={addingPerson}
             size="small"
+            slotProps={{ popper: { sx: { zIndex: (theme) => theme.zIndex.modal + 2 } } }}
             renderInput={(params) => (
               <TextField
                 {...params}
