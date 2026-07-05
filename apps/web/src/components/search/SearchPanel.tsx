@@ -121,6 +121,8 @@ export function SearchPanel({ open, onClose, circleId, onResults }: SearchPanelP
   // Date
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [uploadFrom, setUploadFrom] = useState('');
+  const [uploadTo, setUploadTo] = useState('');
 
   // Media type
   const [mediaType, setMediaType] = useState<MediaTypeFilter>('all');
@@ -177,6 +179,8 @@ export function SearchPanel({ open, onClose, circleId, onResults }: SearchPanelP
     setRadiusKm(25);
     setDateFrom('');
     setDateTo('');
+    setUploadFrom('');
+    setUploadTo('');
     setMediaType('all');
     setSelectedTag(null);
     setSemanticQuery('');
@@ -228,6 +232,14 @@ export function SearchPanel({ open, onClose, circleId, onResults }: SearchPanelP
         if (dateFrom) capturedAt.from = new Date(dateFrom + 'T00:00:00.000Z').toISOString();
         if (dateTo) capturedAt.to = new Date(dateTo + 'T23:59:59.999Z').toISOString();
         filters['capturedAt'] = capturedAt;
+      }
+
+      // Upload date
+      if (uploadFrom || uploadTo) {
+        const uploadedAt: { from?: string; to?: string } = {};
+        if (uploadFrom) uploadedAt.from = new Date(uploadFrom + 'T00:00:00.000Z').toISOString();
+        if (uploadTo) uploadedAt.to = new Date(uploadTo + 'T23:59:59.999Z').toISOString();
+        filters['uploadedAt'] = uploadedAt;
       }
 
       // Media type
@@ -459,6 +471,35 @@ export function SearchPanel({ open, onClose, circleId, onResults }: SearchPanelP
                   fullWidth
                   value={dateTo}
                   onChange={(e) => setDateTo(e.target.value)}
+                  slotProps={{ inputLabel: { shrink: true } }}
+                />
+              </Box>
+            </Box>
+
+            {/* ----------------------------------------------------------------
+                C2. Upload date
+            ----------------------------------------------------------------- */}
+            <Box>
+              <SectionHeader>Upload date</SectionHeader>
+              <Box
+                sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1 }}
+              >
+                <TextField
+                  label="From"
+                  type="date"
+                  size="small"
+                  fullWidth
+                  value={uploadFrom}
+                  onChange={(e) => setUploadFrom(e.target.value)}
+                  slotProps={{ inputLabel: { shrink: true } }}
+                />
+                <TextField
+                  label="To"
+                  type="date"
+                  size="small"
+                  fullWidth
+                  value={uploadTo}
+                  onChange={(e) => setUploadTo(e.target.value)}
                   slotProps={{ inputLabel: { shrink: true } }}
                 />
               </Box>
