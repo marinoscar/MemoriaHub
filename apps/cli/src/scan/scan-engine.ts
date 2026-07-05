@@ -13,10 +13,17 @@
  */
 
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { ScanTypedEmitter, SCAN_EV } from './events.js';
 import { runPool } from '../sync/worker-pool.js';
 import { enumerateFiles } from '../files.js';
 import { readMediaMetadata, resolveCapturedAt } from '../metadata.js';
+import {
+  loadOverrideFile,
+  pickFallback,
+  OverrideValidationError,
+  type FolderOverride,
+} from '../override.js';
 import type { ScanRepo } from '../repo/scans.js';
 import type { FolderRepo } from '../repo/folders.js';
 import type { SettingsRepo } from '../repo/settings.js';
@@ -36,6 +43,21 @@ export interface ScanOptions {
   trigger: 'cli' | 'menu';
 }
 
+/**
+ * A folder whose `memoriahub.json` was present but INVALID during a scan. Unlike
+ * sync (which aborts), a scan is diagnostic — it records the broken override so
+ * the user sees exactly which file is broken and why, then skips fallback
+ * computation for that folder rather than failing the whole scan.
+ */
+export interface ScanOverrideError {
+  /** Directory the invalid memoriahub.json lives in. */
+  dir: string;
+  /** Full path to the invalid override file. */
+  filePath: string;
+  /** Human-readable validation reason. */
+  reason: string;
+}
+
 export interface ScanRunResult {
   scanId: number;
   totals: {
@@ -47,6 +69,8 @@ export interface ScanRunResult {
     gpsCount: number;
   };
   durationMs: number;
+  /** Present-but-invalid folder overrides encountered during the scan (fallback skipped). */
+  overrideErrors: ScanOverrideError[];
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +178,37 @@ export class ScanEngine extends ScanTypedEmitter {
     const total = workList.length;
 
     // ------------------------------------------------------------------
+    // 3b. Per-scan folder-override cache (diagnostic — never aborts)
+    // ------------------------------------------------------------------
+    // Parsed memoriahub.json overrides keyed by directory, memoized so each
+    // folder's override is read at most once. A present-but-invalid override is
+    // recorded (deduped by directory) and its folder is treated as having no
+    // override — the scan surfaces the problem rather than aborting like sync.
+    const overrideCache = new Map<string, FolderOverride | null>();
+    const overrideErrors: ScanOverrideError[] = [];
+    const overrideErrorDirs = new Set<string>();
+    const getOverrideForDir = (dir: string): FolderOverride | null => {
+      if (overrideCache.has(dir)) return overrideCache.get(dir) ?? null;
+      let override: FolderOverride | null = null;
+      try {
+        override = loadOverrideFile(dir);
+      } catch (err) {
+        override = null; // skip fallback for this folder
+        if (err instanceof OverrideValidationError) {
+          if (!overrideErrorDirs.has(dir)) {
+            overrideErrorDirs.add(dir);
+            overrideErrors.push({ dir, filePath: err.filePath, reason: err.message });
+            this.emit(SCAN_EV.ERROR, { message: err.message });
+          }
+        } else {
+          throw err;
+        }
+      }
+      overrideCache.set(dir, override);
+      return override;
+    };
+
+    // ------------------------------------------------------------------
     // 4. Worker pool — extract metadata + persist snapshot rows
     // ------------------------------------------------------------------
     const concurrency = opts.concurrency ?? settings.concurrency();
@@ -170,6 +225,19 @@ export class ScanEngine extends ScanTypedEmitter {
       // source keeps the preview honest — guessed dates are labelled, not
       // presented as real EXIF.
       const cap = await resolveCapturedAt(filePath, mimeType, meta.capturedAt);
+
+      // Preview the per-folder memoriahub.json fallback the same way sync will:
+      // an override only ever fills a gap the file's own EXIF left open. Compute
+      // the two flags so the report shows which files a sync would date-stamp /
+      // geo-tag from the override. A broken override is recorded (above) and
+      // yields no fallback for its folder rather than aborting the scan.
+      const override = getOverrideForDir(path.dirname(filePath));
+      const picked = pickFallback(override, path.basename(filePath), {
+        hasGps: meta.hasGps,
+        capturedAt: meta.capturedAt,
+      });
+      const fallbackDateApplied = picked.capturedAt != null;
+      const fallbackLocationApplied = picked.takenLat != null && picked.takenLng != null;
 
       scans.insertScanFile(scanId, {
         folderId,
@@ -188,6 +256,8 @@ export class ScanEngine extends ScanTypedEmitter {
         takenLat: meta.takenLat,
         takenLng: meta.takenLng,
         capturedAtSource: cap.source,
+        fallbackDateApplied,
+        fallbackLocationApplied,
         metaError: meta.error,
       });
 
@@ -213,6 +283,6 @@ export class ScanEngine extends ScanTypedEmitter {
     const durationMs = Date.now() - startMs;
     this.emit(SCAN_EV.SCAN_DONE, { scanId, totals, durationMs });
 
-    return { scanId, totals, durationMs };
+    return { scanId, totals, durationMs, overrideErrors };
   }
 }

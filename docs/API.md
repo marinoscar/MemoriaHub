@@ -1354,6 +1354,10 @@ Register an uploaded `StorageObject` as a `MediaItem`.
 | `contentHash` | string (64 lowercase hex chars) | No | SHA-256 hex digest of the file bytes. When supplied the server deduplicates by `(circleId, contentHash)`. |
 | `capturedAt` | ISO 8601 datetime | No | When the photo/video was taken |
 | `capturedAtOffset` | integer (minutes) | No | UTC offset of `capturedAt` |
+| `takenLat` | number | No | Client-supplied GPS latitude fallback (-90 to 90). Applied only when the item has no EXIF-derived GPS. See [CLI Metadata Override](specs/cli-metadata-override.md). |
+| `takenLng` | number | No | Client-supplied GPS longitude fallback (-180 to 180). Applied only when the item has no EXIF-derived GPS. |
+| `takenAltitude` | number | No | Client-supplied altitude fallback, in meters. |
+| `coordSource` | `"manual"` | No | Must be the literal string `"manual"` when supplied — no other value is accepted on this endpoint. Marks `takenLat`/`takenLng`/`takenAltitude` as client-supplied (as opposed to EXIF-derived) coordinate provenance. |
 | `title` | string (max 512) | No | |
 | `description` | string (max 8192) | No | |
 | `favorite` | boolean | No | Defaults to `false` |
@@ -1362,6 +1366,10 @@ Register an uploaded `StorageObject` as a `MediaItem`.
 | `sourcePath` | string (max 2048) | No | Original path on source device |
 | `sourceDeviceId` | string (max 256) | No | |
 | `sourceDeviceName` | string (max 256) | No | |
+
+**Client-supplied location fallback (`takenLat`/`takenLng`/`takenAltitude`/`coordSource`):** These four fields let a client supply a fallback GPS location for an item that has no EXIF-derived coordinates — the primary consumer is the CLI's `memoriahub.json` per-folder override feature (see [CLI Metadata Override](specs/cli-metadata-override.md)). Server-extracted EXIF location always wins: if the uploaded file's own EXIF already supplies GPS, these fields are ignored and never overwrite the EXIF-derived coordinates. When the fallback **is** applied (i.e. the item has no EXIF GPS), the server reverse-geocodes the supplied coordinates — writing `geoCountry`, `geoAdmin1`, `geoAdmin2`, `geoLocality`, `geoPlaceName`, and `geoSource`, the same pipeline described in [Geocoding](specs/geocoding.md) — and stores `coordSource` as `'manual'`.
+
+`capturedAt` follows the same precedence rule as a date fallback, even though the row above doesn't spell it out: a server-extracted EXIF capture date always wins over a client-supplied `capturedAt` when both are present for the same item. A client-supplied `capturedAt` is only used when the item has no EXIF-derived capture date.
 
 **Example request (with dedup hash):**
 

@@ -128,6 +128,18 @@ async function runScan(folderArgs: string[], options: ScanActionOptions): Promis
       `Scanned ${result.totals.totalFiles} file(s), ${formatBytes(result.totals.totalBytes)} ` +
         `(scan #${result.scanId})`,
     );
+    // Surface any present-but-invalid memoriahub.json overrides prominently. The
+    // scan does not abort on these (unlike sync) — it reports exactly which file
+    // is broken and why so the user can fix it before running a real sync. Kept
+    // off stdout in --json mode so scripted output stays clean.
+    if (result.overrideErrors.length > 0 && !options.json) {
+      ui.warn(
+        `${result.overrideErrors.length} folder override(s) were invalid and skipped:`,
+      );
+      for (const oe of result.overrideErrors) {
+        ui.warn(`  ${oe.reason}`);
+      }
+    }
   } catch (err) {
     spinner?.fail('Scan failed');
     const msg = err instanceof Error ? err.message : String(err);

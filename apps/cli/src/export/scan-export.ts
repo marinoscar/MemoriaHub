@@ -45,6 +45,8 @@ const DETAIL_COLUMNS: Array<{ header: string; key: keyof ScanFileRowView; width:
   { header: 'Has location', key: 'hasGps', width: 12 },
   { header: 'Captured at', key: 'capturedAt', width: 22 },
   { header: 'Date source', key: 'capturedAtSource', width: 14 },
+  { header: 'Fallback date', key: 'fallbackDate', width: 14 },
+  { header: 'Fallback location', key: 'fallbackLocation', width: 16 },
   { header: 'Width', key: 'width', width: 8 },
   { header: 'Height', key: 'height', width: 8 },
   { header: 'Camera make', key: 'cameraMake', width: 16 },
@@ -64,6 +66,8 @@ interface ScanFileRowView {
   hasGps: string;
   capturedAt: string | null;
   capturedAtSource: string;
+  fallbackDate: string;
+  fallbackLocation: string;
   width: number | null;
   height: number | null;
   cameraMake: string | null;
@@ -84,6 +88,8 @@ function toRowView(f: ScanFile): ScanFileRowView {
     hasGps: f.has_gps ? 'yes' : 'no',
     capturedAt: f.captured_at,
     capturedAtSource: captureSourceLabel(f.captured_at_source),
+    fallbackDate: f.fallback_date_applied ? 'yes' : 'no',
+    fallbackLocation: f.fallback_location_applied ? 'yes' : 'no',
     width: f.width,
     height: f.height,
     cameraMake: f.camera_make,

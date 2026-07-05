@@ -51,6 +51,8 @@ interface ScanFileRow {
   taken_lat: number | null;
   taken_lng: number | null;
   captured_at_source: string | null;
+  fallback_date_applied: number;
+  fallback_location_applied: number;
   meta_error: string | null;
 }
 
@@ -91,6 +93,8 @@ function rowToScanFile(row: ScanFileRow): ScanFile {
     taken_lat: row.taken_lat,
     taken_lng: row.taken_lng,
     captured_at_source: (row.captured_at_source as CaptureDateSource | null) ?? null,
+    fallback_date_applied: row.fallback_date_applied !== 0,
+    fallback_location_applied: row.fallback_location_applied !== 0,
     meta_error: row.meta_error,
   };
 }
@@ -116,6 +120,8 @@ export interface ScanFileInput {
   takenLat?: number | null;
   takenLng?: number | null;
   capturedAtSource?: CaptureDateSource | null;
+  fallbackDateApplied?: boolean;
+  fallbackLocationApplied?: boolean;
   metaError?: string | null;
 }
 
@@ -179,8 +185,9 @@ export class ScanRepo {
            (scan_id, folder_id, file_path, size_bytes, mtime_ms, mime_type,
             media_kind, has_exif, has_gps, captured_at, width, height,
             camera_make, camera_model, taken_lat, taken_lng,
-            captured_at_source, meta_error)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            captured_at_source, fallback_date_applied, fallback_location_applied,
+            meta_error)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         scanId,
@@ -200,6 +207,8 @@ export class ScanRepo {
         input.takenLat ?? null,
         input.takenLng ?? null,
         input.capturedAtSource ?? null,
+        input.fallbackDateApplied ? 1 : 0,
+        input.fallbackLocationApplied ? 1 : 0,
         input.metaError ?? null,
       );
   }
