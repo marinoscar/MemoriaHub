@@ -17,6 +17,7 @@ import {
   whereType,
   whereFavorite,
   whereDateRange,
+  whereCreatedAtRange,
   whereAlbum,
   whereTag,
   whereCountry,
@@ -75,6 +76,20 @@ export const SEARCHABLE_FIELDS: SearchableField[] = [
     buildWhere: (v) => {
       const range = v as { from?: string; to?: string } | undefined;
       return whereDateRange(
+        range?.from ? new Date(range.from) : undefined,
+        range?.to ? new Date(range.to) : undefined,
+      );
+    },
+  },
+  {
+    key: 'uploadedAt',
+    label: 'Upload date range',
+    type: 'date-range',
+    description:
+      'Filter by upload date (when the item was added to the library, i.e. createdAt — distinct from capture/EXIF date). Pass an object { from?: ISO8601, to?: ISO8601 } to match items uploaded in that window.',
+    buildWhere: (v) => {
+      const range = v as { from?: string; to?: string } | undefined;
+      return whereCreatedAtRange(
         range?.from ? new Date(range.from) : undefined,
         range?.to ? new Date(range.to) : undefined,
       );

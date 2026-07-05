@@ -47,6 +47,16 @@ export function whereDateRange(from?: Date, to?: Date): Prisma.MediaItemWhereInp
   };
 }
 
+export function whereCreatedAtRange(from?: Date, to?: Date): Prisma.MediaItemWhereInput {
+  if (!from && !to) return {};
+  return {
+    createdAt: {
+      ...(from && { gte: from }),
+      ...(to && { lte: to }),
+    },
+  };
+}
+
 export function whereAlbum(albumId: string): Prisma.MediaItemWhereInput {
   return { albumItems: { some: { albumId } } };
 }

@@ -928,6 +928,86 @@ describe('wherePeople', () => {
 });
 
 // ---------------------------------------------------------------------------
+// whereCreatedAtRange — standalone helper (upload date range on createdAt)
+// ---------------------------------------------------------------------------
+import { whereCreatedAtRange } from './media-where.builder';
+
+describe('whereCreatedAtRange', () => {
+  it('returns { createdAt: { gte, lte } } when both bounds are provided', () => {
+    const from = new Date('2023-01-01');
+    const to = new Date('2023-12-31');
+    expect(whereCreatedAtRange(from, to)).toEqual({
+      createdAt: { gte: from, lte: to },
+    });
+  });
+
+  it('returns only gte when only from is provided', () => {
+    const from = new Date('2023-06-01');
+    const result = whereCreatedAtRange(from) as any;
+    expect(result.createdAt).toMatchObject({ gte: from });
+    expect(result.createdAt.lte).toBeUndefined();
+  });
+
+  it('returns only lte when only to is provided', () => {
+    const to = new Date('2023-06-01');
+    const result = whereCreatedAtRange(undefined, to) as any;
+    expect(result.createdAt).toMatchObject({ lte: to });
+    expect(result.createdAt.gte).toBeUndefined();
+  });
+
+  it('returns {} when no bounds are provided', () => {
+    expect(whereCreatedAtRange()).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// uploadedAt field in SEARCHABLE_FIELDS registry
+// ---------------------------------------------------------------------------
+describe('SEARCHABLE_FIELDS — uploadedAt field', () => {
+  function getField() {
+    return SEARCHABLE_FIELDS.find((f) => f.key === 'uploadedAt')!;
+  }
+
+  it('contains the uploadedAt key', () => {
+    const keys = SEARCHABLE_FIELDS.map((f) => f.key);
+    expect(keys).toContain('uploadedAt');
+  });
+
+  it('has label "Upload date range" and type "date-range"', () => {
+    const field = getField();
+    expect(field).toBeDefined();
+    expect(field.label).toBe('Upload date range');
+    expect(field.type).toBe('date-range');
+  });
+
+  it('buildWhere with from/to produces createdAt gte/lte', () => {
+    const field = getField();
+    const result = field.buildWhere({
+      from: '2023-01-01T00:00:00.000Z',
+      to: '2023-12-31T00:00:00.000Z',
+    }) as any;
+    expect(result.createdAt.gte).toEqual(new Date('2023-01-01T00:00:00.000Z'));
+    expect(result.createdAt.lte).toEqual(new Date('2023-12-31T00:00:00.000Z'));
+  });
+
+  it('buildWhere with no bounds returns {}', () => {
+    const field = getField();
+    expect(field.buildWhere({})).toEqual({});
+  });
+});
+
+describe('buildWhereFromFields — uploadedAt filter', () => {
+  it('produces an AND fragment containing createdAt gte/lte', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, {
+      uploadedAt: { from: '2023-01-01T00:00:00.000Z', to: '2023-12-31T00:00:00.000Z' },
+    });
+    const clause = inAnd(where, 'createdAt');
+    expect(clause.createdAt.gte).toEqual(new Date('2023-01-01T00:00:00.000Z'));
+    expect(clause.createdAt.lte).toEqual(new Date('2023-12-31T00:00:00.000Z'));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // people field buildWhere via registry
 // ---------------------------------------------------------------------------
 describe('SEARCHABLE_FIELDS people field buildWhere', () => {
