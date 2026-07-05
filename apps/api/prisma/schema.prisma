@@ -551,6 +551,7 @@ model MediaItem {
   @@index([circleId])
   @@index([addedById])
   @@index([capturedAt])
+  @@index([createdAt])
   @@index([contentHash])
   @@index([type])
   @@index([deletedAt])
