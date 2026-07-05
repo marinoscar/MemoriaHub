@@ -20,6 +20,7 @@ export type MenuActionId =
   | 'scan-all'
   | 'scan-select'
   | 'scan-report'
+  | 'organize'
   | 'folders'
   | 'circles'
   | 'app-settings'
@@ -93,6 +94,7 @@ export const MENU_TREE: MenuSubmenu = {
       id: 'settings',
       label: 'Settings',
       children: [
+        { kind: 'action', label: 'Organize folder by date', action: 'organize', loggedOut: true },
         { kind: 'action', label: 'Manage folders', action: 'folders' },
         { kind: 'action', label: 'Manage circles', action: 'circles' },
         { kind: 'action', label: 'App settings', action: 'app-settings' },

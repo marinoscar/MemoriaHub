@@ -31,6 +31,7 @@ import { PickFolders } from './PickFolders.js';
 import { DateRangeFilter } from './DateRangeFilter.js';
 import { SyncDashboard } from './SyncDashboard.js';
 import { ScanScreen } from './ScanScreen.js';
+import { OrganizeScreen } from './OrganizeScreen.js';
 import { ReportView } from './ReportView.js';
 import { SettingsScreen } from './SettingsScreen.js';
 import { FactoryResetScreen } from './FactoryResetScreen.js';
@@ -54,10 +55,11 @@ type Screen =
   | { kind: 'login' }
   | { kind: 'folders' }
   | { kind: 'circles' }
-  | { kind: 'pickFolders'; purpose?: 'sync' | 'scan' }
+  | { kind: 'pickFolders'; purpose?: 'sync' | 'scan' | 'organize' }
   | { kind: 'dateRange'; all?: boolean; folderIds?: number[] }
   | { kind: 'dashboard'; all?: boolean; folderIds?: number[]; retryFailedOnly?: boolean; fromMs?: number; toMs?: number }
   | { kind: 'scan'; all?: boolean; folderIds?: number[] }
+  | { kind: 'organize'; all?: boolean; folderIds?: number[] }
   | { kind: 'scanReport' }
   | { kind: 'help' }
   | { kind: 'settings' }
@@ -215,6 +217,9 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
       case 'scan-report':
         push({ kind: 'screen', screen: { kind: 'scanReport' } });
         break;
+      case 'organize':
+        push({ kind: 'screen', screen: { kind: 'pickFolders', purpose: 'organize' } });
+        break;
       case 'jobs':
         push({ kind: 'screen', screen: { kind: 'jobs' } });
         break;
@@ -371,10 +376,16 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
 
     case 'pickFolders': {
       const purpose = screen.purpose ?? 'sync';
+      const pickTitle =
+        purpose === 'scan'
+          ? 'Scan Selected Folders'
+          : purpose === 'organize'
+            ? 'Organize Folders by Date'
+            : undefined;
       return (
         <PickFolders
           db={db}
-          title={purpose === 'scan' ? 'Scan Selected Folders' : undefined}
+          title={pickTitle}
           onConfirm={(folderIds) =>
             setStack((prev) => [
               ...prev,
@@ -383,7 +394,9 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
                 screen:
                   purpose === 'scan'
                     ? { kind: 'scan', folderIds }
-                    : { kind: 'dateRange', folderIds },
+                    : purpose === 'organize'
+                      ? { kind: 'organize', folderIds }
+                      : { kind: 'dateRange', folderIds },
               },
             ])
           }
@@ -414,6 +427,17 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
     case 'scan':
       return (
         <ScanScreen
+          db={db}
+          all={screen.all}
+          folderIds={screen.folderIds}
+          onHome={resetToRoot}
+          onBack={pop}
+        />
+      );
+
+    case 'organize':
+      return (
+        <OrganizeScreen
           db={db}
           all={screen.all}
           folderIds={screen.folderIds}
