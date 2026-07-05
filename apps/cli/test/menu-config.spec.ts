@@ -65,16 +65,17 @@ describe('menu-config', () => {
       expect(settings).toBeDefined();
     });
 
-    it('within Settings when logged out, only the loggedOut leaf (factory reset) is visible', () => {
+    it('within Settings when logged out, only the loggedOut leaves (organize + factory reset) are visible', () => {
       const settings = findSubmenu('settings')!;
       const nodes = visibleChildren(settings, false);
-      expect(labels(nodes)).toEqual(['Factory reset (delete all local data)']);
+      expect(labels(nodes)).toEqual(['Organize folder by date', 'Factory reset (delete all local data)']);
     });
 
     it('within Settings when logged in, all settings leaves are visible', () => {
       const settings = findSubmenu('settings')!;
       const nodes = visibleChildren(settings, true);
       expect(labels(nodes)).toEqual([
+        'Organize folder by date',
         'Manage folders',
         'Manage circles',
         'App settings',
