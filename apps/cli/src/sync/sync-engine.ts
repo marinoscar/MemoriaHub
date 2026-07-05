@@ -14,7 +14,13 @@ import * as path from 'node:path';
 import { TypedEmitter, EV } from './events.js';
 import { runPool } from './worker-pool.js';
 import { enumerateFiles } from '../files.js';
-import { resolveCapturedAt, type ResolvedCaptureDate } from '../metadata.js';
+import { readMediaMetadata, resolveCapturedAt, type ResolvedCaptureDate } from '../metadata.js';
+import {
+  loadOverrideFile,
+  pickFallback,
+  OverrideValidationError,
+  type FolderOverride,
+} from '../override.js';
 import { sha256File } from '../hash.js';
 import { uploadFile, type UploadPersistence } from '../upload.js';
 import { ApiError, type ApiClient } from '../api.js';
@@ -226,6 +232,22 @@ export class SyncEngine extends TypedEmitter {
     }
 
     // ------------------------------------------------------------------
+    // 2c. Per-run folder-override cache
+    // ------------------------------------------------------------------
+    // Parsed `memoriahub.json` overrides, keyed by the directory a file lives in.
+    // loadOverrideFile does its own fs read + validation on every call, so
+    // memoizing here means each folder's override is read at most once per run
+    // and reused by both the pre-flight validation pass and the worker's register
+    // step. A cached value may be a FolderOverride or null (no override present).
+    const overrideCache = new Map<string, FolderOverride | null>();
+    const getOverrideForDir = (dir: string): FolderOverride | null => {
+      if (overrideCache.has(dir)) return overrideCache.get(dir) ?? null;
+      const override = loadOverrideFile(dir); // may throw OverrideValidationError
+      overrideCache.set(dir, override);
+      return override;
+    };
+
+    // ------------------------------------------------------------------
     // 3. Build the work set
     // ------------------------------------------------------------------
     const workList: Array<{ fileId: number; filePath: string; mimeType: string; folderId: number }> = [];
@@ -343,6 +365,34 @@ export class SyncEngine extends TypedEmitter {
           files.setStatus(rec.id, 'queued');
           workList.push({ fileId: rec.id, filePath, mimeType, folderId });
           this.emit(EV.FILE_QUEUED, { fileId: rec.id, path: filePath });
+        }
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // 3b. Pre-flight: validate every folder override before uploading bytes
+    // ------------------------------------------------------------------
+    // A present-but-invalid memoriahub.json must abort the run BEFORE any media is
+    // uploaded — silently ignoring it would attach the wrong date/location to the
+    // user's photos, which is worse than refusing to run. We validate the distinct
+    // parent directories of the work set exactly once (scope: whole run — any bad
+    // override aborts everything). Successful parses stay cached for the worker to
+    // reuse, so no folder's override is read twice. This runs before the run record
+    // is started (step 4), so an abort leaves no run row and uploads nothing.
+    {
+      const overrideDirs = new Set(workList.map((w) => path.dirname(w.filePath)));
+      for (const dir of overrideDirs) {
+        try {
+          getOverrideForDir(dir);
+        } catch (err) {
+          if (err instanceof OverrideValidationError) {
+            const msg =
+              `Sync aborted — ${err.message}. ` +
+              'Fix or remove that file, then re-run. No media was uploaded.';
+            this.emit(EV.ERROR, { message: msg });
+            return Promise.reject(new Error(msg));
+          }
+          throw err;
         }
       }
     }
@@ -576,10 +626,39 @@ export class SyncEngine extends TypedEmitter {
         // originalCreatedAt records the file's creation time as provenance.
         const basename = path.basename(filePath);
         const type = mimeToMediaType(mimeType);
+        // Read the file's own metadata ONCE. Its capturedAt feeds the capture-date
+        // resolution (so exifr is not parsed twice), and its hasGps/capturedAt gate
+        // the per-folder memoriahub.json fallback below.
+        const meta = await readMediaMetadata(filePath, mimeType);
         // Reuse the date resolved during range filtering when available; otherwise
-        // resolve it now (the no-filter path, unchanged from before).
+        // resolve it now, passing meta.capturedAt so exifr is not parsed again.
         const cap =
-          captureDateCache.get(fileId) ?? (await resolveCapturedAt(filePath, mimeType));
+          captureDateCache.get(fileId) ??
+          (await resolveCapturedAt(filePath, mimeType, meta.capturedAt));
+
+        // Per-folder metadata override (memoriahub.json): fills ONLY the gaps the
+        // file's own EXIF left open. Already validated in the pre-flight pass, so
+        // this is a pure cache hit that never throws.
+        const override = getOverrideForDir(path.dirname(filePath));
+        const picked = pickFallback(override, basename, {
+          hasGps: meta.hasGps,
+          capturedAt: meta.capturedAt,
+        });
+
+        // Date precedence: real EXIF always wins; otherwise an override date beats
+        // the file-timestamp guess; otherwise fall back to the file-timestamp guess
+        // (which may be null). originalCreatedAt is sent unchanged as provenance.
+        let capturedAt: string | null;
+        let capturedAtOffset: number | undefined;
+        if (cap.source === 'exif') {
+          capturedAt = cap.capturedAt;
+        } else if (picked.capturedAt) {
+          capturedAt = picked.capturedAt;
+          capturedAtOffset = picked.capturedAtOffset;
+        } else {
+          capturedAt = cap.capturedAt;
+        }
+
         const mediaItem = await api.post<MediaItem>('/api/media', {
           storageObjectId: objectId,
           type,
@@ -587,8 +666,21 @@ export class SyncEngine extends TypedEmitter {
           originalFilename: basename,
           contentHash: sha256,
           circleId: resolvedCircleId,
-          ...(cap.capturedAt ? { capturedAt: cap.capturedAt } : {}),
+          ...(capturedAt ? { capturedAt } : {}),
+          ...(capturedAtOffset != null ? { capturedAtOffset } : {}),
           ...(cap.originalCreatedAt ? { originalCreatedAt: cap.originalCreatedAt } : {}),
+          // Location fallback only ever fires when the file had no EXIF GPS. The
+          // server still applies it present-only (real EXIF GPS wins server-side).
+          ...(picked.takenLat != null && picked.takenLng != null
+            ? {
+                takenLat: picked.takenLat,
+                takenLng: picked.takenLng,
+                coordSource: 'manual',
+                ...(picked.takenAltitude != null
+                  ? { takenAltitude: picked.takenAltitude }
+                  : {}),
+              }
+            : {}),
         });
 
         // If the server deduplicated (race: another device registered same content first),

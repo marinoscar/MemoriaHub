@@ -32,6 +32,8 @@ import {
   CREATE_SCAN_FILES_IDX_SCAN,
   CREATE_SCAN_FILES_IDX_SCAN_KIND,
   ALTER_SCAN_FILES_ADD_CAPTURED_AT_SOURCE,
+  ALTER_SCAN_FILES_ADD_FALLBACK_DATE,
+  ALTER_SCAN_FILES_ADD_FALLBACK_LOCATION,
 } from './schema.js';
 
 interface Migration {
@@ -142,6 +144,17 @@ const MIGRATIONS: Migration[] = [
       // so the scan preview never presents a guessed date as a real EXIF date.
       // Nullable — existing scan rows get NULL (unknown provenance).
       db.exec(ALTER_SCAN_FILES_ADD_CAPTURED_AT_SOURCE);
+    },
+  },
+  {
+    version: 9,
+    up(db: BetterSqlite3.Database): void {
+      // Add the memoriahub.json fallback-preview flags to scan_files so the scan
+      // dashboard / Excel detail sheet can show which files a sync would date-
+      // stamp or geo-tag from a folder override. NOT NULL DEFAULT 0 — existing
+      // snapshot rows read as "no fallback applied".
+      db.exec(ALTER_SCAN_FILES_ADD_FALLBACK_DATE);
+      db.exec(ALTER_SCAN_FILES_ADD_FALLBACK_LOCATION);
     },
   },
 ];

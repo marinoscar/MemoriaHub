@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { OVERRIDE_FILENAME } from './override.js';
 
 /**
  * Supported media file extensions → MIME type.
@@ -145,6 +146,13 @@ export function enumerateFiles(
         continue;
       }
       if (!entry.isFile()) {
+        continue;
+      }
+
+      // The per-folder metadata override sidecar is never media — skip it
+      // explicitly so it can never be enumerated for upload regardless of
+      // extension mapping.
+      if (entry.name === OVERRIDE_FILENAME) {
         continue;
       }
 

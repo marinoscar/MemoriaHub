@@ -211,3 +211,19 @@ CREATE INDEX IF NOT EXISTS idx_scan_files_scan_kind ON scan_files(scan_id, media
  */
 export const ALTER_SCAN_FILES_ADD_CAPTURED_AT_SOURCE = `
 ALTER TABLE scan_files ADD COLUMN captured_at_source TEXT`;
+
+/**
+ * Migration v9: record whether a per-folder `memoriahub.json` override WOULD
+ * fill a gap the file's own EXIF left open, so the scan preview shows the user
+ * exactly which files a sync would date-stamp / geo-tag from the override before
+ * they upload.  Both flags are booleans stored as 0/1, NOT NULL DEFAULT 0 so
+ * existing snapshot rows read as "no fallback applied".
+ *
+ * fallback_date_applied     — override supplies capturedAt (file has no EXIF date).
+ * fallback_location_applied — override supplies GPS (file has no EXIF location).
+ */
+export const ALTER_SCAN_FILES_ADD_FALLBACK_DATE = `
+ALTER TABLE scan_files ADD COLUMN fallback_date_applied INTEGER NOT NULL DEFAULT 0`;
+
+export const ALTER_SCAN_FILES_ADD_FALLBACK_LOCATION = `
+ALTER TABLE scan_files ADD COLUMN fallback_location_applied INTEGER NOT NULL DEFAULT 0`;

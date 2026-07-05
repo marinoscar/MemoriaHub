@@ -138,5 +138,9 @@ export interface ScanFile {
   taken_lat: number | null;
   taken_lng: number | null;
   captured_at_source: CaptureDateSource | null;
+  /** True when a folder override would supply capturedAt (file has no EXIF date). */
+  fallback_date_applied: boolean;
+  /** True when a folder override would supply GPS (file has no EXIF location). */
+  fallback_location_applied: boolean;
   meta_error: string | null;
 }
