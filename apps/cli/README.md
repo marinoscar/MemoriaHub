@@ -330,6 +330,8 @@ memoriahub sync ~/Photos
 
 Passing folder paths directly to `sync` auto-registers any path not already in the registry. The `-r` flag sets the recursive flag on newly registered folders.
 
+> **Files missing their date or location?** Drop a [`memoriahub.json`](#metadata-override-memoriahubjson) file into the folder to supply a fallback *date taken* and *GPS location* for any media that lacks them in its own EXIF — the built-in way to date and geotag old scans, screenshots, and videos in bulk. It needs no flag; `sync` picks it up automatically. See [Metadata override (`memoriahub.json`)](#metadata-override-memoriahubjson).
+
 | Flag | Description |
 |------|-------------|
 | `--from <date>` | Only include files captured on or after this date (`YYYY-MM-DD` or full ISO 8601) |
@@ -472,6 +474,8 @@ When a file has no EXIF date taken (`DateTimeOriginal` / `CreateDate` / `ModifyD
 
 A genuine EXIF date always takes priority — inference only fills the gap when EXIF has none, and never overrides a real EXIF date even if the server later re-extracts metadata (metadata sync is present-only).
 
+To set an explicit date (and location) yourself instead of relying on the filesystem-timestamp guess, drop a [`memoriahub.json`](#metadata-override-memoriahubjson) file into the folder — an override date takes priority over the timestamp guess while still yielding to a real EXIF date.
+
 This happens automatically during `memoriahub sync` uploads, with no new flags to opt in. Alongside `capturedAt`, the CLI also sends `originalCreatedAt` (the file's creation time) as a provenance field. The offline `scan` preview (see [Scan](#scan-dry-run-preview) below) surfaces the same inferred date, and its Excel/CSV export adds a **Date source** column to the Detail sheet — `EXIF`, `File timestamp`, or blank — so guessed dates are clearly distinguished from real EXIF dates.
 
 ### Per-file status lifecycle
@@ -497,6 +501,65 @@ On startup, any file rows stuck in `uploading` status (from a previous crashed r
 ### Persistence
 
 All state lives in `~/.memoriahub/memoriahub.db`. The `status` command reads from this database — no server connection is needed to check sync status.
+
+---
+
+## Metadata override (`memoriahub.json`)
+
+> **Drop one `memoriahub.json` into a folder to supply the date and location for media that has none of its own.** This is the built-in way to correctly date and geotag old scans, screenshots, messaging-app exports, and videos in bulk — before they ever reach the server.
+
+### Why this file exists
+
+Photos and videos are only as useful as their metadata. A modern phone photo carries an EXIF *date taken* and GPS coordinates, so the server can place it on your timeline and on the map automatically. But a huge amount of real-world media carries **no embedded metadata at all** — scanned prints, screenshots, files re-shared through messaging apps (which strip EXIF), and most camcorder/older video clips. Without a date those files fall back to a best-guess from the file's timestamps; without coordinates they never appear on the map or in place-based browsing.
+
+`memoriahub.json` closes that gap at the source. Instead of hand-editing every file or cleaning up after the fact, you write **one small, hand-editable file per folder** describing the date and place that folder's media was captured, and the CLI fills in only what each file is missing. It exists so you can organize metadata-less media into folders — a trip, a day, a shoebox of scans — and have that context land correctly in MemoriaHub in a single pass.
+
+### How it behaves
+
+- **Fallback only — a file's own EXIF always wins, per field.** The override never overwrites real metadata; it only fills gaps. A photo with an EXIF date but no GPS keeps its date and takes the location from the file; a photo with GPS but no date keeps its GPS and takes the date. Date and location are decided independently.
+- **Videos always receive it.** The CLI reads no EXIF from videos, so a video takes whatever the override supplies — this is the primary way to date and geotag video.
+- **Scoped to its own folder.** An override applies only to media **directly inside the folder that contains it** — it does **not** recurse into subfolders. Segregate a trip/day/batch into its own folder and drop one `memoriahub.json` in it; give a subfolder its own file when it needs different values.
+- **An invalid file stops the sync.** If a `memoriahub.json` is present but malformed (bad JSON, out-of-range coordinates, unknown version, duplicate file entries), the run **aborts with a clear error naming the file and the problem, and uploads nothing for that folder** — a typo can never silently mis-tag your library. A *missing* file is not an error; that folder simply has no override.
+- **Coordinates are reverse-geocoded** by the server into country/region/city, so overridden items show up correctly on the map and in place browsing (recorded with `coordSource: manual`).
+
+### File format
+
+Create a file named exactly `memoriahub.json` (a normal, visible filename) inside the folder:
+
+```json
+{
+  "version": 1,
+  "fallback": {
+    "capturedAt": "2019-06-15T14:30:00-06:00",
+    "location": { "latitude": 9.9281, "longitude": -84.0907, "altitude": 1170 }
+  },
+  "files": [
+    { "name": "IMG_0042.jpg", "location": { "latitude": 9.63, "longitude": -84.66 } }
+  ]
+}
+```
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `version` | yes | Schema version — currently `1`. |
+| `fallback.capturedAt` | no | Fallback *date taken*, ISO 8601 with UTC offset (preferred), or a date-only `YYYY-MM-DD` (expanded to local noon). Used only when the file has no EXIF date. |
+| `fallback.location.latitude` / `longitude` | together | Fallback GPS coordinates (`latitude` −90…90, `longitude` −180…180). Used only when the file has no EXIF GPS. |
+| `fallback.location.altitude` | no | Optional altitude in meters. |
+| `files[]` | no | Array of per-file overrides matched by exact filename (`name`), each carrying the same `capturedAt` / `location` fields. A per-file entry beats the folder `fallback` for that one file. |
+
+The file itself is never uploaded as media — the CLI skips it during enumeration.
+
+### Verify before uploading
+
+Preview exactly which files would receive the fallback — with no uploads and no server calls — using a dry run:
+
+```bash
+memoriahub sync --dry-run ~/Pictures/CostaRica2019
+```
+
+The scan report flags, per file, whether the date and/or location fallback would apply, and surfaces any invalid `memoriahub.json` so you can fix it before committing to an upload.
+
+**Full specification** (schema reference, merge semantics, worked examples): [docs/specs/cli-metadata-override.md](../../docs/specs/cli-metadata-override.md).
 
 ---
 
@@ -752,6 +815,7 @@ The binary name registered in `package.json` is `memoriahub`.
 
 ## Related documentation
 
+- [Metadata override (`memoriahub.json`) specification](../../docs/specs/cli-metadata-override.md)
 - [Phase 05 — CLI Importer](../../docs/plan/phase-05-cli-importer.md)
 - [API Reference](../../docs/API.md)
 - [Architecture](../../docs/ARCHITECTURE.md)
