@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { readMediaMetadata, oldestFileTimestamp, resolveCapturedAt } from '../src/metadata.js';
+import { readMediaMetadata, oldestFileTimestamp, resolveCapturedAt, readExifCaptureDate } from '../src/metadata.js';
 
 // ESM test file — no __dirname available; resolve relative to the process cwd,
 // which Jest sets to the package root (apps/cli) per jest.config.js rootDir.
@@ -196,5 +196,65 @@ describe('resolveCapturedAt', () => {
     // Type/relationship check only — exact value is fs-dependent.
     expect(result.originalCreatedAt).toBe(birthtimeIso);
     expect(result.originalCreatedAt === null || typeof result.originalCreatedAt === 'string').toBe(true);
+  });
+});
+
+/**
+ * readExifCaptureDate() — the organize command's lean EXIF-capture-date-only
+ * reader.  Unlike readMediaMetadata, it has no `error` field: every failure
+ * mode (missing file, unsupported/no-EXIF photo, video mimeType) collapses to
+ * a plain `null` resolution and it never rejects.
+ */
+describe('readExifCaptureDate', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mh-metadata-exifdate-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  describe('photo with real EXIF (fixture)', () => {
+    it('resolves a valid Date for a header-only parse', async () => {
+      const result = await readExifCaptureDate(FIXTURE_PATH, 'image/jpeg');
+
+      expect(result).toBeInstanceOf(Date);
+      expect(isNaN((result as Date).getTime())).toBe(false);
+    });
+
+    it('resolves a valid Date when opts.full=true forces a full-file parse', async () => {
+      const result = await readExifCaptureDate(FIXTURE_PATH, 'image/jpeg', { full: true });
+
+      expect(result).toBeInstanceOf(Date);
+      expect(isNaN((result as Date).getTime())).toBe(false);
+    });
+  });
+
+  describe('video mimeType', () => {
+    it('resolves null immediately without touching the filesystem (path need not exist)', async () => {
+      const result = await readExifCaptureDate('/nonexistent/clip.mp4', 'video/mp4');
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('non-existent file', () => {
+    it('resolves null rather than throwing or rejecting', async () => {
+      const missingPath = path.join(tmpDir, 'does-not-exist.jpg');
+
+      await expect(readExifCaptureDate(missingPath, 'image/jpeg')).resolves.toBeNull();
+    });
+  });
+
+  describe('photo lacking EXIF (random bytes)', () => {
+    it('resolves null', async () => {
+      const randomPath = path.join(tmpDir, 'random.jpg');
+      fs.writeFileSync(randomPath, crypto.randomBytes(256));
+
+      const result = await readExifCaptureDate(randomPath, 'image/jpeg');
+
+      expect(result).toBeNull();
+    });
   });
 });
