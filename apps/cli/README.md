@@ -667,6 +667,82 @@ memoriahub sync ~/Pictures/Vacation2024 --scan 12
 
 ---
 
+## Organize (reorganize by date before syncing)
+
+`organize` is a fully offline, local-only command that reorganizes a folder's media into date-based subfolders before you ever run `sync` — so the on-server layout starts clean instead of mirroring whatever ad-hoc folder structure the files happened to be in.
+
+`organize` is entirely local: no PAT and no server connection are required, the same as `scan`.
+
+### `memoriahub organize`
+
+```bash
+memoriahub organize [folder...] [--all] [--dry-run] [-r|--recursive] [--concurrency <n>] [--json]
+```
+
+```bash
+# Preview the plan for a folder without moving anything
+memoriahub organize ~/Photos --dry-run
+
+# Organize a specific folder
+memoriahub organize ~/Photos
+
+# Organize every registered enabled folder
+memoriahub organize --all
+
+# Recurse into sub-directories of an ad-hoc (not-yet-registered) path
+memoriahub organize ~/Photos -r
+
+# Override the concurrent metadata-read worker count
+memoriahub organize ~/Photos --concurrency 5
+
+# Machine-readable totals instead of the summary box
+memoriahub organize ~/Photos --json
+```
+
+| Flag | Description |
+|------|-------------|
+| `[folder...]` | One or more folder paths to organize; unknown paths are auto-registered, same as `scan`/`sync`. Omit and pass `--all` instead to organize every registered enabled folder. |
+| `--all` | Organize every registered enabled folder instead of specific paths. |
+| `--dry-run` | Preview the plan (what would move, and what would go to `NODATE/`) without moving anything. |
+| `-r`, `--recursive` | Descend into sub-directories when organizing an ad-hoc (not-yet-registered) path. |
+| `--concurrency <n>` | Number of concurrent metadata-read workers. |
+| `--json` | Emit the totals object (`{ total, moved, skipped, conflicts, errors, nodate, byBucket }`) instead of the summary box. |
+
+### Example flow
+
+```bash
+memoriahub organize ~/Photos --dry-run
+memoriahub organize ~/Photos
+```
+
+The first run previews exactly what would move; the second actually performs the moves.
+
+### Resulting layout
+
+`organize` walks the folder for media files using the same extension-based, case-insensitive discovery mechanism as `scan`/`sync` (see [Supported media formats](#supported-media-formats)). For each file it reads the photo's EXIF capture date — from the **full file**, not just the header, so a date located deep in the file is never missed — and moves the file into a `YEAR/MM - Month/` subfolder created inside that same folder, e.g.:
+
+```
+Photos/
+  2023/
+    07 - July/
+      IMG_0001.jpg
+  2024/
+    01 - January/
+      IMG_0042.jpg
+  NODATE/
+    clip.mp4
+```
+
+Files with no EXIF capture date are moved into a top-level `NODATE/` folder instead. **This currently includes every video** — the CLI does not probe video metadata for a capture date, so all video files land in `NODATE/` regardless of any date embedded in the container. This EXIF-only date read is specific to `organize`; unlike sync's [capture-date inference](#capture-date-inference), `organize` does not fall back to filesystem timestamps when EXIF is absent.
+
+`organize` is idempotent: files already sitting in their correct `YEAR/MM - Month/` (or `NODATE/`) bucket are skipped, so re-running the command after it has already organized a folder moves nothing. It is also non-destructive to data — if a move would collide with an existing file of different content at the destination, the CLI appends ` (1)`, ` (2)`, … to the filename rather than overwriting anything. Moves are cross-device safe: if a direct rename fails with `EXDEV` (source and destination are on different filesystems/mount points), the CLI falls back to a copy-then-delete.
+
+### Interactive UI
+
+`organize` is also reachable from the interactive menu under **Settings ▸ Organize folder by date**. It runs a plan → confirm → execute flow: it first computes and shows the full plan (what would move, what would go to `NODATE/`), asks for a `y` confirmation before touching anything (since it moves files), and then executes with a live progress bar.
+
+---
+
 ## Data locations
 
 | Path | Purpose |
