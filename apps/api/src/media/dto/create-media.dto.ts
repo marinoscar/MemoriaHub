@@ -19,6 +19,16 @@ export const createMediaSchema = z.object({
   sourceDeviceName: z.string().max(256).optional(),
   circleId: z.string().uuid(),
   /**
+   * Client-supplied FALLBACK location (e.g. from a per-folder memoriahub.json
+   * override). Applied only when the item has no EXIF GPS: the server-extracted
+   * EXIF location always wins. `coordSource` is restricted to `'manual'` so a
+   * client cannot spoof `'exif'`/`'inferred'` provenance.
+   */
+  takenLat: z.number().min(-90).max(90).optional(),
+  takenLng: z.number().min(-180).max(180).optional(),
+  takenAltitude: z.number().optional(),
+  coordSource: z.literal('manual').optional(),
+  /**
    * Client-provided SHA-256 content hash (64 lowercase hex characters).
    * When supplied, the server uses it to deduplicate: if an active MediaItem
    * with the same (circle_id, content_hash) already exists the existing item is

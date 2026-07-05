@@ -226,6 +226,40 @@ export class MediaService {
       // Never fail createMedia because of a sync issue
     }
 
+    // Fallback location: apply the client-supplied coordinates ONLY when the
+    // server-extracted EXIF did not set a location. The metadata sync above may
+    // have just written EXIF coords directly to the DB, so re-read the row fresh
+    // rather than trusting the stale in-memory `mediaItem`. A geo/reverse-geocode
+    // failure must never fail createMedia — mirror the sync try/catch posture.
+    if (dto.takenLat != null && dto.takenLng != null) {
+      try {
+        const current = await this.prisma.mediaItem.findUnique({
+          where: { id: mediaItem.id },
+          select: { takenLat: true },
+        });
+
+        if (current?.takenLat == null) {
+          const patch = await applyLocation(
+            this.geoProvider,
+            dto.takenLat,
+            dto.takenLng,
+            dto.takenAltitude ?? null,
+            'manual',
+          );
+          await this.prisma.mediaItem.update({
+            where: { id: mediaItem.id },
+            data: patch,
+          });
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Fallback location apply failed for MediaItem ${mediaItem.id}: ${msg}`,
+        );
+        // Never fail createMedia because of a fallback-location issue
+      }
+    }
+
     // Synchronously enqueue all upload-time enrichment jobs (auto_tagging,
     // face_detection, burst_detection) before returning. This is the single
     // authoritative trigger — job rows exist before createMedia returns,
