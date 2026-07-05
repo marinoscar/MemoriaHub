@@ -22,6 +22,7 @@ import { FileRepo } from '../../src/repo/files.js';
 import { RunRepo } from '../../src/repo/runs.js';
 import { SettingsRepo } from '../../src/repo/settings.js';
 import { SyncEngine } from '../../src/sync/sync-engine.js';
+import { OVERRIDE_FILENAME } from '../../src/override.js';
 import { EV } from '../../src/sync/events.js';
 import type {
   RunStartPayload,
@@ -970,6 +971,74 @@ describe('SyncEngine', () => {
       expect(doneEvents).toHaveLength(1);
       const rec = ctx.files.listByFolder(folder.id)[0];
       expect(rec.status).toBe('uploaded');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // per-folder metadata override (memoriahub.json)
+  // -------------------------------------------------------------------------
+
+  describe('per-folder metadata override (memoriahub.json)', () => {
+    it('includes takenLat/takenLng/coordSource from memoriahub.json fallback when the file has no EXIF GPS', async () => {
+      // writeTmpJpeg() writes a fake JPEG header with no real EXIF, so
+      // meta.hasGps will be false for this file — the folder fallback location
+      // should fill the gap.
+      fs.writeFileSync(
+        path.join(tmpDir, OVERRIDE_FILENAME),
+        JSON.stringify({
+          version: 1,
+          fallback: {
+            location: { latitude: 37.7749, longitude: -122.4194 },
+          },
+        }),
+      );
+      writeTmpJpeg(tmpDir, 'override-gps.jpg');
+
+      const postFn = mockResolving({ id: 'media-override-gps' });
+      const ctx = makeEngine(
+        db,
+        {
+          get: mockResolving({ items: [] }),
+          post: postFn,
+        },
+        makeUploadFn('obj-override-gps'),
+      );
+
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
+      await ctx.engine.run({ trigger: 'cli', folderIds: [folder.id] });
+
+      expect(postFn).toHaveBeenCalledTimes(1);
+      const callArgs = postFn.mock.calls[0] as [string, Record<string, unknown>];
+      expect(callArgs[0]).toBe('/api/media');
+      expect(callArgs[1]).toMatchObject({
+        takenLat: 37.7749,
+        takenLng: -122.4194,
+        coordSource: 'manual',
+      });
+    });
+
+    it('does NOT include takenLat/takenLng/coordSource when no memoriahub.json is present in the folder', async () => {
+      writeTmpJpeg(tmpDir, 'no-override.jpg');
+
+      const postFn = mockResolving({ id: 'media-no-override' });
+      const ctx = makeEngine(
+        db,
+        {
+          get: mockResolving({ items: [] }),
+          post: postFn,
+        },
+        makeUploadFn('obj-no-override'),
+      );
+
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
+      await ctx.engine.run({ trigger: 'cli', folderIds: [folder.id] });
+
+      expect(postFn).toHaveBeenCalledTimes(1);
+      const callArgs = postFn.mock.calls[0] as [string, Record<string, unknown>];
+      expect(callArgs[0]).toBe('/api/media');
+      expect(callArgs[1]).not.toHaveProperty('takenLat');
+      expect(callArgs[1]).not.toHaveProperty('takenLng');
+      expect(callArgs[1]).not.toHaveProperty('coordSource');
     });
   });
 
