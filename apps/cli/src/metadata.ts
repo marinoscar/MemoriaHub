@@ -158,6 +158,79 @@ export async function readMediaMetadata(
   }
 }
 
+/**
+ * Read ONLY the EXIF capture date of a media file, returned as a raw `Date`.
+ *
+ * Used by the `organize` command, which buckets files by their recorded
+ * local-time capture date and therefore needs the naive wall-clock `Date`
+ * object rather than an ISO string.
+ *
+ * Videos always resolve to `null` (the CLI never probes video metadata), so
+ * they land in the `NODATE/` bucket — matching the behavior of readMediaMetadata.
+ *
+ * When `opts.full` is true, exifr is told to read the ENTIRE file
+ * (`chunked: false`) rather than just the header, so a capture date recorded
+ * deep in the file is never missed.  This is the explicit requirement of the
+ * organize flow, which trades a little speed for correctness.
+ *
+ * Never throws: any parse failure, missing tags, or genuine I/O error
+ * (ENOENT/EACCES/EISDIR/EPERM/ENOTDIR) resolves to `null`.
+ *
+ * @param filePath  Absolute path to the file.
+ * @param mimeType  MIME type resolved from the file extension (see files.ts).
+ * @param opts      `full: true` reads the whole file instead of just the header.
+ */
+export async function readExifCaptureDate(
+  filePath: string,
+  mimeType: string,
+  opts?: { full?: boolean },
+): Promise<Date | null> {
+  // Videos: no EXIF capture date (no ffmpeg probe) — always NODATE.
+  if (mimeType.startsWith('video/')) {
+    return null;
+  }
+
+  try {
+    const exifr = await getExifr();
+    const parseOpts: Record<string, unknown> = {
+      tiff: true,
+      exif: true,
+      gps: true,
+      ifd0: true,
+      mergeOutput: true,
+      translateValues: false,
+      reviveValues: true,
+      sanitize: true,
+    };
+    // Full read: force exifr to scan the entire file, not just the header, so a
+    // capture date buried deep in the file is still found.
+    if (opts?.full) {
+      parseOpts['chunked'] = false;
+    }
+
+    const raw = await exifr.parse(filePath, parseOpts).catch((e: unknown) => {
+      // Swallow parse failures on readable-but-unsupported/no-EXIF files; treat
+      // genuine I/O errors the same way (return null) rather than throwing — the
+      // organize flow must never abort on a single bad file.
+      void e;
+      return undefined;
+    });
+
+    if (!raw || Object.keys(raw).length === 0) {
+      return null;
+    }
+
+    const value =
+      raw['DateTimeOriginal'] ?? raw['CreateDate'] ?? raw['ModifyDate'];
+    if (value instanceof Date && !isNaN(value.getTime())) {
+      return value;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Capture-date inference from filesystem timestamps
 // ---------------------------------------------------------------------------
