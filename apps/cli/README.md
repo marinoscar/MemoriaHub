@@ -743,6 +743,81 @@ Files with no EXIF capture date are moved into a top-level `NODATE/` folder inst
 
 ---
 
+## Convert (transcode videos to MP4)
+
+`convert` is a fully offline, local-only command that transcodes video files to `.mp4` — turning legacy or awkward formats (MOV from iPhones, MTS/M2TS from AVCHD camcorders, AVI, WMV, and more) into the broadly-compatible MP4 container so they play everywhere and behave well downstream. Like `scan`/`organize`, it needs no PAT and no server connection.
+
+> **Requires [ffmpeg](https://ffmpeg.org/).** `convert` shells out to `ffmpeg`, which must be installed and on your `PATH`. It is not bundled. If it is missing, the command exits with a per-platform install hint:
+> - macOS: `brew install ffmpeg`
+> - Debian/Ubuntu: `sudo apt install ffmpeg`
+> - Windows: `winget install ffmpeg` (or `choco install ffmpeg`)
+
+### `memoriahub convert`
+
+```bash
+memoriahub convert [path...] [--all] [--dry-run] [-r|--recursive] [--concurrency <n>] \
+                   [--formats <list>] [--delete-original] [--overwrite] [--reencode] [--crf <n>] [--json]
+```
+
+```bash
+# Convert a single video file
+memoriahub convert ~/Videos/holiday.MOV
+
+# Convert every video in a folder (files land as .mp4 alongside the originals)
+memoriahub convert ~/Videos
+
+# Preview what would be converted without running ffmpeg
+memoriahub convert ~/Videos --dry-run
+
+# Convert videos in every registered enabled folder
+memoriahub convert --all
+
+# Only convert certain formats
+memoriahub convert ~/Videos --formats mov,mts
+
+# Delete each original after its .mp4 is written and verified
+memoriahub convert ~/Videos --delete-original
+
+# Force a full re-encode (instead of the lossless remux fast-path) at a chosen quality
+memoriahub convert ~/Videos --reencode --crf 22
+```
+
+| Flag | Description |
+|------|-------------|
+| `[path...]` | One or more video **files** and/or **folders**. Files are converted directly; folders are walked for convertible videos (unknown folder paths are auto-registered, same as `scan`/`organize`). Omit and pass `--all` to sweep every registered enabled folder. |
+| `--all` | Convert videos in every registered enabled folder instead of specific paths. |
+| `--dry-run` | Preview how many files would be converted without running ffmpeg. |
+| `-r`, `--recursive` | Descend into sub-directories when auto-registering an ad-hoc folder path. |
+| `--concurrency <n>` | Number of concurrent conversions. |
+| `--formats <list>` | Comma-separated extensions to convert (e.g. `mov,mts`). Default: all recognized non-MP4 videos. |
+| `--delete-original` | Delete each source file after its `.mp4` is verified written. Off by default (originals are kept). |
+| `--overwrite` | Overwrite an existing target `.mp4` instead of skipping it. |
+| `--reencode` | Force a full H.264 re-encode, skipping the lossless remux fast-path. |
+| `--crf <n>` | Quality for the re-encode path (lower = better quality/larger file; default 20). |
+| `--json` | Emit the totals object (`{ total, converted, skipped, errors, deleted, remuxed, reencoded, bytesIn, bytesOut }`) instead of the summary box. |
+
+### What gets converted
+
+`convert` walks folders using the same extension-based, case-insensitive discovery as `scan`/`sync` (see [Supported media formats](#supported-media-formats)) and picks every file whose type is a video **except those already in an MP4 container** (`.mp4`, `.m4v`). That covers MOV, QT, MTS, M2TS, AVI, WMV, ASF, MKV, WEBM, FLV, 3GP, MPEG, VOB, DIVX, and the rest of the recognized video set. Photos are never touched. Use `--formats` to narrow the set.
+
+### How each file is converted
+
+For every source, `convert` first attempts a **lossless remux**: it copies the (usually H.264) video stream untouched and transcodes only the audio to AAC — instant, no visible quality loss — writing `name.mp4` next to the original. If that fails because the source codec isn't MP4-compatible (e.g. ProRes, or an exotic AVI codec), it automatically falls back to a full **H.264 re-encode**. Pass `--reencode` to force the re-encode path for every file, and `--crf` to tune its quality.
+
+Conversions are written to a temporary `.partial` file and renamed into place only on success, so an interrupted run never leaves a truncated `.mp4`. `convert` is idempotent — if the target already exists it is skipped (`--overwrite` to replace) — and non-destructive by default: originals are kept unless you pass `--delete-original`, and name collisions append ` (1)`, ` (2)`, … rather than overwriting.
+
+### Interactive UI
+
+`convert` is also reachable from the interactive menu under **Convert videos to MP4 ▸**, which offers three modes:
+
+- **Convert a single file** — type/paste a path to one video file.
+- **Convert selected folder(s)** — pick from your registered folders.
+- **Convert all registered folders** — sweep everything.
+
+Each mode runs a plan → confirm → execute flow: it counts the convertible files, asks for a `y` confirmation (since it creates files and, with `--delete-original`, removes originals), then converts with a live progress indicator. If ffmpeg is not installed, the screen shows the error with the install hint.
+
+---
+
 ## Data locations
 
 | Path | Purpose |
