@@ -18,6 +18,8 @@ import { TrashPurgeTask } from './trash-purge.task';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaEnrichmentEnqueueListener } from './enrichment/media-enrichment-enqueue.listener';
 import { MediaThumbnailService } from './media-thumbnail.service';
+import { MediaUrlSigningModule } from './signing/media-url-signing.module';
+import { MediaBlobController } from './media-blob.controller';
 
 /**
  * MediaModule
@@ -55,8 +57,9 @@ import { MediaThumbnailService } from './media-thumbnail.service';
     GeoLocationModule,
     SettingsModule,
     EnrichmentModule,
+    MediaUrlSigningModule,
   ],
-  controllers: [MediaController, MediaReprocessController],
+  controllers: [MediaController, MediaReprocessController, MediaBlobController],
   providers: [
     MediaService,
     MediaMetadataSyncService,
