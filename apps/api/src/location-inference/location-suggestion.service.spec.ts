@@ -24,6 +24,7 @@ import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { MediaUrlSigningService } from '../media/signing/media-url-signing.service';
 import { GEO_LOCATION_PROVIDER } from '../media/geo/geo-location-provider.interface';
 import { GEO_CLEAR_COLUMNS } from '../media/geo/geo-result.mapper';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
@@ -92,6 +93,7 @@ describe('LocationSuggestionService', () => {
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: StorageProviderResolver, useValue: mockResolver },
+        { provide: MediaUrlSigningService, useValue: { enabled: false } },
         { provide: GEO_LOCATION_PROVIDER, useValue: mockGeoProvider },
       ],
     }).compile();

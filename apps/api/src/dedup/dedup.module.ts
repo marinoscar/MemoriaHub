@@ -4,6 +4,7 @@ import { StorageProvidersModule } from '../storage/providers/storage-providers.m
 import { PrismaModule } from '../prisma/prisma.module';
 import { CirclesModule } from '../circles/circles.module';
 import { SettingsModule } from '../settings/settings.module';
+import { MediaUrlSigningModule } from '../media/signing/media-url-signing.module';
 import { DuplicateController } from './duplicate.controller';
 import { DuplicateService } from './duplicate.service';
 import { AdminDuplicateController } from './admin-duplicate.controller';
@@ -14,7 +15,7 @@ import { DuplicateBackfillService } from './duplicate-backfill.service';
 import { VisualEmbeddingService } from './visual-embedding.service';
 
 @Module({
-  imports: [EnrichmentModule, StorageProvidersModule, PrismaModule, CirclesModule, SettingsModule],
+  imports: [EnrichmentModule, StorageProvidersModule, PrismaModule, CirclesModule, SettingsModule, MediaUrlSigningModule],
   controllers: [DuplicateController, AdminDuplicateController],
   providers: [
     DuplicateService,

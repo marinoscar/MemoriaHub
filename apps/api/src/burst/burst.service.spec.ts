@@ -21,6 +21,7 @@ import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { MediaUrlSigningService } from '../media/signing/media-url-signing.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { BurstGroupStatus, CircleRole, MediaType } from '@prisma/client';
@@ -188,6 +189,7 @@ describe('BurstService', () => {
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: StorageProviderResolver, useValue: mockResolver },
+        { provide: MediaUrlSigningService, useValue: { enabled: false } },
         { provide: SystemSettingsService, useValue: mockSystemSettings },
       ],
     }).compile();

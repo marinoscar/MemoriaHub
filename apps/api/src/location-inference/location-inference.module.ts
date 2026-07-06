@@ -5,6 +5,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { CirclesModule } from '../circles/circles.module';
 import { SettingsModule } from '../settings/settings.module';
 import { GeoLocationModule } from '../media/geo/geo-location.module';
+import { MediaUrlSigningModule } from '../media/signing/media-url-signing.module';
 import { LocationSuggestionController } from './location-suggestion.controller';
 import { LocationSuggestionService } from './location-suggestion.service';
 import { AdminLocationInferenceController } from './admin-location-inference.controller';
@@ -21,7 +22,7 @@ import { LocationInferenceBackfillService } from './location-inference-backfill.
  * of a circular module dependency (MediaModule never imports this module).
  */
 @Module({
-  imports: [EnrichmentModule, StorageProvidersModule, PrismaModule, CirclesModule, SettingsModule, GeoLocationModule],
+  imports: [EnrichmentModule, StorageProvidersModule, PrismaModule, CirclesModule, SettingsModule, GeoLocationModule, MediaUrlSigningModule],
   controllers: [LocationSuggestionController, AdminLocationInferenceController],
   providers: [
     LocationInferenceService,

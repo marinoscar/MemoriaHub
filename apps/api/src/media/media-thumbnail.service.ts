@@ -6,6 +6,7 @@ import {
   StorageProvider,
 } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { MediaUrlSigningService } from './signing/media-url-signing.service';
 
 /**
  * MediaThumbnailService
@@ -30,6 +31,7 @@ export class MediaThumbnailService {
     private readonly prisma: PrismaService,
     @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
+    private readonly urlSigner: MediaUrlSigningService,
   ) {}
 
   /**
@@ -45,6 +47,14 @@ export class MediaThumbnailService {
     if (typeof key !== 'string' || !key) {
       return null;
     }
+
+    // When the same-origin byte-proxy is enabled, return a signed proxy URL
+    // directly — no provider lookup needed (the proxy resolves the provider at
+    // serve time). This is the Zscaler-safe path.
+    if (this.urlSigner.enabled) {
+      return this.urlSigner.signBlobUrl(key);
+    }
+
     try {
       // Look up the StorageObject row for the thumbnail to route signing
       // through the correct provider (the active provider may have changed

@@ -14,6 +14,7 @@ import {
   StorageProvider,
 } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { MediaUrlSigningService } from '../media/signing/media-url-signing.service';
 import { hammingDistance } from '../burst/burst-detection.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { DuplicateQueryDto } from './dto/duplicate-query.dto';
@@ -60,6 +61,7 @@ export class DuplicateService {
     @Inject(STORAGE_PROVIDER)
     private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
+    private readonly urlSigner: MediaUrlSigningService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -74,6 +76,10 @@ export class DuplicateService {
     const key = meta['thumbnailStorageKey'];
     if (typeof key !== 'string' || !key) {
       return null;
+    }
+    // Same-origin byte-proxy path (Zscaler-safe): no provider lookup needed.
+    if (this.urlSigner.enabled) {
+      return this.urlSigner.signBlobUrl(key);
     }
     try {
       const thumbObj = await this.prisma.storageObject.findFirst({
@@ -103,6 +109,10 @@ export class DuplicateService {
         select: { storageKey: true, storageProvider: true, bucket: true },
       });
       if (!storageObj) return null;
+      // Same-origin byte-proxy path (Zscaler-safe): no provider lookup needed.
+      if (this.urlSigner.enabled) {
+        return this.urlSigner.signBlobUrl(storageObj.storageKey);
+      }
       const provider = await this.resolver.getProviderFor(storageObj.storageProvider, storageObj.bucket);
       return await provider.getSignedDownloadUrl(storageObj.storageKey);
     } catch (err) {

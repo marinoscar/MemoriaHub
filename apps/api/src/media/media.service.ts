@@ -46,6 +46,7 @@ import { GEO_CLEAR_COLUMNS } from './geo/geo-result.mapper';
 import { applyLocation } from './geo/apply-location.util';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
+import { MediaUrlSigningService } from './signing/media-url-signing.service';
 
 /** Shape of each element returned by listLocations. */
 export interface MediaLocation {
@@ -71,6 +72,7 @@ export class MediaService {
     private readonly forwardGeocodeService: ForwardGeocodeService,
     private readonly resolver: StorageProviderResolver,
     private readonly mediaEnrichmentService: MediaEnrichmentService,
+    private readonly urlSigner: MediaUrlSigningService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -579,13 +581,24 @@ export class MediaService {
       select: { storageKey: true, storageProvider: true, bucket: true },
     });
 
+    // Browser-facing full-res URL. When the same-origin byte-proxy is enabled,
+    // return a signed proxy URL (Zscaler-safe); otherwise fall back to a direct
+    // provider presigned URL.
+    const signDownload = async (): Promise<string | null> => {
+      if (!storageObj) return null;
+      if (this.urlSigner.enabled) {
+        return this.urlSigner.signBlobUrl(storageObj.storageKey);
+      }
+      const provider = await this.resolver.getProviderFor(
+        storageObj.storageProvider,
+        storageObj.bucket,
+      );
+      return provider.getSignedDownloadUrl(storageObj.storageKey);
+    };
+
     const [thumbnailUrl, downloadUrl] = await Promise.all([
       this.signThumb(item.metadata),
-      storageObj
-        ? this.resolver
-            .getProviderFor(storageObj.storageProvider, storageObj.bucket)
-            .then((p) => p.getSignedDownloadUrl(storageObj.storageKey))
-        : Promise.resolve(null),
+      signDownload(),
     ]);
 
     const { mediaTags, ...rest } = item;
@@ -1892,6 +1905,12 @@ export class MediaService {
     if (typeof key !== 'string' || !key) {
       return null;
     }
+
+    // Same-origin byte-proxy path (Zscaler-safe): no provider lookup needed.
+    if (this.urlSigner.enabled) {
+      return this.urlSigner.signBlobUrl(key);
+    }
+
     try {
       // Look up the StorageObject row for the thumbnail to route signing
       // through the correct provider (the active provider may have changed

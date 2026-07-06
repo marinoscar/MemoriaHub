@@ -5,6 +5,7 @@ import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER, StorageProvider } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { MediaUrlSigningService } from '../media/signing/media-url-signing.service';
 import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from '../media/geo/geo-location-provider.interface';
 import { applyLocation } from '../media/geo/apply-location.util';
 import { GEO_CLEAR_COLUMNS } from '../media/geo/geo-result.mapper';
@@ -23,6 +24,7 @@ export class LocationSuggestionService {
     @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
     @Inject(GEO_LOCATION_PROVIDER) private readonly geoProvider: GeoLocationProvider,
+    private readonly urlSigner: MediaUrlSigningService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -37,6 +39,10 @@ export class LocationSuggestionService {
     const key = meta['thumbnailStorageKey'];
     if (typeof key !== 'string' || !key) {
       return null;
+    }
+    // Same-origin byte-proxy path (Zscaler-safe): no provider lookup needed.
+    if (this.urlSigner.enabled) {
+      return this.urlSigner.signBlobUrl(key);
     }
     try {
       const thumbObj = await this.prisma.storageObject.findFirst({

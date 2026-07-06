@@ -22,6 +22,7 @@ import { CircleMembershipService } from '../circles/circle-membership.service';
 import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { MediaUrlSigningService } from './signing/media-url-signing.service';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { randomUUID } from 'crypto';
 
@@ -154,6 +155,7 @@ describe('MediaService — archive & trash methods', () => {
         { provide: GEO_LOCATION_PROVIDER, useValue: mockGeoProvider },
         { provide: ForwardGeocodeService, useValue: mockForwardGeocodeService },
         { provide: StorageProviderResolver, useValue: { getProviderFor: jest.fn() } },
+        { provide: MediaUrlSigningService, useValue: { enabled: false } },
         {
           provide: MediaEnrichmentService,
           useValue: { enqueueUploadEnrichment: jest.fn().mockResolvedValue(undefined), enqueueForStorageObject: jest.fn().mockResolvedValue(undefined) },

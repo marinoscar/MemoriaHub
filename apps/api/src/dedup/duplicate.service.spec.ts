@@ -27,6 +27,7 @@ import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { MediaUrlSigningService } from '../media/signing/media-url-signing.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { CircleRole, DuplicateGroupStatus, JobReason, JobStatus, MediaType } from '@prisma/client';
 import { DuplicateQueryDto } from './dto/duplicate-query.dto';
@@ -156,6 +157,7 @@ describe('DuplicateService', () => {
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: StorageProviderResolver, useValue: mockResolver },
+        { provide: MediaUrlSigningService, useValue: { enabled: false } },
       ],
     }).compile();
 

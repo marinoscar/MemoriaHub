@@ -28,6 +28,7 @@ import { CircleMembershipService } from '../circles/circle-membership.service';
 import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { MediaUrlSigningService } from './signing/media-url-signing.service';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 
 const CIRCLE_ID = 'circle-uuid-0001-0002-0003';
@@ -159,6 +160,7 @@ describe('MediaService.createMedia — fallback location', () => {
         { provide: GEO_LOCATION_PROVIDER, useValue: mockGeoProvider },
         { provide: ForwardGeocodeService, useValue: mockForwardGeocodeService },
         { provide: StorageProviderResolver, useValue: mockResolver },
+        { provide: MediaUrlSigningService, useValue: { enabled: false } },
         { provide: MediaEnrichmentService, useValue: mockMediaEnrichmentService },
       ],
     }).compile();

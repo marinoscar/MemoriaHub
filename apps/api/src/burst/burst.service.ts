@@ -14,6 +14,7 @@ import {
   StorageProvider,
 } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { MediaUrlSigningService } from '../media/signing/media-url-signing.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { FEATURE_KEYS } from '../common/types/settings.types';
 import { BurstQueryDto } from './dto/burst-query.dto';
@@ -31,6 +32,7 @@ export class BurstService {
     private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
     private readonly systemSettings: SystemSettingsService,
+    private readonly urlSigner: MediaUrlSigningService,
   ) {}
 
   /**
@@ -75,6 +77,10 @@ export class BurstService {
     const key = meta['thumbnailStorageKey'];
     if (typeof key !== 'string' || !key) {
       return null;
+    }
+    // Same-origin byte-proxy path (Zscaler-safe): no provider lookup needed.
+    if (this.urlSigner.enabled) {
+      return this.urlSigner.signBlobUrl(key);
     }
     try {
       // Look up the thumbnail StorageObject row to find which provider+bucket it lives on.
