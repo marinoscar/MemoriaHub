@@ -391,6 +391,12 @@ App-wide geocode backfill across all circles (not circle-scoped). Processes item
 - `GET /api/media/geo/reverse?lat=&lng=` - On-demand reverse geocoding; provider resolved per-call from system setting `geo.reverseProvider` (`offline`|`nominatim`|`google`), selected in Admin Settings → Geo (fallback: `GEO_PROVIDER` env var; default `offline`)
 - `GET /api/media/geo/search?q=&limit=` - Forward geocoding via Nominatim; requires system setting `geo.forwardSearchEnabled=true` (fallback: `GEO_FORWARD_SEARCH_ENABLED=true`)
 
+### Media — Byte Proxy
+`GET /api/media/blob?k=<urlencoded storageKey>&exp=<unixSeconds>&sig=<hex hmac-sha256>` - Same-origin, `@Public()` endpoint (no JWT) that streams raw media bytes; authorizes via the HMAC token itself rather than a session. Fixes a bug where users behind a corporate proxy (Zscaler) got 403 Forbidden loading media: browser-facing thumbnails/downloads previously used AWS SigV4 presigned URLs on `*.r2.cloudflarestorage.com`, and Zscaler injects a `_sm_nck=1` query param that invalidates the SigV4 signature. This endpoint reads only `k`, `exp`, `sig` and ignores any extra injected query params. Signature = `HMAC-SHA256(secret, "${storageKey}\n${exp}")`, timing-safe compared; request is rejected if `exp < now`. Declared on the static path `media/blob` so it is never shadowed by `media/:id`.
+- Bad/missing/expired signature → `403`; provider/object unresolvable → `404`; success streams bytes with `Content-Type`, `Content-Disposition: inline`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: private, max-age=<ttl>`, `Accept-Ranges: bytes`; video `Range` requests → `206`.
+- When `MEDIA_PROXY_ENABLED` is true (default), `thumbnailUrl` (grid/search/bursts/duplicates/faces/person cover faces), `downloadUrl` (`GET /api/media/:id`; lightbox full image, video `<source>`, download link), and duplicate `previewUrl` are all returned as relative `/api/media/blob?...` URLs instead of direct provider presigned URLs. **Not proxied** (unchanged, still real presigned URLs): multipart upload part URLs, init-upload, admin/CLI object download (`storage/objects/*`), backup, storage-migration server-to-server copy, and the public-share proxy (`GET /api/public/shares/:token/media/:idx`).
+- **Limitation:** raw original bytes are streamed; embedded EXIF/GPS is NOT stripped (same limitation as public shares). See [Media Byte Proxy spec](docs/specs/media-proxy.md).
+
 ### Media — Circle Dashboard
 - `GET /api/media/dashboard?circleId=` - On This Day + recent/favorites + review-queue counts; also returns `pendingBurstGroups` count when `features.burstDetection` is enabled globally
 
@@ -828,6 +834,13 @@ See [Bulk Import Resilience](docs/specs/bulk-import-resilience.md) for the full 
 
 Note: Storage provider credentials (S3, R2, local) are now configurable in the Admin UI under Storage Providers. The `S3_*` environment variables and `STORAGE_PROVIDER` serve as bootstrap defaults and fallback for objects created before Admin UI configuration. The active provider for new uploads is controlled by the `storage.activeProvider` system setting (string; default: env `STORAGE_PROVIDER` or `'s3'`); switching the active provider affects new uploads only — existing objects are NOT migrated automatically.
 
+**Media Proxy:**
+
+Same-origin authenticated byte-proxy for browser-facing media (`GET /api/media/blob`), added to work around corporate TLS-inspecting proxies (e.g. Zscaler) that inject a `_sm_nck` query param into every HTTP(S) request — this invalidates AWS SigV4 presigned-URL signatures (which are computed over the exact query string) served directly from `*.r2.cloudflarestorage.com`, causing 403s in the browser. Routing bytes through our own API/domain sidesteps SigV4 entirely: our own HMAC token ignores injected params, and the browser never talks to R2 directly for these URLs. See [Media Byte Proxy spec](docs/specs/media-proxy.md).
+- `MEDIA_PROXY_ENABLED` - When `true` (default), signers emit relative `/api/media/blob?...` URLs for `thumbnailUrl`/`downloadUrl`/`previewUrl` instead of direct provider presigned URLs. Set to `false` to revert to direct R2/S3 presigned URLs (e.g. to roll back if the proxy causes unexpected load).
+- `MEDIA_PROXY_URL_TTL_SECONDS` - TTL in seconds for both the signed proxy URL's `exp` claim and the `Cache-Control: private, max-age=<ttl>` response header (default: `3600`)
+- `MEDIA_URL_SIGNING_SECRET` - HMAC-SHA256 secret used to sign/verify `GET /api/media/blob` tokens; falls back to `JWT_SECRET` if unset
+
 **Burst Detection:**
 - `BURST_DETECTION_ENABLED` - Environment kill-switch for auto-enqueue on upload; set to `false` to disable `BurstEnqueueListener` regardless of system settings. The runtime toggle is `features.burstDetection` in system settings; this env var is a hard override for CI/test environments (default: `true`)
 
@@ -950,6 +963,7 @@ Detailed specs live under `docs/specs/`:
 - [Location Inference](docs/specs/location-inference.md) — coord_source provenance model and its three writers, antimeridian-safe interpolation/extrapolation algorithm with exact confidence formula and auto-apply gate, single-sweep-job-per-circle backfill architecture with snapshot invariant and force semantics, review/admin API, algorithm positioning vs. ExifTool/gpscorrelate/PhotoPrism/Immich/Google Photos
 - [Social Media Detection](docs/specs/social-media-detection.md) — gate-then-fan-out video routing that withholds `video_face_detection` pending classification, two-tier (ffprobe metadata/filename rule catalog + on-server OCR) detection engine, `media_social_status`/`social_media_source`/`MediaTagSource.system` data model and tag-protection rules, settings/env configuration, admin backfill and status API, Doctor `ai.socialMedia` check, precision-over-recall rationale and WhatsApp/Telegram re-encode limitation
 - [Doctor Diagnostics](docs/specs/doctor.md) — on-demand configuration health sweep, 21-check catalog across 7 sections, status semantics, `runCheck` concurrency/timeout/exception-normalization design, reuse of existing settings test-connection services
+- [Media Byte Proxy](docs/specs/media-proxy.md) — same-origin HMAC-token byte-proxy fixing Zscaler `_sm_nck` SigV4 signature invalidation, `<img>`/`<video>` auth constraint, bytes-through-VPS trade-off, C-Worker future alternative, revert switch, EXIF/GPS-not-stripped limitation
 
 ## Audits
 
