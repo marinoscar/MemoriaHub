@@ -25,13 +25,14 @@ describe('menu-config', () => {
   // ---------------------------------------------------------------------------
 
   describe('visibleChildren', () => {
-    it('returns all 8 top-level nodes when logged in', () => {
+    it('returns all 9 top-level nodes when logged in', () => {
       const nodes = visibleChildren(MENU_TREE, true);
-      expect(nodes).toHaveLength(8);
+      expect(nodes).toHaveLength(9);
       expect(labels(nodes)).toEqual([
         'Login / Change server',
         'Sync',
         'Scan (dry-run preview)',
+        'Convert videos to MP4',
         'Reports',
         'Settings',
         'Tools',
@@ -40,11 +41,12 @@ describe('menu-config', () => {
       ]);
     });
 
-    it('returns exactly [Login, Scan, Settings, Help, Quit] when logged out', () => {
+    it('returns exactly [Login, Scan, Convert, Settings, Help, Quit] when logged out', () => {
       const nodes = visibleChildren(MENU_TREE, false);
       expect(labels(nodes)).toEqual([
         'Login / Change server',
         'Scan (dry-run preview)',
+        'Convert videos to MP4',
         'Settings',
         'Help',
         'Quit',
@@ -120,6 +122,18 @@ describe('menu-config', () => {
       expect(actions).toEqual(['scan-all', 'scan-select', 'scan-report']);
       const nodes = visibleChildren(scan!, false);
       expect(nodes).toHaveLength(3);
+    });
+
+    it('finds the convert submenu with its 3 loggedOut action children', () => {
+      const convert = findSubmenu('convert');
+      expect(convert).toBeDefined();
+      expect(convert!.children.every((c) => c.kind === 'action')).toBe(true);
+      const actions = convert!.children.map((c) =>
+        c.kind === 'action' ? c.action : null,
+      );
+      expect(actions).toEqual(['convert-file', 'convert-select', 'convert-all']);
+      // Fully offline — every child is visible when logged out.
+      expect(visibleChildren(convert!, false)).toHaveLength(3);
     });
 
     it('returns a reports submenu whose children match the report registry ids', () => {
