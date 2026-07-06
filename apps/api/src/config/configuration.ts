@@ -87,6 +87,24 @@ export default () => {
 
   logLevel: process.env.LOG_LEVEL || 'info',
 
+  // Same-origin media byte-proxy (Zscaler-safe browser media delivery).
+  // When enabled, browser-facing thumbnail/download URLs are served through
+  // GET /api/media/blob (HMAC-signed, same-origin) instead of cross-origin R2
+  // presigned URLs that a corporate proxy could invalidate by injecting query
+  // params (e.g. `_sm_nck`). When disabled, signers fall back to direct
+  // provider presigned URLs (legacy behaviour).
+  media: {
+    proxyEnabled: process.env.MEDIA_PROXY_ENABLED !== 'false',
+    proxyUrlTtlSeconds: parseInt(
+      process.env.MEDIA_PROXY_URL_TTL_SECONDS || '3600',
+      10,
+    ),
+    // Dedicated HMAC secret for signed blob URLs; falls back to JWT_SECRET when
+    // unset so no new required env var is introduced for existing deployments.
+    urlSigningSecret:
+      process.env.MEDIA_URL_SIGNING_SECRET || process.env.JWT_SECRET || '',
+  },
+
   // Geo Services
   geo: {
     provider: process.env.GEO_PROVIDER || 'offline',
