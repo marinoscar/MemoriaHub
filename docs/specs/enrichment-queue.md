@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.4 |
+| **Version** | 1.5 |
 | **Last Updated** | July 2026 |
 
 ---
@@ -372,6 +372,17 @@ Handlers throw `RateLimitError` directly for known provider responses (auto-tagg
 
 Unknown handler types fail immediately without retry. This prevents an infinite retry loop for jobs created before a handler was removed.
 
+### Active Per-Job Timeout
+
+Each `handler.process(job)` call is raced against an active timeout controlled by `ENRICHMENT_JOB_TIMEOUT_MS` (default `600000`, i.e. 10 minutes; `0` disables it). If the handler runs longer than this budget, the worker abandons the wait: the timeout rejects with a plain `Error` (`enrichment job execution timed out after <ms>ms (type="...")`), which — being neither a `RateLimitError` nor a `classifyRateLimit` match — flows through the **normal-failure retry path** exactly like any other thrown error: `attempts++`, exponential backoff via `scheduledFor`, retry while `attempts < MAX_ATTEMPTS`, then permanent `failed` with the timeout message as `lastError`.
+
+The point of the active timeout is that the worker slot is **freed immediately** when the timeout fires. Before this, a hung handler call blocked the worker indefinitely — at `ENRICHMENT_WORKER_CONCURRENCY=1` a single hang stalled the entire queue, and recovery depended solely on the `EnrichmentStuckResetTask` cron (runs every 10 min, resets jobs `running` past the 15-min `ENRICHMENT_STUCK_MINUTES` threshold), a ≈25-minute worst case. With the active timeout, one hang no longer stalls the queue: the tick completes, the slot is released, and the next tick claims the following job.
+
+Two caveats follow from JavaScript's execution model:
+
+- **The underlying work is not force-cancelled.** JS cannot abort a running promise; the abandoned `handler.process` promise is left to settle in the background. `Promise.race` still attaches reactions to it, so a late rejection does **not** surface as an `unhandledRejection`. Set `ENRICHMENT_JOB_TIMEOUT_MS` comfortably above the longest *legitimate* single-job runtime (e.g. long video face detection) so valid work is never killed mid-flight.
+- **`EnrichmentStuckResetTask` remains as a crash backstop.** The active timeout only covers a handler that hangs while the worker process is alive. If the worker process itself dies (OOM kill, container restart) mid-job, the row is orphaned in `running` with no live timer to fire. The stuck-reset cron still recovers those rows — see [Section 14](#14-operational-notes).
+
 ---
 
 ## 9. Priority Conventions
@@ -691,6 +702,7 @@ No dashboard code changes are needed.
 | `FACE_JOB_POLL_MS` | `'5000'` | Legacy alias for `ENRICHMENT_JOB_POLL_MS`. |
 | `ENRICHMENT_WORKER_CONCURRENCY` | `'1'` | Jobs to attempt per tick. |
 | `FACE_WORKER_CONCURRENCY` | `'1'` | Legacy alias for `ENRICHMENT_WORKER_CONCURRENCY`. |
+| `ENRICHMENT_JOB_TIMEOUT_MS` | `600000` | Active per-job execution timeout (ms). A handler running longer is aborted, its worker slot freed, and the job routed through the normal-failure retry path (`attempts++`, backoff, permanent-fail after `ENRICHMENT_MAX_ATTEMPTS`). `0` disables. Must exceed the longest legitimate single-job runtime. See [Section 8 — Active Per-Job Timeout](#active-per-job-timeout). |
 
 ### Normal-failure retry
 
@@ -716,7 +728,7 @@ For variables specific to the `face_detection` handler (thresholds, providers, i
 
 ## 14. Operational Notes
 
-**Stuck-running recovery.** If the worker process crashes or the container restarts while a job is in `running` status, that job will never transition out of `running` on its own. Use `POST /api/admin/jobs/reset-stuck { olderThanMinutes: 10 }` to return stale running jobs to `pending`. The default 10-minute threshold is conservative; adjust `olderThanMinutes` if your handlers are expected to take longer.
+**Stuck-running recovery.** If the worker process crashes or the container restarts while a job is in `running` status, that job will never transition out of `running` on its own. This is the crash backstop that the automatic `EnrichmentStuckResetTask` cron and the manual `POST /api/admin/jobs/reset-stuck { olderThanMinutes: 10 }` endpoint exist for — both return stale running jobs to `pending`. Note this is distinct from a handler that *hangs* while the worker is still alive: that case is now handled promptly by the active per-job timeout (`ENRICHMENT_JOB_TIMEOUT_MS`, see [Section 8 — Active Per-Job Timeout](#active-per-job-timeout)), which frees the slot without waiting for the stuck-reset cron. The stuck-reset path only covers rows orphaned by a dead worker process. The default 10-minute threshold is conservative; adjust `olderThanMinutes` if your handlers are expected to take longer.
 
 **Idempotency.** `enqueue()` checks for existing `pending` or `running` jobs with the same `type` and `mediaItemId`. Calling enqueue multiple times for the same photo is safe. This means the backfill endpoint and the upload listener can both call enqueue without creating duplicate work, and a backfill can be retried without double-processing items that were already queued.
 
@@ -787,3 +799,4 @@ Each of these would: implement `EnrichmentHandler`, self-register via `onModuleI
 | 1.2 | June 2026 | AI Assistant | Upload enrichment trigger model (Section 10): synchronous enqueue in `createMedia` via `MediaEnrichmentService`; single backstop `MediaEnrichmentEnqueueListener`; gating table with feature flags and env kill-switches; feature-flag caching; metadata sync separation; client-never-enqueues principle |
 | 1.3 | June 2026 | AI Assistant | Registered handlers reference (Section 15): add `job_history_purge` global handler — nightly cron purge of terminal job rows past retention cutoff |
 | 1.4 | July 2026 | AI Assistant | Registered handlers reference (Section 15): add `social_media_detection` handler and the new "Gate-then-fan-out pattern" subsection describing how it withholds and conditionally re-enqueues `video_face_detection` |
+| 1.5 | July 2026 | AI Assistant | Active per-job execution timeout: new `ENRICHMENT_JOB_TIMEOUT_MS` knob races each `handler.process` call, frees the worker slot immediately on timeout, and routes the hang through the normal-failure retry path; Section 8 subsection, Section 13 config row, Section 14 stuck-reset clarification (cron is now a crash backstop only) |

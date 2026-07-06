@@ -43,6 +43,12 @@ const RL_BASE_MS = getEnvInt('ENRICHMENT_RATELIMIT_BASE_MS', 30_000);
 const RL_MAX_MS = getEnvInt('ENRICHMENT_RATELIMIT_MAX_MS', 900_000);
 const RL_MAX_HITS = getEnvInt('ENRICHMENT_RATELIMIT_MAX_HITS', 10);
 
+// Active per-job execution timeout. A handler that runs longer than this is
+// aborted (its worker slot freed) and routed through the normal-failure retry
+// path. 0 disables the timeout. Must exceed the longest LEGITIMATE single-job
+// runtime (e.g. long video face detection) to avoid killing valid work.
+const JOB_TIMEOUT_MS = getEnvInt('ENRICHMENT_JOB_TIMEOUT_MS', 600_000); // 10 min
+
 @Injectable()
 export class EnrichmentJobWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EnrichmentJobWorker.name);
@@ -143,6 +149,28 @@ export class EnrichmentJobWorker implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /**
+   * Race a job's work against a timeout. If the timeout wins, rejects with a
+   * timeout Error (which the caller's catch routes through the normal-failure
+   * retry path). The underlying work promise is left to settle in the background
+   * — JS cannot force-cancel it — but the worker slot is freed immediately so the
+   * queue keeps moving. Promise.race attaches reactions to `work`, so a late
+   * rejection does not surface as an unhandledRejection.
+   */
+  private withTimeout<T>(work: Promise<T>, ms: number, job: EnrichmentJob): Promise<T> {
+    let timer: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`enrichment job execution timed out after ${ms}ms (type="${job.type}")`));
+      }, ms);
+      // Don't let this timer keep the process alive on its own.
+      if (typeof (timer as unknown as { unref?: () => void }).unref === 'function') {
+        (timer as unknown as { unref: () => void }).unref();
+      }
+    });
+    return Promise.race([work, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
+  }
+
   private async processJob(job: EnrichmentJob): Promise<void> {
     const handler = this.registry.get(job.type);
 
@@ -171,7 +199,11 @@ export class EnrichmentJobWorker implements OnModuleInit, OnModuleDestroy {
         await this.throttle.acquire(throttleKey);
       }
 
-      await handler.process(job);
+      if (JOB_TIMEOUT_MS > 0) {
+        await this.withTimeout(handler.process(job), JOB_TIMEOUT_MS, job);
+      } else {
+        await handler.process(job);
+      }
 
       // Successful call — decay the exponential ramp toward baseline.
       if (throttleKey) {

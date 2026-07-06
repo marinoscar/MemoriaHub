@@ -504,4 +504,138 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       expect(retryUpdate.data.attempts).toBe(1);
     });
   });
+
+  // =========================================================================
+  // Active per-job execution timeout (ENRICHMENT_JOB_TIMEOUT_MS)
+  //
+  // JOB_TIMEOUT_MS is read into a module-level const at import time (default
+  // 600_000). Rather than re-import the module with a smaller env value — which
+  // breaks NestJS DI token identity under jest.isolateModules — these tests use
+  // the default timeout and simply advance Jest fake timers past it (virtual
+  // time is instantaneous regardless of magnitude), keeping the test fast and
+  // deterministic. A hung handler is raced against the timeout; when the timeout
+  // wins it rejects with a plain Error that flows through the normal-failure
+  // retry path (attempts++, backoff, permanent-fail after MAX_ATTEMPTS).
+  // =========================================================================
+
+  describe('active per-job timeout (ENRICHMENT_JOB_TIMEOUT_MS)', () => {
+    // Matches the module-level JOB_TIMEOUT_MS default (env var not set in tests).
+    const TIMEOUT_MS = 600_000;
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('times out a hung handler and routes it through the normal-failure retry path', async () => {
+      const { worker, mockPrisma, mockHandler } = await buildWorker(EnrichmentJobWorker);
+
+      // 'metadata_extraction' has no provider throttle key, keeping the race
+      // free of unrelated cooldown timers under fake timers.
+      const job = makeJob({ type: 'metadata_extraction', attempts: 0, rateLimitHits: 0 });
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
+      (mockPrisma.enrichmentJob.update as jest.Mock)
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running })
+        .mockResolvedValueOnce({});
+
+      // Handler never resolves — only the timeout can settle the race.
+      mockHandler.process.mockReturnValue(new Promise<void>(() => {}));
+
+      jest.useFakeTimers();
+      const tickPromise = (worker as any).tick();
+      await jest.advanceTimersByTimeAsync(TIMEOUT_MS + 500);
+      await tickPromise;
+
+      const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
+      const timeoutUpdate = updateCalls[updateCalls.length - 1][0];
+
+      // normal-failure path: attempts incremented, rateLimitHits untouched
+      expect(timeoutUpdate.data.attempts).toBe(1);
+      expect(timeoutUpdate.data.rateLimitHits).toBeUndefined();
+      // still retryable (1 < MAX_ATTEMPTS default 3): pending + future scheduledFor
+      expect(timeoutUpdate.data.status).toBe(JobStatus.pending);
+      expect(timeoutUpdate.data.scheduledFor).toBeInstanceOf(Date);
+      expect((timeoutUpdate.data.scheduledFor as Date).getTime()).toBeGreaterThan(Date.now());
+      // timeout message stored as lastError
+      expect(String(timeoutUpdate.data.lastError)).toContain('timed out');
+      // not a permanent failure yet
+      expect(timeoutUpdate.data.finishedAt).toBeUndefined();
+
+      worker.onModuleDestroy();
+    });
+
+    it('permanently fails a repeatedly-hanging job once attempts reach MAX_ATTEMPTS', async () => {
+      const { worker, mockPrisma, mockHandler } = await buildWorker(EnrichmentJobWorker);
+
+      // attempts=2 → this timeout makes newAttempts=3 = MAX_ATTEMPTS (default 3) → failed
+      const job = makeJob({ type: 'metadata_extraction', attempts: 2, rateLimitHits: 0 });
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
+      (mockPrisma.enrichmentJob.update as jest.Mock)
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running })
+        .mockResolvedValueOnce({});
+
+      mockHandler.process.mockReturnValue(new Promise<void>(() => {}));
+
+      jest.useFakeTimers();
+      const tickPromise = (worker as any).tick();
+      await jest.advanceTimersByTimeAsync(TIMEOUT_MS + 500);
+      await tickPromise;
+
+      const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
+      const failUpdate = updateCalls[updateCalls.length - 1][0];
+
+      expect(failUpdate.data.attempts).toBe(3);
+      expect(failUpdate.data.status).toBe(JobStatus.failed);
+      expect(failUpdate.data.finishedAt).toBeInstanceOf(Date);
+      expect(failUpdate.data.scheduledFor).toBeNull();
+      expect(String(failUpdate.data.lastError)).toContain('timed out');
+
+      worker.onModuleDestroy();
+    });
+
+    it('frees the worker slot: a later tick claims and processes the next job after a timeout', async () => {
+      const { worker, mockPrisma, mockHandler } = await buildWorker(EnrichmentJobWorker);
+
+      const jobA = makeJob({ id: 'job-A', type: 'metadata_extraction' });
+      const jobB = makeJob({ id: 'job-B', type: 'metadata_extraction' });
+
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock)
+        .mockResolvedValueOnce(jobA) // tick 1 claims A
+        .mockResolvedValueOnce(jobB) // tick 2 claims B
+        .mockResolvedValue(null);
+      // The claim update returns the claimed job (processJob uses its id/type),
+      // so each tick's claim must echo the right job back.
+      (mockPrisma.enrichmentJob.update as jest.Mock)
+        .mockResolvedValueOnce({ ...jobA, status: JobStatus.running }) // tick 1 claim
+        .mockResolvedValueOnce({}) // tick 1 timeout-failure update
+        .mockResolvedValueOnce({ ...jobB, status: JobStatus.running }) // tick 2 claim
+        .mockResolvedValueOnce({}); // tick 2 success update
+
+      // A hangs (times out); B resolves normally.
+      mockHandler.process
+        .mockReturnValueOnce(new Promise<void>(() => {}))
+        .mockResolvedValueOnce(undefined);
+
+      jest.useFakeTimers();
+
+      // Tick 1: job A times out and its slot is released.
+      const t1 = (worker as any).tick();
+      await jest.advanceTimersByTimeAsync(TIMEOUT_MS + 500);
+      await t1;
+
+      // Tick 2: job B is claimed and succeeds — proving the timed-out job did
+      // not permanently block processing.
+      const t2 = (worker as any).tick();
+      await jest.advanceTimersByTimeAsync(0);
+      await t2;
+
+      expect(mockHandler.process).toHaveBeenCalledTimes(2);
+
+      const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
+      const lastUpdate = updateCalls[updateCalls.length - 1][0];
+      expect(lastUpdate.where.id).toBe('job-B');
+      expect(lastUpdate.data.status).toBe(JobStatus.succeeded);
+
+      worker.onModuleDestroy();
+    });
+  });
 });
