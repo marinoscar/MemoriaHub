@@ -32,6 +32,8 @@ import { DateRangeFilter } from './DateRangeFilter.js';
 import { SyncDashboard } from './SyncDashboard.js';
 import { ScanScreen } from './ScanScreen.js';
 import { OrganizeScreen } from './OrganizeScreen.js';
+import { ConvertScreen } from './ConvertScreen.js';
+import { ConvertFileInput } from './ConvertFileInput.js';
 import { ReportView } from './ReportView.js';
 import { SettingsScreen } from './SettingsScreen.js';
 import { FactoryResetScreen } from './FactoryResetScreen.js';
@@ -55,11 +57,13 @@ type Screen =
   | { kind: 'login' }
   | { kind: 'folders' }
   | { kind: 'circles' }
-  | { kind: 'pickFolders'; purpose?: 'sync' | 'scan' | 'organize' }
+  | { kind: 'pickFolders'; purpose?: 'sync' | 'scan' | 'organize' | 'convert' }
   | { kind: 'dateRange'; all?: boolean; folderIds?: number[] }
   | { kind: 'dashboard'; all?: boolean; folderIds?: number[]; retryFailedOnly?: boolean; fromMs?: number; toMs?: number }
   | { kind: 'scan'; all?: boolean; folderIds?: number[] }
   | { kind: 'organize'; all?: boolean; folderIds?: number[] }
+  | { kind: 'convert'; all?: boolean; folderIds?: number[]; files?: string[] }
+  | { kind: 'convertFileInput' }
   | { kind: 'scanReport' }
   | { kind: 'help' }
   | { kind: 'settings' }
@@ -219,6 +223,15 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
         break;
       case 'organize':
         push({ kind: 'screen', screen: { kind: 'pickFolders', purpose: 'organize' } });
+        break;
+      case 'convert-file':
+        push({ kind: 'screen', screen: { kind: 'convertFileInput' } });
+        break;
+      case 'convert-select':
+        push({ kind: 'screen', screen: { kind: 'pickFolders', purpose: 'convert' } });
+        break;
+      case 'convert-all':
+        push({ kind: 'screen', screen: { kind: 'convert', all: true } });
         break;
       case 'jobs':
         push({ kind: 'screen', screen: { kind: 'jobs' } });
@@ -381,7 +394,9 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
           ? 'Scan Selected Folders'
           : purpose === 'organize'
             ? 'Organize Folders by Date'
-            : undefined;
+            : purpose === 'convert'
+              ? 'Convert Videos to MP4'
+              : undefined;
       return (
         <PickFolders
           db={db}
@@ -396,7 +411,9 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
                     ? { kind: 'scan', folderIds }
                     : purpose === 'organize'
                       ? { kind: 'organize', folderIds }
-                      : { kind: 'dateRange', folderIds },
+                      : purpose === 'convert'
+                        ? { kind: 'convert', folderIds }
+                        : { kind: 'dateRange', folderIds },
               },
             ])
           }
@@ -442,6 +459,28 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
           all={screen.all}
           folderIds={screen.folderIds}
           onHome={resetToRoot}
+          onBack={pop}
+        />
+      );
+
+    case 'convert':
+      return (
+        <ConvertScreen
+          db={db}
+          all={screen.all}
+          folderIds={screen.folderIds}
+          files={screen.files}
+          onHome={resetToRoot}
+          onBack={pop}
+        />
+      );
+
+    case 'convertFileInput':
+      return (
+        <ConvertFileInput
+          onConfirm={(absPath) =>
+            push({ kind: 'screen', screen: { kind: 'convert', files: [absPath] } })
+          }
           onBack={pop}
         />
       );

@@ -21,6 +21,9 @@ export type MenuActionId =
   | 'scan-select'
   | 'scan-report'
   | 'organize'
+  | 'convert-file'
+  | 'convert-select'
+  | 'convert-all'
   | 'folders'
   | 'circles'
   | 'app-settings'
@@ -79,6 +82,18 @@ export const MENU_TREE: MenuSubmenu = {
         { kind: 'action', label: 'Scan all folders', action: 'scan-all', loggedOut: true },
         { kind: 'action', label: 'Scan selected folders', action: 'scan-select', loggedOut: true },
         { kind: 'action', label: 'View last scan report', action: 'scan-report', loggedOut: true },
+      ],
+    },
+    {
+      // Convert is a fully offline local file operation — visible when logged out.
+      kind: 'submenu',
+      id: 'convert',
+      label: 'Convert videos to MP4',
+      loggedOut: true,
+      children: [
+        { kind: 'action', label: 'Convert a single file', action: 'convert-file', loggedOut: true },
+        { kind: 'action', label: 'Convert selected folder(s)', action: 'convert-select', loggedOut: true },
+        { kind: 'action', label: 'Convert all registered folders', action: 'convert-all', loggedOut: true },
       ],
     },
     {
