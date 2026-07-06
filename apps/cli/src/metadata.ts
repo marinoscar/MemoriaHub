@@ -69,9 +69,40 @@ function emptyMetadata(kind: MediaKind, error: string | null = null): MediaMetad
   };
 }
 
-function toIso(value: unknown): string | null {
+/**
+ * Convert an EXIF date value into an ISO 8601 string that preserves the
+ * camera's WALL-CLOCK time, independent of the machine running the scan.
+ *
+ * EXIF `DateTimeOriginal`/`CreateDate` are timezone-less strings like
+ * "2026:06:20 20:16:07". The earlier implementation let exifr revive them into
+ * a `Date` using the scanning host's local timezone and then called
+ * `.toISOString()`, which shifted the wall-clock by the host's UTC offset and
+ * produced different results on different machines (a 20:16 capture became
+ * 01:16 on a UTC−5 host). Here we parse the raw digits and emit them verbatim
+ * as a UTC ISO string, so the reported capture time always matches what the
+ * camera recorded, on any host. (The true instant/offset is a server-side
+ * concern; the server re-extracts EXIF and records `capturedAtOffset` itself.)
+ */
+export function exifDateToIso(value: unknown): string | null {
+  // With reviveValues:false, exifr returns the raw EXIF datetime string.
+  if (typeof value === 'string') {
+    const m = value
+      .trim()
+      .match(/^(\d{4})[:\-/](\d{2})[:\-/](\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+    if (!m) return null;
+    const [, y, mo, d, h, mi, s] = m;
+    // "0000:00:00 00:00:00" is a common empty-EXIF sentinel — treat as absent.
+    if (y === '0000' || mo === '00' || d === '00') return null;
+    return `${y}-${mo}-${d}T${h}:${mi}:${s}.000Z`;
+  }
+  // Defensive: if a Date slips through (older/newer exifr), exifr built it from
+  // the wall-clock in LOCAL time, so local getters recover the original digits.
   if (value instanceof Date && !isNaN(value.getTime())) {
-    return value.toISOString();
+    const p = (n: number): string => String(n).padStart(2, '0');
+    return (
+      `${value.getFullYear()}-${p(value.getMonth() + 1)}-${p(value.getDate())}` +
+      `T${p(value.getHours())}:${p(value.getMinutes())}:${p(value.getSeconds())}.000Z`
+    );
   }
   return null;
 }
@@ -113,7 +144,10 @@ export async function readMediaMetadata(
         ifd0: true,
         mergeOutput: true,
         translateValues: false,
-        reviveValues: true,
+        // Keep EXIF dates as raw "YYYY:MM:DD HH:mm:ss" strings so exifDateToIso
+        // can preserve the camera's wall-clock time instead of letting exifr
+        // revive them through the scanning host's local timezone.
+        reviveValues: false,
         sanitize: true,
       })
       .catch((e: unknown) => {
@@ -135,9 +169,9 @@ export async function readMediaMetadata(
     const lat = numOrNull(raw['latitude'] ?? raw['GPSLatitude']);
     const lng = numOrNull(raw['longitude'] ?? raw['GPSLongitude']);
     const capturedAt =
-      toIso(raw['DateTimeOriginal']) ??
-      toIso(raw['CreateDate']) ??
-      toIso(raw['ModifyDate']);
+      exifDateToIso(raw['DateTimeOriginal']) ??
+      exifDateToIso(raw['CreateDate']) ??
+      exifDateToIso(raw['ModifyDate']);
 
     return {
       mediaKind: 'photo',

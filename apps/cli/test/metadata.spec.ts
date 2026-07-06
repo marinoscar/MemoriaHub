@@ -11,7 +11,13 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { readMediaMetadata, oldestFileTimestamp, resolveCapturedAt, readExifCaptureDate } from '../src/metadata.js';
+import {
+  readMediaMetadata,
+  oldestFileTimestamp,
+  resolveCapturedAt,
+  readExifCaptureDate,
+  exifDateToIso,
+} from '../src/metadata.js';
 
 // ESM test file — no __dirname available; resolve relative to the process cwd,
 // which Jest sets to the package root (apps/cli) per jest.config.js rootDir.
@@ -35,12 +41,57 @@ describe('readMediaMetadata', () => {
       expect(meta.mediaKind).toBe('photo');
       expect(meta.hasExif).toBe(true);
       expect(meta.hasGps).toBe(true);
-      expect(typeof meta.capturedAt).toBe('string');
-      expect(meta.capturedAt).not.toBeNull();
+      // Capture time is preserved as the camera's exact WALL-CLOCK, independent
+      // of the host timezone. The fixture's EXIF DateTimeOriginal is
+      // "2026:06:20 20:16:07"; the old code shifted this by the scanning
+      // machine's UTC offset, so this exact-value assertion guards the fix.
+      expect(meta.capturedAt).toBe('2026-06-20T20:16:07.000Z');
       expect(meta.cameraMake).toBe('samsung');
-      expect(typeof meta.takenLat).toBe('number');
-      expect(typeof meta.takenLng).toBe('number');
+      expect(meta.cameraModel).toBe('Galaxy Z Fold7');
+      // Exact coordinates (Texas) — negative longitude confirms the W-hemisphere
+      // sign is applied. exifr returns signed decimals directly.
+      expect(meta.takenLat).toBeCloseTo(30.2413485, 5);
+      expect(meta.takenLng).toBeCloseTo(-95.4831974, 5);
       expect(meta.error).toBeNull();
+    });
+  });
+
+  describe('exifDateToIso — wall-clock preservation', () => {
+    it('parses a raw EXIF datetime string to a UTC-stamped wall-clock ISO', () => {
+      expect(exifDateToIso('2023:07:15 14:30:00')).toBe('2023-07-15T14:30:00.000Z');
+    });
+
+    it('is independent of the host timezone (digits preserved verbatim)', () => {
+      // Whatever TZ the scan runs under, the same wall-clock digits come back.
+      const original = process.env.TZ;
+      try {
+        process.env.TZ = 'America/Chicago';
+        expect(exifDateToIso('2026:06:20 20:16:07')).toBe('2026-06-20T20:16:07.000Z');
+        process.env.TZ = 'Asia/Tokyo';
+        expect(exifDateToIso('2026:06:20 20:16:07')).toBe('2026-06-20T20:16:07.000Z');
+      } finally {
+        process.env.TZ = original;
+      }
+    });
+
+    it('accepts dash/slash date separators and a T time separator', () => {
+      expect(exifDateToIso('2023-07-15T14:30:00')).toBe('2023-07-15T14:30:00.000Z');
+      expect(exifDateToIso('2023/07/15 14:30:00')).toBe('2023-07-15T14:30:00.000Z');
+    });
+
+    it('treats the empty-EXIF sentinel and garbage as absent (null)', () => {
+      expect(exifDateToIso('0000:00:00 00:00:00')).toBeNull();
+      expect(exifDateToIso('not a date')).toBeNull();
+      expect(exifDateToIso(null)).toBeNull();
+      expect(exifDateToIso(undefined)).toBeNull();
+      expect(exifDateToIso(12345)).toBeNull();
+    });
+
+    it('recovers wall-clock digits from a Date via local getters (defensive path)', () => {
+      // exifr, when it revives, builds the Date from EXIF digits in LOCAL time,
+      // so local getters return the original wall-clock regardless of TZ.
+      const d = new Date(2023, 6, 15, 14, 30, 0); // 2023-07-15 14:30:00 local
+      expect(exifDateToIso(d)).toBe('2023-07-15T14:30:00.000Z');
     });
   });
 
