@@ -96,6 +96,43 @@ describe('buildScanReport', () => {
     });
   });
 
+  describe('capture date source — EXIF-only, no filesystem fallback', () => {
+    it('a row with capturedAt:null carries capturedAtSource="none" and is excluded from capturedAtCount', () => {
+      const scanId = scans.startScan({ trigger: 'cli', folderIds: [folderId] });
+      scans.insertScanFile(scanId, baseFile({
+        folderId,
+        filePath: '/tmp/nodate.jpg',
+        capturedAt: null,
+        capturedAtSource: 'none',
+      }));
+      scans.insertScanFile(scanId, baseFile({
+        folderId,
+        filePath: '/tmp/dated.jpg',
+        hasExif: true,
+        capturedAt: '2026-01-01T00:00:00.000Z',
+        capturedAtSource: 'exif',
+      }));
+      const totals = scans.computeTotals(scanId);
+      scans.finishScan(scanId, totals);
+
+      const report = buildScanReport(scans, folders, scanId);
+
+      expect(report.kpis.totalFiles).toBe(2);
+      // Only the EXIF-dated row counts toward capturedAtCount — the null row
+      // is never backfilled from a filesystem timestamp.
+      expect(report.coverage.capturedAtCount).toBe(1);
+      expect(report.coverage.capturedAtPct).toBe(50);
+
+      const files = scans.listScanFiles(scanId);
+      const nodateRow = files.find((f) => f.file_path === '/tmp/nodate.jpg')!;
+      const datedRow = files.find((f) => f.file_path === '/tmp/dated.jpg')!;
+      expect(nodateRow.captured_at).toBeNull();
+      expect(nodateRow.captured_at_source).toBe('none');
+      expect(datedRow.captured_at).toBe('2026-01-01T00:00:00.000Z');
+      expect(datedRow.captured_at_source).toBe('exif');
+    });
+  });
+
   describe('byFolder', () => {
     it('resolves the real folder path via folders.getById()', () => {
       const folder2 = folders.add({ path: '/tmp/report-folder2' });

@@ -308,6 +308,55 @@ describe('ScanEngine', () => {
     });
   });
 
+  describe('capture date source — EXIF-only, no filesystem fallback', () => {
+    it('records captured_at=null and captured_at_source="none" when metadataFn returns capturedAt:null (no fs-timestamp fallback)', async () => {
+      const filePath = writeTmpJpeg(tmpDir, 'nodate.jpg');
+      // Backdate the file's mtime to a plausible-looking real date so this
+      // test would fail loudly if the engine ever reintroduced a filesystem
+      // fallback for a null EXIF capture date.
+      const oldStamp = new Date('2010-01-01T00:00:00.000Z');
+      fs.utimesSync(filePath, oldStamp, oldStamp);
+
+      const metadataFn = makeMetadataFn(() => ({
+        mediaKind: 'photo',
+        hasExif: false,
+        hasGps: false,
+        capturedAt: null,
+        width: null,
+        height: null,
+        cameraMake: null,
+        cameraModel: null,
+        takenLat: null,
+        takenLng: null,
+        error: null,
+      }));
+      const { engine, folders, scans } = makeEngine(db, metadataFn);
+      const folder = folders.add({ path: tmpDir });
+
+      const result = await engine.run({ folderIds: [folder.id], trigger: 'cli' });
+
+      const files = scans.listScanFiles(result.scanId);
+      expect(files).toHaveLength(1);
+      expect(files[0].captured_at).toBeNull();
+      expect(files[0].captured_at_source).toBe('none');
+    });
+
+    it('records captured_at=<EXIF value> and captured_at_source="exif" when metadataFn returns a capturedAt', async () => {
+      writeTmpJpeg(tmpDir, 'dated.jpg');
+
+      const metadataFn = makeMetadataFn(); // default -> PHOTO_META (capturedAt set)
+      const { engine, folders, scans } = makeEngine(db, metadataFn);
+      const folder = folders.add({ path: tmpDir });
+
+      const result = await engine.run({ folderIds: [folder.id], trigger: 'cli' });
+
+      const files = scans.listScanFiles(result.scanId);
+      expect(files).toHaveLength(1);
+      expect(files[0].captured_at).toBe(PHOTO_META.capturedAt);
+      expect(files[0].captured_at_source).toBe('exif');
+    });
+  });
+
   describe('per-file metadata errors', () => {
     it('still inserts a scan_files row with meta_error set instead of aborting the scan', async () => {
       writeTmpJpeg(tmpDir, 'good.jpg');

@@ -3,7 +3,7 @@
  *
  * Integration-level tests for OrganizeEngine using:
  *   - In-memory SQLite DB (openDb(':memory:')) for FolderRepo/SettingsRepo
- *   - Mock captureDateFn (jest.fn()) so no real EXIF parsing is exercised
+ *   - Mock placementFn (jest.fn()) so no real EXIF parsing is exercised
  *   - Real temp files on the filesystem, moved by the REAL enumerateFiles /
  *     fs.renameSync / resolveCollision code paths
  *
@@ -44,13 +44,15 @@ function writeTmpJpeg(dir: string, name: string): string {
   return p;
 }
 
-/** A captureDateFn stub that returns a fixed date for every call. */
-function makeCaptureDateFn(date: Date | null): AnyFn {
-  return jest.fn<(...args: any[]) => any>().mockResolvedValue(date);
+/** A placementFn stub that returns a fixed {capturedAt, hasGps} for every call. */
+function makePlacementFn(date: Date | null, hasGps: boolean): AnyFn {
+  return jest.fn<(...args: any[]) => any>().mockResolvedValue({ capturedAt: date, hasGps });
 }
 
-/** A captureDateFn stub whose return value is looked up per file path. */
-function makeCaptureDateFnByPath(mapping: (filePath: string) => Date | null): AnyFn {
+/** A placementFn stub whose return value is looked up per file path. */
+function makePlacementFnByPath(
+  mapping: (filePath: string) => { capturedAt: Date | null; hasGps: boolean },
+): AnyFn {
   const fn = jest.fn<(...args: any[]) => any>();
   fn.mockImplementation(async (filePath: string) => mapping(filePath));
   return fn;
@@ -58,7 +60,7 @@ function makeCaptureDateFnByPath(mapping: (filePath: string) => Date | null): An
 
 function makeEngine(
   db: BetterSqlite3.Database,
-  captureDateFn: AnyFn,
+  placementFn: AnyFn,
 ): { engine: OrganizeEngine; folders: FolderRepo; settings: SettingsRepo } {
   const folders = new FolderRepo(db);
   const settings = new SettingsRepo(db);
@@ -66,7 +68,7 @@ function makeEngine(
   const engine = new OrganizeEngine({
     folders,
     settings,
-    captureDateFn: captureDateFn as unknown as OrganizeEngineDeps['captureDateFn'],
+    placementFn: placementFn as unknown as OrganizeEngineDeps['placementFn'],
   });
 
   return { engine, folders, settings };
@@ -91,10 +93,10 @@ describe('OrganizeEngine', () => {
   });
 
   describe('move to bucket', () => {
-    it('moves a dated photo into YEAR/MM - Month/ and updates totals', async () => {
+    it('moves a dated photo (with GPS) into YEAR/MM - Month/ and updates totals', async () => {
       const filePath = writeTmpJpeg(tmpDir, 'vacation.jpg');
-      const captureDateFn = makeCaptureDateFn(new Date(2023, 6, 15, 12, 0, 0));
-      const { engine } = makeEngine(db, captureDateFn);
+      const placementFn = makePlacementFn(new Date(2023, 6, 15, 12, 0, 0), true);
+      const { engine } = makeEngine(db, placementFn);
 
       const result = await engine.run({ paths: [tmpDir] });
 
@@ -108,18 +110,19 @@ describe('OrganizeEngine', () => {
       expect(result.totals.conflicts).toBe(0);
       expect(result.totals.errors).toBe(0);
       expect(result.totals.nodate).toBe(0);
+      expect(result.totals.noGps).toBe(0);
       expect(result.totals.byBucket['2023/07 - July']).toBe(1);
 
-      // captureDateFn is always invoked with {full: true}.
-      expect(captureDateFn).toHaveBeenCalledWith(filePath, 'image/jpeg', { full: true });
+      // placementFn is always invoked with {full: true}.
+      expect(placementFn).toHaveBeenCalledWith(filePath, 'image/jpeg', { full: true });
     });
   });
 
   describe('NODATE bucket', () => {
-    it('routes an undated file into NODATE/ and increments totals.nodate', async () => {
+    it('routes an undated file (with GPS) into NODATE/ and increments totals.nodate only', async () => {
       writeTmpJpeg(tmpDir, 'unknown.jpg');
-      const captureDateFn = makeCaptureDateFn(null);
-      const { engine } = makeEngine(db, captureDateFn);
+      const placementFn = makePlacementFn(null, true);
+      const { engine } = makeEngine(db, placementFn);
 
       const result = await engine.run({ paths: [tmpDir] });
 
@@ -127,6 +130,60 @@ describe('OrganizeEngine', () => {
       expect(fs.existsSync(expectedTarget)).toBe(true);
       expect(result.totals.moved).toBe(1);
       expect(result.totals.nodate).toBe(1);
+      expect(result.totals.noGps).toBe(0);
+      expect(result.totals.byBucket['NODATE']).toBe(1);
+    });
+  });
+
+  describe('NO-GPS routing', () => {
+    it('routes a dated photo with no GPS into YEAR/MM - Month/NO-GPS/ and increments totals.noGps', async () => {
+      const filePath = writeTmpJpeg(tmpDir, 'no-gps.jpg');
+      const placementFn = makePlacementFn(new Date(2023, 6, 15, 12, 0, 0), false);
+      const { engine } = makeEngine(db, placementFn);
+
+      const result = await engine.run({ paths: [tmpDir] });
+
+      expect(fs.existsSync(filePath)).toBe(false);
+      const expectedTarget = path.join(tmpDir, '2023', '07 - July', 'NO-GPS', 'no-gps.jpg');
+      expect(fs.existsSync(expectedTarget)).toBe(true);
+
+      expect(result.totals.moved).toBe(1);
+      expect(result.totals.nodate).toBe(0);
+      expect(result.totals.noGps).toBe(1);
+      expect(result.totals.byBucket['2023/07 - July/NO-GPS']).toBe(1);
+    });
+
+    it('routes an undated photo with no GPS into NODATE/NO-GPS/ and increments both totals.nodate and totals.noGps', async () => {
+      const filePath = writeTmpJpeg(tmpDir, 'no-date-no-gps.jpg');
+      const placementFn = makePlacementFn(null, false);
+      const { engine } = makeEngine(db, placementFn);
+
+      const result = await engine.run({ paths: [tmpDir] });
+
+      expect(fs.existsSync(filePath)).toBe(false);
+      const expectedTarget = path.join(tmpDir, 'NODATE', 'NO-GPS', 'no-date-no-gps.jpg');
+      expect(fs.existsSync(expectedTarget)).toBe(true);
+
+      expect(result.totals.moved).toBe(1);
+      expect(result.totals.nodate).toBe(1);
+      expect(result.totals.noGps).toBe(1);
+      expect(result.totals.byBucket['NODATE/NO-GPS']).toBe(1);
+    });
+
+    it('routes an undated photo WITH GPS into NODATE/ (not nested under NO-GPS) — totals.nodate only', async () => {
+      const filePath = writeTmpJpeg(tmpDir, 'no-date-has-gps.jpg');
+      const placementFn = makePlacementFn(null, true);
+      const { engine } = makeEngine(db, placementFn);
+
+      const result = await engine.run({ paths: [tmpDir] });
+
+      expect(fs.existsSync(filePath)).toBe(false);
+      const expectedTarget = path.join(tmpDir, 'NODATE', 'no-date-has-gps.jpg');
+      expect(fs.existsSync(expectedTarget)).toBe(true);
+
+      expect(result.totals.moved).toBe(1);
+      expect(result.totals.nodate).toBe(1);
+      expect(result.totals.noGps).toBe(0);
       expect(result.totals.byBucket['NODATE']).toBe(1);
     });
   });
@@ -135,8 +192,8 @@ describe('OrganizeEngine', () => {
     it('skips a file already sitting at its correct bucket path on a second run', async () => {
       writeTmpJpeg(tmpDir, 'repeat.jpg');
       const fixedDate = new Date(2024, 2, 10, 9, 0, 0); // March 10, 2024
-      const captureDateFn = makeCaptureDateFn(fixedDate);
-      const { engine: firstEngine } = makeEngine(db, captureDateFn);
+      const placementFn = makePlacementFn(fixedDate, true);
+      const { engine: firstEngine } = makeEngine(db, placementFn);
 
       const firstResult = await firstEngine.run({ paths: [tmpDir] });
       expect(firstResult.totals.moved).toBe(1);
@@ -146,10 +203,10 @@ describe('OrganizeEngine', () => {
 
       // Second run over the SAME root: the file now lives one level down inside
       // 2024/03 - March/, so `recursive: true` is required for enumerateFiles to
-      // find it at all. bucketForDate(fixedDate) still resolves to that same
+      // find it at all. bucketFor(fixedDate, true) still resolves to that same
       // sub-path, so it should be recognized as already-in-place and skipped
       // rather than re-moved.
-      const { engine: secondEngine } = makeEngine(db, captureDateFn);
+      const { engine: secondEngine } = makeEngine(db, placementFn);
       const fileEvents: OrganizeFilePayload[] = [];
       secondEngine.on(ORGANIZE_EV.ORGANIZE_FILE, (p) => fileEvents.push(p));
 
@@ -170,8 +227,8 @@ describe('OrganizeEngine', () => {
   describe('dryRun', () => {
     it('leaves the source file untouched while still reporting planned moves', async () => {
       const filePath = writeTmpJpeg(tmpDir, 'preview.jpg');
-      const captureDateFn = makeCaptureDateFn(new Date(2022, 4, 5, 8, 0, 0)); // May 2022
-      const { engine } = makeEngine(db, captureDateFn);
+      const placementFn = makePlacementFn(new Date(2022, 4, 5, 8, 0, 0), true); // May 2022
+      const { engine } = makeEngine(db, placementFn);
 
       const fileEvents: OrganizeFilePayload[] = [];
       engine.on(ORGANIZE_EV.ORGANIZE_FILE, (p) => fileEvents.push(p));
@@ -205,7 +262,7 @@ describe('OrganizeEngine', () => {
       fs.writeFileSync(preExisting, 'pre-existing-bytes-different-identity');
 
       // The incoming source file lives elsewhere in the root, with the SAME
-      // basename, and captureDateFn buckets it into the same target folder.
+      // basename, and placementFn buckets it into the same target folder.
       const incomingDir = path.join(tmpDir, 'incoming');
       fs.mkdirSync(incomingDir, { recursive: true });
       const incoming = writeTmpJpeg(incomingDir, 'photo.jpg');
@@ -214,8 +271,8 @@ describe('OrganizeEngine', () => {
       // buckets to the same September 2021 folder, so the pre-existing file
       // resolves as "already in place" (skip) while the incoming file hits a
       // genuine collision against it and gets renamed.
-      const captureDateFn = makeCaptureDateFn(new Date(2021, 8, 1, 10, 0, 0));
-      const { engine } = makeEngine(db, captureDateFn);
+      const placementFn = makePlacementFn(new Date(2021, 8, 1, 10, 0, 0), true);
+      const { engine } = makeEngine(db, placementFn);
 
       const fileEvents: OrganizeFilePayload[] = [];
       engine.on(ORGANIZE_EV.ORGANIZE_FILE, (p) => fileEvents.push(p));
@@ -242,8 +299,8 @@ describe('OrganizeEngine', () => {
     it('emits ORGANIZE_DONE exactly once with totals matching the resolved result, and ORGANIZE_PROGRESS at least once including the initial baseline', async () => {
       writeTmpJpeg(tmpDir, 'a.jpg');
       writeTmpJpeg(tmpDir, 'b.jpg');
-      const captureDateFn = makeCaptureDateFn(new Date(2020, 0, 1));
-      const { engine } = makeEngine(db, captureDateFn);
+      const placementFn = makePlacementFn(new Date(2020, 0, 1), true);
+      const { engine } = makeEngine(db, placementFn);
 
       const doneEvents: OrganizeDonePayload[] = [];
       const progressEvents: OrganizeProgressPayload[] = [];
@@ -266,8 +323,8 @@ describe('OrganizeEngine', () => {
 
   describe('no target folders', () => {
     it('rejects with "No target folders specified" and emits ORGANIZE_EV.ERROR when opts is empty', async () => {
-      const captureDateFn = makeCaptureDateFn(null);
-      const { engine } = makeEngine(db, captureDateFn);
+      const placementFn = makePlacementFn(null, true);
+      const { engine } = makeEngine(db, placementFn);
 
       let errorPayload: OrganizeErrorPayload | null = null;
       engine.on(ORGANIZE_EV.ERROR, (p) => { errorPayload = p; });

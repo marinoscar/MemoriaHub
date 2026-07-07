@@ -17,6 +17,7 @@ import {
   resolveCapturedAt,
   readExifCaptureDate,
   exifDateToIso,
+  readExifPlacement,
 } from '../src/metadata.js';
 
 // ESM test file — no __dirname available; resolve relative to the process cwd,
@@ -306,6 +307,71 @@ describe('readExifCaptureDate', () => {
       const result = await readExifCaptureDate(randomPath, 'image/jpeg');
 
       expect(result).toBeNull();
+    });
+  });
+});
+
+/**
+ * readExifPlacement() — the organize command's combined EXIF capture-date +
+ * GPS-presence reader used for NO-GPS bucketing. Like readExifCaptureDate, it
+ * never throws/rejects: every failure mode collapses to
+ * `{ capturedAt: null, hasGps: false }`.
+ */
+describe('readExifPlacement', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mh-metadata-placement-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  describe('photo with real EXIF + GPS (fixture)', () => {
+    it('resolves a valid Date and hasGps=true for a header-only parse', async () => {
+      const result = await readExifPlacement(FIXTURE_PATH, 'image/jpeg');
+
+      expect(result.capturedAt).toBeInstanceOf(Date);
+      expect(isNaN((result.capturedAt as Date).getTime())).toBe(false);
+      expect(result.hasGps).toBe(true);
+    });
+
+    it('resolves a valid Date and hasGps=true when opts.full=true forces a full-file parse', async () => {
+      const result = await readExifPlacement(FIXTURE_PATH, 'image/jpeg', { full: true });
+
+      expect(result.capturedAt).toBeInstanceOf(Date);
+      expect(isNaN((result.capturedAt as Date).getTime())).toBe(false);
+      expect(result.hasGps).toBe(true);
+    });
+  });
+
+  describe('video mimeType', () => {
+    it('resolves {capturedAt: null, hasGps: false} immediately without touching the filesystem (path need not exist)', async () => {
+      const result = await readExifPlacement('/nonexistent/clip.mp4', 'video/mp4');
+      expect(result).toEqual({ capturedAt: null, hasGps: false });
+    });
+  });
+
+  describe('non-existent file', () => {
+    it('resolves {capturedAt: null, hasGps: false} rather than throwing or rejecting', async () => {
+      const missingPath = path.join(tmpDir, 'does-not-exist.jpg');
+
+      await expect(readExifPlacement(missingPath, 'image/jpeg')).resolves.toEqual({
+        capturedAt: null,
+        hasGps: false,
+      });
+    });
+  });
+
+  describe('photo lacking EXIF (random bytes)', () => {
+    it('resolves {capturedAt: null, hasGps: false}', async () => {
+      const randomPath = path.join(tmpDir, 'random.jpg');
+      fs.writeFileSync(randomPath, crypto.randomBytes(256));
+
+      const result = await readExifPlacement(randomPath, 'image/jpeg');
+
+      expect(result).toEqual({ capturedAt: null, hasGps: false });
     });
   });
 });

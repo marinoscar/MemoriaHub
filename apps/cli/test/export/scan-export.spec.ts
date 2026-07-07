@@ -263,6 +263,37 @@ describe('exportScan', () => {
       expect(detail.getRow(3).getCell(9).value).toBe('EXIF');
       expect(detail.getRow(4).getCell(9).value).toBe('');
     });
+
+    it('renders the Date source column as blank for source="none" and captured_at=null (scan no longer infers from filesystem timestamps)', async () => {
+      const report = makeReport();
+      const files: ScanFile[] = [
+        makeScanFile({
+          id: 1,
+          file_path: '/tmp/report-folder/no-date.jpg',
+          captured_at: null,
+          captured_at_source: 'none',
+        }),
+        makeScanFile({
+          id: 2,
+          file_path: '/tmp/report-folder/has-date.jpg',
+          captured_at: '2026-01-01T00:00:00.000Z',
+          captured_at_source: 'exif',
+        }),
+      ];
+
+      const outPath = path.join(tmpDir, 'none-source.xlsx');
+      await exportScan(report, files, outPath, 'xlsx');
+
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.readFile(outPath);
+      const detail = workbook.getWorksheet('Detail')!;
+
+      // A scan's own no-fallback rows carry source="none" (never "file"); the
+      // Date source column renders it as blank, same as a null source.
+      expect(detail.getRow(2).getCell(8).value).toBeNull(); // Captured at
+      expect(detail.getRow(2).getCell(9).value).toBe(''); // Date source
+      expect(detail.getRow(3).getCell(9).value).toBe('EXIF');
+    });
   });
 
   describe('csv', () => {

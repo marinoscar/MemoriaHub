@@ -2,45 +2,54 @@
  * test/organize/plan.spec.ts
  *
  * Unit tests for organize/plan.ts — the pure path-planning helpers used by
- * the OrganizeEngine: bucketForDate, targetPathFor, resolveCollision.
+ * the OrganizeEngine: bucketFor, targetPathFor, resolveCollision.
  */
 
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { bucketForDate, targetPathFor, resolveCollision, MONTH_NAMES } from '../../src/organize/plan.js';
+import { bucketFor, targetPathFor, resolveCollision, MONTH_NAMES } from '../../src/organize/plan.js';
 
-describe('bucketForDate', () => {
-  it('returns [NODATE] for a null date', () => {
-    expect(bucketForDate(null)).toEqual(['NODATE']);
+describe('bucketFor', () => {
+  it('returns [NODATE] for a null date with GPS present', () => {
+    expect(bucketFor(null, true)).toEqual(['NODATE']);
   });
 
-  it('buckets a real date into [YEAR, "MM - Month"]', () => {
+  it('returns [NODATE, NO-GPS] for a null date with no GPS', () => {
+    expect(bucketFor(null, false)).toEqual(['NODATE', 'NO-GPS']);
+  });
+
+  it('buckets a real date + GPS present into [YEAR, "MM - Month"]', () => {
     const date = new Date(2023, 6, 15, 12, 0, 0); // July 15, 2023, local noon
-    expect(bucketForDate(date)).toEqual(['2023', '07 - July']);
+    expect(bucketFor(date, true)).toEqual(['2023', '07 - July']);
+  });
+
+  it('buckets a real date + no GPS into [YEAR, "MM - Month", NO-GPS]', () => {
+    const date = new Date(2023, 6, 15, 12, 0, 0); // July 15, 2023, local noon
+    expect(bucketFor(date, false)).toEqual(['2023', '07 - July', 'NO-GPS']);
   });
 
   it('buckets January correctly (month index 0)', () => {
     const date = new Date(2023, 0, 15);
-    expect(bucketForDate(date)).toEqual(['2023', '01 - January']);
+    expect(bucketFor(date, true)).toEqual(['2023', '01 - January']);
     expect(MONTH_NAMES[0]).toBe('January');
   });
 
   it('buckets December correctly (month index 11)', () => {
     const date = new Date(2023, 11, 15);
-    expect(bucketForDate(date)).toEqual(['2023', '12 - December']);
+    expect(bucketFor(date, true)).toEqual(['2023', '12 - December']);
     expect(MONTH_NAMES[11]).toBe('December');
   });
 
   it('uses LOCAL date getters, not UTC — local midnight-ish on the 1st stays in that month', () => {
     // 00:30 local time on July 1st. If UTC getters were used instead of local
     // getters, a positive UTC offset (west of Greenwich) would roll this back
-    // into June when converted to UTC. bucketForDate must use getFullYear()/
+    // into June when converted to UTC. bucketFor must use getFullYear()/
     // getMonth() (local) so the bucket always reflects the local wall-clock
     // date the photo was taken on, regardless of the test runner's TZ.
     const date = new Date(2023, 6, 1, 0, 30, 0);
-    expect(bucketForDate(date)).toEqual(['2023', '07 - July']);
+    expect(bucketFor(date, true)).toEqual(['2023', '07 - July']);
   });
 });
 
