@@ -52,8 +52,18 @@ const JOB_TIMEOUT_MS = getEnvInt('ENRICHMENT_JOB_TIMEOUT_MS', 600_000); // 10 mi
 @Injectable()
 export class EnrichmentJobWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EnrichmentJobWorker.name);
-  private intervalHandle: ReturnType<typeof setInterval> | null = null;
-  private running = false;
+
+  // Continuous worker-pool state.
+  private shuttingDown = false;
+  private loops: Promise<void>[] = [];
+  private pollMs = 5000;
+  // Promise-chain mutex serializing claims across the in-process pool loops so
+  // two loops never select+claim the same pending row (Prisma's read-committed
+  // findFirst→update can otherwise double-claim under concurrency).
+  private claimLock: Promise<void> = Promise.resolve();
+  // Outstanding empty-queue sleep timers, tracked so onModuleDestroy can abort
+  // them promptly for a fast shutdown.
+  private readonly sleepTimers = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -68,59 +78,103 @@ export class EnrichmentJobWorker implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const pollMs = parseInt(
+    this.pollMs = parseInt(
       process.env['ENRICHMENT_JOB_POLL_MS'] ?? process.env['FACE_JOB_POLL_MS'] ?? '5000',
       10,
     );
-    this.logger.log(`EnrichmentJobWorker starting; poll interval: ${pollMs}ms`);
-
-    this.intervalHandle = setInterval(() => {
-      void this.tick();
-    }, pollMs);
+    // Pool size is fixed at startup — unlike the old per-tick concurrency read,
+    // the number of loops cannot change without a restart. This is intentional:
+    // each loop is a long-lived claim→process→repeat cycle.
+    const concurrency = Math.max(
+      1,
+      parseInt(
+        process.env['ENRICHMENT_WORKER_CONCURRENCY'] ?? process.env['FACE_WORKER_CONCURRENCY'] ?? '1',
+        10,
+      ) || 1,
+    );
+    this.shuttingDown = false;
+    this.logger.log(
+      `EnrichmentJobWorker starting; pool size ${concurrency}, poll interval ${this.pollMs}ms`,
+    );
+    // Fire off N long-lived loops. We deliberately do NOT await them — they run
+    // for the lifetime of the worker.
+    this.loops = Array.from({ length: concurrency }, (_, i) => this.runLoop(i));
   }
 
   onModuleDestroy(): void {
-    if (this.intervalHandle !== null) {
-      clearInterval(this.intervalHandle);
-      this.intervalHandle = null;
-      this.logger.log('EnrichmentJobWorker stopped');
+    this.shuttingDown = true;
+    for (const t of this.sleepTimers) clearTimeout(t);
+    this.sleepTimers.clear();
+    this.logger.log('EnrichmentJobWorker stopping');
+  }
+
+  /**
+   * One long-lived worker-pool loop: claim a job → process it → repeat; sleep
+   * `pollMs` whenever the queue is empty. There is no batch barrier — a slow or
+   * hung job (bounded by the active per-job timeout) only stalls its own slot,
+   * never the other loops or the queue as a whole.
+   */
+  private async runLoop(slot: number): Promise<void> {
+    while (!this.shuttingDown) {
+      let processed = false;
+      try {
+        processed = await this.tick();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.error(`EnrichmentJobWorker loop ${slot} error: ${msg}`);
+      }
+      if (!processed && !this.shuttingDown) {
+        await this.sleep(this.pollMs);
+      }
     }
   }
 
-  private async tick(): Promise<void> {
-    if (this.running) {
-      this.logger.debug('EnrichmentJobWorker tick skipped — previous tick still running');
-      return;
-    }
+  /**
+   * Claim and process ONE job. Returns true if a job was processed, false if the
+   * queue was empty. The continuous worker loops call this; unit tests drive it
+   * directly. Claims are serialized (see claimOne) so concurrent loops never
+   * double-claim; processing runs outside the claim lock.
+   */
+  async tick(): Promise<boolean> {
+    const job = await this.claimOne();
+    if (!job) return false;
+    await this.processJob(job);
+    return true;
+  }
 
-    this.running = true;
+  /**
+   * Serialize claims with a promise-chain mutex so no two loops in this process
+   * select+claim the same row. The claim runs under the lock; the returned job
+   * is processed by the caller OUTSIDE the lock, keeping processing concurrent.
+   */
+  private async claimOne(): Promise<EnrichmentJob | null> {
+    let release!: () => void;
+    const prev = this.claimLock;
+    this.claimLock = new Promise<void>((r) => (release = r));
+    await prev;
     try {
-      const concurrency = parseInt(
-        process.env['ENRICHMENT_WORKER_CONCURRENCY'] ?? process.env['FACE_WORKER_CONCURRENCY'] ?? '1',
-        10,
-      );
-      await this.processBatch(concurrency);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`EnrichmentJobWorker tick error: ${message}`);
+      return await this.claimNextJob();
     } finally {
-      this.running = false;
+      release();
     }
   }
 
-  private async processBatch(concurrency: number): Promise<void> {
-    const jobs: EnrichmentJob[] = [];
-
-    for (let i = 0; i < concurrency; i++) {
-      const job = await this.claimNextJob();
-      if (!job) break;
-      jobs.push(job);
-    }
-
-    if (jobs.length === 0) return;
-
-    this.logger.debug(`EnrichmentJobWorker claimed ${jobs.length} job(s)`);
-    await Promise.all(jobs.map((job) => this.processJob(job)));
+  /**
+   * Abortable sleep. The timer is tracked in `sleepTimers` so onModuleDestroy
+   * can clear it for a prompt shutdown, and unref'd so it never keeps the
+   * process alive on its own.
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const t = setTimeout(() => {
+        this.sleepTimers.delete(t);
+        resolve();
+      }, ms);
+      if (typeof (t as unknown as { unref?: () => void }).unref === 'function') {
+        (t as unknown as { unref: () => void }).unref();
+      }
+      this.sleepTimers.add(t);
+    });
   }
 
   private async claimNextJob(): Promise<EnrichmentJob | null> {

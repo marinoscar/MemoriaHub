@@ -638,4 +638,120 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       worker.onModuleDestroy();
     });
   });
+
+  // =========================================================================
+  // Continuous worker pool — claim serialization
+  //
+  // The pool replaced the old setInterval+Promise.all-batch model with N
+  // long-lived loops that each claim→process→repeat. Claims are serialized by
+  // an in-process promise-chain mutex (claimOne) so two loops never select+claim
+  // the same pending row under Prisma's read-committed findFirst→update. The
+  // pool itself is not started in tests (ENRICHMENT_WORKER_ENABLED='false'), so
+  // these tests drive the seams (claimOne/tick) directly.
+  // =========================================================================
+
+  describe('continuous pool — claim serialization', () => {
+    // Flush the microtask + macrotask queue so pending awaits make progress.
+    const flush = () => new Promise((r) => setImmediate(r));
+
+    it('serializes two concurrent claimOne() calls — the second claim only begins after the first resolves, and results are distinct', async () => {
+      const { worker } = await buildWorker(EnrichmentJobWorker);
+
+      const jobA = makeJob({ id: 'job-A' });
+      const jobB = makeJob({ id: 'job-B' });
+
+      // Gate the first claim so we can observe whether the second one starts
+      // while the first is still in flight (it must not, thanks to the mutex).
+      let releaseFirst!: () => void;
+      const firstGate = new Promise<void>((r) => (releaseFirst = r));
+      let secondStarted = false;
+
+      const claimSpy = jest
+        .spyOn(worker as any, 'claimNextJob')
+        .mockImplementationOnce(async () => {
+          await firstGate;
+          return jobA;
+        })
+        .mockImplementationOnce(async () => {
+          secondStarted = true;
+          return jobB;
+        });
+
+      // Fire both claims back-to-back (synchronously), as two pool loops would.
+      const p1 = (worker as any).claimOne() as Promise<EnrichmentJob | null>;
+      const p2 = (worker as any).claimOne() as Promise<EnrichmentJob | null>;
+
+      await flush();
+
+      // Mutex holds: only the first claim has begun; the second is blocked
+      // behind the lock and has NOT touched claimNextJob yet.
+      expect(claimSpy).toHaveBeenCalledTimes(1);
+      expect(secondStarted).toBe(false);
+
+      // Release the first claim; now the second is free to run.
+      releaseFirst();
+      const [r1, r2] = await Promise.all([p1, p2]);
+
+      expect(claimSpy).toHaveBeenCalledTimes(2);
+      expect(secondStarted).toBe(true);
+      // The two loops claimed different rows — never the same job.
+      expect(r1).toBe(jobA);
+      expect(r2).toBe(jobB);
+      expect(r1).not.toBe(r2);
+
+      worker.onModuleDestroy();
+    });
+
+    it('a slow processJob in one tick does not block a second, independent tick from claiming and processing another job', async () => {
+      const { worker, mockPrisma, mockHandler } = await buildWorker(EnrichmentJobWorker);
+
+      const jobA = makeJob({ id: 'job-A', type: 'metadata_extraction' });
+      const jobB = makeJob({ id: 'job-B', type: 'metadata_extraction' });
+
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock)
+        .mockResolvedValueOnce(jobA) // tick 1 claims A
+        .mockResolvedValueOnce(jobB) // tick 2 claims B
+        .mockResolvedValue(null);
+      // Claim updates echo the running job back (processJob reads its id/type);
+      // terminal updates return {}. Keyed off data.status so ordering is robust.
+      (mockPrisma.enrichmentJob.update as jest.Mock).mockImplementation(
+        async ({ where, data }: any) => {
+          if (data?.status === JobStatus.running) {
+            return { ...makeJob({ id: where.id, type: 'metadata_extraction' }), status: JobStatus.running };
+          }
+          return {};
+        },
+      );
+
+      // A's processing blocks indefinitely (until released); B's resolves.
+      let releaseA!: () => void;
+      const aGate = new Promise<void>((r) => (releaseA = r));
+      mockHandler.process
+        .mockImplementationOnce(() => aGate)
+        .mockResolvedValueOnce(undefined);
+
+      // Tick 1: claims A, then awaits processJob(A) — which hangs.
+      const t1 = (worker as any).tick() as Promise<boolean>;
+      let t1Done = false;
+      void t1.then(() => {
+        t1Done = true;
+      });
+      await flush();
+
+      // tick() awaits processJob before returning — it has NOT resolved yet.
+      expect(t1Done).toBe(false);
+
+      // Tick 2: independently claims B and processes it to completion while A
+      // is still hung — proving the slow slot does not block the queue.
+      const t2Result = await (worker as any).tick();
+      expect(t2Result).toBe(true);
+      expect(mockHandler.process).toHaveBeenCalledTimes(2);
+
+      // Now let A finish; tick 1 resolves true.
+      releaseA();
+      expect(await t1).toBe(true);
+
+      worker.onModuleDestroy();
+    });
+  });
 });

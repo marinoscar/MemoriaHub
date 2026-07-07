@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.5 |
+| **Version** | 1.6 |
 | **Last Updated** | July 2026 |
 
 ---
@@ -272,19 +272,25 @@ If no existing job is found, a new job is created with `status: pending` and the
 
 ### Lifecycle
 
-- **OnModuleInit:** Sets up the polling interval using `setInterval`.
-- **OnModuleDestroy:** Clears the interval to stop polling on graceful shutdown.
+The worker is a **continuous worker pool**: `ENRICHMENT_WORKER_CONCURRENCY` long-lived async loops, each independently running **claim one job → process it → repeat**, sleeping `pollMs` whenever the queue is empty. There is no `setInterval` tick and no `Promise.all` batch barrier — the batched-tick model it replaced claimed up to N jobs and then waited for the slowest of them (`await Promise.all(...)`) before the next tick could start, so a single slow or hung job stalled the whole queue and left slots idle.
+
+- **OnModuleInit:** Reads `pollMs` and the pool size (`ENRICHMENT_WORKER_CONCURRENCY`, min 1) once, logs `pool size N, poll interval Pms`, then starts N `runLoop(i)` loops (not awaited — they run for the worker's lifetime). **The pool size is fixed at startup** — unlike the old model, which re-read concurrency on every tick, changing the pool size now requires a restart. This is intentional: each loop is a persistent claim→process cycle, not a per-tick allocation.
+- **OnModuleDestroy:** Sets `shuttingDown = true` (each loop exits after its current cycle), clears all outstanding empty-queue sleep timers so shutdown is prompt, and logs `EnrichmentJobWorker stopping`.
+
+### Key Benefit
+
+Because each loop processes exactly one job at a time and there is no batch barrier, **one hung or slow job (bounded by the active per-job timeout) only stalls its own slot — never the other loops or the queue as a whole.** The remaining loops keep claiming and processing, and the freed slot resumes as soon as its job settles or times out.
 
 ### Disabling the Worker
 
-The worker checks two environment variables on each tick:
+The worker checks two environment variables once in `onModuleInit`:
 
 ```
 ENRICHMENT_WORKER_ENABLED  (checked first)
 FACE_WORKER_ENABLED        (legacy alias, checked second)
 ```
 
-If either is set to `'false'`, the worker skips all processing for that tick. Useful in test environments and CI to prevent background jobs from interfering with tests.
+If either is set to `'false'`, `onModuleInit` returns early and **no loops start** — the pool is never created. Useful in test environments and CI to prevent background jobs from interfering with tests.
 
 ### Poll Interval
 
@@ -292,32 +298,55 @@ If either is set to `'false'`, the worker skips all processing for that tick. Us
 ENRICHMENT_JOB_POLL_MS ?? FACE_JOB_POLL_MS ?? '5000'
 ```
 
-Parsed as an integer and passed to `setInterval`. Default: 5000 ms.
+Parsed as an integer at startup. Each loop sleeps this long whenever a claim finds the queue empty, then tries again. Default: 5000 ms.
 
-### Concurrency
-
-```
-ENRICHMENT_WORKER_CONCURRENCY ?? FACE_WORKER_CONCURRENCY ?? '1'
-```
-
-Parsed as an integer. Controls how many jobs the worker attempts to claim and process in a single tick. Default: 1.
-
-### Tick Logic
+### Concurrency (Pool Size)
 
 ```
-tick():
-  if this.running → skip (previous tick still executing)
-  this.running = true
-  try:
-    for i in 0..concurrency:
-      job = atomicClaim()          // transaction: findFirst + update to running
-      if no job: break
-      dispatch(job)                // call handler.process(job)
-  finally:
-    this.running = false
+ENRICHMENT_WORKER_CONCURRENCY ?? FACE_WORKER_CONCURRENCY ?? '1'   (min 1)
 ```
 
-The `this.running` flag prevents concurrent tick executions if a tick takes longer than the poll interval.
+Parsed as an integer at startup. This is the number of long-lived loops in the pool — i.e. how many jobs can be processed **concurrently**. Default: 1. Fixed for the process's lifetime (see Lifecycle above).
+
+### Loop Logic
+
+```
+runLoop(slot):
+  while not shuttingDown:
+    processed = tick()             // claim + process ONE job; try/catch logs loop errors
+    if not processed and not shuttingDown:
+      sleep(pollMs)                // queue was empty — back off before retrying
+
+tick():                           // single claim+process cycle; the unit-test seam
+  job = claimOne()                 // serialized claim (see below); null if queue empty
+  if no job: return false
+  processJob(job)                  // runs OUTSIDE the claim lock — concurrent across loops
+  return true
+```
+
+There is no `running` guard and no batch — each loop drives its own slot independently. `processJob` runs outside the claim mutex, so processing is fully concurrent across the pool.
+
+### Serialized Claims (in-process mutex)
+
+Multiple loops in the same process could otherwise select the same `pending` row: Prisma's `$transaction(findFirst → update)` runs at read-committed isolation, where two overlapping transactions can both `findFirst` the same row before either `update`s it to `running`. To prevent double-claiming, `claimOne()` serializes claims with a **promise-chain mutex**:
+
+```typescript
+private async claimOne(): Promise<EnrichmentJob | null> {
+  let release!: () => void;
+  const prev = this.claimLock;
+  this.claimLock = new Promise<void>((r) => (release = r));
+  await prev;                       // wait for the previous claim to finish
+  try {
+    return await this.claimNextJob(); // the atomic claim below, one at a time
+  } finally {
+    release();                      // let the next loop claim
+  }
+}
+```
+
+Only the claim is serialized; the returned job is processed by the caller **outside** the lock, so slow processing never blocks other loops from claiming.
+
+> **LIMITATION — single-process only.** This in-process mutex makes claims safe **within one API process**. It does **not** coordinate across processes: running MULTIPLE API replicas against the same database could still double-claim, because each replica has its own independent `claimLock`. Cross-process safety would require a database-level claim — e.g. `SELECT … FOR UPDATE SKIP LOCKED` or a conditional `UPDATE … WHERE status = 'pending'` that returns the affected row — so that the database, not an in-memory promise chain, arbitrates the race. That hardening is a documented follow-up; today the deployment model is a single API process running the worker pool.
 
 ### Atomic Claim
 
@@ -800,3 +829,4 @@ Each of these would: implement `EnrichmentHandler`, self-register via `onModuleI
 | 1.3 | June 2026 | AI Assistant | Registered handlers reference (Section 15): add `job_history_purge` global handler — nightly cron purge of terminal job rows past retention cutoff |
 | 1.4 | July 2026 | AI Assistant | Registered handlers reference (Section 15): add `social_media_detection` handler and the new "Gate-then-fan-out pattern" subsection describing how it withholds and conditionally re-enqueues `video_face_detection` |
 | 1.5 | July 2026 | AI Assistant | Active per-job execution timeout: new `ENRICHMENT_JOB_TIMEOUT_MS` knob races each `handler.process` call, frees the worker slot immediately on timeout, and routes the hang through the normal-failure retry path; Section 8 subsection, Section 13 config row, Section 14 stuck-reset clarification (cron is now a crash backstop only) |
+| 1.6 | July 2026 | AI Assistant | Continuous worker pool: replaced the `setInterval` tick + `Promise.all` batch model with N long-lived claim→process→repeat loops (pool size fixed at startup from `ENRICHMENT_WORKER_CONCURRENCY`), so one hung/slow job only stalls its own slot, never the queue; claims serialized by an in-process promise-chain mutex (`claimOne`); Section 8 Lifecycle/Loop Logic/Serialized Claims rewrite; added single-process-only limitation note (multi-replica needs `FOR UPDATE SKIP LOCKED`) |
