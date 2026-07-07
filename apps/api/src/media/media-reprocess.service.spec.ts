@@ -160,27 +160,36 @@ describe('MediaReprocessService', () => {
   // -------------------------------------------------------------------------
 
   describe('reprocessImageObject — skip rules', () => {
-    it('should skip non-image objects (application/pdf)', async () => {
+    it('should skip objects the thumbnail processor cannot handle (e.g. application/pdf)', async () => {
+      // The top-level gate now delegates entirely to thumbnailProcessor.canProcess
+      // (no more mimeType.startsWith('image/') check), so the skip path must be
+      // exercised by making canProcess itself return false — a PDF mimeType alone
+      // no longer skips anything since canProcess is stubbed to return true by default.
+      mockThumbnailCanProcess.mockReturnValue(false);
       mockFindUnique.mockResolvedValue(makeStorageObject({ mimeType: 'application/pdf' }));
 
       await service.reprocessImageObject('obj-001');
 
       expect(mockThumbnailProcess).not.toHaveBeenCalled();
       expect(mockDimensionsProcess).not.toHaveBeenCalled();
+      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockEmit).not.toHaveBeenCalled();
     });
 
     it('should skip objects whose storageKey starts with "thumbnails/"', async () => {
       mockFindUnique.mockResolvedValue(
-        makeStorageObject({ mimeType: 'image/jpeg', storageKey: 'thumbnails/foo.jpg' }),
+        makeStorageObject({ mimeType: 'image/jpeg', storageKey: 'thumbnails/foo.jpg', status: 'ready' }),
       );
 
       await service.reprocessImageObject('obj-001');
 
       expect(mockThumbnailProcess).not.toHaveBeenCalled();
       expect(mockDimensionsProcess).not.toHaveBeenCalled();
+      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockEmit).not.toHaveBeenCalled();
     });
 
-    it('should skip objects whose status is not ready or failed (e.g. pending)', async () => {
+    it('should skip objects whose status is not ready/failed/processing (e.g. pending)', async () => {
       mockFindUnique.mockResolvedValue(
         makeStorageObject({ mimeType: 'image/jpeg', status: 'pending' }),
       );
@@ -189,17 +198,21 @@ describe('MediaReprocessService', () => {
 
       expect(mockThumbnailProcess).not.toHaveBeenCalled();
       expect(mockDimensionsProcess).not.toHaveBeenCalled();
+      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockEmit).not.toHaveBeenCalled();
     });
 
-    it('should skip objects whose status is "processing"', async () => {
+    it('should skip objects whose status is "uploading"', async () => {
       mockFindUnique.mockResolvedValue(
-        makeStorageObject({ mimeType: 'image/jpeg', status: 'processing' }),
+        makeStorageObject({ mimeType: 'image/jpeg', status: 'uploading' }),
       );
 
       await service.reprocessImageObject('obj-001');
 
       expect(mockThumbnailProcess).not.toHaveBeenCalled();
       expect(mockDimensionsProcess).not.toHaveBeenCalled();
+      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockEmit).not.toHaveBeenCalled();
     });
 
     it('should NOT skip objects whose status is "failed" (recovery path)', async () => {
@@ -268,6 +281,44 @@ describe('MediaReprocessService', () => {
 
       await service.reprocessImageObject('obj-001');
 
+      expect(mockEmit).toHaveBeenCalledWith(
+        OBJECT_PROCESSED_EVENT,
+        expect.objectContaining({ storageObjectId: 'obj-001' }),
+      );
+    });
+
+    it('should process (not skip) objects whose status is "processing" — OOM-orphan recovery', async () => {
+      // 'processing' was previously a skip case; it is now a processable status
+      // covering objects orphaned by an OOM-killed API container mid-thumbnail-generation.
+      mockFindUnique.mockResolvedValue(
+        makeStorageObject({ mimeType: 'image/jpeg', status: 'processing' }),
+      );
+
+      await service.reprocessImageObject('obj-001');
+
+      expect(mockDimensionsProcess).toHaveBeenCalledTimes(1);
+      expect(mockThumbnailProcess).toHaveBeenCalledTimes(1);
+      expect(mockUpdate).toHaveBeenCalledTimes(1);
+      expect(mockUpdate.mock.calls[0][0].data.status).toBe('ready');
+      expect(mockEmit).toHaveBeenCalledWith(
+        OBJECT_PROCESSED_EVENT,
+        expect.objectContaining({ storageObjectId: 'obj-001' }),
+      );
+    });
+
+    it('should reprocess video objects — thumbnail runs, dimensions self-guards and skips', async () => {
+      // ImageDimensionsProcessor self-guards to image/* via its own canProcess,
+      // so video objects should still get a first-frame thumbnail while
+      // dimensions extraction is correctly skipped.
+      mockThumbnailCanProcess.mockReturnValue(true);
+      mockDimensionsCanProcess.mockReturnValue(false);
+      mockFindUnique.mockResolvedValue(makeStorageObject({ mimeType: 'video/mp4' }));
+
+      await expect(service.reprocessImageObject('obj-001')).resolves.toBeUndefined();
+
+      expect(mockThumbnailProcess).toHaveBeenCalledTimes(1);
+      expect(mockDimensionsProcess).not.toHaveBeenCalled();
+      expect(mockUpdate).toHaveBeenCalledTimes(1);
       expect(mockEmit).toHaveBeenCalledWith(
         OBJECT_PROCESSED_EVENT,
         expect.objectContaining({ storageObjectId: 'obj-001' }),
