@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.6 |
+| **Version** | 1.7 |
 | **Last Updated** | July 2026 |
 
 ---
@@ -729,9 +729,10 @@ No dashboard code changes are needed.
 | `FACE_WORKER_ENABLED` | `'true'` | Legacy alias. Either variable set to `'false'` disables the worker. |
 | `ENRICHMENT_JOB_POLL_MS` | `'5000'` | Worker poll interval in milliseconds. |
 | `FACE_JOB_POLL_MS` | `'5000'` | Legacy alias for `ENRICHMENT_JOB_POLL_MS`. |
-| `ENRICHMENT_WORKER_CONCURRENCY` | `'1'` | Jobs to attempt per tick. |
+| `ENRICHMENT_WORKER_CONCURRENCY` | `'1'` | Worker-pool size — the number of long-lived worker loops, fixed at startup. Each loop independently claims and processes one job at a time; there is no batch barrier, so a slow/hung job only stalls its own slot. Raise for throughput; the per-provider throttle gate keeps higher values 429-safe. Memory scales with this value (each concurrent job buffers a decoded image). See [Section 8 — Concurrency (Pool Size)](#concurrency-pool-size). |
 | `FACE_WORKER_CONCURRENCY` | `'1'` | Legacy alias for `ENRICHMENT_WORKER_CONCURRENCY`. |
 | `ENRICHMENT_JOB_TIMEOUT_MS` | `600000` | Active per-job execution timeout (ms). A handler running longer is aborted, its worker slot freed, and the job routed through the normal-failure retry path (`attempts++`, backoff, permanent-fail after `ENRICHMENT_MAX_ATTEMPTS`). `0` disables. Must exceed the longest legitimate single-job runtime. See [Section 8 — Active Per-Job Timeout](#active-per-job-timeout). |
+| `ENRICHMENT_STUCK_MINUTES` | `15` | Age (minutes) a job may sit in `running` before the `EnrichmentStuckResetTask` cron (runs every 10 min) resets it to `pending`. This is a CRASH backstop only — live handler hangs are handled by `ENRICHMENT_JOB_TIMEOUT_MS`. Must exceed the longest legitimate single-job runtime. |
 
 ### Normal-failure retry
 
@@ -752,6 +753,32 @@ No dashboard code changes are needed.
 Rate-limit hits do not consume `ENRICHMENT_MAX_ATTEMPTS`. A job can exhaust its normal retry budget independently of how many times it has been rate-limited, and vice versa.
 
 For variables specific to the `face_detection` handler (thresholds, providers, image dimensions), see [face-recognition.md — Configuration](face-recognition.md#13-configuration-and-environment-variables).
+
+### Tuning for large runs / bulk backfills
+
+All worker configuration in this section is set via environment variables (in `infra/compose/.env`, see `.env.example`) and takes effect on API restart. Job *history* retention — as opposed to worker behavior — is a runtime System Setting, not an environment variable; see "Job history retention" below.
+
+**Recommended presets:**
+
+| Profile | Settings |
+|---------|----------|
+| **Large backfill, capable host** | `ENRICHMENT_WORKER_CONCURRENCY=4`, `ENRICHMENT_JOB_TIMEOUT_MS=150000` (~2.5 min), `ENRICHMENT_STUCK_MINUTES=5` |
+| **Memory-constrained VPS (≈1 GB)** | Keep `ENRICHMENT_WORKER_CONCURRENCY=1–2`; lower `TAG_MAX_IMAGE_DIM`/`FACE_MAX_IMAGE_DIM` to 768–1024; set `NODE_OPTIONS=--max-old-space-size=512`; raise `ENRICHMENT_RATELIMIT_MAX_HITS`/`ENRICHMENT_RATELIMIT_MAX_MS` for very long runs whose provider quota window takes hours to recover |
+| **Fast, isolated run** | Higher concurrency (e.g. 4–8) if the host has ample RAM/CPU and the configured providers tolerate it |
+
+`ENRICHMENT_JOB_TIMEOUT_MS` must always be set comfortably above the longest LEGITIMATE single-job runtime (e.g. long video face detection) so valid work is never killed mid-flight — the same caveat already stated in [Section 8 — Active Per-Job Timeout](#active-per-job-timeout).
+
+**On-demand control (no restart required):**
+
+- `POST /api/admin/jobs/reset-stuck` body `{ olderThanMinutes }` — immediately frees stuck running jobs.
+- `POST /api/admin/jobs/retry-failed` (optional body `{ type }`) — requeues failed jobs.
+- `GET /api/admin/jobs/stats` and `GET /api/admin/jobs/insights` — monitor live counts and ETA.
+
+See [Section 11 — Admin Jobs Dashboard](#11-admin-jobs-dashboard) for full detail on these endpoints.
+
+**Job history retention** is a runtime System Setting, NOT an environment variable — `jobs.history.retentionDays` (default 30) and `jobs.history.purgeEnabled` (default true), editable in Admin Settings, control the nightly `job_history_purge` job. See [job-insights.md](job-insights.md).
+
+For the full provider rate-limit classification matrix and OOM/crash recovery runbook, see [bulk-import-resilience.md](bulk-import-resilience.md).
 
 ---
 
@@ -830,3 +857,4 @@ Each of these would: implement `EnrichmentHandler`, self-register via `onModuleI
 | 1.4 | July 2026 | AI Assistant | Registered handlers reference (Section 15): add `social_media_detection` handler and the new "Gate-then-fan-out pattern" subsection describing how it withholds and conditionally re-enqueues `video_face_detection` |
 | 1.5 | July 2026 | AI Assistant | Active per-job execution timeout: new `ENRICHMENT_JOB_TIMEOUT_MS` knob races each `handler.process` call, frees the worker slot immediately on timeout, and routes the hang through the normal-failure retry path; Section 8 subsection, Section 13 config row, Section 14 stuck-reset clarification (cron is now a crash backstop only) |
 | 1.6 | July 2026 | AI Assistant | Continuous worker pool: replaced the `setInterval` tick + `Promise.all` batch model with N long-lived claim→process→repeat loops (pool size fixed at startup from `ENRICHMENT_WORKER_CONCURRENCY`), so one hung/slow job only stalls its own slot, never the queue; claims serialized by an in-process promise-chain mutex (`claimOne`); Section 8 Lifecycle/Loop Logic/Serialized Claims rewrite; added single-process-only limitation note (multi-replica needs `FOR UPDATE SKIP LOCKED`) |
+| 1.7 | July 2026 | AI Assistant | Section 13 config table: fixed stale `ENRICHMENT_WORKER_CONCURRENCY` note (was "jobs per tick", now correctly describes the fixed-at-startup worker-pool size, consistent with Section 8); added missing `ENRICHMENT_STUCK_MINUTES` row; added new "Tuning for large runs / bulk backfills" subsection with recommended presets, on-demand admin controls, and job-history-retention pointer |

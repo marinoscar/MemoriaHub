@@ -64,7 +64,7 @@ The task is gated on `ENRICHMENT_WORKER_ENABLED !== 'false'` so non-worker insta
 |---|---|---|
 | `ENRICHMENT_WORKER_ENABLED` | `true` | Set `false` to disable the worker and the stuck-reset cron |
 | `ENRICHMENT_JOB_POLL_MS` | `5000` | Worker poll interval in ms |
-| `ENRICHMENT_WORKER_CONCURRENCY` | `1` | Jobs processed per poll tick |
+| `ENRICHMENT_WORKER_CONCURRENCY` | `1` | Worker-pool size — number of long-lived claim→process→repeat loops, fixed at startup (no batch barrier). Memory scales with it. |
 | `ENRICHMENT_MAX_ATTEMPTS` | `3` | Max normal-failure retries before permanent failure |
 | `ENRICHMENT_RETRY_BASE_MS` | `2000` | Base backoff for normal-failure retries |
 | `ENRICHMENT_RETRY_MAX_MS` | `60000` | Max backoff cap for normal-failure retries |
