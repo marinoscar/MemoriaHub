@@ -17,7 +17,7 @@ import * as path from 'node:path';
 import { ScanTypedEmitter, SCAN_EV } from './events.js';
 import { runPool } from '../sync/worker-pool.js';
 import { enumerateFiles } from '../files.js';
-import { readMediaMetadata, resolveCapturedAt } from '../metadata.js';
+import { readMediaMetadata } from '../metadata.js';
 import {
   loadOverrideFile,
   pickFallback,
@@ -219,12 +219,11 @@ export class ScanEngine extends ScanTypedEmitter {
 
       const meta = await this.deps.metadataFn(filePath, mimeType);
 
-      // Resolve the capture date the same way sync will: EXIF when present,
-      // otherwise the oldest of the file's created/modified/accessed stamps.
-      // Pass meta.capturedAt so we don't parse EXIF a second time. Storing the
-      // source keeps the preview honest — guessed dates are labelled, not
-      // presented as real EXIF.
-      const cap = await resolveCapturedAt(filePath, mimeType, meta.capturedAt);
+      // Report the capture date from EXIF ONLY — no filesystem-timestamp
+      // fallback. When EXIF carries no capture date the scan records null and a
+      // source of 'none', so the preview never presents a guessed filesystem
+      // date as if it were real. (Sync still infers from file stamps; scan does
+      // not.)
 
       // Preview the per-folder memoriahub.json fallback the same way sync will:
       // an override only ever fills a gap the file's own EXIF left open. Compute
@@ -248,14 +247,14 @@ export class ScanEngine extends ScanTypedEmitter {
         mediaKind: meta.mediaKind,
         hasExif: meta.hasExif,
         hasGps: meta.hasGps,
-        capturedAt: cap.capturedAt,
+        capturedAt: meta.capturedAt,
         width: meta.width,
         height: meta.height,
         cameraMake: meta.cameraMake,
         cameraModel: meta.cameraModel,
         takenLat: meta.takenLat,
         takenLng: meta.takenLng,
-        capturedAtSource: cap.source,
+        capturedAtSource: meta.capturedAt ? 'exif' : 'none',
         fallbackDateApplied,
         fallbackLocationApplied,
         metaError: meta.error,
