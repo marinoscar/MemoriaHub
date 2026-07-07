@@ -5,7 +5,10 @@
  * the FULL file so a date buried deep inside is never missed), and MOVES each
  * file into a `YEAR/MM - Month/` sub-folder created inside that same root.
  * Files with no EXIF capture date — which includes every video, since the CLI
- * never probes video metadata — move into a top-level `NODATE/` folder.
+ * never probes video metadata — move into a top-level `NODATE/` folder. Within
+ * each date bucket, files that have no EXIF GPS location are nested one level
+ * deeper into a `NO-GPS/` sub-folder (applied uniformly, including under
+ * `NODATE`), so the ones missing coordinates are grouped together.
  *
  * Fully offline and side-effect-free with respect to any server: it mirrors the
  * ScanEngine's structure (offline, UI-free, injected deps, typed events) rather
@@ -16,10 +19,10 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { OrganizeTypedEmitter, ORGANIZE_EV, type OrganizeTotals } from './events.js';
-import { bucketForDate, targetPathFor, resolveCollision } from './plan.js';
+import { bucketFor, targetPathFor, resolveCollision } from './plan.js';
 import { runPool } from '../sync/worker-pool.js';
 import { enumerateFiles } from '../files.js';
-import { readExifCaptureDate } from '../metadata.js';
+import { readExifPlacement } from '../metadata.js';
 import type { FolderRepo } from '../repo/folders.js';
 import type { SettingsRepo } from '../repo/settings.js';
 
@@ -53,8 +56,8 @@ export interface OrganizeRunResult {
 export interface OrganizeEngineDeps {
   folders: FolderRepo;
   settings: SettingsRepo;
-  /** Injectable for testing — defaults to the real readExifCaptureDate. */
-  captureDateFn?: typeof readExifCaptureDate;
+  /** Injectable for testing — defaults to the real readExifPlacement. */
+  placementFn?: typeof readExifPlacement;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,7 +85,7 @@ export class OrganizeEngine extends OrganizeTypedEmitter {
     super();
     this.deps = {
       ...deps,
-      captureDateFn: deps.captureDateFn ?? readExifCaptureDate,
+      placementFn: deps.placementFn ?? readExifPlacement,
     };
   }
 
@@ -142,6 +145,7 @@ export class OrganizeEngine extends OrganizeTypedEmitter {
       conflicts: 0,
       errors: 0,
       nodate: 0,
+      noGps: 0,
       byBucket: {},
     };
 
@@ -158,8 +162,10 @@ export class OrganizeEngine extends OrganizeTypedEmitter {
       const { root, filePath, mimeType } = item;
       // Single-threaded JS: increments below are race-free.
       try {
-        const date = await this.deps.captureDateFn(filePath, mimeType, { full: true });
-        const segments = bucketForDate(date);
+        const { capturedAt, hasGps } = await this.deps.placementFn(filePath, mimeType, {
+          full: true,
+        });
+        const segments = bucketFor(capturedAt, hasGps);
         const bucketKey = segments.join('/');
         const desired = targetPathFor(root, segments, path.basename(filePath));
 
@@ -168,6 +174,7 @@ export class OrganizeEngine extends OrganizeTypedEmitter {
           totals.skipped++;
           totals.byBucket[bucketKey] = (totals.byBucket[bucketKey] ?? 0) + 1;
           if (segments[0] === 'NODATE') totals.nodate++;
+          if (!hasGps) totals.noGps++;
           this.emit(ORGANIZE_EV.ORGANIZE_FILE, {
             filePath,
             bucket: segments,
@@ -199,6 +206,7 @@ export class OrganizeEngine extends OrganizeTypedEmitter {
         if (conflictRenamed) totals.conflicts++;
         totals.byBucket[bucketKey] = (totals.byBucket[bucketKey] ?? 0) + 1;
         if (segments[0] === 'NODATE') totals.nodate++;
+        if (!hasGps) totals.noGps++;
 
         this.emit(ORGANIZE_EV.ORGANIZE_FILE, {
           filePath,

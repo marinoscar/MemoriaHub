@@ -55,6 +55,7 @@ export function renderOrganizeSummary(
       conflictsLine,
       errorsLine,
       `  No date    : ${totals.nodate} → NODATE/`,
+      `  No GPS     : ${totals.noGps} → NO-GPS/`,
     ],
     title,
   );

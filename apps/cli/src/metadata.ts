@@ -265,6 +265,80 @@ export async function readExifCaptureDate(
   }
 }
 
+/**
+ * Read a media file's EXIF capture date AND GPS presence in one parse, for the
+ * `organize` command's GPS-aware bucketing.
+ *
+ * Returns the raw `Date` (not an ISO string) so the caller can bucket by the
+ * naive local wall-clock date, plus a boolean indicating whether EXIF supplied
+ * usable numeric latitude AND longitude.
+ *
+ * Videos always resolve to `{ capturedAt: null, hasGps: false }` (the CLI never
+ * probes video metadata), matching readExifCaptureDate.
+ *
+ * When `opts.full` is true, exifr reads the ENTIRE file (`chunked: false`) so a
+ * date or GPS tag buried deep in the file is never missed.
+ *
+ * Never throws: any parse failure or genuine I/O error resolves to
+ * `{ capturedAt: null, hasGps: false }`.
+ *
+ * @param filePath  Absolute path to the file.
+ * @param mimeType  MIME type resolved from the file extension (see files.ts).
+ * @param opts      `full: true` reads the whole file instead of just the header.
+ */
+export async function readExifPlacement(
+  filePath: string,
+  mimeType: string,
+  opts?: { full?: boolean },
+): Promise<{ capturedAt: Date | null; hasGps: boolean }> {
+  // Videos: no EXIF probe — no date, no GPS.
+  if (mimeType.startsWith('video/')) {
+    return { capturedAt: null, hasGps: false };
+  }
+
+  try {
+    const exifr = await getExifr();
+    const parseOpts: Record<string, unknown> = {
+      tiff: true,
+      exif: true,
+      gps: true,
+      ifd0: true,
+      mergeOutput: true,
+      translateValues: false,
+      reviveValues: true,
+      sanitize: true,
+    };
+    // Full read: force exifr to scan the entire file, not just the header, so a
+    // date/GPS tag buried deep in the file is still found.
+    if (opts?.full) {
+      parseOpts['chunked'] = false;
+    }
+
+    const raw = await exifr.parse(filePath, parseOpts).catch((e: unknown) => {
+      // Never abort the organize flow on a single bad file — swallow parse and
+      // I/O failures alike and treat the file as having no placement metadata.
+      void e;
+      return undefined;
+    });
+
+    if (!raw || Object.keys(raw).length === 0) {
+      return { capturedAt: null, hasGps: false };
+    }
+
+    const value =
+      raw['DateTimeOriginal'] ?? raw['CreateDate'] ?? raw['ModifyDate'];
+    const capturedAt =
+      value instanceof Date && !isNaN(value.getTime()) ? value : null;
+
+    const lat = numOrNull(raw['latitude'] ?? raw['GPSLatitude']);
+    const lng = numOrNull(raw['longitude'] ?? raw['GPSLongitude']);
+
+    return { capturedAt, hasGps: lat !== null && lng !== null };
+  } catch {
+    return { capturedAt: null, hasGps: false };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Capture-date inference from filesystem timestamps
 // ---------------------------------------------------------------------------

@@ -41,6 +41,8 @@ export interface OrganizeTotals {
   conflicts: number;
   errors: number;
   nodate: number;
+  /** Files routed into any `NO-GPS/` folder (missing EXIF GPS location). */
+  noGps: number;
   byBucket: Record<string, number>;
 }
 

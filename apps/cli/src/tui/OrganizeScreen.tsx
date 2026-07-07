@@ -240,6 +240,9 @@ export function OrganizeScreen({
           <Text>
             <Text color="yellow">{totals?.nodate ?? 0}</Text> → NODATE (no capture date; includes videos)
           </Text>
+          <Text>
+            <Text color="magenta">{totals?.noGps ?? 0}</Text> → NO-GPS/ (no EXIF GPS)
+          </Text>
         </Box>
 
         {buckets.length > 0 && (
@@ -327,6 +330,9 @@ export function OrganizeScreen({
         </Text>
         <Text>
           <Text color="yellow">{totals?.nodate ?? 0}</Text> → NODATE
+        </Text>
+        <Text>
+          <Text color="magenta">{totals?.noGps ?? 0}</Text> → NO-GPS
         </Text>
         <Text>
           <Text color="cyan">{totals?.conflicts ?? 0}</Text> renamed (name conflicts)

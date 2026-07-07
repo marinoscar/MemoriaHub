@@ -28,23 +28,36 @@ export const MONTH_NAMES: string[] = [
 ];
 
 /**
- * Compute the destination sub-folder segments for a capture date.
+ * Compute the destination sub-folder segments for a capture date + GPS presence.
  *
  * A `null` date (no EXIF capture date — includes every video) buckets into a
  * single top-level `NODATE/` folder.  A real date buckets into
  * `YEAR/MM - Month/` (e.g. `2023/07 - July`).
  *
+ * When `hasGps` is false, a final `NO-GPS/` segment is appended so files
+ * missing EXIF location are grouped together WITHIN their date bucket — applied
+ * uniformly, including under `NODATE`. The four resulting shapes are:
+ *   has date + has GPS → `2023/07 - July`
+ *   has date + no GPS  → `2023/07 - July/NO-GPS`
+ *   no date  + has GPS → `NODATE`
+ *   no date  + no GPS  → `NODATE/NO-GPS`
+ *
  * LOCAL getters are used deliberately: EXIF capture dates are naive wall-clock
  * timestamps, so an item must bucket by the local date it was recorded, not the
  * UTC date (which can shift across a day boundary).
  */
-export function bucketForDate(date: Date | null): string[] {
-  if (date === null) {
-    return ['NODATE'];
+export function bucketFor(date: Date | null, hasGps: boolean): string[] {
+  const segments =
+    date === null
+      ? ['NODATE']
+      : [
+          String(date.getFullYear()),
+          `${String(date.getMonth() + 1).padStart(2, '0')} - ${MONTH_NAMES[date.getMonth()]}`,
+        ];
+  if (!hasGps) {
+    segments.push('NO-GPS');
   }
-  const year = String(date.getFullYear());
-  const month = `${String(date.getMonth() + 1).padStart(2, '0')} - ${MONTH_NAMES[date.getMonth()]}`;
-  return [year, month];
+  return segments;
 }
 
 /**
