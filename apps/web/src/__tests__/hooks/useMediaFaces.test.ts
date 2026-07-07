@@ -342,6 +342,32 @@ describe('useMediaFaces', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Empty mediaId guard
+  // -------------------------------------------------------------------------
+
+  describe('empty mediaId guard', () => {
+    it('does not call getMediaFaces or getMediaFaceStatus on mount when mediaId is empty', async () => {
+      renderHook(() => useMediaFaces(''));
+
+      // Give any accidental effect a tick to fire
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockGetMediaFaces).not.toHaveBeenCalled();
+      expect(mockGetMediaFaceStatus).not.toHaveBeenCalled();
+    });
+
+    it('does not call rerunMediaFaces when mediaId is empty', async () => {
+      const { result } = renderHook(() => useMediaFaces(''));
+
+      await act(async () => {
+        await result.current.rerun();
+      });
+
+      expect(mockRerunMediaFaces).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Cleanup
   // -------------------------------------------------------------------------
 
