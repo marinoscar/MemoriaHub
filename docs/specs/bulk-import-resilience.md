@@ -2,7 +2,7 @@
 
 This spec covers how MemoriaHub handles large photo imports — thousands of files from OneDrive or Google Photos onto a constrained VPS running OpenAI auto-tagging, Google reverse-geocoding, face recognition, and S3/R2 storage — without losing work to OOM kills, process restarts, provider rate limits, or CLI crashes.
 
-Cross-references: [Enrichment Queue](enrichment-queue.md) | [Geocoding](geocoding.md)
+Cross-references: [Enrichment Queue](enrichment-queue.md) | [Geocoding](geocoding.md) | [Bulk Uploads on a Cheap VPS — Memory Tuning](bulk-upload-vps-tuning.md) (memory sizing / OOM runbook)
 
 ---
 

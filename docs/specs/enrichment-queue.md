@@ -778,7 +778,7 @@ See [Section 11 — Admin Jobs Dashboard](#11-admin-jobs-dashboard) for full det
 
 **Job history retention** is a runtime System Setting, NOT an environment variable — `jobs.history.retentionDays` (default 30) and `jobs.history.purgeEnabled` (default true), editable in Admin Settings, control the nightly `job_history_purge` job. See [job-insights.md](job-insights.md).
 
-For the full provider rate-limit classification matrix and OOM/crash recovery runbook, see [bulk-import-resilience.md](bulk-import-resilience.md).
+For the full provider rate-limit classification matrix and OOM/crash recovery runbook, see [bulk-import-resilience.md](bulk-import-resilience.md). For **memory sizing on a small/cheap VPS** — heap cap vs off-heap, why bulk imports OOM, per-container-size presets, and real throughput/failure numbers from a ~20k-job import — see [bulk-upload-vps-tuning.md](bulk-upload-vps-tuning.md).
 
 ---
 
