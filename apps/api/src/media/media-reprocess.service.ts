@@ -19,14 +19,25 @@ export class MediaReprocessService {
   ) {}
 
   /**
-   * Reprocess a single image StorageObject:
-   * 1. Skip if not a ready image or is itself a thumbnail
+   * Reprocess a single image OR video StorageObject:
+   * 1. Skip if the object is not thumbnail-processable, is not in a processable
+   *    state, or is itself a thumbnail (recursion guard)
    * 2. Re-run ImageDimensionsProcessor + ThumbnailProcessor in priority order
+   *    (dimensions self-guards to image/* via its own canProcess, so video
+   *    objects simply skip dimensions and still get a first-frame thumbnail)
    * 3. Merge results into metadata._processing, persist as 'ready', emit OBJECT_PROCESSED_EVENT
    *
    * No thumbnail deletion is needed: ThumbnailProcessor uses a deterministic
    * storageKey (`thumbnails/<objectId>.jpg`) and upserts, so the same row is
    * reused on every reprocess run — there is nothing to orphan.
+   *
+   * @remarks
+   * Processable statuses are 'ready', 'failed', AND 'processing'. The
+   * 'processing' case recovers OOM-orphaned objects: when the API container is
+   * OOM-killed during in-process thumbnail generation, the object is left in
+   * 'processing' forever, OBJECT_PROCESSED_EVENT never fires, and the UI spins
+   * on a missing thumbnail. Re-running here heals them. Video objects are also
+   * covered — ThumbnailProcessor extracts a first-frame thumbnail for video/*.
    */
   async reprocessImageObject(objectId: string): Promise<void> {
     const object = await this.prisma.storageObject.findUnique({ where: { id: objectId } });
@@ -36,11 +47,16 @@ export class MediaReprocessService {
       return;
     }
 
-    // Skip non-images, objects not in a processable state, and thumbnail objects (recursion guard).
-    // Allow both 'ready' and 'failed' so that objects that failed processing (e.g. because the
-    // original was in R2 while the processor used the wrong provider) can be recovered here.
-    const processableStatus = object.status === 'ready' || object.status === 'failed';
-    if (!object.mimeType.startsWith('image/') || !processableStatus || object.storageKey.startsWith('thumbnails/')) {
+    // Skip objects the thumbnail processor can't handle, objects not in a
+    // processable state, and thumbnail objects (recursion guard).
+    // Allow 'ready', 'failed', and 'processing':
+    //  - 'failed'     — e.g. the original was in R2 while the processor used the wrong provider
+    //  - 'processing' — OOM-orphaned objects whose in-process processing never completed
+    // thumbnailProcessor.canProcess accepts image/* and video/* (and rejects
+    // thumbnails/ itself); we keep the explicit thumbnails/ guard for clarity.
+    const processableStatus =
+      object.status === 'ready' || object.status === 'failed' || object.status === 'processing';
+    if (!this.thumbnailProcessor.canProcess(object) || !processableStatus || object.storageKey.startsWith('thumbnails/')) {
       this.logger.debug(`reprocessImageObject: skipping object ${objectId} (mimeType=${object.mimeType}, status=${object.status}, key=${object.storageKey})`);
       return;
     }
