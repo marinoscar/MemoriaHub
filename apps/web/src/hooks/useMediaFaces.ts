@@ -24,6 +24,7 @@ export function useMediaFaces(mediaId: string) {
   }, []);
 
   const loadData = useCallback(async () => {
+    if (!mediaId) return;
     setLoading(true);
     setError(null);
     try {
@@ -46,6 +47,7 @@ export function useMediaFaces(mediaId: string) {
   }, [loadData, stopPolling]);
 
   const rerun = useCallback(async () => {
+    if (!mediaId) return;
     setRerunLoading(true);
     stopPolling();
     try {
