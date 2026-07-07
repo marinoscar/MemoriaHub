@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
 import { EnrichmentJob, JobStatus } from '@prisma/client';
@@ -23,9 +23,9 @@ function getEnvInt(key: string, defaultValue: number): number {
  * `FACE_WORKER_ENABLED` alias for backwards compatibility — either one set to
  * 'false' disables the worker.
  *
- * Extracted as a pure function (rather than inlined in onModuleInit) so other
- * consumers — e.g. DoctorService's diagnostics sweep — can check the same
- * enabled/disabled state without duplicating the boolean logic.
+ * Extracted as a pure function (rather than inlined in the lifecycle hook) so
+ * other consumers — e.g. DoctorService's diagnostics sweep — can check the
+ * same enabled/disabled state without duplicating the boolean logic.
  */
 export function isEnrichmentWorkerEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const enrichmentEnabled = env['ENRICHMENT_WORKER_ENABLED'];
@@ -50,7 +50,7 @@ const RL_MAX_HITS = getEnvInt('ENRICHMENT_RATELIMIT_MAX_HITS', 10);
 const JOB_TIMEOUT_MS = getEnvInt('ENRICHMENT_JOB_TIMEOUT_MS', 600_000); // 10 min
 
 @Injectable()
-export class EnrichmentJobWorker implements OnModuleInit, OnModuleDestroy {
+export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(EnrichmentJobWorker.name);
 
   // Continuous worker-pool state.
@@ -71,7 +71,20 @@ export class EnrichmentJobWorker implements OnModuleInit, OnModuleDestroy {
     private readonly throttle: ProviderThrottleService,
   ) {}
 
-  onModuleInit(): void {
+  /**
+   * Started from OnApplicationBootstrap — NOT OnModuleInit — deliberately.
+   * OnApplicationBootstrap is guaranteed to fire only after every module's
+   * OnModuleInit (across the whole app, not just this module's DI subtree) has
+   * resolved. Enrichment handlers self-register via their own module's
+   * OnModuleInit (see docs/specs/enrichment-queue.md Section 6); starting the
+   * pool from OnModuleInit raced against that registration in production —
+   * during a slow boot (e.g. the offline reverse-geocoder's GeoNames dataset
+   * load blocking the event loop for several seconds) the worker successfully
+   * claimed real jobs whose handlers weren't registered yet, and those jobs
+   * were marked permanently `failed` with "no handler registered" (no retry).
+   * OnApplicationBootstrap closes that race structurally.
+   */
+  onApplicationBootstrap(): void {
     // Check both new and legacy env vars for backwards compatibility
     if (!isEnrichmentWorkerEnabled()) {
       this.logger.log('EnrichmentJobWorker disabled via env var');

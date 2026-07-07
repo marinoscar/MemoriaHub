@@ -84,7 +84,7 @@ async function buildWorker(
   }).compile();
 
   const worker = module.get<EnrichmentJobWorker>(WorkerClass);
-  worker.onModuleInit();
+  worker.onApplicationBootstrap();
 
   return { worker, mockPrisma, mockHandler };
 }
@@ -195,7 +195,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
         ],
       }).compile();
       const w2 = module.get<EnrichmentJobWorker>(EnrichmentJobWorker);
-      w2.onModuleInit();
+      w2.onApplicationBootstrap();
 
       await (w2 as any).tick();
 

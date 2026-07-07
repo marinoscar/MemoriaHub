@@ -95,8 +95,8 @@ describe('EnrichmentJobWorker', () => {
 
     worker = module.get<EnrichmentJobWorker>(EnrichmentJobWorker);
 
-    // Trigger onModuleInit explicitly so tests control it
-    worker.onModuleInit();
+    // Trigger onApplicationBootstrap explicitly so tests control it
+    worker.onApplicationBootstrap();
   });
 
   afterEach(async () => {
@@ -124,9 +124,9 @@ describe('EnrichmentJobWorker', () => {
   // -------------------------------------------------------------------------
 
   describe('ENRICHMENT_WORKER_ENABLED=false', () => {
-    it('does NOT set intervalHandle when ENRICHMENT_WORKER_ENABLED is false', () => {
+    it('does NOT start any pool loops when ENRICHMENT_WORKER_ENABLED is false', () => {
       // worker was initialized with ENRICHMENT_WORKER_ENABLED=false in beforeEach
-      expect((worker as any).intervalHandle).toBeNull();
+      expect((worker as any).loops).toEqual([]);
     });
   });
 
@@ -135,7 +135,7 @@ describe('EnrichmentJobWorker', () => {
   // -------------------------------------------------------------------------
 
   describe('FACE_WORKER_ENABLED=false (legacy env var)', () => {
-    it('does NOT set intervalHandle when FACE_WORKER_ENABLED is false', async () => {
+    it('does NOT start any pool loops when FACE_WORKER_ENABLED is false', async () => {
       // Create a new worker with FACE_WORKER_ENABLED=false
       delete process.env['ENRICHMENT_WORKER_ENABLED'];
       process.env['FACE_WORKER_ENABLED'] = 'false';
@@ -150,38 +150,21 @@ describe('EnrichmentJobWorker', () => {
       }).compile();
 
       const legacyWorker = module.get<EnrichmentJobWorker>(EnrichmentJobWorker);
-      legacyWorker.onModuleInit();
+      legacyWorker.onApplicationBootstrap();
 
-      expect((legacyWorker as any).intervalHandle).toBeNull();
+      expect((legacyWorker as any).loops).toEqual([]);
 
       legacyWorker.onModuleDestroy();
     });
   });
 
   // -------------------------------------------------------------------------
-  // Overlapping-tick guard
-  // -------------------------------------------------------------------------
-
-  describe('overlapping-tick guard', () => {
-    it('skips processJob when already running', async () => {
-      // Force running=true to simulate an in-progress tick
-      (worker as any).running = true;
-
-      await (worker as any).tick();
-
-      expect(mockHandler.process).not.toHaveBeenCalled();
-    });
-
-    it('running stays true when tick exits early due to guard', async () => {
-      (worker as any).running = true;
-
-      await (worker as any).tick();
-
-      // guard returns early without resetting running
-      expect((worker as any).running).toBe(true);
-    });
-  });
-
+  // NOTE: the single global `running` reentrancy guard tested here previously
+  // was removed by the continuous-worker-pool refactor — tick() is now a
+  // single claim+process cycle safely callable concurrently across N pool
+  // loops, with claims serialized by an in-process mutex instead (see
+  // enrichment-job.worker.spec.ts's "continuous pool — claim serialization"
+  // describe block for that coverage).
   // -------------------------------------------------------------------------
   // No pending job
   // -------------------------------------------------------------------------
@@ -340,16 +323,18 @@ describe('EnrichmentJobWorker', () => {
   // -------------------------------------------------------------------------
 
   describe('onModuleDestroy', () => {
-    it('clears interval on module destroy when interval was set', () => {
-      // Set a real interval and ensure it gets cleared
-      (worker as any).intervalHandle = setInterval(() => {}, 10000);
-      const clearIntervalSpy = jest.spyOn(global, 'clearInterval');
+    it('sets shuttingDown and clears any outstanding empty-queue sleep timers', () => {
+      // Simulate a loop currently parked in its empty-queue sleep.
+      const timer = setTimeout(() => {}, 10000);
+      (worker as any).sleepTimers.add(timer);
+      const clearTimeoutSpy = jest.spyOn(global, 'clearTimeout');
 
       worker.onModuleDestroy();
 
-      expect(clearIntervalSpy).toHaveBeenCalled();
-      expect((worker as any).intervalHandle).toBeNull();
-      clearIntervalSpy.mockRestore();
+      expect((worker as any).shuttingDown).toBe(true);
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(timer);
+      expect((worker as any).sleepTimers.size).toBe(0);
+      clearTimeoutSpy.mockRestore();
     });
   });
 });

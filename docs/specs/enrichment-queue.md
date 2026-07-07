@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.7 |
+| **Version** | 1.8 |
 | **Last Updated** | July 2026 |
 
 ---
@@ -274,7 +274,7 @@ If no existing job is found, a new job is created with `status: pending` and the
 
 The worker is a **continuous worker pool**: `ENRICHMENT_WORKER_CONCURRENCY` long-lived async loops, each independently running **claim one job → process it → repeat**, sleeping `pollMs` whenever the queue is empty. There is no `setInterval` tick and no `Promise.all` batch barrier — the batched-tick model it replaced claimed up to N jobs and then waited for the slowest of them (`await Promise.all(...)`) before the next tick could start, so a single slow or hung job stalled the whole queue and left slots idle.
 
-- **OnModuleInit:** Reads `pollMs` and the pool size (`ENRICHMENT_WORKER_CONCURRENCY`, min 1) once, logs `pool size N, poll interval Pms`, then starts N `runLoop(i)` loops (not awaited — they run for the worker's lifetime). **The pool size is fixed at startup** — unlike the old model, which re-read concurrency on every tick, changing the pool size now requires a restart. This is intentional: each loop is a persistent claim→process cycle, not a per-tick allocation.
+- **OnApplicationBootstrap:** Reads `pollMs` and the pool size (`ENRICHMENT_WORKER_CONCURRENCY`, min 1) once, logs `pool size N, poll interval Pms`, then starts N `runLoop(i)` loops (not awaited — they run for the worker's lifetime). **The pool size is fixed at startup** — unlike the old model, which re-read concurrency on every tick, changing the pool size now requires a restart. This is intentional: each loop is a persistent claim→process cycle, not a per-tick allocation. Pool startup lives in `OnApplicationBootstrap` rather than `OnModuleInit` specifically because NestJS guarantees `OnApplicationBootstrap` fires only after **every** module's `OnModuleInit` has resolved app-wide — including each enrichment handler's own self-registration call (see [Section 6](#6-self-registration-pattern)). `OnModuleInit` carries no such cross-module ordering guarantee: the worker's own `OnModuleInit` could run before a handler module elsewhere in the DI graph had finished registering itself. This was a real production bug — during boot, the offline reverse-geocoder's synchronous dataset load blocked the event loop for several seconds, and jobs claimed in that window (`face_detection`, `burst_detection`, `duplicate_detection`, `location_inference`) whose handlers hadn't yet self-registered were marked permanently `failed` via the "no handler registered" branch, with no retry. Starting the pool in `OnApplicationBootstrap` closes this race structurally, with no arbitrary startup delay involved.
 - **OnModuleDestroy:** Sets `shuttingDown = true` (each loop exits after its current cycle), clears all outstanding empty-queue sleep timers so shutdown is prompt, and logs `EnrichmentJobWorker stopping`.
 
 ### Key Benefit
@@ -283,14 +283,14 @@ Because each loop processes exactly one job at a time and there is no batch barr
 
 ### Disabling the Worker
 
-The worker checks two environment variables once in `onModuleInit`:
+The worker checks two environment variables once in `onApplicationBootstrap`:
 
 ```
 ENRICHMENT_WORKER_ENABLED  (checked first)
 FACE_WORKER_ENABLED        (legacy alias, checked second)
 ```
 
-If either is set to `'false'`, `onModuleInit` returns early and **no loops start** — the pool is never created. Useful in test environments and CI to prevent background jobs from interfering with tests.
+If either is set to `'false'`, `onApplicationBootstrap` returns early and **no loops start** — the pool is never created. Useful in test environments and CI to prevent background jobs from interfering with tests.
 
 ### Poll Interval
 
@@ -858,3 +858,4 @@ Each of these would: implement `EnrichmentHandler`, self-register via `onModuleI
 | 1.5 | July 2026 | AI Assistant | Active per-job execution timeout: new `ENRICHMENT_JOB_TIMEOUT_MS` knob races each `handler.process` call, frees the worker slot immediately on timeout, and routes the hang through the normal-failure retry path; Section 8 subsection, Section 13 config row, Section 14 stuck-reset clarification (cron is now a crash backstop only) |
 | 1.6 | July 2026 | AI Assistant | Continuous worker pool: replaced the `setInterval` tick + `Promise.all` batch model with N long-lived claim→process→repeat loops (pool size fixed at startup from `ENRICHMENT_WORKER_CONCURRENCY`), so one hung/slow job only stalls its own slot, never the queue; claims serialized by an in-process promise-chain mutex (`claimOne`); Section 8 Lifecycle/Loop Logic/Serialized Claims rewrite; added single-process-only limitation note (multi-replica needs `FOR UPDATE SKIP LOCKED`) |
 | 1.7 | July 2026 | AI Assistant | Section 13 config table: fixed stale `ENRICHMENT_WORKER_CONCURRENCY` note (was "jobs per tick", now correctly describes the fixed-at-startup worker-pool size, consistent with Section 8); added missing `ENRICHMENT_STUCK_MINUTES` row; added new "Tuning for large runs / bulk backfills" subsection with recommended presets, on-demand admin controls, and job-history-retention pointer |
+| 1.8 | July 2026 | AI Assistant | Corrected worker lifecycle hook: pool startup (and the enable/disable env-var check) moved from `OnModuleInit` to `OnApplicationBootstrap` to close a module-registration race causing permanently-failed jobs during boot (Section 8, Section 8 "Disabling the Worker") |
