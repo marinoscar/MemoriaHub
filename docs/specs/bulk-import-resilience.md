@@ -13,6 +13,7 @@ A "bulk import" session can run for hours or days. The system must survive these
 | Failure mode | Without resilience | With resilience |
 |---|---|---|
 | API process OOM-killed or restarted mid-job | Enrichment jobs stuck in `running` forever | Auto-reset by stuck-job cron within 10 minutes |
+| API process OOM-killed or restarted mid-upload processing (content-hash/exif/dimensions/video-probe/geocode/thumbnail/visual-hash) | `StorageObject` stuck at `status='processing'` forever — no thumbnail, dimensions, or EXIF ever generated for that photo/video, and no existing recovery path touches it | Auto-recovered by `StorageProcessingRecoveryTask` within `STORAGE_PROCESSING_STUCK_MINUTES` (default 10 min), capped at `STORAGE_PROCESSING_MAX_RETRIES` attempts |
 | Provider rate limit (429 / 529 / `OVER_QUERY_LIMIT`) | Job retried as normal error, or silently marked processed with no data | Job deferred on separate `rateLimitHits` counter; provider gate backs off sibling jobs |
 | Geocode provider quota | `null` return → job marked `processed` with no geo data; no retry | Provider throws `RateLimitError` → job deferred; status stays `pending` until retry succeeds |
 | CLI crash mid-multipart upload | Upload restarted from byte 0; file row stuck in `uploading` | Parts persisted per-PUT to SQLite; crash recovery resumes from last confirmed part |
@@ -72,6 +73,26 @@ The task is gated on `ENRICHMENT_WORKER_ENABLED !== 'false'` so non-worker insta
 | `ENRICHMENT_RATELIMIT_MAX_MS` | `900000` | Max backoff cap for rate-limit deferrals (15 min) |
 | `ENRICHMENT_RATELIMIT_MAX_HITS` | `10` | Max rate-limit deferrals before permanent failure |
 | `ENRICHMENT_STUCK_MINUTES` | `15` | Threshold (minutes) for stuck-job auto-reset; must exceed the longest expected single-job runtime |
+
+### Stuck StorageObject auto-reset cron (new — `StorageProcessingRecoveryTask`)
+
+The upload-time processing pipeline (content-hash, exif, dimensions, video-probe, geocode, thumbnail, visual-hash — `ObjectProcessingService.handleObjectUploaded`) is a **separate system from `enrichment_jobs`**: it runs synchronously in-process off a fire-and-forget `OBJECT_UPLOADED_EVENT`, not a durable, retryable job row. If the API process is killed anywhere inside that pipeline — the exact failure mode a bulk import's sustained memory pressure produces — the owning `StorageObject` is left at `status='processing'` forever. `EnrichmentStuckResetTask` cannot see it (wrong table); the daily `StorageCleanupTask` only targets `pending`/`uploading`; and the one existing manual tool, `MediaReprocessService.reprocessImageObject` (`POST /api/admin/media/reprocess`), explicitly requires `status IN ('ready','failed')` and an image mimeType, so it silently skips both stuck rows and any video.
+
+`StorageProcessingRecoveryTask` runs every 10 minutes via `@Cron(EVERY_10_MINUTES)`, mirroring `EnrichmentStuckResetTask`'s shape. It delegates to `StorageProcessingRecoveryService.recoverStuckObjects()`, which:
+
+1. Finds `StorageObject` rows at `status='processing'` with `updatedAt` older than `STORAGE_PROCESSING_STUCK_MINUTES`.
+2. For each, checks `metadata._processingRetryCount` against `STORAGE_PROCESSING_MAX_RETRIES`. If the cap is already reached, marks `status='failed'` (with `metadata._processingRetryExhausted=true`) and stops — no further retries.
+3. Otherwise increments and **persists** the retry counter first, then re-invokes the full pipeline (`ObjectProcessingService.handleObjectUploaded`) directly. Persisting the counter *before* the pipeline call — not after — is the key correctness property: if this recovery attempt itself gets killed, the counter has already advanced, so the object still counts toward the cap on the next tick instead of retrying forever with no progress. As a side effect, the counter write also bumps `updatedAt` (Prisma `@updatedAt`), which naturally keeps the object off the next scan until another full threshold window passes even if the attempt hangs rather than crashing.
+
+Re-running the *full* pipeline (not just dimensions+thumbnail, unlike `MediaReprocessService`) is what lets this recover stuck videos as well as photos, and is safe to repeat: content-hash is deterministic, the thumbnail upload is an upsert keyed on the object's deterministic `thumbnails/<objectId>.jpg` storage key, and the downstream `OBJECT_PROCESSED_EVENT` listeners (`MediaMetadataSyncService`, `MediaEnrichmentEnqueueListener`) are already idempotent.
+
+`POST /api/admin/media/reprocess-stuck` (body `{ olderThanMinutes? }`) triggers the same recovery immediately, without waiting for the next tick — useful right after deploying this fix, or for any future incident where you don't want to wait out the threshold. `POST /api/media/:id/thumbnail/rerun` is the single-item, user-facing counterpart (bypasses the threshold/cap entirely, since an explicit retry should always get a fresh attempt) — see the "Media — Thumbnail Rerun" section of `CLAUDE.md`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `STORAGE_PROCESSING_STUCK_MINUTES` | `10` | Threshold (minutes) for stuck-`StorageObject` auto-recovery |
+| `STORAGE_PROCESSING_MAX_RETRIES` | `3` | Max automatic recovery attempts per object before it is marked `failed` |
+| `STORAGE_PROCESSING_STUCK_RESET_ENABLED` | `true` | Set `false` to disable the recovery cron |
 
 ### Per-provider throttle gate (new — `ProviderThrottleService`)
 
@@ -212,6 +233,17 @@ Enrichment jobs left in `running` state are auto-reset within 10 minutes by `Enr
 For immediate recovery: `POST /api/admin/jobs/reset-stuck` with optional body `{ olderThanMinutes: 5 }`.
 
 After recovery the worker re-claims and reprocesses the jobs. Handlers are not checkpointed mid-run, so any partial work inside a handler (e.g. a half-written embedding) is retried from the beginning.
+
+**Separately**, photos/videos whose upload-time processing (thumbnail, dimensions, EXIF, etc.) was interrupted by the same OOM/restart show up as a permanent "Processing…" spinner in the gallery (frontend now times this out into a broken-image icon after 15 minutes, but the underlying `StorageObject` still needs actual recovery). This is handled by `StorageProcessingRecoveryTask`, not the enrichment cron above — see "Stuck StorageObject auto-reset cron" earlier in this doc. No manual action is required either; for immediate recovery instead of waiting for the next tick: `POST /api/admin/media/reprocess-stuck` with optional body `{ olderThanMinutes: 5 }`. To identify affected items first:
+
+```sql
+SELECT so.id, so.name, so.mime_type, so.created_at, so.updated_at,
+       mi.id AS media_item_id, mi.circle_id
+FROM storage_objects so
+LEFT JOIN media_items mi ON mi.storage_object_id = so.id
+WHERE so.status = 'processing'
+ORDER BY so.created_at;
+```
 
 ### After sustained provider rate limits
 

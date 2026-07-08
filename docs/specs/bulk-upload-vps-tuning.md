@@ -119,8 +119,9 @@ Restarts and OOM kills leave debris. None of it is lost data — jobs live in Po
   `POST /api/admin/jobs/reset-stuck {"olderThanMinutes":5}` flips them back to `pending` immediately. An hourly cron (`ENRICHMENT_STUCK_MINUTES`, default 15) also does this automatically, but the manual call skips the wait.
 - **Failed jobs**: `POST /api/admin/jobs/retry-failed` (optionally `{"type":"..."}` to scope) requeues them.
 - **Monitor progress**: `/admin/settings/jobs/insights` (or `GET /api/admin/jobs/insights`) shows live counts, throughput, per-type ETA, and lifetime totals.
+- **Orphaned `StorageObject`s stuck at `status='processing'`** (upload-time thumbnail/EXIF/dimensions pipeline killed mid-flight — a *separate* system from the `enrichment_jobs` above, since it isn't a queued job at all): symptom is photos/videos showing a permanent "Processing…" spinner in the gallery. `POST /api/admin/media/reprocess-stuck {"olderThanMinutes":5}` recovers them immediately; `StorageProcessingRecoveryTask` (`STORAGE_PROCESSING_STUCK_MINUTES`, default 10) also does this automatically. See [Bulk Import Resilience § Stuck StorageObject auto-reset cron](bulk-import-resilience.md#stuck-storageobject-auto-reset-cron-new--storageprocessingrecoverytask) for the full mechanism, including the retry-cap/OOM-during-recovery correctness detail.
 
-Reprocessing interrupted jobs is safe: face detection re-detects, auto-tagging overwrites its own `source='ai'` tags, geocode/metadata recompute, duplicate/burst detection are read-time non-destructive. No duplicates, no corruption.
+Reprocessing interrupted jobs is safe: face detection re-detects, auto-tagging overwrites its own `source='ai'` tags, geocode/metadata recompute, duplicate/burst detection are read-time non-destructive. No duplicates, no corruption. The same applies to reprocessing a stuck `StorageObject` — content-hash is deterministic and thumbnail upload is an idempotent upsert.
 
 ---
 

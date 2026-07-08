@@ -310,6 +310,10 @@ cd apps/api && npm run prisma:migrate
 - `DELETE /api/storage/objects/:id` - Delete object
 - `PATCH /api/storage/objects/:id/metadata` - Update metadata
 
+### Admin: Stuck StorageObject Recovery (Admin role + storage:delete_any)
+StorageObjects can get orphaned at `status='processing'` forever if the API process is killed (OOM, crash, deploy) mid-pipeline — nothing writes a final status once the initial `processing` write happens, since `markReady`/`markFailed` only run at the very end of `ObjectProcessingService.handleObjectUploaded`. `StorageProcessingRecoveryTask` (a `@Cron` every 10 min, mirroring `EnrichmentStuckResetTask`) automatically finds objects stuck past `STORAGE_PROCESSING_STUCK_MINUTES` and re-runs the full processing pipeline (covers both photos and videos, unlike the narrower `POST /api/admin/media/reprocess`, which requires `status IN ('ready','failed')` and image mimeType only). Retries are capped at `STORAGE_PROCESSING_MAX_RETRIES` per object (tracked in `StorageObject.metadata._processingRetryCount`, persisted before each attempt so a crash mid-retry still advances the cap); an object that exhausts the cap is marked `status='failed'` instead of retried further.
+- `POST /api/admin/media/reprocess-stuck` body `{ olderThanMinutes? }` - Immediately triggers the same recovery the cron runs automatically, without waiting for the next tick; returns `{ claimed, reprocessed, exhausted, errors }` (Admin + storage:delete_any)
+
 ### Personal Access Tokens
 - `POST /api/pat` - Create a new personal access token
 - `GET /api/pat` - List current user's tokens
@@ -426,6 +430,12 @@ Metadata re-run re-extracts EXIF, dimensions, geocode, and video-probe data on d
 - `GET /api/media/:id/metadata/status` - Get per-item metadata extraction status: `{ status, processedAt, lastError }` (status `not_processed|pending|processing|processed|failed`); returns `not_processed` with null fields when no status row exists (media:read + viewer)
 
 > **UI:** A "Re-run metadata extraction" button appears in the media properties pane (MediaDetailDrawer) and calls `POST /api/media/:id/metadata/rerun`. For bulk backfill, Admins use the global backfill panel in Admin Settings (see `POST /api/admin/metadata/backfill` below).
+
+### Media — Thumbnail Rerun (media:write + per-circle collaborator role)
+Unlike metadata rerun, thumbnail regeneration runs synchronously in the request (mirrors `MediaReprocessService.reprocessImageObject`'s style, not the `enrichment_jobs` queue) — resolves the `MediaItem`'s `StorageObject`, resets it to `status='processing'`, clears any prior `_processingRetryCount`/`_processingRetryExhausted`, and re-runs the full processing pipeline via `StorageProcessingRecoveryService.reprocessObjectNow`. This is the explicit user-facing counterpart to the automatic `StorageProcessingRecoveryTask` cron documented under Storage Objects above — it bypasses that cron's stuck-threshold and retry-cap entirely, since an explicit retry request should always get a fresh attempt regardless of history.
+- `POST /api/media/:id/thumbnail/rerun` - Re-run thumbnail generation for a single item; resolves synchronously, no job to poll; returns `{ status: 'ready' | 'failed' }` reflecting the resulting StorageObject status (media:write + collaborator)
+
+> **UI:** A "Retry thumbnail" button appears in the media properties pane (MediaDetailDrawer) next to the Metadata section and calls `POST /api/media/:id/thumbnail/rerun`. Gallery tiles (`MediaTile`/`GalleryTile`) also fall back from the "Processing…" spinner to a broken-image icon once a thumbnail has been missing for more than 15 minutes, so a genuinely stuck item doesn't spin forever waiting for either the cron or a manual retry.
 
 ### Media — Geocode Rerun (media:read / media:write + per-circle roles)
 Per-item geocoding rerun via the `geocode` enrichment job type. Reads stored `takenLat`/`takenLng` — no image download. Writes geo columns (`geoCountry`, `geoAdmin1`, etc.) and `geoSource` using the active reverse provider configured in Geo Settings. Status is tracked in `media_geocode_status`.
@@ -809,6 +819,11 @@ Note: The rate-limit classifier (`classifyRateLimit`) treats HTTP 429 **and** HT
 - `ENRICHMENT_RATELIMIT_MAX_HITS` - Maximum rate-limit deferrals before a job is permanently failed; tracked separately from `ENRICHMENT_MAX_ATTEMPTS` (default: `10`)
 - `ENRICHMENT_STUCK_MINUTES` - Threshold in minutes for the automatic stuck-job reset cron (`EnrichmentStuckResetTask`, runs every 10 min); jobs that remain in `running` state beyond this threshold are reset to `pending` so the worker can re-claim them after an OOM kill or process restart (default: `15`); must exceed the longest expected single-job runtime
 
+**Storage object processing recovery** (separate from the `enrichment_jobs` queue above — this covers the content-hash/exif/dimensions/video-probe/geocode/thumbnail/visual-hash pipeline that runs synchronously in-process off `OBJECT_UPLOADED_EVENT`, not a queued job type):
+- `STORAGE_PROCESSING_STUCK_MINUTES` - Threshold in minutes for `StorageProcessingRecoveryTask` (runs every 10 min, mirrors `EnrichmentStuckResetTask`); `StorageObject` rows stuck at `status='processing'` beyond this threshold — left behind when the API process is OOM-killed, crashed, or restarted mid-pipeline — are re-processed automatically (default: `10`)
+- `STORAGE_PROCESSING_MAX_RETRIES` - Maximum automatic recovery attempts per object, tracked in `StorageObject.metadata._processingRetryCount`; an object that exhausts the cap is marked `status='failed'` instead of retried further (default: `3`)
+- `STORAGE_PROCESSING_STUCK_RESET_ENABLED` - Set to `false` to disable the recovery cron (default: `true`)
+
 **Bulk Import Tuning:**
 
 When importing thousands of photos onto a VPS with limited RAM, tune these settings to keep enrichment stable:
@@ -818,6 +833,7 @@ When importing thousands of photos onto a VPS with limited RAM, tune these setti
 - `TAG_MAX_IMAGE_DIM` / `FACE_MAX_IMAGE_DIM` — reduce from the default 1568 to 768–1024 on memory-constrained hosts; lower resolution reduces per-job peak memory at the cost of slightly lower tagging accuracy.
 - `ENRICHMENT_RATELIMIT_MAX_HITS` / `ENRICHMENT_RATELIMIT_MAX_MS` — raise for very large runs where a single provider quota window may take hours to recover; the defaults (10 hits, 15 min max) are designed for short bursts, not sustained 10 000-item backfills.
 - `ENRICHMENT_STUCK_MINUTES` — leave at the default 15 unless you are using a slow face provider where single-item detection takes longer than that; a value too low will reset legitimately-running jobs.
+- `STORAGE_PROCESSING_STUCK_MINUTES` / `STORAGE_PROCESSING_MAX_RETRIES` — the thumbnail/EXIF/dimensions pipeline is a separate recovery path from the enrichment settings above; if an OOM incident during a bulk import leaves photos stuck without thumbnails, `StorageProcessingRecoveryTask` auto-recovers them within this threshold — no manual intervention needed for the common case, but `POST /api/admin/media/reprocess-stuck` triggers it immediately if you don't want to wait for the next tick.
 
 See [Bulk Import Resilience](docs/specs/bulk-import-resilience.md) for the full provider rate-limit classification matrix, stuck-job recovery runbook, and CLI durable resume details. For **memory sizing on a cheap/constrained VPS** — the V8-heap-vs-off-heap model, why bulk imports OOM-loop, the `--max-old-space-size` / concurrency / `*_MAX_IMAGE_DIM` levers, per-container-size presets, `dmesg` OOM diagnosis, and real ~20k-job throughput/failure numbers — see [Bulk Uploads on a Cheap VPS](docs/specs/bulk-upload-vps-tuning.md).
 
