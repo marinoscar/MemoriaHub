@@ -11,10 +11,37 @@ interface UseInfiniteMediaResult {
   reset: () => void;
 }
 
+/**
+ * Page fetcher contract. Given a 1-based page number and a page size, resolve
+ * to that page's items plus the total page count so the hook can decide whether
+ * more pages remain. This is the seam that lets MediaGallery back any surface
+ * (Home, Trash, Archive, …) — not just `GET /api/media`.
+ */
+export type InfiniteMediaFetcher = (
+  page: number,
+  pageSize: number,
+) => Promise<{ items: MediaItem[]; totalPages: number }>;
+
+export interface UseInfiniteMediaOptions {
+  /**
+   * Optional custom page fetcher. When provided it is called instead of the
+   * default `listMedia(params)`, so callers can pull from any paginated media
+   * endpoint (e.g. `listTrash`, `listArchived`).
+   */
+  fetcher?: InfiniteMediaFetcher;
+  /**
+   * Reset/refetch key. When it changes the feed resets to page 1. Defaults to
+   * `JSON.stringify(params)`. Supply this when using a custom `fetcher` whose
+   * inputs are not captured by `params`.
+   */
+  queryKey?: string;
+}
+
 export function useInfiniteMedia(
   params: Omit<MediaQueryParams, 'page' | 'pageSize'>,
   pageSize = 50,
   enabled = true,
+  options?: UseInfiniteMediaOptions,
 ): UseInfiniteMediaResult {
   const [items, setItems] = useState<MediaItem[]>([]);
   const [page, setPage] = useState(1);
@@ -25,6 +52,7 @@ export function useInfiniteMedia(
   // Stable refs to avoid stale closures
   const paramsRef = useRef(params);
   const pageSizeRef = useRef(pageSize);
+  const fetcherRef = useRef<InfiniteMediaFetcher | undefined>(options?.fetcher);
   const inflightRef = useRef(false);
   // Generation counter: increments on reset so stale fetches are discarded
   const genRef = useRef(0);
@@ -32,9 +60,11 @@ export function useInfiniteMedia(
   // Keep refs current
   paramsRef.current = params;
   pageSizeRef.current = pageSize;
+  fetcherRef.current = options?.fetcher;
 
-  // Serialized key for detecting param changes
-  const paramsKey = JSON.stringify(params);
+  // Serialized key for detecting param changes. A custom queryKey takes
+  // precedence so callers with a fetcher can control reset semantics.
+  const paramsKey = options?.queryKey ?? JSON.stringify(params);
 
   const fetchPage = useCallback(async (targetPage: number, gen: number) => {
     if (inflightRef.current) return;
@@ -42,16 +72,19 @@ export function useInfiniteMedia(
     setIsLoading(true);
     setError(null);
     try {
-      const response = await listMedia({
-        ...paramsRef.current,
-        page: targetPage,
-        pageSize: pageSizeRef.current,
-      });
+      const fetcher = fetcherRef.current;
+      const response = fetcher
+        ? await fetcher(targetPage, pageSizeRef.current)
+        : await listMedia({
+            ...paramsRef.current,
+            page: targetPage,
+            pageSize: pageSizeRef.current,
+          }).then((r) => ({ items: r.items, totalPages: r.meta.totalPages }));
       if (gen !== genRef.current) return; // stale
       setItems((prev) =>
         targetPage === 1 ? response.items : [...prev, ...response.items],
       );
-      setTotalPages(response.meta.totalPages);
+      setTotalPages(response.totalPages);
     } catch (err) {
       if (gen !== genRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load media');

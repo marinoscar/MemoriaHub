@@ -39,6 +39,7 @@ import {
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { useInfiniteMedia } from '../../hooks/useInfiniteMedia';
+import type { InfiniteMediaFetcher } from '../../hooks/useInfiniteMedia';
 import { useIntersectionObserver } from '../../hooks/useIntersectionObserver';
 import { useMediaRefresh } from '../../contexts/MediaRefreshContext';
 import { groupByDay } from '../../utils/groupByDay';
@@ -46,6 +47,8 @@ import { isThumbnailStuck } from '../../utils/thumbnailTimeout';
 import { MediaDetailDrawer } from './MediaDetailDrawer';
 import { MediaLightbox } from './MediaLightbox';
 import { BulkActionToolbar } from './BulkActionToolbar';
+import { TrashBulkToolbar } from './TrashBulkToolbar';
+import { ArchiveBulkToolbar } from './ArchiveBulkToolbar';
 import { BulkLocationDialog } from './BulkLocationDialog';
 import { BulkDateDialog } from './BulkDateDialog';
 import { BulkTagsDialog } from './BulkTagsDialog';
@@ -283,6 +286,26 @@ export interface MediaGalleryProps {
 
   /** FEED mode: component calls useInfiniteMedia with these params. */
   queryParams?: MediaQueryParams;
+  /**
+   * FEED mode (pluggable): custom page fetcher passed straight to
+   * useInfiniteMedia. When supplied, the gallery fetches through this instead
+   * of the default `listMedia` — letting any paginated media surface (Trash,
+   * Archive, …) reuse the gallery. Providing `fetcher` alone activates FEED
+   * mode even without `queryParams`.
+   */
+  fetcher?: InfiniteMediaFetcher;
+  /**
+   * Reset/refetch key for the custom fetcher. Changing it resets the feed to
+   * page 1. Defaults to JSON.stringify(queryParams) inside the hook.
+   */
+  queryKey?: string;
+  /**
+   * Which bulk toolbar to render in the toolbar slot (always ABOVE the grid):
+   *   'home'    → BulkActionToolbar (location/date/tags/album/…)
+   *   'trash'   → TrashBulkToolbar (restore / delete forever)
+   *   'archive' → ArchiveBulkToolbar (unarchive / move to Trash)
+   */
+  mode?: 'home' | 'trash' | 'archive';
   /** CONTROLLED mode: render this array directly, no fetching. */
   items?: MediaItem[];
   /** Controlled-mode loading flag — shows a centered spinner when true. */
@@ -301,6 +324,12 @@ export interface MediaGalleryProps {
    * state (e.g. album header, search result counts).
    */
   onChange?: () => void;
+  /**
+   * Optional passthrough invoked after any successful bulk action (any mode),
+   * with the success message. Lets pages refresh their own external state
+   * (e.g. Trash/Archive item counts) on top of the gallery's internal reset.
+   */
+  onBulkSuccess?: (message: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -311,17 +340,22 @@ export function MediaGallery({
   circleId,
   activeCircleRole,
   queryParams,
+  fetcher,
+  queryKey,
+  mode = 'home',
   items: controlledItems,
   isLoading: controlledLoading,
   pageSize = 50,
   albumId,
   emptyState,
   onChange,
+  onBulkSuccess,
 }: MediaGalleryProps) {
   const theme = useTheme();
 
-  // Determine mode
-  const isFeedMode = queryParams !== undefined;
+  // Determine mode: FEED activates when EITHER queryParams OR a custom fetcher
+  // is supplied. CONTROLLED mode is used only when neither is present.
+  const isFeedMode = queryParams !== undefined || fetcher !== undefined;
 
   // -------------------------------------------------------------------------
   // FEED mode — infinite scroll via useInfiniteMedia
@@ -329,9 +363,10 @@ export function MediaGallery({
 
   const feedResult = useInfiniteMedia(
     // Always call the hook (rules of hooks); pass empty params in controlled mode
-    isFeedMode ? queryParams : {},
+    isFeedMode ? (queryParams ?? {}) : {},
     pageSize,
     isFeedMode && !!circleId,
+    { fetcher, queryKey },
   );
 
   const feedItems = feedResult.items;
@@ -499,8 +534,9 @@ export function MediaGallery({
       } else {
         onChange?.();
       }
+      onBulkSuccess?.(message);
     },
-    [isFeedMode, feedReset, onChange],
+    [isFeedMode, feedReset, onChange, onBulkSuccess],
   );
 
   // -------------------------------------------------------------------------
@@ -616,22 +652,44 @@ export function MediaGallery({
         </Box>
       )}
 
-      {/* Bulk action toolbar */}
-      <BulkActionToolbar
-        selected={selected}
-        circleId={circleId}
-        activeCircleRole={activeCircleRole}
-        onClear={handleClearSelection}
-        onSelectAll={handleSelectAll}
-        onOpenLocation={() => setBulkLocationOpen(true)}
-        onOpenDate={() => setBulkDateOpen(true)}
-        onOpenTags={() => setBulkTagsOpen(true)}
-        onOpenAlbum={() => setAddToAlbumOpen(true)}
-        albumMode={Boolean(albumId)}
-        onRemoveFromAlbum={albumId ? () => void handleRemoveFromAlbum() : undefined}
-        onSuccess={handleBulkSuccess}
-        onError={(msg) => setSnackbar({ message: msg, severity: 'error' })}
-      />
+      {/* Bulk action toolbar — one per mode, always rendered ABOVE the grid */}
+      {mode === 'trash' ? (
+        <TrashBulkToolbar
+          selected={selected}
+          circleId={circleId}
+          activeCircleRole={activeCircleRole}
+          onClear={handleClearSelection}
+          onSelectAll={handleSelectAll}
+          onSuccess={handleBulkSuccess}
+          onError={(msg) => setSnackbar({ message: msg, severity: 'error' })}
+        />
+      ) : mode === 'archive' ? (
+        <ArchiveBulkToolbar
+          selected={selected}
+          circleId={circleId}
+          activeCircleRole={activeCircleRole}
+          onClear={handleClearSelection}
+          onSelectAll={handleSelectAll}
+          onSuccess={handleBulkSuccess}
+          onError={(msg) => setSnackbar({ message: msg, severity: 'error' })}
+        />
+      ) : (
+        <BulkActionToolbar
+          selected={selected}
+          circleId={circleId}
+          activeCircleRole={activeCircleRole}
+          onClear={handleClearSelection}
+          onSelectAll={handleSelectAll}
+          onOpenLocation={() => setBulkLocationOpen(true)}
+          onOpenDate={() => setBulkDateOpen(true)}
+          onOpenTags={() => setBulkTagsOpen(true)}
+          onOpenAlbum={() => setAddToAlbumOpen(true)}
+          albumMode={Boolean(albumId)}
+          onRemoveFromAlbum={albumId ? () => void handleRemoveFromAlbum() : undefined}
+          onSuccess={handleBulkSuccess}
+          onError={(msg) => setSnackbar({ message: msg, severity: 'error' })}
+        />
+      )}
 
       {/* Day-grouped grid */}
       {!showFirstLoad && mergedItems.length > 0 && (
