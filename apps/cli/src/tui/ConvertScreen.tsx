@@ -2,9 +2,11 @@
  * tui/ConvertScreen.tsx — App-hosted "Convert videos to MP4" screen.
  *
  * Converts recognized non-MP4 video files (MOV, MTS, AVI, WMV, …) to `.mp4`
- * alongside the originals via ffmpeg.  Because the operation creates files (and
- * originals are kept), the screen still uses a plan → confirm → execute flow and
- * never runs ffmpeg without an explicit 'y' confirmation.
+ * alongside the originals via ffmpeg.  Because the operation creates files, the
+ * screen uses a plan → confirm → execute flow and never runs ffmpeg without an
+ * explicit 'y' confirmation.  On the confirm screen the user also chooses what
+ * happens to each original once its `.mp4` is written — keep (default), delete,
+ * or move into a chosen folder.
  *
  * Like OrganizeScreen this lives inside the running Ink app tree and takes
  * onBack/onHome callbacks.  Convert is fully offline (no PAT/login), so there is
@@ -23,6 +25,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import Spinner from 'ink-spinner';
+import TextInput from 'ink-text-input';
 import type BetterSqlite3 from 'better-sqlite3';
 
 import { ConvertEngine } from '../convert/convert-engine.js';
@@ -32,6 +35,7 @@ import {
   type ConvertDonePayload,
   type ConvertErrorPayload,
   type ConvertTotals,
+  type OriginalDisposition,
 } from '../convert/events.js';
 import { FolderRepo } from '../repo/folders.js';
 import { SettingsRepo } from '../repo/settings.js';
@@ -64,7 +68,22 @@ interface ScreenState {
   planTotals: ConvertTotals | null;
   finalTotals: ConvertTotals | null;
   errorMsg: string | null;
+  /** Chosen disposition for the originals (selected on the confirm screen). */
+  disposition: OriginalDisposition;
+  /** Destination folder for moved originals (disposition 'move'). */
+  originalsDir: string;
+  /** True while the move-destination text field is being edited. */
+  editingDir: boolean;
+  /** Inline validation message shown on the confirm screen. */
+  confirmError: string | null;
 }
+
+/** Human labels for each disposition, shown on the confirm + done screens. */
+const DISPOSITION_LABELS: Record<OriginalDisposition, string> = {
+  keep: 'Keep originals',
+  delete: 'Delete originals after conversion',
+  move: 'Move originals to a folder',
+};
 
 // ---------------------------------------------------------------------------
 // Component
@@ -86,6 +105,10 @@ export function ConvertScreen({
     planTotals: null,
     finalTotals: null,
     errorMsg: null,
+    disposition: 'keep',
+    originalsDir: '',
+    editingDir: false,
+    confirmError: null,
   });
 
   // Guard against setState after unmount.
@@ -100,7 +123,10 @@ export function ConvertScreen({
   // single run pass. Used for both the dry-run plan pass and the real execute
   // pass — the done handler branches on `dryRun` to route to confirm vs. done.
   // -------------------------------------------------------------------------
-  function startPass(dryRun: boolean): void {
+  function startPass(
+    dryRun: boolean,
+    runOpts?: { originalDisposition?: OriginalDisposition; originalsDir?: string },
+  ): void {
     const engine = engineRef.current;
     if (!engine) return;
 
@@ -139,7 +165,7 @@ export function ConvertScreen({
     // When an engine is injected for tests, the test drives run() itself.
     if (!_engineForTesting) {
       engine
-        .run({ all, folderIds, files, dryRun })
+        .run({ all, folderIds, files, dryRun, ...runOpts })
         .catch((err: unknown) => {
           if (mounted.current) {
             setState((s) => ({
@@ -157,15 +183,37 @@ export function ConvertScreen({
     if (state.phase === 'planning' || state.phase === 'running') return;
 
     if (state.phase === 'confirm') {
+      // While editing the move-destination field, the TextInput owns typing;
+      // Esc cancels editing without leaving the screen.
+      if (state.editingDir) {
+        if (key.escape) setState((s) => ({ ...s, editingDir: false }));
+        return;
+      }
+      // Disposition selection.
+      if (input === '1') { setState((s) => ({ ...s, disposition: 'keep', editingDir: false, confirmError: null })); return; }
+      if (input === '2') { setState((s) => ({ ...s, disposition: 'delete', editingDir: false, confirmError: null })); return; }
+      if (input === '3') { setState((s) => ({ ...s, disposition: 'move', editingDir: true, confirmError: null })); return; }
       if (input === 'y' || input === 'Y') {
+        if (state.disposition === 'move' && state.originalsDir.trim().length === 0) {
+          setState((s) => ({
+            ...s,
+            editingDir: true,
+            confirmError: 'Enter a destination folder for the originals, then press Enter.',
+          }));
+          return;
+        }
         // Confirmed — start the execute pass with fresh listeners.
+        const originalsDir = state.originalsDir.trim();
         setState((s) => ({
           ...s,
           phase: 'running',
           processed: 0,
           total: s.planTotals?.total ?? 0,
         }));
-        startPass(false);
+        startPass(false, {
+          originalDisposition: state.disposition,
+          originalsDir: state.disposition === 'move' ? originalsDir : undefined,
+        });
         return;
       }
       if (input === 'q' || key.escape) { onBack(); return; }
@@ -220,6 +268,7 @@ export function ConvertScreen({
 
   if (state.phase === 'confirm') {
     const totals = state.planTotals;
+    const opts: OriginalDisposition[] = ['keep', 'delete', 'move'];
     return (
       <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Convert Videos to MP4 — Plan</Text>
@@ -227,15 +276,55 @@ export function ConvertScreen({
           <Text>
             <Text color="green">{totals?.total ?? 0}</Text> video file(s) would be converted to .mp4
           </Text>
-          <Text dimColor>Originals are kept alongside the new .mp4 files.</Text>
         </Box>
+
+        <Box marginTop={1} flexDirection="column">
+          <Text bold>What should happen to the original videos?</Text>
+          {opts.map((d, i) => {
+            const selected = state.disposition === d;
+            return (
+              <Text key={d} color={selected ? 'green' : undefined}>
+                {selected ? '❯ ' : '  '}[{i + 1}] {DISPOSITION_LABELS[d]}
+              </Text>
+            );
+          })}
+          {state.disposition === 'move' && (
+            <Box marginTop={1}>
+              <Text color="cyan">{'  Folder: '}</Text>
+              {state.editingDir ? (
+                <TextInput
+                  value={state.originalsDir}
+                  onChange={(v) => setState((s) => ({ ...s, originalsDir: v }))}
+                  onSubmit={() => setState((s) => ({ ...s, editingDir: false }))}
+                />
+              ) : (
+                <Text dimColor>
+                  {state.originalsDir.trim().length > 0
+                    ? state.originalsDir
+                    : '(not set — press 3 to enter a folder)'}
+                </Text>
+              )}
+            </Box>
+          )}
+        </Box>
+
+        {state.confirmError && (
+          <Box marginTop={1}>
+            <Text color="red">{state.confirmError}</Text>
+          </Box>
+        )}
 
         <Box marginTop={1} flexDirection="column">
           <Text color="yellow">⚠ Conversion requires ffmpeg and may take a while for large videos.</Text>
           <Box marginTop={1}>
-            <Text>
-              <Text color="green">[y]</Text> convert now   <Text dimColor>[q/Esc] cancel</Text>
-            </Text>
+            {state.editingDir ? (
+              <Text dimColor>[Enter] set folder   [Esc] cancel edit</Text>
+            ) : (
+              <Text>
+                <Text dimColor>[1/2/3] choose   </Text>
+                <Text color="green">[y]</Text> convert now   <Text dimColor>[q/Esc] cancel</Text>
+              </Text>
+            )}
           </Box>
         </Box>
       </Box>
@@ -307,6 +396,14 @@ export function ConvertScreen({
         {(totals?.deleted ?? 0) > 0 && (
           <Text>
             <Text color="yellow">{totals?.deleted ?? 0}</Text> originals deleted
+          </Text>
+        )}
+        {(totals?.moved ?? 0) > 0 && (
+          <Text>
+            <Text color="yellow">{totals?.moved ?? 0}</Text> originals moved
+            {state.originalsDir.trim().length > 0 && (
+              <Text dimColor> → {state.originalsDir.trim()}</Text>
+            )}
           </Text>
         )}
         <Text>
