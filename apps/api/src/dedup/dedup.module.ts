@@ -24,6 +24,6 @@ import { VisualEmbeddingService } from './visual-embedding.service';
     DuplicateBackfillService,
     VisualEmbeddingService,
   ],
-  exports: [VisualEmbeddingService],
+  exports: [VisualEmbeddingService, DuplicateDetectionService],
 })
 export class DedupModule {}

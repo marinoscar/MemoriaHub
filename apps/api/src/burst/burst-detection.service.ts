@@ -8,6 +8,7 @@ import {
 } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { computeAndPersistVisualHash } from '../storage/processing/hash-backfill.util';
+import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
 
 /**
  * Computes the Hamming distance between two 64-bit perceptual hashes.
@@ -49,6 +50,7 @@ export class BurstDetectionService {
     @Inject(STORAGE_PROVIDER)
     private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
+    private readonly duplicateDetectionService: DuplicateDetectionService,
   ) {}
 
   async processMediaItem(job: EnrichmentJob): Promise<void> {
@@ -300,6 +302,26 @@ export class BurstDetectionService {
 
     // Step 6: Recompute scores for all group members
     await this.recomputeGroupScores(targetGroupId, item.circleId);
+
+    // Step 7: Burst wins over duplicate detection. Any member that dedup
+    // prematurely placed in a duplicate group (upload ordering race) must be
+    // evicted now that it belongs to a burst group. Running it over the whole
+    // target group uniformly covers the create/join/merge branches and is
+    // idempotent for members with no duplicate group. Best-effort — a failure
+    // here must not fail the burst job.
+    try {
+      const groupMembers = await this.prisma.mediaItem.findMany({
+        where: { burstGroupId: targetGroupId, deletedAt: null },
+        select: { id: true },
+      });
+      await this.duplicateDetectionService.evictFromDuplicateGroups(
+        groupMembers.map((m) => m.id),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Failed to evict burst group ${targetGroupId} members from duplicate groups: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   private async recomputeGroupScores(groupId: string, circleId: string): Promise<void> {
