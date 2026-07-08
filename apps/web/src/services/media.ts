@@ -119,6 +119,26 @@ export async function deleteMedia(id: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Orientation editing (destructive rotate / flip of a photo's original bytes)
+// ---------------------------------------------------------------------------
+
+export type OrientationOp =
+  | 'rotate_left'
+  | 'rotate_right'
+  | 'flip_horizontal'
+  | 'flip_vertical';
+
+export async function editOrientation(
+  id: string,
+  op: OrientationOp,
+): Promise<{ status: string; width: number; height: number }> {
+  return api.post<{ status: string; width: number; height: number }>(
+    `/media/${id}/edit/orientation`,
+    { op },
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Tags
 // ---------------------------------------------------------------------------
 

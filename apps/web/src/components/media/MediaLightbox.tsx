@@ -1,12 +1,24 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
   Box,
   IconButton,
   Typography,
   CircularProgress,
   Stack,
   Tooltip,
+  Popover,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText,
+  Divider,
+  Snackbar,
+  Alert,
   useMediaQuery,
 } from '@mui/material';
 import {
@@ -15,12 +27,36 @@ import {
   StarBorder as StarBorderIcon,
   Download as DownloadIcon,
   InfoOutlined,
+  IosShare as IosShareIcon,
+  Tune as TuneIcon,
+  Archive as ArchiveIcon,
+  Unarchive as UnarchiveIcon,
+  Delete as DeleteIcon,
+  MoreVert as MoreVertIcon,
+  Add as AddIcon,
+  LocalOffer as LocalOfferIcon,
+  Face as FaceIcon,
+  InfoOutlined as InfoOutlinedIcon,
+  Refresh as RefreshIcon,
   ChevronLeft,
   ChevronRight,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import type { MediaItem } from '../../types/media';
-import { getMedia, patchMedia as patchMediaApi } from '../../services/media';
+import {
+  getMedia,
+  patchMedia as patchMediaApi,
+  bulkArchive,
+  bulkUnarchive,
+  bulkDelete,
+} from '../../services/media';
+import { rerunMediaFaces } from '../../services/face';
+import { rerunThumbnail } from '../../services/thumbnail';
+import { useMediaTags } from '../../hooks/useMediaTags';
+import { useMediaMetadata } from '../../hooks/useMediaMetadata';
+import { SharePanel } from '../share/SharePanel';
+import { AddToAlbumDialog } from '../album/AddToAlbumDialog';
+import { MediaOrientationEditor } from './MediaOrientationEditor';
 import { VideoPlayer } from './VideoPlayer';
 
 // ---------------------------------------------------------------------------
@@ -67,6 +103,21 @@ export function MediaLightbox({
   const [zoomed, setZoomed] = useState(false);
   // Controls visibility — added in commit 4
   const [controlsVisible, setControlsVisible] = useState(true);
+
+  // Immich-style action bar surfaces
+  const [shareAnchor, setShareAnchor] = useState<null | HTMLElement>(null);
+  const [moreAnchor, setMoreAnchor] = useState<null | HTMLElement>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [addAlbumOpen, setAddAlbumOpen] = useState(false);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [facesLoading, setFacesLoading] = useState(false);
+  const [thumbLoading, setThumbLoading] = useState(false);
+  const [snack, setSnack] = useState<{
+    message: string;
+    severity: 'success' | 'error';
+  } | null>(null);
 
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const swipeRef = useRef<{
@@ -115,6 +166,117 @@ export function MediaLightbox({
       // Silently fail
     }
   }, [item, fullItem, onItemUpdated]);
+
+  // --- Refetch the full item (fresh signed URLs) and propagate upward ---
+  // Busts the module cache, updates local state, and forces the full-res <img>
+  // to reload. Used by the orientation editor and the refresh overflow actions.
+  const refreshFullItem = useCallback(async () => {
+    if (!item) return;
+    try {
+      fullItemCache.delete(item.id);
+      const refreshed = await getMedia(item.id);
+      fullItemCache.set(refreshed.id, refreshed);
+      setFullItem(refreshed);
+      setFullResLoaded(false);
+      onItemUpdated?.(refreshed);
+    } catch {
+      // Silently swallow — the previous item remains displayed
+    }
+  }, [item?.id, onItemUpdated]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Tagging / metadata rerun hooks (poll to completion, then refresh the item)
+  const { rerun: rerunTags, rerunLoading: rerunTagsLoading } = useMediaTags(
+    item?.id ?? '',
+    () => void refreshFullItem(),
+  );
+  const { rerun: rerunMetadata, rerunLoading: rerunMetadataLoading } = useMediaMetadata(
+    item?.id ?? '',
+    () => void refreshFullItem(),
+  );
+
+  // --- Archive / unarchive toggle ---
+  const handleToggleArchive = useCallback(async () => {
+    if (!item) return;
+    setArchiveLoading(true);
+    try {
+      const isArchived = ((fullItem ?? item).archivedAt ?? null) !== null;
+      if (isArchived) {
+        await bulkUnarchive({ circleId: item.circleId, ids: [item.id] });
+      } else {
+        await bulkArchive({ circleId: item.circleId, ids: [item.id] });
+      }
+      const refreshed = await getMedia(item.id);
+      fullItemCache.set(refreshed.id, refreshed);
+      setFullItem(refreshed);
+      onItemUpdated?.(refreshed);
+      setSnack({
+        message: isArchived ? 'Item unarchived' : 'Item archived',
+        severity: 'success',
+      });
+    } catch (err) {
+      setSnack({
+        message: err instanceof Error ? err.message : 'Failed to update archive state',
+        severity: 'error',
+      });
+    } finally {
+      setArchiveLoading(false);
+    }
+  }, [item, fullItem, onItemUpdated]);
+
+  // --- Move to Trash ---
+  const handleDelete = useCallback(async () => {
+    if (!item) return;
+    setDeleteConfirmOpen(false);
+    setDeleteLoading(true);
+    try {
+      await bulkDelete({ circleId: item.circleId, ids: [item.id] });
+      onClose();
+    } catch (err) {
+      setSnack({
+        message: err instanceof Error ? err.message : 'Failed to move item to Trash',
+        severity: 'error',
+      });
+    } finally {
+      setDeleteLoading(false);
+    }
+  }, [item, onClose]);
+
+  // --- Overflow: refresh faces (async job — no polling) ---
+  const handleRefreshFaces = useCallback(async () => {
+    if (!item) return;
+    setMoreAnchor(null);
+    setFacesLoading(true);
+    try {
+      await rerunMediaFaces(item.id);
+      setSnack({ message: 'Face detection re-queued', severity: 'success' });
+    } catch (err) {
+      setSnack({
+        message: err instanceof Error ? err.message : 'Failed to refresh faces',
+        severity: 'error',
+      });
+    } finally {
+      setFacesLoading(false);
+    }
+  }, [item]);
+
+  // --- Overflow: retry thumbnail (synchronous server-side) ---
+  const handleRefreshThumbnail = useCallback(async () => {
+    if (!item) return;
+    setMoreAnchor(null);
+    setThumbLoading(true);
+    try {
+      await rerunThumbnail(item.id);
+      await refreshFullItem();
+      setSnack({ message: 'Thumbnail regenerated', severity: 'success' });
+    } catch (err) {
+      setSnack({
+        message: err instanceof Error ? err.message : 'Failed to retry thumbnail',
+        severity: 'error',
+      });
+    } finally {
+      setThumbLoading(false);
+    }
+  }, [item, refreshFullItem]);
 
   // --- Keyboard navigation ---
   useEffect(() => {
@@ -286,18 +448,18 @@ export function MediaLightbox({
             </Typography>
 
             <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-              <Tooltip title={displayItem.favorite ? 'Remove from favorites' : 'Add to favorites'}>
+              {/* 1. Share */}
+              <Tooltip title="Share publicly">
                 <IconButton
-                  aria-label="Toggle favorite"
-                  onClick={() => void handleToggleFavorite()}
-                  sx={{
-                    color: displayItem.favorite ? theme.palette.warning.main : 'white',
-                  }}
+                  aria-label="Share publicly"
+                  onClick={(e) => setShareAnchor(e.currentTarget)}
+                  sx={{ color: 'white', minWidth: 44, minHeight: 44 }}
                 >
-                  {displayItem.favorite ? <StarIcon /> : <StarBorderIcon />}
+                  <IosShareIcon />
                 </IconButton>
               </Tooltip>
 
+              {/* 2. Download */}
               {downloadUrl && (
                 <Tooltip title="Download original">
                   <IconButton
@@ -305,20 +467,98 @@ export function MediaLightbox({
                     href={downloadUrl}
                     download
                     aria-label="Download original"
-                    sx={{ color: 'white' }}
+                    sx={{ color: 'white', minWidth: 44, minHeight: 44 }}
                   >
                     <DownloadIcon />
                   </IconButton>
                 </Tooltip>
               )}
 
+              {/* 3. Info */}
               <Tooltip title="Open properties panel">
                 <IconButton
                   aria-label="Open properties panel"
                   onClick={() => onOpenProperties(displayItem)}
-                  sx={{ color: 'white' }}
+                  sx={{ color: 'white', minWidth: 44, minHeight: 44 }}
                 >
                   <InfoOutlined />
+                </IconButton>
+              </Tooltip>
+
+              {/* 4. Favorite */}
+              <Tooltip title={displayItem.favorite ? 'Remove from favorites' : 'Add to favorites'}>
+                <IconButton
+                  aria-label="Toggle favorite"
+                  onClick={() => void handleToggleFavorite()}
+                  sx={{
+                    color: displayItem.favorite ? theme.palette.warning.main : 'white',
+                    minWidth: 44,
+                    minHeight: 44,
+                  }}
+                >
+                  {displayItem.favorite ? <StarIcon /> : <StarBorderIcon />}
+                </IconButton>
+              </Tooltip>
+
+              {/* 5. Edit (photos only) */}
+              {displayItem.type === 'photo' && (
+                <Tooltip title="Edit orientation">
+                  <IconButton
+                    aria-label="Edit orientation"
+                    onClick={() => setEditorOpen(true)}
+                    sx={{ color: 'white', minWidth: 44, minHeight: 44 }}
+                  >
+                    <TuneIcon />
+                  </IconButton>
+                </Tooltip>
+              )}
+
+              {/* 6. Archive / Unarchive */}
+              <Tooltip title={displayItem.archivedAt !== null ? 'Unarchive' : 'Archive'}>
+                <span>
+                  <IconButton
+                    aria-label={displayItem.archivedAt !== null ? 'Unarchive' : 'Archive'}
+                    onClick={() => void handleToggleArchive()}
+                    disabled={archiveLoading}
+                    sx={{ color: 'white', minWidth: 44, minHeight: 44 }}
+                  >
+                    {archiveLoading ? (
+                      <CircularProgress size={20} sx={{ color: 'white' }} />
+                    ) : displayItem.archivedAt !== null ? (
+                      <UnarchiveIcon />
+                    ) : (
+                      <ArchiveIcon />
+                    )}
+                  </IconButton>
+                </span>
+              </Tooltip>
+
+              {/* 7. Delete */}
+              <Tooltip title="Move to Trash">
+                <span>
+                  <IconButton
+                    aria-label="Move to Trash"
+                    onClick={() => setDeleteConfirmOpen(true)}
+                    disabled={deleteLoading}
+                    sx={{ color: 'white', minWidth: 44, minHeight: 44 }}
+                  >
+                    {deleteLoading ? (
+                      <CircularProgress size={20} sx={{ color: 'white' }} />
+                    ) : (
+                      <DeleteIcon />
+                    )}
+                  </IconButton>
+                </span>
+              </Tooltip>
+
+              {/* 8. Overflow */}
+              <Tooltip title="More actions">
+                <IconButton
+                  aria-label="More actions"
+                  onClick={(e) => setMoreAnchor(e.currentTarget)}
+                  sx={{ color: 'white', minWidth: 44, minHeight: 44 }}
+                >
+                  <MoreVertIcon />
                 </IconButton>
               </Tooltip>
             </Stack>
@@ -468,6 +708,160 @@ export function MediaLightbox({
           </IconButton>
         </Box>
       </Box>
+
+      {/* Share popover — anchored to the share button. Rendered as a single
+          nested Modal over the lightbox Dialog (standard MUI stacking). */}
+      <Popover
+        open={Boolean(shareAnchor)}
+        anchorEl={shareAnchor}
+        onClose={() => setShareAnchor(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+        sx={{ zIndex: (t) => t.zIndex.modal + 2 }}
+      >
+        <Box sx={{ p: 2, width: 320 }} onClick={(e) => e.stopPropagation()}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            Share publicly
+          </Typography>
+          <SharePanel
+            target={{ type: 'media_item', id: displayItem.id }}
+            onRequestClose={() => setShareAnchor(null)}
+          />
+        </Box>
+      </Popover>
+
+      {/* Overflow menu */}
+      <Menu
+        anchorEl={moreAnchor}
+        open={Boolean(moreAnchor)}
+        onClose={() => setMoreAnchor(null)}
+        sx={{ zIndex: (t) => t.zIndex.modal + 2 }}
+      >
+        <MenuItem
+          onClick={() => {
+            setMoreAnchor(null);
+            setAddAlbumOpen(true);
+          }}
+        >
+          <ListItemIcon><AddIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Add to album</ListItemText>
+        </MenuItem>
+        <Divider />
+        <MenuItem
+          disabled={rerunTagsLoading}
+          onClick={() => {
+            setMoreAnchor(null);
+            void rerunTags();
+          }}
+        >
+          <ListItemIcon>
+            {rerunTagsLoading ? <CircularProgress size={18} /> : <LocalOfferIcon fontSize="small" />}
+          </ListItemIcon>
+          <ListItemText>Re-run AI tagging</ListItemText>
+        </MenuItem>
+        <MenuItem
+          disabled={facesLoading}
+          onClick={() => void handleRefreshFaces()}
+        >
+          <ListItemIcon>
+            {facesLoading ? <CircularProgress size={18} /> : <FaceIcon fontSize="small" />}
+          </ListItemIcon>
+          <ListItemText>Refresh faces</ListItemText>
+        </MenuItem>
+        <MenuItem
+          disabled={rerunMetadataLoading}
+          onClick={() => {
+            setMoreAnchor(null);
+            void rerunMetadata();
+          }}
+        >
+          <ListItemIcon>
+            {rerunMetadataLoading ? <CircularProgress size={18} /> : <InfoOutlinedIcon fontSize="small" />}
+          </ListItemIcon>
+          <ListItemText>Refresh metadata</ListItemText>
+        </MenuItem>
+        <MenuItem
+          disabled={thumbLoading}
+          onClick={() => void handleRefreshThumbnail()}
+        >
+          <ListItemIcon>
+            {thumbLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
+          </ListItemIcon>
+          <ListItemText>Refresh thumbnails</ListItemText>
+        </MenuItem>
+      </Menu>
+
+      {/* Move to Trash confirm dialog */}
+      <Dialog
+        open={deleteConfirmOpen}
+        onClose={() => setDeleteConfirmOpen(false)}
+        maxWidth="xs"
+        fullWidth
+        sx={{ zIndex: (t) => t.zIndex.modal + 3 }}
+      >
+        <DialogTitle>Move to Trash?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            This item will be moved to Trash and can be recovered within the retention period.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteConfirmOpen(false)} disabled={deleteLoading}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => void handleDelete()}
+            color="error"
+            variant="contained"
+            disabled={deleteLoading}
+          >
+            Move to Trash
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Orientation editor */}
+      <MediaOrientationEditor
+        item={displayItem}
+        open={editorOpen}
+        onClose={() => setEditorOpen(false)}
+        onEdited={() => void refreshFullItem()}
+      />
+
+      {/* Add to album */}
+      <AddToAlbumDialog
+        open={addAlbumOpen}
+        onClose={() => setAddAlbumOpen(false)}
+        circleId={displayItem.circleId}
+        selectedIds={[displayItem.id]}
+        filters={{ circleId: displayItem.circleId }}
+        matchingCount={1}
+        onSuccess={(message) => {
+          setAddAlbumOpen(false);
+          setSnack({ message, severity: 'success' });
+        }}
+        onError={(message) => setSnack({ message, severity: 'error' })}
+      />
+
+      {/* Action feedback */}
+      <Snackbar
+        open={snack !== null}
+        autoHideDuration={4000}
+        onClose={() => setSnack(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        sx={{ zIndex: (t) => t.zIndex.modal + 4 }}
+      >
+        {snack ? (
+          <Alert
+            severity={snack.severity}
+            onClose={() => setSnack(null)}
+            variant="filled"
+            sx={{ width: '100%' }}
+          >
+            {snack.message}
+          </Alert>
+        ) : undefined}
+      </Snackbar>
     </Dialog>
   );
 }
