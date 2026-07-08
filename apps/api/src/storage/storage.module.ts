@@ -6,6 +6,8 @@ import { CirclesModule } from '../circles/circles.module';
 import { ObjectsController } from './objects/objects.controller';
 import { ObjectsService } from './objects/objects.service';
 import { StorageCleanupTask } from './tasks/storage-cleanup.task';
+import { StorageProcessingRecoveryService } from './tasks/storage-processing-recovery.service';
+import { StorageProcessingRecoveryTask } from './tasks/storage-processing-recovery.task';
 
 @Module({
   imports: [
@@ -15,7 +17,12 @@ import { StorageCleanupTask } from './tasks/storage-cleanup.task';
     CirclesModule,
   ],
   controllers: [ObjectsController],
-  providers: [ObjectsService, StorageCleanupTask],
-  exports: [ObjectsService],
+  providers: [
+    ObjectsService,
+    StorageCleanupTask,
+    StorageProcessingRecoveryService,
+    StorageProcessingRecoveryTask,
+  ],
+  exports: [ObjectsService, StorageProcessingRecoveryService],
 })
 export class StorageModule {}
