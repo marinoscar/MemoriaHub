@@ -65,6 +65,7 @@ import { useMediaTags } from '../../hooks/useMediaTags';
 import type { MediaTagStatusType } from '../../services/tagging';
 import { useMediaMetadata } from '../../hooks/useMediaMetadata';
 import type { MediaMetadataStatusType } from '../../services/metadata';
+import { rerunThumbnail } from '../../services/thumbnail';
 import { useSuggestLocation, useItemAutoAppliedSuggestion } from '../../hooks/useLocationSuggestions';
 import { revertLocationSuggestion } from '../../services/locationSuggestions';
 
@@ -438,6 +439,26 @@ export function MediaDetailDrawer({
     item?.id ?? '',
     onRefreshTags,
   );
+
+  // Thumbnail retry — runs synchronously server-side (no job to poll, unlike
+  // metadata/tags rerun), so this is a plain one-shot call rather than a hook.
+  const [thumbnailRerunLoading, setThumbnailRerunLoading] = useState(false);
+  const [thumbnailRerunError, setThumbnailRerunError] = useState<string | null>(null);
+
+  const handleRerunThumbnail = useCallback(async () => {
+    if (!item) return;
+    setThumbnailRerunLoading(true);
+    setThumbnailRerunError(null);
+    try {
+      await rerunThumbnail(item.id);
+      setImgError(false);
+      await onRefreshTags();
+    } catch (err) {
+      setThumbnailRerunError(err instanceof Error ? err.message : 'Failed to retry thumbnail');
+    } finally {
+      setThumbnailRerunLoading(false);
+    }
+  }, [item, onRefreshTags]);
 
   // Faces for the video marker strip — only fetched when viewing a video.
   // Always called (rules of hooks) but guarded by empty string when not a video.
@@ -1053,6 +1074,29 @@ export function MediaDetailDrawer({
         })()}
         {metadataStatus?.status === 'failed' && metadataStatus.lastError && (
           <Alert severity="error" sx={{ mb: 1 }}>{metadataStatus.lastError}</Alert>
+        )}
+
+        {/* Thumbnail retry — for items whose thumbnail never generated (e.g.
+            server was interrupted mid-upload); works even on an already-ready
+            thumbnail if the user just wants it regenerated. */}
+        <Divider sx={{ my: 1.5 }} />
+        <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+          Thumbnail
+        </Typography>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ alignItems: { xs: 'flex-start', sm: 'center' }, mb: 1 }}>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={thumbnailRerunLoading ? <CircularProgress size={14} /> : <RefreshIcon />}
+            onClick={() => void handleRerunThumbnail()}
+            disabled={thumbnailRerunLoading}
+            sx={{ minHeight: 44 }}
+          >
+            Retry thumbnail
+          </Button>
+        </Stack>
+        {thumbnailRerunError && (
+          <Alert severity="error" sx={{ mb: 1 }}>{thumbnailRerunError}</Alert>
         )}
 
         {/* Timestamps */}
