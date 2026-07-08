@@ -16,6 +16,7 @@ import {
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { FEATURE_KEYS } from '../common/types/settings.types';
+import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
 import { BurstQueryDto } from './dto/burst-query.dto';
 import { ResolveBurstDto } from './dto/resolve-burst.dto';
 
@@ -31,6 +32,7 @@ export class BurstService {
     private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
     private readonly systemSettings: SystemSettingsService,
+    private readonly duplicateDetectionService: DuplicateDetectionService,
   ) {}
 
   /**
@@ -485,7 +487,7 @@ export class BurstService {
     from?: string;
     to?: string;
     force?: boolean;
-  }): Promise<{ enqueued: number; circles: number }> {
+  }): Promise<{ enqueued: number; circles: number; evictedDuplicateOverlaps: number }> {
     const allCircles = await this.prisma.circle.findMany({
       select: { id: true },
     });
@@ -498,10 +500,24 @@ export class BurstService {
       totalEnqueued += count;
     }
 
+    // One-time remediation: heal photos already double-listed in both the
+    // burst and duplicate review queues by evicting them from their duplicate
+    // groups (burst wins). App-wide, synchronous, best-effort — a remediation
+    // failure must not fail the backfill enqueue.
+    let evictedDuplicateOverlaps = 0;
+    try {
+      const result = await this.duplicateDetectionService.evictExistingBurstOverlaps();
+      evictedDuplicateOverlaps = result.evicted;
+    } catch (err) {
+      this.logger.warn(
+        `Failed to evict existing burst/duplicate overlaps during backfill: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
     this.logger.log(
-      `Global burst backfill complete: ${totalEnqueued} job(s) enqueued across ${circleCount} circle(s)`,
+      `Global burst backfill complete: ${totalEnqueued} job(s) enqueued across ${circleCount} circle(s), evicted ${evictedDuplicateOverlaps} duplicate overlap(s)`,
     );
 
-    return { enqueued: totalEnqueued, circles: circleCount };
+    return { enqueued: totalEnqueued, circles: circleCount, evictedDuplicateOverlaps };
   }
 }
