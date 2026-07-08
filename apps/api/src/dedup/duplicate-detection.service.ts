@@ -281,8 +281,11 @@ export class DuplicateDetectionService {
   /**
    * Recompute mediaCount and the chronological capturedAt (earliest active
    * member) for a duplicate group after membership changes. Deletes the
-   * group if it has been emptied out (defensive — membership can also
-   * shrink via trash/archive actions elsewhere).
+   * group if it has fallen below the invariant `mediaCount >= 2` — either
+   * emptied out entirely, or shrunk to a single lone member whose
+   * duplicateGroupId is then cleared (a 1-member duplicate group is
+   * meaningless). Defensive — membership can shrink via trash/archive
+   * actions or burst eviction elsewhere.
    */
   private async recomputeGroupMeta(groupId: string): Promise<void> {
     const members = await this.prisma.mediaItem.findMany({
@@ -291,6 +294,17 @@ export class DuplicateDetectionService {
     });
 
     if (members.length === 0) {
+      await this.prisma.duplicateGroup.delete({ where: { id: groupId } }).catch(() => undefined);
+      return;
+    }
+
+    if (members.length === 1) {
+      // A duplicate group is invariant `mediaCount >= 2`; a lone survivor is
+      // no longer a duplicate — clear its membership and delete the group.
+      await this.prisma.mediaItem.updateMany({
+        where: { id: members[0].id },
+        data: { duplicateGroupId: null },
+      });
       await this.prisma.duplicateGroup.delete({ where: { id: groupId } }).catch(() => undefined);
       return;
     }
@@ -307,5 +321,67 @@ export class DuplicateDetectionService {
         ...(earliestCapturedAt ? { capturedAt: earliestCapturedAt } : {}),
       },
     });
+  }
+
+  /**
+   * Evict a set of media items from whatever duplicate group they currently
+   * belong to, then recompute/clean the affected groups. Used by burst
+   * detection: burst wins over duplicate detection, so once an item lands in
+   * a burst group it must be pulled out of any near-duplicate group it was
+   * prematurely placed in (upload ordering race — see the duplicate-detection
+   * spec). Idempotent: items with a null duplicateGroupId are no-ops.
+   */
+  async evictFromDuplicateGroups(itemIds: string[]): Promise<void> {
+    if (itemIds.length === 0) return;
+
+    const linked = await this.prisma.mediaItem.findMany({
+      where: { id: { in: itemIds }, duplicateGroupId: { not: null } },
+      select: { id: true, duplicateGroupId: true },
+    });
+
+    if (linked.length === 0) return;
+
+    const affectedGroupIds = [
+      ...new Set(linked.map((m) => m.duplicateGroupId).filter((id): id is string => id !== null)),
+    ];
+
+    await this.prisma.mediaItem.updateMany({
+      where: { id: { in: linked.map((m) => m.id) } },
+      data: { duplicateGroupId: null },
+    });
+
+    for (const groupId of affectedGroupIds) {
+      await this.recomputeGroupMeta(groupId);
+    }
+
+    this.logger.log(
+      `Evicted ${linked.length} item(s) from ${affectedGroupIds.length} duplicate group(s) (burst wins)`,
+    );
+  }
+
+  /**
+   * One-time remediation for photos already double-listed in both the burst
+   * and duplicate review queues (uploads processed before the eviction fix
+   * existed). Finds every media item that is BOTH in a pending burst group
+   * AND in a duplicate group, optionally scoped to a circle, evicts them from
+   * their duplicate groups, and returns the count evicted.
+   */
+  async evictExistingBurstOverlaps(circleId?: string): Promise<{ evicted: number }> {
+    const overlaps = await this.prisma.mediaItem.findMany({
+      where: {
+        ...(circleId ? { circleId } : {}),
+        duplicateGroupId: { not: null },
+        burstGroup: { status: BurstGroupStatus.pending },
+      },
+      select: { id: true },
+    });
+
+    if (overlaps.length === 0) {
+      return { evicted: 0 };
+    }
+
+    await this.evictFromDuplicateGroups(overlaps.map((o) => o.id));
+
+    return { evicted: overlaps.length };
   }
 }
