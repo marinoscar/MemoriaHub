@@ -1,23 +1,40 @@
 /**
  * Component tests — MediaLibraryPage
  *
- * Mocking strategy (mirrors UserManagementPage.test.tsx pattern):
- *   - useMedia and useAlbums hooks are module-mocked via vi.mock so no real API
- *     calls are made.
- *   - listTags (services/media) is mocked to return an empty array by default.
- *   - MediaDetailDrawer and MediaUploadDialog are rendered normally; their
- *     internal service calls are mocked at the service level (services/media).
- *   - The test suite verifies: grid renders items, grouping headers appear,
- *     applying a filter triggers fetchMedia with the expected param, and
- *     clicking a tile opens the drawer.
+ * Post-refactor architecture: the page itself no longer renders the grid,
+ * month grouping, tiles, pagination, selection mode, or the detail drawer —
+ * all of that now lives in the shared <MediaGallery> component (feed mode),
+ * which has its own dedicated test suite at
+ * apps/web/src/components/media/__tests__/MediaGallery.test.tsx.
+ *
+ * This page's remaining responsibilities are:
+ *   - Rendering the header, Export button, and Filters toggle/panel.
+ *   - Building `queryParams` from filter state (type, album, sort, date
+ *     range, favorites, camera/device, missing-geo/faces, location
+ *     drill-down, people, tags) and passing them to <MediaGallery
+ *     queryParams=... mode="home" />.
+ *   - Using `useMedia` ONLY to sample items (page 1, pageSize 200) for the
+ *     location facet (country/region/city) pick-lists — not for rendering
+ *     a visible grid.
+ *
+ * Mocking strategy:
+ *   - useMedia, useAlbums, useCircle are module-mocked via vi.mock so no
+ *     real API calls are made.
+ *   - listTags / exportMedia (services/media) are mocked.
+ *   - <MediaGallery> is mocked to a lightweight stub that stashes the
+ *     `queryParams` prop it received as a `data-query-params` JSON
+ *     attribute, so tests can assert filter state flows through correctly
+ *     without needing to drive MediaGallery's internal infinite-scroll
+ *     fetching.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils/test-utils';
 import MediaLibraryPage from '../../pages/MediaLibrary/MediaLibraryPage';
-import type { MediaItem, MediaListMeta } from '../../types/media';
+import type { MediaItem, MediaListMeta, Album } from '../../types/media';
+import type { MediaGalleryProps } from '../../components/media/MediaGallery';
 
 // ---------------------------------------------------------------------------
 // Module mocks
@@ -33,13 +50,6 @@ vi.mock('../../hooks/useAlbums', () => ({
 
 vi.mock('../../services/media', () => ({
   listTags: vi.fn(),
-  patchMedia: vi.fn(),
-  getMedia: vi.fn(),
-  initUpload: vi.fn(),
-  uploadPart: vi.fn(),
-  completeUpload: vi.fn(),
-  registerMedia: vi.fn(),
-  listAlbums: vi.fn(),
   exportMedia: vi.fn(),
 }));
 
@@ -47,16 +57,26 @@ vi.mock('../../hooks/useCircle', () => ({
   useCircle: vi.fn(),
 }));
 
+vi.mock('../../components/media/MediaGallery', () => ({
+  MediaGallery: (props: MediaGalleryProps) => (
+    <div
+      data-testid="media-gallery"
+      data-query-params={JSON.stringify(props.queryParams ?? {})}
+      data-mode={props.mode}
+      data-circle-id={props.circleId}
+      data-circle-role={props.activeCircleRole ?? ''}
+    />
+  ),
+}));
+
 import { useMedia } from '../../hooks/useMedia';
 import { useAlbums } from '../../hooks/useAlbums';
-import { listTags, patchMedia, getMedia } from '../../services/media';
+import { listTags } from '../../services/media';
 import { useCircle } from '../../hooks/useCircle';
 
 const mockUseMedia = vi.mocked(useMedia);
 const mockUseAlbums = vi.mocked(useAlbums);
 const mockListTags = vi.mocked(listTags);
-const mockPatchMedia = vi.mocked(patchMedia);
-const mockGetMedia = vi.mocked(getMedia);
 const mockUseCircle = vi.mocked(useCircle);
 
 const mockActiveCircle = {
@@ -135,15 +155,25 @@ function makeMediaItem(id: string, overrides: Partial<MediaItem> = {}): MediaIte
   };
 }
 
+function makeAlbum(id: string, overrides: Partial<Album> = {}): Album {
+  return {
+    id,
+    name: `Album ${id}`,
+    description: null,
+    addedById: 'user-001',
+    circleId: 'circle-1',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Default hook implementations
 // ---------------------------------------------------------------------------
 
 function makeUseMediaDefaults(items: MediaItem[] = [], overrides: Record<string, unknown> = {}) {
-  // fetchMedia now returns Promise<MediaItem[]> per the updated hook contract.
   const fetchMedia = vi.fn().mockResolvedValue(items);
-  const patchMediaHook = vi.fn().mockResolvedValue(undefined);
-  const updateItemLocally = vi.fn();
   return {
     items,
     meta: { ...defaultMeta, totalItems: items.length },
@@ -152,22 +182,38 @@ function makeUseMediaDefaults(items: MediaItem[] = [], overrides: Record<string,
     filters: {},
     setFilters: vi.fn(),
     fetchMedia,
-    patchMedia: patchMediaHook,
+    patchMedia: vi.fn().mockResolvedValue(undefined),
     removeMedia: vi.fn(),
-    updateItemLocally,
+    updateItemLocally: vi.fn(),
     ...overrides,
   };
 }
 
-function makeUseAlbumsDefaults() {
+function makeUseAlbumsDefaults(albums: Album[] = []) {
   return {
-    albums: [],
+    albums,
     meta: null,
     isLoading: false,
     error: null,
     fetchAlbums: vi.fn().mockResolvedValue(undefined),
     addAlbum: vi.fn(),
+    updateAlbum: vi.fn(),
+    deleteAlbum: vi.fn(),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Test helpers
+// ---------------------------------------------------------------------------
+
+/** Read the queryParams the page most recently passed to <MediaGallery>. */
+function getGalleryQueryParams(): Record<string, unknown> {
+  const el = screen.getByTestId('media-gallery');
+  return JSON.parse(el.getAttribute('data-query-params') ?? '{}');
+}
+
+async function openFilters(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: /filters/i }));
 }
 
 // ---------------------------------------------------------------------------
@@ -180,13 +226,11 @@ describe('MediaLibraryPage', () => {
     mockUseMedia.mockReturnValue(makeUseMediaDefaults());
     mockUseAlbums.mockReturnValue(makeUseAlbumsDefaults());
     mockListTags.mockResolvedValue([]);
-    mockPatchMedia.mockResolvedValue(makeMediaItem('media-001'));
-    mockGetMedia.mockResolvedValue({ ...makeMediaItem('media-001'), downloadUrl: null });
     mockUseCircle.mockReturnValue(makeUseCircleDefaults());
   });
 
   // -------------------------------------------------------------------------
-  // Page header
+  // Page header / chrome
   // -------------------------------------------------------------------------
 
   describe('page header', () => {
@@ -202,509 +246,39 @@ describe('MediaLibraryPage', () => {
       expect(screen.getByRole('button', { name: /filters/i })).toBeInTheDocument();
     });
 
-  });
-
-  // -------------------------------------------------------------------------
-  // Loading state
-  // -------------------------------------------------------------------------
-
-  describe('loading state', () => {
-    it('should show a loading spinner while isLoading is true', () => {
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { isLoading: true }));
+    it('should render the Export button', () => {
       render(<MediaLibraryPage />);
-      expect(screen.getByRole('progressbar')).toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Empty state
-  // -------------------------------------------------------------------------
-
-  describe('empty state', () => {
-    it('should show "No media found" when items list is empty and not loading', () => {
-      render(<MediaLibraryPage />);
-      expect(screen.getByText(/no media found/i)).toBeInTheDocument();
-    });
-
-    it('should mention the Upload button in the toolbar in the empty state', () => {
-      render(<MediaLibraryPage />);
-      // The empty state now refers the user to "the Upload button in the toolbar" (moved to AppBar)
-      expect(screen.getByText(/upload button in the toolbar/i)).toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Grid — renders items
-  // -------------------------------------------------------------------------
-
-  describe('grid rendering', () => {
-    it('should render an image tile for each media item with a thumbnail URL', () => {
-      // When thumbnailUrl is set the tile renders an <img> element.
-      // When it's null, a placeholder icon is shown instead (no img).
-      const items = [
-        makeMediaItem('a', { originalFilename: 'photo-a.jpg', thumbnailUrl: 'http://cdn/a.jpg' }),
-        makeMediaItem('b', { originalFilename: 'photo-b.jpg', thumbnailUrl: 'http://cdn/b.jpg' }),
-        makeMediaItem('c', { originalFilename: 'photo-c.jpg', thumbnailUrl: 'http://cdn/c.jpg' }),
-      ];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-      expect(screen.getByAltText('photo-a.jpg')).toBeInTheDocument();
-      expect(screen.getByAltText('photo-b.jpg')).toBeInTheDocument();
-      expect(screen.getByAltText('photo-c.jpg')).toBeInTheDocument();
-    });
-
-    it('should render placeholder icons when thumbnailUrl is null', () => {
-      const items = [
-        makeMediaItem('p1', { originalFilename: 'no-thumb.jpg', thumbnailUrl: null }),
-      ];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-      // No img alt text; placeholder icon is present
-      expect(screen.queryByAltText('no-thumb.jpg')).not.toBeInTheDocument();
-    });
-
-    it('should not render empty-state text when items exist', () => {
-      const items = [makeMediaItem('x', { originalFilename: 'any-photo.jpg' })];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-      expect(screen.queryByText(/no media found/i)).not.toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Grouping headers by capturedAt month
-  // -------------------------------------------------------------------------
-
-  describe('grouping by month', () => {
-    it('should render a month group header for June 2024 items', () => {
-      const items = [makeMediaItem('g1', { capturedAt: '2024-06-10T12:00:00.000Z' })];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-      expect(screen.getByText(/june 2024/i)).toBeInTheDocument();
-    });
-
-    it('should render separate group headers for items in different months', () => {
-      // Use mid-month, midday UTC timestamps (not midnight) so the local
-      // calendar date/month stays put across every real-world timezone —
-      // a UTC-midnight timestamp would roll back into the previous day (and
-      // potentially the previous month) in timezones west of UTC.
-      const capturedAt1 = '2024-06-15T12:00:00.000Z';
-      const capturedAt2 = '2024-05-15T12:00:00.000Z';
-      const items = [
-        makeMediaItem('m1', { capturedAt: capturedAt1 }),
-        makeMediaItem('m2', { capturedAt: capturedAt2 }),
-      ];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-      // Compute the expected label the same way groupByYearMonth() does
-      // (toLocaleDateString(undefined, ...) — system locale) rather than
-      // hardcoding "June 2024" / "May 2024", so the assertion holds under
-      // any system locale while still meaningfully verifying that the two
-      // items land in two distinct month groups.
-      const label1 = new Date(capturedAt1).toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'long',
-      });
-      const label2 = new Date(capturedAt2).toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'long',
-      });
-      expect(label1).not.toBe(label2);
-      expect(screen.getByText(label1)).toBeInTheDocument();
-      expect(screen.getByText(label2)).toBeInTheDocument();
-    });
-
-    it('should render an "Unknown Date" group for items with null capturedAt', () => {
-      const items = [makeMediaItem('u1', { capturedAt: null })];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-      expect(screen.getByText(/unknown date/i)).toBeInTheDocument();
-    });
-
-    it('should sort newest month first', () => {
-      const items = [
-        makeMediaItem('old', { capturedAt: '2023-01-01T00:00:00.000Z' }),
-        makeMediaItem('new', { capturedAt: '2024-12-01T00:00:00.000Z' }),
-      ];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-      const headers = screen.getAllByText(/\d{4}/);
-      // The first header in the DOM should contain 2024 (newest)
-      expect(headers[0].textContent).toMatch(/2024/);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Filter interaction — favourite
-  // -------------------------------------------------------------------------
-
-  describe('filter — favorites', () => {
-    it('should call fetchMedia with favorite:true after toggling favorites filter', async () => {
-      const fetchMedia = vi.fn().mockResolvedValue(undefined);
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
-      const user = userEvent.setup();
-      render(<MediaLibraryPage />);
-
-      // Open filter panel
-      await user.click(screen.getByRole('button', { name: /filters/i }));
-
-      // Click the "Favorites only" toggle button
-      const favoritesBtn = await screen.findByRole('button', { name: /favorites only/i });
-      await user.click(favoritesBtn);
-
-      await waitFor(() => {
-        expect(fetchMedia).toHaveBeenCalledWith(
-          expect.objectContaining({ favorite: true }),
-        );
-      });
-    });
-
-    it('should call fetchMedia without favorite param after toggling back to All', async () => {
-      const fetchMedia = vi.fn().mockResolvedValue(undefined);
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
-      const user = userEvent.setup();
-      render(<MediaLibraryPage />);
-
-      await user.click(screen.getByRole('button', { name: /filters/i }));
-      const favoritesBtn = await screen.findByRole('button', { name: /favorites only/i });
-      await user.click(favoritesBtn); // enable
-      // Use getAllByRole because multiple elements with role="button" and name "All" may exist.
-      const allBtns = screen.getAllByRole('button', { name: /^all$/i });
-      await user.click(allBtns[0]); // first match is the ToggleButton inside the Favorites group
-
-      await waitFor(() => {
-        // The last call should not include favorite: true
-        const calls = fetchMedia.mock.calls;
-        const lastCall = calls[calls.length - 1][0];
-        expect(lastCall.favorite).toBeFalsy();
-      });
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Filter interaction — location search
-  // -------------------------------------------------------------------------
-
-  describe('filter — location search', () => {
-    it('should call fetchMedia with location param after typing in the search box', async () => {
-      const fetchMedia = vi.fn().mockResolvedValue(undefined);
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
-      const user = userEvent.setup();
-      render(<MediaLibraryPage />);
-
-      // Open filters
-      await user.click(screen.getByRole('button', { name: /filters/i }));
-
-      const locationInput = await screen.findByPlaceholderText(/california.*costa rica.*yosemite/i);
-      await user.type(locationInput, 'Paris');
-
-      await waitFor(() => {
-        const calls = fetchMedia.mock.calls;
-        const matchingCall = calls.find(
-          ([params]) => typeof params.location === 'string' && params.location.includes('Paris'),
-        );
-        expect(matchingCall).toBeDefined();
-      });
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Drawer — clicking a tile opens the detail drawer
-  // -------------------------------------------------------------------------
-
-  describe('detail drawer', () => {
-    it('should open the lightbox when an image tile is clicked', async () => {
-      const user = userEvent.setup();
-      const clickItem = makeMediaItem('click-me', {
-        originalFilename: 'click-target.jpg',
-        thumbnailUrl: 'http://cdn/click-me.jpg',
-      });
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults([clickItem]));
-      // getMedia is called by MediaLightbox to load the full-res version
-      mockGetMedia.mockResolvedValue({ ...clickItem, downloadUrl: 'http://cdn/full.jpg' });
-      render(<MediaLibraryPage />);
-
-      // The tile renders an <img> when thumbnailUrl is set
-      const tileImg = screen.getByAltText('click-target.jpg');
-      await user.click(tileImg);
-
-      // MediaLightbox renders as a dialog when open (index !== null).
-      // Check that at least one presentation container is present.
-      await waitFor(() => {
-        const presentations = screen.getAllByRole('presentation');
-        expect(presentations.length).toBeGreaterThan(0);
-      });
-    });
-
-    it('should render the detail drawer in the closed state initially', () => {
-      const items = [makeMediaItem('d1', { originalFilename: 'drawer-test.jpg' })];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-      // The close-detail-panel button should not be visible before tile click
       expect(
-        screen.queryByRole('button', { name: /close detail panel/i }),
-      ).not.toBeInTheDocument();
+        screen.getByRole('button', { name: /export media metadata/i }),
+      ).toBeInTheDocument();
     });
   });
 
   // -------------------------------------------------------------------------
-  // Error state
+  // MediaGallery delegation
   // -------------------------------------------------------------------------
 
-  describe('error state', () => {
-    it('should display an error alert when the hook reports an error', () => {
-      mockUseMedia.mockReturnValue(
-        makeUseMediaDefaults([], { error: 'Failed to load media' }),
+  describe('MediaGallery delegation', () => {
+    it('renders MediaGallery in "home" mode scoped to the active circle', () => {
+      render(<MediaLibraryPage />);
+      const gallery = screen.getByTestId('media-gallery');
+      expect(gallery).toHaveAttribute('data-mode', 'home');
+      expect(gallery).toHaveAttribute('data-circle-id', 'circle-1');
+      expect(gallery).toHaveAttribute('data-circle-role', 'circle_admin');
+    });
+
+    it('passes circleId in the initial queryParams', () => {
+      render(<MediaLibraryPage />);
+      expect(getGalleryQueryParams()).toEqual(
+        expect.objectContaining({ circleId: 'circle-1' }),
       );
-      render(<MediaLibraryPage />);
-      expect(screen.getByRole('alert')).toBeInTheDocument();
-      expect(screen.getByText(/failed to load media/i)).toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Selection mode — Select / Done toggle button
-  // -------------------------------------------------------------------------
-
-  describe('selection mode', () => {
-    it("should render the 'Select' button in the header for non-viewers", () => {
-      render(<MediaLibraryPage />);
-      expect(
-        screen.getByRole('button', { name: /enter selection mode/i }),
-      ).toBeInTheDocument();
     });
 
-    it("should NOT render the 'Select' button for viewers", () => {
-      mockUseCircle.mockReturnValue(
-        makeUseCircleDefaults({ activeCircleRole: 'viewer' as const }),
+    it('passes default sort params (capturedAt desc) with no filters applied', () => {
+      render(<MediaLibraryPage />);
+      expect(getGalleryQueryParams()).toEqual(
+        expect.objectContaining({ sortBy: 'capturedAt', sortOrder: 'desc' }),
       );
-      render(<MediaLibraryPage />);
-      expect(
-        screen.queryByRole('button', { name: /enter selection mode/i }),
-      ).not.toBeInTheDocument();
-    });
-
-    it("should switch to 'Done' label and show as pressed after clicking Select", async () => {
-      const user = userEvent.setup();
-      render(<MediaLibraryPage />);
-
-      const selectBtn = screen.getByRole('button', { name: /enter selection mode/i });
-      await user.click(selectBtn);
-
-      const doneBtn = screen.getByRole('button', { name: /exit selection mode/i });
-      expect(doneBtn).toBeInTheDocument();
-      expect(doneBtn).toHaveAttribute('aria-pressed', 'true');
-    });
-
-    it('should clear selection and exit selection mode when Done is clicked', async () => {
-      const user = userEvent.setup();
-      const items = [
-        makeMediaItem('sel-1', {
-          originalFilename: 'selectable-item.jpg',
-          thumbnailUrl: 'http://cdn/sel-1.jpg',
-        }),
-      ];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-
-      // Enter selection mode
-      await user.click(screen.getByRole('button', { name: /enter selection mode/i }));
-      expect(
-        screen.getByRole('button', { name: /exit selection mode/i }),
-      ).toBeInTheDocument();
-
-      // Click Done to exit
-      await user.click(screen.getByRole('button', { name: /exit selection mode/i }));
-
-      // Should be back to "Select"
-      expect(
-        screen.getByRole('button', { name: /enter selection mode/i }),
-      ).toBeInTheDocument();
-    });
-
-    it('should not open the drawer when a tile is clicked in selection mode', async () => {
-      const user = userEvent.setup();
-      const items = [
-        makeMediaItem('click-me', {
-          originalFilename: 'click-target.jpg',
-          thumbnailUrl: 'http://cdn/click-me.jpg',
-        }),
-      ];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-
-      // Verify tile image is present before entering selection mode
-      expect(screen.getByAltText('click-target.jpg')).toBeInTheDocument();
-
-      // Enter selection mode
-      await user.click(screen.getByRole('button', { name: /enter selection mode/i }));
-
-      // Click the tile image — in selection mode this should toggle selection, NOT open drawer
-      const tileImg = screen.getByAltText('click-target.jpg');
-      await user.click(tileImg);
-
-      // The drawer "Close detail panel" button only appears when the drawer is open.
-      // After clicking in selection mode the drawer must NOT have opened.
-      expect(
-        screen.queryByRole('button', { name: /close detail panel/i }),
-      ).not.toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Mount / unmount
-  // -------------------------------------------------------------------------
-
-  describe('lifecycle', () => {
-    it('should call fetchMedia on mount', () => {
-      const fetchMedia = vi.fn().mockResolvedValue([]);
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
-      render(<MediaLibraryPage />);
-      expect(fetchMedia).toHaveBeenCalledTimes(1);
-    });
-
-    it('should call fetchAlbums on mount', () => {
-      const fetchAlbums = vi.fn().mockResolvedValue(undefined);
-      mockUseAlbums.mockReturnValue({ ...makeUseAlbumsDefaults(), fetchAlbums });
-      render(<MediaLibraryPage />);
-      expect(fetchAlbums).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Processing placeholder — photo tiles awaiting enrichment
-  // -------------------------------------------------------------------------
-
-  describe('processing placeholder', () => {
-    // Recent createdAt so isThumbnailStuck() does not fast-forward these
-    // items past the "still processing" window into the broken-icon state
-    // (see the "stuck thumbnail fallback" describe block below for that case).
-    const recentCreatedAt = () => new Date().toISOString();
-
-    it('should show a "Processing…" label for photo items without a thumbnail', () => {
-      const items = [
-        makeMediaItem('pending', { type: 'photo', thumbnailUrl: null, createdAt: recentCreatedAt() }),
-      ];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-      expect(screen.getByText(/processing…/i)).toBeInTheDocument();
-    });
-
-    it('should show a "Processing…" label for video items without a thumbnail', () => {
-      // Videos awaiting their poster thumbnail also show the processing state
-      const items = [
-        makeMediaItem('vid', { type: 'video', thumbnailUrl: null, createdAt: recentCreatedAt() }),
-      ];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-      expect(screen.getByText(/processing…/i)).toBeInTheDocument();
-    });
-
-    it('should not show "Processing…" when the photo has a thumbnail', () => {
-      const items = [
-        makeMediaItem('done', { type: 'photo', thumbnailUrl: 'http://cdn/thumb.jpg' }),
-      ];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-      expect(screen.queryByText(/processing…/i)).not.toBeInTheDocument();
-    });
-
-    it('should not show "Processing…" when the video has a thumbnail (poster ready)', () => {
-      const items = [
-        makeMediaItem('vid-ready', { type: 'video', thumbnailUrl: 'http://cdn/poster.jpg' }),
-      ];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-      expect(screen.queryByText(/processing…/i)).not.toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Stuck thumbnail fallback — spinner times out into a broken-image icon
-  // -------------------------------------------------------------------------
-
-  describe('stuck thumbnail fallback', () => {
-    const oldCreatedAt = '2020-01-01T00:00:00.000Z';
-
-    it('shows the broken-image fallback instead of "Processing…" once past the stuck threshold', () => {
-      const items = [
-        makeMediaItem('stuck', { type: 'photo', thumbnailUrl: null, createdAt: oldCreatedAt }),
-      ];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-      expect(screen.queryByText(/processing…/i)).not.toBeInTheDocument();
-      expect(screen.getByLabelText('Thumbnail unavailable')).toBeInTheDocument();
-    });
-
-    it('applies the same stuck fallback to video items', () => {
-      const items = [
-        makeMediaItem('stuck-vid', { type: 'video', thumbnailUrl: null, createdAt: oldCreatedAt }),
-      ];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-      expect(screen.queryByText(/processing…/i)).not.toBeInTheDocument();
-      expect(screen.getByLabelText('Thumbnail unavailable')).toBeInTheDocument();
-    });
-
-    it('still shows the image when thumbnailUrl is present, regardless of age', () => {
-      const items = [
-        makeMediaItem('old-but-ready', {
-          type: 'photo',
-          originalFilename: 'old-ready.jpg',
-          thumbnailUrl: 'http://cdn/old-ready.jpg',
-          createdAt: oldCreatedAt,
-        }),
-      ];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-      expect(screen.getByAltText('old-ready.jpg')).toBeInTheDocument();
-      expect(screen.queryByLabelText('Thumbnail unavailable')).not.toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Play indicator — video tiles with a thumbnail show a play overlay
-  // -------------------------------------------------------------------------
-
-  describe('play indicator', () => {
-    it('should show the play indicator overlay for video tiles with a thumbnail', () => {
-      const items = [
-        makeMediaItem('vid-thumb', {
-          type: 'video',
-          thumbnailUrl: 'http://cdn/poster.jpg',
-          originalFilename: 'my-video.mp4',
-        }),
-      ];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-      // The image renders
-      expect(screen.getByAltText('my-video.mp4')).toBeInTheDocument();
-      // The play indicator is present
-      expect(screen.getByTestId('play-indicator')).toBeInTheDocument();
-    });
-
-    it('should NOT show the play indicator for photo tiles with a thumbnail', () => {
-      const items = [
-        makeMediaItem('photo-thumb', {
-          type: 'photo',
-          thumbnailUrl: 'http://cdn/photo.jpg',
-          originalFilename: 'my-photo.jpg',
-        }),
-      ];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-      expect(screen.getByAltText('my-photo.jpg')).toBeInTheDocument();
-      expect(screen.queryByTestId('play-indicator')).not.toBeInTheDocument();
-    });
-
-    it('should NOT show the play indicator for video tiles in the processing state', () => {
-      // No thumbnail yet — the tile shows "Processing…", not the poster + play button
-      const items = [
-        makeMediaItem('vid-pending', { type: 'video', thumbnailUrl: null }),
-      ];
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
-      render(<MediaLibraryPage />);
-      expect(screen.queryByTestId('play-indicator')).not.toBeInTheDocument();
     });
   });
 
@@ -720,100 +294,237 @@ describe('MediaLibraryPage', () => {
       expect(screen.getByText(/select a circle/i)).toBeInTheDocument();
     });
 
-    it('should call fetchMedia with circleId when active circle is set', () => {
+    it('should not render MediaGallery when no active circle', () => {
+      mockUseCircle.mockReturnValue(makeUseCircleDefaults({ activeCircle: null }));
+      render(<MediaLibraryPage />);
+      expect(screen.queryByTestId('media-gallery')).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Lifecycle — facet sample fetch + album fetch
+  // -------------------------------------------------------------------------
+
+  describe('lifecycle', () => {
+    it('should call fetchMedia (facet sample) on mount', () => {
+      const fetchMedia = vi.fn().mockResolvedValue([]);
+      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
+      render(<MediaLibraryPage />);
+      expect(fetchMedia).toHaveBeenCalledTimes(1);
+    });
+
+    it('should call fetchMedia with a large pageSize sample for facet derivation', () => {
       const fetchMedia = vi.fn().mockResolvedValue([]);
       mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
       render(<MediaLibraryPage />);
       expect(fetchMedia).toHaveBeenCalledWith(
-        expect.objectContaining({ circleId: 'circle-1' }),
+        expect.objectContaining({ page: 1, pageSize: 200, circleId: 'circle-1' }),
       );
     });
+
+    it('should call fetchAlbums on mount', () => {
+      const fetchAlbums = vi.fn().mockResolvedValue(undefined);
+      mockUseAlbums.mockReturnValue({ ...makeUseAlbumsDefaults(), fetchAlbums });
+      render(<MediaLibraryPage />);
+      expect(fetchAlbums).toHaveBeenCalledTimes(1);
+    });
   });
 
   // -------------------------------------------------------------------------
-  // Post-upload enrichment polling
+  // Filter — type
   // -------------------------------------------------------------------------
 
-  describe('enrichment poll after upload', () => {
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
-    it('should start polling after upload success and stop early when all photos are enriched', async () => {
-      vi.useFakeTimers();
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-
-      // First call (mount) returns a photo with no thumbnail.
-      // Second call (immediate refetch on upload success) still returns no thumbnail.
-      // Third call (first poll tick) returns an enriched photo — poll should stop.
-      const enrichedItem = makeMediaItem('e1', { type: 'photo', thumbnailUrl: 'http://cdn/e1.jpg' });
-      const pendingItem = makeMediaItem('e1', { type: 'photo', thumbnailUrl: null });
-
-      const fetchMedia = vi.fn()
-        .mockResolvedValueOnce([pendingItem])   // mount
-        .mockResolvedValueOnce([pendingItem])   // immediate refetch on upload success
-        .mockResolvedValueOnce([enrichedItem])  // 1st poll tick — enriched, stop
-        .mockResolvedValue([enrichedItem]);      // any further calls
-
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults([pendingItem], { fetchMedia }));
-
+  describe('filter — type', () => {
+    it('should include type:"video" in queryParams after selecting Videos', async () => {
+      const user = userEvent.setup();
       render(<MediaLibraryPage />);
 
-      // Open and immediately close the upload dialog to trigger onSuccess.
-      // The MediaUploadDialog's onSuccess is wired to handleUploadSuccess in the page.
-      // We trigger it indirectly via the FAB + upload dialog mock: instead, simulate
-      // by clicking the FAB and calling onSuccess prop if accessible, or use the
-      // MediaUploadDialog's mock. Since the dialog is rendered normally, we just check
-      // fetchMedia call counts after advancing timers.
+      await openFilters(user);
 
-      // Trigger handleUploadSuccess by opening upload dialog and simulating success.
-      // The simplest approach: spy on the FAB button that opens the dialog, then use
-      // the dialog's onSuccess callback. Here we verify poll is bounded.
-      // After mount: 1 call. Advance 3 s * 10 = 30 s max.
-      expect(fetchMedia).toHaveBeenCalledTimes(1);
+      const comboboxes = screen.getAllByRole('combobox');
+      fireEvent.mouseDown(comboboxes[0]); // Type select
+      await user.click(screen.getByRole('option', { name: /^videos$/i }));
 
-      // Advance past max attempts to confirm it never exceeds the cap + 1 immediate.
-      await vi.advanceTimersByTimeAsync(30_000);
-
-      // Without an upload trigger, the poll never starts — call count stays 1.
-      expect(fetchMedia).toHaveBeenCalledTimes(1);
-    });
-
-    it('should call fetchMedia immediately on upload success (no wait)', async () => {
-      const fetchMedia = vi.fn().mockResolvedValue([]);
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
-
-      const { unmount } = render(<MediaLibraryPage />);
-      // 1 call from mount effect
-      expect(fetchMedia).toHaveBeenCalledTimes(1);
-      unmount();
-    });
-
-    it('should use fake timers: poll fires at most ENRICHMENT_POLL_MAX_ATTEMPTS times', async () => {
-      vi.useFakeTimers();
-
-      // All fetches return an un-enriched photo so the poll runs to completion.
-      const pendingItem = makeMediaItem('p1', { type: 'photo', thumbnailUrl: null });
-      const fetchMedia = vi.fn().mockResolvedValue([pendingItem]);
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults([pendingItem], { fetchMedia }));
-
-      const { unmount } = render(<MediaLibraryPage />);
-      // mount call
-      expect(fetchMedia).toHaveBeenCalledTimes(1);
-
-      // Simulate what handleUploadSuccess does: call fetchMedia immediately + start poll.
-      // We can't directly invoke the callback without the dialog, but we can measure that
-      // the poll is bounded. We verify the count doesn't exceed 1 (mount) since the poll
-      // hasn't been started by a real upload in this render. Clean up.
-      await vi.advanceTimersByTimeAsync(35_000);
-      expect(fetchMedia).toHaveBeenCalledTimes(1); // only the mount call
-
-      unmount();
+      await waitFor(() => {
+        expect(getGalleryQueryParams()).toEqual(
+          expect.objectContaining({ type: 'video' }),
+        );
+      });
     });
   });
 
   // -------------------------------------------------------------------------
-  // Person filter chip
+  // Filter — album
+  // -------------------------------------------------------------------------
+
+  describe('filter — album', () => {
+    it('should include albumId in queryParams after selecting an album', async () => {
+      const album = makeAlbum('album-1', { name: 'Summer Trip' });
+      mockUseAlbums.mockReturnValue(makeUseAlbumsDefaults([album]));
+      const user = userEvent.setup();
+      render(<MediaLibraryPage />);
+
+      await openFilters(user);
+
+      const comboboxes = screen.getAllByRole('combobox');
+      fireEvent.mouseDown(comboboxes[1]); // Album select
+      await user.click(screen.getByRole('option', { name: /summer trip/i }));
+
+      await waitFor(() => {
+        expect(getGalleryQueryParams()).toEqual(
+          expect.objectContaining({ albumId: 'album-1' }),
+        );
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Filter — sort
+  // -------------------------------------------------------------------------
+
+  describe('filter — sort', () => {
+    it('should update sortBy/sortOrder in queryParams after selecting "Imported — Newest"', async () => {
+      const user = userEvent.setup();
+      render(<MediaLibraryPage />);
+
+      await openFilters(user);
+
+      const comboboxes = screen.getAllByRole('combobox');
+      fireEvent.mouseDown(comboboxes[2]); // Sort By select
+      await user.click(screen.getByRole('option', { name: /imported.*newest/i }));
+
+      await waitFor(() => {
+        expect(getGalleryQueryParams()).toEqual(
+          expect.objectContaining({ sortBy: 'importedAt', sortOrder: 'desc' }),
+        );
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Filter — date range
+  // -------------------------------------------------------------------------
+
+  describe('filter — date range', () => {
+    it('should include capturedAtFrom/capturedAtTo in queryParams after filling both date fields', async () => {
+      const user = userEvent.setup();
+      render(<MediaLibraryPage />);
+
+      await openFilters(user);
+
+      const fromInput = screen.getByLabelText(/captured from/i);
+      const toInput = screen.getByLabelText(/captured to/i);
+      fireEvent.change(fromInput, { target: { value: '2024-01-01' } });
+      fireEvent.change(toInput, { target: { value: '2024-01-31' } });
+
+      await waitFor(() => {
+        const params = getGalleryQueryParams();
+        expect(params.capturedAtFrom).toBe(new Date('2024-01-01').toISOString());
+        expect(params.capturedAtTo).toBe(new Date('2024-01-31').toISOString());
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Filter — favorites
+  // -------------------------------------------------------------------------
+
+  describe('filter — favorites', () => {
+    it('should include favorite:true in queryParams after toggling favorites filter', async () => {
+      const user = userEvent.setup();
+      render(<MediaLibraryPage />);
+
+      await openFilters(user);
+
+      const favoritesBtn = await screen.findByRole('button', { name: /favorites only/i });
+      await user.click(favoritesBtn);
+
+      await waitFor(() => {
+        expect(getGalleryQueryParams()).toEqual(
+          expect.objectContaining({ favorite: true }),
+        );
+      });
+    });
+
+    it('should drop favorite from queryParams after toggling back to All', async () => {
+      const user = userEvent.setup();
+      render(<MediaLibraryPage />);
+
+      await openFilters(user);
+
+      const favoritesBtn = await screen.findByRole('button', { name: /favorites only/i });
+      await user.click(favoritesBtn); // enable
+      const allBtns = screen.getAllByRole('button', { name: /^all$/i });
+      await user.click(allBtns[0]); // first match is the ToggleButton inside the Favorites group
+
+      await waitFor(() => {
+        expect(getGalleryQueryParams().favorite).toBeFalsy();
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Filter — camera / device
+  // -------------------------------------------------------------------------
+
+  describe('filter — camera', () => {
+    it('should include cameraMake in queryParams after typing a camera make', async () => {
+      const user = userEvent.setup();
+      render(<MediaLibraryPage />);
+
+      await openFilters(user);
+
+      const cameraMakeInput = screen.getByLabelText(/camera make/i);
+      await user.type(cameraMakeInput, 'Canon');
+
+      await waitFor(() => {
+        expect(getGalleryQueryParams()).toEqual(
+          expect.objectContaining({ cameraMake: 'Canon' }),
+        );
+      });
+    });
+
+    it('should include missingGeo:true in queryParams after enabling "Missing location only"', async () => {
+      const user = userEvent.setup();
+      render(<MediaLibraryPage />);
+
+      await openFilters(user);
+
+      const missingGeoSwitch = screen.getByLabelText(/missing location only/i);
+      await user.click(missingGeoSwitch);
+
+      await waitFor(() => {
+        expect(getGalleryQueryParams()).toEqual(
+          expect.objectContaining({ missingGeo: true }),
+        );
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Filter — location search
+  // -------------------------------------------------------------------------
+
+  describe('filter — location search', () => {
+    it('should include location param in queryParams after typing in the search box', async () => {
+      const user = userEvent.setup();
+      render(<MediaLibraryPage />);
+
+      await openFilters(user);
+
+      const locationInput = await screen.findByPlaceholderText(/california.*costa rica.*yosemite/i);
+      await user.type(locationInput, 'Paris');
+
+      await waitFor(() => {
+        const params = getGalleryQueryParams();
+        expect(typeof params.location).toBe('string');
+        expect(params.location).toContain('Paris');
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Person filter chip / people filter
   // -------------------------------------------------------------------------
 
   describe('person filter chip', () => {
@@ -822,41 +533,25 @@ describe('MediaLibraryPage', () => {
       expect(screen.queryByText(/showing photos of/i)).not.toBeInTheDocument();
     });
 
-    it('passes personId to fetchMedia when person filter is active', async () => {
-      const fetchMedia = vi.fn().mockResolvedValue([]);
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
+    it('seeds the multi-select people filter (personIds) from a ?personId= URL deep-link', async () => {
+      // On mount, a URL personId seeds peopleFilter.ids via the multi-select
+      // filter state — buildParams() then forwards it as personIds/peopleMatch
+      // (not the legacy singular personId key, which only applies when the
+      // multi-select is empty).
       render(<MediaLibraryPage />, {
         wrapperOptions: { route: '/?personId=person-1&personName=Alice' },
       });
+
       await waitFor(() => {
-        const calls = fetchMedia.mock.calls;
-        const matchingCall = calls.find(([params]: [any]) => params.personId === 'person-1');
-        expect(matchingCall).toBeDefined();
+        expect(getGalleryQueryParams()).toEqual(
+          expect.objectContaining({ personIds: ['person-1'], peopleMatch: 'any' }),
+        );
       });
     });
 
-    it('includes personName in the chip label when personName is provided', () => {
-      // Spy on how the component uses personName to build the chip label.
-      // The chip label is "Showing photos of ${personName ?? 'a person'}".
-      // We verify buildParams uses personId by checking the fetch call includes it.
-      const fetchMedia = vi.fn().mockResolvedValue([]);
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
-      render(<MediaLibraryPage />, {
-        wrapperOptions: { route: '/?personId=person-1&personName=Alice' },
-      });
-      // On initial render (before setSearchParams effect fires), personId IS in params.
-      // The first fetchMedia call must include personId.
-      expect(fetchMedia).toHaveBeenCalledWith(
-        expect.objectContaining({ personId: 'person-1' }),
-      );
-    });
-
-    it('does not pass personId to fetchMedia when personId is absent from URL', () => {
-      const fetchMedia = vi.fn().mockResolvedValue([]);
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
+    it('does not include personId in queryParams when absent from the URL', () => {
       render(<MediaLibraryPage />);
-      // fetchMedia should be called without personId
-      expect(fetchMedia).toHaveBeenCalledWith(
+      expect(getGalleryQueryParams()).toEqual(
         expect.not.objectContaining({ personId: expect.anything() }),
       );
     });
@@ -866,64 +561,54 @@ describe('MediaLibraryPage', () => {
   // Tiered Places / Tags deep-link filter seeding
   // (mounting at /media?country=|region=|locality=|tag= from PlacesOverviewPage,
   // LevelBrowsePage, or the SearchPage Explore rows must seed the matching
-  // filter state so the very first fetchMedia call already includes it.)
+  // filter state so the very first queryParams already includes it.)
   // -------------------------------------------------------------------------
 
   describe('location and tag deep-link filters', () => {
-    it('seeds the country filter from ?country= and forwards it to fetchMedia', async () => {
-      const fetchMedia = vi.fn().mockResolvedValue([]);
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
+    it('seeds the country filter from ?country= into queryParams', () => {
       render(<MediaLibraryPage />, {
         wrapperOptions: { route: '/?country=France' },
       });
 
-      expect(fetchMedia).toHaveBeenCalledWith(
+      expect(getGalleryQueryParams()).toEqual(
         expect.objectContaining({ country: 'France' }),
       );
     });
 
-    it('seeds the region filter from ?region= and forwards it to fetchMedia', async () => {
-      const fetchMedia = vi.fn().mockResolvedValue([]);
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
+    it('seeds the region filter from ?region= into queryParams', () => {
       render(<MediaLibraryPage />, {
         wrapperOptions: { route: '/?region=Guanacaste' },
       });
 
-      expect(fetchMedia).toHaveBeenCalledWith(
+      expect(getGalleryQueryParams()).toEqual(
         expect.objectContaining({ region: 'Guanacaste' }),
       );
     });
 
-    it('seeds the locality filter from ?locality= and forwards it to fetchMedia', async () => {
-      const fetchMedia = vi.fn().mockResolvedValue([]);
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
+    it('seeds the locality filter from ?locality= into queryParams', () => {
       render(<MediaLibraryPage />, {
         wrapperOptions: { route: '/?locality=Liberia' },
       });
 
-      expect(fetchMedia).toHaveBeenCalledWith(
+      expect(getGalleryQueryParams()).toEqual(
         expect.objectContaining({ locality: 'Liberia' }),
       );
     });
 
-    it('seeds the tag filter from ?tag= as a single-element selection and forwards it to fetchMedia', async () => {
-      const fetchMedia = vi.fn().mockResolvedValue([]);
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
+    it('seeds the tag filter from ?tag= as a single-element selection into queryParams', () => {
       render(<MediaLibraryPage />, {
         wrapperOptions: { route: '/?tag=beach' },
       });
 
-      expect(fetchMedia).toHaveBeenCalledWith(
+      expect(getGalleryQueryParams()).toEqual(
         expect.objectContaining({ tag: 'beach' }),
       );
     });
 
-    it('does not forward country/region/locality/tag params when absent from the URL', () => {
-      const fetchMedia = vi.fn().mockResolvedValue([]);
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
+    it('does not include country/region/locality/tag in queryParams when absent from the URL', () => {
       render(<MediaLibraryPage />);
 
-      expect(fetchMedia).toHaveBeenCalledWith(
+      expect(getGalleryQueryParams()).toEqual(
         expect.not.objectContaining({
           country: expect.anything(),
           region: expect.anything(),
@@ -934,8 +619,6 @@ describe('MediaLibraryPage', () => {
     });
 
     it('shows the seeded tag as a selected (filled) chip once tags load', async () => {
-      const fetchMedia = vi.fn().mockResolvedValue([]);
-      mockUseMedia.mockReturnValue(makeUseMediaDefaults([], { fetchMedia }));
       mockListTags.mockResolvedValue([
         { id: 'tag-1', name: 'beach', count: 3 },
         { id: 'tag-2', name: 'sunset', count: 1 },
