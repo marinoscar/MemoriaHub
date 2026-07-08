@@ -223,6 +223,56 @@ describe('MediaGallery', () => {
   });
 
   // -------------------------------------------------------------------------
+  // (a.1) Stuck thumbnail fallback — spinner times out into a broken icon
+  // -------------------------------------------------------------------------
+  describe('stuck thumbnail fallback', () => {
+    const oldCreatedAt = '2020-01-01T00:00:00.000Z';
+    const recentCreatedAt = () => new Date().toISOString();
+
+    it('shows the processing spinner for a recently-created item without a thumbnail', () => {
+      const items = [
+        makeItem('recent', { thumbnailUrl: null, createdAt: recentCreatedAt() }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+    });
+
+    it('shows the broken-image fallback instead of the spinner once past the stuck threshold', () => {
+      const items = [
+        makeItem('stuck', { thumbnailUrl: null, createdAt: oldCreatedAt }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Thumbnail unavailable')).toBeInTheDocument();
+    });
+
+    it('still shows the image when thumbnailUrl is present, regardless of age', () => {
+      const items = [
+        makeItem('old-but-ready', {
+          originalFilename: 'old-ready.jpg',
+          thumbnailUrl: 'https://cdn.example.com/old-ready.jpg',
+          createdAt: oldCreatedAt,
+        }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      expect(screen.getByAltText('old-ready.jpg')).toBeInTheDocument();
+      expect(screen.queryByLabelText('Thumbnail unavailable')).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // (b) Selection — checkbox selects an item and reveals BulkActionToolbar
   // -------------------------------------------------------------------------
   describe('selection', () => {

@@ -30,6 +30,7 @@ import {
 } from '@mui/material';
 import {
   PhotoLibrary as PhotoLibraryIcon,
+  BrokenImage as BrokenImageIcon,
   PlayCircleOutlined as PlayCircleOutlinedIcon,
   Star as StarIcon,
   StarBorder as StarBorderIcon,
@@ -41,6 +42,7 @@ import { useInfiniteMedia } from '../../hooks/useInfiniteMedia';
 import { useIntersectionObserver } from '../../hooks/useIntersectionObserver';
 import { useMediaRefresh } from '../../contexts/MediaRefreshContext';
 import { groupByDay } from '../../utils/groupByDay';
+import { isThumbnailStuck } from '../../utils/thumbnailTimeout';
 import { MediaDetailDrawer } from './MediaDetailDrawer';
 import { MediaLightbox } from './MediaLightbox';
 import { BulkActionToolbar } from './BulkActionToolbar';
@@ -141,7 +143,7 @@ const GalleryTile = memo(function GalleryTile({
             </Box>
           )}
         </Box>
-      ) : !imgError ? (
+      ) : (item.type === 'photo' || item.type === 'video') && !imgError && !isThumbnailStuck(item.createdAt) ? (
         /* Awaiting thumbnail enrichment */
         <Box
           sx={{
@@ -161,6 +163,19 @@ const GalleryTile = memo(function GalleryTile({
             sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
           />
           <CircularProgress size={24} sx={{ position: 'relative', zIndex: 1 }} />
+        </Box>
+      ) : (item.type === 'photo' || item.type === 'video') && !imgError ? (
+        /* Thumbnail never arrived within the recovery window — stop spinning forever */
+        <Box
+          sx={{
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <BrokenImageIcon sx={{ fontSize: 36, color: theme.palette.grey[600] }} aria-label="Thumbnail unavailable" />
         </Box>
       ) : (
         /* Broken / missing image */

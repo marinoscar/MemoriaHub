@@ -576,9 +576,14 @@ describe('MediaLibraryPage', () => {
   // -------------------------------------------------------------------------
 
   describe('processing placeholder', () => {
+    // Recent createdAt so isThumbnailStuck() does not fast-forward these
+    // items past the "still processing" window into the broken-icon state
+    // (see the "stuck thumbnail fallback" describe block below for that case).
+    const recentCreatedAt = () => new Date().toISOString();
+
     it('should show a "Processing…" label for photo items without a thumbnail', () => {
       const items = [
-        makeMediaItem('pending', { type: 'photo', thumbnailUrl: null }),
+        makeMediaItem('pending', { type: 'photo', thumbnailUrl: null, createdAt: recentCreatedAt() }),
       ];
       mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
       render(<MediaLibraryPage />);
@@ -588,7 +593,7 @@ describe('MediaLibraryPage', () => {
     it('should show a "Processing…" label for video items without a thumbnail', () => {
       // Videos awaiting their poster thumbnail also show the processing state
       const items = [
-        makeMediaItem('vid', { type: 'video', thumbnailUrl: null }),
+        makeMediaItem('vid', { type: 'video', thumbnailUrl: null, createdAt: recentCreatedAt() }),
       ];
       mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
       render(<MediaLibraryPage />);
@@ -611,6 +616,49 @@ describe('MediaLibraryPage', () => {
       mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
       render(<MediaLibraryPage />);
       expect(screen.queryByText(/processing…/i)).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Stuck thumbnail fallback — spinner times out into a broken-image icon
+  // -------------------------------------------------------------------------
+
+  describe('stuck thumbnail fallback', () => {
+    const oldCreatedAt = '2020-01-01T00:00:00.000Z';
+
+    it('shows the broken-image fallback instead of "Processing…" once past the stuck threshold', () => {
+      const items = [
+        makeMediaItem('stuck', { type: 'photo', thumbnailUrl: null, createdAt: oldCreatedAt }),
+      ];
+      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
+      render(<MediaLibraryPage />);
+      expect(screen.queryByText(/processing…/i)).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Thumbnail unavailable')).toBeInTheDocument();
+    });
+
+    it('applies the same stuck fallback to video items', () => {
+      const items = [
+        makeMediaItem('stuck-vid', { type: 'video', thumbnailUrl: null, createdAt: oldCreatedAt }),
+      ];
+      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
+      render(<MediaLibraryPage />);
+      expect(screen.queryByText(/processing…/i)).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Thumbnail unavailable')).toBeInTheDocument();
+    });
+
+    it('still shows the image when thumbnailUrl is present, regardless of age', () => {
+      const items = [
+        makeMediaItem('old-but-ready', {
+          type: 'photo',
+          originalFilename: 'old-ready.jpg',
+          thumbnailUrl: 'http://cdn/old-ready.jpg',
+          createdAt: oldCreatedAt,
+        }),
+      ];
+      mockUseMedia.mockReturnValue(makeUseMediaDefaults(items));
+      render(<MediaLibraryPage />);
+      expect(screen.getByAltText('old-ready.jpg')).toBeInTheDocument();
+      expect(screen.queryByLabelText('Thumbnail unavailable')).not.toBeInTheDocument();
     });
   });
 

@@ -44,6 +44,7 @@ import {
   Search as SearchIcon,
   FileDownload as ExportIcon,
   PhotoLibrary as PhotoLibraryIcon,
+  BrokenImage as BrokenImageIcon,
   PlayCircleOutlined as PlayCircleOutlinedIcon,
   CheckBox as CheckBoxIcon,
   CheckBoxOutlineBlank as CheckBoxOutlineBlankIcon,
@@ -66,6 +67,7 @@ import { BulkTagsDialog } from '../../components/media/BulkTagsDialog';
 import { AddToAlbumDialog } from '../../components/album/AddToAlbumDialog';
 import type { MediaItem, MediaQueryParams, TagItem, MediaType } from '../../types/media';
 import { PersonMultiSelect } from '../../components/search/PersonMultiSelect';
+import { isThumbnailStuck } from '../../utils/thumbnailTimeout';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -216,7 +218,7 @@ function MediaTile({ item, onSelect, onToggleFavorite, isSelected, anySelected, 
             </Box>
           )}
         </Box>
-      ) : (item.type === 'photo' || item.type === 'video') && !imgError ? (
+      ) : (item.type === 'photo' || item.type === 'video') && !imgError && !isThumbnailStuck(item.createdAt) ? (
         /* Photo or video awaiting thumbnail enrichment — show a subtle processing state */
         <Box
           sx={{
@@ -257,6 +259,23 @@ function MediaTile({ item, onSelect, onToggleFavorite, isSelected, anySelected, 
           >
             Processing…
           </Typography>
+        </Box>
+      ) : (item.type === 'photo' || item.type === 'video') && !imgError ? (
+        /* Thumbnail never arrived within the recovery window — stop spinning forever */
+        <Box
+          sx={{
+            width: '100%',
+            height: '100%',
+            backgroundColor: theme.palette.grey[800],
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <BrokenImageIcon
+            sx={{ fontSize: 40, color: theme.palette.grey[600] }}
+            aria-label="Thumbnail unavailable"
+          />
         </Box>
       ) : (
         /* Broken image — generic fallback icon */
