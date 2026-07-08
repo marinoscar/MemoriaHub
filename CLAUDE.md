@@ -437,6 +437,12 @@ Unlike metadata rerun, thumbnail regeneration runs synchronously in the request 
 
 > **UI:** A "Retry thumbnail" button appears in the media properties pane (MediaDetailDrawer) next to the Metadata section and calls `POST /api/media/:id/thumbnail/rerun`. Gallery tiles (`MediaTile`/`GalleryTile`) also fall back from the "Processing…" spinner to a broken-image icon once a thumbnail has been missing for more than 15 minutes, so a genuinely stuck item doesn't spin forever waiting for either the cron or a manual retry.
 
+### Media — Orientation Edit (media:write + per-circle collaborator role)
+Destructively rotates/flips a photo's original stored bytes — there is no separate edited copy and no versioning; the only way back is applying the inverse transform. Photos only (400 for videos / non-image media). Applies the transform via sharp, baking in any existing EXIF orientation first, then OVERWRITES the same storage key with the new JPEG bytes, resets `MediaItem.orientation` to 1, and swaps `width`/`height` for the rotate cases. Thumbnails are regenerated through the existing reprocess pipeline (`StorageProcessingRecoveryService.reprocessObjectNow`, same helper used by thumbnail rerun above). Because rotation invalidates normalized face bounding boxes, the endpoint best-effort re-enqueues `face_detection` after the transform completes.
+- `POST /api/media/:id/edit/orientation` body `{ op: 'rotate_left' | 'rotate_right' | 'flip_horizontal' | 'flip_vertical' }` - Apply the transform and overwrite the original; returns `{ data: { status: 'ready' | 'failed', width, height } }` (media:write + collaborator)
+
+> **UI:** An "Edit" (rotate/flip) action is available in the full-screen media viewer (MediaLightbox) via an orientation editor panel.
+
 ### Media — Geocode Rerun (media:read / media:write + per-circle roles)
 Per-item geocoding rerun via the `geocode` enrichment job type. Reads stored `takenLat`/`takenLng` — no image download. Writes geo columns (`geoCountry`, `geoAdmin1`, etc.) and `geoSource` using the active reverse provider configured in Geo Settings. Status is tracked in `media_geocode_status`.
 - `POST /api/media/:id/geocode/rerun` - Re-enqueue a `geocode` enrichment job at priority 0; upserts `media_geocode_status` to `pending`; returns `{ jobId, status }` (media:write + collaborator)
