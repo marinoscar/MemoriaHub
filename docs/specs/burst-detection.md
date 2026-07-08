@@ -2,8 +2,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.3 |
-| **Last Updated** | June 2026 |
+| **Version** | 1.4 |
+| **Last Updated** | July 2026 |
 | **Status** | Specification |
 
 ---
@@ -282,6 +282,8 @@ Order by `capturedAt DESC` to find the most recent preceding neighbors first.
 - Set `BurstGroup.suggestedBestItemId` to the highest-scoring member.
 - Set `BurstGroup.mediaCount` to the current member count.
 
+**Step 6a. Burst wins over duplicate detection.** After scores are recomputed, the handler loads every current member of the target burst group and calls `DuplicateDetectionService.evictFromDuplicateGroups(memberIds)` to clear `duplicateGroupId` on any of them that had already been linked into a `DuplicateGroup` — closing the upload-time ordering race where `duplicate_detection` processes an item before `burst_detection` does (both are enqueued together on upload, so either order can occur). This is **best-effort**: wrapped in try/catch, a failure is logged as a warning and never fails the burst job. See [duplicate-detection.md §3.2](duplicate-detection.md#32-burst-overlap-exclusion-rules) for the full rationale and the one-time `evictExistingBurstOverlaps` remediation used by the admin backfill.
+
 **Step 7.** If the item was not linked to any neighbor, no group is created or modified. The item's `burstGroupId` remains null.
 
 **On error:** throw so the worker applies standard retry logic. The handler does not maintain a separate per-item status table — group membership is the observable state.
@@ -429,6 +431,8 @@ Bulk-enqueue `burst_detection` jobs for photos across **all circles** that have 
 
 For each enqueued photo that lacks a `perceptualHash`, the enrichment job performs on-demand fingerprinting: it downloads the image from the storage provider, runs `computeVisualHash` (`apps/api/src/storage/processing/visual-hash.util.ts`) to compute the 64-bit dHash and Laplacian sharpness score, and persists both to `media_items` before applying burst-grouping logic. This retroactive path enables backfill to operate on libraries that pre-date the burst detection feature.
 
+After enqueueing runs across all circles, the endpoint also runs a one-time app-wide remediation step, `DuplicateDetectionService.evictExistingBurstOverlaps()`, which evicts any media item currently double-listed in both a pending burst group and a duplicate group — burst wins (see [duplicate-detection.md §3.2](duplicate-detection.md#32-burst-overlap-exclusion-rules)). This is best-effort: a remediation failure is logged but does not fail the backfill enqueue. The evicted count is returned as `evictedDuplicateOverlaps` in the response below.
+
 - **Auth:** Admin role + `system_settings:write`
 - **Requirement:** `features.burstDetection` must be `true` in system settings; otherwise returns `400 Bad Request`.
 - **Request body:**
@@ -444,8 +448,9 @@ For each enqueued photo that lacks a `perceptualHash`, the enrichment job perfor
   When `force` is `false` (default), only photos without an existing `burstGroupId` and without a `succeeded` `burst_detection` job are enqueued. When `force` is `true`, all non-deleted photos within the scope are enqueued (useful after changing `burst.timeGapSeconds` or `burst.hashDistance`, or to re-fingerprint photos that previously failed hashing).
 - **Response `201`:**
   ```json
-  { "data": { "enqueued": 312, "circles": 4 } }
+  { "data": { "enqueued": 312, "circles": 4, "evictedDuplicateOverlaps": 5 } }
   ```
+  `evictedDuplicateOverlaps` counts media items evicted from duplicate groups by the post-backfill remediation step described above.
 - **Error cases:**
   - `400` — `features.burstDetection` is `false` in system settings
   - `400` — `from` is later than `to`
@@ -575,3 +580,4 @@ The following extensions are left for future iterations. None of them require ch
 | 1.1 | June 2026 | AI Assistant | Document `from`/`to` date-range params on backfill endpoint; document on-demand retroactive perceptual hashing for legacy photos in the enrichment handler (§5.5 Step 1a) and backfill (§7.3); document "Scan for bursts" panel in circle Settings UI (§8.3); resolve deferred "Smart backfill on settings change" Future Work item |
 | 1.2 | June 2026 | AI Assistant | Change `perceptualHash` column type from `BigInt` to `String` (TEXT, unsigned decimal) to fix signed-overflow and JSON-serialization bugs; add storage rationale and lessons-learned note in §4.2 |
 | 1.3 | June 2026 | AI Assistant | Per-circle opt-in removed — burst detection is now a global system setting (`features.burstDetection`); per-circle backfill replaced by global admin endpoint (`POST /api/admin/bursts/backfill`); per-circle settings endpoints removed; Admin Settings UI updated |
+| 1.4 | July 2026 | AI Assistant | Document burst-wins duplicate-group eviction: `BurstDetectionService.processMediaItem` now evicts its group's members from any duplicate group after grouping (Step 6a); `POST /api/admin/bursts/backfill` gained a post-step remediation and `evictedDuplicateOverlaps` response field; see [duplicate-detection.md §3.2](duplicate-detection.md#32-burst-overlap-exclusion-rules) for full detail |

@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
+| **Version** | 1.1 |
 | **Last Updated** | July 2026 |
 | **Status** | Specification (backend complete; UI not yet implemented) |
 
@@ -124,6 +124,19 @@ When a burst group transitions out of `pending` (resolved or dismissed), its mem
 
 - **On resolve:** for the `keepIds` (survivors) — they were excluded from dedup matching while the group was pending review.
 - **On dismiss:** for *all* members — `dismissBurstGroup` clears `burstGroupId` to null on every member, so all of them become eligible.
+
+**Closing the ordering race — eviction ("burst wins").** The three rules above only prevent overlap when burst detection groups an item *before* duplicate detection runs against it. Both `burst_detection` and `duplicate_detection` are enqueued together at upload time (`MediaEnrichmentService.enqueueUploadEnrichment`), so the enrichment worker can just as easily process them in the opposite order: `duplicate_detection` runs first while the item has no `burstGroupId` yet, links it into a `DuplicateGroup`, and only afterward does `burst_detection` group the same item into a `BurstGroup` — leaving the photo visible in both review queues at once.
+
+This ordering race is closed by making burst detection **actively evict** its own group's members from any duplicate group, rather than relying solely on the candidate-exclusion rules above:
+
+- **`DuplicateDetectionService.evictFromDuplicateGroups(itemIds: string[])`** — for the given items, clears `duplicateGroupId` to null and recomputes/cleans every duplicate group that lost a member. Idempotent: items with a null `duplicateGroupId` are no-ops.
+- **`recomputeGroupMeta`** (the same private helper used after every membership change in §3.1) now also deletes a duplicate group when eviction shrinks it below the `mediaCount >= 2` invariant — including the single-remaining-member case, which additionally clears that member's `duplicateGroupId` before the group row is deleted (a 1-member duplicate group is meaningless).
+- **`BurstDetectionService.processMediaItem`**, after assigning an item to a burst group and recomputing burst scores (§5, Step 6 in [burst-detection.md](burst-detection.md)), loads every current member of that burst group and calls `evictFromDuplicateGroups` on all of them — covering both the item just processed and any pre-existing group members that were dedup'd before this item arrived to trigger the burst grouping. This runs uniformly across the create/join/merge branches. **Best-effort:** the call is wrapped in try/catch; a failure is logged as a warning but never fails the burst job.
+- **`DuplicateDetectionService.evictExistingBurstOverlaps(circleId?: string)`** — one-time remediation for photos that were already double-listed in both queues before this fix existed (uploads processed during the old ordering-race window). Finds every media item that is simultaneously in a *pending* burst group and in a duplicate group (optionally scoped to one circle), evicts them via `evictFromDuplicateGroups`, and returns `{ evicted: number }`.
+
+`POST /api/admin/bursts/backfill` (see [burst-detection.md §7.3](burst-detection.md#73-global-backfill-admin)) now runs `evictExistingBurstOverlaps()` app-wide as a post-step after enqueueing backfill jobs, so a single admin-triggered scan both catches up any un-fingerprinted legacy photos and heals existing overlap. Its response gained a new field: `{ "data": { "enqueued": 312, "circles": 4, "evictedDuplicateOverlaps": 5 } }`.
+
+Net effect: burst membership always wins. An item that lands in a burst group — whether it got there before or after duplicate detection ran — is guaranteed not to remain in a duplicate group at the same time.
 
 ### 3.3 Best-Copy Scoring (Read-Time)
 
@@ -553,3 +566,4 @@ The scenarios below describe the full coverage this module should have; items al
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | July 2026 | AI Assistant | Initial specification, documenting the Phase 1 (backend) implementation: CLIP ViT-B/32 + dHash two-tier matching engine, union-find grouping with burst-overlap exclusion rules, read-time best-copy scoring and kind classification, model lifecycle and degraded mode, chunked backfill architecture, and the full review/admin API surface |
+| 1.1 | July 2026 | AI Assistant | Document §3.2 eviction ("burst wins") fix closing the upload-time ordering race: `DuplicateDetectionService.evictFromDuplicateGroups`, the `recomputeGroupMeta` shrink-below-2 cleanup, `evictExistingBurstOverlaps` one-time remediation, and the `evictedDuplicateOverlaps` field on `POST /api/admin/bursts/backfill` |
