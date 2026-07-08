@@ -324,3 +324,119 @@ describe('getOrientedDimensions', () => {
     expect(result!.height).toBe(4000);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: applyOrientationTransform — REAL sharp round-trip
+//
+// Unlike the suites above, these tests exercise the real `sharp` native
+// binary rather than the module-level `jest.mock('sharp', ...)` at the top
+// of this file. A destructive rotate/flip is exactly the kind of logic that
+// a hand-rolled mock could get subtly wrong (e.g. asserting rotate(90) was
+// called without verifying the actual output pixels are rotated), so this
+// suite temporarily unmocks 'sharp' and re-requires a fresh copy of the
+// module under test so its internal `await import('sharp')` resolves to the
+// real, unmocked package.
+//
+// If the native sharp binary cannot run in this sandbox, these tests will
+// fail/error at the `beforeAll` or first `it` — see the task report for
+// whether that happened here.
+// ---------------------------------------------------------------------------
+
+describe('applyOrientationTransform (real sharp round-trip)', () => {
+  let realApplyOrientationTransform: typeof import('./image-orientation.util').applyOrientationTransform;
+  let realSharp: typeof import('sharp').default;
+
+  beforeAll(() => {
+    jest.resetModules();
+    jest.unmock('sharp');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    realSharp = require('sharp').default ?? require('sharp');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    realApplyOrientationTransform = require('./image-orientation.util').applyOrientationTransform;
+  });
+
+  afterAll(() => {
+    // Restore module registry state; the mocked `sharp` import at the top of
+    // this file is re-applied automatically the next time a fresh test file
+    // loads it, so no explicit re-mock is needed here since this is the last
+    // suite in the file.
+    jest.resetModules();
+  });
+
+  async function makeTestJpeg(width: number, height: number): Promise<Buffer> {
+    return realSharp({
+      create: {
+        width,
+        height,
+        channels: 3,
+        background: { r: 200, g: 50, b: 50 },
+      },
+    })
+      .jpeg()
+      .toBuffer();
+  }
+
+  it('rotate_left swaps dimensions (4x2 -> 2x4) and re-encodes as a valid JPEG', async () => {
+    const input = await makeTestJpeg(4, 2);
+
+    const result = await realApplyOrientationTransform(input, 'rotate_left');
+
+    expect(result.width).toBe(2);
+    expect(result.height).toBe(4);
+
+    const meta = await realSharp(result.buffer).metadata();
+    expect(meta.format).toBe('jpeg');
+    expect(meta.width).toBe(2);
+    expect(meta.height).toBe(4);
+  });
+
+  it('rotate_right swaps dimensions (4x2 -> 2x4) and re-encodes as a valid JPEG', async () => {
+    const input = await makeTestJpeg(4, 2);
+
+    const result = await realApplyOrientationTransform(input, 'rotate_right');
+
+    expect(result.width).toBe(2);
+    expect(result.height).toBe(4);
+
+    const meta = await realSharp(result.buffer).metadata();
+    expect(meta.format).toBe('jpeg');
+    expect(meta.width).toBe(2);
+    expect(meta.height).toBe(4);
+  });
+
+  it('flip_horizontal keeps dimensions (4x2 -> 4x2) and re-encodes as a valid JPEG', async () => {
+    const input = await makeTestJpeg(4, 2);
+
+    const result = await realApplyOrientationTransform(input, 'flip_horizontal');
+
+    expect(result.width).toBe(4);
+    expect(result.height).toBe(2);
+
+    const meta = await realSharp(result.buffer).metadata();
+    expect(meta.format).toBe('jpeg');
+    expect(meta.width).toBe(4);
+    expect(meta.height).toBe(2);
+  });
+
+  it('flip_vertical keeps dimensions (4x2 -> 4x2) and re-encodes as a valid JPEG', async () => {
+    const input = await makeTestJpeg(4, 2);
+
+    const result = await realApplyOrientationTransform(input, 'flip_vertical');
+
+    expect(result.width).toBe(4);
+    expect(result.height).toBe(2);
+
+    const meta = await realSharp(result.buffer).metadata();
+    expect(meta.format).toBe('jpeg');
+    expect(meta.width).toBe(4);
+    expect(meta.height).toBe(2);
+  });
+
+  it('throws a descriptive error when given bytes that are not a valid image', async () => {
+    const garbage = Buffer.from('this is not an image at all');
+
+    await expect(
+      realApplyOrientationTransform(garbage, 'rotate_right'),
+    ).rejects.toThrow('Image orientation transform failed');
+  });
+});
