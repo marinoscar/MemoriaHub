@@ -11,6 +11,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useCircle } from '../hooks/useCircle';
 import { streamAgent } from '../services/searchAgentStream';
 import type { ChatMsg } from '../services/searchAgentStream';
+import type { SearchRequest } from '../services/search';
 import type { MediaItem, MediaListMeta } from '../types/media';
 
 // ---------------------------------------------------------------------------
@@ -25,10 +26,16 @@ export interface SearchResults {
 interface SearchContextValue {
   messages: ChatMsg[];
   results: SearchResults | null;
+  /**
+   * Deterministic (advanced) search request. When set, SearchPage renders the
+   * results grid in FEED (infinite-scroll) mode, letting MediaGallery's fetcher
+   * own paging. Mutually exclusive with the agentic `results` batch.
+   */
+  searchRequest: SearchRequest | null;
   isSearching: boolean;
   error: string | null;
   runAgentSearch: (query: string) => void;
-  runAdvancedResults: (items: MediaItem[], total: number) => void;
+  runDeterministicSearch: (request: SearchRequest) => void;
   clearSearch: () => void;
 }
 
@@ -49,6 +56,7 @@ export function SearchProvider({ children }: SearchProviderProps) {
 
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [results, setResults] = useState<SearchResults | null>(null);
+  const [searchRequest, setSearchRequest] = useState<SearchRequest | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,6 +66,7 @@ export function SearchProvider({ children }: SearchProviderProps) {
   useEffect(() => {
     setMessages([]);
     setResults(null);
+    setSearchRequest(null);
     setError(null);
     abortRef.current?.abort();
     abortRef.current = null;
@@ -75,6 +84,8 @@ export function SearchProvider({ children }: SearchProviderProps) {
       const userMsg: ChatMsg = { role: 'user', content: query.trim() };
       const nextMessages = [...messages, userMsg];
       setMessages(nextMessages);
+      // Agentic and deterministic paths are mutually exclusive.
+      setSearchRequest(null);
       setIsSearching(true);
       setError(null);
 
@@ -125,19 +136,21 @@ export function SearchProvider({ children }: SearchProviderProps) {
     [activeCircle, messages, navigate, location.pathname],
   );
 
-  const runAdvancedResults = useCallback(
-    (items: MediaItem[], total: number) => {
+  const runDeterministicSearch = useCallback(
+    (request: SearchRequest) => {
       // Abort any in-flight agent search
       abortRef.current?.abort();
       abortRef.current = null;
 
-      const meta: MediaListMeta = {
-        page: 1,
-        pageSize: items.length,
-        totalItems: total,
-        totalPages: Math.max(1, Math.ceil(total / Math.max(items.length, 1))),
-      };
-      setResults({ items, meta });
+      // Paging is owned by the gallery's fetcher — strip any page/pageSize so
+      // the stored request is a stable, page-agnostic query key.
+      const { page: _page, pageSize: _pageSize, ...rest } = request;
+      void _page;
+      void _pageSize;
+
+      setSearchRequest(rest);
+      // Deterministic and agentic paths are mutually exclusive.
+      setResults(null);
       setMessages([]);
       setIsSearching(false);
       setError(null);
@@ -154,6 +167,7 @@ export function SearchProvider({ children }: SearchProviderProps) {
     abortRef.current = null;
     setMessages([]);
     setResults(null);
+    setSearchRequest(null);
     setError(null);
     setIsSearching(false);
   }, []);
@@ -163,10 +177,11 @@ export function SearchProvider({ children }: SearchProviderProps) {
       value={{
         messages,
         results,
+        searchRequest,
         isSearching,
         error,
         runAgentSearch,
-        runAdvancedResults,
+        runDeterministicSearch,
         clearSearch,
       }}
     >

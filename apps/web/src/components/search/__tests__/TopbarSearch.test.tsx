@@ -5,7 +5,7 @@
  *   - Typing and pressing Enter calls runAgentSearch with the typed text.
  *   - Clicking the search icon button also calls runAgentSearch.
  *   - Pressing the Tune button opens AdvancedSearchDialog.
- *   - AdvancedSearchDialog.onResults is wired to runAdvancedResults.
+ *   - SearchPanel.onSubmit is wired to runDeterministicSearch.
  *   - Clear button appears when input has text and clears it.
  *   - Phone branch: search icon expands overlay; back button collapses it.
  *
@@ -36,22 +36,26 @@ vi.mock('../../../hooks/useCircle', () => ({
   useCircle: vi.fn(),
 }));
 
-// Stub SearchPanel: renders an "Apply" button that calls onResults
+// A realistic minimal SearchRequest fixture used by the stubbed SearchPanel's
+// "Apply" button.
+const FAKE_REQUEST = { circleId: 'circle-1', filters: { country: 'Costa Rica' } };
+
+// Stub SearchPanel: renders an "Apply" button that calls onSubmit
 // when clicked, so we can test the wiring.
 vi.mock('../SearchPanel', () => ({
   SearchPanel: vi.fn(
     ({
       open,
-      onResults,
+      onSubmit,
       onClose,
     }: {
       open: boolean;
-      onResults: (items: [], total: number) => void;
+      onSubmit: (request: typeof FAKE_REQUEST) => void;
       onClose: () => void;
     }) =>
       open ? (
         <div data-testid="advanced-dialog">
-          <button onClick={() => onResults([], 5)}>Apply</button>
+          <button onClick={() => onSubmit(FAKE_REQUEST)}>Apply</button>
           <button onClick={onClose}>Cancel</button>
         </div>
       ) : null,
@@ -95,8 +99,9 @@ function defaultSearchMock() {
     results: null,
     isSearching: false,
     error: null,
+    searchRequest: null,
     runAgentSearch: vi.fn(),
-    runAdvancedResults: vi.fn(),
+    runDeterministicSearch: vi.fn(),
     clearSearch: vi.fn(),
   };
 }
@@ -252,11 +257,11 @@ describe('TopbarSearch', () => {
       expect(screen.getByTestId('advanced-dialog')).toBeInTheDocument();
     });
 
-    it('calls runAdvancedResults when the dialog fires onResults', async () => {
-      const runAdvancedResults = vi.fn();
+    it('calls runDeterministicSearch when the dialog fires onSubmit', async () => {
+      const runDeterministicSearch = vi.fn();
       mockUseSearch.mockReturnValue({
         ...defaultSearchMock(),
-        runAdvancedResults,
+        runDeterministicSearch,
       } as any);
 
       const user = userEvent.setup();
@@ -265,7 +270,7 @@ describe('TopbarSearch', () => {
       await user.click(screen.getByRole('button', { name: /open advanced search filters/i }));
       await user.click(screen.getByRole('button', { name: /apply/i }));
 
-      expect(runAdvancedResults).toHaveBeenCalledWith([], 5);
+      expect(runDeterministicSearch).toHaveBeenCalledWith(FAKE_REQUEST);
     });
 
     it('closes the dialog when Cancel is clicked', async () => {

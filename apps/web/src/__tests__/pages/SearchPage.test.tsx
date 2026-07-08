@@ -80,8 +80,9 @@ function defaultSearchMock() {
     results: null,
     isSearching: false,
     error: null,
+    searchRequest: null,
     runAgentSearch: vi.fn(),
-    runAdvancedResults: vi.fn(),
+    runDeterministicSearch: vi.fn(),
     clearSearch: vi.fn(),
   };
 }

@@ -7,7 +7,7 @@
  *     message from onDone.
  *   - Refine mode: calling runAgentSearch a second time sends BOTH prior
  *     messages AND the new user message (full history).
- *   - runAdvancedResults: sets results + clears messages.
+ *   - runDeterministicSearch: sets searchRequest (page/pageSize stripped), clears results/messages.
  *   - clearSearch: resets messages, results, error, isSearching.
  *   - Circle change: resets state when activeCircleId changes.
  */
@@ -108,6 +108,7 @@ describe('SearchContext', () => {
       expect(result.current.results).toBeNull();
       expect(result.current.isSearching).toBe(false);
       expect(result.current.error).toBeNull();
+      expect(result.current.searchRequest).toBeNull();
     });
   });
 
@@ -284,10 +285,10 @@ describe('SearchContext', () => {
   });
 
   // -------------------------------------------------------------------------
-  // runAdvancedResults
+  // runDeterministicSearch
   // -------------------------------------------------------------------------
-  describe('runAdvancedResults', () => {
-    it('sets results and clears messages', async () => {
+  describe('runDeterministicSearch', () => {
+    it('sets searchRequest and clears results/messages', async () => {
       // First: run an agent search so we have messages
       mockStreamAgent.mockImplementation(async (_body, handlers) => {
         handlers.onToken?.('hello');
@@ -304,16 +305,31 @@ describe('SearchContext', () => {
       // Confirm messages exist
       expect(result.current.messages.length).toBeGreaterThan(0);
 
-      // Now call runAdvancedResults
-      const items: MediaItem[] = [];
+      // Now call runDeterministicSearch
       await act(async () => {
-        result.current.runAdvancedResults(items, 3);
+        result.current.runDeterministicSearch({ circleId: 'circle-1', filters: {} });
       });
 
-      expect(result.current.results?.meta.totalItems).toBe(3);
+      expect(result.current.searchRequest).toEqual({ circleId: 'circle-1', filters: {} });
+      expect(result.current.results).toBeNull();
       expect(result.current.messages).toEqual([]);
       expect(result.current.isSearching).toBe(false);
       expect(result.current.error).toBeNull();
+    });
+
+    it('strips page/pageSize from the stored searchRequest', async () => {
+      const { result } = renderSearchHook();
+
+      await act(async () => {
+        result.current.runDeterministicSearch({
+          circleId: 'circle-1',
+          filters: {},
+          page: 2,
+          pageSize: 50,
+        } as any);
+      });
+
+      expect(result.current.searchRequest).toEqual({ circleId: 'circle-1', filters: {} });
     });
   });
 

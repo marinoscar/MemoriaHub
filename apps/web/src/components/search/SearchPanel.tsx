@@ -32,11 +32,10 @@ import {
 } from '@mui/icons-material';
 import { PersonMultiSelect } from './PersonMultiSelect';
 import { LocationPickerMap } from '../media/LocationPickerMap';
-import { performSearch } from '../../services/search';
+import type { SearchRequest } from '../../services/search';
 import { getExploreTags, getLocationFacets } from '../../services/media';
 import type { LocationCountry } from '../../services/media';
 import type { ExploreItem } from '../../services/media';
-import type { MediaItem } from '../../types/media';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,7 +45,11 @@ export interface SearchPanelProps {
   open: boolean;
   onClose: () => void;
   circleId: string;
-  onResults: (items: MediaItem[], totalItems: number) => void;
+  /**
+   * Emits the built deterministic SearchRequest. The panel no longer fetches —
+   * paging is owned downstream by MediaGallery's fetcher (infinite scroll).
+   */
+  onSubmit: (request: SearchRequest) => void;
 }
 
 type LocationMode = 'picklists' | 'map';
@@ -72,7 +75,7 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 // SearchPanel
 // ---------------------------------------------------------------------------
 
-export function SearchPanel({ open, onClose, circleId, onResults }: SearchPanelProps) {
+export function SearchPanel({ open, onClose, circleId, onSubmit }: SearchPanelProps) {
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -143,10 +146,6 @@ export function SearchPanel({ open, onClose, circleId, onResults }: SearchPanelP
   const [cameraMake, setCameraMake] = useState('');
   const [cameraModel, setCameraModel] = useState('');
 
-  // Search state
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-
   // -------------------------------------------------------------------------
   // Derived picklist options
   // -------------------------------------------------------------------------
@@ -192,93 +191,83 @@ export function SearchPanel({ open, onClose, circleId, onResults }: SearchPanelP
     setNoFaces(false);
     setCameraMake('');
     setCameraModel('');
-    setSearchError(null);
   };
 
   // -------------------------------------------------------------------------
-  // handleSearch
+  // handleSearch — build the deterministic SearchRequest and emit it.
+  // Paging is owned downstream by MediaGallery's fetcher, so no page/pageSize
+  // is set here and the panel never fetches.
   // -------------------------------------------------------------------------
-  const handleSearch = async () => {
+  const handleSearch = () => {
     if (!circleId) return;
-    setIsSearching(true);
-    setSearchError(null);
-    try {
-      const filters: Record<string, unknown> = {};
 
-      // People
-      if (peopleValue.ids.length > 0) {
-        filters['people'] = peopleValue;
-      }
+    const filters: Record<string, unknown> = {};
 
-      // Location
-      if (locationMode === 'picklists') {
-        if (selectedLocality) {
-          filters['locality'] = selectedLocality.value;
-          if (selectedRegion) filters['region'] = selectedRegion.value;
-          if (selectedCountry) filters['country'] = selectedCountry.value;
-        } else if (selectedRegion) {
-          filters['region'] = selectedRegion.value;
-          if (selectedCountry) filters['country'] = selectedCountry.value;
-        } else if (selectedCountry) {
-          filters['country'] = selectedCountry.value;
-        }
-      } else if (locationMode === 'map' && pinLocation) {
-        filters['near'] = { lat: pinLocation.lat, lng: pinLocation.lng, radiusKm };
-      }
-
-      // Date
-      if (dateFrom || dateTo) {
-        const capturedAt: { from?: string; to?: string } = {};
-        if (dateFrom) capturedAt.from = new Date(dateFrom + 'T00:00:00.000Z').toISOString();
-        if (dateTo) capturedAt.to = new Date(dateTo + 'T23:59:59.999Z').toISOString();
-        filters['capturedAt'] = capturedAt;
-      }
-
-      // Upload date
-      if (uploadFrom || uploadTo) {
-        const uploadedAt: { from?: string; to?: string } = {};
-        if (uploadFrom) uploadedAt.from = new Date(uploadFrom + 'T00:00:00.000Z').toISOString();
-        if (uploadTo) uploadedAt.to = new Date(uploadTo + 'T23:59:59.999Z').toISOString();
-        filters['uploadedAt'] = uploadedAt;
-      }
-
-      // Media type
-      if (mediaType !== 'all') {
-        filters['type'] = mediaType;
-      }
-
-      // Tag
-      if (selectedTag) {
-        filters['tag'] = selectedTag.name;
-      }
-
-      // Flags (only include when true)
-      if (favoritesOnly) filters['favorite'] = true;
-      if (excludeArchived) filters['excludeArchived'] = true;
-      if (missingCapturedAt) filters['missingCapturedAt'] = true;
-      if (missingGeo) filters['missingGeo'] = true;
-      if (missingCamera) filters['missingCamera'] = true;
-      if (noFaces) filters['noFaces'] = true;
-
-      // Camera
-      if (cameraMake.trim()) filters['cameraMake'] = cameraMake.trim();
-      if (cameraModel.trim()) filters['cameraModel'] = cameraModel.trim();
-
-      const result = await performSearch({
-        circleId,
-        filters,
-        semanticQuery: semanticQuery.trim() || undefined,
-        page: 1,
-        pageSize: 20,
-      });
-
-      onResults(result.items, result.meta.totalItems);
-      onClose();
-    } catch (err) {
-      setSearchError(err instanceof Error ? err.message : 'Search failed');
-    } finally {
-      setIsSearching(false);
+    // People
+    if (peopleValue.ids.length > 0) {
+      filters['people'] = peopleValue;
     }
+
+    // Location
+    if (locationMode === 'picklists') {
+      if (selectedLocality) {
+        filters['locality'] = selectedLocality.value;
+        if (selectedRegion) filters['region'] = selectedRegion.value;
+        if (selectedCountry) filters['country'] = selectedCountry.value;
+      } else if (selectedRegion) {
+        filters['region'] = selectedRegion.value;
+        if (selectedCountry) filters['country'] = selectedCountry.value;
+      } else if (selectedCountry) {
+        filters['country'] = selectedCountry.value;
+      }
+    } else if (locationMode === 'map' && pinLocation) {
+      filters['near'] = { lat: pinLocation.lat, lng: pinLocation.lng, radiusKm };
+    }
+
+    // Date
+    if (dateFrom || dateTo) {
+      const capturedAt: { from?: string; to?: string } = {};
+      if (dateFrom) capturedAt.from = new Date(dateFrom + 'T00:00:00.000Z').toISOString();
+      if (dateTo) capturedAt.to = new Date(dateTo + 'T23:59:59.999Z').toISOString();
+      filters['capturedAt'] = capturedAt;
+    }
+
+    // Upload date
+    if (uploadFrom || uploadTo) {
+      const uploadedAt: { from?: string; to?: string } = {};
+      if (uploadFrom) uploadedAt.from = new Date(uploadFrom + 'T00:00:00.000Z').toISOString();
+      if (uploadTo) uploadedAt.to = new Date(uploadTo + 'T23:59:59.999Z').toISOString();
+      filters['uploadedAt'] = uploadedAt;
+    }
+
+    // Media type
+    if (mediaType !== 'all') {
+      filters['type'] = mediaType;
+    }
+
+    // Tag
+    if (selectedTag) {
+      filters['tag'] = selectedTag.name;
+    }
+
+    // Flags (only include when true)
+    if (favoritesOnly) filters['favorite'] = true;
+    if (excludeArchived) filters['excludeArchived'] = true;
+    if (missingCapturedAt) filters['missingCapturedAt'] = true;
+    if (missingGeo) filters['missingGeo'] = true;
+    if (missingCamera) filters['missingCamera'] = true;
+    if (noFaces) filters['noFaces'] = true;
+
+    // Camera
+    if (cameraMake.trim()) filters['cameraMake'] = cameraMake.trim();
+    if (cameraModel.trim()) filters['cameraModel'] = cameraModel.trim();
+
+    onSubmit({
+      circleId,
+      filters,
+      semanticQuery: semanticQuery.trim() || undefined,
+    });
+    onClose();
   };
 
   // -------------------------------------------------------------------------
@@ -656,26 +645,18 @@ export function SearchPanel({ open, onClose, circleId, onResults }: SearchPanelP
         )}
       </DialogContent>
 
-      {searchError && (
-        <Alert severity="error" sx={{ mx: 3, mb: 1 }}>
-          {searchError}
-        </Alert>
-      )}
-
       <DialogActions sx={{ px: 3, py: 2, justifyContent: 'space-between' }}>
         <Button
           variant="text"
           onClick={handleClearAll}
-          disabled={isSearching}
           sx={{ minHeight: 44 }}
         >
           Clear all
         </Button>
         <Button
           variant="contained"
-          onClick={() => void handleSearch()}
-          disabled={!circleId || isSearching}
-          startIcon={isSearching ? <CircularProgress size={16} /> : undefined}
+          onClick={handleSearch}
+          disabled={!circleId}
           sx={{ minHeight: 44 }}
         >
           Search

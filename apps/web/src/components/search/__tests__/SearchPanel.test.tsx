@@ -2,11 +2,11 @@
  * Unit tests for SearchPanel — payload-building assertions.
  *
  * Exercises five core scenarios:
- *   A. Country picklist selected → performSearch receives filters.country
- *   B. Map mode + pin dropped  → performSearch receives filters.near
- *   C. Date range only          → performSearch receives filters.capturedAt, no location
- *   D. Favorites flag ON/OFF    → performSearch includes/omits filters.favorite
- *   E. AI description filled    → performSearch receives semanticQuery (top-level)
+ *   A. Country picklist selected → onSubmit receives filters.country
+ *   B. Map mode + pin dropped  → onSubmit receives filters.near
+ *   C. Date range only          → onSubmit receives filters.capturedAt, no location
+ *   D. Favorites flag ON/OFF    → onSubmit includes/omits filters.favorite
+ *   E. AI description filled    → onSubmit receives semanticQuery (top-level)
  *
  * Heavy sub-components (LocationPickerMap, PersonMultiSelect) are stubbed so
  * tests run without Leaflet or async people fetches.
@@ -20,11 +20,6 @@ import { render } from '../../../__tests__/utils/test-utils';
 // ---------------------------------------------------------------------------
 // Module mocks — declared BEFORE importing the modules under test
 // ---------------------------------------------------------------------------
-
-// Mock performSearch so we can inspect calls
-vi.mock('../../../services/search', () => ({
-  performSearch: vi.fn(),
-}));
 
 // Mock location facets and explore tags — return minimal static data
 vi.mock('../../../services/media', () => ({
@@ -64,10 +59,8 @@ vi.mock('../../media/LocationPickerMap', () => ({
 // ---------------------------------------------------------------------------
 
 import { SearchPanel } from '../SearchPanel';
-import { performSearch } from '../../../services/search';
 import { getLocationFacets, getExploreTags } from '../../../services/media';
 
-const mockPerformSearch = vi.mocked(performSearch);
 const mockGetLocationFacets = vi.mocked(getLocationFacets);
 const mockGetExploreTags = vi.mocked(getExploreTags);
 
@@ -93,22 +86,16 @@ const mockFacets = [
   },
 ];
 
-/** Successful empty search response */
-const emptySearchResponse = {
-  items: [],
-  meta: { page: 1, pageSize: 20, totalItems: 0, totalPages: 0 },
-};
-
 function defaultProps(overrides: Partial<{
   open: boolean;
   onClose: ReturnType<typeof vi.fn>;
-  onResults: ReturnType<typeof vi.fn>;
+  onSubmit: ReturnType<typeof vi.fn>;
 }> = {}) {
   return {
     open: true,
     circleId: CIRCLE_ID,
     onClose: vi.fn(),
-    onResults: vi.fn(),
+    onSubmit: vi.fn(),
     ...overrides,
   };
 }
@@ -129,16 +116,16 @@ describe('SearchPanel', () => {
     vi.clearAllMocks();
     mockGetLocationFacets.mockResolvedValue(mockFacets as any);
     mockGetExploreTags.mockResolvedValue([]);
-    mockPerformSearch.mockResolvedValue(emptySearchResponse as any);
   });
 
   // -------------------------------------------------------------------------
   // A. Country picklist
   // -------------------------------------------------------------------------
   describe('A — country picklist selection', () => {
-    it('calls performSearch with filters.country when a country is selected', async () => {
+    it('calls onSubmit with filters.country when a country is selected', async () => {
       const user = userEvent.setup();
-      render(<SearchPanel {...defaultProps()} />);
+      const onSubmit = vi.fn();
+      render(<SearchPanel {...defaultProps({ onSubmit })} />);
 
       await waitForLoaded();
 
@@ -152,7 +139,7 @@ describe('SearchPanel', () => {
       await user.click(screen.getByRole('button', { name: /^search$/i }));
 
       await waitFor(() => {
-        expect(mockPerformSearch).toHaveBeenCalledWith(
+        expect(onSubmit).toHaveBeenCalledWith(
           expect.objectContaining({
             circleId: CIRCLE_ID,
             filters: expect.objectContaining({ country: 'Costa Rica' }),
@@ -163,7 +150,8 @@ describe('SearchPanel', () => {
 
     it('does NOT include capturedAt when only country is selected', async () => {
       const user = userEvent.setup();
-      render(<SearchPanel {...defaultProps()} />);
+      const onSubmit = vi.fn();
+      render(<SearchPanel {...defaultProps({ onSubmit })} />);
 
       await waitForLoaded();
 
@@ -175,7 +163,7 @@ describe('SearchPanel', () => {
       await user.click(screen.getByRole('button', { name: /^search$/i }));
 
       await waitFor(() => {
-        const call = mockPerformSearch.mock.calls[0]?.[0] as any;
+        const call = onSubmit.mock.calls[0]?.[0] as any;
         expect(call.filters).not.toHaveProperty('capturedAt');
       });
     });
@@ -185,9 +173,10 @@ describe('SearchPanel', () => {
   // B. Map mode + pin drop
   // -------------------------------------------------------------------------
   describe('B — map mode with dropped pin', () => {
-    it('calls performSearch with filters.near when map mode is active and pin is dropped', async () => {
+    it('calls onSubmit with filters.near when map mode is active and pin is dropped', async () => {
       const user = userEvent.setup();
-      render(<SearchPanel {...defaultProps()} />);
+      const onSubmit = vi.fn();
+      render(<SearchPanel {...defaultProps({ onSubmit })} />);
 
       await waitForLoaded();
 
@@ -200,7 +189,7 @@ describe('SearchPanel', () => {
       await user.click(screen.getByRole('button', { name: /^search$/i }));
 
       await waitFor(() => {
-        const call = mockPerformSearch.mock.calls[0]?.[0] as any;
+        const call = onSubmit.mock.calls[0]?.[0] as any;
         expect(call.filters).toMatchObject({
           near: { lat: 9.93, lng: -84.09, radiusKm: expect.any(Number) },
         });
@@ -213,7 +202,8 @@ describe('SearchPanel', () => {
 
     it('does NOT include filters.near when map mode is active but no pin dropped', async () => {
       const user = userEvent.setup();
-      render(<SearchPanel {...defaultProps()} />);
+      const onSubmit = vi.fn();
+      render(<SearchPanel {...defaultProps({ onSubmit })} />);
 
       await waitForLoaded();
 
@@ -223,7 +213,7 @@ describe('SearchPanel', () => {
       await user.click(screen.getByRole('button', { name: /^search$/i }));
 
       await waitFor(() => {
-        const call = mockPerformSearch.mock.calls[0]?.[0] as any;
+        const call = onSubmit.mock.calls[0]?.[0] as any;
         expect(call.filters).not.toHaveProperty('near');
       });
     });
@@ -233,24 +223,27 @@ describe('SearchPanel', () => {
   // C. Date range only
   // -------------------------------------------------------------------------
   describe('C — date range filter', () => {
-    it('calls performSearch with filters.capturedAt from/to when dates are filled', async () => {
-      render(<SearchPanel {...defaultProps()} />);
+    it('calls onSubmit with filters.capturedAt from/to when dates are filled', async () => {
+      const onSubmit = vi.fn();
+      render(<SearchPanel {...defaultProps({ onSubmit })} />);
 
       await waitForLoaded();
 
-      // Fill the From date input
-      fireEvent.change(screen.getByLabelText(/^from$/i), {
+      // Fill the From date input — "Date taken" section renders before
+      // "Upload date", both of which have From/To labeled fields, so pick
+      // the first match.
+      fireEvent.change(screen.getAllByLabelText(/^from$/i)[0], {
         target: { value: '2023-01-15' },
       });
       // Fill the To date input
-      fireEvent.change(screen.getByLabelText(/^to$/i), {
+      fireEvent.change(screen.getAllByLabelText(/^to$/i)[0], {
         target: { value: '2023-12-31' },
       });
 
       fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
 
       await waitFor(() => {
-        const call = mockPerformSearch.mock.calls[0]?.[0] as any;
+        const call = onSubmit.mock.calls[0]?.[0] as any;
         expect(call.filters).toHaveProperty('capturedAt');
         expect(call.filters.capturedAt).toHaveProperty('from');
         expect(call.filters.capturedAt).toHaveProperty('to');
@@ -261,31 +254,33 @@ describe('SearchPanel', () => {
     });
 
     it('from ISO string starts at midnight UTC', async () => {
-      render(<SearchPanel {...defaultProps()} />);
+      const onSubmit = vi.fn();
+      render(<SearchPanel {...defaultProps({ onSubmit })} />);
       await waitForLoaded();
 
-      fireEvent.change(screen.getByLabelText(/^from$/i), {
+      fireEvent.change(screen.getAllByLabelText(/^from$/i)[0], {
         target: { value: '2023-06-01' },
       });
       fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
 
       await waitFor(() => {
-        const call = mockPerformSearch.mock.calls[0]?.[0] as any;
+        const call = onSubmit.mock.calls[0]?.[0] as any;
         expect(call.filters.capturedAt.from).toMatch(/T00:00:00/);
       });
     });
 
     it('to ISO string ends at 23:59:59 UTC', async () => {
-      render(<SearchPanel {...defaultProps()} />);
+      const onSubmit = vi.fn();
+      render(<SearchPanel {...defaultProps({ onSubmit })} />);
       await waitForLoaded();
 
-      fireEvent.change(screen.getByLabelText(/^to$/i), {
+      fireEvent.change(screen.getAllByLabelText(/^to$/i)[0], {
         target: { value: '2023-06-30' },
       });
       fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
 
       await waitFor(() => {
-        const call = mockPerformSearch.mock.calls[0]?.[0] as any;
+        const call = onSubmit.mock.calls[0]?.[0] as any;
         expect(call.filters.capturedAt.to).toMatch(/T23:59:59/);
       });
     });
@@ -321,7 +316,8 @@ describe('SearchPanel', () => {
 
     it('sends filters.favorite=true when switch is turned ON', async () => {
       const user = userEvent.setup();
-      render(<SearchPanel {...defaultProps()} />);
+      const onSubmit = vi.fn();
+      render(<SearchPanel {...defaultProps({ onSubmit })} />);
       await waitForLoaded();
 
       await expandMoreFilters(user);
@@ -332,26 +328,28 @@ describe('SearchPanel', () => {
       await user.click(screen.getByRole('button', { name: /^search$/i }));
 
       await waitFor(() => {
-        const call = mockPerformSearch.mock.calls[0]?.[0] as any;
+        const call = onSubmit.mock.calls[0]?.[0] as any;
         expect(call.filters).toMatchObject({ favorite: true });
       });
     });
 
     it('omits filters.favorite when switch is OFF (default)', async () => {
-      render(<SearchPanel {...defaultProps()} />);
+      const onSubmit = vi.fn();
+      render(<SearchPanel {...defaultProps({ onSubmit })} />);
       await waitForLoaded();
 
       fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
 
       await waitFor(() => {
-        const call = mockPerformSearch.mock.calls[0]?.[0] as any;
+        const call = onSubmit.mock.calls[0]?.[0] as any;
         expect(call.filters).not.toHaveProperty('favorite');
       });
     });
 
     it('omits filters.favorite when switch is turned ON then OFF again', async () => {
       const user = userEvent.setup();
-      render(<SearchPanel {...defaultProps()} />);
+      const onSubmit = vi.fn();
+      render(<SearchPanel {...defaultProps({ onSubmit })} />);
       await waitForLoaded();
 
       await expandMoreFilters(user);
@@ -363,7 +361,7 @@ describe('SearchPanel', () => {
       await user.click(screen.getByRole('button', { name: /^search$/i }));
 
       await waitFor(() => {
-        const call = mockPerformSearch.mock.calls[0]?.[0] as any;
+        const call = onSubmit.mock.calls[0]?.[0] as any;
         expect(call.filters).not.toHaveProperty('favorite');
       });
     });
@@ -375,7 +373,8 @@ describe('SearchPanel', () => {
   describe('E — AI description (semanticQuery)', () => {
     it('sends top-level semanticQuery when AI description is filled', async () => {
       const user = userEvent.setup();
-      render(<SearchPanel {...defaultProps()} />);
+      const onSubmit = vi.fn();
+      render(<SearchPanel {...defaultProps({ onSubmit })} />);
       await waitForLoaded();
 
       const descInput = screen.getByRole('textbox', { name: /describe the photo/i });
@@ -385,26 +384,28 @@ describe('SearchPanel', () => {
       await user.click(screen.getByRole('button', { name: /^search$/i }));
 
       await waitFor(() => {
-        const call = mockPerformSearch.mock.calls[0]?.[0] as any;
+        const call = onSubmit.mock.calls[0]?.[0] as any;
         expect(call.semanticQuery).toBe('sunset over the ocean');
       });
     });
 
     it('omits semanticQuery when AI description is blank', async () => {
-      render(<SearchPanel {...defaultProps()} />);
+      const onSubmit = vi.fn();
+      render(<SearchPanel {...defaultProps({ onSubmit })} />);
       await waitForLoaded();
 
       fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
 
       await waitFor(() => {
-        const call = mockPerformSearch.mock.calls[0]?.[0] as any;
+        const call = onSubmit.mock.calls[0]?.[0] as any;
         expect(call.semanticQuery).toBeUndefined();
       });
     });
 
     it('strips whitespace-only AI description (treats as empty)', async () => {
       const user = userEvent.setup();
-      render(<SearchPanel {...defaultProps()} />);
+      const onSubmit = vi.fn();
+      render(<SearchPanel {...defaultProps({ onSubmit })} />);
       await waitForLoaded();
 
       const descInput = screen.getByRole('textbox', { name: /describe the photo/i });
@@ -413,7 +414,7 @@ describe('SearchPanel', () => {
       await user.click(screen.getByRole('button', { name: /^search$/i }));
 
       await waitFor(() => {
-        const call = mockPerformSearch.mock.calls[0]?.[0] as any;
+        const call = onSubmit.mock.calls[0]?.[0] as any;
         expect(call.semanticQuery).toBeUndefined();
       });
     });
@@ -423,47 +424,33 @@ describe('SearchPanel', () => {
   // General wiring
   // -------------------------------------------------------------------------
   describe('general wiring', () => {
-    it('calls onResults and onClose after a successful search', async () => {
-      const onResults = vi.fn();
+    it('calls onSubmit and onClose after clicking Search', async () => {
+      const onSubmit = vi.fn();
       const onClose = vi.fn();
-      mockPerformSearch.mockResolvedValue({
-        items: [],
-        meta: { page: 1, pageSize: 20, totalItems: 7, totalPages: 1 },
-      } as any);
 
-      render(<SearchPanel open circleId={CIRCLE_ID} onResults={onResults} onClose={onClose} />);
+      render(<SearchPanel open circleId={CIRCLE_ID} onSubmit={onSubmit} onClose={onClose} />);
       await waitForLoaded();
 
       fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
 
       await waitFor(() => {
-        expect(onResults).toHaveBeenCalledWith([], 7);
+        expect(onSubmit).toHaveBeenCalledWith(
+          expect.objectContaining({ circleId: CIRCLE_ID }),
+        );
         expect(onClose).toHaveBeenCalled();
       });
     });
 
-    it('always sends circleId in the performSearch payload', async () => {
-      render(<SearchPanel {...defaultProps()} />);
+    it('always sends circleId in the onSubmit payload', async () => {
+      const onSubmit = vi.fn();
+      render(<SearchPanel {...defaultProps({ onSubmit })} />);
       await waitForLoaded();
 
       fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
 
       await waitFor(() => {
-        expect(mockPerformSearch).toHaveBeenCalledWith(
+        expect(onSubmit).toHaveBeenCalledWith(
           expect.objectContaining({ circleId: CIRCLE_ID }),
-        );
-      });
-    });
-
-    it('sends page=1 and pageSize=20 in every search call', async () => {
-      render(<SearchPanel {...defaultProps()} />);
-      await waitForLoaded();
-
-      fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
-
-      await waitFor(() => {
-        expect(mockPerformSearch).toHaveBeenCalledWith(
-          expect.objectContaining({ page: 1, pageSize: 20 }),
         );
       });
     });

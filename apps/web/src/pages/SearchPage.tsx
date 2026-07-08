@@ -1,12 +1,15 @@
 /**
  * SearchPage — results view + Explore (People / Places / Tags).
  *
- * When SearchContext holds results (agent or advanced), shows:
- *   - A small header with total count and a "Clear" button.
- *   - The result grid via MediaGallery (controlled mode).
+ * Two mutually-exclusive result paths:
+ *   - Deterministic (advanced) search: SearchContext holds a `searchRequest`;
+ *     the result grid renders via MediaGallery in FEED mode (infinite scroll),
+ *     where the gallery's fetcher owns paging.
+ *   - Agentic (AI chat) search: SearchContext holds a single `results` batch;
+ *     the grid renders via MediaGallery in controlled mode.
  *
- * When there are no results and no in-flight search, falls back to the
- * Explore browse rows (People / Places / Tags), which existed before.
+ * When neither is set (and no in-flight search), falls back to the Explore
+ * browse rows (People / Places / Tags), which existed before.
  *
  * The search input lives in the AppBar TopbarSearch; this page only
  * renders output.
@@ -29,6 +32,7 @@ import {
 } from '@mui/icons-material';
 import { useCircle } from '../hooks/useCircle';
 import { usePeople } from '../hooks/usePeople';
+import { performSearch } from '../services/search';
 import { getExploreLocations, getExploreTags } from '../services/media';
 import type { ExploreItem, ExploreLocations } from '../services/media';
 import type { PersonListItem } from '../services/face';
@@ -167,7 +171,7 @@ export default function SearchPage() {
   const navigate = useNavigate();
   const { activeCircle, activeCircleRole } = useCircle();
   const { data: peopleData, loading: peopleLoading } = usePeople(activeCircle?.id ?? null);
-  const { results, isSearching, error, clearSearch } = useSearch();
+  const { results, searchRequest, isSearching, error, clearSearch } = useSearch();
 
   // Explore data (shown when no results)
   const [locations, setLocations] = useState<ExploreLocations>({
@@ -213,7 +217,53 @@ export default function SearchPage() {
   }
 
   // -------------------------------------------------------------------------
-  // Results view
+  // Deterministic (advanced) search — FEED mode (infinite scroll).
+  // MediaGallery's fetcher owns paging; the stored request is page-agnostic.
+  // -------------------------------------------------------------------------
+  if (searchRequest !== null) {
+    return (
+      <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1200, mx: 'auto' }}>
+        {/* Header row */}
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            mb: 2,
+          }}
+        >
+          <Typography variant="body2" color="text.secondary">
+            Search results
+          </Typography>
+          <Button size="small" onClick={clearSearch} sx={{ minHeight: 36 }}>
+            Clear
+          </Button>
+        </Box>
+
+        <MediaGallery
+          mode="home"
+          circleId={searchRequest.circleId}
+          activeCircleRole={activeCircleRole}
+          fetcher={(page, pageSize) =>
+            performSearch({ ...searchRequest, page, pageSize }).then((r) => ({
+              items: r.items,
+              totalPages: r.meta.totalPages,
+            }))
+          }
+          queryKey={`search:${JSON.stringify(searchRequest)}`}
+          emptyState={
+            <Typography variant="body2" color="text.secondary">
+              No results found.
+            </Typography>
+          }
+          onChange={clearSearch}
+        />
+      </Box>
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Agentic (AI chat) results — controlled single batch
   // -------------------------------------------------------------------------
   if (results !== null || isSearching) {
     return (

@@ -32,7 +32,7 @@ export function TopbarSearch() {
   const isPhone = useMediaQuery(theme.breakpoints.down('sm'));
 
   const { activeCircle, activeCircleId } = useCircle();
-  const { runAgentSearch, runAdvancedResults } = useSearch();
+  const { runAgentSearch, runDeterministicSearch } = useSearch();
 
   const [input, setInput] = useState('');
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -80,12 +80,12 @@ export function TopbarSearch() {
     inputRef.current?.focus();
   }, []);
 
-  const handleAdvancedResults = useCallback(
-    (items: Parameters<typeof runAdvancedResults>[0], total: number) => {
-      runAdvancedResults(items, total);
+  const handleAdvancedSubmit = useCallback(
+    (request: Parameters<typeof runDeterministicSearch>[0]) => {
+      runDeterministicSearch(request);
       setPhoneExpanded(false);
     },
-    [runAdvancedResults],
+    [runDeterministicSearch],
   );
 
   const circleId = activeCircleId ?? '';
@@ -209,7 +209,7 @@ export function TopbarSearch() {
             open={advancedOpen}
             onClose={() => setAdvancedOpen(false)}
             circleId={circleId}
-            onResults={handleAdvancedResults}
+            onSubmit={handleAdvancedSubmit}
           />
         )}
       </>
@@ -243,7 +243,7 @@ export function TopbarSearch() {
           open={advancedOpen}
           onClose={() => setAdvancedOpen(false)}
           circleId={circleId}
-          onResults={handleAdvancedResults}
+          onSubmit={handleAdvancedSubmit}
         />
       )}
     </>
