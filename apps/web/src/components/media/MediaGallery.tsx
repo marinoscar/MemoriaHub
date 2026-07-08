@@ -50,6 +50,7 @@ import { BulkLocationDialog } from './BulkLocationDialog';
 import { BulkDateDialog } from './BulkDateDialog';
 import { BulkTagsDialog } from './BulkTagsDialog';
 import { AddToAlbumDialog } from '../album/AddToAlbumDialog';
+import { TimelineScrubber } from './TimelineScrubber';
 import { patchMedia as patchMediaApi, removeAlbumItem } from '../../services/media';
 import type { MediaItem, MediaQueryParams } from '../../types/media';
 import type { CircleRole } from '../../types/circles';
@@ -385,6 +386,15 @@ export function MediaGallery({
 
   const grouped = useMemo(() => groupByDay(mergedItems), [mergedItems]);
 
+  // Registry of day-group DOM nodes keyed by group.key, for the TimelineScrubber
+  // to resolve scroll targets. Falls back to id lookup if the map entry is stale.
+  const groupElsRef = useRef<Map<string, HTMLElement>>(new Map());
+  const getGroupElement = useCallback(
+    (key: string): HTMLElement | null =>
+      groupElsRef.current.get(key) ?? document.getElementById(`group-${key}`),
+    [],
+  );
+
   // O(1) id→index map so each tile doesn't do an O(n) indexOf scan
   const indexById = useMemo(() => {
     const m = new Map<string, number>();
@@ -627,7 +637,15 @@ export function MediaGallery({
       {!showFirstLoad && mergedItems.length > 0 && (
         <Box sx={{ px: { xs: 1, sm: 2 }, pt: { xs: 1, sm: 2 } }}>
           {grouped.map((group) => (
-            <Box key={group.key} sx={{ mb: 3 }}>
+            <Box
+              key={group.key}
+              id={`group-${group.key}`}
+              ref={(el: HTMLElement | null) => {
+                if (el) groupElsRef.current.set(group.key, el);
+                else groupElsRef.current.delete(group.key);
+              }}
+              sx={{ mb: 3 }}
+            >
               {/* Sticky day header with per-group Select all / Clear */}
               <Box
                 sx={{
@@ -731,6 +749,17 @@ export function MediaGallery({
             </Box>
           )}
         </Box>
+      )}
+
+      {/* Timeline scrubber (self-hides when <2 month buckets). position:fixed,
+          so its placement here does not affect layout. */}
+      {!showFirstLoad && mergedItems.length > 0 && (
+        <TimelineScrubber
+          groups={grouped}
+          getGroupElement={getGroupElement}
+          onRequestLoadMore={isFeedMode ? feedLoadMore : undefined}
+          hasMore={isFeedMode ? feedHasMore : false}
+        />
       )}
 
       {/* Lightbox */}
