@@ -1239,6 +1239,26 @@ function UnassignedFacesSection({
         </Paper>
       )}
 
+      {/* Select all / Deselect all toggle for the live grid */}
+      {faces.length > 0 && (
+        <Box sx={{ mb: 1 }}>
+          <Button
+            size="small"
+            startIcon={<SelectAllIcon fontSize="small" />}
+            onClick={() =>
+              selectedIds.size === faces.length && faces.length > 0
+                ? setSelectedIds(new Set())
+                : setSelectedIds(new Set(faces.map((f) => f.faceId)))
+            }
+            sx={{ minHeight: 44 }}
+          >
+            {selectedIds.size === faces.length && faces.length > 0
+              ? 'Deselect all'
+              : 'Select all'}
+          </Button>
+        </Box>
+      )}
+
       {/* Live face grid */}
       <FaceThumbGrid faces={faces} selectedIds={selectedIds} onToggle={toggleSelect} />
 
@@ -1321,6 +1341,30 @@ function UnassignedFacesSection({
                     </Button>
                   </Stack>
                 </Paper>
+              )}
+
+              {/* Select all / Deselect all toggle for the archived grid */}
+              {archivedFaces.length > 0 && (
+                <Box sx={{ mb: 1 }}>
+                  <Button
+                    size="small"
+                    startIcon={<SelectAllIcon fontSize="small" />}
+                    onClick={() =>
+                      archivedSelectedIds.size === archivedFaces.length &&
+                      archivedFaces.length > 0
+                        ? setArchivedSelectedIds(new Set())
+                        : setArchivedSelectedIds(
+                            new Set(archivedFaces.map((f) => f.faceId)),
+                          )
+                    }
+                    sx={{ minHeight: 44 }}
+                  >
+                    {archivedSelectedIds.size === archivedFaces.length &&
+                    archivedFaces.length > 0
+                      ? 'Deselect all'
+                      : 'Select all'}
+                  </Button>
+                </Box>
               )}
 
               {archivedLoading ? (
