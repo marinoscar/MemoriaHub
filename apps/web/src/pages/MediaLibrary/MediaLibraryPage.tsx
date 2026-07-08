@@ -8,9 +8,6 @@ import {
   Box,
   Typography,
   Grid,
-  ImageListItem,
-  ImageListItemBar,
-  IconButton,
   Chip,
   Stack,
   Tooltip,
@@ -22,90 +19,37 @@ import {
   FormControl,
   InputLabel,
   CircularProgress,
-  Skeleton,
   Alert,
   Badge,
   Button,
   Collapse,
-  Pagination,
-  useMediaQuery,
   ToggleButton,
   ToggleButtonGroup,
   Paper,
   Menu,
-  Snackbar,
   Switch,
   FormControlLabel,
 } from '@mui/material';
 import {
   Star as StarIcon,
-  StarBorder as StarBorderIcon,
   FilterList as FilterIcon,
   Search as SearchIcon,
   FileDownload as ExportIcon,
-  PhotoLibrary as PhotoLibraryIcon,
-  BrokenImage as BrokenImageIcon,
-  PlayCircleOutlined as PlayCircleOutlinedIcon,
-  CheckBox as CheckBoxIcon,
-  CheckBoxOutlineBlank as CheckBoxOutlineBlankIcon,
-  Checklist as ChecklistIcon,
   Person as PersonIcon,
 } from '@mui/icons-material';
-import { useTheme } from '@mui/material/styles';
 import { useSearchParams } from 'react-router-dom';
 import { useMedia } from '../../hooks/useMedia';
 import { useAlbums } from '../../hooks/useAlbums';
 import { useCircle } from '../../hooks/useCircle';
 import { listTags, exportMedia } from '../../services/media';
 import type { ExportFilters } from '../../services/media';
-import { MediaDetailDrawer } from '../../components/media/MediaDetailDrawer';
-import { MediaLightbox } from '../../components/media/MediaLightbox';
-import { BulkActionToolbar } from '../../components/media/BulkActionToolbar';
-import { BulkLocationDialog } from '../../components/media/BulkLocationDialog';
-import { BulkDateDialog } from '../../components/media/BulkDateDialog';
-import { BulkTagsDialog } from '../../components/media/BulkTagsDialog';
-import { AddToAlbumDialog } from '../../components/album/AddToAlbumDialog';
+import { MediaGallery } from '../../components/media/MediaGallery';
 import type { MediaItem, MediaQueryParams, TagItem, MediaType } from '../../types/media';
 import { PersonMultiSelect } from '../../components/search/PersonMultiSelect';
-import { isThumbnailStuck } from '../../utils/thumbnailTimeout';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function groupByYearMonth(
-  items: MediaItem[],
-): Array<{ key: string; label: string; items: MediaItem[] }> {
-  const groups = new Map<string, { label: string; items: MediaItem[] }>();
-
-  for (const item of items) {
-    let key: string;
-    let label: string;
-
-    if (!item.capturedAt) {
-      key = 'unknown';
-      label = 'Unknown Date';
-    } else {
-      const d = new Date(item.capturedAt);
-      key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      label = d.toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
-    }
-
-    if (!groups.has(key)) {
-      groups.set(key, { label, items: [] });
-    }
-    groups.get(key)!.items.push(item);
-  }
-
-  // Sort groups newest-first (unknown goes last)
-  return Array.from(groups.entries())
-    .sort(([a], [b]) => {
-      if (a === 'unknown') return 1;
-      if (b === 'unknown') return -1;
-      return b.localeCompare(a);
-    })
-    .map(([key, value]) => ({ key, ...value }));
-}
 
 /** Derive unique geo facets from the current item set. */
 function deriveGeoFacets(items: MediaItem[]) {
@@ -137,247 +81,11 @@ function deriveGeoFacets(items: MediaItem[]) {
 }
 
 // ---------------------------------------------------------------------------
-// Thumbnail tile
-// ---------------------------------------------------------------------------
-
-interface MediaTileProps {
-  item: MediaItem;
-  colCount: number;
-  onSelect: (item: MediaItem) => void;
-  onToggleFavorite: (item: MediaItem) => void;
-  isSelected: boolean;
-  anySelected: boolean;
-  onToggleSelect: (id: string) => void;
-  selectionMode: boolean;
-}
-
-function MediaTile({ item, onSelect, onToggleFavorite, isSelected, anySelected, onToggleSelect, selectionMode }: MediaTileProps) {
-  const theme = useTheme();
-  const isMobileDevice = useMediaQuery(theme.breakpoints.down('sm'));
-  const [imgError, setImgError] = useState(false);
-
-  const thumbUrl = item.thumbnailUrl;
-
-  return (
-    <ImageListItem
-      onClick={() => {
-        if (selectionMode || anySelected) {
-          onToggleSelect(item.id);
-        } else {
-          onSelect(item);
-        }
-      }}
-      sx={{
-        position: 'relative',
-        cursor: 'pointer',
-        overflow: 'hidden',
-        borderRadius: 1,
-        border: `1px solid ${theme.palette.divider}`,
-        aspectRatio: '1',
-        '&:hover .media-overlay': { opacity: 1 },
-      }}
-    >
-      {thumbUrl && !imgError ? (
-        /* Thumbnail present — show the image, plus a play indicator for videos */
-        <Box sx={{ position: 'relative', width: '100%', height: '100%' }}>
-          <Box
-            component="img"
-            src={thumbUrl}
-            alt={item.originalFilename}
-            onError={() => setImgError(true)}
-            sx={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-              display: 'block',
-            }}
-          />
-          {item.type === 'video' && (
-            <Box
-              aria-label="video"
-              data-testid="play-indicator"
-              sx={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                pointerEvents: 'none',
-              }}
-            >
-              <PlayCircleOutlinedIcon
-                sx={{
-                  fontSize: 48,
-                  color: 'rgba(255,255,255,0.85)',
-                  filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.5))',
-                }}
-              />
-            </Box>
-          )}
-        </Box>
-      ) : (item.type === 'photo' || item.type === 'video') && !imgError && !isThumbnailStuck(item.createdAt) ? (
-        /* Photo or video awaiting thumbnail enrichment — show a subtle processing state */
-        <Box
-          sx={{
-            width: '100%',
-            height: '100%',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 1,
-            position: 'relative',
-            overflow: 'hidden',
-          }}
-        >
-          <Skeleton
-            variant="rectangular"
-            sx={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-            }}
-            aria-hidden="true"
-          />
-          <CircularProgress
-            size={28}
-            aria-label="Processing thumbnail"
-            sx={{ position: 'relative', zIndex: 1 }}
-          />
-          <Typography
-            variant="caption"
-            sx={{
-              position: 'relative',
-              zIndex: 1,
-              color: 'text.secondary',
-            }}
-          >
-            Processing…
-          </Typography>
-        </Box>
-      ) : (item.type === 'photo' || item.type === 'video') && !imgError ? (
-        /* Thumbnail never arrived within the recovery window — stop spinning forever */
-        <Box
-          sx={{
-            width: '100%',
-            height: '100%',
-            backgroundColor: theme.palette.grey[800],
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <BrokenImageIcon
-            sx={{ fontSize: 40, color: theme.palette.grey[600] }}
-            aria-label="Thumbnail unavailable"
-          />
-        </Box>
-      ) : (
-        /* Broken image — generic fallback icon */
-        <Box
-          sx={{
-            width: '100%',
-            height: '100%',
-            backgroundColor: theme.palette.grey[800],
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <PhotoLibraryIcon
-            sx={{ fontSize: 40, color: theme.palette.grey[600] }}
-          />
-        </Box>
-      )}
-
-      {/* Selection checkbox — shown on hover or when any item is selected; always visible on mobile */}
-      <Box
-        className="select-overlay"
-        sx={{
-          position: 'absolute',
-          top: 4,
-          left: 4,
-          zIndex: 2,
-          opacity: isMobileDevice || selectionMode || anySelected || isSelected ? 1 : 0,
-          transition: 'opacity 0.15s',
-          '.MuiImageListItem-root:hover &': { opacity: 1 },
-        }}
-      >
-        <IconButton
-          size="small"
-          onClick={(e) => { e.stopPropagation(); onToggleSelect(item.id); }}
-          aria-label={isSelected ? 'Deselect item' : 'Select item'}
-          sx={{
-            color: isSelected ? 'primary.main' : 'white',
-            backgroundColor: 'rgba(0,0,0,0.4)',
-            '&:hover': { backgroundColor: 'rgba(0,0,0,0.6)' },
-            p: { xs: 0.5, sm: 0.25 },
-          }}
-        >
-          {isSelected ? <CheckBoxIcon fontSize="small" /> : <CheckBoxOutlineBlankIcon fontSize="small" />}
-        </IconButton>
-      </Box>
-
-      {/* Overlay with favorite toggle */}
-      <Box
-        className="media-overlay"
-        sx={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background:
-            'linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 50%)',
-          opacity: item.favorite ? 1 : 0,
-          transition: 'opacity 0.2s',
-        }}
-      />
-
-      <ImageListItemBar
-        sx={{
-          background: 'transparent',
-          '& .MuiImageListItemBar-titleWrap': { display: 'none' },
-        }}
-        actionIcon={
-          <Tooltip title={item.favorite ? 'Remove from favorites' : 'Add to favorites'}>
-            <IconButton
-              size="small"
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleFavorite(item);
-              }}
-              aria-label={item.favorite ? 'Remove from favorites' : 'Add to favorites'}
-              sx={{ color: item.favorite ? theme.palette.warning.main : 'white', p: { xs: 1, sm: 0.5 } }}
-            >
-              {item.favorite ? <StarIcon /> : <StarBorderIcon />}
-            </IconButton>
-          </Tooltip>
-        }
-        position="top"
-        actionPosition="right"
-      />
-    </ImageListItem>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
 export default function MediaLibraryPage() {
-  const theme = useTheme();
-  const isXl = useMediaQuery(theme.breakpoints.up('xl'));
-  const isLg = useMediaQuery(theme.breakpoints.up('lg'));
-  const isMd = useMediaQuery(theme.breakpoints.up('md'));
   const { activeCircle, activeCircleRole } = useCircle();
-
-  const colCount = isXl || isLg ? 4 : isMd ? 2 : 1;
 
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -393,15 +101,10 @@ export default function MediaLibraryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const {
-    items,
-    meta,
-    isLoading,
-    error,
-    fetchMedia,
-    patchMedia,
-    updateItemLocally,
-  } = useMedia();
+  // useMedia is retained solely to derive the location facets (country / region /
+  // city pick-lists) from a lightweight sample of the current filter's items.
+  // The gallery below owns all display, paging, selection, and bulk actions.
+  const { items, fetchMedia } = useMedia();
 
   const { albums, fetchAlbums } = useAlbums();
 
@@ -420,20 +123,11 @@ export default function MediaLibraryPage() {
   const [filterDateTo, setFilterDateTo] = useState('');
   const [sortBy, setSortBy] = useState<'capturedAt' | 'importedAt' | 'createdAt'>('capturedAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [page, setPage] = useState(1);
   const [filterMissingGeo, setFilterMissingGeo] = useState<boolean>(searchParams.get('missingGeo') === '1');
   const [filterNoFaces, setFilterNoFaces] = useState<boolean>(searchParams.get('noFaces') === '1');
   const [filterCameraMake, setFilterCameraMake] = useState<string>(searchParams.get('cameraMake') || '');
   const [filterCameraModel, setFilterCameraModel] = useState<string>(searchParams.get('cameraModel') || '');
   const [filterDeviceName, setFilterDeviceName] = useState<string>(searchParams.get('sourceDeviceName') || '');
-
-  // Selection state
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [bulkLocationOpen, setBulkLocationOpen] = useState(false);
-  const [bulkDateOpen, setBulkDateOpen] = useState(false);
-  const [bulkTagsOpen, setBulkTagsOpen] = useState(false);
-  const [snackbar, setSnackbar] = useState<{ message: string; severity: 'success' | 'error' } | null>(null);
 
   // Multi-person filter
   const [peopleFilter, setPeopleFilter] = useState<{ ids: string[]; mode: 'any' | 'all' }>({ ids: [], mode: 'any' });
@@ -444,19 +138,11 @@ export default function MediaLibraryPage() {
   const [filterLocality, setFilterLocality] = useState(searchParams.get('locality') || '');
   const [locationSearch, setLocationSearch] = useState('');
 
-  // Drawer / dialog
-  const [selectedItem, setSelectedItem] = useState<MediaItem | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
-
   // Export menu
   const [exportAnchorEl, setExportAnchorEl] = useState<null | HTMLElement>(null);
   const exportMenuOpen = Boolean(exportAnchorEl);
   const [exportLoading, setExportLoading] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-
-  // Add to album dialog
-  const [addToAlbumOpen, setAddToAlbumOpen] = useState(false);
 
   const geoFacets = useMemo(() => deriveGeoFacets(items), [items]);
 
@@ -498,10 +184,11 @@ export default function MediaLibraryPage() {
     peopleFilter,
   ]);
 
+  // Build the query params for BOTH the gallery feed and the facet sample.
+  // Pagination is intentionally omitted — the gallery / useInfiniteMedia hook
+  // manage paging via infinite scroll.
   const buildParams = useCallback((): MediaQueryParams => {
     const params: MediaQueryParams = {
-      page,
-      pageSize: 20,
       sortBy,
       sortOrder,
     };
@@ -529,7 +216,6 @@ export default function MediaLibraryPage() {
     }
     return params;
   }, [
-    page,
     sortBy,
     sortOrder,
     activeCircle,
@@ -552,34 +238,15 @@ export default function MediaLibraryPage() {
     peopleFilter,
   ]);
 
-  // Load data on mount and when filters change.
+  const queryParams = useMemo(() => buildParams(), [buildParams]);
+
+  // Refresh the facet sample whenever filters change. A larger page size gives
+  // the location pick-lists a richer set of countries/regions/cities than the
+  // default page would.
   useEffect(() => {
     if (!activeCircle) return;
-    void fetchMedia(buildParams());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    activeCircle,
-    page,
-    filterType,
-    filterFavorite,
-    filterAlbum,
-    filterDateFrom,
-    filterDateTo,
-    selectedTags,
-    filterCountry,
-    filterRegion,
-    filterLocality,
-    locationSearch,
-    sortBy,
-    sortOrder,
-    filterMissingGeo,
-    filterNoFaces,
-    filterCameraMake,
-    filterCameraModel,
-    filterDeviceName,
-    personId,
-    peopleFilter,
-  ]);
+    void fetchMedia({ ...queryParams, page: 1, pageSize: 200 });
+  }, [activeCircle, queryParams, fetchMedia]);
 
   // Reflect filter changes to URL params
   useEffect(() => {
@@ -608,55 +275,21 @@ export default function MediaLibraryPage() {
         ? prev.filter((t) => t !== tagName)
         : [...prev, tagName],
     );
-    setPage(1);
   }, []);
-
-  const handleSelectItem = useCallback((item: MediaItem) => {
-    const idx = items.indexOf(item);
-    if (idx !== -1) setLightboxIndex(idx);
-  }, [items]);
-
-  const handleItemUpdated = useCallback(
-    (updated: MediaItem) => {
-      updateItemLocally(updated.id, updated);
-      setSelectedItem(updated);
-    },
-    [updateItemLocally],
-  );
-
-  const handleToggleFavorite = useCallback(
-    async (item: MediaItem) => {
-      try {
-        await patchMedia(item.id, { favorite: !item.favorite });
-        if (selectedItem?.id === item.id) {
-          setSelectedItem((prev) =>
-            prev ? { ...prev, favorite: !prev.favorite } : prev,
-          );
-        }
-      } catch {
-        // Ignore — error already set by hook
-      }
-    },
-    [patchMedia, selectedItem],
-  );
-
 
   const handleCountrySelect = useCallback((country: string) => {
     setFilterCountry(country);
     setFilterRegion('');
     setFilterLocality('');
-    setPage(1);
   }, []);
 
   const handleRegionSelect = useCallback((region: string) => {
     setFilterRegion(region);
     setFilterLocality('');
-    setPage(1);
   }, []);
 
   const handleLocalitySelect = useCallback((locality: string) => {
     setFilterLocality(locality);
-    setPage(1);
   }, []);
 
   const handleClearLocation = useCallback(() => {
@@ -664,33 +297,7 @@ export default function MediaLibraryPage() {
     setFilterRegion('');
     setFilterLocality('');
     setLocationSearch('');
-    setPage(1);
   }, []);
-
-  const handleToggleSelect = useCallback((id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  const handleClearSelection = useCallback(() => {
-    setSelected(new Set());
-    setSelectionMode(false);
-  }, []);
-
-  const handleSelectAll = useCallback(() => {
-    setSelected(new Set(items.map((item) => item.id)));
-  }, [items]);
-
-  const handleBulkSuccess = useCallback((message: string) => {
-    setSnackbar({ message, severity: 'success' });
-    setSelected(new Set());
-    setSelectionMode(false);
-    void fetchMedia(buildParams());
-  }, [fetchMedia, buildParams]);
 
   const handleExport = useCallback(
     async (format: 'json' | 'csv') => {
@@ -717,8 +324,6 @@ export default function MediaLibraryPage() {
     },
     [activeCircle, filterType, filterDateFrom, filterDateTo],
   );
-
-  const grouped = useMemo(() => groupByYearMonth(items), [items]);
 
   const availableRegions = filterCountry
     ? Array.from(geoFacets.regionsByCountry.get(filterCountry) ?? []).sort()
@@ -759,39 +364,6 @@ export default function MediaLibraryPage() {
         </Typography>
 
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* Select toggle button — touch-friendly multi-select */}
-          {activeCircleRole !== 'viewer' && (
-            <Button
-              variant={selectionMode ? 'contained' : 'outlined'}
-              startIcon={<ChecklistIcon />}
-              onClick={() => {
-                if (selectionMode) {
-                  setSelectionMode(false);
-                  setSelected(new Set());
-                } else {
-                  setSelectionMode(true);
-                }
-              }}
-              aria-pressed={selectionMode}
-              aria-label={selectionMode ? 'Exit selection mode' : 'Enter selection mode'}
-              sx={{ minHeight: 44 }}
-            >
-              {selectionMode ? 'Done' : 'Select'}
-            </Button>
-          )}
-
-          {/* Add to Album button */}
-          {activeCircleRole !== 'viewer' && (
-            <Button
-              variant="outlined"
-              startIcon={<PhotoLibraryIcon />}
-              onClick={() => setAddToAlbumOpen(true)}
-              sx={{ minHeight: 44 }}
-            >
-              Add to Album
-            </Button>
-          )}
-
           {/* Export button — opens JSON / CSV format menu */}
           <Tooltip title="Export metadata">
             <span>
@@ -856,7 +428,6 @@ export default function MediaLibraryPage() {
                   value={filterType}
                   onChange={(e) => {
                     setFilterType(e.target.value as MediaType | '');
-                    setPage(1);
                   }}
                 >
                   <MenuItem value="">All types</MenuItem>
@@ -875,7 +446,6 @@ export default function MediaLibraryPage() {
                   value={filterAlbum}
                   onChange={(e) => {
                     setFilterAlbum(e.target.value);
-                    setPage(1);
                   }}
                 >
                   <MenuItem value="">All albums</MenuItem>
@@ -899,7 +469,6 @@ export default function MediaLibraryPage() {
                     const [by, order] = e.target.value.split(':');
                     setSortBy(by as typeof sortBy);
                     setSortOrder(order as typeof sortOrder);
-                    setPage(1);
                   }}
                 >
                   <MenuItem value="capturedAt:desc">Captured — Newest</MenuItem>
@@ -920,7 +489,6 @@ export default function MediaLibraryPage() {
                 value={filterDateFrom}
                 onChange={(e) => {
                   setFilterDateFrom(e.target.value);
-                  setPage(1);
                 }}
                 slotProps={{ inputLabel: { shrink: true } }}
               />
@@ -934,7 +502,6 @@ export default function MediaLibraryPage() {
                 value={filterDateTo}
                 onChange={(e) => {
                   setFilterDateTo(e.target.value);
-                  setPage(1);
                 }}
                 slotProps={{ inputLabel: { shrink: true } }}
               />
@@ -948,7 +515,6 @@ export default function MediaLibraryPage() {
                 value={filterFavorite ? 'favorites' : 'all'}
                 onChange={(_, val) => {
                   setFilterFavorite(val === 'favorites');
-                  setPage(1);
                 }}
                 sx={{ flexWrap: 'wrap' }}
               >
@@ -966,7 +532,7 @@ export default function MediaLibraryPage() {
                 size="small"
                 fullWidth
                 value={filterCameraMake}
-                onChange={(e) => { setFilterCameraMake(e.target.value); setPage(1); }}
+                onChange={(e) => { setFilterCameraMake(e.target.value); }}
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
@@ -975,7 +541,7 @@ export default function MediaLibraryPage() {
                 size="small"
                 fullWidth
                 value={filterCameraModel}
-                onChange={(e) => { setFilterCameraModel(e.target.value); setPage(1); }}
+                onChange={(e) => { setFilterCameraModel(e.target.value); }}
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
@@ -984,7 +550,7 @@ export default function MediaLibraryPage() {
                 size="small"
                 fullWidth
                 value={filterDeviceName}
-                onChange={(e) => { setFilterDeviceName(e.target.value); setPage(1); }}
+                onChange={(e) => { setFilterDeviceName(e.target.value); }}
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
@@ -992,7 +558,7 @@ export default function MediaLibraryPage() {
                 control={
                   <Switch
                     checked={filterMissingGeo}
-                    onChange={(e) => { setFilterMissingGeo(e.target.checked); setPage(1); }}
+                    onChange={(e) => { setFilterMissingGeo(e.target.checked); }}
                     size="small"
                   />
                 }
@@ -1004,7 +570,7 @@ export default function MediaLibraryPage() {
                 control={
                   <Switch
                     checked={filterNoFaces}
-                    onChange={(e) => { setFilterNoFaces(e.target.checked); setPage(1); }}
+                    onChange={(e) => { setFilterNoFaces(e.target.checked); }}
                     size="small"
                   />
                 }
@@ -1034,7 +600,6 @@ export default function MediaLibraryPage() {
                       setFilterRegion('');
                       setFilterLocality('');
                     }
-                    setPage(1);
                   }}
                   slotProps={{
                     input: {
@@ -1117,7 +682,6 @@ export default function MediaLibraryPage() {
                 value={peopleFilter}
                 onChange={(next) => {
                   setPeopleFilter(next);
-                  setPage(1);
                   // Clear URL personId deep-link when user changes the people filter
                   if (personId) {
                     const nextParams = new URLSearchParams(searchParams);
@@ -1132,7 +696,7 @@ export default function MediaLibraryPage() {
                 <Button
                   size="small"
                   sx={{ mt: 1, minHeight: 44 }}
-                  onClick={() => { setPeopleFilter({ ids: [], mode: 'any' }); setPage(1); }}
+                  onClick={() => { setPeopleFilter({ ids: [], mode: 'any' }); }}
                 >
                   Clear people filter
                 </Button>
@@ -1183,13 +747,6 @@ export default function MediaLibraryPage() {
         </Box>
       )}
 
-      {/* Error state */}
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
-        </Alert>
-      )}
-
       {/* Export error */}
       {exportError && (
         <Alert
@@ -1201,220 +758,15 @@ export default function MediaLibraryPage() {
         </Alert>
       )}
 
-      {/* Loading */}
-      {isLoading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-          <CircularProgress />
-        </Box>
-      )}
-
-      {/* Empty state */}
-      {!isLoading && items.length === 0 && !error && (
-        <Box sx={{ textAlign: 'center', py: 8 }}>
-          <PhotoLibraryIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
-          <Typography variant="h6" color="text.secondary">
-            No media found
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Upload photos or videos using the Upload button in the toolbar.
-          </Typography>
-        </Box>
-      )}
-
-      {/* Grid grouped by month */}
-      {!isLoading && items.length > 0 && (
-        <>
-          {grouped.map((group) => (
-            <Box key={group.key} sx={{ mb: 3 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1, pb: 0.5, borderBottom: `1px solid ${theme.palette.divider}` }}>
-                <Typography variant="subtitle2" color="text.secondary">
-                  {group.label}
-                </Typography>
-                <Stack direction="row" spacing={0.5}>
-                  <Button
-                    size="small"
-                    variant="text"
-                    sx={{ minWidth: 'auto', fontSize: '0.7rem', py: 0 }}
-                    onClick={() => {
-                      setSelected(prev => {
-                        const next = new Set(prev);
-                        group.items.forEach(item => next.add(item.id));
-                        return next;
-                      });
-                    }}
-                  >
-                    Select all
-                  </Button>
-                  {group.items.some(item => selected.has(item.id)) && (
-                    <Button
-                      size="small"
-                      variant="text"
-                      sx={{ minWidth: 'auto', fontSize: '0.7rem', py: 0 }}
-                      onClick={() => {
-                        setSelected(prev => {
-                          const next = new Set(prev);
-                          group.items.forEach(item => next.delete(item.id));
-                          return next;
-                        });
-                      }}
-                    >
-                      Clear
-                    </Button>
-                  )}
-                </Stack>
-              </Box>
-
-              {/* Responsive grid using MUI Grid v2 */}
-              <Box
-                sx={{
-                  display: 'grid',
-                  gridTemplateColumns: {
-                    xs: '1fr',
-                    md: 'repeat(2, 1fr)',
-                    lg: 'repeat(4, 1fr)',
-                  },
-                  gap: 1,
-                }}
-              >
-                {group.items.map((item) => (
-                  <MediaTile
-                    key={item.id}
-                    item={item}
-                    colCount={colCount}
-                    onSelect={handleSelectItem}
-                    onToggleFavorite={handleToggleFavorite}
-                    isSelected={selected.has(item.id)}
-                    anySelected={selected.size > 0}
-                    onToggleSelect={handleToggleSelect}
-                    selectionMode={selectionMode}
-                  />
-                ))}
-              </Box>
-            </Box>
-          ))}
-
-          {/* Pagination */}
-          {meta && meta.totalPages > 1 && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3, pb: 2 }}>
-              <Pagination
-                count={meta.totalPages}
-                page={page}
-                onChange={(_, val) => setPage(val)}
-                color="primary"
-              />
-            </Box>
-          )}
-        </>
-      )}
-
-      {/* Detail drawer */}
-      <MediaDetailDrawer
-        item={selectedItem}
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        onItemUpdated={handleItemUpdated}
-      />
-
-      {/* Lightbox */}
-      <MediaLightbox
-        items={items}
-        index={lightboxIndex}
-        onIndexChange={(i) => {
-          setLightboxIndex(i);
-          setDrawerOpen(false);
-        }}
-        onClose={() => setLightboxIndex(null)}
-        onOpenProperties={(item) => {
-          setSelectedItem(item);
-          setDrawerOpen(true);
-        }}
-        onItemUpdated={handleItemUpdated}
-      />
-
-      {/* Bulk action toolbar */}
-      <BulkActionToolbar
-        selected={selected}
+      {/* Media grid — infinite scroll with day grouping, selection, and bulk
+          actions all owned by the canonical MediaGallery (home mode). Changing
+          any filter mutates queryParams → the feed resets to page 1. */}
+      <MediaGallery
         circleId={activeCircle.id}
         activeCircleRole={activeCircleRole}
-        onClear={handleClearSelection}
-        onSelectAll={handleSelectAll}
-        onOpenLocation={() => setBulkLocationOpen(true)}
-        onOpenDate={() => setBulkDateOpen(true)}
-        onOpenTags={() => setBulkTagsOpen(true)}
-        onOpenAlbum={() => setAddToAlbumOpen(true)}
-        onSuccess={handleBulkSuccess}
-        onError={(msg) => setSnackbar({ message: msg, severity: 'error' })}
+        queryParams={queryParams}
+        mode="home"
       />
-
-      {/* Bulk location dialog */}
-      <BulkLocationDialog
-        open={bulkLocationOpen}
-        onClose={() => setBulkLocationOpen(false)}
-        circleId={activeCircle.id}
-        ids={Array.from(selected)}
-        onSuccess={(msg) => { setBulkLocationOpen(false); handleBulkSuccess(msg); }}
-      />
-
-      {/* Bulk date dialog */}
-      <BulkDateDialog
-        open={bulkDateOpen}
-        onClose={() => setBulkDateOpen(false)}
-        circleId={activeCircle.id}
-        ids={Array.from(selected)}
-        onSuccess={(msg) => { setBulkDateOpen(false); handleBulkSuccess(msg); }}
-      />
-
-      {/* Bulk tags dialog */}
-      <BulkTagsDialog
-        open={bulkTagsOpen}
-        onClose={() => setBulkTagsOpen(false)}
-        circleId={activeCircle.id}
-        ids={Array.from(selected)}
-        onSuccess={(msg) => { setBulkTagsOpen(false); handleBulkSuccess(msg); }}
-      />
-
-      {/* Add to Album dialog */}
-      {activeCircle && (
-        <AddToAlbumDialog
-          open={addToAlbumOpen}
-          onClose={() => setAddToAlbumOpen(false)}
-          circleId={activeCircle.id}
-          selectedIds={Array.from(selected)}
-          filters={(() => {
-            const p = buildParams();
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            const { page: _p, pageSize: _ps, sortBy: _sb, sortOrder: _so, ...rest } = p;
-            return rest;
-          })()}
-          matchingCount={meta?.totalItems ?? 0}
-          onSuccess={(msg) => {
-            setAddToAlbumOpen(false);
-            setSnackbar({ message: msg, severity: 'success' });
-            setSelected(new Set());
-            setSelectionMode(false);
-          }}
-          onError={(msg) => {
-            setAddToAlbumOpen(false);
-            setSnackbar({ message: msg, severity: 'error' });
-          }}
-        />
-      )}
-
-      {/* Snackbar */}
-      <Snackbar
-        open={snackbar !== null}
-        autoHideDuration={4000}
-        onClose={() => setSnackbar(null)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert
-          onClose={() => setSnackbar(null)}
-          severity={snackbar?.severity ?? 'success'}
-          sx={{ width: '100%' }}
-        >
-          {snackbar?.message}
-        </Alert>
-      </Snackbar>
     </Box>
   );
 }
