@@ -145,6 +145,18 @@ const mockUseItemAutoAppliedSuggestion = vi.mocked(useItemAutoAppliedSuggestion)
 const mockRevertLocationSuggestion = vi.mocked(revertLocationSuggestion);
 
 // ---------------------------------------------------------------------------
+// Mock the thumbnail service — Retry thumbnail button
+// ---------------------------------------------------------------------------
+
+vi.mock('../../../services/thumbnail', () => ({
+  rerunThumbnail: vi.fn(),
+}));
+
+import { rerunThumbnail } from '../../../services/thumbnail';
+
+const mockRerunThumbnail = vi.mocked(rerunThumbnail);
+
+// ---------------------------------------------------------------------------
 // Factories
 // ---------------------------------------------------------------------------
 
@@ -230,6 +242,7 @@ describe('MediaDetailDrawer', () => {
     mockUseSuggestLocation.mockReturnValue({ suggest: vi.fn(), loading: false, error: null });
     mockUseItemAutoAppliedSuggestion.mockReturnValue({ suggestionId: null, loading: false });
     mockRevertLocationSuggestion.mockResolvedValue({ id: 'suggestion-1', status: 'reverted' });
+    mockRerunThumbnail.mockResolvedValue({ status: 'ready' });
   });
 
   // -------------------------------------------------------------------------
@@ -1061,6 +1074,66 @@ describe('MediaDetailDrawer', () => {
 
       const button = screen.getByRole('button', { name: /suggesting/i });
       expect(button).toBeDisabled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Retry thumbnail — calls the synchronous rerun endpoint, refreshes the
+  // item, and surfaces errors inline
+  // -------------------------------------------------------------------------
+
+  describe('retry thumbnail', () => {
+    it('calls rerunThumbnail with the item id when clicked', async () => {
+      const user = userEvent.setup();
+      render(<MediaDetailDrawer {...defaultProps()} />);
+
+      await user.click(screen.getByRole('button', { name: /retry thumbnail/i }));
+
+      await waitFor(() => {
+        expect(mockRerunThumbnail).toHaveBeenCalledWith(ITEM_ID);
+      });
+    });
+
+    it('calls getMedia to refresh the item after a successful retry', async () => {
+      const user = userEvent.setup();
+      render(<MediaDetailDrawer {...defaultProps()} />);
+
+      await user.click(screen.getByRole('button', { name: /retry thumbnail/i }));
+
+      await waitFor(() => {
+        expect(mockGetMedia).toHaveBeenCalledWith(ITEM_ID);
+      });
+    });
+
+    it('shows an inline error when rerunThumbnail rejects', async () => {
+      mockRerunThumbnail.mockRejectedValue(new Error('Thumbnail regeneration failed'));
+      const user = userEvent.setup();
+      render(<MediaDetailDrawer {...defaultProps()} />);
+
+      await user.click(screen.getByRole('button', { name: /retry thumbnail/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Thumbnail regeneration failed')).toBeInTheDocument();
+      });
+    });
+
+    it('disables the button while the retry is in flight', async () => {
+      let resolveRerun!: (v: { status: string }) => void;
+      mockRerunThumbnail.mockReturnValue(new Promise((resolve) => { resolveRerun = resolve; }));
+      const user = userEvent.setup();
+      render(<MediaDetailDrawer {...defaultProps()} />);
+
+      const button = screen.getByRole('button', { name: /retry thumbnail/i });
+      await user.click(button);
+
+      await waitFor(() => {
+        expect(button).toBeDisabled();
+      });
+
+      resolveRerun({ status: 'ready' });
+      await waitFor(() => {
+        expect(button).not.toBeDisabled();
+      });
     });
   });
 });

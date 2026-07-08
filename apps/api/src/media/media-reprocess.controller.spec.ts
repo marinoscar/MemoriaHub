@@ -8,8 +8,9 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { MediaReprocessController, ReprocessBodyDto } from './media-reprocess.controller';
+import { MediaReprocessController, ReprocessBodyDto, ReprocessStuckBodyDto } from './media-reprocess.controller';
 import { MediaReprocessService } from './media-reprocess.service';
+import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
@@ -19,9 +20,11 @@ const allowAllGuard = { canActivate: () => true };
 describe('MediaReprocessController', () => {
   let controller: MediaReprocessController;
   let mockReprocessCircle: jest.Mock;
+  let mockRecoverStuckObjects: jest.Mock;
 
   beforeEach(async () => {
     mockReprocessCircle = jest.fn().mockResolvedValue({ reprocessed: 3, failed: 0 });
+    mockRecoverStuckObjects = jest.fn().mockResolvedValue({ claimed: 0, reprocessed: 0, exhausted: 0, errors: 0 });
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [MediaReprocessController],
@@ -30,6 +33,12 @@ describe('MediaReprocessController', () => {
           provide: MediaReprocessService,
           useValue: {
             reprocessCircle: mockReprocessCircle,
+          },
+        },
+        {
+          provide: StorageProcessingRecoveryService,
+          useValue: {
+            recoverStuckObjects: mockRecoverStuckObjects,
           },
         },
       ],
@@ -83,6 +92,37 @@ describe('MediaReprocessController', () => {
       const result = await controller.reprocess(body);
 
       expect(result).toEqual({ reprocessed: 0, failed: 0 });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // reprocessStuck — delegation to StorageProcessingRecoveryService
+  // -------------------------------------------------------------------------
+
+  describe('reprocessStuck', () => {
+    it('should call recoverStuckObjects with undefined when body has no olderThanMinutes', async () => {
+      const body = {} as ReprocessStuckBodyDto;
+
+      await controller.reprocessStuck(body);
+
+      expect(mockRecoverStuckObjects).toHaveBeenCalledWith(undefined);
+    });
+
+    it('should call recoverStuckObjects with the provided olderThanMinutes', async () => {
+      const body = { olderThanMinutes: 30 } as ReprocessStuckBodyDto;
+
+      await controller.reprocessStuck(body);
+
+      expect(mockRecoverStuckObjects).toHaveBeenCalledWith(30);
+    });
+
+    it('should return the service result directly', async () => {
+      mockRecoverStuckObjects.mockResolvedValue({ claimed: 5, reprocessed: 4, exhausted: 1, errors: 0 });
+      const body = {} as ReprocessStuckBodyDto;
+
+      const result = await controller.reprocessStuck(body);
+
+      expect(result).toEqual({ claimed: 5, reprocessed: 4, exhausted: 1, errors: 0 });
     });
   });
 });
