@@ -13,6 +13,8 @@ import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { MediaReprocessService } from './media-reprocess.service';
 import { MediaReprocessController } from './media-reprocess.controller';
 import { MediaThumbnailRerunController } from './media-thumbnail-rerun.controller';
+import { MediaOrientationEditController } from './media-orientation-edit.controller';
+import { MediaOrientationEditService } from './media-orientation-edit.service';
 import { ThumbnailProcessor } from '../storage/processing/processors/thumbnail.processor';
 import { ImageDimensionsProcessor } from '../storage/processing/processors/image-dimensions.processor';
 import { TrashPurgeHandler } from './trash-purge.handler';
@@ -64,7 +66,12 @@ import { MediaThumbnailService } from './media-thumbnail.service';
     SettingsModule,
     EnrichmentModule,
   ],
-  controllers: [MediaController, MediaReprocessController, MediaThumbnailRerunController],
+  controllers: [
+    MediaController,
+    MediaReprocessController,
+    MediaThumbnailRerunController,
+    MediaOrientationEditController,
+  ],
   providers: [
     MediaService,
     MediaMetadataSyncService,
@@ -77,6 +84,7 @@ import { MediaThumbnailService } from './media-thumbnail.service';
     MediaEnrichmentService,
     MediaEnrichmentEnqueueListener,
     MediaThumbnailService,
+    MediaOrientationEditService,
   ],
   exports: [MediaService, MediaReprocessService, MediaMetadataSyncService, MediaEnrichmentService, MediaThumbnailService],
 })
