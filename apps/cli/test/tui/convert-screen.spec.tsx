@@ -32,7 +32,7 @@ function makeEngine(db: BetterSqlite3.Database): ConvertEngine {
 
 function totals(over: Partial<ConvertTotals> = {}): ConvertTotals {
   return {
-    total: 0, converted: 0, skipped: 0, errors: 0, deleted: 0,
+    total: 0, converted: 0, skipped: 0, errors: 0, deleted: 0, moved: 0,
     remuxed: 0, reencoded: 0, bytesIn: 0, bytesOut: 0, ...over,
   };
 }
@@ -63,6 +63,39 @@ describe('ConvertScreen', () => {
     expect(plain).toContain('Plan');
     expect(plain).toContain('3');
     expect(plain).toContain('[y]');
+  });
+
+  it('shows the three disposition options on the confirm screen with "Keep originals" selected by default', async () => {
+    const engine = makeEngine(db);
+    const { lastFrame } = render(
+      <ConvertScreen db={db} all onHome={() => {}} onBack={() => {}} _engineForTesting={engine} />,
+    );
+
+    engine.emit(CONVERT_EV.CONVERT_DONE, { totals: totals({ total: 2 }) });
+    await flushAsync();
+
+    const plain = stripAnsi(lastFrame()!);
+    expect(plain).toContain('Keep originals');
+    expect(plain).toContain('Delete originals after conversion');
+    expect(plain).toContain('Move originals to a folder');
+    expect(plain).toContain('❯ [1] Keep originals');
+  });
+
+  it('pressing 2 on the confirm screen selects "Delete originals after conversion"', async () => {
+    const engine = makeEngine(db);
+    const { lastFrame, stdin } = render(
+      <ConvertScreen db={db} all onHome={() => {}} onBack={() => {}} _engineForTesting={engine} />,
+    );
+
+    engine.emit(CONVERT_EV.CONVERT_DONE, { totals: totals({ total: 2 }) });
+    await flushAsync();
+
+    stdin.write('2');
+    await flushAsync();
+
+    const plain = stripAnsi(lastFrame()!);
+    expect(plain).toContain('❯ [2] Delete originals after conversion');
+    expect(plain).not.toContain('❯ [1] Keep originals');
   });
 
   it('shows "empty" when the plan finds no convertible files', async () => {
