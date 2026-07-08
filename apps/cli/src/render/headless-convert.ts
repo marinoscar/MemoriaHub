@@ -23,7 +23,7 @@ export function renderConvertJson(totals: ConvertTotals): void {
  */
 export function renderConvertSummary(
   totals: ConvertTotals,
-  opts: { dryRun: boolean },
+  opts: { dryRun: boolean; movedTo?: string },
 ): void {
   const title = opts.dryRun ? 'Convert (dry-run)' : 'Convert Summary';
 
@@ -54,6 +54,10 @@ export function renderConvertSummary(
     );
     if (totals.deleted > 0) {
       lines.push(`  Originals  : ${chalk.yellow(String(totals.deleted))} deleted`);
+    }
+    if (totals.moved > 0) {
+      const dest = opts.movedTo ? ` → ${chalk.dim(opts.movedTo)}` : '';
+      lines.push(`  Originals  : ${chalk.yellow(String(totals.moved))} moved${dest}`);
     }
     if (totals.converted > 0) {
       const delta = totals.bytesIn - totals.bytesOut;

@@ -9,8 +9,13 @@
  * Fully offline: no PAT, no network, no DB writes beyond auto-registering any
  * unknown folder path (mirrors `organize`, not `sync`).
  *
+ * By default originals are kept alongside the new `.mp4`.  `--delete-original`
+ * removes each source after its `.mp4` is verified; `--move-originals-to <dir>`
+ * relocates each source into `<dir>` instead.  The two are mutually exclusive.
+ *
  *   memoriahub convert [path...] [--all] [--dry-run] [-r] [--concurrency <n>]
- *                      [--json] [--formats <list>] [--delete-original]
+ *                      [--json] [--formats <list>]
+ *                      [--keep-originals | --delete-original | --move-originals-to <dir>]
  *                      [--overwrite] [--reencode] [--crf <n>]
  */
 
@@ -21,7 +26,7 @@ import { getDb } from '../db/database.js';
 import { FolderRepo } from '../repo/folders.js';
 import { SettingsRepo } from '../repo/settings.js';
 import { ConvertEngine } from '../convert/convert-engine.js';
-import { CONVERT_EV } from '../convert/events.js';
+import { CONVERT_EV, type OriginalDisposition } from '../convert/events.js';
 import { parseFormats } from '../convert/plan.js';
 import { FfmpegNotFoundError } from '../convert/ffmpeg.js';
 import { renderConvertSummary } from '../render/headless-convert.js';
@@ -34,10 +39,37 @@ interface ConvertActionOptions {
   recursive: boolean;
   concurrency?: number;
   formats?: string;
+  keepOriginals: boolean;
   deleteOriginal: boolean;
+  moveOriginalsTo?: string;
   overwrite: boolean;
   reencode: boolean;
   crf?: number;
+}
+
+/**
+ * Resolve the mutually-exclusive original-disposition flags into an engine
+ * disposition + destination folder. Exits 1 if more than one is supplied.
+ */
+function resolveDisposition(
+  options: ConvertActionOptions,
+): { disposition: OriginalDisposition; originalsDir?: string } {
+  const chosen = [
+    options.keepOriginals && 'keep',
+    options.deleteOriginal && 'delete',
+    options.moveOriginalsTo && 'move',
+  ].filter(Boolean);
+  if (chosen.length > 1) {
+    ui.error(
+      'Choose only one of --keep-originals, --delete-original, or --move-originals-to.',
+    );
+    process.exit(1);
+  }
+  if (options.moveOriginalsTo) {
+    return { disposition: 'move', originalsDir: path.resolve(options.moveOriginalsTo) };
+  }
+  if (options.deleteOriginal) return { disposition: 'delete' };
+  return { disposition: 'keep' };
 }
 
 async function runConvert(
@@ -83,6 +115,8 @@ async function runConvert(
     }
   }
 
+  const { disposition, originalsDir } = resolveDisposition(options);
+
   const engine = new ConvertEngine({
     folders: folderRepo,
     settings: settingsRepo,
@@ -104,7 +138,8 @@ async function runConvert(
       recursive: options.recursive,
       dryRun: options.dryRun,
       concurrency: options.concurrency,
-      deleteOriginal: options.deleteOriginal,
+      originalDisposition: disposition,
+      originalsDir,
       overwrite: options.overwrite,
       reencode: options.reencode,
       crf: options.crf,
@@ -122,7 +157,7 @@ async function runConvert(
     if (options.json) {
       process.stdout.write(JSON.stringify(totals, null, 2) + '\n');
     } else {
-      renderConvertSummary(totals, { dryRun: options.dryRun });
+      renderConvertSummary(totals, { dryRun: options.dryRun, movedTo: originalsDir });
     }
   } catch (err) {
     spinner?.fail('Convert failed');
@@ -153,7 +188,9 @@ export function convertCommand(): Command {
     .option('-r, --recursive', 'Descend into sub-directories (when auto-registering a folder)', false)
     .option('--concurrency <n>', 'Number of concurrent conversions', parseInt)
     .option('--formats <list>', 'Comma-separated extensions to convert (default: all non-MP4 videos)')
+    .option('--keep-originals', 'Keep each source file alongside the new MP4 (default)', false)
     .option('--delete-original', 'Delete each source file after its MP4 is written', false)
+    .option('--move-originals-to <dir>', 'Move each source file into <dir> after its MP4 is written')
     .option('--overwrite', 'Overwrite an existing target .mp4 instead of skipping it', false)
     .option('--reencode', 'Force a full H.264 re-encode (skip the lossless remux fast-path)', false)
     .option('--crf <n>', 'Quality for re-encode (lower = better, default 20)', parseInt)

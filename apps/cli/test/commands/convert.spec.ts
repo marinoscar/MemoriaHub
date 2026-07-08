@@ -54,7 +54,7 @@ const { FfmpegNotFoundError } = await import('../../src/convert/ffmpeg.js');
 
 function sampleTotals(): Record<string, unknown> {
   return {
-    total: 2, converted: 2, skipped: 0, errors: 0, deleted: 0,
+    total: 2, converted: 2, skipped: 0, errors: 0, deleted: 0, moved: 0,
     remuxed: 1, reencoded: 1, bytesIn: 200, bytesOut: 120,
   };
 }
@@ -118,6 +118,40 @@ describe('convert command', () => {
 
     expect(mockUiError).toHaveBeenCalledWith(expect.stringContaining('ffmpeg'));
     expect(mockUiInfo).toHaveBeenCalledWith(expect.stringMatching(/install ffmpeg/i));
+  });
+
+  it('--move-originals-to <dir> calls engine.run with originalDisposition move and the resolved dir', async () => {
+    mockEngineRun.mockResolvedValue({ totals: sampleTotals() });
+
+    await invokeConvert(['--all', '--json', '--move-originals-to', 'my-originals']);
+
+    expect(mockEngineRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        originalDisposition: 'move',
+        originalsDir: path.resolve('my-originals'),
+      }),
+    );
+  });
+
+  it('--delete-original calls engine.run with originalDisposition delete', async () => {
+    mockEngineRun.mockResolvedValue({ totals: sampleTotals() });
+
+    await invokeConvert(['--all', '--json', '--delete-original']);
+
+    expect(mockEngineRun).toHaveBeenCalledWith(
+      expect.objectContaining({ originalDisposition: 'delete' }),
+    );
+  });
+
+  it('rejects combining --delete-original and --move-originals-to and exits 1', async () => {
+    await expect(
+      invokeConvert(['--all', '--json', '--delete-original', '--move-originals-to', 'my-originals']),
+    ).rejects.toThrow('process.exit(1)');
+
+    expect(mockUiError).toHaveBeenCalledWith(
+      'Choose only one of --keep-originals, --delete-original, or --move-originals-to.',
+    );
+    expect(mockEngineRun).not.toHaveBeenCalled();
   });
 });
 

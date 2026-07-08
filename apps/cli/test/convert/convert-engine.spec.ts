@@ -108,6 +108,7 @@ describe('ConvertEngine', () => {
       const result = await engine.run({ files: [src] });
 
       expect(result.totals.converted).toBe(1);
+      expect(result.totals.moved).toBe(0);
       expect(convertFn).toHaveBeenCalledTimes(1);
       const target = path.join(tmpDir, 'holiday.mp4');
       expect(convertFn.mock.calls[0][1]).toBe(target);
@@ -166,6 +167,55 @@ describe('ConvertEngine', () => {
       const result = await engine.run({ files: [src], deleteOriginal: true });
 
       expect(result.totals.deleted).toBe(1);
+      expect(fs.existsSync(src)).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, 'a.mp4'))).toBe(true);
+    });
+  });
+
+  describe('move disposition', () => {
+    it('moves the original into originalsDir after a successful conversion', async () => {
+      const src = writeTmp(tmpDir, 'a.mov');
+      const originalsDir = path.join(tmpDir, 'originals-out');
+      const convertFn = makeConvertFn();
+      const engine = makeEngine(db, convertFn, makeDetectFn(true));
+
+      const result = await engine.run({
+        files: [src],
+        originalDisposition: 'move',
+        originalsDir,
+      });
+
+      expect(result.totals.moved).toBe(1);
+      expect(fs.existsSync(src)).toBe(false);
+      expect(fs.existsSync(path.join(originalsDir, 'a.mov'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, 'a.mp4'))).toBe(true);
+    });
+
+    it('rejects with the originalsDir-required error and emits ERROR when originalsDir is missing', async () => {
+      const src = writeTmp(tmpDir, 'a.mov');
+      const engine = makeEngine(db, makeConvertFn(), makeDetectFn(true));
+
+      let errPayload: ConvertErrorPayload | null = null;
+      engine.on(CONVERT_EV.ERROR, (p) => { errPayload = p; });
+
+      await expect(
+        engine.run({ files: [src], originalDisposition: 'move' }),
+      ).rejects.toThrow('A destination folder is required to move originals (originalsDir).');
+      expect(errPayload).not.toBeNull();
+      expect((errPayload as unknown as ConvertErrorPayload).message).toMatch(
+        /A destination folder is required to move originals/,
+      );
+    });
+
+    it('originalDisposition: "delete" behaves like the legacy deleteOriginal flag', async () => {
+      const src = writeTmp(tmpDir, 'a.mov');
+      const convertFn = makeConvertFn();
+      const engine = makeEngine(db, convertFn, makeDetectFn(true));
+
+      const result = await engine.run({ files: [src], originalDisposition: 'delete' });
+
+      expect(result.totals.deleted).toBe(1);
+      expect(result.totals.moved).toBe(0);
       expect(fs.existsSync(src)).toBe(false);
       expect(fs.existsSync(path.join(tmpDir, 'a.mp4'))).toBe(true);
     });

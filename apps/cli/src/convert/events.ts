@@ -31,14 +31,25 @@ export type ConvertAction = 'convert' | 'skip' | 'error';
 /** Which ffmpeg path actually produced the output. */
 export type ConvertMode = 'remux' | 'reencode';
 
+/**
+ * What to do with each source video once its `.mp4` has been written:
+ *   'keep'   — leave the original alongside the new .mp4 (default).
+ *   'delete' — remove the original after the .mp4 is verified.
+ *   'move'   — relocate the original into a chosen folder after the .mp4 is
+ *              verified (requires `originalsDir`).
+ */
+export type OriginalDisposition = 'keep' | 'delete' | 'move';
+
 /** Roll-up counters for a convert run. */
 export interface ConvertTotals {
   total: number;
   converted: number;
   skipped: number;
   errors: number;
-  /** Originals removed after a successful conversion (only when deleteOriginal). */
+  /** Originals removed after a successful conversion (disposition 'delete'). */
   deleted: number;
+  /** Originals relocated after a successful conversion (disposition 'move'). */
+  moved: number;
   /** Split of `converted`: lossless stream-copy remuxes. */
   remuxed: number;
   /** Split of `converted`: full H.264 re-encodes. */
@@ -67,6 +78,10 @@ export interface ConvertFilePayload {
   mode?: ConvertMode;
   /** True when the original was deleted after a successful convert. */
   deletedOriginal?: boolean;
+  /** True when the original was moved after a successful convert. */
+  movedOriginal?: boolean;
+  /** Destination path the original was moved to (present when movedOriginal). */
+  originalMovedTo?: string;
   /** Non-null when the file could not be converted. */
   error?: string;
 }
