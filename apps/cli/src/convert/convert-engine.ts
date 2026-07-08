@@ -4,8 +4,9 @@
  * Discovers convertible video files from three sources (explicit files, ad-hoc
  * folder paths, and registered folders / --all), then transcodes each to a
  * sibling `.mp4` via ffmpeg — a fast lossless remux where possible, falling back
- * to a full H.264 re-encode.  Originals are kept by default; when
- * `deleteOriginal` is set, each source is removed only after its `.mp4` is
+ * to a full H.264 re-encode.  Originals are kept by default; the
+ * `originalDisposition` option chooses instead to delete each source, or to move
+ * it into `originalsDir` — either action happening only after its `.mp4` is
  * verified written.
  *
  * Mirrors OrganizeEngine's structure exactly (offline, UI-free, injected deps,
@@ -19,6 +20,7 @@ import {
   ConvertTypedEmitter,
   CONVERT_EV,
   type ConvertTotals,
+  type OriginalDisposition,
 } from './events.js';
 import {
   isConvertibleVideo,
@@ -50,7 +52,17 @@ export interface ConvertOptions {
   dryRun?: boolean;
   /** Worker pool concurrency override (falls back to settings.concurrency()). */
   concurrency?: number;
-  /** Delete each original after its `.mp4` is verified written. */
+  /**
+   * What to do with each source once its `.mp4` is verified written:
+   *   'keep' (default) — leave the original in place.
+   *   'delete'         — remove the original.
+   *   'move'           — relocate the original into `originalsDir`.
+   * When omitted, `deleteOriginal` is honoured for backward compatibility.
+   */
+  originalDisposition?: OriginalDisposition;
+  /** Destination folder for moved originals (required when disposition 'move'). */
+  originalsDir?: string;
+  /** Legacy alias for `originalDisposition: 'delete'`; kept for compatibility. */
   deleteOriginal?: boolean;
   /** Overwrite an existing target `.mp4` instead of skipping it. */
   overwrite?: boolean;
@@ -90,6 +102,40 @@ interface WorkItem {
 // How often (in files) to emit a progress event during the pool run.
 const PROGRESS_EVERY = 1;
 
+/**
+ * Resolve the effective disposition for a run from the (mutually-exclusive)
+ * options. `originalDisposition` wins; the legacy `deleteOriginal` boolean maps
+ * to `'delete'`; the default is `'keep'`.
+ */
+function resolveDisposition(opts: ConvertOptions): OriginalDisposition {
+  if (opts.originalDisposition) return opts.originalDisposition;
+  if (opts.deleteOriginal) return 'delete';
+  return 'keep';
+}
+
+/**
+ * Move `src` into `destDir`, preserving its basename and resolving name
+ * collisions with a ` (n)` suffix. Creates `destDir` if needed. Uses rename with
+ * a cross-device (EXDEV) copy+unlink fallback, mirroring the commit step in
+ * ffmpeg.ts and the move step in organize-engine.ts. Returns the final path.
+ */
+function moveOriginalInto(src: string, destDir: string): string {
+  fs.mkdirSync(destDir, { recursive: true });
+  const desired = path.join(destDir, path.basename(src));
+  const finalDest = resolveConvertCollision(desired);
+  try {
+    fs.renameSync(src, finalDest);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === 'EXDEV') {
+      fs.copyFileSync(src, finalDest);
+      fs.unlinkSync(src);
+    } else {
+      throw err;
+    }
+  }
+  return finalDest;
+}
+
 // ---------------------------------------------------------------------------
 // ConvertEngine
 // ---------------------------------------------------------------------------
@@ -115,6 +161,21 @@ export class ConvertEngine extends ConvertTypedEmitter {
    */
   async run(opts: ConvertOptions): Promise<ConvertRunResult> {
     const { folders, settings } = this.deps;
+
+    // ------------------------------------------------------------------
+    // 0. Resolve + validate the original-file disposition.
+    // ------------------------------------------------------------------
+    const disposition = resolveDisposition(opts);
+    const originalsDir =
+      disposition === 'move' && opts.originalsDir
+        ? path.resolve(opts.originalsDir)
+        : undefined;
+    if (disposition === 'move' && !originalsDir) {
+      const msg =
+        'A destination folder is required to move originals (originalsDir).';
+      this.emit(CONVERT_EV.ERROR, { message: msg });
+      return Promise.reject(new Error(msg));
+    }
 
     // ------------------------------------------------------------------
     // 1. ffmpeg preflight — skipped for a dry-run, which only plans.
@@ -199,6 +260,7 @@ export class ConvertEngine extends ConvertTypedEmitter {
       skipped: 0,
       errors: 0,
       deleted: 0,
+      moved: 0,
       remuxed: 0,
       reencoded: 0,
       bytesIn: 0,
@@ -256,14 +318,26 @@ export class ConvertEngine extends ConvertTypedEmitter {
         totals.bytesIn += result.bytesIn;
         totals.bytesOut += result.bytesOut;
 
+        // Apply the chosen disposition to the original. A failure here must
+        // never fail the conversion — the .mp4 is already safely written.
         let deletedOriginal = false;
-        if (opts.deleteOriginal) {
+        let movedOriginal = false;
+        let originalMovedTo: string | undefined;
+        if (disposition === 'delete') {
           try {
             fs.unlinkSync(filePath);
             totals.deleted++;
             deletedOriginal = true;
           } catch {
-            // A failed cleanup must not fail the conversion — the .mp4 is safe.
+            // best-effort cleanup
+          }
+        } else if (disposition === 'move' && originalsDir) {
+          try {
+            originalMovedTo = moveOriginalInto(filePath, originalsDir);
+            totals.moved++;
+            movedOriginal = true;
+          } catch {
+            // best-effort relocation
           }
         }
 
@@ -273,6 +347,8 @@ export class ConvertEngine extends ConvertTypedEmitter {
           target: finalTarget,
           mode: result.mode,
           deletedOriginal,
+          movedOriginal,
+          originalMovedTo,
         });
       } catch (err) {
         // One bad file must never abort the pool. runPool already swallows
