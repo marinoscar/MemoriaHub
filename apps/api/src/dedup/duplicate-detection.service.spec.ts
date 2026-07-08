@@ -567,4 +567,188 @@ describe('DuplicateDetectionService', () => {
       expect(mockPrisma.storageObject.findUnique).not.toHaveBeenCalled();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // evictFromDuplicateGroups — burst wins over duplicate detection: pull
+  // members out of any duplicate group once they land in a burst group.
+  // -------------------------------------------------------------------------
+
+  describe('evictFromDuplicateGroups', () => {
+    it('is a no-op when itemIds is empty (no Prisma calls made)', async () => {
+      await service.evictFromDuplicateGroups([]);
+
+      expect(mockPrisma.mediaItem.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaItem.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op when none of the given items currently belong to a duplicate group', async () => {
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValueOnce([]); // "linked" query finds nothing
+
+      await service.evictFromDuplicateGroups(['item-a', 'item-b']);
+
+      expect(mockPrisma.mediaItem.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: ['item-a', 'item-b'] }, duplicateGroupId: { not: null } },
+        }),
+      );
+      expect(mockPrisma.mediaItem.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.duplicateGroup.update).not.toHaveBeenCalled();
+      expect(mockPrisma.duplicateGroup.delete).not.toHaveBeenCalled();
+    });
+
+    it('nulls duplicateGroupId on items currently in a duplicate group and recomputes the affected group', async () => {
+      (mockPrisma.mediaItem.findMany as jest.Mock)
+        .mockResolvedValueOnce([
+          { id: 'item-a', duplicateGroupId: 'group-1' },
+          { id: 'item-b', duplicateGroupId: 'group-1' },
+        ]) // linked query
+        .mockResolvedValueOnce([
+          { id: 'item-c', capturedAt: new Date('2026-06-01T00:00:00Z') },
+          { id: 'item-d', capturedAt: new Date('2026-06-02T00:00:00Z') },
+        ]); // recomputeGroupMeta: remaining active members
+      (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+      (mockPrisma.duplicateGroup.update as jest.Mock).mockResolvedValue({});
+
+      await service.evictFromDuplicateGroups(['item-a', 'item-b']);
+
+      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['item-a', 'item-b'] } },
+        data: { duplicateGroupId: null },
+      });
+      expect(mockPrisma.duplicateGroup.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'group-1' },
+          data: expect.objectContaining({ mediaCount: 2 }),
+        }),
+      );
+    });
+
+    it('recomputes each distinct affected group when evicted items span multiple duplicate groups', async () => {
+      (mockPrisma.mediaItem.findMany as jest.Mock)
+        .mockResolvedValueOnce([
+          { id: 'item-a', duplicateGroupId: 'group-x' },
+          { id: 'item-b', duplicateGroupId: 'group-y' },
+        ]) // linked query
+        .mockResolvedValueOnce([
+          { id: 'item-x2', capturedAt: new Date() },
+          { id: 'item-x3', capturedAt: new Date() },
+        ]) // recomputeGroupMeta for group-x
+        .mockResolvedValueOnce([
+          { id: 'item-y2', capturedAt: new Date() },
+          { id: 'item-y3', capturedAt: new Date() },
+        ]); // recomputeGroupMeta for group-y
+      (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+      (mockPrisma.duplicateGroup.update as jest.Mock).mockResolvedValue({});
+
+      await service.evictFromDuplicateGroups(['item-a', 'item-b']);
+
+      expect(mockPrisma.duplicateGroup.update).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.duplicateGroup.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'group-x' } }),
+      );
+      expect(mockPrisma.duplicateGroup.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'group-y' } }),
+      );
+    });
+
+    it('shrinking a duplicate group to exactly 2 active members updates the group (does not delete it)', async () => {
+      (mockPrisma.mediaItem.findMany as jest.Mock)
+        .mockResolvedValueOnce([{ id: 'item-a', duplicateGroupId: 'group-shrink' }]) // evicting 1 of 3
+        .mockResolvedValueOnce([
+          { id: 'item-b', capturedAt: new Date() },
+          { id: 'item-c', capturedAt: new Date() },
+        ]); // 2 members remain
+      (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.duplicateGroup.update as jest.Mock).mockResolvedValue({});
+
+      await service.evictFromDuplicateGroups(['item-a']);
+
+      expect(mockPrisma.duplicateGroup.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'group-shrink' },
+          data: expect.objectContaining({ mediaCount: 2 }),
+        }),
+      );
+      expect(mockPrisma.duplicateGroup.delete).not.toHaveBeenCalled();
+    });
+
+    it('shrinking a duplicate group to exactly 1 active member clears that member and deletes the group', async () => {
+      (mockPrisma.mediaItem.findMany as jest.Mock)
+        .mockResolvedValueOnce([{ id: 'item-a', duplicateGroupId: 'group-lone' }])
+        .mockResolvedValueOnce([{ id: 'item-lone', capturedAt: new Date() }]); // 1 member remains
+      (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.duplicateGroup.delete as jest.Mock).mockResolvedValue({});
+
+      await service.evictFromDuplicateGroups(['item-a']);
+
+      // Second updateMany call clears the lone survivor's duplicateGroupId
+      expect(mockPrisma.mediaItem.updateMany).toHaveBeenLastCalledWith({
+        where: { id: 'item-lone' },
+        data: { duplicateGroupId: null },
+      });
+      expect(mockPrisma.duplicateGroup.delete).toHaveBeenCalledWith({ where: { id: 'group-lone' } });
+      expect(mockPrisma.duplicateGroup.update).not.toHaveBeenCalled();
+    });
+
+    it('shrinking a duplicate group to 0 active members deletes the group (pre-existing behavior still holds)', async () => {
+      (mockPrisma.mediaItem.findMany as jest.Mock)
+        .mockResolvedValueOnce([{ id: 'item-a', duplicateGroupId: 'group-empty' }])
+        .mockResolvedValueOnce([]); // no active members remain
+      (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.duplicateGroup.delete as jest.Mock).mockResolvedValue({});
+
+      await service.evictFromDuplicateGroups(['item-a']);
+
+      expect(mockPrisma.duplicateGroup.delete).toHaveBeenCalledWith({ where: { id: 'group-empty' } });
+      expect(mockPrisma.duplicateGroup.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // evictExistingBurstOverlaps — one-time remediation for items already
+  // double-listed in both the burst and duplicate review queues.
+  // -------------------------------------------------------------------------
+
+  describe('evictExistingBurstOverlaps', () => {
+    it('evicts only items that are BOTH in a duplicate group AND in a pending burst group, returning the evicted count', async () => {
+      const overlapItems = [{ id: 'overlap-1' }, { id: 'overlap-2' }];
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValueOnce(overlapItems);
+      const evictSpy = jest
+        .spyOn(service, 'evictFromDuplicateGroups')
+        .mockResolvedValue(undefined);
+
+      const result = await service.evictExistingBurstOverlaps(CIRCLE_ID);
+
+      expect(mockPrisma.mediaItem.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            circleId: CIRCLE_ID,
+            duplicateGroupId: { not: null },
+            burstGroup: { status: BurstGroupStatus.pending },
+          }),
+        }),
+      );
+      expect(evictSpy).toHaveBeenCalledWith(['overlap-1', 'overlap-2']);
+      expect(result).toEqual({ evicted: 2 });
+    });
+
+    it('omits the circleId filter from the query when circleId is not provided', async () => {
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValueOnce([]);
+
+      await service.evictExistingBurstOverlaps();
+
+      const call = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls[0][0];
+      expect(call.where.circleId).toBeUndefined();
+    });
+
+    it('returns { evicted: 0 } and does not call evictFromDuplicateGroups when no overlaps are found', async () => {
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValueOnce([]);
+      const evictSpy = jest.spyOn(service, 'evictFromDuplicateGroups');
+
+      const result = await service.evictExistingBurstOverlaps(CIRCLE_ID);
+
+      expect(result).toEqual({ evicted: 0 });
+      expect(evictSpy).not.toHaveBeenCalled();
+    });
+  });
 });

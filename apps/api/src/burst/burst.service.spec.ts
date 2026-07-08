@@ -22,6 +22,7 @@ import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { BurstGroupStatus, CircleRole, MediaType } from '@prisma/client';
 import { BurstQueryDto } from './dto/burst-query.dto';
@@ -149,6 +150,7 @@ describe('BurstService', () => {
   let mockStorageProvider: { getSignedDownloadUrl: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
   let mockSystemSettings: { isFeatureEnabled: jest.Mock };
+  let mockDuplicateDetectionService: { evictExistingBurstOverlaps: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -162,6 +164,11 @@ describe('BurstService', () => {
     };
     // Resolver returns mockStorageProvider so getSignedDownloadUrl assertions are unchanged.
     mockResolver = { getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider) };
+    // Burst wins over duplicate detection: backfillAllCircles's remediation
+    // step, mocked as a collaborator, never the real DuplicateDetectionService.
+    mockDuplicateDetectionService = {
+      evictExistingBurstOverlaps: jest.fn().mockResolvedValue({ evicted: 0 }),
+    };
 
     // Default: $transaction executes array operations
     (mockPrisma.$transaction as jest.Mock).mockImplementation((ops: Promise<unknown>[]) =>
@@ -189,6 +196,7 @@ describe('BurstService', () => {
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: StorageProviderResolver, useValue: mockResolver },
         { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: DuplicateDetectionService, useValue: mockDuplicateDetectionService },
       ],
     }).compile();
 
@@ -553,5 +561,50 @@ describe('BurstService', () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // backfillAllCircles — includes the burst/duplicate overlap remediation
+  // -------------------------------------------------------------------------
+
+  describe('backfillAllCircles', () => {
+    function setupCircles(circleIds: string[]) {
+      (mockPrisma.circle.findMany as jest.Mock).mockResolvedValue(circleIds.map((id) => ({ id })));
+      // force=false path (default opts): no succeeded jobs, no eligible items —
+      // keeps the per-circle enqueue loop a no-op so these tests isolate the
+      // eviction remediation step.
+      (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
+    }
+
+    it('result includes evictedDuplicateOverlaps matching what evictExistingBurstOverlaps returned', async () => {
+      setupCircles(['circle-a', 'circle-b']);
+      mockDuplicateDetectionService.evictExistingBurstOverlaps.mockResolvedValue({ evicted: 7 });
+
+      const result = await service.backfillAllCircles({});
+
+      expect(result).toMatchObject({ circles: 2, evictedDuplicateOverlaps: 7 });
+    });
+
+    it('calls evictExistingBurstOverlaps exactly once, app-wide (no circleId scoping)', async () => {
+      setupCircles(['circle-a']);
+      mockDuplicateDetectionService.evictExistingBurstOverlaps.mockResolvedValue({ evicted: 0 });
+
+      await service.backfillAllCircles({});
+
+      expect(mockDuplicateDetectionService.evictExistingBurstOverlaps).toHaveBeenCalledTimes(1);
+      expect(mockDuplicateDetectionService.evictExistingBurstOverlaps).toHaveBeenCalledWith();
+    });
+
+    it('does not fail the backfill when evictExistingBurstOverlaps throws (best-effort)', async () => {
+      setupCircles(['circle-a']);
+      mockDuplicateDetectionService.evictExistingBurstOverlaps.mockRejectedValue(
+        new Error('eviction boom'),
+      );
+
+      const result = await service.backfillAllCircles({});
+
+      expect(result.evictedDuplicateOverlaps).toBe(0);
+      expect(result.circles).toBe(1);
+    });
+  });
 });
 

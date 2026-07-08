@@ -16,6 +16,9 @@
  *  - No device info and no burstUuid → early return
  *  - Null perceptualHash → skip temporal-only link
  *  - On-demand perceptual hash for legacy photos (perceptualHash null + storageObjectId present)
+ *  - Step 7 (burst wins over duplicate detection): after grouping, the burst
+ *    group's member ids are passed to DuplicateDetectionService.evictFromDuplicateGroups;
+ *    a thrown error is caught and logged, never failing the burst job
  */
 
 // ---------------------------------------------------------------------------
@@ -31,6 +34,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { BurstGroupStatus, EnrichmentJob, JobReason, JobStatus, MediaType } from '@prisma/client';
 import { computeVisualHash } from '../storage/processing/visual-hash.util';
@@ -126,6 +130,7 @@ describe('BurstDetectionService', () => {
   let mockEnrichmentJobService: { enqueue: jest.Mock };
   let mockStorageProvider: { download: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
+  let mockDuplicateDetectionService: { evictFromDuplicateGroups: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -133,6 +138,9 @@ describe('BurstDetectionService', () => {
     mockStorageProvider = { download: jest.fn() };
     // Resolver returns mockStorageProvider so download assertions are unchanged.
     mockResolver = { getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider) };
+    // Burst wins over duplicate detection (Step 7): mocked as a collaborator,
+    // never the real DuplicateDetectionService.
+    mockDuplicateDetectionService = { evictFromDuplicateGroups: jest.fn().mockResolvedValue(undefined) };
 
     // Default system settings: standard burst config
     (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue({
@@ -152,6 +160,7 @@ describe('BurstDetectionService', () => {
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: StorageProviderResolver, useValue: mockResolver },
+        { provide: DuplicateDetectionService, useValue: mockDuplicateDetectionService },
       ],
     }).compile();
 
@@ -170,6 +179,7 @@ describe('BurstDetectionService', () => {
     );
     // Default: face.groupBy returns empty array (face signal absent by default)
     (mockPrisma.face.groupBy as jest.Mock).mockResolvedValue([]);
+    mockDuplicateDetectionService.evictFromDuplicateGroups.mockResolvedValue(undefined);
   });
 
   // -------------------------------------------------------------------------
@@ -776,6 +786,59 @@ describe('BurstDetectionService', () => {
 
       const groupUpdateCall = (mockPrisma.burstGroup.update as jest.Mock).mock.calls[0][0];
       expect(groupUpdateCall.data.mediaCount).toBe(2);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Step 7: burst wins over duplicate detection (eviction)
+  // -------------------------------------------------------------------------
+
+  describe('Step 7: eviction from duplicate groups after burst grouping', () => {
+    function setupGroupCreationForEviction() {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+      (mockPrisma.mediaItem.findMany as jest.Mock)
+        // Step 3: candidate neighbors
+        .mockResolvedValueOnce([makeNeighbor()])
+        // Step 6 (recomputeGroupScores): group members
+        .mockResolvedValueOnce([
+          { id: 'media-1', sharpnessScore: 100, width: 4032, height: 3024, capturedAt: BASE_TIME },
+          { id: 'media-neighbor-1', sharpnessScore: 80, width: 3024, height: 4032, capturedAt: BASE_TIME },
+        ])
+        // Step 7: group members for eviction
+        .mockResolvedValueOnce([{ id: 'media-1' }, { id: 'media-neighbor-1' }]);
+      (mockPrisma.burstGroup.create as jest.Mock).mockResolvedValue({ id: 'group-1' });
+      (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+      (mockPrisma.mediaItem.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
+    }
+
+    it('calls duplicateDetectionService.evictFromDuplicateGroups with the target burst group member ids after grouping', async () => {
+      setupGroupCreationForEviction();
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockPrisma.mediaItem.findMany).toHaveBeenNthCalledWith(
+        3,
+        expect.objectContaining({
+          where: { burstGroupId: 'group-1', deletedAt: null },
+        }),
+      );
+      expect(mockDuplicateDetectionService.evictFromDuplicateGroups).toHaveBeenCalledWith(
+        expect.arrayContaining(['media-1', 'media-neighbor-1']),
+      );
+    });
+
+    it('an error thrown by eviction is caught and does not fail/reject the burst job', async () => {
+      setupGroupCreationForEviction();
+      mockDuplicateDetectionService.evictFromDuplicateGroups.mockRejectedValue(
+        new Error('eviction boom'),
+      );
+
+      await expect(service.processMediaItem(makeJob())).resolves.toBeUndefined();
+
+      // Normal burst grouping (Steps 1-6) still completed despite the eviction failure.
+      expect(mockPrisma.burstGroup.create).toHaveBeenCalled();
+      expect(mockPrisma.burstGroup.update).toHaveBeenCalled();
     });
   });
 });
