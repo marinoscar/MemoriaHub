@@ -133,4 +133,29 @@ export class StorageProcessingRecoveryService {
     await this.objectProcessingService.handleObjectUploaded(new ObjectUploadedEvent(claimed));
     result.reprocessed++;
   }
+
+  /**
+   * Re-run the full processing pipeline for a single object right now,
+   * regardless of its current status or retry history — used by the
+   * user-facing "Retry thumbnail" action (an explicit request should always
+   * get a fresh attempt, unlike the automatic cron which respects the retry
+   * cap). Clears any prior retry bookkeeping and resets status to
+   * 'processing' before invoking, mirroring the original upload flow.
+   */
+  async reprocessObjectNow(object: StorageObject): Promise<void> {
+    const existingMeta = (object.metadata as Record<string, unknown> | null) ?? {};
+    const { _processingRetryCount, _processingRetryExhausted, ...restMeta } = existingMeta;
+
+    const reset = await this.prisma.storageObject.update({
+      where: { id: object.id },
+      data: {
+        status: 'processing',
+        metadata: restMeta as Prisma.InputJsonValue,
+      },
+    });
+
+    this.logger.log(`reprocessObjectNow: manual retry triggered for object ${object.id}`);
+
+    await this.objectProcessingService.handleObjectUploaded(new ObjectUploadedEvent(reset));
+  }
 }
