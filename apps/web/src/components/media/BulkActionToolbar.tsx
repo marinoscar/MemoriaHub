@@ -24,7 +24,6 @@ import {
   RemoveCircleOutlined as RemoveCircleOutlineIcon,
   SelectAll as SelectAllIcon,
   Add as AddIcon,
-  FavoriteBorder as FavoriteBorderIcon,
   MoreVert as MoreVertIcon,
   StarBorder as StarBorderIcon,
   Archive as ArchiveIcon,
@@ -195,7 +194,7 @@ export function BulkActionToolbar({
                 onClick={() => void handleFavorite(true)}
                 disabled={loading}
               >
-                {loading ? <CircularProgress size={20} /> : <FavoriteBorderIcon />}
+                {loading ? <CircularProgress size={20} /> : <StarBorderIcon />}
               </IconButton>
             </Tooltip>
 
