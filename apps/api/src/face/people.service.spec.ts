@@ -2820,4 +2820,126 @@ describe('PeopleService', () => {
       expect(result).toEqual({ deleted: 2 });
     });
   });
+
+  // -------------------------------------------------------------------------
+  // purgeArchivedFaces  (permanently delete ALL archived unassigned faces in a circle)
+  // -------------------------------------------------------------------------
+
+  describe('purgeArchivedFaces', () => {
+    const dto = { circleId: CIRCLE_ID } as any;
+
+    function setupPurgeArchivedFacesMocks(deletedCount = 1, affectedFaces: any[] = []) {
+      // face.findMany for affected media items lookup (BEFORE the transaction)
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue(affectedFaces);
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb: any) => {
+        return cb(mockPrisma);
+      });
+      (mockPrisma.face.deleteMany as jest.Mock).mockResolvedValue({ count: deletedCount });
+      (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({ id: 'audit-1' });
+    }
+
+    it('calls assertCircleAccess with collaborator role', async () => {
+      setupPurgeArchivedFacesMocks();
+
+      await service.purgeArchivedFaces(dto, USER_ID, PERMS);
+
+      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+        USER_ID,
+        CIRCLE_ID,
+        PERMS,
+        'collaborator',
+      );
+    });
+
+    it('hard-deletes archived unassigned Face rows scoped to circleId, personId:null, hiddenAt:not-null (no mediaItem sub-filter)', async () => {
+      setupPurgeArchivedFacesMocks();
+
+      await service.purgeArchivedFaces(dto, USER_ID, PERMS);
+
+      expect(mockPrisma.face.deleteMany).toHaveBeenCalledWith({
+        where: { circleId: CIRCLE_ID, personId: null, hiddenAt: { not: null } },
+      });
+    });
+
+    it('captures affected media items via face.findMany using the same where clause plus distinct: [mediaItemId]', async () => {
+      setupPurgeArchivedFacesMocks();
+
+      await service.purgeArchivedFaces(dto, USER_ID, PERMS);
+
+      expect(mockPrisma.face.findMany).toHaveBeenCalledWith({
+        where: { circleId: CIRCLE_ID, personId: null, hiddenAt: { not: null } },
+        select: {
+          mediaItemId: true,
+          mediaItem: { select: { circleId: true } },
+        },
+        distinct: ['mediaItemId'],
+      });
+    });
+
+    it('writes a face:purge_archived audit event inside the transaction with targetType circle and targetId=circleId', async () => {
+      setupPurgeArchivedFacesMocks(1);
+
+      await service.purgeArchivedFaces(dto, USER_ID, PERMS);
+
+      expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            action: 'face:purge_archived',
+            actorUserId: USER_ID,
+            targetType: 'circle',
+            targetId: CIRCLE_ID,
+            meta: expect.objectContaining({ circleId: CIRCLE_ID, count: 1 }),
+          }),
+        }),
+      );
+    });
+
+    it('re-enqueues auto_tagging for affected media items after purge', async () => {
+      mockSystemSettings.isFeatureEnabled.mockResolvedValue(true);
+      setupPurgeArchivedFacesMocks(1, [
+        {
+          mediaItemId: MEDIA_ID,
+          mediaItem: { circleId: CIRCLE_ID },
+        },
+      ]);
+
+      await service.purgeArchivedFaces(dto, USER_ID, PERMS);
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'auto_tagging',
+          mediaItemId: MEDIA_ID,
+          circleId: CIRCLE_ID,
+        }),
+      );
+    });
+
+    it('does not enqueue auto_tagging when there are no affected media items', async () => {
+      mockSystemSettings.isFeatureEnabled.mockResolvedValue(true);
+      setupPurgeArchivedFacesMocks(1, []);
+
+      await service.purgeArchivedFaces(dto, USER_ID, PERMS);
+
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('returns { deleted: count }', async () => {
+      setupPurgeArchivedFacesMocks(2);
+
+      const result = await service.purgeArchivedFaces(dto, USER_ID, PERMS);
+
+      expect(result).toEqual({ deleted: 2 });
+    });
+
+    it('propagates ForbiddenException when assertCircleAccess denies access', async () => {
+      const { ForbiddenException } = await import('@nestjs/common');
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValue(
+        new ForbiddenException('Forbidden'),
+      );
+
+      await expect(
+        service.purgeArchivedFaces(dto, USER_ID, PERMS),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
 });
