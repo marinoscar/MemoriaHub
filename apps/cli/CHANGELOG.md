@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Interactive menu: video conversion and organize moved under Tools** — the `Convert videos to MP4 ▸` submenu (single file / selected folder(s) / all registered folders) and the `Organize folder by date` action now live under the **Tools ▸** menu instead of at the top level / under Settings respectively. Tools now groups the offline file utilities (Convert, Organize) alongside the existing Job queue monitor and Backup, and stays visible when logged out because Convert and Organize are offline. The underlying commands (`memoriahub convert`, `memoriahub organize`) are unchanged. Ships in CLI v1.1.23.
+
 ### Fixed
 
 - **`convert` failed every file with "Unable to find a suitable output format"** — conversions are written to a temporary `<target>.mp4.partial` file, and ffmpeg was inferring the output container from the unrecognized `.partial` extension, failing every file before doing any work (e.g. 135 files → 135 errors, 0 converted). The muxer is now forced with `-f mp4`, so the temp extension no longer matters. Ships in CLI v1.1.22.

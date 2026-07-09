@@ -25,14 +25,13 @@ describe('menu-config', () => {
   // ---------------------------------------------------------------------------
 
   describe('visibleChildren', () => {
-    it('returns all 9 top-level nodes when logged in', () => {
+    it('returns all 8 top-level nodes when logged in', () => {
       const nodes = visibleChildren(MENU_TREE, true);
-      expect(nodes).toHaveLength(9);
+      expect(nodes).toHaveLength(8);
       expect(labels(nodes)).toEqual([
         'Login / Change server',
         'Sync',
         'Scan (dry-run preview)',
-        'Convert videos to MP4',
         'Reports',
         'Settings',
         'Tools',
@@ -41,24 +40,25 @@ describe('menu-config', () => {
       ]);
     });
 
-    it('returns exactly [Login, Scan, Convert, Settings, Help, Quit] when logged out', () => {
+    it('returns exactly [Login, Scan, Settings, Tools, Help, Quit] when logged out', () => {
       const nodes = visibleChildren(MENU_TREE, false);
       expect(labels(nodes)).toEqual([
         'Login / Change server',
         'Scan (dry-run preview)',
-        'Convert videos to MP4',
         'Settings',
+        'Tools',
         'Help',
         'Quit',
       ]);
     });
 
-    it('excludes Sync, Reports, and Tools entirely when logged out', () => {
+    it('excludes Sync and Reports entirely when logged out, but keeps Tools (offline children)', () => {
       const nodes = visibleChildren(MENU_TREE, false);
       const ids = nodes.filter((n) => n.kind === 'submenu').map((n) => n.id);
       expect(ids).not.toContain('sync');
       expect(ids).not.toContain('reports');
-      expect(ids).not.toContain('tools');
+      // Tools now hosts the offline convert + organize utilities, so it stays visible.
+      expect(ids).toContain('tools');
     });
 
     it('includes the Settings submenu when logged out because it has a loggedOut leaf', () => {
@@ -67,21 +67,37 @@ describe('menu-config', () => {
       expect(settings).toBeDefined();
     });
 
-    it('within Settings when logged out, only the loggedOut leaves (organize + factory reset) are visible', () => {
+    it('within Settings when logged out, only the factory-reset loggedOut leaf is visible', () => {
       const settings = findSubmenu('settings')!;
       const nodes = visibleChildren(settings, false);
-      expect(labels(nodes)).toEqual(['Organize folder by date', 'Factory reset (delete all local data)']);
+      expect(labels(nodes)).toEqual(['Factory reset (delete all local data)']);
     });
 
     it('within Settings when logged in, all settings leaves are visible', () => {
       const settings = findSubmenu('settings')!;
       const nodes = visibleChildren(settings, true);
       expect(labels(nodes)).toEqual([
-        'Organize folder by date',
         'Manage folders',
         'Manage circles',
         'App settings',
         'Factory reset (delete all local data)',
+      ]);
+    });
+
+    it('within Tools when logged out, the offline Convert submenu and Organize leaf are visible', () => {
+      const tools = findSubmenu('tools')!;
+      const nodes = visibleChildren(tools, false);
+      expect(labels(nodes)).toEqual(['Convert videos to MP4', 'Organize folder by date']);
+    });
+
+    it('within Tools when logged in, all four tools are visible in order', () => {
+      const tools = findSubmenu('tools')!;
+      const nodes = visibleChildren(tools, true);
+      expect(labels(nodes)).toEqual([
+        'Convert videos to MP4',
+        'Organize folder by date',
+        'Job queue monitor',
+        'Backup',
       ]);
     });
   });
@@ -171,6 +187,14 @@ describe('menu-config', () => {
 
     it("returns 'Menu › Settings' for the settings submenu", () => {
       expect(breadcrumb('settings')).toBe('Menu › Settings');
+    });
+
+    it("returns 'Menu › Tools' for the tools submenu", () => {
+      expect(breadcrumb('tools')).toBe('Menu › Tools');
+    });
+
+    it("returns the nested 'Menu › Tools › Convert videos to MP4' for convert", () => {
+      expect(breadcrumb('convert')).toBe('Menu › Tools › Convert videos to MP4');
     });
 
     it('falls back to the root label for an unknown id', () => {

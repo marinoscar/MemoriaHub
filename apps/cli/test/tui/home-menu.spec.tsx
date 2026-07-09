@@ -58,19 +58,26 @@ describe('HomeMenu', () => {
       expect(plain).toContain('Quit');
     });
 
-    it('does NOT show Sync, Reports, or Tools submenus when logged out', () => {
+    it('does NOT show Sync or Reports submenus when logged out', () => {
       const { lastFrame } = render(
         <HomeMenu config={null} identity={null} onSelect={() => {}} />,
       );
       const plain = stripAnsi(lastFrame()!);
       expect(plain).not.toContain('Sync ▸');
       expect(plain).not.toContain('Reports ▸');
-      expect(plain).not.toContain('Tools ▸');
       // Sync/folders leaf actions (which only exist inside those hidden
       // submenus) must not leak through either.
       expect(plain).not.toContain('Sync all folders');
       expect(plain).not.toContain('Manage folders');
       expect(plain).not.toContain('Retry failed files');
+    });
+
+    it('DOES show the Tools submenu when logged out (it hosts the offline convert/organize tools)', () => {
+      const { lastFrame } = render(
+        <HomeMenu config={null} identity={null} onSelect={() => {}} />,
+      );
+      const plain = stripAnsi(lastFrame()!);
+      expect(plain).toContain('Tools ▸');
     });
 
     it('DOES show the Settings submenu when logged out (it contains a loggedOut leaf)', () => {
