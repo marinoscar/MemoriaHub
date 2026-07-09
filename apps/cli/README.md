@@ -814,7 +814,9 @@ memoriahub convert ~/Videos --reencode --crf 22
 
 For every source, `convert` first attempts a **lossless remux**: it copies the (usually H.264) video stream untouched and transcodes only the audio to AAC — instant, no visible quality loss — writing `name.mp4` next to the original. If that fails because the source codec isn't MP4-compatible (e.g. ProRes, or an exotic AVI codec), it automatically falls back to a full **H.264 re-encode**. Pass `--reencode` to force the re-encode path for every file, and `--crf` to tune its quality.
 
-Conversions are written to a temporary `.partial` file and renamed into place only on success, so an interrupted run never leaves a truncated `.mp4`. `convert` is idempotent — if the target already exists it is skipped (`--overwrite` to replace) — and non-destructive by default: originals are kept unless you pass `--delete-original`, and name collisions append ` (1)`, ` (2)`, … rather than overwriting.
+Conversions are written to a temporary `.partial` file (with the mp4 muxer forced via `-f mp4` so the temp extension doesn't confuse ffmpeg) and renamed into place only on success, so an interrupted run never leaves a truncated `.mp4`. `convert` is idempotent — if the target already exists it is skipped (`--overwrite` to replace) — and non-destructive by default: originals are kept unless you pass `--delete-original`, and name collisions append ` (1)`, ` (2)`, … rather than overwriting.
+
+If any files fail, `convert` shows the distinct error causes (grouped with counts) and writes a full per-file report to `~/.memoriahub/exports/convert-errors-<timestamp>.log` — both in the headless command and on the interactive done screen — so you can see exactly what ffmpeg reported for each file.
 
 ### Interactive UI
 
