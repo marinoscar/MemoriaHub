@@ -108,7 +108,26 @@ export interface SystemSettingsValue {
       retentionDays: number;
       purgeEnabled: boolean;
     };
+    /**
+     * Minutes a `running` enrichment job may go without finishing before the
+     * stats endpoint counts it as stuck and the reset cron re-queues it.
+     */
+    stuckThresholdMinutes?: number;
   };
+}
+
+/**
+ * Default for jobs.stuckThresholdMinutes: the legacy ENRICHMENT_STUCK_MINUTES
+ * env var when set to a valid positive integer (clamped to the 1–120 setting
+ * bounds), else 3 minutes.
+ */
+export function defaultStuckThresholdMinutes(): number {
+  const raw = process.env['ENRICHMENT_STUCK_MINUTES'];
+  if (raw) {
+    const parsed = parseInt(raw, 10);
+    if (!isNaN(parsed) && parsed > 0) return Math.min(parsed, 120);
+  }
+  return 3;
 }
 
 /**
@@ -207,5 +226,6 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
       retentionDays: 30,
       purgeEnabled: true,
     },
+    stuckThresholdMinutes: defaultStuckThresholdMinutes(),
   },
 };
