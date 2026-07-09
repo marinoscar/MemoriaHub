@@ -439,6 +439,7 @@ export class MediaService {
       locality,
       place,
       location,
+      albumId,
     } = query;
 
     await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
@@ -451,6 +452,8 @@ export class MediaService {
       // Exclude soft-deleted and archived items
       deletedAt: null,
       archivedAt: null,
+      // Optional album scope
+      ...(albumId && { albumItems: { some: { albumId } } }),
       // Optional type filter
       ...(type && { type }),
       // Date range
@@ -803,18 +806,52 @@ export class MediaService {
 
     const where: Prisma.AlbumWhereInput = { circleId };
 
-    const [items, totalItems] = await Promise.all([
+    const [albums, totalItems] = await Promise.all([
       this.prisma.album.findMany({
         where,
         orderBy: { [sortBy]: sortOrder },
         skip,
         take: pageSize,
-        include: {
-          _count: { select: { items: true } },
-        },
       }),
       this.prisma.album.count({ where }),
     ]);
+
+    // Enrich each album with an item count, a resolved cover thumbnail, and the
+    // captured-at date range across its non-deleted / non-archived members.
+    const items = await Promise.all(
+      albums.map(async (album) => {
+        const memberWhere: Prisma.MediaItemWhereInput = {
+          albumItems: { some: { albumId: album.id } },
+          deletedAt: null,
+          archivedAt: null,
+        };
+
+        const [agg, coverThumbnailUrl] = await Promise.all([
+          this.prisma.mediaItem.aggregate({
+            where: memberWhere,
+            _count: { _all: true },
+            _min: { capturedAt: true },
+            _max: { capturedAt: true },
+          }),
+          this.resolveAlbumCoverThumb(album.id, album.coverMediaItemId),
+        ]);
+
+        const min = agg._min.capturedAt;
+        const max = agg._max.capturedAt;
+        const dateRange =
+          min && max
+            ? { min: min.toISOString(), max: max.toISOString() }
+            : null;
+
+        return {
+          ...album,
+          itemCount: agg._count._all,
+          coverMediaItemId: album.coverMediaItemId,
+          coverThumbnailUrl,
+          dateRange,
+        };
+      }),
+    );
 
     return {
       items,
@@ -848,7 +885,27 @@ export class MediaService {
 
     await this.circleMembershipService.assertCircleAccess(userId, album.circleId, userPermissions, 'viewer' as CircleRole);
 
-    return album;
+    // Flatten AlbumItem join rows into full MediaItem-shaped objects, each with
+    // a signed thumbnailUrl (matching listMedia / listLocations item shape).
+    const { items: albumItems, ...albumFields } = album;
+    const items = await Promise.all(
+      albumItems.map(async (ai) => ({
+        ...ai.mediaItem,
+        thumbnailUrl: await this.signThumb(ai.mediaItem.metadata),
+      })),
+    );
+
+    const coverThumbnailUrl = await this.resolveAlbumCoverThumb(
+      album.id,
+      album.coverMediaItemId,
+    );
+
+    return {
+      ...albumFields,
+      coverMediaItemId: album.coverMediaItemId,
+      coverThumbnailUrl,
+      items,
+    };
   }
 
   /**
@@ -867,11 +924,28 @@ export class MediaService {
       'collaborator' as CircleRole,
     );
 
+    // Resolve the cover pointer only when the field was actually supplied.
+    // Omitted → leave existing cover untouched; null → clear; UUID → validate
+    // that the item is a member of this album before persisting.
+    const coverProvided = 'coverMediaItemId' in dto;
+    if (coverProvided && dto.coverMediaItemId != null) {
+      const member = await this.prisma.albumItem.findFirst({
+        where: { albumId: album.id, mediaItemId: dto.coverMediaItemId },
+        select: { id: true },
+      });
+      if (!member) {
+        throw new BadRequestException(
+          'Cover photo must be an item in this album',
+        );
+      }
+    }
+
     const updated = await this.prisma.album.update({
       where: { id: album.id },
       data: {
         ...(dto.name !== undefined && { name: dto.name }),
         ...(dto.description !== undefined && { description: dto.description }),
+        ...(coverProvided && { coverMediaItemId: dto.coverMediaItemId ?? null }),
       },
     });
 
@@ -1881,6 +1955,44 @@ export class MediaService {
    * Reads `thumbnailStorageKey` from the JSONB metadata field.  This is a
    * stable key (never signed), so it is safe to store in the DB.
    */
+  /**
+   * Resolve the signed cover thumbnail URL for an album.
+   *
+   * Preference order:
+   *   1. The explicitly-set `coverMediaItemId`, but only if it is still a
+   *      valid non-deleted / non-archived member of the album.
+   *   2. Otherwise the most recent (capturedAt desc, then createdAt desc)
+   *      non-deleted / non-archived member.
+   * Returns null when the album has no eligible members.
+   */
+  private async resolveAlbumCoverThumb(
+    albumId: string,
+    coverMediaItemId: string | null,
+  ): Promise<string | null> {
+    const memberWhere: Prisma.MediaItemWhereInput = {
+      albumItems: { some: { albumId } },
+      deletedAt: null,
+      archivedAt: null,
+    };
+
+    if (coverMediaItemId) {
+      const cover = await this.prisma.mediaItem.findFirst({
+        where: { ...memberWhere, id: coverMediaItemId },
+        select: { metadata: true },
+      });
+      if (cover) {
+        return this.signThumb(cover.metadata);
+      }
+    }
+
+    const fallback = await this.prisma.mediaItem.findFirst({
+      where: memberWhere,
+      orderBy: [{ capturedAt: 'desc' }, { createdAt: 'desc' }],
+      select: { metadata: true },
+    });
+    return this.signThumb(fallback?.metadata ?? null);
+  }
+
   private async signThumb(
     metadata: Prisma.JsonValue | null,
   ): Promise<string | null> {

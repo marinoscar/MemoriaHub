@@ -547,6 +547,8 @@ model MediaItem {
   locationSuggestion     LocationSuggestion?
   // Social Media Detection relations
   socialStatus           MediaSocialStatus?
+  // Album cover relations
+  coverForAlbums         Album[]              @relation("AlbumCover")
 
   @@index([circleId])
   @@index([addedById])
@@ -596,8 +598,12 @@ model Album {
   items       AlbumItem[]
   // Media Sharing relations
   shares      MediaShare[]
+  // Album cover pointer
+  coverMediaItemId String?     @map("cover_media_item_id") @db.Uuid
+  coverMediaItem   MediaItem?  @relation("AlbumCover", fields: [coverMediaItemId], references: [id], onDelete: SetNull)
 
   @@index([circleId])
+  @@index([coverMediaItemId])
   @@map("albums")
 }
 

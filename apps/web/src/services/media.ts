@@ -91,6 +91,8 @@ export interface MediaLocationFilters {
   capturedAtFrom?: string;
   capturedAtTo?: string;
   circleId?: string;
+  /** Scope the location index to a single album. */
+  albumId?: string;
 }
 
 export async function listMediaLocations(
@@ -106,8 +108,20 @@ export async function listMediaLocations(
   if (filters?.capturedAtFrom) searchParams.set('capturedAtFrom', filters.capturedAtFrom);
   if (filters?.capturedAtTo) searchParams.set('capturedAtTo', filters.capturedAtTo);
   if (filters?.circleId) searchParams.set('circleId', filters.circleId);
+  if (filters?.albumId) searchParams.set('albumId', filters.albumId);
   const qs = searchParams.toString();
   return api.get<MediaLocation[]>(`/media/locations${qs ? `?${qs}` : ''}`);
+}
+
+/**
+ * List geotagged media locations scoped to a single album.
+ * Thin wrapper over listMediaLocations that mirrors the MediaMapPage flow.
+ */
+export async function listAlbumLocations(
+  albumId: string,
+  circleId: string,
+): Promise<MediaLocation[]> {
+  return listMediaLocations({ albumId, circleId });
 }
 
 export async function patchMedia(id: string, dto: PatchMediaDto): Promise<MediaItem> {

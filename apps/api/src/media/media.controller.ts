@@ -365,6 +365,7 @@ export class MediaController {
   @ApiQuery({ name: 'locality', required: false, type: String, description: 'Matches geoLocality (contains), case-insensitive' })
   @ApiQuery({ name: 'place', required: false, type: String, description: 'Substring match on geoPlaceName, case-insensitive' })
   @ApiQuery({ name: 'location', required: false, type: String, description: 'Free-text search across all geo tiers' })
+  @ApiQuery({ name: 'albumId', required: false, type: String, format: 'uuid', description: 'Scope the map to members of a single album' })
   @ApiResponse({ status: 200, description: 'Array of geotagged media location objects' })
   async listLocations(
     @Query() query: MediaLocationsQueryDto,

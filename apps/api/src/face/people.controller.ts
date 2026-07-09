@@ -112,6 +112,7 @@ export class PeopleController {
   @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
   @ApiQuery({ name: 'includeUnlabeled', required: false, type: Boolean, description: 'Include unlabeled (name=null) people' })
   @ApiQuery({ name: 'hidden', required: false, type: Boolean, description: 'When true, return only hidden people instead of visible people' })
+  @ApiQuery({ name: 'albumId', required: false, type: String, format: 'uuid', description: 'Scope to people appearing in a single album\'s media' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'pageSize', required: false, type: Number })
   @ApiResponse({ status: 200, description: 'Paginated people list' })

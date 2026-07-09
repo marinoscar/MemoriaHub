@@ -52,7 +52,8 @@ export class PeopleService {
     userId: string,
     userPermissions: string[],
   ) {
-    const { circleId, includeUnlabeled, hidden, page, pageSize } = query;
+    const { circleId, includeUnlabeled, hidden, albumId, page, pageSize } =
+      query;
 
     await this.circleMembershipService.assertCircleAccess(
       userId,
@@ -71,6 +72,21 @@ export class PeopleService {
         ? { hiddenAt: { not: null } }
         : { hiddenAt: null }),
       ...(includeUnlabeled ? {} : { name: { not: null } }),
+      // Optional album scope: keep only people with at least one face on a
+      // non-deleted / non-archived media item belonging to the album.
+      ...(albumId
+        ? {
+            faces: {
+              some: {
+                mediaItem: {
+                  albumItems: { some: { albumId } },
+                  deletedAt: null,
+                  archivedAt: null,
+                },
+              },
+            },
+          }
+        : {}),
     };
 
     const [persons, totalItems] = await Promise.all([

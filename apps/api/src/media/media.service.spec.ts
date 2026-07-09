@@ -134,6 +134,7 @@ function makeAlbum(overrides: Partial<any> = {}) {
     circleId: CIRCLE_ID,
     name: 'My Album',
     description: null,
+    coverMediaItemId: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -1177,6 +1178,128 @@ describe('MediaService', () => {
         totalPages: 3,
       });
     });
+
+    // -----------------------------------------------------------------------
+    // itemCount / coverThumbnailUrl / dateRange enrichment
+    // -----------------------------------------------------------------------
+
+    it('returns itemCount matching the aggregated member count', async () => {
+      const album = makeAlbum();
+      mockPrisma.album.findMany.mockResolvedValue([album] as any);
+      mockPrisma.album.count.mockResolvedValue(1);
+      mockPrisma.mediaItem.aggregate.mockResolvedValue({
+        _count: { _all: 7 },
+        _min: { capturedAt: null },
+        _max: { capturedAt: null },
+      } as any);
+      mockPrisma.mediaItem.findFirst.mockResolvedValue(null);
+
+      const result = await service.listAlbums(defaultAlbumQuery, 'user-1', ownPerms);
+
+      expect(result.items[0].itemCount).toBe(7);
+    });
+
+    it('resolves coverThumbnailUrl to the explicitly-set cover item when coverMediaItemId is set', async () => {
+      const coverId = randomUUID();
+      const album = makeAlbum({ coverMediaItemId: coverId });
+      mockPrisma.album.findMany.mockResolvedValue([album] as any);
+      mockPrisma.album.count.mockResolvedValue(1);
+      mockPrisma.mediaItem.aggregate.mockResolvedValue({
+        _count: { _all: 2 },
+        _min: { capturedAt: null },
+        _max: { capturedAt: null },
+      } as any);
+      mockPrisma.mediaItem.findFirst.mockResolvedValue({
+        metadata: { thumbnailStorageKey: 'cover-thumb-key' },
+      } as any);
+
+      const result = await service.listAlbums(defaultAlbumQuery, 'user-1', ownPerms);
+
+      expect(mockPrisma.mediaItem.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: coverId }),
+        }),
+      );
+      expect(result.items[0].coverThumbnailUrl).toBe('https://cdn.example.com/signed');
+      expect(result.items[0].coverMediaItemId).toBe(coverId);
+    });
+
+    it('falls back to the most-recently-captured member thumbnail when no cover is set', async () => {
+      const album = makeAlbum({ coverMediaItemId: null });
+      mockPrisma.album.findMany.mockResolvedValue([album] as any);
+      mockPrisma.album.count.mockResolvedValue(1);
+      mockPrisma.mediaItem.aggregate.mockResolvedValue({
+        _count: { _all: 3 },
+        _min: { capturedAt: null },
+        _max: { capturedAt: null },
+      } as any);
+      mockPrisma.mediaItem.findFirst.mockResolvedValue({
+        metadata: { thumbnailStorageKey: 'fallback-thumb-key' },
+      } as any);
+
+      const result = await service.listAlbums(defaultAlbumQuery, 'user-1', ownPerms);
+
+      // Fallback orders by capturedAt desc, then createdAt desc (most recent member).
+      expect(mockPrisma.mediaItem.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: [{ capturedAt: 'desc' }, { createdAt: 'desc' }],
+        }),
+      );
+      expect(result.items[0].coverThumbnailUrl).toBe('https://cdn.example.com/signed');
+    });
+
+    it('returns null coverThumbnailUrl when the album has no members', async () => {
+      const album = makeAlbum({ coverMediaItemId: null });
+      mockPrisma.album.findMany.mockResolvedValue([album] as any);
+      mockPrisma.album.count.mockResolvedValue(1);
+      mockPrisma.mediaItem.aggregate.mockResolvedValue({
+        _count: { _all: 0 },
+        _min: { capturedAt: null },
+        _max: { capturedAt: null },
+      } as any);
+      mockPrisma.mediaItem.findFirst.mockResolvedValue(null);
+
+      const result = await service.listAlbums(defaultAlbumQuery, 'user-1', ownPerms);
+
+      expect(result.items[0].coverThumbnailUrl).toBeNull();
+    });
+
+    it('returns dateRange as { min, max } across members', async () => {
+      const album = makeAlbum();
+      const min = new Date('2024-01-01T00:00:00.000Z');
+      const max = new Date('2024-06-15T00:00:00.000Z');
+      mockPrisma.album.findMany.mockResolvedValue([album] as any);
+      mockPrisma.album.count.mockResolvedValue(1);
+      mockPrisma.mediaItem.aggregate.mockResolvedValue({
+        _count: { _all: 2 },
+        _min: { capturedAt: min },
+        _max: { capturedAt: max },
+      } as any);
+      mockPrisma.mediaItem.findFirst.mockResolvedValue(null);
+
+      const result = await service.listAlbums(defaultAlbumQuery, 'user-1', ownPerms);
+
+      expect(result.items[0].dateRange).toEqual({
+        min: min.toISOString(),
+        max: max.toISOString(),
+      });
+    });
+
+    it('returns dateRange as null for an empty album', async () => {
+      const album = makeAlbum();
+      mockPrisma.album.findMany.mockResolvedValue([album] as any);
+      mockPrisma.album.count.mockResolvedValue(1);
+      mockPrisma.mediaItem.aggregate.mockResolvedValue({
+        _count: { _all: 0 },
+        _min: { capturedAt: null },
+        _max: { capturedAt: null },
+      } as any);
+      mockPrisma.mediaItem.findFirst.mockResolvedValue(null);
+
+      const result = await service.listAlbums(defaultAlbumQuery, 'user-1', ownPerms);
+
+      expect(result.items[0].dateRange).toBeNull();
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -1187,10 +1310,43 @@ describe('MediaService', () => {
     it('should return album with items for the owner', async () => {
       const album = { ...makeAlbum(), items: [] };
       mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      // No members → resolveAlbumCoverThumb's fallback findFirst finds nothing.
+      mockPrisma.mediaItem.findFirst.mockResolvedValue(null);
 
       const result = await service.getAlbum(album.id, 'user-1', ownPerms);
 
-      expect(result).toEqual(album);
+      // getAlbum now also exposes coverThumbnailUrl (resolved from coverMediaItemId).
+      expect(result).toEqual({ ...album, coverThumbnailUrl: null });
+    });
+
+    it('should sign a thumbnailUrl for each item and expose coverMediaItemId/coverThumbnailUrl', async () => {
+      const mediaItem = makeMediaItem({
+        metadata: { thumbnailStorageKey: 'item-thumb-key' },
+      });
+      const album = {
+        ...makeAlbum({ addedById: 'user-1', coverMediaItemId: null }),
+        items: [
+          {
+            id: randomUUID(),
+            albumId: 'album-1',
+            mediaItemId: mediaItem.id,
+            addedAt: new Date(),
+            mediaItem,
+          },
+        ],
+      };
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.mediaItem.findFirst.mockResolvedValue(null);
+
+      const result = await service.getAlbum(album.id, 'user-1', ownPerms);
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]).toMatchObject({
+        id: mediaItem.id,
+        thumbnailUrl: 'https://cdn.example.com/signed',
+      });
+      expect(result.coverMediaItemId).toBeNull();
+      expect(result.coverThumbnailUrl).toBeNull();
     });
 
     it('should throw NotFoundException when album does not exist', async () => {
@@ -1214,10 +1370,11 @@ describe('MediaService', () => {
     it('should allow Admin with media:read_any to access another user\'s album', async () => {
       const album = { ...makeAlbum({ addedById: 'other-user' }), items: [] };
       mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.mediaItem.findFirst.mockResolvedValue(null);
 
       const result = await service.getAlbum(album.id, 'user-1', anyPerms);
 
-      expect(result).toEqual(album);
+      expect(result).toEqual({ ...album, coverThumbnailUrl: null });
     });
   });
 
@@ -1258,6 +1415,98 @@ describe('MediaService', () => {
       await expect(
         service.updateAlbum(album.id, { name: 'hack' }, 'user-1', ownPerms),
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    // -----------------------------------------------------------------------
+    // coverMediaItemId (album cover pointer)
+    // -----------------------------------------------------------------------
+
+    it('sets the cover when coverMediaItemId is a member of the album', async () => {
+      const album = makeAlbum({ addedById: 'user-1' });
+      const mediaItemId = randomUUID();
+      const updated = { ...album, coverMediaItemId: mediaItemId };
+
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.albumItem.findFirst.mockResolvedValue({ id: 'album-item-1' } as any);
+      mockPrisma.album.update.mockResolvedValue(updated as any);
+
+      const result = await service.updateAlbum(
+        album.id,
+        { coverMediaItemId: mediaItemId },
+        'user-1',
+        ownPerms,
+      );
+
+      expect(mockPrisma.albumItem.findFirst).toHaveBeenCalledWith({
+        where: { albumId: album.id, mediaItemId },
+        select: { id: true },
+      });
+      expect(mockPrisma.album.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: album.id },
+          data: expect.objectContaining({ coverMediaItemId: mediaItemId }),
+        }),
+      );
+      expect(result.coverMediaItemId).toBe(mediaItemId);
+    });
+
+    it('throws BadRequestException when coverMediaItemId is not a member of the album', async () => {
+      const album = makeAlbum({ addedById: 'user-1' });
+      const mediaItemId = randomUUID();
+
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.albumItem.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.updateAlbum(
+          album.id,
+          { coverMediaItemId: mediaItemId },
+          'user-1',
+          ownPerms,
+        ),
+      ).rejects.toThrow(
+        new BadRequestException('Cover photo must be an item in this album'),
+      );
+      expect(mockPrisma.album.update).not.toHaveBeenCalled();
+    });
+
+    it('clears the cover when coverMediaItemId is null', async () => {
+      const album = makeAlbum({ addedById: 'user-1', coverMediaItemId: randomUUID() });
+      const updated = { ...album, coverMediaItemId: null };
+
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.album.update.mockResolvedValue(updated as any);
+
+      const result = await service.updateAlbum(
+        album.id,
+        { coverMediaItemId: null },
+        'user-1',
+        ownPerms,
+      );
+
+      // Member-check is skipped entirely when clearing the cover (null).
+      expect(mockPrisma.albumItem.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.album.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ coverMediaItemId: null }),
+        }),
+      );
+      expect(result.coverMediaItemId).toBeNull();
+    });
+
+    it('leaves the existing cover untouched when coverMediaItemId is omitted from the DTO', async () => {
+      const existingCoverId = randomUUID();
+      const album = makeAlbum({ addedById: 'user-1', coverMediaItemId: existingCoverId });
+      const updated = { ...album, name: 'Renamed' };
+
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.album.update.mockResolvedValue(updated as any);
+
+      await service.updateAlbum(album.id, { name: 'Renamed' }, 'user-1', ownPerms);
+
+      expect(mockPrisma.albumItem.findFirst).not.toHaveBeenCalled();
+      const [call] = (mockPrisma.album.update as jest.Mock).mock.calls;
+      expect(call[0].data).not.toHaveProperty('coverMediaItemId');
     });
   });
 
@@ -1612,6 +1861,19 @@ describe('MediaService', () => {
       await service.listLocations({ circleId: CIRCLE_ID, type: 'video' } as any, 'user-1', ownPerms);
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
       expect(call[0].where).toMatchObject({ type: 'video' });
+    });
+
+    it('AND-composes an albumItems filter when albumId is provided', async () => {
+      const albumId = randomUUID();
+      await service.listLocations({ circleId: CIRCLE_ID, albumId } as any, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({ albumItems: { some: { albumId } } });
+    });
+
+    it('does NOT add an albumItems filter when albumId is omitted', async () => {
+      await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).not.toHaveProperty('albumItems');
     });
 
     it('filters by capturedAt date range', async () => {

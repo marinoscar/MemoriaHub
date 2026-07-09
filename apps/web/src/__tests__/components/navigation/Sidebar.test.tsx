@@ -216,9 +216,9 @@ describe('Sidebar', () => {
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
       // Only items with visible: true should be rendered
-      // Non-admin: Photos, Explore, Map, Circles, People, Review Bursts, Review Duplicates, Location Suggestions, Archive, Trash, User Settings
+      // Non-admin: Photos, Explore, Map, Circles, Albums, People, Review Bursts, Review Duplicates, Location Suggestions, Archive, Trash, User Settings
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(menuButtons).toHaveLength(11);
+      expect(menuButtons).toHaveLength(12);
     });
 
     it('should show all menu items when user is admin', () => {
@@ -240,13 +240,13 @@ describe('Sidebar', () => {
       // After the settings refactor the admin section collapses from many individual links
       // to a single "Settings" hub entry (plus permission-gated items when hasPermission
       // is unconfigured/false, as in this test).
-      // Admin layout (no albums in test): Photos, Explore, Map, Circles,
-      //                                   People, Review Bursts, Review Duplicates, Location Suggestions,
-      //                                   Archive, Trash,
-      //                                   Settings (admin hub),
-      //                                   User Settings
+      // Admin layout: Photos, Explore, Map, Circles, Albums,
+      //               People, Review Bursts, Review Duplicates, Location Suggestions,
+      //               Archive, Trash,
+      //               Settings (admin hub),
+      //               User Settings
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(menuButtons).toHaveLength(12);
+      expect(menuButtons).toHaveLength(13);
     });
 
     it('should dynamically update menu items when isAdmin changes', () => {
@@ -584,7 +584,7 @@ describe('Sidebar', () => {
 
       // Settings(0) hub + 3 gated items + User Settings pinned at bottom
       const buttons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(buttons).toHaveLength(15);
+      expect(buttons).toHaveLength(16);
     });
   });
 
@@ -725,12 +725,12 @@ describe('Sidebar', () => {
         wrapperOptions: { user: mockAdminUser },
       });
 
-      // After the settings refactor, admin sees: Photos, Explore, Map, Circles,
+      // After the settings refactor, admin sees: Photos, Explore, Map, Circles, Albums,
       //   People, Review Bursts, Review Duplicates, Location Suggestions, Archive, Trash,
-      //   Settings (admin hub), User Settings — 12 total
+      //   Settings (admin hub), User Settings — 13 total
       // (hasPermission is unconfigured/false here, so no extra gated items render).
       const icons = container.querySelectorAll('.MuiListItemIcon-root');
-      expect(icons).toHaveLength(12);
+      expect(icons).toHaveLength(13);
     });
 
     it('should highlight icon for selected menu item', () => {
@@ -1004,6 +1004,57 @@ describe('Sidebar', () => {
       expect(libraryList!.textContent).not.toContain('Review Bursts');
       expect(libraryList!.textContent).not.toContain('Review Duplicates');
       expect(libraryList!.textContent).not.toContain('Location Suggestions');
+    });
+  });
+
+  describe('Albums Navigation', () => {
+    it('renders exactly one nav entry labeled "Albums" and no per-album rows', () => {
+      // The Sidebar collapsed from enumerating individual albums to a single
+      // static "Albums" nav entry — useAlbums is mocked with albums: [] above
+      // to prove the count doesn't come from (or vary with) real album data.
+      vi.mocked(usePermissions).mockReturnValue({
+        permissions: new Set(),
+        roles: new Set(),
+        hasPermission: vi.fn(),
+        hasAnyPermission: vi.fn(),
+        hasAllPermissions: vi.fn(),
+        hasRole: vi.fn(),
+        hasAnyRole: vi.fn(),
+        isAdmin: false,
+      });
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.getAllByText('Albums')).toHaveLength(1);
+
+      const albumsButton = screen
+        .getByText('Albums')
+        .closest('.MuiListItemButton-root') as HTMLElement;
+      expect(albumsButton).not.toBeNull();
+    });
+
+    it('navigates to /albums when the Albums item is clicked', async () => {
+      vi.mocked(usePermissions).mockReturnValue({
+        permissions: new Set(),
+        roles: new Set(),
+        hasPermission: vi.fn(),
+        hasAnyPermission: vi.fn(),
+        hasAllPermissions: vi.fn(),
+        hasRole: vi.fn(),
+        hasAnyRole: vi.fn(),
+        isAdmin: false,
+      });
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      const albumsButton = screen
+        .getByText('Albums')
+        .closest('.MuiListItemButton-root') as HTMLElement;
+      fireEvent.click(albumsButton);
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/albums');
+      });
     });
   });
 });

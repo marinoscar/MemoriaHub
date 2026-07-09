@@ -213,13 +213,21 @@ export interface ClusterResult {
 
 export async function listPeople(
   circleId: string,
-  opts?: { includeUnlabeled?: boolean; page?: number; pageSize?: number; hidden?: boolean },
+  opts?: {
+    includeUnlabeled?: boolean;
+    page?: number;
+    pageSize?: number;
+    hidden?: boolean;
+    /** Scope the people list to those appearing in a single album. */
+    albumId?: string;
+  },
 ): Promise<PersonListResponse> {
   const p = new URLSearchParams({ circleId });
   if (opts?.includeUnlabeled) p.set('includeUnlabeled', 'true');
   if (opts?.page) p.set('page', String(opts.page));
   if (opts?.pageSize) p.set('pageSize', String(opts.pageSize));
   if (opts?.hidden) p.set('hidden', 'true');
+  if (opts?.albumId) p.set('albumId', opts.albumId);
   return api.get<PersonListResponse>(`/people?${p.toString()}`);
 }
 

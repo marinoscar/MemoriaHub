@@ -196,6 +196,54 @@ describe('PeopleService', () => {
         mergedIntoId: null,
       });
     });
+
+    // -------------------------------------------------------------------------
+    // albumId (album membership scoping)
+    // -------------------------------------------------------------------------
+
+    it('filters by album membership via faces.some.mediaItem.albumItems when albumId is provided', async () => {
+      (mockPrisma.person.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.person.count as jest.Mock).mockResolvedValue(0);
+      const albumId = 'album-uuid-0001';
+
+      await service.listPeople(
+        { circleId: CIRCLE_ID, includeUnlabeled: false, albumId, page: 1, pageSize: 20 } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      const findManyCall = (mockPrisma.person.findMany as jest.Mock).mock.calls[0][0];
+      expect(findManyCall.where).toMatchObject({
+        faces: {
+          some: {
+            mediaItem: {
+              albumItems: { some: { albumId } },
+              deletedAt: null,
+              archivedAt: null,
+            },
+          },
+        },
+      });
+      // The identical where clause must also be used for the count query.
+      const countCall = (mockPrisma.person.count as jest.Mock).mock.calls[0][0];
+      expect(countCall.where).toMatchObject({
+        faces: { some: { mediaItem: { albumItems: { some: { albumId } } } } },
+      });
+    });
+
+    it('does NOT filter by album membership when albumId is omitted', async () => {
+      (mockPrisma.person.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.person.count as jest.Mock).mockResolvedValue(0);
+
+      await service.listPeople(
+        { circleId: CIRCLE_ID, includeUnlabeled: false, page: 1, pageSize: 20 } as any,
+        USER_ID,
+        PERMS,
+      );
+
+      const findManyCall = (mockPrisma.person.findMany as jest.Mock).mock.calls[0][0];
+      expect(findManyCall.where.faces).toBeUndefined();
+    });
   });
 
   // -------------------------------------------------------------------------

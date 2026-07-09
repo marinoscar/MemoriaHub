@@ -215,6 +215,14 @@ export interface Album {
   circleId: string;
   createdAt: string;
   updatedAt: string;
+  /** Media item chosen as the album cover; null when unset. */
+  coverMediaItemId?: string | null;
+  /** Signed thumbnail URL of the cover item (or fallback); null when none. */
+  coverThumbnailUrl?: string | null;
+  /** Number of media items in the album. */
+  itemCount?: number;
+  /** Earliest / latest capturedAt across the album's items; null when empty. */
+  dateRange?: { min: string; max: string } | null;
 }
 
 export interface AlbumListResponse {
@@ -243,6 +251,8 @@ export interface AlbumQueryParams {
 export interface UpdateAlbumDto {
   name?: string;
   description?: string | null;
+  /** UUID sets the album cover; null clears it. */
+  coverMediaItemId?: string | null;
 }
 
 export type AddAlbumItemsByFilterDto = Omit<

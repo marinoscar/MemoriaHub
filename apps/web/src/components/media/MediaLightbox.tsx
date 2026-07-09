@@ -40,6 +40,8 @@ import {
   Refresh as RefreshIcon,
   ChevronLeft,
   ChevronRight,
+  PlayArrow as PlayArrowIcon,
+  Pause as PauseIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import type { MediaItem } from '../../types/media';
@@ -76,7 +78,12 @@ interface MediaLightboxProps {
   onClose: () => void;
   onOpenProperties: (item: MediaItem) => void;
   onItemUpdated?: (updated: MediaItem) => void;
+  /** Start a slideshow (auto-advance) when the lightbox opens. Default false. */
+  autoPlay?: boolean;
 }
+
+/** Fixed slideshow interval in milliseconds. */
+const SLIDESHOW_INTERVAL_MS = 4000;
 
 // ---------------------------------------------------------------------------
 // Component
@@ -89,6 +96,7 @@ export function MediaLightbox({
   onClose,
   onOpenProperties,
   onItemUpdated,
+  autoPlay = false,
 }: MediaLightboxProps) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -103,6 +111,9 @@ export function MediaLightbox({
   const [zoomed, setZoomed] = useState(false);
   // Controls visibility — added in commit 4
   const [controlsVisible, setControlsVisible] = useState(true);
+  // Slideshow auto-advance state (seeded from autoPlay on each open)
+  const [playing, setPlaying] = useState(autoPlay);
+  const prevOpenRef = useRef(false);
 
   // Immich-style action bar surfaces
   const [shareAnchor, setShareAnchor] = useState<null | HTMLElement>(null);
@@ -278,14 +289,42 @@ export function MediaLightbox({
     }
   }, [item, refreshFullItem]);
 
-  // --- Keyboard navigation ---
+  // --- Slideshow: reset play state on open/close transitions only ---
+  // Seeds `playing` from autoPlay when the lightbox opens, and stops on close.
+  // Keyed on transitions (not every index change) so a manual pause sticks.
+  useEffect(() => {
+    const isOpen = index !== null;
+    if (isOpen && !prevOpenRef.current) {
+      setPlaying(autoPlay);
+    } else if (!isOpen && prevOpenRef.current) {
+      setPlaying(false);
+    }
+    prevOpenRef.current = isOpen;
+  }, [index, autoPlay]);
+
+  // --- Slideshow: auto-advance on a fixed interval while playing ---
+  // The timer is re-created on each index change, giving a fresh interval per
+  // slide. Loops back to the first item after the last. Cleaned up on unmount,
+  // close, pause, or index change.
+  useEffect(() => {
+    if (!playing || index === null || items.length < 2) return;
+    const timer = setTimeout(() => {
+      const next = index < items.length - 1 ? index + 1 : 0;
+      onIndexChange(next);
+    }, SLIDESHOW_INTERVAL_MS);
+    return () => clearTimeout(timer);
+  }, [playing, index, items.length, onIndexChange]);
+
+  // --- Keyboard navigation (manual nav pauses the slideshow) ---
   useEffect(() => {
     if (index === null) return;
 
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'ArrowLeft' && index > 0) {
+        setPlaying(false);
         onIndexChange(index - 1);
       } else if (e.key === 'ArrowRight' && index < items.length - 1) {
+        setPlaying(false);
         onIndexChange(index + 1);
       } else if (e.key === 'Escape') {
         onClose();
@@ -323,8 +362,10 @@ export function MediaLightbox({
     swipeRef.current.swiping = false;
     if (swiping && Math.abs(deltaX) > 50 && Math.abs(deltaX) > Math.abs(deltaY)) {
       if (deltaX > 0 && index !== null && index > 0) {
+        setPlaying(false);
         onIndexChange(index - 1);
       } else if (deltaX < 0 && index !== null && index < items.length - 1) {
+        setPlaying(false);
         onIndexChange(index + 1);
       }
     }
@@ -448,6 +489,19 @@ export function MediaLightbox({
             </Typography>
 
             <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+              {/* 0. Slideshow play/pause — only useful with more than one item */}
+              {items.length > 1 && (
+                <Tooltip title={playing ? 'Pause slideshow' : 'Play slideshow'}>
+                  <IconButton
+                    aria-label={playing ? 'Pause slideshow' : 'Play slideshow'}
+                    onClick={() => setPlaying((p) => !p)}
+                    sx={{ color: 'white', minWidth: 44, minHeight: 44 }}
+                  >
+                    {playing ? <PauseIcon /> : <PlayArrowIcon />}
+                  </IconButton>
+                </Tooltip>
+              )}
+
               {/* 1. Share */}
               <Tooltip title="Share publicly">
                 <IconButton
@@ -655,7 +709,10 @@ export function MediaLightbox({
           <IconButton
             aria-label="Previous photo"
             disabled={index === 0}
-            onClick={() => onIndexChange(index - 1)}
+            onClick={() => {
+              setPlaying(false);
+              onIndexChange(index - 1);
+            }}
             sx={{
               position: 'absolute',
               left: 8,
@@ -683,7 +740,10 @@ export function MediaLightbox({
           <IconButton
             aria-label="Next photo"
             disabled={index === items.length - 1}
-            onClick={() => onIndexChange(index + 1)}
+            onClick={() => {
+              setPlaying(false);
+              onIndexChange(index + 1);
+            }}
             sx={{
               position: 'absolute',
               right: 8,
