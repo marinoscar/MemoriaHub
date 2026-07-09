@@ -85,18 +85,6 @@ export const MENU_TREE: MenuSubmenu = {
       ],
     },
     {
-      // Convert is a fully offline local file operation — visible when logged out.
-      kind: 'submenu',
-      id: 'convert',
-      label: 'Convert videos to MP4',
-      loggedOut: true,
-      children: [
-        { kind: 'action', label: 'Convert a single file', action: 'convert-file', loggedOut: true },
-        { kind: 'action', label: 'Convert selected folder(s)', action: 'convert-select', loggedOut: true },
-        { kind: 'action', label: 'Convert all registered folders', action: 'convert-all', loggedOut: true },
-      ],
-    },
-    {
       kind: 'submenu',
       id: 'reports',
       label: 'Reports',
@@ -109,7 +97,6 @@ export const MENU_TREE: MenuSubmenu = {
       id: 'settings',
       label: 'Settings',
       children: [
-        { kind: 'action', label: 'Organize folder by date', action: 'organize', loggedOut: true },
         { kind: 'action', label: 'Manage folders', action: 'folders' },
         { kind: 'action', label: 'Manage circles', action: 'circles' },
         { kind: 'action', label: 'App settings', action: 'app-settings' },
@@ -122,10 +109,27 @@ export const MENU_TREE: MenuSubmenu = {
       ],
     },
     {
+      // Tools hosts offline file utilities (convert, organize) plus server tools
+      // (jobs, backup). It stays visible when logged out thanks to its offline
+      // children being loggedOut.
       kind: 'submenu',
       id: 'tools',
       label: 'Tools',
+      loggedOut: true,
       children: [
+        {
+          // Convert is a fully offline local file operation — visible when logged out.
+          kind: 'submenu',
+          id: 'convert',
+          label: 'Convert videos to MP4',
+          loggedOut: true,
+          children: [
+            { kind: 'action', label: 'Convert a single file', action: 'convert-file', loggedOut: true },
+            { kind: 'action', label: 'Convert selected folder(s)', action: 'convert-select', loggedOut: true },
+            { kind: 'action', label: 'Convert all registered folders', action: 'convert-all', loggedOut: true },
+          ],
+        },
+        { kind: 'action', label: 'Organize folder by date', action: 'organize', loggedOut: true },
         { kind: 'action', label: 'Job queue monitor', action: 'jobs' },
         { kind: 'action', label: 'Backup', action: 'backup' },
       ],

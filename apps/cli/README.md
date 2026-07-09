@@ -151,13 +151,18 @@ The root menu displays the ASCII banner, your connected server and account, the 
     App settings
     Factory reset (delete all local data)
   Tools ▸
+    Convert videos to MP4 ▸
+      Convert a single file
+      Convert selected folder(s)
+      Convert all registered folders
+    Organize folder by date
     Job queue monitor
     Backup
   Help
   Quit
 ```
 
-When not logged in, only Login, Settings ▸ (Factory reset only), Help, and Quit are shown.
+When not logged in, only Login, Scan ▸, Tools ▸ (Convert videos to MP4 and Organize folder by date — the offline utilities), Settings ▸ (Factory reset only), Help, and Quit are shown.
 
 Navigate with arrow keys and Enter — selecting a `▸` item descends one level into its submenu. Press `Esc` or `q` to go back one level (not all the way to the root). The ASCII banner and the connected-server/account identity box render only on the root menu; submenus instead show a breadcrumb trail, e.g. `Menu › Sync`. Every item in the menu is the interactive equivalent of a direct CLI command.
 
@@ -743,13 +748,13 @@ Photos/
 
 Files with no EXIF capture date are moved into a top-level `NODATE/` folder instead. **This currently includes every video** — the CLI does not probe video metadata for a capture date, so all video files land in `NODATE/` regardless of any date embedded in the container. This EXIF-only date read is specific to `organize`; unlike sync's [capture-date inference](#capture-date-inference), `organize` does not fall back to filesystem timestamps when EXIF is absent.
 
-GPS presence is read from EXIF using the same full-file read as the capture date. Since videos never have GPS extracted, a video with no capture date lands specifically in `NODATE/NO-GPS/`, as shown above. The organize summary now reports a **No GPS** count alongside the existing NODATE count, and this grouping — along with the No GPS count — is visible in the Settings ▸ Organize folder by date TUI screen (see [Interactive UI](#interactive-ui) below) too.
+GPS presence is read from EXIF using the same full-file read as the capture date. Since videos never have GPS extracted, a video with no capture date lands specifically in `NODATE/NO-GPS/`, as shown above. The organize summary now reports a **No GPS** count alongside the existing NODATE count, and this grouping — along with the No GPS count — is visible in the Tools ▸ Organize folder by date TUI screen (see [Interactive UI](#interactive-ui) below) too.
 
 `organize` is idempotent: files already sitting in their correct `YEAR/MM - Month/` (or `NODATE/`) bucket are skipped, so re-running the command after it has already organized a folder moves nothing. It is also non-destructive to data — if a move would collide with an existing file of different content at the destination, the CLI appends ` (1)`, ` (2)`, … to the filename rather than overwriting anything. Moves are cross-device safe: if a direct rename fails with `EXDEV` (source and destination are on different filesystems/mount points), the CLI falls back to a copy-then-delete.
 
 ### Interactive UI
 
-`organize` is also reachable from the interactive menu under **Settings ▸ Organize folder by date**. It runs a plan → confirm → execute flow: it first computes and shows the full plan (what would move, what would go to `NODATE/`), asks for a `y` confirmation before touching anything (since it moves files), and then executes with a live progress bar.
+`organize` is also reachable from the interactive menu under **Tools ▸ Organize folder by date**. It runs a plan → confirm → execute flow: it first computes and shows the full plan (what would move, what would go to `NODATE/`), asks for a `y` confirmation before touching anything (since it moves files), and then executes with a live progress bar.
 
 ---
 
@@ -820,7 +825,7 @@ If any files fail, `convert` shows the distinct error causes (grouped with count
 
 ### Interactive UI
 
-`convert` is also reachable from the interactive menu under **Convert videos to MP4 ▸**, which offers three modes:
+`convert` is also reachable from the interactive menu under **Tools ▸ Convert videos to MP4 ▸**, which offers three modes:
 
 - **Convert a single file** — type/paste a path to one video file.
 - **Convert selected folder(s)** — pick from your registered folders.
