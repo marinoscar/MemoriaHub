@@ -1,14 +1,16 @@
 /**
  * organize/organize-engine.ts — Event-driven OrganizeEngine.
  *
- * Walks one or more root folders, reads each photo's EXIF capture date (reading
- * the FULL file so a date buried deep inside is never missed), and MOVES each
- * file into a `YEAR/MM - Month/` sub-folder created inside that same root.
- * Files with no EXIF capture date — which includes every video, since the CLI
- * never probes video metadata — move into a top-level `NODATE/` folder. Within
- * each date bucket, files that have no EXIF GPS location are nested one level
- * deeper into a `NO-GPS/` sub-folder (applied uniformly, including under
- * `NODATE`), so the ones missing coordinates are grouped together.
+ * Walks one or more root folders, reads each file's capture date + GPS — photos
+ * via EXIF (reading the FULL file so a date buried deep inside is never missed),
+ * videos via an ffprobe probe of the container's creation date / ISO 6709
+ * location (see video-probe.ts) — and MOVES each file into a `YEAR/MM - Month/`
+ * sub-folder created inside that same root. Files with no resolvable capture
+ * date — photos without EXIF, and videos when ffprobe is unavailable or the
+ * container carries no date — move into a top-level `NODATE/` folder. Within
+ * each date bucket, files that have no GPS location are nested one level deeper
+ * into a `NO-GPS/` sub-folder (applied uniformly, including under `NODATE`), so
+ * the ones missing coordinates are grouped together.
  *
  * Fully offline and side-effect-free with respect to any server: it mirrors the
  * ScanEngine's structure (offline, UI-free, injected deps, typed events) rather

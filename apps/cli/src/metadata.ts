@@ -19,6 +19,7 @@
 import * as fs from 'node:fs';
 
 import type { MediaKind, CaptureDateSource } from './db/types.js';
+import { readVideoPlacement } from './video-probe.js';
 
 // exifr ships ES-module and CJS builds; use dynamic import so both resolve.
 type ExifrModule = {
@@ -270,14 +271,16 @@ export async function readExifCaptureDate(
  * `organize` command's GPS-aware bucketing.
  *
  * Returns the raw `Date` (not an ISO string) so the caller can bucket by the
- * naive local wall-clock date, plus a boolean indicating whether EXIF supplied
- * usable numeric latitude AND longitude.
+ * naive local wall-clock date, plus a boolean indicating whether the file
+ * supplied a usable location.
  *
- * Videos always resolve to `{ capturedAt: null, hasGps: false }` (the CLI never
- * probes video metadata), matching readExifCaptureDate.
+ * Videos are probed via ffprobe (see video-probe.ts) for their container
+ * creation date and ISO 6709 location, since exifr cannot read QuickTime/MP4
+ * metadata. When ffprobe is unavailable, videos resolve to
+ * `{ capturedAt: null, hasGps: false }` (the legacy NODATE behavior).
  *
  * When `opts.full` is true, exifr reads the ENTIRE file (`chunked: false`) so a
- * date or GPS tag buried deep in the file is never missed.
+ * date or GPS tag buried deep in a PHOTO is never missed (no effect on videos).
  *
  * Never throws: any parse failure or genuine I/O error resolves to
  * `{ capturedAt: null, hasGps: false }`.
@@ -291,9 +294,9 @@ export async function readExifPlacement(
   mimeType: string,
   opts?: { full?: boolean },
 ): Promise<{ capturedAt: Date | null; hasGps: boolean }> {
-  // Videos: no EXIF probe — no date, no GPS.
+  // Videos: probe the container via ffprobe (exifr can't read MP4/QuickTime).
   if (mimeType.startsWith('video/')) {
-    return { capturedAt: null, hasGps: false };
+    return readVideoPlacement(filePath);
   }
 
   try {
