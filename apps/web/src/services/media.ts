@@ -283,6 +283,27 @@ export async function bulkArchive(dto: BulkArchiveDto): Promise<{ archived: numb
   return api.patch<{ archived: number }>('/media/bulk/archive', dto);
 }
 
+// ---------------------------------------------------------------------------
+// Bulk enrichment reruns (thumbnails / faces / AI tagging)
+// ---------------------------------------------------------------------------
+
+export interface BulkRerunDto {
+  circleId: string;
+  ids: string[];
+}
+
+export async function bulkRerunTags(dto: BulkRerunDto): Promise<{ queued: number }> {
+  return api.post<{ queued: number }>('/media/bulk/tags/rerun', dto);
+}
+
+export async function bulkRerunFaces(dto: BulkRerunDto): Promise<{ queued: number }> {
+  return api.post<{ queued: number }>('/media/bulk/faces/rerun', dto);
+}
+
+export async function bulkRerunThumbnails(dto: BulkRerunDto): Promise<{ queued: number }> {
+  return api.post<{ queued: number }>('/media/bulk/thumbnail/rerun', dto);
+}
+
 export async function bulkUnarchive(dto: BulkArchiveDto): Promise<{ unarchived: number }> {
   return api.patch<{ unarchived: number }>('/media/bulk/unarchive', dto);
 }

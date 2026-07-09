@@ -24,6 +24,7 @@ import { ThumbnailRepairTask } from './thumbnail-repair.task';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaEnrichmentEnqueueListener } from './enrichment/media-enrichment-enqueue.listener';
 import { MediaThumbnailService } from './media-thumbnail.service';
+import { ThumbnailRegenHandler } from './thumbnail-regen.handler';
 
 /**
  * MediaModule
@@ -92,6 +93,7 @@ import { MediaThumbnailService } from './media-thumbnail.service';
     MediaEnrichmentEnqueueListener,
     MediaThumbnailService,
     MediaOrientationEditService,
+    ThumbnailRegenHandler,
   ],
   exports: [MediaService, MediaReprocessService, MediaMetadataSyncService, MediaEnrichmentService, MediaThumbnailService],
 })
