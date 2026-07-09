@@ -122,6 +122,11 @@ export function SyncDashboard({
     exportError: null,
   });
 
+  // Bumping this re-runs the engine effect. nonce 0 is the initial pass (honours
+  // the `retryFailedOnly` prop); any nonce > 0 is a user-triggered retry pass,
+  // which always runs in retryFailedOnly mode and re-queues the failed files.
+  const [runNonce, setRunNonce] = useState(0);
+
   // Collector that builds the Excel run report (real runs only, not test engine).
   const collectorRef = useRef<SyncReportCollector | null>(null);
 
@@ -131,6 +136,9 @@ export function SyncDashboard({
   const throttleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Auto-clears the rate-limit indicator once a cooldown window elapses.
   const rateLimitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Whether the pending retry pass should also reset+retry files blocked at the
+  // attempts cap (the `f` key). Read by the engine effect for the next pass.
+  const forceRetryRef = useRef(false);
 
   const flushProgress = useCallback(() => {
     if (pendingCounts.current === null) return;
@@ -139,6 +147,37 @@ export function SyncDashboard({
     pendingCounts.current = null;
     throttleTimer.current = null;
     setState((prev) => ({ ...prev, counts, total }));
+  }, []);
+
+  // Reset the run view and kick off a fresh retry pass in-place. Bumping
+  // runNonce re-runs the engine effect below (which forces retryFailedOnly mode
+  // for any nonce > 0). Clearing the throttle timer avoids a stale flush leaking
+  // the previous pass's counts into the new run.
+  const startRetry = useCallback((force = false) => {
+    forceRetryRef.current = force;
+    if (throttleTimer.current) {
+      clearTimeout(throttleTimer.current);
+      throttleTimer.current = null;
+    }
+    pendingCounts.current = null;
+    setState((prev) => ({
+      ...prev,
+      counts: EMPTY_COUNTS,
+      total: 0,
+      activeFiles: [],
+      logEvents: [],
+      failures: [],
+      isDone: false,
+      runId: 0,
+      doneStats: null,
+      durationMs: 0,
+      errorMsg: null,
+      throttleDelayMs: null,
+      exporting: false,
+      exportPath: null,
+      exportError: null,
+    }));
+    setRunNonce((n) => n + 1);
   }, []);
 
   useInput((_input, key) => {
@@ -322,15 +361,23 @@ export function SyncDashboard({
 
     // Kick off the run only when not using an injected test engine.
     // (Test engines have their run() called externally.)
+    // nonce 0 = initial pass (honours the prop); nonce > 0 = user retry pass,
+    // which always re-queues and retries the failed files for the same scope.
+    const isRetryPass = runNonce > 0 ? true : (retryFailedOnly ?? false);
     if (!_engineForTesting) {
       engine.run({
-        trigger: retryFailedOnly ? 'retry' : 'menu',
+        trigger: isRetryPass ? 'retry' : 'menu',
         all: all ?? false,
         folderIds: folderIds ?? [],
-        retryFailedOnly: retryFailedOnly ?? false,
+        retryFailedOnly: isRetryPass,
+        // Force only applies to a user-triggered retry pass; it resets files
+        // blocked at the attempts cap so they are tried again.
+        force: isRetryPass ? forceRetryRef.current : false,
         circleId: config.activeCircleId,
-        fromMs,
-        toMs,
+        // A retry pass re-queues failed files by status; the date filter only
+        // applies to the initial filesystem-enumeration pass.
+        fromMs: isRetryPass ? undefined : fromMs,
+        toMs: isRetryPass ? undefined : toMs,
       }).catch(() => {
         // Fatal errors emitted via EV.ERROR already
       });
@@ -341,7 +388,7 @@ export function SyncDashboard({
       if (rateLimitTimer.current) clearTimeout(rateLimitTimer.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [runNonce]);
 
   const { counts, total, activeFiles, logEvents, failures, isDone, doneStats, durationMs, runId, errorMsg, throttleDelayMs, exporting, exportPath, exportError } = state;
 
@@ -368,10 +415,7 @@ export function SyncDashboard({
         exportPath={exportPath}
         exportError={exportError}
         onHome={onHome}
-        onRetry={() => {
-          // Re-navigate: just go home and let user pick "retry failed"
-          onHome();
-        }}
+        onRetry={startRetry}
       />
     );
   }
@@ -384,7 +428,7 @@ export function SyncDashboard({
     ? (new FolderRepo(db).list({ enabledOnly: true }).length)
     : (folderIds?.length ?? 0);
 
-  const dashboardTitle = retryFailedOnly ? 'Retry' : 'Sync';
+  const dashboardTitle = retryFailedOnly || runNonce > 0 ? 'Retry' : 'Sync';
 
   const hasDateFilter = fromMs != null || toMs != null;
 

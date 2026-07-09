@@ -2,7 +2,7 @@
  * tui/components/Summary.tsx — Post-run summary shown after run:done.
  *
  * Displays uploaded/skipped/failed counts, duration, failures list.
- * Keys: Enter → home, r → retry failed.
+ * Keys: Enter → home, r → retry failed, f → force retry (reset attempt cap).
  */
 
 import React from 'react';
@@ -30,7 +30,8 @@ interface SummaryProps {
   exportPath?: string | null;
   exportError?: string | null;
   onHome: () => void;
-  onRetry: () => void;
+  /** Retry failed uploads; `force` also resets files blocked at the attempts cap. */
+  onRetry: (force?: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,7 +64,8 @@ export function Summary({
 }: SummaryProps): React.ReactElement {
   useInput((input, key) => {
     if (key.return || input === 'q') onHome();
-    if (input === 'r' && failures.length > 0) onRetry();
+    if (input === 'r' && failures.length > 0) onRetry(false);
+    if (input === 'f' && failures.length > 0) onRetry(true);
   });
 
   const secs = (durationMs / 1000).toFixed(1);
@@ -133,7 +135,8 @@ export function Summary({
       {/* Key hints */}
       <Box flexDirection="row" gap={3} paddingLeft={1}>
         <Text dimColor>[Enter/q] back to home</Text>
-        {failures.length > 0 && <Text dimColor>[r] retry failed</Text>}
+        {failures.length > 0 && <Text color="yellow">[r] retry failed</Text>}
+        {failures.length > 0 && <Text dimColor>[f] force retry (reset attempt cap)</Text>}
       </Box>
     </Box>
   );
