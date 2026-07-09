@@ -453,6 +453,54 @@ export class MediaController {
   }
 
   /**
+   * POST /api/media/bulk/tags/rerun
+   * Bulk re-enqueue auto-tagging for a selection of media items.
+   */
+  @Post('bulk/tags/rerun')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Bulk re-run auto-tagging on selected media items' })
+  @ApiResponse({ status: 200, description: '{ queued: number }' })
+  async bulkRerunTags(
+    @Body() dto: BulkArchiveDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.bulkRerunTags(dto, user.id, user.permissions);
+  }
+
+  /**
+   * POST /api/media/bulk/faces/rerun
+   * Bulk re-enqueue face detection for a selection of media items.
+   */
+  @Post('bulk/faces/rerun')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Bulk re-run face detection on selected media items' })
+  @ApiResponse({ status: 200, description: '{ queued: number }' })
+  async bulkRerunFaces(
+    @Body() dto: BulkArchiveDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.bulkRerunFaces(dto, user.id, user.permissions);
+  }
+
+  /**
+   * POST /api/media/bulk/thumbnail/rerun
+   * Bulk re-enqueue thumbnail regeneration for a selection of media items.
+   */
+  @Post('bulk/thumbnail/rerun')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Bulk re-run thumbnail generation on selected media items' })
+  @ApiResponse({ status: 200, description: '{ queued: number }' })
+  async bulkRerunThumbnails(
+    @Body() dto: BulkArchiveDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.bulkRerunThumbnails(dto, user.id, user.permissions);
+  }
+
+  /**
    * GET /api/media/archived
    * List archived media items for a circle (paginated).
    */

@@ -1687,6 +1687,82 @@ export class MediaService {
     return { unarchived: count };
   }
 
+  // ---------------------------------------------------------------------------
+  // Selection-scoped bulk enrichment reruns
+  //
+  // Each verifies circle collaborator access + that every id is a live member of
+  // the circle (assertAllInCircle), then delegates per-item to the shared
+  // MediaEnrichmentService rerun helpers so enqueue+status-upsert logic is not
+  // duplicated from the single-item rerun controllers. Enqueue is idempotent
+  // (dedups pending/running per (type, mediaItemId)), so the loop is safe.
+  // ---------------------------------------------------------------------------
+
+  async bulkRerunTags(
+    dto: BulkArchiveDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ queued: number }> {
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
+
+    const uniqueIds = [...new Set(dto.ids)];
+    let queued = 0;
+    for (const id of uniqueIds) {
+      await this.mediaEnrichmentService.enqueueTagRerun({ id, circleId: dto.circleId });
+      queued++;
+    }
+
+    this.logger.log(`bulkRerunTags: queued ${queued} auto_tagging reruns in circle ${dto.circleId} by user ${userId}`);
+    return { queued };
+  }
+
+  async bulkRerunFaces(
+    dto: BulkArchiveDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ queued: number }> {
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
+
+    const uniqueIds = [...new Set(dto.ids)];
+
+    // Face detection routes on media type (photo → face_detection, video →
+    // video_face_detection), so fetch each item's type.
+    const items = await this.prisma.mediaItem.findMany({
+      where: { id: { in: uniqueIds }, circleId: dto.circleId, deletedAt: null },
+      select: { id: true, type: true },
+    });
+
+    let queued = 0;
+    for (const item of items) {
+      await this.mediaEnrichmentService.enqueueFaceRerun({
+        id: item.id,
+        type: item.type,
+        circleId: dto.circleId,
+      });
+      queued++;
+    }
+
+    this.logger.log(`bulkRerunFaces: queued ${queued} face detection reruns in circle ${dto.circleId} by user ${userId}`);
+    return { queued };
+  }
+
+  async bulkRerunThumbnails(
+    dto: BulkArchiveDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ queued: number }> {
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
+
+    const uniqueIds = [...new Set(dto.ids)];
+    let queued = 0;
+    for (const id of uniqueIds) {
+      await this.mediaEnrichmentService.enqueueThumbnailRerun({ id, circleId: dto.circleId });
+      queued++;
+    }
+
+    this.logger.log(`bulkRerunThumbnails: queued ${queued} thumbnail_regen jobs in circle ${dto.circleId} by user ${userId}`);
+    return { queued };
+  }
+
   async listArchived(query: ListArchivedQueryDto, userId: string, userPermissions: string[]) {
     const { circleId, page, pageSize } = query;
     const skip = (page - 1) * pageSize;
