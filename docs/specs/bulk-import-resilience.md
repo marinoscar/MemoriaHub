@@ -12,7 +12,7 @@ A "bulk import" session can run for hours or days. The system must survive these
 
 | Failure mode | Without resilience | With resilience |
 |---|---|---|
-| API process OOM-killed or restarted mid-job | Enrichment jobs stuck in `running` forever | Auto-reset by stuck-job cron within 10 minutes |
+| API process OOM-killed or restarted mid-job | Enrichment jobs stuck in `running` forever | Auto-reset by stuck-job cron within `jobs.stuckThresholdMinutes` (system setting, default 3 min) |
 | API process OOM-killed or restarted mid-upload processing (content-hash/exif/dimensions/video-probe/geocode/thumbnail/visual-hash) | `StorageObject` stuck at `status='processing'` forever — no thumbnail, dimensions, or EXIF ever generated for that photo/video, and no existing recovery path touches it | Auto-recovered by `StorageProcessingRecoveryTask` within `STORAGE_PROCESSING_STUCK_MINUTES` (default 10 min), capped at `STORAGE_PROCESSING_MAX_RETRIES` attempts |
 | Provider rate limit (429 / 529 / `OVER_QUERY_LIMIT`) | Job retried as normal error, or silently marked processed with no data | Job deferred on separate `rateLimitHits` counter; provider gate backs off sibling jobs |
 | Geocode provider quota | `null` return → job marked `processed` with no geo data; no retry | Provider throws `RateLimitError` → job deferred; status stays `pending` until retry succeeds |
@@ -53,11 +53,11 @@ Jobs are claimed atomically inside a Prisma `$transaction` (`findFirst` + `updat
 
 When the API process is OOM-killed or restarted, any job that was `running` at that moment has no worker to complete it. It stays `running` indefinitely unless something resets it.
 
-`EnrichmentStuckResetTask` runs every 10 minutes via `@Cron(EVERY_10_MINUTES)`. It resets jobs that have been in `running` state for longer than `ENRICHMENT_STUCK_MINUTES` back to `pending`, so the worker can re-claim them on the next tick.
+`EnrichmentStuckResetTask` runs every 10 minutes via `@Cron(EVERY_10_MINUTES)`. It resets jobs that have been in `running` state (including zombie rows where `startedAt` was never stamped, aged by `createdAt` instead) for longer than the threshold back to `pending`, so the worker can re-claim them on the next tick.
 
-The task is gated on `ENRICHMENT_WORKER_ENABLED !== 'false'` so non-worker instances (web-only replicas, read replicas) do not interfere. It delegates to `EnrichmentAdminService.resetStuck(minutes)` — the same implementation used by `POST /api/admin/jobs/reset-stuck`.
+The task is gated on `ENRICHMENT_WORKER_ENABLED !== 'false'` so non-worker instances (web-only replicas, read replicas) do not interfere. It delegates to `EnrichmentAdminService.resetStuck()` with no argument — the same implementation used by `POST /api/admin/jobs/reset-stuck` when its `olderThanMinutes` body field is omitted — so the cron, the stats `stuckRunning` count, and the manual reset endpoint always agree on one threshold.
 
-`ENRICHMENT_STUCK_MINUTES` must be set to a value greater than the longest expected single-job runtime. The default of 15 minutes is conservative enough for most AI tagging and geocoding calls.
+The threshold is the `jobs.stuckThresholdMinutes` **system setting** (integer, 1–120, default **3** minutes), runtime-editable in Admin Settings without a restart. It falls back to the legacy `ENRICHMENT_STUCK_MINUTES` env var (clamped to 120) only to compute the setting's default the first time it is resolved; once an explicit value exists in the database, the env var has no further effect. Whatever value is in force must exceed the longest expected single-job runtime — set too low, a legitimately-still-running job is reset to `pending` and can be re-claimed and run a second time concurrently with the original.
 
 ### Enrichment environment variable reference
 
@@ -72,7 +72,7 @@ The task is gated on `ENRICHMENT_WORKER_ENABLED !== 'false'` so non-worker insta
 | `ENRICHMENT_RATELIMIT_BASE_MS` | `30000` | Base backoff for rate-limit deferrals |
 | `ENRICHMENT_RATELIMIT_MAX_MS` | `900000` | Max backoff cap for rate-limit deferrals (15 min) |
 | `ENRICHMENT_RATELIMIT_MAX_HITS` | `10` | Max rate-limit deferrals before permanent failure |
-| `ENRICHMENT_STUCK_MINUTES` | `15` | Threshold (minutes) for stuck-job auto-reset; must exceed the longest expected single-job runtime |
+| `ENRICHMENT_STUCK_MINUTES` | _(unset)_ | **Legacy fallback only.** The stuck-job threshold is now the runtime `jobs.stuckThresholdMinutes` system setting (1–120, default 3 min), editable in Admin Settings; this env var seeds that setting's default (clamped to 120) only until an explicit value is saved. Must exceed the longest expected single-job runtime. |
 
 ### Stuck StorageObject auto-reset cron (new — `StorageProcessingRecoveryTask`)
 
@@ -228,9 +228,9 @@ Runs before every `sync` or `retry` command:
 
 ### After an OOM kill or process restart
 
-Enrichment jobs left in `running` state are auto-reset within 10 minutes by `EnrichmentStuckResetTask`. No manual action is required for typical restarts.
+Enrichment jobs left in `running` state — including zombie rows whose `startedAt` was never stamped — are auto-reset within the configured `jobs.stuckThresholdMinutes` (default 3 min) by `EnrichmentStuckResetTask`. No manual action is required for typical restarts.
 
-For immediate recovery: `POST /api/admin/jobs/reset-stuck` with optional body `{ olderThanMinutes: 5 }`.
+For immediate recovery: `POST /api/admin/jobs/reset-stuck` with no body (uses the configured threshold) or an explicit `{ olderThanMinutes: 5 }` override.
 
 After recovery the worker re-claims and reprocesses the jobs. Handlers are not checkpointed mid-run, so any partial work inside a handler (e.g. a half-written embedding) is retried from the beginning.
 

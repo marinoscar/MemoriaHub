@@ -405,7 +405,7 @@ Unknown handler types fail immediately without retry. This prevents an infinite 
 
 Each `handler.process(job)` call is raced against an active timeout controlled by `ENRICHMENT_JOB_TIMEOUT_MS` (default `600000`, i.e. 10 minutes; `0` disables it). If the handler runs longer than this budget, the worker abandons the wait: the timeout rejects with a plain `Error` (`enrichment job execution timed out after <ms>ms (type="...")`), which — being neither a `RateLimitError` nor a `classifyRateLimit` match — flows through the **normal-failure retry path** exactly like any other thrown error: `attempts++`, exponential backoff via `scheduledFor`, retry while `attempts < MAX_ATTEMPTS`, then permanent `failed` with the timeout message as `lastError`.
 
-The point of the active timeout is that the worker slot is **freed immediately** when the timeout fires. Before this, a hung handler call blocked the worker indefinitely — at `ENRICHMENT_WORKER_CONCURRENCY=1` a single hang stalled the entire queue, and recovery depended solely on the `EnrichmentStuckResetTask` cron (runs every 10 min, resets jobs `running` past the 15-min `ENRICHMENT_STUCK_MINUTES` threshold), a ≈25-minute worst case. With the active timeout, one hang no longer stalls the queue: the tick completes, the slot is released, and the next tick claims the following job.
+The point of the active timeout is that the worker slot is **freed immediately** when the timeout fires. Before this, a hung handler call blocked the worker indefinitely — at `ENRICHMENT_WORKER_CONCURRENCY=1` a single hang stalled the entire queue, and recovery depended solely on the `EnrichmentStuckResetTask` cron (runs every 10 min, resets jobs `running` past the stuck threshold — see [Section 11 — Stuck Threshold](#stuck-threshold-settings-driven), currently a settings-driven value defaulting to 3 minutes), up to a ≈13-minute worst case at the current default. With the active timeout, one hang no longer stalls the queue: the tick completes, the slot is released, and the next tick claims the following job.
 
 Two caveats follow from JavaScript's execution model:
 
@@ -478,13 +478,17 @@ Enrichment is entirely server-side. Clients (CLI, web, Android) never call `Enri
 
 The `/admin/jobs` page provides full visibility and control over the queue. All endpoints require Admin role.
 
-### EnrichmentAdminService Constants
+### Stuck Threshold (Settings-Driven)
 
-```typescript
-const STUCK_RUNNING_MINUTES = 10;
-```
+The stuck threshold is no longer a hard-coded constant. `EnrichmentAdminService.getStuckThresholdMinutes()` resolves it from the `jobs.stuckThresholdMinutes` system setting (integer, 1–120, default **3** minutes; falls back to the legacy `ENRICHMENT_STUCK_MINUTES` env var, clamped to 120, when the setting is unset — see `defaultStuckThresholdMinutes()` in `apps/api/src/common/types/settings.types.ts`). Runtime-editable in Admin Settings (`StorageSettings.tsx`, jobs section, next to job history retention) — no restart required.
 
-A job is considered "stuck" if its `status` is `running` and `startedAt` is older than 10 minutes (or the value passed to `reset-stuck`).
+This single resolved value now feeds **all three** stuck-job consumers, which previously disagreed (a hard-coded 10 minutes in the stats query and reset endpoint vs. a 15-minute `ENRICHMENT_STUCK_MINUTES` default in the cron):
+
+- `GET /api/admin/jobs/stats` `stuckRunning` count
+- `POST /api/admin/jobs/reset-stuck` default (when `olderThanMinutes` is omitted)
+- The `EnrichmentStuckResetTask` cron (its own env parsing was removed in favor of calling `resetStuck()` with no argument)
+
+A job is considered "stuck" if its `status` is `running` and either `startedAt` is older than the threshold, **or** `startedAt IS NULL` and `createdAt` is older than the threshold (see "Zombie rows" below).
 
 ### Stats
 
@@ -500,12 +504,17 @@ A job is considered "stuck" if its `status` is `running` and `startedAt` is olde
     failed: number;
   };
   byType: JobStatsByType[];   // per-type breakdown
-  stuckRunning: number;       // jobs running > STUCK_RUNNING_MINUTES
+  stuckRunning: number;       // jobs running past stuckThresholdMinutes (incl. startedAt=null zombies)
+  stuckThresholdMinutes: number; // effective threshold used for stuckRunning (settings-driven)
   scheduled: number;          // pending jobs with scheduledFor > now (backed off)
 }
 ```
 
-The `scheduled` count lets operators distinguish jobs actively waiting in the queue (`pending` with null or past `scheduledFor`) from jobs that are temporarily deferred due to a failure or rate-limit backoff. The `/admin/jobs` frontend surfaces this as a "Scheduled (backing off)" stat tile.
+The `scheduled` count lets operators distinguish jobs actively waiting in the queue (`pending` with null or past `scheduledFor`) from jobs that are temporarily deferred due to a failure or rate-limit backoff. The `/admin/jobs` frontend surfaces this as a "Scheduled (backing off)" stat tile. The `stuckThresholdMinutes` field lets the frontend render the "Reset stuck" button's label dynamically (e.g. "Reset stuck (>3 min)") instead of hard-coding a number that could drift from the actual configured setting.
+
+### Zombie Rows (`startedAt IS NULL`)
+
+A running job whose `startedAt` was never stamped — the claim write landed but the follow-up stamp was lost (process death between claim and stamp, or a lost write) — was previously invisible to `stuckRunning`, the reset endpoint, and the cron, because all three compared against `startedAt` and a SQL comparison against `NULL` is never true. These rows were stuck permanently: `retry`/`delete` refuse rows in `running` status, and a null-`startedAt` running row for a singleton job type also blocked new enqueues via the pending/running dedup check. The shared where-clause (`EnrichmentAdminService.stuckRunningWhere`) now includes an explicit `OR: [{ startedAt: null, createdAt: { lt: threshold } }]` branch, aged by `createdAt` instead, so these zombie rows are counted in `stuckRunning` and recoverable via both the reset endpoint and the cron.
 
 ### Job List
 
@@ -537,7 +546,7 @@ The `/admin/jobs` dashboard surfaces a per-row "backing off" badge when `schedul
 | Endpoint | Permission | Behavior |
 |----------|------------|---------|
 | `POST /api/admin/jobs/retry-failed` | `jobs:write` | `updateMany` all `failed` jobs to `pending`. Optional body `{ type }` to scope by job type. |
-| `POST /api/admin/jobs/reset-stuck` | `jobs:write` | `updateMany` all `running` jobs with `startedAt` older than `olderThanMinutes` (default 10) back to `pending`. |
+| `POST /api/admin/jobs/reset-stuck` | `jobs:write` | `updateMany` all stuck `running` jobs (incl. `startedAt IS NULL` zombies, aged by `createdAt`) back to `pending`, clearing `startedAt` and `scheduledFor`. `olderThanMinutes` in the request body is now optional with no hard-coded default — when omitted, the `jobs.stuckThresholdMinutes` system setting (default 3 minutes) is used. |
 
 ---
 
@@ -732,7 +741,7 @@ No dashboard code changes are needed.
 | `ENRICHMENT_WORKER_CONCURRENCY` | `'1'` | Worker-pool size — the number of long-lived worker loops, fixed at startup. Each loop independently claims and processes one job at a time; there is no batch barrier, so a slow/hung job only stalls its own slot. Raise for throughput; the per-provider throttle gate keeps higher values 429-safe. Memory scales with this value (each concurrent job buffers a decoded image). See [Section 8 — Concurrency (Pool Size)](#concurrency-pool-size). |
 | `FACE_WORKER_CONCURRENCY` | `'1'` | Legacy alias for `ENRICHMENT_WORKER_CONCURRENCY`. |
 | `ENRICHMENT_JOB_TIMEOUT_MS` | `600000` | Active per-job execution timeout (ms). A handler running longer is aborted, its worker slot freed, and the job routed through the normal-failure retry path (`attempts++`, backoff, permanent-fail after `ENRICHMENT_MAX_ATTEMPTS`). `0` disables. Must exceed the longest legitimate single-job runtime. See [Section 8 — Active Per-Job Timeout](#active-per-job-timeout). |
-| `ENRICHMENT_STUCK_MINUTES` | `15` | Age (minutes) a job may sit in `running` before the `EnrichmentStuckResetTask` cron (runs every 10 min) resets it to `pending`. This is a CRASH backstop only — live handler hangs are handled by `ENRICHMENT_JOB_TIMEOUT_MS`. Must exceed the longest legitimate single-job runtime. |
+| `ENRICHMENT_STUCK_MINUTES` | _(unset)_ | **Legacy fallback only.** The stuck threshold is now a runtime System Setting, `jobs.stuckThresholdMinutes` (integer, 1–120, default **3** minutes), editable in Admin Settings without a restart — see [Section 11 — Stuck Threshold (Settings-Driven)](#stuck-threshold-settings-driven). This env var is consulted only to compute the setting's *default* the first time it is read (`defaultStuckThresholdMinutes()`), clamped to 120; once the setting has an explicit value in the database, this env var has no further effect. This is a CRASH backstop only — live handler hangs are handled by `ENRICHMENT_JOB_TIMEOUT_MS`. The effective threshold must exceed the longest legitimate single-job runtime, or long-running-but-legitimate jobs get reset to `pending` and may be picked up and run a second time concurrently with the still-running original. |
 
 ### Normal-failure retry
 
@@ -762,7 +771,7 @@ All worker configuration in this section is set via environment variables (in `i
 
 | Profile | Settings |
 |---------|----------|
-| **Large backfill, capable host** | `ENRICHMENT_WORKER_CONCURRENCY=4`, `ENRICHMENT_JOB_TIMEOUT_MS=150000` (~2.5 min), `ENRICHMENT_STUCK_MINUTES=5` |
+| **Large backfill, capable host** | `ENRICHMENT_WORKER_CONCURRENCY=4`, `ENRICHMENT_JOB_TIMEOUT_MS=150000` (~2.5 min), `jobs.stuckThresholdMinutes` raised via Admin Settings if handlers legitimately run longer than the 3-minute default |
 | **Memory-constrained VPS (≈1 GB)** | Keep `ENRICHMENT_WORKER_CONCURRENCY=1–2`; lower `TAG_MAX_IMAGE_DIM`/`FACE_MAX_IMAGE_DIM` to 768–1024; set `NODE_OPTIONS=--max-old-space-size=512`; raise `ENRICHMENT_RATELIMIT_MAX_HITS`/`ENRICHMENT_RATELIMIT_MAX_MS` for very long runs whose provider quota window takes hours to recover |
 | **Fast, isolated run** | Higher concurrency (e.g. 4–8) if the host has ample RAM/CPU and the configured providers tolerate it |
 
@@ -770,7 +779,7 @@ All worker configuration in this section is set via environment variables (in `i
 
 **On-demand control (no restart required):**
 
-- `POST /api/admin/jobs/reset-stuck` body `{ olderThanMinutes }` — immediately frees stuck running jobs.
+- `POST /api/admin/jobs/reset-stuck` body `{ olderThanMinutes? }` — immediately frees stuck running jobs; omit `olderThanMinutes` to use the configured `jobs.stuckThresholdMinutes` setting.
 - `POST /api/admin/jobs/retry-failed` (optional body `{ type }`) — requeues failed jobs.
 - `GET /api/admin/jobs/stats` and `GET /api/admin/jobs/insights` — monitor live counts and ETA.
 
@@ -784,7 +793,11 @@ For the full provider rate-limit classification matrix and OOM/crash recovery ru
 
 ## 14. Operational Notes
 
-**Stuck-running recovery.** If the worker process crashes or the container restarts while a job is in `running` status, that job will never transition out of `running` on its own. This is the crash backstop that the automatic `EnrichmentStuckResetTask` cron and the manual `POST /api/admin/jobs/reset-stuck { olderThanMinutes: 10 }` endpoint exist for — both return stale running jobs to `pending`. Note this is distinct from a handler that *hangs* while the worker is still alive: that case is now handled promptly by the active per-job timeout (`ENRICHMENT_JOB_TIMEOUT_MS`, see [Section 8 — Active Per-Job Timeout](#active-per-job-timeout)), which frees the slot without waiting for the stuck-reset cron. The stuck-reset path only covers rows orphaned by a dead worker process. The default 10-minute threshold is conservative; adjust `olderThanMinutes` if your handlers are expected to take longer.
+**Stuck-running recovery.** If the worker process crashes or the container restarts while a job is in `running` status, that job will never transition out of `running` on its own. This is the crash backstop that the automatic `EnrichmentStuckResetTask` cron and the manual `POST /api/admin/jobs/reset-stuck` endpoint exist for — both return stale running jobs to `pending`, resolving the threshold from the `jobs.stuckThresholdMinutes` system setting (default 3 minutes) when no explicit `olderThanMinutes` is given. Note this is distinct from a handler that *hangs* while the worker is still alive: that case is now handled promptly by the active per-job timeout (`ENRICHMENT_JOB_TIMEOUT_MS`, see [Section 8 — Active Per-Job Timeout](#active-per-job-timeout)), which frees the slot without waiting for the stuck-reset cron. The stuck-reset path only covers rows orphaned by a dead worker process. **The threshold must exceed the longest legitimate single-job runtime** — set too low, a still-legitimately-running job gets reset to `pending` and can be re-claimed and run a second time concurrently with the original; adjust `jobs.stuckThresholdMinutes` in Admin Settings if your handlers are expected to take longer than the 3-minute default.
+
+**Zombie rows (`startedAt IS NULL`).** A running job whose `startedAt` stamp write was lost — the row was claimed but the process died or errored before the follow-up update — is now included in stuck detection (aged by `createdAt` instead of `startedAt`) rather than sitting permanently un-recoverable. See [Section 11 — Zombie Rows](#zombie-rows-startedat-is-null).
+
+**Terminal status write retry.** `EnrichmentJobWorker.safeTerminalUpdate` wraps every terminal status write (success, failure, rate-limit deferral) with a single retry: if the initial `enrichmentJob.update` throws (e.g. a transient DB error), the worker waits 1 second and retries once. If the retry also fails, the error is logged and swallowed — the worker slot is freed rather than blocked, and the row is left in `running` for the stuck-reset cron/threshold to recover on its next pass, rather than being silently lost or livelocking the worker.
 
 **Idempotency.** `enqueue()` checks for existing `pending` or `running` jobs with the same `type` and `mediaItemId`. Calling enqueue multiple times for the same photo is safe. This means the backfill endpoint and the upload listener can both call enqueue without creating duplicate work, and a backfill can be retried without double-processing items that were already queued.
 
@@ -859,3 +872,4 @@ Each of these would: implement `EnrichmentHandler`, self-register via `onModuleI
 | 1.6 | July 2026 | AI Assistant | Continuous worker pool: replaced the `setInterval` tick + `Promise.all` batch model with N long-lived claim→process→repeat loops (pool size fixed at startup from `ENRICHMENT_WORKER_CONCURRENCY`), so one hung/slow job only stalls its own slot, never the queue; claims serialized by an in-process promise-chain mutex (`claimOne`); Section 8 Lifecycle/Loop Logic/Serialized Claims rewrite; added single-process-only limitation note (multi-replica needs `FOR UPDATE SKIP LOCKED`) |
 | 1.7 | July 2026 | AI Assistant | Section 13 config table: fixed stale `ENRICHMENT_WORKER_CONCURRENCY` note (was "jobs per tick", now correctly describes the fixed-at-startup worker-pool size, consistent with Section 8); added missing `ENRICHMENT_STUCK_MINUTES` row; added new "Tuning for large runs / bulk backfills" subsection with recommended presets, on-demand admin controls, and job-history-retention pointer |
 | 1.8 | July 2026 | AI Assistant | Corrected worker lifecycle hook: pool startup (and the enable/disable env-var check) moved from `OnModuleInit` to `OnApplicationBootstrap` to close a module-registration race causing permanently-failed jobs during boot (Section 8, Section 8 "Disabling the Worker") |
+| 1.9 | July 2026 | AI Assistant | Settings-driven stuck threshold: new `jobs.stuckThresholdMinutes` system setting (1–120, default 3 min, falls back to legacy `ENRICHMENT_STUCK_MINUTES` env var) now shared by `GET /api/admin/jobs/stats` (`stuckRunning`, new `stuckThresholdMinutes` field), `POST /api/admin/jobs/reset-stuck` (`olderThanMinutes` now optional, no hard-coded default), and the `EnrichmentStuckResetTask` cron, replacing three previously-disagreeing thresholds (10/10/15 min); zombie-row fix for `running` jobs with `startedAt IS NULL`, previously invisible to all three stuck-job consumers; `EnrichmentJobWorker.safeTerminalUpdate` retries a failed terminal status write once before leaving the row for the stuck-reset cron; Section 11 rewrite, Section 13 config row, Section 14 operational notes |
