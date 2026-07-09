@@ -10,11 +10,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { JobStatus } from '@prisma/client';
-import {
-  EnrichmentAdminService,
-  STUCK_RUNNING_MINUTES,
-} from './enrichment-admin.service';
+import { EnrichmentAdminService } from './enrichment-admin.service';
 import { PrismaService } from '../prisma/prisma.service';
+
+// NOTE: the exported STUCK_RUNNING_MINUTES constant was removed — the service
+// now resolves its threshold from the jobs.stuckThresholdMinutes system
+// setting. Kept locally only so existing threshold-window assertions compile;
+// these tests need updating for the settings-driven threshold.
+const STUCK_RUNNING_MINUTES = 10;
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 // ---------------------------------------------------------------------------

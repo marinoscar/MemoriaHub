@@ -9,8 +9,8 @@
 import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { Prisma, JobStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-
-export const STUCK_RUNNING_MINUTES = 10;
+import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { defaultStuckThresholdMinutes } from '../common/types/settings.types';
 
 /** Default rolling window (days) for the duration-history aggregate. */
 export const INSIGHTS_WINDOW_DAYS = 7;
@@ -41,6 +41,8 @@ export interface JobStats {
   };
   byType: JobStatsByType[];
   stuckRunning: number;
+  /** Effective stuck threshold (minutes) used for the stuckRunning count. */
+  stuckThresholdMinutes: number;
   /** Number of pending jobs currently deferred (scheduledFor > now). */
   scheduled: number;
 }
@@ -159,14 +161,53 @@ export interface ListJobsFilter {
 export class EnrichmentAdminService {
   private readonly logger = new Logger(EnrichmentAdminService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly settingsService: SystemSettingsService,
+  ) {}
+
+  // -------------------------------------------------------------------------
+  // Stuck-threshold helpers
+  // -------------------------------------------------------------------------
+
+  /**
+   * Resolve the effective stuck threshold (minutes) shared by getStats and
+   * resetStuck: system setting jobs.stuckThresholdMinutes, falling back to the
+   * legacy ENRICHMENT_STUCK_MINUTES env var, else 3. getSettings() is cached
+   * in-process (5 s TTL) so this adds no per-call DB round-trip.
+   */
+  private async getStuckThresholdMinutes(): Promise<number> {
+    const settings = await this.settingsService.getSettings();
+    const configured = settings.jobs?.stuckThresholdMinutes;
+    if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
+      return configured;
+    }
+    return defaultStuckThresholdMinutes();
+  }
+
+  /**
+   * Where-clause matching running jobs stuck past the given threshold.
+   * Includes zombie rows with startedAt=null (claimed but never stamped — e.g.
+   * the process died between claim and stamp, or the terminal-status write was
+   * lost), aged by createdAt instead, so they are counted and recoverable.
+   */
+  private stuckRunningWhere(threshold: Date): Prisma.EnrichmentJobWhereInput {
+    return {
+      status: JobStatus.running,
+      OR: [
+        { startedAt: { lt: threshold } },
+        { startedAt: null, createdAt: { lt: threshold } },
+      ],
+    };
+  }
 
   // -------------------------------------------------------------------------
   // getStats
   // -------------------------------------------------------------------------
 
   async getStats(): Promise<JobStats> {
-    const stuckThreshold = new Date(Date.now() - STUCK_RUNNING_MINUTES * 60 * 1000);
+    const stuckThresholdMinutes = await this.getStuckThresholdMinutes();
+    const stuckThreshold = new Date(Date.now() - stuckThresholdMinutes * 60 * 1000);
 
     const now = new Date();
 
@@ -181,12 +222,9 @@ export class EnrichmentAdminService {
         by: ['type', 'status'],
         _count: { id: true },
       }),
-      // Count stuck running jobs
+      // Count stuck running jobs (incl. startedAt=null zombies)
       this.prisma.enrichmentJob.count({
-        where: {
-          status: JobStatus.running,
-          startedAt: { lt: stuckThreshold },
-        },
+        where: this.stuckRunningWhere(stuckThreshold),
       }),
       // Count pending jobs that are backed off (scheduledFor in the future)
       this.prisma.enrichmentJob.count({
@@ -235,7 +273,14 @@ export class EnrichmentAdminService {
 
     const byType = Array.from(typeMap.values()).sort((a, b) => a.type.localeCompare(b.type));
 
-    return { total, byStatus, byType, stuckRunning: stuckCount, scheduled: scheduledCount };
+    return {
+      total,
+      byStatus,
+      byType,
+      stuckRunning: stuckCount,
+      stuckThresholdMinutes,
+      scheduled: scheduledCount,
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -671,14 +716,12 @@ export class EnrichmentAdminService {
   // resetStuck
   // -------------------------------------------------------------------------
 
-  async resetStuck(olderThanMinutes = STUCK_RUNNING_MINUTES): Promise<{ reset: number }> {
-    const threshold = new Date(Date.now() - olderThanMinutes * 60 * 1000);
+  async resetStuck(olderThanMinutes?: number): Promise<{ reset: number }> {
+    const minutes = olderThanMinutes ?? (await this.getStuckThresholdMinutes());
+    const threshold = new Date(Date.now() - minutes * 60 * 1000);
 
     const result = await this.prisma.enrichmentJob.updateMany({
-      where: {
-        status: JobStatus.running,
-        startedAt: { lt: threshold },
-      },
+      where: this.stuckRunningWhere(threshold),
       data: {
         status: JobStatus.pending,
         startedAt: null,
@@ -687,7 +730,7 @@ export class EnrichmentAdminService {
     });
 
     this.logger.log(
-      `Admin reset ${result.count} stuck enrichment jobs (older than ${olderThanMinutes} minutes)`,
+      `Admin reset ${result.count} stuck enrichment jobs (older than ${minutes} minutes)`,
     );
 
     return { reset: result.count };

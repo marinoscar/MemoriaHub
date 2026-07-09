@@ -62,8 +62,10 @@ const retryAllFailedSchema = z.object({
 
 export class RetryAllFailedDto extends createZodDto(retryAllFailedSchema) {}
 
+// olderThanMinutes deliberately has NO default: an empty body lets the service
+// resolve the jobs.stuckThresholdMinutes system setting (default 3 minutes).
 const resetStuckSchema = z.object({
-  olderThanMinutes: z.number().int().min(1).default(10).optional(),
+  olderThanMinutes: z.number().int().min(1).optional(),
 });
 
 export class ResetStuckDto extends createZodDto(resetStuckSchema) {}
@@ -87,7 +89,8 @@ export class EnrichmentAdminController {
   @ApiResponse({
     status: 200,
     description:
-      'Stats including total, byStatus breakdown, byType breakdown, stuck-running count, and scheduled (deferred/backed-off) count',
+      'Stats including total, byStatus breakdown, byType breakdown, stuck-running count (with the ' +
+      'effective stuckThresholdMinutes used), and scheduled (deferred/backed-off) count',
   })
   async getStats() {
     return this.adminService.getStats();
@@ -159,7 +162,10 @@ export class EnrichmentAdminController {
   @ApiOperation({
     summary: 'Reset stuck running enrichment jobs back to pending (Admin)',
     description:
-      'Finds running jobs whose startedAt is older than olderThanMinutes (default 10) and resets them to pending.',
+      'Finds running jobs stuck past olderThanMinutes (including zombie rows that were never ' +
+      'stamped with startedAt, aged by createdAt) and resets them to pending. When ' +
+      'olderThanMinutes is omitted, the jobs.stuckThresholdMinutes system setting is used ' +
+      '(default 3 minutes).',
   })
   @ApiResponse({ status: 201, description: 'Number of jobs reset' })
   async resetStuck(@Body() dto: ResetStuckDto) {
