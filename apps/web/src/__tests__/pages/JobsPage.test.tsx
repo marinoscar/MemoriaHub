@@ -61,6 +61,7 @@ function makeJobsHook(overrides: Partial<UseJobsResult> = {}): UseJobsResult {
       byType: [{ type: 'face_detection', pending: 4, running: 1, succeeded: 4, failed: 1, total: 10 }],
       stuckRunning: 0,
       scheduled: 0,
+      stuckThresholdMinutes: 3,
     },
     jobs: [],
     meta: null,
@@ -163,6 +164,7 @@ describe('JobsPage', () => {
             byType: [],
             stuckRunning: 3,
             scheduled: 0,
+            stuckThresholdMinutes: 3,
           },
         }),
       );
@@ -267,7 +269,7 @@ describe('JobsPage', () => {
       mockUseJobs.mockReturnValue(
         makeJobsHook({
           jobs,
-          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0, scheduled: 0 },
+          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0, scheduled: 0, stuckThresholdMinutes: 3 },
         }),
       );
       const user = userEvent.setup();
@@ -356,7 +358,7 @@ describe('JobsPage', () => {
       mockUseJobs.mockReturnValue(
         makeJobsHook({
           jobs,
-          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0, scheduled: 0 },
+          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0, scheduled: 0, stuckThresholdMinutes: 3 },
         }),
       );
       const user = userEvent.setup();
@@ -389,6 +391,7 @@ describe('JobsPage', () => {
             byType: [],
             stuckRunning: 0,
             scheduled: 0,
+            stuckThresholdMinutes: 3,
           },
         }),
       );
@@ -413,6 +416,7 @@ describe('JobsPage', () => {
             byType: [],
             stuckRunning: 0,
             scheduled: 0,
+            stuckThresholdMinutes: 3,
           },
         }),
       );
@@ -439,6 +443,7 @@ describe('JobsPage', () => {
             byType: [],
             stuckRunning: 5,
             scheduled: 0,
+            stuckThresholdMinutes: 3,
           },
         }),
       );
@@ -449,7 +454,9 @@ describe('JobsPage', () => {
       const resetBtn = await screen.findByRole('button', { name: /reset stuck/i });
       await user.click(resetBtn);
 
-      expect(resetStuck).toHaveBeenCalledWith(10);
+      // handleResetStuck calls the hook's resetStuck() with no argument — the
+      // service resolves the jobs.stuckThresholdMinutes system setting itself.
+      expect(resetStuck).toHaveBeenCalledWith();
     });
 
     it('shows success snackbar after resetStuck', async () => {
@@ -463,6 +470,7 @@ describe('JobsPage', () => {
             byType: [],
             stuckRunning: 5,
             scheduled: 0,
+            stuckThresholdMinutes: 3,
           },
         }),
       );
@@ -487,6 +495,7 @@ describe('JobsPage', () => {
             byType: [],
             stuckRunning: 0,
             scheduled: 0,
+            stuckThresholdMinutes: 3,
           },
         }),
       );
@@ -508,6 +517,7 @@ describe('JobsPage', () => {
             byType: [],
             stuckRunning: 0,
             scheduled: 0,
+            stuckThresholdMinutes: 3,
           },
         }),
       );
@@ -517,6 +527,37 @@ describe('JobsPage', () => {
       await waitFor(() => {
         const btn = screen.getByRole('button', { name: /reset stuck/i });
         expect(btn).toBeDisabled();
+      });
+    });
+
+    it('renders the configured stuckThresholdMinutes in the "Reset stuck" button label', async () => {
+      mockUseJobs.mockReturnValue(
+        makeJobsHook({
+          stats: {
+            total: 5,
+            byStatus: { pending: 0, running: 5, succeeded: 0, failed: 0 },
+            byType: [],
+            stuckRunning: 5,
+            scheduled: 0,
+            stuckThresholdMinutes: 45,
+          },
+        }),
+      );
+
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /reset stuck \(>45 min\)/i })).toBeInTheDocument();
+      });
+    });
+
+    it('falls back to a "3 min" label when stats is null', async () => {
+      mockUseJobs.mockReturnValue(makeJobsHook({ stats: null }));
+
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /reset stuck \(>3 min\)/i })).toBeInTheDocument();
       });
     });
   });
@@ -533,7 +574,7 @@ describe('JobsPage', () => {
         makeJobsHook({
           jobs,
           retryJob,
-          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0, scheduled: 0 },
+          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0, scheduled: 0, stuckThresholdMinutes: 3 },
         }),
       );
       const user = userEvent.setup();
@@ -557,7 +598,7 @@ describe('JobsPage', () => {
         makeJobsHook({
           jobs,
           retryJob,
-          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0, scheduled: 0 },
+          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0, scheduled: 0, stuckThresholdMinutes: 3 },
         }),
       );
       const user = userEvent.setup();
@@ -828,6 +869,7 @@ describe('JobsPage', () => {
             byType: [],
             stuckRunning: 0,
             scheduled: 2,
+            stuckThresholdMinutes: 3,
           },
         }),
       );

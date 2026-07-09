@@ -222,6 +222,45 @@ describe('EnrichmentAdminController', () => {
       expect(mockAdminService.resetStuck).toHaveBeenCalledWith(undefined);
       expect(result).toEqual({ reset: 0 });
     });
+
+    // -----------------------------------------------------------------------
+    // resetStuckSchema (Zod) validation — olderThanMinutes has NO default, so
+    // an empty body must validate and let the service resolve the
+    // jobs.stuckThresholdMinutes system setting instead.
+    // -----------------------------------------------------------------------
+
+    describe('resetStuckSchema validation', () => {
+      it('accepts an empty body — olderThanMinutes stays undefined (no default applied)', () => {
+        const parsed = ResetStuckDto.create({});
+
+        expect(parsed).toEqual({});
+        expect(parsed.olderThanMinutes).toBeUndefined();
+      });
+
+      it('accepts an explicit valid olderThanMinutes and passes it through unchanged', () => {
+        const parsed = ResetStuckDto.create({ olderThanMinutes: 15 });
+
+        expect(parsed.olderThanMinutes).toBe(15);
+      });
+
+      it('accepts the minimum valid value of 1', () => {
+        const parsed = ResetStuckDto.create({ olderThanMinutes: 1 });
+
+        expect(parsed.olderThanMinutes).toBe(1);
+      });
+
+      it('rejects olderThanMinutes: 0', () => {
+        expect(() => ResetStuckDto.create({ olderThanMinutes: 0 })).toThrow();
+      });
+
+      it('rejects a negative olderThanMinutes', () => {
+        expect(() => ResetStuckDto.create({ olderThanMinutes: -5 })).toThrow();
+      });
+
+      it('rejects a non-integer olderThanMinutes', () => {
+        expect(() => ResetStuckDto.create({ olderThanMinutes: 15.5 })).toThrow();
+      });
+    });
   });
 
   // =========================================================================

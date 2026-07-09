@@ -754,4 +754,130 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       worker.onModuleDestroy();
     });
   });
+
+  // =========================================================================
+  // safeTerminalUpdate — retry-once on transient DB write failure
+  //
+  // Exercises the private safeTerminalUpdate(jobId, jobType, data) helper
+  // directly (bypassing tick/processJob) so the retry/give-up behavior is
+  // isolated from claim/handler mechanics. The method's real implementation
+  // sleeps 1s between the first failure and the retry; that sleep is stubbed
+  // to resolve immediately so the test stays fast and deterministic.
+  // =========================================================================
+
+  describe('safeTerminalUpdate — retry once on transient failure', () => {
+    let worker: EnrichmentJobWorker;
+    let mockPrisma: MockPrismaService;
+
+    beforeEach(async () => {
+      ({ worker, mockPrisma } = await buildWorker(EnrichmentJobWorker));
+    });
+
+    afterEach(() => {
+      worker.onModuleDestroy();
+    });
+
+    it('retries once after the first update() throws, and succeeds on the retry', async () => {
+      const sleepSpy = jest.spyOn(worker as any, 'sleep').mockResolvedValue(undefined);
+      const loggerWarnSpy = jest.spyOn((worker as any).logger, 'warn').mockImplementation(() => {});
+      const loggerErrorSpy = jest.spyOn((worker as any).logger, 'error').mockImplementation(() => {});
+
+      (mockPrisma.enrichmentJob.update as jest.Mock)
+        .mockRejectedValueOnce(new Error('transient DB error'))
+        .mockResolvedValueOnce({});
+
+      const data = { status: JobStatus.succeeded, finishedAt: new Date() };
+      await (worker as any).safeTerminalUpdate('job-retry-1', 'face_detection', data);
+
+      // Both attempts used the same where/data payload.
+      const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
+      expect(updateCalls).toHaveLength(2);
+      expect(updateCalls[0][0]).toEqual({ where: { id: 'job-retry-1' }, data });
+      expect(updateCalls[1][0]).toEqual({ where: { id: 'job-retry-1' }, data });
+
+      // Slept once (~1s) between the two attempts.
+      expect(sleepSpy).toHaveBeenCalledTimes(1);
+      expect(sleepSpy).toHaveBeenCalledWith(1_000);
+
+      // A warning was logged for the first failure; no error since the retry succeeded.
+      expect(loggerWarnSpy).toHaveBeenCalledTimes(1);
+      expect(loggerWarnSpy.mock.calls[0][0]).toContain('job-retry-1');
+      expect(loggerErrorSpy).not.toHaveBeenCalled();
+    });
+
+    it('logs an error and swallows the failure (does not throw) when both attempts fail', async () => {
+      const sleepSpy = jest.spyOn(worker as any, 'sleep').mockResolvedValue(undefined);
+      const loggerWarnSpy = jest.spyOn((worker as any).logger, 'warn').mockImplementation(() => {});
+      const loggerErrorSpy = jest.spyOn((worker as any).logger, 'error').mockImplementation(() => {});
+
+      (mockPrisma.enrichmentJob.update as jest.Mock)
+        .mockRejectedValueOnce(new Error('db down'))
+        .mockRejectedValueOnce(new Error('still down'));
+
+      const data = { status: JobStatus.failed, finishedAt: new Date(), lastError: 'boom' };
+
+      // Must not throw — the caller (processJob) relies on this being swallowed
+      // so the worker slot is freed even when the DB write itself fails.
+      await expect(
+        (worker as any).safeTerminalUpdate('job-retry-2', 'ocr', data),
+      ).resolves.toBeUndefined();
+
+      const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
+      expect(updateCalls).toHaveLength(2);
+
+      expect(sleepSpy).toHaveBeenCalledTimes(1);
+      expect(loggerWarnSpy).toHaveBeenCalledTimes(1);
+      expect(loggerErrorSpy).toHaveBeenCalledTimes(1);
+      expect(loggerErrorSpy.mock.calls[0][0]).toContain('job-retry-2');
+      expect(loggerErrorSpy.mock.calls[0][0]).toContain('stuck-reset cron');
+    });
+
+    it('does not retry when the first update() succeeds', async () => {
+      const sleepSpy = jest.spyOn(worker as any, 'sleep').mockResolvedValue(undefined);
+
+      (mockPrisma.enrichmentJob.update as jest.Mock).mockResolvedValueOnce({});
+
+      await (worker as any).safeTerminalUpdate('job-ok', 'face_detection', {
+        status: JobStatus.succeeded,
+      });
+
+      expect(mockPrisma.enrichmentJob.update).toHaveBeenCalledTimes(1);
+      expect(sleepSpy).not.toHaveBeenCalled();
+    });
+
+    it('processJob success path routes through safeTerminalUpdate and recovers from one transient failure', async () => {
+      // Stub the retry-delay sleep so the test resolves immediately regardless
+      // of the requested duration.
+      jest.spyOn(worker as any, 'sleep').mockResolvedValue(undefined);
+
+      const job = makeJob({ id: 'job-e2e-1', attempts: 0 });
+      const mockRegistry = { get: jest.fn().mockReturnValue({ type: 'face_detection', process: jest.fn().mockResolvedValue(undefined) }) };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          EnrichmentJobWorker,
+          { provide: PrismaService, useValue: mockPrisma },
+          { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
+          { provide: ProviderThrottleService, useValue: new ProviderThrottleService() },
+        ],
+      }).compile();
+      const w2 = module.get<EnrichmentJobWorker>(EnrichmentJobWorker);
+      w2.onApplicationBootstrap();
+
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValueOnce(job);
+      (mockPrisma.enrichmentJob.update as jest.Mock)
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running }) // claim
+        .mockRejectedValueOnce(new Error('flaky write')) // first terminal write attempt
+        .mockResolvedValueOnce({}); // retried terminal write succeeds
+
+      await (w2 as any).tick();
+
+      const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
+      // claim + first (failed) terminal write + retried terminal write
+      expect(updateCalls).toHaveLength(3);
+      expect(updateCalls[2][0].data.status).toBe(JobStatus.succeeded);
+
+      w2.onModuleDestroy();
+    });
+  });
 });
