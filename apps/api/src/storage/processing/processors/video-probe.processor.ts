@@ -6,7 +6,7 @@ import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { ObjectProcessor, ObjectProcessorResult } from '../object-processor.interface';
-import { streamToBuffer } from './stream-utils';
+import { streamToTempFile } from './stream-utils';
 import { probeVideoFile, extractContainerMetadata } from './ffprobe.util';
 
 /**
@@ -18,10 +18,10 @@ import { probeVideoFile, extractContainerMetadata } from './ffprobe.util';
  * Handles:  video/* MIME types only
  *
  * ffprobe requires a seekable file path, so this processor:
- *   1. Buffers the download stream.
- *   2. Writes to a temp file in os.tmpdir().
- *   3. Runs ffprobe against the temp file (via the shared ffprobe.util).
- *   4. Deletes the temp file in a finally block.
+ *   1. Streams the download to a temp file in os.tmpdir() with constant memory
+ *      (never buffers the full video in RAM).
+ *   2. Runs ffprobe against the temp file (via the shared ffprobe.util).
+ *   3. Deletes the temp file in a finally block.
  *
  * Requires ffmpeg/ffprobe to be installed in the container (see Dockerfile).
  *
@@ -58,10 +58,9 @@ export class VideoProbeProcessor implements ObjectProcessor {
     const tmpPath = join(tmpdir(), `memoriaHub-probe-${randomUUID()}`);
 
     try {
-      // Download to temp file
+      // Stream the download to a temp file
       const stream = await getStream();
-      const buffer = await streamToBuffer(stream);
-      await fs.writeFile(tmpPath, buffer);
+      await streamToTempFile(stream, tmpPath);
 
       // Run ffprobe
       const probeData = await probeVideoFile(tmpPath);

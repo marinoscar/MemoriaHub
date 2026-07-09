@@ -10,7 +10,7 @@ import { ObjectProcessor, ObjectProcessorResult } from '../object-processor.inte
 import { STORAGE_PROVIDER, StorageProvider } from '../../providers/storage-provider.interface';
 import { StorageProviderResolver } from '../../providers/storage-provider.resolver';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { streamToBuffer } from './stream-utils';
+import { streamToBuffer, streamToTempFile } from './stream-utils';
 
 /**
  * ThumbnailProcessor — generates a JPEG thumbnail (≤800 px on each side, by
@@ -30,7 +30,8 @@ import { streamToBuffer } from './stream-utils';
  *   Buffers the stream → sharp resize to ≤THUMBNAIL_MAX_DIM px JPEG → upload → StorageObject.
  *
  * Video path:
- *   1. Buffers the stream to a temp file.
+ *   1. Streams the download to a temp file with constant memory (buffering the
+ *      whole video in RAM previously OOM'd the process on large MP4s).
  *   2. Extracts one frame with fluent-ffmpeg (seeks to 1 s; falls back to 0 s
  *      for clips shorter than 1 s) into a temp JPEG.
  *   3. Runs the extracted frame through sharp (same resize/quality settings as
@@ -144,10 +145,9 @@ export class ThumbnailProcessor implements ObjectProcessor {
     const tmpOut = join(tmpdir(), `memoriaHub-thumb-out-${randomUUID()}.jpg`);
 
     try {
-      // 1. Buffer the video to a temp file (ffmpeg requires a seekable path)
+      // 1. Stream the video to a temp file (ffmpeg requires a seekable path)
       const stream = await getStream();
-      const buffer = await streamToBuffer(stream);
-      await fs.writeFile(tmpIn, buffer);
+      await streamToTempFile(stream, tmpIn);
 
       // 2. Extract a single frame.  Try 1 s first; if the clip is too short
       //    ffmpeg will error, so we fall back to timestamp 0 (first frame).
