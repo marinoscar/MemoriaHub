@@ -44,6 +44,14 @@ function writeTmpJpeg(dir: string, name: string): string {
   return p;
 }
 
+/** Mirrors writeTmpJpeg but writes a .mov file — content is irrelevant since
+ * placementFn is a stub in these tests (no real ffprobe/EXIF parsing runs). */
+function writeTmpVideo(dir: string, name: string): string {
+  const p = path.join(dir, name);
+  fs.writeFileSync(p, Buffer.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]));
+  return p;
+}
+
 /** A placementFn stub that returns a fixed {capturedAt, hasGps} for every call. */
 function makePlacementFn(date: Date | null, hasGps: boolean): AnyFn {
   return jest.fn<(...args: any[]) => any>().mockResolvedValue({ capturedAt: date, hasGps });
@@ -335,6 +343,42 @@ describe('OrganizeEngine', () => {
       expect((errorPayload as unknown as OrganizeErrorPayload).message).toMatch(
         /No target folders specified/,
       );
+    });
+  });
+
+  describe('video placement (ffprobe-backed)', () => {
+    it('moves a video with a placementFn-supplied date+GPS into YEAR/MM - Month/ (not NODATE)', async () => {
+      const filePath = writeTmpVideo(tmpDir, 'clip.mov');
+      const placementFn = makePlacementFn(new Date(2023, 5, 20, 20, 16, 7), true);
+      const { engine } = makeEngine(db, placementFn);
+
+      const result = await engine.run({ paths: [tmpDir] });
+
+      expect(fs.existsSync(filePath)).toBe(false);
+      const expectedTarget = path.join(tmpDir, '2023', '06 - June', 'clip.mov');
+      expect(fs.existsSync(expectedTarget)).toBe(true);
+
+      expect(result.totals.byBucket['2023/06 - June']).toBe(1);
+      expect(result.totals.nodate).toBe(0);
+
+      // mimeType is resolved by extension via enumerateFiles: mov -> video/quicktime.
+      expect(placementFn).toHaveBeenCalledWith(filePath, 'video/quicktime', { full: true });
+    });
+
+    it('routes a video with no ffprobe metadata (capturedAt: null, hasGps: false) into NODATE/NO-GPS/', async () => {
+      const filePath = writeTmpVideo(tmpDir, 'no-metadata.mov');
+      const placementFn = makePlacementFn(null, false);
+      const { engine } = makeEngine(db, placementFn);
+
+      const result = await engine.run({ paths: [tmpDir] });
+
+      expect(fs.existsSync(filePath)).toBe(false);
+      const expectedTarget = path.join(tmpDir, 'NODATE', 'NO-GPS', 'no-metadata.mov');
+      expect(fs.existsSync(expectedTarget)).toBe(true);
+
+      expect(result.totals.nodate).toBe(1);
+      expect(result.totals.noGps).toBe(1);
+      expect(result.totals.byBucket['NODATE/NO-GPS']).toBe(1);
     });
   });
 });
