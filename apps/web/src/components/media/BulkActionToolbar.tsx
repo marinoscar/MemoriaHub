@@ -29,9 +29,20 @@ import {
   Archive as ArchiveIcon,
   Unarchive as UnarchiveIcon,
   EditCalendar as EditCalendarIcon,
+  PhotoSizeSelectActual as PhotoSizeSelectActualIcon,
+  Face as FaceIcon,
+  AutoAwesome as AutoAwesomeIcon,
 } from '@mui/icons-material';
 import type { CircleRole } from '../../types/circles';
-import { bulkUpdateMedia, bulkDelete, bulkArchive, bulkUnarchive } from '../../services/media';
+import {
+  bulkUpdateMedia,
+  bulkDelete,
+  bulkArchive,
+  bulkUnarchive,
+  bulkRerunTags,
+  bulkRerunFaces,
+  bulkRerunThumbnails,
+} from '../../services/media';
 
 /**
  * Mode controls which archive-related actions are shown.
@@ -78,6 +89,7 @@ export function BulkActionToolbar({
   const [moreAnchor, setMoreAnchor] = useState<null | HTMLElement>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [confirm, setConfirm] = useState<{ label: string; run: () => void } | null>(null);
 
   const isViewer = activeCircleRole === 'viewer';
   const ids = Array.from(selected);
@@ -133,6 +145,57 @@ export function BulkActionToolbar({
       onError(err instanceof Error ? err.message : 'Failed to unarchive items');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // --- Bulk enrichment reruns (thumbnails / faces / AI tagging) ---
+
+  const runRerunThumbnails = async () => {
+    setLoading(true);
+    try {
+      const result = await bulkRerunThumbnails({ circleId, ids });
+      onSuccess(`Queued thumbnail refresh for ${result.queued} item${result.queued !== 1 ? 's' : ''}`);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Failed to queue thumbnail refresh');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runRerunFaces = async () => {
+    setLoading(true);
+    try {
+      const result = await bulkRerunFaces({ circleId, ids });
+      onSuccess(`Queued face detection for ${result.queued} item${result.queued !== 1 ? 's' : ''}`);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Failed to queue face detection');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runRerunTags = async () => {
+    setLoading(true);
+    try {
+      const result = await bulkRerunTags({ circleId, ids });
+      onSuccess(`Queued AI tagging for ${result.queued} item${result.queued !== 1 ? 's' : ''}`);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Failed to queue AI tagging');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
+   * Fire a rerun action. For large selections (>25) open a confirm dialog first;
+   * otherwise run immediately. Always closes the overflow menu.
+   */
+  const runRerun = (label: string, fn: () => void) => {
+    setMoreAnchor(null);
+    if (count > 25) {
+      setConfirm({ label, run: fn });
+    } else {
+      fn();
     }
   };
 
@@ -226,6 +289,19 @@ export function BulkActionToolbar({
           <ListItemText>Edit tags</ListItemText>
         </MenuItem>
         <Divider />
+        <MenuItem onClick={() => runRerun('thumbnail refresh', () => void runRerunThumbnails())}>
+          <ListItemIcon><PhotoSizeSelectActualIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Refresh thumbnails</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => runRerun('face detection', () => void runRerunFaces())}>
+          <ListItemIcon><FaceIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Re-run faces</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => runRerun('AI tagging', () => void runRerunTags())}>
+          <ListItemIcon><AutoAwesomeIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Re-run AI tagging</ListItemText>
+        </MenuItem>
+        <Divider />
         <MenuItem onClick={() => { setMoreAnchor(null); void handleFavorite(false); }}>
           <ListItemIcon><StarBorderIcon fontSize="small" /></ListItemIcon>
           <ListItemText>Remove from favorites</ListItemText>
@@ -268,6 +344,32 @@ export function BulkActionToolbar({
           <Button onClick={() => setDeleteConfirmOpen(false)}>Cancel</Button>
           <Button onClick={() => void handleDelete()} color="error" variant="contained">
             Move to Trash
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk rerun confirm (large selections) */}
+      <Dialog open={Boolean(confirm)} onClose={() => setConfirm(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>
+          Re-run {confirm?.label} on {count} item{count !== 1 ? 's' : ''}?
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            Re-run {confirm?.label} on {count} item{count !== 1 ? 's' : ''}? They&apos;ll process in
+            the background.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirm(null)}>Cancel</Button>
+          <Button
+            onClick={() => {
+              const run = confirm?.run;
+              setConfirm(null);
+              run?.();
+            }}
+            variant="contained"
+          >
+            Re-run
           </Button>
         </DialogActions>
       </Dialog>

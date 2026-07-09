@@ -326,6 +326,94 @@ export class MediaEnrichmentService {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Per-item rerun helpers (priority 0, reason=rerun)
+  //
+  // These mirror the single-item rerun controllers (TaggingController.rerunTagging,
+  // FaceDetectionController.rerunFaceDetection, MediaThumbnailRerunController) so
+  // the bulk selection-scoped endpoints (MediaService.bulkRerun*) share exactly one
+  // enqueue+status-upsert implementation instead of replicating it. Feature flags
+  // are intentionally NOT checked here — matching per-item rerun behavior; the
+  // handlers themselves respect the global toggles.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Re-enqueue auto-tagging for a single item and mark its tag status pending.
+   * Mirrors TaggingController.rerunTagging.
+   */
+  async enqueueTagRerun(item: { id: string; circleId: string }): Promise<void> {
+    await this.enrichmentJobService.enqueue({
+      type: 'auto_tagging',
+      mediaItemId: item.id,
+      circleId: item.circleId,
+      reason: JobReason.rerun,
+      priority: 0,
+    });
+
+    await this.prisma.mediaTagStatus.upsert({
+      where: { mediaItemId: item.id },
+      create: {
+        mediaItemId: item.id,
+        circleId: item.circleId,
+        status: MediaTagStatusType.pending,
+        tagCount: 0,
+      },
+      update: {
+        status: MediaTagStatusType.pending,
+      },
+    });
+  }
+
+  /**
+   * Re-enqueue face detection for a single item and mark its face status pending.
+   * Routes to video_face_detection for video items, face_detection otherwise —
+   * mirrors FaceDetectionController.rerunFaceDetection.
+   */
+  async enqueueFaceRerun(item: {
+    id: string;
+    type: MediaType;
+    circleId: string;
+  }): Promise<void> {
+    const jobType =
+      item.type === MediaType.video ? 'video_face_detection' : 'face_detection';
+
+    await this.enrichmentJobService.enqueue({
+      type: jobType,
+      mediaItemId: item.id,
+      circleId: item.circleId,
+      reason: JobReason.rerun,
+      priority: 0,
+    });
+
+    await this.prisma.mediaFaceStatus.upsert({
+      where: { mediaItemId: item.id },
+      create: {
+        mediaItemId: item.id,
+        status: MediaFaceStatusType.pending,
+        faceCount: 0,
+      },
+      update: {
+        status: MediaFaceStatusType.pending,
+      },
+    });
+  }
+
+  /**
+   * Re-enqueue thumbnail regeneration for a single item via the async
+   * `thumbnail_regen` job (ThumbnailRegenHandler). Unlike the synchronous
+   * single-item endpoint this does NOT block on reprocessing — it is the
+   * bulk-safe path. There is no per-item status table for thumbnails.
+   */
+  async enqueueThumbnailRerun(item: { id: string; circleId: string }): Promise<void> {
+    await this.enrichmentJobService.enqueue({
+      type: 'thumbnail_regen',
+      mediaItemId: item.id,
+      circleId: item.circleId,
+      reason: JobReason.rerun,
+      priority: 0,
+    });
+  }
+
   /**
    * Resolve a MediaItem by its storageObjectId, then call enqueueUploadEnrichment.
    *
