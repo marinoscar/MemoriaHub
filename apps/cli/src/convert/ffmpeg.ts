@@ -104,6 +104,11 @@ export const DEFAULT_CRF = 20;
  *
  * Both paths preserve container metadata (`-map_metadata 0`, keeps capture date)
  * and enable web-friendly progressive playback (`+faststart`).
+ *
+ * The muxer is forced with `-f mp4` because the output is written to a temp
+ * `<target>.mp4.partial` file — ffmpeg would otherwise infer the format from the
+ * `.partial` extension, which it does not recognize, and fail every conversion
+ * with "Unable to find a suitable output format".
  */
 export function buildConvertArgs(
   src: string,
@@ -119,6 +124,7 @@ export function buildConvertArgs(
       '-c:a', 'aac',
       '-map_metadata', '0',
       '-movflags', '+faststart',
+      '-f', 'mp4',
       tmpOut,
     ];
   }
@@ -132,6 +138,7 @@ export function buildConvertArgs(
     '-b:a', '192k',
     '-map_metadata', '0',
     '-movflags', '+faststart',
+    '-f', 'mp4',
     tmpOut,
   ];
 }
