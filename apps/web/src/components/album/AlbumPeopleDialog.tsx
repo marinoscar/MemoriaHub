@@ -39,7 +39,7 @@ export function AlbumPeopleDialog({ open, onClose, albumId, circleId }: AlbumPeo
     let cancelled = false;
     setLoading(true);
     setError(null);
-    listPeople(circleId, { albumId, includeUnlabeled: true, pageSize: 200 })
+    listPeople(circleId, { albumId, includeUnlabeled: true, pageSize: 100 })
       .then((resp) => {
         if (!cancelled) setPeople(resp.items);
       })
