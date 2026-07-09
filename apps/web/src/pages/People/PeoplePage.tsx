@@ -808,7 +808,8 @@ function UnassignedFacesSection({
   allPeople: PersonListItem[];
   onAssigned: () => void;
 }) {
-  const { faces, loading, error, refresh, hide } = useUnassignedFaces(circleId);
+  const { faces, total, hasMore, loadMore, loadingMore, loading, error, refresh, hide } =
+    useUnassignedFaces(circleId);
   const {
     faces: archivedFaces,
     loading: archivedLoading,
@@ -997,7 +998,7 @@ function UnassignedFacesSection({
   if (loading) return <CircularProgress size={24} />;
   if (error) return <Alert severity="error">{error}</Alert>;
   // hide section entirely if there are neither live nor archived unassigned faces
-  if (faces.length === 0 && archivedFaces.length === 0) return null;
+  if (total === 0 && archivedFaces.length === 0) return null;
 
   const getPersonLabel = (p: PersonListItem) =>
     p.name ?? `Unlabeled (${p.id.slice(0, 6)})`;
@@ -1005,10 +1006,15 @@ function UnassignedFacesSection({
   return (
     <Box>
       <Typography variant="h6" sx={{ mb: 1 }}>
-        Unassigned Faces ({faces.length})
+        Unassigned Faces ({total})
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         Individual detected faces not yet linked to a person. Select one or more to name, assign, or archive.
+        {faces.length < total && (
+          <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+            Showing {faces.length} of {total}
+          </Typography>
+        )}
       </Typography>
 
       {/* Action bar — visible when faces are selected */}
@@ -1106,6 +1112,22 @@ function UnassignedFacesSection({
 
       {/* Live face grid */}
       <FaceThumbGrid faces={faces} selectedIds={selectedIds} onToggle={toggleSelect} />
+
+      {/* Load more — remaining pages of live unassigned faces */}
+      {hasMore && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => void loadMore()}
+            disabled={loadingMore}
+            startIcon={loadingMore ? <CircularProgress size={16} /> : undefined}
+            sx={{ minHeight: 44 }}
+          >
+            Load more ({total - faces.length} remaining)
+          </Button>
+        </Box>
+      )}
 
       {/* Archived faces sub-view */}
       {archivedFaces.length > 0 && (

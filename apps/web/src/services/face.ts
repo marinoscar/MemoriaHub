@@ -396,6 +396,12 @@ export async function purgeFaces(
   return api.post<{ deleted: number }>('/people/faces/bulk/purge', { circleId, ids });
 }
 
+export async function purgeArchivedFaces(
+  circleId: string,
+): Promise<{ deleted: number }> {
+  return api.post<{ deleted: number }>('/people/faces/purge-archived', { circleId });
+}
+
 // ---------------------------------------------------------------------------
 // Manual people association
 // ---------------------------------------------------------------------------
