@@ -19,7 +19,6 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Checkbox,
   Autocomplete,
   Tooltip,
   Snackbar,
@@ -55,8 +54,10 @@ import { PersonGrid } from '../../components/people/PersonGrid';
 import { UnknownFacesReview } from '../../components/people/UnknownFacesReview';
 import { MergePeopleDialog } from '../../components/people/MergePeopleDialog';
 import { FaceCrop } from '../../components/people/FaceCrop';
+import { FaceThumbGrid } from '../../components/people/FaceThumbGrid';
+import { PurgeFacesDialog } from '../../components/people/PurgeFacesDialog';
 import { PersonAvatar } from '../../components/people/PersonAvatar';
-import type { PersonListItem, PersonDetail, UnassignedFaceDto } from '../../services/face';
+import type { PersonListItem, PersonDetail } from '../../services/face';
 import {
   deleteCircleBiometrics,
   mergePeople,
@@ -269,76 +270,6 @@ function PurgePeopleDialog({ open, count, onClose, onConfirm }: PurgePeopleDialo
             {count} person record{count !== 1 ? 's' : ''}
           </strong>{' '}
           and their face data. <strong>Your photos are NOT deleted.</strong> This cannot be undone.
-        </Typography>
-        {error && (
-          <Alert severity="error" sx={{ mt: 2 }}>
-            {error}
-          </Alert>
-        )}
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={handleClose} disabled={deleting}>
-          Cancel
-        </Button>
-        <Button
-          variant="contained"
-          color="error"
-          onClick={() => void handleConfirm()}
-          disabled={deleting}
-          startIcon={deleting ? <CircularProgress size={16} /> : undefined}
-        >
-          {deleting ? 'Deleting…' : 'Delete permanently'}
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Purge Faces Dialog (permanent delete of individual archived faces)
-// ---------------------------------------------------------------------------
-
-interface PurgeFacesDialogProps {
-  open: boolean;
-  count: number;
-  onClose: () => void;
-  onConfirm: () => Promise<void>;
-}
-
-function PurgeFacesDialog({ open, count, onClose, onConfirm }: PurgeFacesDialogProps) {
-  const [deleting, setDeleting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleConfirm = async () => {
-    setDeleting(true);
-    setError(null);
-    try {
-      await onConfirm();
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Deletion failed. Please try again.');
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  const handleClose = () => {
-    if (deleting) return;
-    setError(null);
-    onClose();
-  };
-
-  return (
-    <Dialog open={open} onClose={handleClose} maxWidth="xs" fullWidth>
-      <DialogTitle>Delete permanently?</DialogTitle>
-      <DialogContent>
-        <Typography variant="body2" sx={{ mb: 1 }}>
-          This permanently removes{' '}
-          <strong>
-            {count} face{count !== 1 ? 's' : ''}
-          </strong>{' '}
-          and their biometric data. <strong>Your photos are NOT deleted.</strong> This cannot be
-          undone.
         </Typography>
         {error && (
           <Alert severity="error" sx={{ mt: 2 }}>
@@ -867,92 +798,6 @@ function PersonDetailDrawer({
 // ---------------------------------------------------------------------------
 // Unassigned Faces Section (lone detected faces not yet in any Person)
 // ---------------------------------------------------------------------------
-
-/**
- * Renders a selectable grid of face thumbnails, resolving each face's media
- * thumbnail URL on demand. Used by both the live unassigned pool and the
- * archived faces sub-view.
- */
-function FaceThumbGrid({
-  faces,
-  selectedIds,
-  onToggle,
-}: {
-  faces: UnassignedFaceDto[];
-  selectedIds: Set<string>;
-  onToggle: (faceId: string) => void;
-}) {
-  const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
-
-  // Resolve thumbnail URLs for each unique mediaItemId
-  useEffect(() => {
-    if (faces.length === 0) return;
-    const uniqueIds = [...new Set(faces.map((f) => f.mediaItemId))];
-    const missing = uniqueIds.filter((id) => !mediaUrls[id]);
-    if (missing.length === 0) return;
-    missing.forEach((mediaId) => {
-      getMedia(mediaId)
-        .then((item) => {
-          const url = item.downloadUrl ?? item.thumbnailUrl;
-          if (url) {
-            setMediaUrls((prev) => ({ ...prev, [mediaId]: url }));
-          }
-        })
-        .catch(() => undefined);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [faces]);
-
-  return (
-    <Grid container spacing={1}>
-      {faces.map((face) => {
-        const imgUrl = mediaUrls[face.mediaItemId];
-        const selected = selectedIds.has(face.faceId);
-        return (
-          <Grid key={face.faceId}>
-            <Box
-              onClick={() => onToggle(face.faceId)}
-              sx={{
-                position: 'relative',
-                cursor: 'pointer',
-                borderRadius: 1,
-                border: selected ? '2px solid' : '2px solid transparent',
-                borderColor: selected ? 'primary.main' : 'transparent',
-                '&:hover': { borderColor: 'primary.light' },
-              }}
-            >
-              {face.faceThumbnailUrl ? (
-                <Box
-                  component="img"
-                  src={face.faceThumbnailUrl}
-                  sx={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 1, display: 'block' }}
-                />
-              ) : imgUrl ? (
-                <FaceCrop imageUrl={imgUrl} boundingBox={face.boundingBox} size={72} />
-              ) : (
-                <Box sx={{ width: 72, height: 72, bgcolor: 'grey.200', borderRadius: 1 }} />
-              )}
-              <Checkbox
-                size="small"
-                checked={selected}
-                sx={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  p: 0.25,
-                  color: 'white',
-                  '&.Mui-checked': { color: 'primary.main' },
-                }}
-                onClick={(e) => e.stopPropagation()}
-                onChange={() => onToggle(face.faceId)}
-              />
-            </Box>
-          </Grid>
-        );
-      })}
-    </Grid>
-  );
-}
 
 function UnassignedFacesSection({
   circleId,
