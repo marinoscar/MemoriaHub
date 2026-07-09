@@ -124,3 +124,10 @@ export class BulkPeopleDto extends createZodDto(bulkPeopleSchema) {}
 // ---------------------------------------------------------------------------
 
 export class BulkFacesDto extends createZodDto(bulkPeopleSchema) {}
+
+// ---------------------------------------------------------------------------
+// PurgeArchivedFacesDto  (circle-wide purge of archived unassigned faces;
+// same { circleId } shape as ClusterDto, aliased for a face-scoped signature)
+// ---------------------------------------------------------------------------
+
+export class PurgeArchivedFacesDto extends createZodDto(clusterSchema) {}

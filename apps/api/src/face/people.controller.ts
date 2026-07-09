@@ -36,6 +36,7 @@ import {
   ListUnassignedFacesQueryDto,
   BulkPeopleDto,
   BulkFacesDto,
+  PurgeArchivedFacesDto,
 } from './dto/people.dto';
 import { MergePeopleDto } from './dto/merge-people.dto';
 
@@ -272,6 +273,31 @@ export class PeopleController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.peopleService.purgeFaces(dto, user.id, user.permissions);
+  }
+
+  /**
+   * POST /api/people/faces/purge-archived
+   * Permanent hard-delete of ALL archived unassigned faces in a circle.
+   * Requires media:delete permission.
+   */
+  @Post('faces/purge-archived')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Permanently purge ALL archived unassigned faces in a circle (media:delete + collaborator)',
+    description:
+      'Hard-deletes every archived (hiddenAt set) unassigned Face row in the circle, including ' +
+      'faces on trashed/archived media — so the deleted count may exceed the visible archived ' +
+      'list. Photos/media items are NOT deleted. Affected media items are re-queued for ' +
+      'auto-tagging.',
+  })
+  @ApiResponse({ status: 200, description: 'Returns { deleted: number }' })
+  @ApiResponse({ status: 403, description: 'Access denied (collaborator + media:delete required)' })
+  async purgeArchivedFaces(
+    @Body() dto: PurgeArchivedFacesDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.peopleService.purgeArchivedFaces(dto, user.id, user.permissions);
   }
 
   /**
