@@ -7,7 +7,7 @@ import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { ObjectProcessor, ObjectProcessorResult } from '../object-processor.interface';
 import { streamToTempFile } from './stream-utils';
-import { probeVideoFile, extractContainerMetadata } from './ffprobe.util';
+import { probeVideoFileWithTimeout, extractContainerMetadata } from './ffprobe.util';
 
 /**
  * VideoProbeProcessor — extracts duration, dimensions, codec, and container
@@ -62,8 +62,9 @@ export class VideoProbeProcessor implements ObjectProcessor {
       const stream = await getStream();
       await streamToTempFile(stream, tmpPath);
 
-      // Run ffprobe
-      const probeData = await probeVideoFile(tmpPath);
+      // Run ffprobe (bounded — ffprobe can hang on corrupt containers)
+      const timeoutMs = parseInt(process.env.FFPROBE_TIMEOUT_MS ?? '30000', 10);
+      const probeData = await probeVideoFileWithTimeout(tmpPath, timeoutMs);
 
       const container = extractContainerMetadata(probeData);
       const { durationMs, width, height, codec, formatName, formatTags, streamTags } = container;

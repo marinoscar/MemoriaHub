@@ -47,6 +47,34 @@ export function probeVideoFile(filePath: string): Promise<ffmpeg.FfprobeData> {
 }
 
 /**
+ * Run ffprobe with an upper bound on runtime.  ffprobe has no built-in timeout
+ * and can hang on corrupt/truncated containers; the race guarantees the caller
+ * settles.  NOTE: the underlying ffprobe process is not killed on timeout —
+ * fluent-ffmpeg's ffprobe API exposes no process handle — but an orphaned probe
+ * exits on its own once it finishes reading the input.
+ */
+export function probeVideoFileWithTimeout(
+  filePath: string,
+  timeoutMs: number,
+): Promise<ffmpeg.FfprobeData> {
+  return new Promise<ffmpeg.FfprobeData>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`ffprobe timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+    probeVideoFile(filePath)
+      .then(data => {
+        clearTimeout(timer);
+        resolve(data);
+      })
+      .catch(err => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
+/**
  * Lowercase every key and string-coerce every value of a raw ffprobe tag bag.
  * Undefined/null inputs yield an empty object. Nullish values are skipped.
  */

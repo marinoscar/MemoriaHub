@@ -32,8 +32,12 @@ import { streamToBuffer, streamToTempFile } from './stream-utils';
  * Video path:
  *   1. Streams the download to a temp file with constant memory (buffering the
  *      whole video in RAM previously OOM'd the process on large MP4s).
- *   2. Extracts one frame with fluent-ffmpeg (seeks to 1 s; falls back to 0 s
- *      for clips shorter than 1 s) into a temp JPEG.
+ *   2. Extracts one frame with fluent-ffmpeg into a temp JPEG via a
+ *      three-attempt fallback ladder: seek 1 s → seek 0 s → `thumbnail` video
+ *      filter (no seek).  After each attempt the output is validated to exist
+ *      and be non-empty — ffmpeg can exit 0 without writing a frame.  Every
+ *      attempt is killed (SIGKILL) after FFMPEG_TIMEOUT_MS so a hung ffmpeg
+ *      never wedges the pipeline.
  *   3. Runs the extracted frame through sharp (same resize/quality settings as
  *      the image path) for consistency.
  *   4. Uploads → StorageObject.  All temp files cleaned up in finally.
@@ -44,6 +48,7 @@ import { streamToBuffer, streamToTempFile } from './stream-utils';
  * Env vars (read at construction time):
  *   THUMBNAIL_MAX_DIM  — max width and height in px (default: 800, fit: inside, no enlargement)
  *   THUMBNAIL_QUALITY  — JPEG quality 1–100 (default: 85)
+ *   FFMPEG_TIMEOUT_MS  — max runtime per frame-extraction attempt in ms (default: 60000)
  *
  * Writes (into returned metadata, stored in StorageObject._processing.thumbnail):
  *   { thumbnailObjectId: string, thumbnailStorageKey: string }
@@ -59,6 +64,7 @@ export class ThumbnailProcessor implements ObjectProcessor {
 
   private readonly maxDim: number;
   private readonly quality: number;
+  private readonly ffmpegTimeoutMs: number;
 
   constructor(
     @Inject(STORAGE_PROVIDER)
@@ -68,6 +74,7 @@ export class ThumbnailProcessor implements ObjectProcessor {
   ) {
     this.maxDim = parseInt(process.env.THUMBNAIL_MAX_DIM ?? '800', 10);
     this.quality = parseInt(process.env.THUMBNAIL_QUALITY ?? '85', 10);
+    this.ffmpegTimeoutMs = parseInt(process.env.FFMPEG_TIMEOUT_MS ?? '60000', 10);
   }
 
   canProcess(object: StorageObject): boolean {
@@ -149,21 +156,34 @@ export class ThumbnailProcessor implements ObjectProcessor {
       const stream = await getStream();
       await streamToTempFile(stream, tmpIn);
 
-      // 2. Extract a single frame.  Try 1 s first; if the clip is too short
-      //    ffmpeg will error, so we fall back to timestamp 0 (first frame).
+      // 2. Extract a single frame — three-attempt fallback ladder.  Each
+      //    attempt's output is validated (ffmpeg can exit 0 with an empty or
+      //    missing output file) and unlinked before the next attempt.
+      const attempts: Array<{ label: string; seekSecs: number | null }> = [
+        { label: '1s seek', seekSecs: 1 },
+        { label: '0s seek', seekSecs: 0 },
+        { label: 'thumbnail filter', seekSecs: null },
+      ];
       let frameExtracted = false;
-      try {
-        await this.extractFrame(tmpIn, tmpOut, 1);
-        frameExtracted = true;
-      } catch {
-        // Short clip — retry at timestamp 0
-        this.logger.debug(
-          `1s seek failed for object ${object.id}; retrying at timestamp 0`,
-        );
+      let lastError: Error = new Error('frame extraction not attempted');
+      for (const attempt of attempts) {
+        try {
+          await this.extractFrame(tmpIn, tmpOut, attempt.seekSecs);
+          await this.assertNonEmptyFile(tmpOut);
+          frameExtracted = true;
+          break;
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+          this.logger.debug(
+            `frame extraction (${attempt.label}) failed for object ${object.id}: ` +
+              `${lastError.message}; falling back to next attempt`,
+          );
+          await fs.unlink(tmpOut).catch(() => {});
+        }
       }
 
       if (!frameExtracted) {
-        await this.extractFrame(tmpIn, tmpOut, 0);
+        throw lastError;
       }
 
       // 3. Read the extracted frame and run it through sharp (consistent sizing
@@ -193,24 +213,69 @@ export class ThumbnailProcessor implements ObjectProcessor {
   }
 
   /**
-   * Extract a single frame from the video at `seekSecs` seconds into `tmpOut`.
-   * Wraps the fluent-ffmpeg event-driven API in a Promise.
+   * Extract a single frame from the video into `tmpOut`.  With `seekSecs` set,
+   * seeks to that timestamp; with `seekSecs === null`, applies the ffmpeg
+   * `thumbnail` video filter instead (picks a representative frame without
+   * seeking — last rung of the fallback ladder).
+   *
+   * The command is killed with SIGKILL once FFMPEG_TIMEOUT_MS elapses — a hung
+   * ffmpeg (corrupt input, codec loop) must never wedge the pipeline.  The
+   * settled guard ensures the promise settles exactly once: the timer cannot
+   * fire after 'end'/'error', and a late 'error' emitted by the kill is a no-op.
    *
    * `ffmpeg(input)` is the factory call — fluent-ffmpeg's default export is a
    * callable function, not a class constructor.  `ffmpeg.FfmpegCommand` does not
    * exist at runtime; calling `new ffmpeg.FfmpegCommand(...)` throws
    * "ffmpeg.FfmpegCommand is not a constructor".
    */
-  private extractFrame(tmpIn: string, tmpOut: string, seekSecs: number): Promise<void> {
+  private extractFrame(tmpIn: string, tmpOut: string, seekSecs: number | null): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      ffmpeg(tmpIn)
-        .seekInput(seekSecs)
+      let settled = false;
+      let timer: NodeJS.Timeout | null = null;
+
+      const settle = (err?: Error) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        if (err) reject(err);
+        else resolve();
+      };
+
+      const cmd = ffmpeg(tmpIn);
+      if (seekSecs !== null) {
+        cmd.seekInput(seekSecs);
+      } else {
+        cmd.videoFilters('thumbnail');
+      }
+      cmd
         .frames(1)
         .output(tmpOut)
-        .on('end', () => resolve())
-        .on('error', (err: Error) => reject(err))
-        .run();
+        .on('end', () => settle())
+        .on('error', (err: Error) => settle(err));
+
+      timer = setTimeout(() => {
+        // SIGKILL — ffmpeg can ignore the default SIGTERM mid-decode
+        try {
+          cmd.kill('SIGKILL');
+        } catch {
+          // Process already gone
+        }
+        settle(new Error(`ffmpeg frame extraction timed out after ${this.ffmpegTimeoutMs}ms`));
+      }, this.ffmpegTimeoutMs);
+
+      cmd.run();
     });
+  }
+
+  /**
+   * Reject unless `path` exists with size > 0 — ffmpeg can exit 0 without
+   * writing a frame (e.g. a seek past the end of the stream).
+   */
+  private async assertNonEmptyFile(path: string): Promise<void> {
+    const stats = await fs.stat(path);
+    if (stats.size === 0) {
+      throw new Error(`ffmpeg produced an empty output file: ${path}`);
+    }
   }
 
   // ---------------------------------------------------------------------------

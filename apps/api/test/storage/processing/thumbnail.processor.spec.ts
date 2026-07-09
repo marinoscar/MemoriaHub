@@ -90,8 +90,10 @@ jest.mock('fluent-ffmpeg', () => {
 
   const stub = {
     seekInput(_n: number) { return stub; },
+    videoFilters(_f: string) { return stub; },
     frames(_n: number) { return stub; },
     output(_path: string) { return stub; },
+    kill(_signal: string) { return stub; },
     on(event: string, cb: (...args: any[]) => void) {
       if (event === 'end') ffmpegMockState.endCb = cb as () => void;
       if (event === 'error') ffmpegMockState.errorCb = cb as (err: Error) => void;
@@ -128,8 +130,10 @@ jest.mock('fluent-ffmpeg', () => {
 // fs mock (promises API used by the processor)
 // ---------------------------------------------------------------------------
 //
-// The processor calls fs.writeFile, fs.readFile, and fs.unlink.
-// writeFile and unlink are stubs; readFile returns a real JPEG buffer.
+// The processor calls fs.writeFile, fs.readFile, fs.stat, and fs.unlink.
+// writeFile and unlink are stubs; readFile returns a real JPEG buffer; stat
+// reports a non-empty file so the post-extraction output validation passes
+// (ffmpeg is mocked, so no real frame is ever written to disk).
 
 let mockFsReadFileBuffer: Buffer = Buffer.alloc(0);
 
@@ -141,6 +145,7 @@ jest.mock('fs', () => {
       ...originalFs.promises,
       writeFile: jest.fn().mockResolvedValue(undefined),
       readFile: jest.fn().mockImplementation(() => Promise.resolve(mockFsReadFileBuffer)),
+      stat: jest.fn().mockImplementation(() => Promise.resolve({ size: 1 })),
       unlink: jest.fn().mockResolvedValue(undefined),
     },
   };
