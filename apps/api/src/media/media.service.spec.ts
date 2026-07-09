@@ -198,7 +198,13 @@ describe('MediaService', () => {
   let mockGeoProvider: { reverseGeocode: jest.Mock };
   let mockForwardGeocodeService: { searchPlaces: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
-  let mockMediaEnrichmentService: { enqueueUploadEnrichment: jest.Mock; enqueueForStorageObject: jest.Mock };
+  let mockMediaEnrichmentService: {
+    enqueueUploadEnrichment: jest.Mock;
+    enqueueForStorageObject: jest.Mock;
+    enqueueTagRerun: jest.Mock;
+    enqueueFaceRerun: jest.Mock;
+    enqueueThumbnailRerun: jest.Mock;
+  };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -233,6 +239,9 @@ describe('MediaService', () => {
     mockMediaEnrichmentService = {
       enqueueUploadEnrichment: jest.fn().mockResolvedValue(undefined),
       enqueueForStorageObject: jest.fn().mockResolvedValue(undefined),
+      enqueueTagRerun: jest.fn().mockResolvedValue(undefined),
+      enqueueFaceRerun: jest.fn().mockResolvedValue(undefined),
+      enqueueThumbnailRerun: jest.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -2478,6 +2487,247 @@ describe('MediaService', () => {
       const result = await service.bulkDelete(dto, 'user-1', ownPerms);
 
       expect(result).toEqual({ deleted: 2 });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // bulkRerunTags / bulkRerunFaces / bulkRerunThumbnails
+  // -------------------------------------------------------------------------
+
+  describe('bulkRerunTags', () => {
+    function makeBulkRerunDto(overrides: Partial<any> = {}): any {
+      return {
+        circleId: CIRCLE_ID,
+        ids: [randomUUID(), randomUUID()],
+        ...overrides,
+      };
+    }
+
+    it('throws ForbiddenException when assertCircleAccess rejects and enqueues nothing', async () => {
+      const dto = makeBulkRerunDto();
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+        new ForbiddenException('Insufficient circle role'),
+      );
+
+      await expect(
+        service.bulkRerunTags(dto, 'user-1', ownPerms),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(mockMediaEnrichmentService.enqueueTagRerun).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException when not all ids belong to the circle and enqueues nothing', async () => {
+      const ids = [randomUUID(), randomUUID(), randomUUID()];
+      const dto = makeBulkRerunDto({ ids });
+      // assertAllInCircle's findMany returns only 2 of 3 ids
+      mockPrisma.mediaItem.findMany.mockResolvedValue([
+        { id: ids[0] },
+        { id: ids[1] },
+      ] as any);
+
+      await expect(
+        service.bulkRerunTags(dto, 'user-1', ownPerms),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(mockMediaEnrichmentService.enqueueTagRerun).not.toHaveBeenCalled();
+    });
+
+    it('calls assertCircleAccess with role "collaborator"', async () => {
+      const ids = [randomUUID(), randomUUID()];
+      const dto = makeBulkRerunDto({ ids });
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+
+      await service.bulkRerunTags(dto, 'user-1', ownPerms);
+
+      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+        'user-1',
+        CIRCLE_ID,
+        ownPerms,
+        'collaborator',
+      );
+    });
+
+    it('enqueues a tag rerun per id via enqueueTagRerun and returns { queued: N }', async () => {
+      const ids = [randomUUID(), randomUUID(), randomUUID()];
+      const dto = makeBulkRerunDto({ ids });
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+
+      const result = await service.bulkRerunTags(dto, 'user-1', ownPerms);
+
+      expect(mockMediaEnrichmentService.enqueueTagRerun).toHaveBeenCalledTimes(3);
+      for (const id of ids) {
+        expect(mockMediaEnrichmentService.enqueueTagRerun).toHaveBeenCalledWith({
+          id,
+          circleId: CIRCLE_ID,
+        });
+      }
+      expect(result).toEqual({ queued: 3 });
+    });
+  });
+
+  describe('bulkRerunFaces', () => {
+    function makeBulkRerunDto(overrides: Partial<any> = {}): any {
+      return {
+        circleId: CIRCLE_ID,
+        ids: [randomUUID(), randomUUID()],
+        ...overrides,
+      };
+    }
+
+    it('throws ForbiddenException when assertCircleAccess rejects and enqueues nothing', async () => {
+      const dto = makeBulkRerunDto();
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+        new ForbiddenException('Insufficient circle role'),
+      );
+
+      await expect(
+        service.bulkRerunFaces(dto, 'user-1', ownPerms),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(mockMediaEnrichmentService.enqueueFaceRerun).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException when not all ids belong to the circle and enqueues nothing', async () => {
+      const ids = [randomUUID(), randomUUID(), randomUUID()];
+      const dto = makeBulkRerunDto({ ids });
+      // assertAllInCircle's findMany returns only 2 of 3 ids — bulkRerunFaces
+      // must never reach its own routing findMany call.
+      mockPrisma.mediaItem.findMany.mockResolvedValue([
+        { id: ids[0] },
+        { id: ids[1] },
+      ] as any);
+
+      await expect(
+        service.bulkRerunFaces(dto, 'user-1', ownPerms),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(mockMediaEnrichmentService.enqueueFaceRerun).not.toHaveBeenCalled();
+    });
+
+    it('fetches item types via prisma.mediaItem.findMany scoped to circle + non-deleted', async () => {
+      const ids = [randomUUID(), randomUUID()];
+      const dto = makeBulkRerunDto({ ids });
+      // Single mock backs both the assertAllInCircle existence check and the
+      // routing fetch — both only require an `id` field to satisfy the
+      // former, and this response additionally carries `type` for the latter.
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id, type: 'photo' })) as any,
+      );
+
+      await service.bulkRerunFaces(dto, 'user-1', ownPerms);
+
+      expect(mockPrisma.mediaItem.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: { in: ids },
+            circleId: CIRCLE_ID,
+            deletedAt: null,
+          }),
+          select: { id: true, type: true },
+        }),
+      );
+    });
+
+    it('routes a mix of photo and video items to enqueueFaceRerun with correct type per item', async () => {
+      const photoId = randomUUID();
+      const videoId = randomUUID();
+      const dto = makeBulkRerunDto({ ids: [photoId, videoId] });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue([
+        { id: photoId, type: 'photo' },
+        { id: videoId, type: 'video' },
+      ] as any);
+
+      const result = await service.bulkRerunFaces(dto, 'user-1', ownPerms);
+
+      expect(mockMediaEnrichmentService.enqueueFaceRerun).toHaveBeenCalledTimes(2);
+      expect(mockMediaEnrichmentService.enqueueFaceRerun).toHaveBeenCalledWith({
+        id: photoId,
+        type: 'photo',
+        circleId: CIRCLE_ID,
+      });
+      expect(mockMediaEnrichmentService.enqueueFaceRerun).toHaveBeenCalledWith({
+        id: videoId,
+        type: 'video',
+        circleId: CIRCLE_ID,
+      });
+      expect(result).toEqual({ queued: 2 });
+    });
+
+    it('returns { queued } reflecting the number of items actually fetched/routed', async () => {
+      const ids = [randomUUID(), randomUUID(), randomUUID()];
+      const dto = makeBulkRerunDto({ ids });
+      // assertAllInCircle sees all 3 (passes the guard), but the routing
+      // findMany call in this mock also returns all 3 with types.
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id, type: 'photo' })) as any,
+      );
+
+      const result = await service.bulkRerunFaces(dto, 'user-1', ownPerms);
+
+      expect(result).toEqual({ queued: 3 });
+      expect(mockMediaEnrichmentService.enqueueFaceRerun).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe('bulkRerunThumbnails', () => {
+    function makeBulkRerunDto(overrides: Partial<any> = {}): any {
+      return {
+        circleId: CIRCLE_ID,
+        ids: [randomUUID(), randomUUID()],
+        ...overrides,
+      };
+    }
+
+    it('throws ForbiddenException when assertCircleAccess rejects and enqueues nothing', async () => {
+      const dto = makeBulkRerunDto();
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+        new ForbiddenException('Insufficient circle role'),
+      );
+
+      await expect(
+        service.bulkRerunThumbnails(dto, 'user-1', ownPerms),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(mockMediaEnrichmentService.enqueueThumbnailRerun).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException when not all ids belong to the circle and enqueues nothing', async () => {
+      const ids = [randomUUID(), randomUUID(), randomUUID()];
+      const dto = makeBulkRerunDto({ ids });
+      mockPrisma.mediaItem.findMany.mockResolvedValue([
+        { id: ids[0] },
+        { id: ids[1] },
+      ] as any);
+
+      await expect(
+        service.bulkRerunThumbnails(dto, 'user-1', ownPerms),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(mockMediaEnrichmentService.enqueueThumbnailRerun).not.toHaveBeenCalled();
+    });
+
+    it('enqueues a thumbnail rerun per id via enqueueThumbnailRerun and returns { queued: N }', async () => {
+      const ids = [randomUUID(), randomUUID(), randomUUID()];
+      const dto = makeBulkRerunDto({ ids });
+      mockPrisma.mediaItem.findMany.mockResolvedValue(
+        ids.map((id) => ({ id })) as any,
+      );
+
+      const result = await service.bulkRerunThumbnails(dto, 'user-1', ownPerms);
+
+      expect(mockMediaEnrichmentService.enqueueThumbnailRerun).toHaveBeenCalledTimes(3);
+      for (const id of ids) {
+        expect(mockMediaEnrichmentService.enqueueThumbnailRerun).toHaveBeenCalledWith({
+          id,
+          circleId: CIRCLE_ID,
+        });
+      }
+      expect(result).toEqual({ queued: 3 });
     });
   });
 

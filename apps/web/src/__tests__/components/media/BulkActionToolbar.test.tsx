@@ -32,6 +32,9 @@ vi.mock('../../../services/media', () => ({
   bulkDelete: vi.fn(),
   bulkArchive: vi.fn(),
   bulkUnarchive: vi.fn(),
+  bulkRerunTags: vi.fn(),
+  bulkRerunFaces: vi.fn(),
+  bulkRerunThumbnails: vi.fn(),
   getDashboard: vi.fn(),
   listMedia: vi.fn(),
   getMedia: vi.fn(),
@@ -44,10 +47,19 @@ vi.mock('../../../services/media', () => ({
   bulkTags: vi.fn(),
 }));
 
-import { bulkUpdateMedia, bulkDelete } from '../../../services/media';
+import {
+  bulkUpdateMedia,
+  bulkDelete,
+  bulkRerunTags,
+  bulkRerunFaces,
+  bulkRerunThumbnails,
+} from '../../../services/media';
 
 const mockBulkUpdateMedia = vi.mocked(bulkUpdateMedia);
 const mockBulkDelete = vi.mocked(bulkDelete);
+const mockBulkRerunTags = vi.mocked(bulkRerunTags);
+const mockBulkRerunFaces = vi.mocked(bulkRerunFaces);
+const mockBulkRerunThumbnails = vi.mocked(bulkRerunThumbnails);
 
 // ---------------------------------------------------------------------------
 // Default props
@@ -72,6 +84,9 @@ describe('BulkActionToolbar', () => {
     vi.clearAllMocks();
     mockBulkUpdateMedia.mockResolvedValue({ updated: 2 });
     mockBulkDelete.mockResolvedValue({ deleted: 2 });
+    mockBulkRerunTags.mockResolvedValue({ queued: 2 });
+    mockBulkRerunFaces.mockResolvedValue({ queued: 2 });
+    mockBulkRerunThumbnails.mockResolvedValue({ queued: 2 });
   });
 
   // -------------------------------------------------------------------------
@@ -318,6 +333,77 @@ describe('BulkActionToolbar', () => {
       await user.click(screen.getByRole('button', { name: /more actions/i }));
       await user.click(screen.getByRole('menuitem', { name: /move to trash/i }));
       expect(screen.getByText(/move 1 item to trash\?/i)).toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Bulk enrichment reruns (thumbnails / faces / AI tagging)
+  //
+  // count <= 25: fires immediately, no confirm dialog.
+  // count > 25: opens a confirm dialog first; the service call only happens
+  // after the dialog's "Re-run" button is clicked.
+  // -------------------------------------------------------------------------
+  describe('Bulk enrichment reruns', () => {
+    it('small selection (<=25): "Re-run AI tagging" calls bulkRerunTags immediately with {circleId, ids} and fires onSuccess', async () => {
+      const user = userEvent.setup();
+      render(<BulkActionToolbar {...defaultProps} />);
+
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      await user.click(screen.getByRole('menuitem', { name: /re-run ai tagging/i }));
+
+      // No confirm dialog for a small selection — call happens right away.
+      expect(
+        screen.queryByText(/re-run ai tagging on 2 items\?/i),
+      ).not.toBeInTheDocument();
+
+      await waitFor(() => {
+        expect(mockBulkRerunTags).toHaveBeenCalledTimes(1);
+      });
+      expect(mockBulkRerunTags).toHaveBeenCalledWith({
+        circleId: 'circle-1',
+        ids: expect.arrayContaining(['item-1', 'item-2']),
+      });
+
+      await waitFor(() => {
+        expect(defaultProps.onSuccess).toHaveBeenCalledWith(
+          expect.stringMatching(/queued ai tagging for 2 items/i),
+        );
+      });
+    });
+
+    it('large selection (>25): "Re-run faces" opens a confirm dialog and only calls bulkRerunFaces once confirmed', async () => {
+      const largeSelection = new Set(
+        Array.from({ length: 30 }, (_, i) => `item-${i}`),
+      );
+      mockBulkRerunFaces.mockResolvedValue({ queued: 30 });
+
+      const user = userEvent.setup();
+      render(
+        <BulkActionToolbar {...defaultProps} selected={largeSelection} />,
+      );
+
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      await user.click(screen.getByRole('menuitem', { name: /re-run faces/i }));
+
+      // Confirm dialog appears (title heading); the service must NOT have
+      // been called yet. The dialog body repeats similar text, so scope the
+      // assertion to the heading to avoid a multi-match error.
+      expect(
+        screen.getByRole('heading', { name: /re-run face detection on 30 items\?/i }),
+      ).toBeInTheDocument();
+      expect(mockBulkRerunFaces).not.toHaveBeenCalled();
+
+      // Confirm — the dialog's "Re-run" button (not the menu item, which is
+      // already closed).
+      await user.click(screen.getByRole('button', { name: /^re-run$/i }));
+
+      await waitFor(() => {
+        expect(mockBulkRerunFaces).toHaveBeenCalledTimes(1);
+      });
+      expect(mockBulkRerunFaces).toHaveBeenCalledWith({
+        circleId: 'circle-1',
+        ids: expect.arrayContaining(Array.from(largeSelection)),
+      });
     });
   });
 });
