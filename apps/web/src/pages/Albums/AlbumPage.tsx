@@ -4,8 +4,11 @@
  * Owns:
  * - Back link to /albums
  * - Album title + optional description (loaded via getAlbum)
+ * - Icon toolbar: Map, Slideshow, People, Share
+ * - Kebab menu (non-viewers): Select album cover / Rename / Delete album
  * - Rename (PATCH) and Delete (DELETE → navigate /albums) dialogs
  * - MediaGallery in FEED + album mode for the album's media items
+ * - A dedicated fullscreen slideshow (MediaLightbox with autoPlay)
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -23,26 +26,41 @@ import {
   TextField,
   Menu,
   MenuItem,
+  Stack,
+  Tooltip,
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
   MoreVert as MoreVertIcon,
   Share as ShareIcon,
+  Map as MapIcon,
+  Slideshow as SlideshowIcon,
+  People as PeopleIcon,
+  Image as ImageIcon,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { getAlbum, updateAlbum, deleteAlbum } from '../../services/media';
+import type { MediaItem } from '../../types/media';
 import { MediaGallery } from '../../components/media/MediaGallery';
+import { MediaLightbox } from '../../components/media/MediaLightbox';
 import { ShareDialog } from '../../components/share/ShareDialog';
+import { AlbumMapDialog } from '../../components/album/AlbumMapDialog';
+import { AlbumPeopleDialog } from '../../components/album/AlbumPeopleDialog';
+import { SelectAlbumCoverDialog } from '../../components/album/SelectAlbumCoverDialog';
 
 export default function AlbumPage() {
   const { albumId } = useParams<{ albumId: string }>();
   const navigate = useNavigate();
   const { activeCircle, activeCircleRole } = useCircle();
 
+  const canManage = activeCircleRole !== 'viewer';
+
   // Album metadata
   const [albumName, setAlbumName] = useState<string | null>(null);
   const [albumDescription, setAlbumDescription] = useState<string | null>(null);
+  const [albumItems, setAlbumItems] = useState<MediaItem[]>([]);
+  const [coverMediaItemId, setCoverMediaItemId] = useState<string | null>(null);
   const [albumHeaderLoading, setAlbumHeaderLoading] = useState(false);
   const [albumHeaderError, setAlbumHeaderError] = useState<string | null>(null);
 
@@ -64,10 +82,19 @@ export default function AlbumPage() {
   // Share dialog
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
 
+  // Map / People / Cover dialogs
+  const [mapOpen, setMapOpen] = useState(false);
+  const [peopleOpen, setPeopleOpen] = useState(false);
+  const [coverOpen, setCoverOpen] = useState(false);
+
+  // Slideshow lightbox — null = closed. Self-contained; does not fight the
+  // MediaGallery's own lightbox.
+  const [slideshowIndex, setSlideshowIndex] = useState<number | null>(null);
+
   // Gallery refresh token — incrementing causes MediaGallery to re-fetch album header
   const [headerRefreshToken, setHeaderRefreshToken] = useState(0);
 
-  // Load album metadata
+  // Load album metadata + items
   useEffect(() => {
     if (!albumId) return;
     setAlbumHeaderLoading(true);
@@ -76,14 +103,22 @@ export default function AlbumPage() {
       .then((detail) => {
         setAlbumName(detail.name);
         setAlbumDescription(detail.description);
+        setAlbumItems(detail.items ?? []);
+        setCoverMediaItemId(detail.coverMediaItemId ?? null);
       })
       .catch((err) => {
         setAlbumHeaderError(err instanceof Error ? err.message : 'Failed to load album');
         setAlbumName(null);
         setAlbumDescription(null);
+        setAlbumItems([]);
+        setCoverMediaItemId(null);
       })
       .finally(() => setAlbumHeaderLoading(false));
   }, [albumId, headerRefreshToken]);
+
+  const reloadAlbumHeader = useCallback(() => {
+    setHeaderRefreshToken((t) => t + 1);
+  }, []);
 
   const handleRename = async () => {
     if (!albumId || !renameNameValue.trim()) return;
@@ -119,9 +154,15 @@ export default function AlbumPage() {
     }
   };
 
-  const reloadAlbumHeader = useCallback(() => {
-    setHeaderRefreshToken((t) => t + 1);
-  }, []);
+  // Persist the chosen album cover, then reload the header so it reflects.
+  const handleSaveCover = useCallback(
+    async (mediaItemId: string) => {
+      if (!albumId) return;
+      await updateAlbum(albumId, { coverMediaItemId: mediaItemId });
+      reloadAlbumHeader();
+    },
+    [albumId, reloadAlbumHeader],
+  );
 
   const queryParams = useMemo(
     () =>
@@ -152,6 +193,8 @@ export default function AlbumPage() {
     );
   }
 
+  const isEmpty = albumItems.length === 0;
+
   return (
     <Box sx={{ minHeight: '100vh', pb: { xs: 10, sm: 4 } }}>
       {/* Album chrome */}
@@ -171,65 +214,128 @@ export default function AlbumPage() {
           </Alert>
         )}
 
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            mb: 0.5,
+            flexWrap: 'wrap',
+          }}
+        >
           {albumHeaderLoading ? (
             <CircularProgress size={20} />
           ) : (
-            <Typography variant="h5" component="h1">
+            <Typography variant="h5" component="h1" sx={{ flexShrink: 1, minWidth: 0 }} noWrap>
               {albumName ?? 'Album'}
             </Typography>
           )}
 
-          {/* Album actions menu — visible to collaborators and above */}
-          {activeCircleRole !== 'viewer' && (
-            <>
+          {/* Right-aligned icon toolbar */}
+          <Stack
+            direction="row"
+            spacing={0.5}
+            sx={{ ml: 'auto', alignItems: 'center', flexShrink: 0 }}
+          >
+            <Tooltip title="Map">
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={() => setMapOpen(true)}
+                  disabled={isEmpty}
+                  aria-label="View album on map"
+                >
+                  <MapIcon />
+                </IconButton>
+              </span>
+            </Tooltip>
+
+            <Tooltip title="Slideshow">
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={() => setSlideshowIndex(0)}
+                  disabled={isEmpty}
+                  aria-label="Play slideshow"
+                >
+                  <SlideshowIcon />
+                </IconButton>
+              </span>
+            </Tooltip>
+
+            <Tooltip title="People">
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={() => setPeopleOpen(true)}
+                  disabled={isEmpty}
+                  aria-label="People in this album"
+                >
+                  <PeopleIcon />
+                </IconButton>
+              </span>
+            </Tooltip>
+
+            <Tooltip title="Share album">
               <IconButton
                 size="small"
-                onClick={(e) => {
-                  setRenameNameValue(albumName ?? '');
-                  setRenameDescValue(albumDescription ?? '');
-                  setMenuAnchor(e.currentTarget);
-                }}
-                aria-label="Album actions"
+                onClick={() => setShareDialogOpen(true)}
+                aria-label="Share album"
               >
-                <MoreVertIcon />
+                <ShareIcon />
               </IconButton>
-              <Menu
-                anchorEl={menuAnchor}
-                open={Boolean(menuAnchor)}
-                onClose={() => setMenuAnchor(null)}
-              >
-                <MenuItem
-                  onClick={() => {
-                    setMenuAnchor(null);
-                    setRenameNameValue(albumName ?? '');
-                    setRenameDescValue(albumDescription ?? '');
-                    setRenameOpen(true);
-                  }}
+            </Tooltip>
+
+            {/* Album management menu — collaborators and above only */}
+            {canManage && (
+              <>
+                <Tooltip title="More actions">
+                  <IconButton
+                    size="small"
+                    onClick={(e) => setMenuAnchor(e.currentTarget)}
+                    aria-label="Album actions"
+                  >
+                    <MoreVertIcon />
+                  </IconButton>
+                </Tooltip>
+                <Menu
+                  anchorEl={menuAnchor}
+                  open={Boolean(menuAnchor)}
+                  onClose={() => setMenuAnchor(null)}
                 >
-                  Rename
-                </MenuItem>
-                <MenuItem
-                  onClick={() => {
-                    setMenuAnchor(null);
-                    setShareDialogOpen(true);
-                  }}
-                >
-                  <ShareIcon fontSize="small" sx={{ mr: 1 }} />
-                  Share album
-                </MenuItem>
-                <MenuItem
-                  onClick={() => {
-                    setMenuAnchor(null);
-                    setDeleteConfirmOpen(true);
-                  }}
-                  sx={{ color: 'error.main' }}
-                >
-                  Delete album
-                </MenuItem>
-              </Menu>
-            </>
-          )}
+                  <MenuItem
+                    disabled={isEmpty}
+                    onClick={() => {
+                      setMenuAnchor(null);
+                      setCoverOpen(true);
+                    }}
+                  >
+                    <ImageIcon fontSize="small" sx={{ mr: 1 }} />
+                    Select album cover
+                  </MenuItem>
+                  <MenuItem
+                    onClick={() => {
+                      setMenuAnchor(null);
+                      setRenameNameValue(albumName ?? '');
+                      setRenameDescValue(albumDescription ?? '');
+                      setRenameOpen(true);
+                    }}
+                  >
+                    Rename
+                  </MenuItem>
+                  <MenuItem
+                    onClick={() => {
+                      setMenuAnchor(null);
+                      setDeleteConfirmOpen(true);
+                    }}
+                    sx={{ color: 'error.main' }}
+                  >
+                    Delete album
+                  </MenuItem>
+                </Menu>
+              </>
+            )}
+          </Stack>
         </Box>
 
         {albumDescription && (
@@ -257,14 +363,51 @@ export default function AlbumPage() {
         />
       )}
 
-      {/* Share dialog */}
-      {albumId && (
-        <ShareDialog
-          open={shareDialogOpen}
-          onClose={() => setShareDialogOpen(false)}
-          target={{ type: 'album', id: albumId }}
+      {/* Slideshow — dedicated fullscreen lightbox seeded with the album items */}
+      {slideshowIndex !== null && albumItems.length > 0 && (
+        <MediaLightbox
+          items={albumItems}
+          index={slideshowIndex}
+          onIndexChange={(i) => setSlideshowIndex(i)}
+          onClose={() => setSlideshowIndex(null)}
+          onOpenProperties={() => {
+            /* properties panel is not surfaced in slideshow mode */
+          }}
+          autoPlay
         />
       )}
+
+      {/* Map dialog */}
+      <AlbumMapDialog
+        open={mapOpen}
+        onClose={() => setMapOpen(false)}
+        albumId={albumId}
+        circleId={activeCircle.id}
+      />
+
+      {/* People dialog */}
+      <AlbumPeopleDialog
+        open={peopleOpen}
+        onClose={() => setPeopleOpen(false)}
+        albumId={albumId}
+        circleId={activeCircle.id}
+      />
+
+      {/* Select album cover dialog */}
+      <SelectAlbumCoverDialog
+        open={coverOpen}
+        onClose={() => setCoverOpen(false)}
+        items={albumItems}
+        currentCoverMediaItemId={coverMediaItemId}
+        onSave={handleSaveCover}
+      />
+
+      {/* Share dialog */}
+      <ShareDialog
+        open={shareDialogOpen}
+        onClose={() => setShareDialogOpen(false)}
+        target={{ type: 'album', id: albumId }}
+      />
 
       {/* Rename dialog */}
       <Dialog open={renameOpen} onClose={() => setRenameOpen(false)} maxWidth="xs" fullWidth>
