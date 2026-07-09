@@ -15,6 +15,8 @@ export const listPeopleQuerySchema = z.object({
     .string()
     .optional()
     .transform((v) => v === 'true'),
+  // Scope to people appearing in a single album's media
+  albumId: z.string().uuid().optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });

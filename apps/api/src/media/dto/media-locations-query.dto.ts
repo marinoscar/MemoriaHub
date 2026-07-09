@@ -16,6 +16,8 @@ export const mediaLocationsQuerySchema = z.object({
   place: z.string().optional(),
   // Combined free-text geo search
   location: z.string().optional(),
+  // Scope the map to a single album's members
+  albumId: z.string().uuid().optional(),
 });
 
 export class MediaLocationsQueryDto extends createZodDto(mediaLocationsQuerySchema) {}
