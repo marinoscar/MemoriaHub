@@ -24,6 +24,7 @@ import {
   ListUnassignedFacesQueryDto,
   BulkPeopleDto,
   BulkFacesDto,
+  PurgeArchivedFacesDto,
 } from './dto/people.dto';
 import { MergePeopleDto } from './dto/merge-people.dto';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
@@ -1076,6 +1077,76 @@ export class PeopleService {
 
     this.logger.log(
       `purgeFaces: ${deleted} face(s) permanently deleted in circle ${circleId} by user ${userId}`,
+    );
+
+    return { deleted };
+  }
+
+  // ---------------------------------------------------------------------------
+  // purgeArchivedFaces  (permanently delete ALL archived unassigned faces in a circle)
+  // ---------------------------------------------------------------------------
+
+  async purgeArchivedFaces(
+    dto: PurgeArchivedFacesDto,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{ deleted: number }> {
+    const { circleId } = dto;
+
+    await this.circleMembershipService.assertCircleAccess(
+      userId,
+      circleId,
+      userPermissions,
+      'collaborator' as CircleRole,
+    );
+
+    // Deliberately NO mediaItem: { deletedAt: null, archivedAt: null } sub-filter:
+    // archived faces on since-trashed/archived media are cleaned up too, so the
+    // deleted count may exceed what the visible archived-faces list shows.
+    const where = { circleId, personId: null, hiddenAt: { not: null } };
+
+    // Capture affected media items BEFORE deleting faces (so we can re-enqueue tagging)
+    const affectedMediaItems = await this.prisma.face.findMany({
+      where,
+      select: {
+        mediaItemId: true,
+        mediaItem: { select: { circleId: true } },
+      },
+      distinct: ['mediaItemId'],
+    });
+
+    const dedupedMedia: Array<{ mediaItemId: string; circleId: string }> = [];
+    const seen = new Set<string>();
+    for (const f of affectedMediaItems) {
+      if (!seen.has(f.mediaItemId)) {
+        seen.add(f.mediaItemId);
+        dedupedMedia.push({ mediaItemId: f.mediaItemId, circleId: f.mediaItem.circleId });
+      }
+    }
+
+    let deleted = 0;
+
+    await this.prisma.$transaction(async (tx) => {
+      // Hard-delete the archived Face rows (reclaims embedding storage).
+      const result = await tx.face.deleteMany({ where });
+      deleted = result.count;
+
+      await tx.auditEvent.create({
+        data: {
+          actorUserId: userId,
+          action: 'face:purge_archived',
+          targetType: 'circle',
+          targetId: circleId,
+          meta: { circleId, count: deleted } as any,
+        },
+      });
+    });
+
+    // Re-enqueue auto-tagging for all affected media items (faces removed from context)
+    await this.enqueueAutoTaggingForMediaItems(dedupedMedia);
+
+    this.logger.log(
+      `purgeArchivedFaces: ${deleted} archived face(s) permanently deleted in circle ${circleId} by user ${userId}`,
     );
 
     return { deleted };

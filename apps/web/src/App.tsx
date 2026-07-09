@@ -41,6 +41,7 @@ const LocationInferenceSettingsPage = lazy(() => import('./pages/Admin/LocationI
 const ArchivingSettingsPage = lazy(() => import('./pages/Admin/ArchivingSettingsPage'));
 const SearchPage = lazy(() => import('./pages/SearchPage'));
 const PeoplePage = lazy(() => import('./pages/People/PeoplePage'));
+const ArchivedFacesPage = lazy(() => import('./pages/People/ArchivedFacesPage'));
 const AlbumsPage = lazy(() => import('./pages/Albums'));
 const AlbumPage = lazy(() => import('./pages/Albums/AlbumPage'));
 const TagsBrowsePage = lazy(() => import('./pages/Tags'));
@@ -123,6 +124,7 @@ function AppRoutes() {
                 <Route path="/admin/backup" element={<Navigate to="/admin/settings/backup" replace />} />
                 <Route path="/search" element={<SearchPage />} />
                 <Route path="/people" element={<PeoplePage />} />
+                <Route path="/people/archived" element={<ArchivedFacesPage />} />
                 <Route path="/tags" element={<TagsBrowsePage />} />
                 <Route path="/places" element={<PlacesOverviewPage />} />
                 <Route path="/places/countries" element={<LevelBrowsePage level="countries" />} />

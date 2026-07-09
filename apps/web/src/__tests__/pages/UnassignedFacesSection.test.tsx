@@ -54,11 +54,12 @@ vi.mock('../../services/face', () => ({
   listUnassignedFaces: vi.fn().mockResolvedValue({ items: [] }),
 }));
 
+const mockNavigate = vi.fn();
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>();
   return {
     ...actual,
-    useNavigate: () => vi.fn(),
+    useNavigate: () => mockNavigate,
   };
 });
 
@@ -127,16 +128,55 @@ function makeUsePeopleDefaults(items: PersonListItem[] = []) {
 /**
  * Renders PeoplePage with a single unassigned face and one labeled person.
  * Returns the refresh mock so tests can assert on it.
+ *
+ * UnassignedFacesSection calls useUnassignedFaces TWICE: once for the live
+ * pool (no opts / opts.archived falsy) and once as an archived-count probe
+ * (opts.archived === true, pageSize: 1). mockUseUnassignedFaces distinguishes
+ * the two call sites via opts?.archived so each returns its own shape.
  */
-function setupWithFaceAndPerson(refreshMock?: ReturnType<typeof vi.fn>) {
+function setupWithFaceAndPerson(
+  refreshMock?: ReturnType<typeof vi.fn>,
+  opts?: { archivedTotal?: number; total?: number; hasMore?: boolean; loadMore?: ReturnType<typeof vi.fn> },
+) {
   const refresh = refreshMock ?? vi.fn().mockResolvedValue(undefined);
+  const refreshArchived = vi.fn().mockResolvedValue(undefined);
+  const loadMore = opts?.loadMore ?? vi.fn().mockResolvedValue(undefined);
+  const total = opts?.total ?? 1;
+  const archivedTotal = opts?.archivedTotal ?? 0;
+  const hasMore = opts?.hasMore ?? false;
 
-  mockUseUnassignedFaces.mockReturnValue({
-    faces: [makeUnassignedFace('face-1')],
-    loading: false,
-    error: null,
-    refresh,
-  } as any);
+  mockUseUnassignedFaces.mockImplementation((_circleId, hookOpts) => {
+    if (hookOpts?.archived) {
+      return {
+        faces: [],
+        total: archivedTotal,
+        hasMore: false,
+        loadMore: vi.fn(),
+        loadingMore: false,
+        loading: false,
+        error: null,
+        refresh: refreshArchived,
+        hide: vi.fn(),
+        unhide: vi.fn(),
+        purge: vi.fn(),
+        purgeArchived: vi.fn(),
+      } as any;
+    }
+    return {
+      faces: [makeUnassignedFace('face-1')],
+      total,
+      hasMore,
+      loadMore,
+      loadingMore: false,
+      loading: false,
+      error: null,
+      refresh,
+      hide: vi.fn(),
+      unhide: vi.fn(),
+      purge: vi.fn(),
+      purgeArchived: vi.fn(),
+    } as any;
+  });
 
   mockUsePeople.mockImplementation((_id, opts?: { includeUnlabeled?: boolean }) => {
     if (opts?.includeUnlabeled) return makeUsePeopleDefaults([]) as any;
@@ -150,7 +190,7 @@ function setupWithFaceAndPerson(refreshMock?: ReturnType<typeof vi.fn>) {
     refresh: vi.fn(),
   } as any);
 
-  return { refresh };
+  return { refresh, refreshArchived, loadMore };
 }
 
 /**
@@ -311,5 +351,79 @@ describe('UnassignedFacesSection — window focus refresh', () => {
     await waitFor(() => {
       expect(refresh).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('UnassignedFacesSection — total / "Load more"', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows the total from the hook in the section header, not faces.length', async () => {
+    setupWithFaceAndPerson(undefined, { total: 342 });
+
+    render(<PeoplePage />);
+
+    expect(await screen.findByText(/unassigned faces \(342\)/i)).toBeInTheDocument();
+  });
+
+  it('renders a "Load more" button when hasMore is true, and calls loadMore on click', async () => {
+    const loadMore = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    setupWithFaceAndPerson(undefined, { total: 5, hasMore: true, loadMore });
+
+    render(<PeoplePage />);
+
+    const loadMoreBtn = await screen.findByRole('button', { name: /load more/i });
+    await user.click(loadMoreBtn);
+
+    expect(loadMore).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not render a "Load more" button when hasMore is false', async () => {
+    setupWithFaceAndPerson(undefined, { total: 1, hasMore: false });
+
+    render(<PeoplePage />);
+
+    await screen.findByText(/unassigned faces/i);
+    expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('UnassignedFacesSection — "View archived faces" navigation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockNavigate.mockClear();
+  });
+
+  it('renders the "View archived faces" button when the archived probe reports total > 0', async () => {
+    setupWithFaceAndPerson(undefined, { archivedTotal: 7 });
+
+    render(<PeoplePage />);
+
+    expect(await screen.findByRole('button', { name: /view archived faces/i })).toBeInTheDocument();
+  });
+
+  it('does not render "View archived faces" when the archived probe total is 0', async () => {
+    setupWithFaceAndPerson(undefined, { archivedTotal: 0 });
+
+    render(<PeoplePage />);
+
+    await screen.findByText(/unassigned faces/i);
+    expect(screen.queryByRole('button', { name: /view archived faces/i })).not.toBeInTheDocument();
+  });
+
+  it('navigates to /people/archived when "View archived faces" is clicked', async () => {
+    const user = userEvent.setup();
+    setupWithFaceAndPerson(undefined, { archivedTotal: 3 });
+
+    render(<PeoplePage />);
+
+    const viewArchivedBtn = await screen.findByRole('button', { name: /view archived faces/i });
+    await user.click(viewArchivedBtn);
+
+    expect(mockNavigate).toHaveBeenCalledWith('/people/archived');
   });
 });

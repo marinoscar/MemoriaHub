@@ -19,14 +19,12 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Checkbox,
   Autocomplete,
   Tooltip,
   Snackbar,
   Tab,
   Tabs,
   Badge,
-  Collapse,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -43,8 +41,6 @@ import {
   VisibilityOff as VisibilityOffIcon,
   Visibility as VisibilityIcon,
   SelectAll as SelectAllIcon,
-  Restore as RestoreIcon,
-  DeleteForever as DeleteForeverIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import Cropper from 'react-easy-crop';
@@ -55,8 +51,9 @@ import { PersonGrid } from '../../components/people/PersonGrid';
 import { UnknownFacesReview } from '../../components/people/UnknownFacesReview';
 import { MergePeopleDialog } from '../../components/people/MergePeopleDialog';
 import { FaceCrop } from '../../components/people/FaceCrop';
+import { FaceThumbGrid } from '../../components/people/FaceThumbGrid';
 import { PersonAvatar } from '../../components/people/PersonAvatar';
-import type { PersonListItem, PersonDetail, UnassignedFaceDto } from '../../services/face';
+import type { PersonListItem, PersonDetail } from '../../services/face';
 import {
   deleteCircleBiometrics,
   mergePeople,
@@ -269,76 +266,6 @@ function PurgePeopleDialog({ open, count, onClose, onConfirm }: PurgePeopleDialo
             {count} person record{count !== 1 ? 's' : ''}
           </strong>{' '}
           and their face data. <strong>Your photos are NOT deleted.</strong> This cannot be undone.
-        </Typography>
-        {error && (
-          <Alert severity="error" sx={{ mt: 2 }}>
-            {error}
-          </Alert>
-        )}
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={handleClose} disabled={deleting}>
-          Cancel
-        </Button>
-        <Button
-          variant="contained"
-          color="error"
-          onClick={() => void handleConfirm()}
-          disabled={deleting}
-          startIcon={deleting ? <CircularProgress size={16} /> : undefined}
-        >
-          {deleting ? 'Deleting…' : 'Delete permanently'}
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Purge Faces Dialog (permanent delete of individual archived faces)
-// ---------------------------------------------------------------------------
-
-interface PurgeFacesDialogProps {
-  open: boolean;
-  count: number;
-  onClose: () => void;
-  onConfirm: () => Promise<void>;
-}
-
-function PurgeFacesDialog({ open, count, onClose, onConfirm }: PurgeFacesDialogProps) {
-  const [deleting, setDeleting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleConfirm = async () => {
-    setDeleting(true);
-    setError(null);
-    try {
-      await onConfirm();
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Deletion failed. Please try again.');
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  const handleClose = () => {
-    if (deleting) return;
-    setError(null);
-    onClose();
-  };
-
-  return (
-    <Dialog open={open} onClose={handleClose} maxWidth="xs" fullWidth>
-      <DialogTitle>Delete permanently?</DialogTitle>
-      <DialogContent>
-        <Typography variant="body2" sx={{ mb: 1 }}>
-          This permanently removes{' '}
-          <strong>
-            {count} face{count !== 1 ? 's' : ''}
-          </strong>{' '}
-          and their biometric data. <strong>Your photos are NOT deleted.</strong> This cannot be
-          undone.
         </Typography>
         {error && (
           <Alert severity="error" sx={{ mt: 2 }}>
@@ -868,92 +795,6 @@ function PersonDetailDrawer({
 // Unassigned Faces Section (lone detected faces not yet in any Person)
 // ---------------------------------------------------------------------------
 
-/**
- * Renders a selectable grid of face thumbnails, resolving each face's media
- * thumbnail URL on demand. Used by both the live unassigned pool and the
- * archived faces sub-view.
- */
-function FaceThumbGrid({
-  faces,
-  selectedIds,
-  onToggle,
-}: {
-  faces: UnassignedFaceDto[];
-  selectedIds: Set<string>;
-  onToggle: (faceId: string) => void;
-}) {
-  const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
-
-  // Resolve thumbnail URLs for each unique mediaItemId
-  useEffect(() => {
-    if (faces.length === 0) return;
-    const uniqueIds = [...new Set(faces.map((f) => f.mediaItemId))];
-    const missing = uniqueIds.filter((id) => !mediaUrls[id]);
-    if (missing.length === 0) return;
-    missing.forEach((mediaId) => {
-      getMedia(mediaId)
-        .then((item) => {
-          const url = item.downloadUrl ?? item.thumbnailUrl;
-          if (url) {
-            setMediaUrls((prev) => ({ ...prev, [mediaId]: url }));
-          }
-        })
-        .catch(() => undefined);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [faces]);
-
-  return (
-    <Grid container spacing={1}>
-      {faces.map((face) => {
-        const imgUrl = mediaUrls[face.mediaItemId];
-        const selected = selectedIds.has(face.faceId);
-        return (
-          <Grid key={face.faceId}>
-            <Box
-              onClick={() => onToggle(face.faceId)}
-              sx={{
-                position: 'relative',
-                cursor: 'pointer',
-                borderRadius: 1,
-                border: selected ? '2px solid' : '2px solid transparent',
-                borderColor: selected ? 'primary.main' : 'transparent',
-                '&:hover': { borderColor: 'primary.light' },
-              }}
-            >
-              {face.faceThumbnailUrl ? (
-                <Box
-                  component="img"
-                  src={face.faceThumbnailUrl}
-                  sx={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 1, display: 'block' }}
-                />
-              ) : imgUrl ? (
-                <FaceCrop imageUrl={imgUrl} boundingBox={face.boundingBox} size={72} />
-              ) : (
-                <Box sx={{ width: 72, height: 72, bgcolor: 'grey.200', borderRadius: 1 }} />
-              )}
-              <Checkbox
-                size="small"
-                checked={selected}
-                sx={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  p: 0.25,
-                  color: 'white',
-                  '&.Mui-checked': { color: 'primary.main' },
-                }}
-                onClick={(e) => e.stopPropagation()}
-                onChange={() => onToggle(face.faceId)}
-              />
-            </Box>
-          </Grid>
-        );
-      })}
-    </Grid>
-  );
-}
-
 function UnassignedFacesSection({
   circleId,
   allPeople,
@@ -963,15 +804,14 @@ function UnassignedFacesSection({
   allPeople: PersonListItem[];
   onAssigned: () => void;
 }) {
-  const { faces, loading, error, refresh, hide } = useUnassignedFaces(circleId);
-  const {
-    faces: archivedFaces,
-    loading: archivedLoading,
-    error: archivedError,
-    refresh: refreshArchived,
-    unhide,
-    purge,
-  } = useUnassignedFaces(circleId, { archived: true });
+  const navigate = useNavigate();
+  const { faces, total, hasMore, loadMore, loadingMore, loading, error, refresh, hide } =
+    useUnassignedFaces(circleId);
+  // Count probe for archived faces (full management lives on /people/archived)
+  const { total: archivedTotal, refresh: refreshArchived } = useUnassignedFaces(circleId, {
+    archived: true,
+    pageSize: 1,
+  });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [nameDialogOpen, setNameDialogOpen] = useState(false);
   const [newPersonName, setNewPersonName] = useState('');
@@ -981,12 +821,6 @@ function UnassignedFacesSection({
   const [archiving, setArchiving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-
-  // Archived sub-view state
-  const [showArchived, setShowArchived] = useState(false);
-  const [archivedSelectedIds, setArchivedSelectedIds] = useState<Set<string>>(new Set());
-  const [restoring, setRestoring] = useState(false);
-  const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
 
   // Refresh on mount and whenever the window regains focus (handles stale IDs
   // after detection re-runs in another tab)
@@ -1003,15 +837,6 @@ function UnassignedFacesSection({
 
   const toggleSelect = (faceId: string) => {
     setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(faceId)) next.delete(faceId);
-      else next.add(faceId);
-      return next;
-    });
-  };
-
-  const toggleArchivedSelect = (faceId: string) => {
-    setArchivedSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(faceId)) next.delete(faceId);
       else next.add(faceId);
@@ -1049,36 +874,6 @@ function UnassignedFacesSection({
     } finally {
       setArchiving(false);
     }
-  };
-
-  const handleRestore = async () => {
-    if (archivedSelectedIds.size === 0) return;
-    setRestoring(true);
-    setActionError(null);
-    try {
-      const ids = [...archivedSelectedIds];
-      const result = await unhide(ids);
-      setArchivedSelectedIds(new Set());
-      await Promise.all([refresh(), refreshArchived()]);
-      setSuccessMsg(
-        `Restored ${result.unhidden} face${result.unhidden !== 1 ? 's' : ''}.`,
-      );
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to restore faces');
-    } finally {
-      setRestoring(false);
-    }
-  };
-
-  const handlePurge = async () => {
-    if (archivedSelectedIds.size === 0) return;
-    const ids = [...archivedSelectedIds];
-    const result = await purge(ids);
-    setArchivedSelectedIds(new Set());
-    await refreshArchived();
-    setSuccessMsg(
-      `Permanently deleted ${result.deleted} face${result.deleted !== 1 ? 's' : ''}.`,
-    );
   };
 
   const handleCreatePerson = async () => {
@@ -1152,7 +947,7 @@ function UnassignedFacesSection({
   if (loading) return <CircularProgress size={24} />;
   if (error) return <Alert severity="error">{error}</Alert>;
   // hide section entirely if there are neither live nor archived unassigned faces
-  if (faces.length === 0 && archivedFaces.length === 0) return null;
+  if (total === 0 && archivedTotal === 0) return null;
 
   const getPersonLabel = (p: PersonListItem) =>
     p.name ?? `Unlabeled (${p.id.slice(0, 6)})`;
@@ -1160,10 +955,15 @@ function UnassignedFacesSection({
   return (
     <Box>
       <Typography variant="h6" sx={{ mb: 1 }}>
-        Unassigned Faces ({faces.length})
+        Unassigned Faces ({total})
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         Individual detected faces not yet linked to a person. Select one or more to name, assign, or archive.
+        {faces.length < total && (
+          <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+            Showing {faces.length} of {total}
+          </Typography>
+        )}
       </Typography>
 
       {/* Action bar — visible when faces are selected */}
@@ -1262,8 +1062,24 @@ function UnassignedFacesSection({
       {/* Live face grid */}
       <FaceThumbGrid faces={faces} selectedIds={selectedIds} onToggle={toggleSelect} />
 
-      {/* Archived faces sub-view */}
-      {archivedFaces.length > 0 && (
+      {/* Load more — remaining pages of live unassigned faces */}
+      {hasMore && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => void loadMore()}
+            disabled={loadingMore}
+            startIcon={loadingMore ? <CircularProgress size={16} /> : undefined}
+            sx={{ minHeight: 44 }}
+          >
+            Load more ({total - faces.length} remaining)
+          </Button>
+        </Box>
+      )}
+
+      {/* Link to the archived faces page */}
+      {archivedTotal > 0 && (
         <Box sx={{ mt: 3 }}>
           <Button
             size="small"
@@ -1273,111 +1089,15 @@ function UnassignedFacesSection({
             endIcon={
               <Badge
                 color="default"
-                badgeContent={archivedFaces.length}
+                badgeContent={archivedTotal}
                 sx={{ '& .MuiBadge-badge': { position: 'static', transform: 'none' } }}
               />
             }
-            onClick={() => setShowArchived((v) => !v)}
+            onClick={() => navigate('/people/archived')}
             sx={{ minHeight: 44 }}
           >
-            {showArchived ? 'Hide archived faces' : 'Show archived faces'}
+            View archived faces
           </Button>
-
-          <Collapse in={showArchived} unmountOnExit>
-            <Box sx={{ mt: 1 }}>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Archived faces are hidden from the pool above. Restore them, or delete them
-                permanently (removes the face and its biometric data — your photos are kept).
-              </Typography>
-
-              {archivedError && (
-                <Alert severity="error" sx={{ mb: 2 }}>
-                  {archivedError}
-                </Alert>
-              )}
-
-              {/* Archived action bar — visible when archived faces are selected */}
-              {archivedSelectedIds.size > 0 && (
-                <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-                  <Stack
-                    direction={{ xs: 'column', sm: 'row' }}
-                    spacing={2}
-                    sx={{ alignItems: { sm: 'center' }, flexWrap: 'wrap' }}
-                  >
-                    <Typography variant="body2">
-                      {archivedSelectedIds.size} face
-                      {archivedSelectedIds.size !== 1 ? 's' : ''} selected
-                    </Typography>
-
-                    <Button
-                      size="small"
-                      variant="contained"
-                      onClick={() => void handleRestore()}
-                      disabled={restoring}
-                      startIcon={restoring ? <CircularProgress size={14} /> : <RestoreIcon fontSize="small" />}
-                      sx={{ minHeight: 44 }}
-                    >
-                      {restoring ? 'Restoring…' : 'Restore'}
-                    </Button>
-
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      color="error"
-                      onClick={() => setPurgeDialogOpen(true)}
-                      disabled={restoring}
-                      startIcon={<DeleteForeverIcon fontSize="small" />}
-                      sx={{ minHeight: 44 }}
-                    >
-                      Delete permanently
-                    </Button>
-
-                    <Button
-                      size="small"
-                      onClick={() => setArchivedSelectedIds(new Set())}
-                      sx={{ minHeight: 44 }}
-                    >
-                      Clear
-                    </Button>
-                  </Stack>
-                </Paper>
-              )}
-
-              {/* Select all / Deselect all toggle for the archived grid */}
-              {archivedFaces.length > 0 && (
-                <Box sx={{ mb: 1 }}>
-                  <Button
-                    size="small"
-                    startIcon={<SelectAllIcon fontSize="small" />}
-                    onClick={() =>
-                      archivedSelectedIds.size === archivedFaces.length &&
-                      archivedFaces.length > 0
-                        ? setArchivedSelectedIds(new Set())
-                        : setArchivedSelectedIds(
-                            new Set(archivedFaces.map((f) => f.faceId)),
-                          )
-                    }
-                    sx={{ minHeight: 44 }}
-                  >
-                    {archivedSelectedIds.size === archivedFaces.length &&
-                    archivedFaces.length > 0
-                      ? 'Deselect all'
-                      : 'Select all'}
-                  </Button>
-                </Box>
-              )}
-
-              {archivedLoading ? (
-                <CircularProgress size={24} />
-              ) : (
-                <FaceThumbGrid
-                  faces={archivedFaces}
-                  selectedIds={archivedSelectedIds}
-                  onToggle={toggleArchivedSelect}
-                />
-              )}
-            </Box>
-          </Collapse>
         </Box>
       )}
 
@@ -1392,14 +1112,6 @@ function UnassignedFacesSection({
           {successMsg}
         </Alert>
       </Snackbar>
-
-      {/* Purge (permanent delete) confirm dialog — only reachable from archived sub-view */}
-      <PurgeFacesDialog
-        open={purgeDialogOpen}
-        count={archivedSelectedIds.size}
-        onClose={() => setPurgeDialogOpen(false)}
-        onConfirm={handlePurge}
-      />
 
       {/* Name as new person dialog */}
       <Dialog

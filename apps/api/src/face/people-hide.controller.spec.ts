@@ -35,6 +35,7 @@ const mockPeopleService = {
   hideFaces: jest.fn(),
   unhideFaces: jest.fn(),
   purgeFaces: jest.fn(),
+  purgeArchivedFaces: jest.fn(),
 };
 
 // ---------------------------------------------------------------------------
@@ -272,6 +273,36 @@ describe('PeopleController — bulk hide/unhide/purge', () => {
   });
 
   // -------------------------------------------------------------------------
+  // purgeArchivedFaces
+  // -------------------------------------------------------------------------
+
+  describe('purgeArchivedFaces', () => {
+    it('delegates to peopleService.purgeArchivedFaces with dto and user context', async () => {
+      const dto = { circleId: 'circle-1' } as any;
+      const user = makeUser();
+      mockPeopleService.purgeArchivedFaces.mockResolvedValue({ deleted: 4 });
+
+      await controller.purgeArchivedFaces(dto, user);
+
+      expect(mockPeopleService.purgeArchivedFaces).toHaveBeenCalledWith(
+        dto,
+        user.id,
+        user.permissions,
+      );
+    });
+
+    it('returns the { deleted: count } result from the service', async () => {
+      const dto = { circleId: 'circle-1' } as any;
+      const user = makeUser();
+      mockPeopleService.purgeArchivedFaces.mockResolvedValue({ deleted: 7 });
+
+      const result = await controller.purgeArchivedFaces(dto, user);
+
+      expect(result).toEqual({ deleted: 7 });
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Route metadata: the three new face bulk routes exist, are wired to the
   // correct HTTP verb + permission guard, and are declared BEFORE the
   // `:id`-shaped routes (GET/PATCH/DELETE :id, POST :id/faces) so that
@@ -308,6 +339,13 @@ describe('PeopleController — bulk hide/unhide/purge', () => {
     it('POST /people/faces/bulk/purge requires media:delete', () => {
       const meta = routeMeta('purgeFaces');
       expect(meta.path).toBe('faces/bulk/purge');
+      expect(meta.method).toBe(RequestMethod.POST);
+      expect(meta.permissions).toEqual([PERMISSIONS.MEDIA_DELETE]);
+    });
+
+    it('POST /people/faces/purge-archived requires media:delete', () => {
+      const meta = routeMeta('purgeArchivedFaces');
+      expect(meta.path).toBe('faces/purge-archived');
       expect(meta.method).toBe(RequestMethod.POST);
       expect(meta.permissions).toEqual([PERMISSIONS.MEDIA_DELETE]);
     });

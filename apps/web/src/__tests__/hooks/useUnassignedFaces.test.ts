@@ -6,6 +6,10 @@
  * do NOT auto-refresh internally and do NOT throw on a null circleId — they
  * silently no-op and resolve with a zeroed result. Callers (PeoplePage) are
  * responsible for calling refresh() themselves after a mutation.
+ *
+ * Note: refresh() (and the mount-triggered initial load) always fetches
+ * page:1 explicitly now — `listUnassignedFaces(circleId, { page: 1, pageSize, archived })`.
+ * loadMore() fetches the next page and appends results, deduping on faceId.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
@@ -19,6 +23,7 @@ vi.mock('../../services/face', () => ({
   bulkHideFaces: vi.fn(),
   bulkUnhideFaces: vi.fn(),
   purgeFaces: vi.fn(),
+  purgeArchivedFaces: vi.fn(),
 }));
 
 import {
@@ -26,34 +31,38 @@ import {
   bulkHideFaces,
   bulkUnhideFaces,
   purgeFaces,
+  purgeArchivedFaces,
 } from '../../services/face';
-import type { UnassignedFacesResponse } from '../../services/face';
+import type { UnassignedFacesResponse, UnassignedFaceDto } from '../../services/face';
 import { useUnassignedFaces } from '../../hooks/useUnassignedFaces';
 
 const mockListUnassignedFaces = vi.mocked(listUnassignedFaces);
 const mockBulkHideFaces = vi.mocked(bulkHideFaces);
 const mockBulkUnhideFaces = vi.mocked(bulkUnhideFaces);
 const mockPurgeFaces = vi.mocked(purgeFaces);
+const mockPurgeArchivedFaces = vi.mocked(purgeArchivedFaces);
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
+function makeFace(faceId: string): UnassignedFaceDto {
+  return {
+    faceId,
+    mediaItemId: 'media-1',
+    boundingBox: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
+    confidence: 0.9,
+    createdAt: new Date().toISOString(),
+    faceThumbnailUrl: null,
+    hiddenAt: null,
+  };
+}
+
 function makeUnassignedFacesResponse(
   overrides: Partial<UnassignedFacesResponse> = {},
 ): UnassignedFacesResponse {
   return {
-    items: [
-      {
-        faceId: 'face-1',
-        mediaItemId: 'media-1',
-        boundingBox: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
-        confidence: 0.9,
-        createdAt: new Date().toISOString(),
-        faceThumbnailUrl: null,
-        hiddenAt: null,
-      },
-    ],
+    items: [makeFace('face-1')],
     meta: { page: 1, pageSize: 50, totalItems: 1, totalPages: 1 },
     ...overrides,
   };
@@ -68,13 +77,14 @@ describe('useUnassignedFaces — initial load', () => {
     vi.clearAllMocks();
   });
 
-  it('calls listUnassignedFaces on mount with pageSize:50 and archived:false by default', async () => {
+  it('calls listUnassignedFaces on mount with page:1, pageSize:50 and archived:false by default', async () => {
     mockListUnassignedFaces.mockResolvedValue(makeUnassignedFacesResponse());
 
     renderHook(() => useUnassignedFaces('circle-1'));
 
     await waitFor(() => {
       expect(mockListUnassignedFaces).toHaveBeenCalledWith('circle-1', {
+        page: 1,
         pageSize: 50,
         archived: false,
       });
@@ -88,6 +98,7 @@ describe('useUnassignedFaces — initial load', () => {
 
     await waitFor(() => {
       expect(mockListUnassignedFaces).toHaveBeenCalledWith('circle-1', {
+        page: 1,
         pageSize: 50,
         archived: true,
       });
@@ -184,7 +195,7 @@ describe('useUnassignedFaces — refresh()', () => {
     vi.clearAllMocks();
   });
 
-  it('refresh() re-fetches with the same archived option', async () => {
+  it('refresh() re-fetches page 1 with the same archived option', async () => {
     mockListUnassignedFaces.mockResolvedValue(makeUnassignedFacesResponse());
 
     const { result } = renderHook(() => useUnassignedFaces('circle-1', { archived: true }));
@@ -196,9 +207,121 @@ describe('useUnassignedFaces — refresh()', () => {
 
     expect(mockListUnassignedFaces).toHaveBeenCalledTimes(2);
     expect(mockListUnassignedFaces).toHaveBeenLastCalledWith('circle-1', {
+      page: 1,
       pageSize: 50,
       archived: true,
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: total / hasMore
+// ---------------------------------------------------------------------------
+
+describe('useUnassignedFaces — total / hasMore', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('populates total from meta.totalItems', async () => {
+    mockListUnassignedFaces.mockResolvedValue(
+      makeUnassignedFacesResponse({
+        meta: { page: 1, pageSize: 50, totalItems: 137, totalPages: 3 },
+      }),
+    );
+
+    const { result } = renderHook(() => useUnassignedFaces('circle-1'));
+
+    await waitFor(() => {
+      expect(result.current.total).toBe(137);
+    });
+  });
+
+  it('hasMore is true when faces.length < total', async () => {
+    mockListUnassignedFaces.mockResolvedValue(
+      makeUnassignedFacesResponse({
+        items: [makeFace('face-1')],
+        meta: { page: 1, pageSize: 50, totalItems: 5, totalPages: 1 },
+      }),
+    );
+
+    const { result } = renderHook(() => useUnassignedFaces('circle-1'));
+
+    await waitFor(() => {
+      expect(result.current.hasMore).toBe(true);
+    });
+  });
+
+  it('hasMore is false when faces.length equals total', async () => {
+    mockListUnassignedFaces.mockResolvedValue(
+      makeUnassignedFacesResponse({
+        items: [makeFace('face-1')],
+        meta: { page: 1, pageSize: 50, totalItems: 1, totalPages: 1 },
+      }),
+    );
+
+    const { result } = renderHook(() => useUnassignedFaces('circle-1'));
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(result.current.hasMore).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: loadMore()
+// ---------------------------------------------------------------------------
+
+describe('useUnassignedFaces — loadMore()', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('fetches page 2 and appends results, deduping overlapping faceIds', async () => {
+    mockListUnassignedFaces.mockResolvedValueOnce(
+      makeUnassignedFacesResponse({
+        items: [makeFace('face-1'), makeFace('face-2')],
+        meta: { page: 1, pageSize: 2, totalItems: 3, totalPages: 2 },
+      }),
+    );
+
+    const { result } = renderHook(() => useUnassignedFaces('circle-1', { pageSize: 2 }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.faces.map((f) => f.faceId)).toEqual(['face-1', 'face-2']);
+
+    // Page 2 response overlaps face-2 (already loaded) plus a genuinely new face-3.
+    mockListUnassignedFaces.mockResolvedValueOnce(
+      makeUnassignedFacesResponse({
+        items: [makeFace('face-2'), makeFace('face-3')],
+        meta: { page: 2, pageSize: 2, totalItems: 3, totalPages: 2 },
+      }),
+    );
+
+    await act(async () => {
+      await result.current.loadMore();
+    });
+
+    expect(mockListUnassignedFaces).toHaveBeenLastCalledWith('circle-1', {
+      page: 2,
+      pageSize: 2,
+      archived: false,
+    });
+
+    // Deduped: face-2 must not appear twice.
+    expect(result.current.faces.map((f) => f.faceId)).toEqual(['face-1', 'face-2', 'face-3']);
+    expect(result.current.total).toBe(3);
+  });
+
+  it('does not call the service when circleId is null', async () => {
+    const { result } = renderHook(() => useUnassignedFaces(null));
+
+    await act(async () => {
+      await result.current.loadMore();
+    });
+
+    expect(mockListUnassignedFaces).not.toHaveBeenCalled();
   });
 });
 
@@ -366,6 +489,44 @@ describe('useUnassignedFaces — purge()', () => {
     });
 
     expect(mockPurgeFaces).not.toHaveBeenCalled();
+    expect(purgeResult).toEqual({ deleted: 0 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: purgeArchived()
+// ---------------------------------------------------------------------------
+
+describe('useUnassignedFaces — purgeArchived()', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('calls purgeArchivedFaces with circleId', async () => {
+    mockListUnassignedFaces.mockResolvedValue(makeUnassignedFacesResponse());
+    mockPurgeArchivedFaces.mockResolvedValue({ deleted: 12 });
+
+    const { result } = renderHook(() => useUnassignedFaces('circle-1', { archived: true }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let purgeResult: { deleted: number } | undefined;
+    await act(async () => {
+      purgeResult = await result.current.purgeArchived();
+    });
+
+    expect(mockPurgeArchivedFaces).toHaveBeenCalledWith('circle-1');
+    expect(purgeResult).toEqual({ deleted: 12 });
+  });
+
+  it('resolves { deleted: 0 } without calling purgeArchivedFaces when circleId is null', async () => {
+    const { result } = renderHook(() => useUnassignedFaces(null, { archived: true }));
+
+    let purgeResult: { deleted: number } | undefined;
+    await act(async () => {
+      purgeResult = await result.current.purgeArchived();
+    });
+
+    expect(mockPurgeArchivedFaces).not.toHaveBeenCalled();
     expect(purgeResult).toEqual({ deleted: 0 });
   });
 });
