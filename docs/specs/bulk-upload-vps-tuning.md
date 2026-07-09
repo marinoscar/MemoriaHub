@@ -120,8 +120,11 @@ Restarts and OOM kills leave debris. None of it is lost data — jobs live in Po
 - **Failed jobs**: `POST /api/admin/jobs/retry-failed` (optionally `{"type":"..."}` to scope) requeues them.
 - **Monitor progress**: `/admin/settings/jobs/insights` (or `GET /api/admin/jobs/insights`) shows live counts, throughput, per-type ETA, and lifetime totals.
 - **Orphaned `StorageObject`s stuck at `status='processing'`** (upload-time thumbnail/EXIF/dimensions pipeline killed mid-flight — a *separate* system from the `enrichment_jobs` above, since it isn't a queued job at all): symptom is photos/videos showing a permanent "Processing…" spinner in the gallery. `POST /api/admin/media/reprocess-stuck {"olderThanMinutes":5}` recovers them immediately; `StorageProcessingRecoveryTask` (`STORAGE_PROCESSING_STUCK_MINUTES`, default 10) also does this automatically. See [Bulk Import Resilience § Stuck StorageObject auto-reset cron](bulk-import-resilience.md#stuck-storageobject-auto-reset-cron-new--storageprocessingrecoverytask) for the full mechanism, including the retry-cap/OOM-during-recovery correctness detail.
+- **Missing thumbnails** (`StorageObject` reached `status IN ('ready','failed')` but the `MediaItem` never picked up a `thumbnailStorageKey` — e.g. an old ffmpeg failure, or a sync interrupted mid-flight): no manual action needed in most cases. The hourly `ThumbnailRepairTask` cron self-heals these in the background; `POST /api/admin/media/thumbnails/repair` drains the backlog immediately without waiting for the next tick.
 
 Reprocessing interrupted jobs is safe: face detection re-detects, auto-tagging overwrites its own `source='ai'` tags, geocode/metadata recompute, duplicate/burst detection are read-time non-destructive. No duplicates, no corruption. The same applies to reprocessing a stuck `StorageObject` — content-hash is deterministic and thumbnail upload is an idempotent upsert.
+
+The video thumbnail/probe path has also been hardened since the reference run below: video downloads now stream to a temp file with constant memory instead of buffering the whole MP4 in RAM, which was a significant OOM contributor on constrained VPS deployments — reducing how often you'll hit the recovery steps above during video-heavy imports.
 
 ---
 
