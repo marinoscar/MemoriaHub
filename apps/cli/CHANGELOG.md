@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Sync dashboard `[r] retry failed` now actually retries** — after a sync run with failures, the post-run summary advertised `[r] retry failed`, but pressing `r` just navigated back to the home menu without retrying anything. It now re-runs the sync in-place in retry mode (`retryFailedOnly`) for the same scope — re-queuing the failed files, showing live progress, and landing on a fresh summary — reusing the exact engine path the headless `memoriahub retry` command uses. A new `[f] force retry` key also resets and retries files blocked at the attempts cap (the interactive equivalent of `memoriahub retry --force`), so retries survive repeated failures. Ships in CLI v1.1.24.
+
 ### Changed
 
 - **Interactive menu: video conversion and organize moved under Tools** — the `Convert videos to MP4 ▸` submenu (single file / selected folder(s) / all registered folders) and the `Organize folder by date` action now live under the **Tools ▸** menu instead of at the top level / under Settings respectively. Tools now groups the offline file utilities (Convert, Organize) alongside the existing Job queue monitor and Backup, and stays visible when logged out because Convert and Organize are offline. The underlying commands (`memoriahub convert`, `memoriahub organize`) are unchanged. Ships in CLI v1.1.23.

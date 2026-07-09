@@ -376,6 +376,8 @@ memoriahub retry --all --force
 
 Without `--all` or `--folder`, `retry` targets all folders containing failed files.
 
+In the **interactive sync dashboard**, you don't need to leave the run to retry: when a sync finishes with failures, the summary shows **`[r] retry failed`** — which re-runs the failed uploads in place for the same scope and shows live progress — and **`[f] force retry`**, which also resets and retries files blocked at the attempts cap (the equivalent of `retry --force`).
+
 ### `memoriahub settings`
 
 ```bash
