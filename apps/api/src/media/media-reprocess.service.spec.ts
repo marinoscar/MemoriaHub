@@ -9,7 +9,8 @@
  * - ImageDimensionsProcessor (canProcess, process)
  *
  * No I/O, no DB, no storage. Tests cover:
- *   - Skip rules (non-image, thumbnail key, non-ready, missing object)
+ *   - Skip rules (unsupported mimeType, thumbnail key, non-ready, missing object)
+ *   - Video objects are processed (not skipped) — ThumbnailProcessor handles videos
  *   - Happy path: processors called in order, metadata merged, event emitted
  *   - reprocessCircle: correct counts, circleId filter forwarded to prisma
  */
@@ -156,17 +157,30 @@ describe('MediaReprocessService', () => {
   });
 
   // -------------------------------------------------------------------------
-  // reprocessImageObject — skip rules
+  // reprocessMediaObject — skip rules
   // -------------------------------------------------------------------------
 
-  describe('reprocessImageObject — skip rules', () => {
-    it('should skip non-image objects (application/pdf)', async () => {
+  describe('reprocessMediaObject — skip rules', () => {
+    it('should skip objects with unsupported mime types (application/pdf)', async () => {
       mockFindUnique.mockResolvedValue(makeStorageObject({ mimeType: 'application/pdf' }));
 
-      await service.reprocessImageObject('obj-001');
+      await service.reprocessMediaObject('obj-001');
 
       expect(mockThumbnailProcess).not.toHaveBeenCalled();
       expect(mockDimensionsProcess).not.toHaveBeenCalled();
+    });
+
+    it('should NOT skip video objects (video/mp4) — ThumbnailProcessor handles videos', async () => {
+      mockFindUnique.mockResolvedValue(
+        makeStorageObject({ mimeType: 'video/mp4', storageKey: 'originals/video.mp4' }),
+      );
+
+      await service.reprocessMediaObject('obj-001');
+
+      // Processors run for videos too; in production ImageDimensionsProcessor
+      // self-skips via canProcess, which is mocked to true here.
+      expect(mockThumbnailProcess).toHaveBeenCalledTimes(1);
+      expect(mockUpdate).toHaveBeenCalledTimes(1);
     });
 
     it('should skip objects whose storageKey starts with "thumbnails/"', async () => {
@@ -174,7 +188,7 @@ describe('MediaReprocessService', () => {
         makeStorageObject({ mimeType: 'image/jpeg', storageKey: 'thumbnails/foo.jpg' }),
       );
 
-      await service.reprocessImageObject('obj-001');
+      await service.reprocessMediaObject('obj-001');
 
       expect(mockThumbnailProcess).not.toHaveBeenCalled();
       expect(mockDimensionsProcess).not.toHaveBeenCalled();
@@ -185,7 +199,7 @@ describe('MediaReprocessService', () => {
         makeStorageObject({ mimeType: 'image/jpeg', status: 'pending' }),
       );
 
-      await service.reprocessImageObject('obj-001');
+      await service.reprocessMediaObject('obj-001');
 
       expect(mockThumbnailProcess).not.toHaveBeenCalled();
       expect(mockDimensionsProcess).not.toHaveBeenCalled();
@@ -196,7 +210,7 @@ describe('MediaReprocessService', () => {
         makeStorageObject({ mimeType: 'image/jpeg', status: 'processing' }),
       );
 
-      await service.reprocessImageObject('obj-001');
+      await service.reprocessMediaObject('obj-001');
 
       expect(mockThumbnailProcess).not.toHaveBeenCalled();
       expect(mockDimensionsProcess).not.toHaveBeenCalled();
@@ -207,7 +221,7 @@ describe('MediaReprocessService', () => {
         makeStorageObject({ mimeType: 'image/jpeg', status: 'failed' }),
       );
 
-      await service.reprocessImageObject('obj-001');
+      await service.reprocessMediaObject('obj-001');
 
       // Processors should run so the object can be recovered
       expect(mockDimensionsProcess).toHaveBeenCalledTimes(1);
@@ -217,20 +231,20 @@ describe('MediaReprocessService', () => {
     it('should return without error when the object does not exist', async () => {
       mockFindUnique.mockResolvedValue(null);
 
-      await expect(service.reprocessImageObject('nonexistent')).resolves.toBeUndefined();
+      await expect(service.reprocessMediaObject('nonexistent')).resolves.toBeUndefined();
       expect(mockThumbnailProcess).not.toHaveBeenCalled();
     });
   });
 
   // -------------------------------------------------------------------------
-  // reprocessImageObject — happy path (processors called in order)
+  // reprocessMediaObject — happy path (processors called in order)
   // -------------------------------------------------------------------------
 
-  describe('reprocessImageObject — happy path', () => {
+  describe('reprocessMediaObject — happy path', () => {
     it('should call both ImageDimensionsProcessor and ThumbnailProcessor', async () => {
       mockFindUnique.mockResolvedValue(makeStorageObject());
 
-      await service.reprocessImageObject('obj-001');
+      await service.reprocessMediaObject('obj-001');
 
       expect(mockDimensionsProcess).toHaveBeenCalledTimes(1);
       expect(mockThumbnailProcess).toHaveBeenCalledTimes(1);
@@ -239,7 +253,7 @@ describe('MediaReprocessService', () => {
     it('should call storageObject.update exactly once with merged metadata and status ready', async () => {
       mockFindUnique.mockResolvedValue(makeStorageObject());
 
-      await service.reprocessImageObject('obj-001');
+      await service.reprocessMediaObject('obj-001');
 
       expect(mockUpdate).toHaveBeenCalledTimes(1);
       const updateArg = mockUpdate.mock.calls[0][0];
@@ -256,7 +270,7 @@ describe('MediaReprocessService', () => {
     it('should set status to ready even when recovering a previously failed object', async () => {
       mockFindUnique.mockResolvedValue(makeStorageObject({ status: 'failed' }));
 
-      await service.reprocessImageObject('obj-001');
+      await service.reprocessMediaObject('obj-001');
 
       expect(mockUpdate).toHaveBeenCalledTimes(1);
       const updateArg = mockUpdate.mock.calls[0][0];
@@ -266,7 +280,7 @@ describe('MediaReprocessService', () => {
     it('should emit OBJECT_PROCESSED_EVENT after update', async () => {
       mockFindUnique.mockResolvedValue(makeStorageObject());
 
-      await service.reprocessImageObject('obj-001');
+      await service.reprocessMediaObject('obj-001');
 
       expect(mockEmit).toHaveBeenCalledWith(
         OBJECT_PROCESSED_EVENT,
@@ -285,7 +299,7 @@ describe('MediaReprocessService', () => {
         return { success: true, metadata: { width: 100, height: 200 } };
       });
 
-      await service.reprocessImageObject('obj-001');
+      await service.reprocessMediaObject('obj-001');
 
       // Both processors received a getStream callback
       expect(mockDimensionsProcess).toHaveBeenCalledWith(
@@ -319,7 +333,7 @@ describe('MediaReprocessService', () => {
       ]);
 
       // First object: valid image — succeeds (findUnique returns object, update resolves)
-      // Second object: findUnique throws so reprocessImageObject propagates the error
+      // Second object: findUnique throws so reprocessMediaObject propagates the error
       // to the reprocessCircle loop which catches it and increments failed.
       mockFindUnique
         .mockResolvedValueOnce(makeStorageObject({ id: 'obj-success' }))

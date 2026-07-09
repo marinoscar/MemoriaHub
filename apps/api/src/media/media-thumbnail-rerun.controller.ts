@@ -14,7 +14,7 @@ import { StorageProcessingRecoveryService } from '../storage/tasks/storage-proce
  *
  * User-facing "Retry thumbnail" action, mirroring the existing
  * POST /api/media/:id/metadata/rerun pattern (MetadataController). Runs
- * synchronously (like MediaReprocessService.reprocessImageObject) rather than
+ * synchronously (like MediaReprocessService.reprocessMediaObject) rather than
  * via the enrichment_jobs queue, since thumbnail generation is a few seconds
  * at most and there is no existing job type for it. Bypasses the stuck-
  * threshold/retry-cap that gates the automatic recovery cron — an explicit

@@ -21,7 +21,7 @@ const DEFAULT_MAX_RETRIES = 3;
  * call in ObjectProcessingService. Nothing else in the codebase watches this
  * status: the enrichment stuck-reset cron only touches enrichment_jobs, the
  * storage cleanup cron only touches pending/uploading, and the existing
- * MediaReprocessService requires status ready/failed and image mimeType.
+ * MediaReprocessService requires status ready/failed and image/video mimeType.
  */
 @Injectable()
 export class StorageProcessingRecoveryService {

@@ -19,36 +19,41 @@ export class MediaReprocessService {
   ) {}
 
   /**
-   * Reprocess a single image StorageObject:
-   * 1. Skip if not a ready image or is itself a thumbnail
-   * 2. Re-run ImageDimensionsProcessor + ThumbnailProcessor in priority order
+   * Reprocess a single media (image or video) StorageObject:
+   * 1. Skip if not a ready/failed image or video, or is itself a thumbnail
+   * 2. Re-run ImageDimensionsProcessor + ThumbnailProcessor in priority order.
+   *    ThumbnailProcessor handles both images and videos;
+   *    ImageDimensionsProcessor self-skips videos via canProcess.
    * 3. Merge results into metadata._processing, persist as 'ready', emit OBJECT_PROCESSED_EVENT
    *
    * No thumbnail deletion is needed: ThumbnailProcessor uses a deterministic
    * storageKey (`thumbnails/<objectId>.jpg`) and upserts, so the same row is
    * reused on every reprocess run — there is nothing to orphan.
    */
-  async reprocessImageObject(objectId: string): Promise<void> {
+  async reprocessMediaObject(objectId: string): Promise<void> {
     const object = await this.prisma.storageObject.findUnique({ where: { id: objectId } });
 
     if (!object) {
-      this.logger.warn(`reprocessImageObject: object ${objectId} not found`);
+      this.logger.warn(`reprocessMediaObject: object ${objectId} not found`);
       return;
     }
 
-    // Skip non-images, objects not in a processable state, and thumbnail objects (recursion guard).
+    // Skip unsupported mime types (only image/* and video/* are processable), objects not in a
+    // processable state, and thumbnail objects (recursion guard).
     // Allow both 'ready' and 'failed' so that objects that failed processing (e.g. because the
     // original was in R2 while the processor used the wrong provider) can be recovered here.
     const processableStatus = object.status === 'ready' || object.status === 'failed';
-    if (!object.mimeType.startsWith('image/') || !processableStatus || object.storageKey.startsWith('thumbnails/')) {
-      this.logger.debug(`reprocessImageObject: skipping object ${objectId} (mimeType=${object.mimeType}, status=${object.status}, key=${object.storageKey})`);
+    const supportedMimeType =
+      object.mimeType.startsWith('image/') || object.mimeType.startsWith('video/');
+    if (!supportedMimeType || !processableStatus || object.storageKey.startsWith('thumbnails/')) {
+      this.logger.debug(`reprocessMediaObject: skipping object ${objectId} (mimeType=${object.mimeType}, status=${object.status}, key=${object.storageKey})`);
       return;
     }
 
     const existingMeta = (object.metadata as Record<string, any>) ?? {};
     const existingProcessing = (existingMeta._processing ?? {}) as Record<string, any>;
 
-    this.logger.log(`reprocessImageObject: reprocessing object ${objectId}`);
+    this.logger.log(`reprocessMediaObject: reprocessing object ${objectId}`);
 
     // Run processors in priority order: dimensions (25), thumbnail (40)
     const processors = [this.dimensionsProcessor, this.thumbnailProcessor];
@@ -70,12 +75,12 @@ export class MediaReprocessService {
         if (result.success && result.metadata) {
           allMetadata[processor.name] = result.metadata;
         } else if (!result.success) {
-          this.logger.warn(`reprocessImageObject: processor ${processor.name} failed for ${objectId}: ${result.error}`);
+          this.logger.warn(`reprocessMediaObject: processor ${processor.name} failed for ${objectId}: ${result.error}`);
           allMetadata[`${processor.name}_error`] = result.error;
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        this.logger.error(`reprocessImageObject: processor ${processor.name} threw for ${objectId}: ${msg}`);
+        this.logger.error(`reprocessMediaObject: processor ${processor.name} threw for ${objectId}: ${msg}`);
         allMetadata[`${processor.name}_error`] = msg;
       }
     }
@@ -100,8 +105,8 @@ export class MediaReprocessService {
   }
 
   /**
-   * Bulk reprocess all ready image StorageObjects linked to MediaItems in the given circle,
-   * or ALL if circleId is not provided.
+   * Bulk reprocess all ready/failed image and video StorageObjects linked to MediaItems in the
+   * given circle, or ALL if circleId is not provided.
    * Returns { reprocessed, failed }.
    */
   async reprocessCircle(circleId?: string): Promise<{ reprocessed: number; failed: number }> {
@@ -120,7 +125,7 @@ export class MediaReprocessService {
 
     for (const objectId of objectIds) {
       try {
-        await this.reprocessImageObject(objectId);
+        await this.reprocessMediaObject(objectId);
         reprocessed++;
         if (reprocessed % 50 === 0) {
           this.logger.log(`reprocessCircle: progress ${reprocessed}/${objectIds.length}`);
