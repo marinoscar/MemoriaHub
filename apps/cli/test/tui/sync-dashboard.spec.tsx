@@ -340,4 +340,83 @@ describe('SyncDashboard', () => {
       );
     });
   });
+
+  // -------------------------------------------------------------------------
+  // In-place retry from the summary ('r' / 'f')
+  // -------------------------------------------------------------------------
+
+  describe('summary retry keys', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let runSpy: ReturnType<typeof jest.spyOn<any, any>>;
+
+    beforeEach(() => {
+      // Each run() emits one failed file then RUN_DONE with failed:1, so the
+      // summary renders with the [r]/[f] hints active.
+      runSpy = jest
+        .spyOn(SyncEngine.prototype, 'run')
+        .mockImplementation(async function (this: SyncEngine, _opts: SyncOptions) {
+          this.emit(EV.FILE_FAILED, {
+            fileId: 7,
+            path: '/tmp/broken.jpg',
+            error: 'boom',
+            willRetry: false,
+          });
+          this.emit(EV.RUN_DONE, {
+            runId: 1,
+            stats: { uploaded: 0, skipped: 0, failed: 1 },
+            durationMs: 0,
+          });
+          return { runId: 1, stats: { uploaded: 0, skipped: 0, failed: 1 }, durationMs: 0 };
+        });
+    });
+
+    afterEach(() => {
+      runSpy.mockRestore();
+    });
+
+    it('pressing "r" re-runs the engine in retry mode (retryFailedOnly, force:false) for the same scope', async () => {
+      const { stdin, lastFrame } = render(
+        <SyncDashboard config={FAKE_CONFIG} db={db} all={true} onHome={() => {}} />,
+      );
+
+      await flushAsync(200);
+      // Summary shows the retry hint.
+      expect(stripAnsi(lastFrame()!)).toContain('[r] retry failed');
+      expect(runSpy).toHaveBeenCalledTimes(1);
+
+      stdin.write('r');
+      await flushAsync(200);
+
+      expect(runSpy).toHaveBeenCalledTimes(2);
+      expect(runSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          retryFailedOnly: true,
+          trigger: 'retry',
+          force: false,
+          all: true,
+        }),
+      );
+    });
+
+    it('pressing "f" re-runs the engine in retry mode with force:true (reset attempt cap)', async () => {
+      const { stdin } = render(
+        <SyncDashboard config={FAKE_CONFIG} db={db} all={true} onHome={() => {}} />,
+      );
+
+      await flushAsync(200);
+      expect(runSpy).toHaveBeenCalledTimes(1);
+
+      stdin.write('f');
+      await flushAsync(200);
+
+      expect(runSpy).toHaveBeenCalledTimes(2);
+      expect(runSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          retryFailedOnly: true,
+          trigger: 'retry',
+          force: true,
+        }),
+      );
+    });
+  });
 });
