@@ -87,13 +87,26 @@ const {
 
 describe('convert/ffmpeg', () => {
   describe('buildConvertArgs', () => {
-    it('builds a lossless remux (copy video, transcode audio, faststart)', () => {
+    it('builds a lossless remux (copy video, transcode audio, faststart, forced mp4 muxer)', () => {
       const args = buildConvertArgs('/in.mov', '/out.mp4.partial', 'remux');
       expect(args).toEqual([
         '-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-i', '/in.mov',
         '-c:v', 'copy', '-c:a', 'aac', '-map_metadata', '0', '-movflags', '+faststart',
+        '-f', 'mp4',
         '/out.mp4.partial',
       ]);
+    });
+
+    it('forces the mp4 muxer with -f so the .partial temp extension is ignored', () => {
+      // Regression guard: without -f mp4, ffmpeg infers the format from the
+      // ".partial" extension and fails every conversion.
+      for (const mode of ['remux', 'reencode'] as const) {
+        const args = buildConvertArgs('/in.mov', '/out.mp4.partial', mode);
+        const fIdx = args.indexOf('-f');
+        expect(fIdx).toBeGreaterThan(-1);
+        expect(args[fIdx + 1]).toBe('mp4');
+        expect(args[args.length - 1]).toBe('/out.mp4.partial');
+      }
     });
 
     it('builds an H.264 re-encode with the default CRF', () => {

@@ -29,6 +29,11 @@ import { ConvertEngine } from '../convert/convert-engine.js';
 import { CONVERT_EV, type OriginalDisposition } from '../convert/events.js';
 import { parseFormats } from '../convert/plan.js';
 import { FfmpegNotFoundError } from '../convert/ffmpeg.js';
+import {
+  writeConvertErrorReport,
+  summarizeConvertErrors,
+  type ConvertErrorEntry,
+} from '../convert/error-report.js';
 import { renderConvertSummary } from '../render/headless-convert.js';
 import { ui, createSpinner } from '../ui.js';
 
@@ -130,6 +135,14 @@ async function runConvert(
     if (spinner) spinner.text = `${verb}… ${processed}/${total} file(s)`;
   });
 
+  // Collect per-file errors so we can report exactly what failed and why.
+  const errorEntries: ConvertErrorEntry[] = [];
+  engine.on(CONVERT_EV.CONVERT_FILE, (p) => {
+    if (p.action === 'error' && p.error) {
+      errorEntries.push({ filePath: p.filePath, error: p.error });
+    }
+  });
+
   try {
     const result = await engine.run({
       files: files.length > 0 ? files : undefined,
@@ -158,6 +171,24 @@ async function runConvert(
       process.stdout.write(JSON.stringify(totals, null, 2) + '\n');
     } else {
       renderConvertSummary(totals, { dryRun: options.dryRun, movedTo: originalsDir });
+    }
+
+    // When anything failed, write a full report and surface the grouped causes
+    // so the user can see WHY (JSON mode keeps stdout clean but still writes the
+    // report file and prints its path to stderr).
+    if (errorEntries.length > 0) {
+      const reportPath = writeConvertErrorReport(errorEntries);
+      const groups = summarizeConvertErrors(errorEntries);
+      if (options.json) {
+        ui.error(`${errorEntries.length} file(s) failed. Report: ${reportPath}`);
+      } else {
+        ui.warn(`${errorEntries.length} file(s) failed to convert:`);
+        for (const g of groups.slice(0, 5)) {
+          ui.error(`  ${g.count}×  ${g.message}`);
+        }
+        if (groups.length > 5) ui.info(`  … and ${groups.length - 5} more distinct error(s)`);
+        ui.info(`Full per-file report: ${reportPath}`);
+      }
     }
   } catch (err) {
     spinner?.fail('Convert failed');

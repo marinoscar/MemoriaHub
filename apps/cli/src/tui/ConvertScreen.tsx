@@ -32,11 +32,18 @@ import { ConvertEngine } from '../convert/convert-engine.js';
 import {
   CONVERT_EV,
   type ConvertProgressPayload,
+  type ConvertFilePayload,
   type ConvertDonePayload,
   type ConvertErrorPayload,
   type ConvertTotals,
   type OriginalDisposition,
 } from '../convert/events.js';
+import {
+  writeConvertErrorReport,
+  summarizeConvertErrors,
+  type ConvertErrorEntry,
+  type ConvertErrorGroup,
+} from '../convert/error-report.js';
 import { FolderRepo } from '../repo/folders.js';
 import { SettingsRepo } from '../repo/settings.js';
 import { BOX_BORDER } from './theme.js';
@@ -76,6 +83,10 @@ interface ScreenState {
   editingDir: boolean;
   /** Inline validation message shown on the confirm screen. */
   confirmError: string | null;
+  /** Grouped per-file failures shown on the done screen. */
+  errorGroups: ConvertErrorGroup[];
+  /** Path of the written full error report (null when there were no errors). */
+  reportPath: string | null;
 }
 
 /** Human labels for each disposition, shown on the confirm + done screens. */
@@ -109,8 +120,12 @@ export function ConvertScreen({
     originalsDir: '',
     editingDir: false,
     confirmError: null,
+    errorGroups: [],
+    reportPath: null,
   });
 
+  // Per-file errors collected during the current execute pass.
+  const errorsRef = useRef<ConvertErrorEntry[]>([]);
   // Guard against setState after unmount.
   const mounted = useRef(true);
   // The engine instance is shared across both passes (plan then execute).
@@ -133,8 +148,16 @@ export function ConvertScreen({
     // Detach any previous pass's listeners before attaching new ones.
     cleanupRef.current?.();
 
+    // Fresh error collection for this pass.
+    if (!dryRun) errorsRef.current = [];
+
     const onProgress = ({ processed, total }: ConvertProgressPayload): void => {
       if (mounted.current) setState((s) => ({ ...s, processed, total }));
+    };
+    const onFile = (p: ConvertFilePayload): void => {
+      if (!dryRun && p.action === 'error' && p.error) {
+        errorsRef.current.push({ filePath: p.filePath, error: p.error });
+      }
     };
     const onDone = ({ totals }: ConvertDonePayload): void => {
       if (!mounted.current) return;
@@ -145,7 +168,18 @@ export function ConvertScreen({
           planTotals: totals,
         }));
       } else {
-        setState((s) => ({ ...s, phase: 'done', finalTotals: totals }));
+        // Write a full error report (best-effort) and surface a grouped summary.
+        let errorGroups: ConvertErrorGroup[] = [];
+        let reportPath: string | null = null;
+        if (errorsRef.current.length > 0) {
+          errorGroups = summarizeConvertErrors(errorsRef.current);
+          try {
+            reportPath = writeConvertErrorReport(errorsRef.current);
+          } catch {
+            reportPath = null;
+          }
+        }
+        setState((s) => ({ ...s, phase: 'done', finalTotals: totals, errorGroups, reportPath }));
       }
     };
     const onError = ({ message }: ConvertErrorPayload): void => {
@@ -153,11 +187,13 @@ export function ConvertScreen({
     };
 
     engine.on(CONVERT_EV.CONVERT_PROGRESS, onProgress);
+    engine.on(CONVERT_EV.CONVERT_FILE, onFile);
     engine.on(CONVERT_EV.CONVERT_DONE, onDone);
     engine.on(CONVERT_EV.ERROR, onError);
 
     cleanupRef.current = () => {
       engine.off(CONVERT_EV.CONVERT_PROGRESS, onProgress);
+      engine.off(CONVERT_EV.CONVERT_FILE, onFile);
       engine.off(CONVERT_EV.CONVERT_DONE, onDone);
       engine.off(CONVERT_EV.ERROR, onError);
     };
@@ -410,6 +446,26 @@ export function ConvertScreen({
           <Text color={totals && totals.errors > 0 ? 'red' : undefined}>{totals?.errors ?? 0}</Text> errors
         </Text>
       </Box>
+
+      {state.errorGroups.length > 0 && (
+        <Box marginTop={1} flexDirection="column">
+          <Text color="red" bold>Why they failed:</Text>
+          {state.errorGroups.slice(0, 5).map((g, i) => (
+            <Text key={i} color="red">
+              {'  '}{g.count}×  <Text dimColor>{g.message}</Text>
+            </Text>
+          ))}
+          {state.errorGroups.length > 5 && (
+            <Text dimColor>{'  '}… and {state.errorGroups.length - 5} more distinct error(s)</Text>
+          )}
+          {state.reportPath && (
+            <Box marginTop={1}>
+              <Text dimColor>Full per-file report: {state.reportPath}</Text>
+            </Box>
+          )}
+        </Box>
+      )}
+
       <Box marginTop={1}>
         <Text dimColor>[q/Esc] back   [h] home</Text>
       </Box>

@@ -8,6 +8,9 @@
  */
 
 import React from 'react';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { render, cleanup } from 'ink-testing-library';
 import { ConvertScreen } from '../../src/tui/ConvertScreen.js';
 import { ConvertEngine } from '../../src/convert/convert-engine.js';
@@ -152,5 +155,46 @@ describe('ConvertScreen', () => {
     const plain = stripAnsi(lastFrame()!);
     expect(plain).toContain('Convert failed');
     expect(plain).toContain('ffmpeg');
+  });
+
+  it('surfaces grouped per-file errors and a report path on the done screen', async () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mh-convert-screen-home-'));
+    const originalHome = process.env.HOME;
+    process.env.HOME = tmpHome;
+
+    try {
+      const engine = makeEngine(db);
+      const { lastFrame, stdin } = render(
+        <ConvertScreen db={db} all onHome={() => {}} onBack={() => {}} _engineForTesting={engine} />,
+      );
+
+      // Plan → confirm → running (default 'keep' disposition).
+      engine.emit(CONVERT_EV.CONVERT_DONE, { totals: totals({ total: 2 }) });
+      await flushAsync();
+      stdin.write('y');
+      await flushAsync();
+
+      // Two files fail with the same ffmpeg error.
+      engine.emit(CONVERT_EV.CONVERT_FILE, {
+        filePath: '/vids/a.mov', action: 'error',
+        error: "ffmpeg exited with code 1: Unable to find a suitable output format for '/vids/a.mov.partial'",
+      });
+      engine.emit(CONVERT_EV.CONVERT_FILE, {
+        filePath: '/vids/b.mts', action: 'error',
+        error: "ffmpeg exited with code 1: Unable to find a suitable output format for '/vids/b.mts.partial'",
+      });
+      engine.emit(CONVERT_EV.CONVERT_DONE, { totals: totals({ total: 2, errors: 2 }) });
+      await flushAsync();
+
+      const plain = stripAnsi(lastFrame()!);
+      expect(plain).toContain('Why they failed');
+      expect(plain).toContain('2×');
+      expect(plain).toContain('Unable to find a suitable output format');
+      expect(plain).toContain('Full per-file report:');
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
   });
 });
