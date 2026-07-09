@@ -19,6 +19,8 @@ import { ThumbnailProcessor } from '../storage/processing/processors/thumbnail.p
 import { ImageDimensionsProcessor } from '../storage/processing/processors/image-dimensions.processor';
 import { TrashPurgeHandler } from './trash-purge.handler';
 import { TrashPurgeTask } from './trash-purge.task';
+import { ThumbnailRepairHandler } from './thumbnail-repair.handler';
+import { ThumbnailRepairTask } from './thumbnail-repair.task';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaEnrichmentEnqueueListener } from './enrichment/media-enrichment-enqueue.listener';
 import { MediaThumbnailService } from './media-thumbnail.service';
@@ -39,7 +41,10 @@ import { MediaThumbnailService } from './media-thumbnail.service';
  * registry, TrashPurgeTask can enqueue jobs, and MediaEnrichmentService can
  * call EnrichmentJobService.enqueue.
  *
- * TrashPurgeTask @Cron decorators work via ScheduleModule.forRoot() in AppModule.
+ * TrashPurgeTask and ThumbnailRepairTask @Cron decorators work via
+ * ScheduleModule.forRoot() in AppModule. ThumbnailRepairHandler additionally
+ * uses StorageProcessingRecoveryService (exported by StorageModule) and
+ * MediaMetadataSyncService for its reprocess/resync repair paths.
  *
  * Circular-dependency note:
  *   StorageProvidersModule only provides S3StorageProvider — it has no
@@ -81,6 +86,8 @@ import { MediaThumbnailService } from './media-thumbnail.service';
     ImageDimensionsProcessor,
     TrashPurgeHandler,
     TrashPurgeTask,
+    ThumbnailRepairHandler,
+    ThumbnailRepairTask,
     MediaEnrichmentService,
     MediaEnrichmentEnqueueListener,
     MediaThumbnailService,
