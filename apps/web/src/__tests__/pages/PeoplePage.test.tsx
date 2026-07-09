@@ -12,7 +12,7 @@
  * face recognition is controlled globally from admin settings.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils/test-utils';
 
@@ -63,6 +63,7 @@ vi.mock('../../services/face', () => ({
   bulkHideFaces: vi.fn().mockResolvedValue({ hidden: 0 }),
   bulkUnhideFaces: vi.fn().mockResolvedValue({ unhidden: 0 }),
   purgeFaces: vi.fn().mockResolvedValue({ deleted: 0 }),
+  purgeArchivedFaces: vi.fn().mockResolvedValue({ deleted: 0 }),
 }));
 
 vi.mock('react-router-dom', async (importOriginal) => {
@@ -86,8 +87,6 @@ const mockUsePerson = vi.mocked(usePerson);
 const mockDeleteCircleBiometrics = vi.mocked(faceService.deleteCircleBiometrics);
 const mockListUnassignedFaces = vi.mocked(faceService.listUnassignedFaces);
 const mockBulkHideFaces = vi.mocked(faceService.bulkHideFaces);
-const mockBulkUnhideFaces = vi.mocked(faceService.bulkUnhideFaces);
-const mockPurgeFaces = vi.mocked(faceService.purgeFaces);
 
 // ---------------------------------------------------------------------------
 // Default mock return values
@@ -505,87 +504,13 @@ describe('PeoplePage', () => {
       });
     });
 
-    it('the archived faces sub-view fetches with archived:true and renders archived faces', async () => {
-      const archivedFace = makeUnassignedFace({ faceId: 'face-a', mediaItemId: 'media-a' });
-      mockListUnassignedFaces.mockImplementation(async (_circleId, opts) => {
-        if (opts?.archived) {
-          return { items: [archivedFace], meta: { page: 1, pageSize: 50, totalItems: 1, totalPages: 1 } };
-        }
-        return { items: [], meta: { page: 1, pageSize: 50, totalItems: 0, totalPages: 0 } };
-      });
-
-      const user = userEvent.setup();
-      render(<PeoplePage />);
-
-      const showBtn = await screen.findByRole('button', { name: /show archived faces/i });
-      await user.click(showBtn);
-
-      // The archived face grid renders with a selectable checkbox once expanded
-      await waitFor(() => {
-        expect(screen.getByRole('checkbox')).toBeInTheDocument();
-      });
-
-      expect(mockListUnassignedFaces).toHaveBeenCalledWith(
-        'circle-1',
-        expect.objectContaining({ archived: true }),
-      );
-    });
-
-    it('restore calls bulkUnhideFaces with the selected archived face ids', async () => {
-      const archivedFace = makeUnassignedFace({ faceId: 'face-a', mediaItemId: 'media-a' });
-      mockListUnassignedFaces.mockImplementation(async (_circleId, opts) => {
-        if (opts?.archived) {
-          return { items: [archivedFace], meta: { page: 1, pageSize: 50, totalItems: 1, totalPages: 1 } };
-        }
-        return { items: [], meta: { page: 1, pageSize: 50, totalItems: 0, totalPages: 0 } };
-      });
-      mockBulkUnhideFaces.mockResolvedValue({ unhidden: 1 });
-
-      const user = userEvent.setup();
-      render(<PeoplePage />);
-
-      await user.click(await screen.findByRole('button', { name: /show archived faces/i }));
-      const checkbox = await screen.findByRole('checkbox');
-      await user.click(checkbox);
-
-      const restoreBtn = await screen.findByRole('button', { name: /^restore$/i });
-      await user.click(restoreBtn);
-
-      await waitFor(() => {
-        expect(mockBulkUnhideFaces).toHaveBeenCalledWith('circle-1', ['face-a']);
-      });
-    });
-
-    it('"Delete permanently" opens the confirm dialog and calls purgeFaces on confirm', async () => {
-      const archivedFace = makeUnassignedFace({ faceId: 'face-a', mediaItemId: 'media-a' });
-      mockListUnassignedFaces.mockImplementation(async (_circleId, opts) => {
-        if (opts?.archived) {
-          return { items: [archivedFace], meta: { page: 1, pageSize: 50, totalItems: 1, totalPages: 1 } };
-        }
-        return { items: [], meta: { page: 1, pageSize: 50, totalItems: 0, totalPages: 0 } };
-      });
-      mockPurgeFaces.mockResolvedValue({ deleted: 1 });
-
-      const user = userEvent.setup();
-      render(<PeoplePage />);
-
-      await user.click(await screen.findByRole('button', { name: /show archived faces/i }));
-      const checkbox = await screen.findByRole('checkbox');
-      await user.click(checkbox);
-
-      // Opens the dialog — does not call purgeFaces yet
-      await user.click(screen.getByRole('button', { name: /delete permanently/i }));
-      expect(mockPurgeFaces).not.toHaveBeenCalled();
-
-      const dialog = await screen.findByRole('dialog');
-      expect(within(dialog).getByRole('heading', { name: /delete permanently\?/i })).toBeInTheDocument();
-
-      // Confirm inside the dialog (scoped query avoids matching the trigger button)
-      await user.click(within(dialog).getByRole('button', { name: /delete permanently/i }));
-
-      await waitFor(() => {
-        expect(mockPurgeFaces).toHaveBeenCalledWith('circle-1', ['face-a']);
-      });
-    });
+    // NOTE: the old inline "show archived faces" Collapse sub-view (with its own
+    // fetch-with-archived:true / restore / delete-permanently flows) has been
+    // removed from PeoplePage entirely. That functionality now lives on the
+    // standalone /people/archived route — see ArchivedFacesPage.test.tsx.
+    // PeoplePage now only renders a "View archived faces" link that navigates
+    // away; since react-router-dom's useNavigate is mocked to a no-op vi.fn()
+    // in this file, there's nothing further to assert here beyond it not
+    // crashing, which is covered by UnassignedFacesSection.test.tsx.
   });
 });
