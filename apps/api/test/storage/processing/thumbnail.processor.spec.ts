@@ -23,7 +23,15 @@
  *   Calling ffmpeg(input) returns a chainable stub.
  *   Each chain method (.seekInput, .frames, .output) returns `this`.
  *   .on('end', cb) / .on('error', cb) stores the handlers; .run() invokes them.
- *   mockFfmpegInvokeEnd() / mockFfmpegInvokeError() control which callback fires.
+ *   mockFfmpegInvokeEnd() / mockFfmpegInvokeError() control which callback fires
+ *   for a single, non-scripted call (legacy single-mode path used by the
+ *   original tests below).
+ *
+ *   mockFfmpegQueue([...]) scripts an exact outcome per successive .run() call
+ *   ('success' | 'error' | 'hang'), used by the 3-attempt ladder tests to
+ *   assert precisely which attempt fails/succeeds and what seekInput/
+ *   videoFilters arguments each attempt used. 'hang' never invokes 'end' or
+ *   'error' at all — only the extractFrame timeout can settle that call.
  *
  *   fs.promises is mocked so writeFile and unlink are no-ops and readFile
  *   returns a real JPEG buffer obtained from getPlainJpegBuffer().
@@ -54,12 +62,22 @@ import { Readable } from 'stream';
 // mockFfmpegInvokeError() — next .run() fires 'error'; auto-resets to 'success'
 //                           afterwards so the fallback call succeeds.
 
+type FfmpegStep = { kind: 'success' } | { kind: 'error'; message?: string } | { kind: 'hang' };
+
 const ffmpegMockState = {
   mode: 'success' as 'success' | 'error',
+  queue: [] as FfmpegStep[],
   endCb: null as (() => void) | null,
   errorCb: null as ((err: Error) => void) | null,
   runCallCount: 0,
+  seekInputCalls: [] as number[],
+  videoFiltersCalls: [] as string[],
 };
+
+// Separate jest.fn() so tests can assert kill('SIGKILL') was called; declared
+// at module scope (like ffmpegMockState) so the jest.mock() factory below can
+// close over it despite jest.mock() hoisting to the top of the file.
+const killSpy = jest.fn();
 
 function mockFfmpegInvokeEnd() {
   ffmpegMockState.mode = 'success';
@@ -69,11 +87,24 @@ function mockFfmpegInvokeError() {
   ffmpegMockState.mode = 'error';
 }
 
+/**
+ * Script exact per-attempt ffmpeg outcomes. Each element is consumed by one
+ * .run() call, in order; once the queue is drained, run() falls back to the
+ * legacy single `mode` behaviour.
+ */
+function mockFfmpegQueue(steps: FfmpegStep[]) {
+  ffmpegMockState.queue = [...steps];
+}
+
 function resetFfmpegMock() {
   ffmpegMockState.mode = 'success';
+  ffmpegMockState.queue = [];
   ffmpegMockState.endCb = null;
   ffmpegMockState.errorCb = null;
   ffmpegMockState.runCallCount = 0;
+  ffmpegMockState.seekInputCalls = [];
+  ffmpegMockState.videoFiltersCalls = [];
+  killSpy.mockClear();
 }
 
 jest.mock('fluent-ffmpeg', () => {
@@ -89,11 +120,20 @@ jest.mock('fluent-ffmpeg', () => {
   // object below, and the default-import expression resolves to `.default`.
 
   const stub = {
-    seekInput(_n: number) { return stub; },
-    videoFilters(_f: string) { return stub; },
+    seekInput(n: number) {
+      ffmpegMockState.seekInputCalls.push(n);
+      return stub;
+    },
+    videoFilters(f: string) {
+      ffmpegMockState.videoFiltersCalls.push(f);
+      return stub;
+    },
     frames(_n: number) { return stub; },
     output(_path: string) { return stub; },
-    kill(_signal: string) { return stub; },
+    kill(signal: string) {
+      killSpy(signal);
+      return stub;
+    },
     on(event: string, cb: (...args: any[]) => void) {
       if (event === 'end') ffmpegMockState.endCb = cb as () => void;
       if (event === 'error') ffmpegMockState.errorCb = cb as (err: Error) => void;
@@ -101,8 +141,30 @@ jest.mock('fluent-ffmpeg', () => {
     },
     run() {
       ffmpegMockState.runCallCount++;
-      // Use setImmediate so the Promise machinery in extractFrame registers
-      // both handlers before we invoke one.
+
+      if (ffmpegMockState.queue.length > 0) {
+        const step = ffmpegMockState.queue.shift()!;
+        if (step.kind === 'hang') {
+          // Never invoke 'end' or 'error' — only the extractFrame timeout
+          // (a real setTimeout, fakeable via jest.useFakeTimers()) can settle
+          // this call.
+          return;
+        }
+        // Use setImmediate so the Promise machinery in extractFrame registers
+        // both handlers before we invoke one.
+        setImmediate(() => {
+          if (step.kind === 'error' && ffmpegMockState.errorCb) {
+            ffmpegMockState.errorCb(new Error(step.message ?? 'ffmpeg: mock error'));
+          } else if (ffmpegMockState.endCb) {
+            ffmpegMockState.endCb();
+          }
+        });
+        return;
+      }
+
+      // Legacy single-mode path (auto-resets to 'success' so a fallback call
+      // succeeds), used by the original tests that call mockFfmpegInvokeEnd()
+      // / mockFfmpegInvokeError() directly instead of mockFfmpegQueue().
       setImmediate(() => {
         if (ffmpegMockState.mode === 'error' && ffmpegMockState.errorCb) {
           ffmpegMockState.mode = 'success'; // auto-reset so fallback call succeeds
@@ -645,22 +707,6 @@ describe('ThumbnailProcessor', () => {
       expect(result.metadata?.thumbnailObjectId).toBe(THUMB_ID);
     });
 
-    it('should return success:false without throwing when both frame extractions fail', async () => {
-      // Both extractFrame calls will fail: set error mode permanently for this test.
-      // We reset to error after each run() by patching the stub behaviour inline.
-      const { promises: fsMock } = require('fs');
-      // Make readFile throw to simulate both extractions failing (ffmpeg writes nothing)
-      fsMock.readFile.mockRejectedValueOnce(new Error('no frame written'));
-      mockFfmpegInvokeError(); // first call errors; second call goes into success but readFile fails
-
-      const result = await processor.process(
-        makeObject({ mimeType: 'video/mp4' }),
-        makeGetStream(jpegBuf),
-      );
-      expect(result.success).toBe(false);
-      expect(typeof result.error).toBe('string');
-    });
-
     it('should clean up temp files even when ffmpeg fails', async () => {
       const { promises: fsMock } = require('fs');
       fsMock.readFile.mockRejectedValueOnce(new Error('frame read error'));
@@ -673,6 +719,178 @@ describe('ThumbnailProcessor', () => {
 
       // unlink is called in the finally block — must not throw regardless
       expect(fsMock.unlink).toHaveBeenCalled();
+    });
+
+    // -----------------------------------------------------------------------
+    // Three-attempt fallback ladder: 1s seek -> 0s seek -> 'thumbnail' filter
+    // -----------------------------------------------------------------------
+
+    describe('three-attempt fallback ladder', () => {
+      it('should seek to 1s then 0s (no videoFilters) when attempt 1 errors and attempt 2 succeeds', async () => {
+        mockFfmpegQueue([
+          { kind: 'error', message: 'attempt 1: seek 1s failed' },
+          { kind: 'success' },
+        ]);
+
+        const result = await processor.process(
+          makeObject({ mimeType: 'video/mp4' }),
+          makeGetStream(jpegBuf),
+        );
+
+        expect(result.success).toBe(true);
+        expect(ffmpegMockState.seekInputCalls).toEqual([1, 0]);
+        expect(ffmpegMockState.videoFiltersCalls).toEqual([]);
+      });
+
+      it('should fall through to the "thumbnail" video filter (seekSecs=null) when attempts 1 and 2 both error', async () => {
+        mockFfmpegQueue([
+          { kind: 'error', message: 'attempt 1: seek 1s failed' },
+          { kind: 'error', message: 'attempt 2: seek 0s failed' },
+          { kind: 'success' },
+        ]);
+
+        const result = await processor.process(
+          makeObject({ mimeType: 'video/mp4' }),
+          makeGetStream(jpegBuf),
+        );
+
+        expect(result.success).toBe(true);
+        expect(ffmpegMockState.seekInputCalls).toEqual([1, 0]);
+        expect(ffmpegMockState.videoFiltersCalls).toEqual(['thumbnail']);
+      });
+
+      it('should return success:false with the LAST attempt\'s error message when all three attempts error', async () => {
+        mockFfmpegQueue([
+          { kind: 'error', message: 'attempt 1: seek 1s failed' },
+          { kind: 'error', message: 'attempt 2: seek 0s failed' },
+          { kind: 'error', message: 'attempt 3: thumbnail filter failed' },
+        ]);
+
+        const result = await processor.process(
+          makeObject({ mimeType: 'video/mp4' }),
+          makeGetStream(jpegBuf),
+        );
+
+        expect(result.success).toBe(false);
+        expect(result.error).toBe('attempt 3: thumbnail filter failed');
+        // All three rungs of the ladder were attempted, in order.
+        expect(ffmpegMockState.seekInputCalls).toEqual([1, 0]);
+        expect(ffmpegMockState.videoFiltersCalls).toEqual(['thumbnail']);
+      });
+
+      it('should not throw — total ladder failure still resolves to a result object', async () => {
+        mockFfmpegQueue([
+          { kind: 'error' },
+          { kind: 'error' },
+          { kind: 'error' },
+        ]);
+
+        await expect(
+          processor.process(makeObject({ mimeType: 'video/mp4' }), makeGetStream(jpegBuf)),
+        ).resolves.toMatchObject({ success: false });
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // Empty-output detection: ffmpeg exits cleanly ('end') but writes a
+    // zero-byte file — assertNonEmptyFile must treat this as attempt failure.
+    // -----------------------------------------------------------------------
+
+    describe('empty-output detection', () => {
+      it('should treat an empty output file as a failed attempt and fall back to the next attempt', async () => {
+        const { promises: fsMock } = require('fs');
+        // Attempt 1's ffmpeg run "succeeds" (fires 'end') but produces a
+        // zero-byte file; attempt 2's output is non-empty (default stat mock).
+        fsMock.stat.mockResolvedValueOnce({ size: 0 });
+        mockFfmpegQueue([{ kind: 'success' }, { kind: 'success' }]);
+
+        const result = await processor.process(
+          makeObject({ mimeType: 'video/mp4' }),
+          makeGetStream(jpegBuf),
+        );
+
+        expect(result.success).toBe(true);
+        // Two ffmpeg attempts occurred: the first "succeeded" but was empty.
+        expect(ffmpegMockState.seekInputCalls).toEqual([1, 0]);
+        // The empty tmpOut from attempt 1 must be unlinked before attempt 2
+        // reuses the same tmpOut path (plus the two finally-block cleanups).
+        expect(fsMock.unlink.mock.calls.length).toBeGreaterThanOrEqual(2);
+      });
+
+      it('should return success:false with an "empty output file" message when every attempt produces a zero-byte file', async () => {
+        const { promises: fsMock } = require('fs');
+        fsMock.stat
+          .mockResolvedValueOnce({ size: 0 })
+          .mockResolvedValueOnce({ size: 0 })
+          .mockResolvedValueOnce({ size: 0 });
+        mockFfmpegQueue([{ kind: 'success' }, { kind: 'success' }, { kind: 'success' }]);
+
+        const result = await processor.process(
+          makeObject({ mimeType: 'video/mp4' }),
+          makeGetStream(jpegBuf),
+        );
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('empty output file');
+        expect(ffmpegMockState.seekInputCalls).toEqual([1, 0]);
+        expect(ffmpegMockState.videoFiltersCalls).toEqual(['thumbnail']);
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // extractFrame — per-attempt timeout kill + settle-once guard
+  //
+  // These tests call the private extractFrame() method directly (bypassing
+  // the full processVideo pipeline) so the timeout/kill behaviour of a single
+  // attempt can be asserted in isolation without needing 3x the real timeout
+  // duration under fake timers.
+  // -------------------------------------------------------------------------
+
+  describe('extractFrame — timeout handling', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+      delete process.env.FFMPEG_TIMEOUT_MS;
+    });
+
+    it('kills the ffmpeg process with SIGKILL and rejects with a timeout message when ffmpeg never settles', async () => {
+      process.env.FFMPEG_TIMEOUT_MS = '5000';
+      const timeoutProcessor = new ThumbnailProcessor({} as any, {} as any, {} as any);
+      resetFfmpegMock();
+      mockFfmpegQueue([{ kind: 'hang' }]);
+
+      jest.useFakeTimers();
+      const extractPromise = (timeoutProcessor as any).extractFrame('in.mp4', 'out.jpg', 1);
+      // Attach a handler immediately so the pending rejection is never
+      // "unhandled" while fake timers are advanced below.
+      const rejectionCheck = extractPromise.catch((e: unknown) => e);
+
+      await jest.advanceTimersByTimeAsync(5000);
+      const err = await rejectionCheck;
+
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toBe('ffmpeg frame extraction timed out after 5000ms');
+      expect(killSpy).toHaveBeenCalledWith('SIGKILL');
+    });
+
+    it('settles only once: a late "error" event fired after the timeout does not throw', async () => {
+      process.env.FFMPEG_TIMEOUT_MS = '5000';
+      const timeoutProcessor = new ThumbnailProcessor({} as any, {} as any, {} as any);
+      resetFfmpegMock();
+      mockFfmpegQueue([{ kind: 'hang' }]);
+
+      jest.useFakeTimers();
+      const extractPromise = (timeoutProcessor as any).extractFrame('in.mp4', 'out.jpg', 1);
+      const rejectionCheck = extractPromise.catch((e: unknown) => e);
+
+      await jest.advanceTimersByTimeAsync(5000);
+      const err = await rejectionCheck;
+      expect((err as Error).message).toContain('timed out');
+
+      // A late 'error' event (e.g. emitted as a side-effect of the kill()
+      // call) must be a no-op thanks to the settled guard — it must not
+      // throw and must not attempt to reject an already-settled promise.
+      expect(() => ffmpegMockState.errorCb?.(new Error('late ffmpeg error'))).not.toThrow();
     });
   });
 });
