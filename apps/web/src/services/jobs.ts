@@ -27,6 +27,8 @@ export interface JobStats {
   stuckRunning: number;
   /** Number of pending jobs currently waiting on backoff (scheduledFor > now). */
   scheduled: number;
+  /** Configured stuck-job threshold in minutes (system setting jobs.stuckThresholdMinutes). */
+  stuckThresholdMinutes: number;
 }
 
 export interface EnrichmentJobDto {
