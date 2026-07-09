@@ -84,18 +84,24 @@ export class ObjectProcessingService {
           this.logger.debug(`Processor ${processor.name} completed successfully`);
         } else if (!result.success) {
           this.logger.warn(
-            `Processor ${processor.name} failed: ${result.error}`,
+            `Processor ${processor.name} failed${processor.optional ? ' (optional — object not failed)' : ''}: ${result.error}`,
           );
           allMetadata[`${processor.name}_error`] = result.error;
-          hasError = true;
+          // Optional processors record their error but never fail the object
+          if (!processor.optional) {
+            hasError = true;
+          }
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         this.logger.error(
-          `Processor ${processor.name} threw exception: ${errorMessage}`,
+          `Processor ${processor.name} threw exception${processor.optional ? ' (optional — object not failed)' : ''}: ${errorMessage}`,
         );
         allMetadata[`${processor.name}_error`] = errorMessage;
-        hasError = true;
+        // Optional processors record their error but never fail the object
+        if (!processor.optional) {
+          hasError = true;
+        }
       }
     }
 

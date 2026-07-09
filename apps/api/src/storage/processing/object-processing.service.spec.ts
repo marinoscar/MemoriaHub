@@ -467,6 +467,125 @@ describe('ObjectProcessingService', () => {
     });
   });
 
+  describe('with an optional processor', () => {
+    let requiredProcessor: jest.Mocked<ObjectProcessor>;
+    let optionalProcessor: jest.Mocked<ObjectProcessor>;
+
+    beforeEach(async () => {
+      requiredProcessor = {
+        name: 'required-processor',
+        priority: 10,
+        canProcess: jest.fn().mockReturnValue(true),
+        process: jest.fn().mockResolvedValue({
+          success: true,
+          metadata: { key1: 'value1' },
+        }),
+      };
+
+      optionalProcessor = {
+        name: 'optional-processor',
+        priority: 20,
+        optional: true,
+        canProcess: jest.fn().mockReturnValue(true),
+        process: jest.fn().mockResolvedValue({
+          success: true,
+          metadata: { key2: 'value2' },
+        }),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          ObjectProcessingService,
+          { provide: PrismaService, useValue: mockPrisma },
+          { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
+          { provide: StorageProviderResolver, useValue: mockResolver },
+          { provide: EventEmitter2, useValue: mockEventEmitter },
+          {
+            provide: OBJECT_PROCESSOR,
+            useValue: [requiredProcessor, optionalProcessor],
+          },
+        ],
+      }).compile();
+
+      service = module.get<ObjectProcessingService>(ObjectProcessingService);
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue({
+        ...mockStorageObject,
+        metadata: null,
+      } as any);
+      mockPrisma.storageObject.update.mockResolvedValue(mockStorageObject as any);
+      mockStorageProvider.download.mockResolvedValue(
+        Readable.from(['test content']),
+      );
+    });
+
+    it('should mark object ready when only the optional processor fails, recording its error metadata', async () => {
+      optionalProcessor.process.mockResolvedValue({
+        success: false,
+        error: 'probe failed',
+      });
+
+      const event = new ObjectUploadedEvent(mockStorageObject as any);
+      await service.handleObjectUploaded(event);
+
+      expect(mockPrisma.storageObject.update).toHaveBeenCalledWith({
+        where: { id: mockStorageObject.id },
+        data: {
+          status: 'ready',
+          metadata: expect.objectContaining({
+            _processing: expect.objectContaining({
+              'required-processor': { key1: 'value1' },
+              'optional-processor_error': 'probe failed',
+            }),
+          }),
+        },
+      });
+    });
+
+    it('should mark object ready when the optional processor throws, recording its error metadata', async () => {
+      optionalProcessor.process.mockRejectedValue(new Error('probe crashed'));
+
+      const event = new ObjectUploadedEvent(mockStorageObject as any);
+      await service.handleObjectUploaded(event);
+
+      expect(mockPrisma.storageObject.update).toHaveBeenCalledWith({
+        where: { id: mockStorageObject.id },
+        data: {
+          status: 'ready',
+          metadata: expect.objectContaining({
+            _processing: expect.objectContaining({
+              'optional-processor_error': 'probe crashed',
+            }),
+          }),
+        },
+      });
+    });
+
+    it('should still mark object failed when a non-optional processor fails alongside a succeeding optional one', async () => {
+      requiredProcessor.process.mockResolvedValue({
+        success: false,
+        error: 'required failed',
+      });
+
+      const event = new ObjectUploadedEvent(mockStorageObject as any);
+      await service.handleObjectUploaded(event);
+
+      expect(mockPrisma.storageObject.update).toHaveBeenCalledWith({
+        where: { id: mockStorageObject.id },
+        data: {
+          status: 'failed',
+          metadata: expect.objectContaining({
+            _processing: expect.objectContaining({
+              'required-processor_error': 'required failed',
+              'optional-processor': { key2: 'value2' },
+            }),
+            _processingFailed: true,
+          }),
+        },
+      });
+    });
+  });
+
   describe('with single processor', () => {
     let mockProcessor: jest.Mocked<ObjectProcessor>;
 

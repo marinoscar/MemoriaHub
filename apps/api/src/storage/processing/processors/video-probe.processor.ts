@@ -46,6 +46,9 @@ export class VideoProbeProcessor implements ObjectProcessor {
 
   readonly name = 'video-probe';
   readonly priority = 20;
+  // Duration/codec metadata is enrichment, not load-bearing — a probe failure
+  // must not fail an object whose thumbnail succeeded.
+  readonly optional = true;
 
   canProcess(object: StorageObject): boolean {
     return object.mimeType.startsWith('video/');

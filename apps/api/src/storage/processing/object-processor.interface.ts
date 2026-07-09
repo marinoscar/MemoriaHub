@@ -21,6 +21,13 @@ export interface ObjectProcessor {
   readonly priority: number;
 
   /**
+   * When true, a failure/exception from this processor records its error
+   * metadata (_processing.<name>_error) but does NOT mark the whole object
+   * failed; only non-optional processors flip the object to status='failed'.
+   */
+  readonly optional?: boolean;
+
+  /**
    * Check if this processor can handle the given object
    */
   canProcess(object: StorageObject): boolean;
