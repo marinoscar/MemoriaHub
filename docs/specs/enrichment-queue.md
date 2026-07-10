@@ -67,7 +67,7 @@ The worked example throughout this document is `face_detection`. See **[docs/spe
 | `providerKey` | String? | Hint to handler: which provider to use |
 | `modelVersion` | String? | Hint to handler: which model version |
 | `payload` | JsonB? | Handler-specific additional parameters |
-| `attempts` | Int (default 0) | Number of normal processing attempts (does not count rate-limit hits) |
+| `attempts` | Int (default 0) | Number of processing attempts STARTED — charged at CLAIM time, not at failure time (so an OOM-`SIGKILL`ed job still consumes one). Does not count rate-limit deferrals (they un-charge the claim-time increment). See [Atomic Claim](#atomic-claim). |
 | `lastError` | String? | Error message from most recent failure |
 | `scheduledFor` | DateTime? | When the job becomes eligible to be claimed again; null = eligible now. Set by the worker on both normal-failure backoff and rate-limit deferral. |
 | `rateLimitedAt` | DateTime? | Timestamp of the most recent rate-limit hit, for debugging and admin display. |
@@ -363,11 +363,18 @@ const job = await prisma.enrichmentJob.findFirst({
 if (!job) return null;
 await prisma.enrichmentJob.update({
   where: { id: job.id },
-  data: { status: JobStatus.running, startedAt: new Date(), scheduledFor: null },
+  data: {
+    status: JobStatus.running,
+    startedAt: new Date(),
+    scheduledFor: null,
+    attempts: { increment: 1 }, // charged at CLAIM time — see below
+  },
 });
 ```
 
 The `scheduledFor` filter ensures that backed-off jobs are invisible to the worker until their deferral period has elapsed. The transaction ensures only one worker process can claim a given job even during a deploy overlap.
+
+**`attempts` is charged at CLAIM time, not at in-process failure time.** The increment happens in the claim `update` above, so `attempts` means "attempts STARTED", not "attempts failed". This is deliberate: a job that takes the whole worker process down mid-run (an OOM `SIGKILL`, a container OOM-kill) never reaches the normal-failure path that would otherwise increment the counter, so a crash-on-every-run "poison pill" would be requeued forever in an infinite crash loop. Charging up front means the row still carries its consumed attempts when the stuck-reset path later finds it orphaned in `running`, so that path can permanently **fail** it once the budget is exhausted (see [Section 11 — Stuck Threshold](#stuck-threshold-settings-driven)) — bounding any such job to `ENRICHMENT_MAX_ATTEMPTS` process crashes. The rate-limit deferral path, which must not consume the normal-failure budget, explicitly **un-charges** this increment with an absolute write (`attempts: job.attempts - 1`, idempotent under a `safeTerminalUpdate` retry) so a throttle response costs a `rateLimitHits` tick but not an `attempts` tick.
 
 ### Retry and Backoff
 
@@ -375,11 +382,13 @@ The worker handles two distinct failure modes separately. Normal errors and rate
 
 **Normal failure path:**
 
+Note `attempts` was already incremented at claim time (see [Atomic Claim](#atomic-claim)), so at the failure path `attempts` already includes the current attempt — the worker does **not** increment it again here; it only decides `pending` vs. `failed` by comparing the already-charged `attempts` against `MAX_ATTEMPTS`.
+
 | Outcome | Action |
 |---------|--------|
 | `handler.process()` returns normally | `status = succeeded`, `finishedAt = now()` |
-| Throws a non-rate-limit error, `attempts < MAX_ATTEMPTS` | `attempts++`, `status = pending`, `scheduledFor = now + backoff` |
-| Throws a non-rate-limit error, `attempts >= MAX_ATTEMPTS` | `attempts++`, `status = failed`, `finishedAt = now()`, `lastError = message` |
+| Throws a non-rate-limit error, `attempts < MAX_ATTEMPTS` | `status = pending`, `scheduledFor = now + backoff` (attempts already charged at claim) |
+| Throws a non-rate-limit error, `attempts >= MAX_ATTEMPTS` | `status = failed`, `finishedAt = now()`, `lastError = message` |
 | `registry.get(type)` returns `undefined` | `status = failed` immediately (no retry), `lastError = "No handler registered..."` |
 
 The backoff delay uses equal-jitter exponential backoff: `delay = exp/2 + rand() * (exp/2)` where `exp = min(RETRY_MAX_MS, RETRY_BASE_MS * 2^(attempt-1))`. Default values give delays of roughly 1–2 s, 2–4 s, then permanent failure on the third attempt.
@@ -390,8 +399,8 @@ When a handler throws a `RateLimitError`, or when the worker's `classifyRateLimi
 
 | Outcome | Action |
 |---------|--------|
-| Rate-limit error, `rateLimitHits < RL_MAX_HITS` | `rateLimitHits++`, `rateLimitedAt = now()`, `status = pending`, `scheduledFor = now + rl_backoff`; `attempts` is **not** incremented |
-| Rate-limit error, `rateLimitHits >= RL_MAX_HITS` | `rateLimitHits++`, `status = failed`, `finishedAt = now()`, `lastError = message` |
+| Rate-limit error, `rateLimitHits < RL_MAX_HITS` | `rateLimitHits++`, `rateLimitedAt = now()`, `status = pending`, `scheduledFor = now + rl_backoff`; the claim-time `attempts` increment is **un-charged** (`attempts = job.attempts - 1`) so a deferral never consumes the normal-failure budget |
+| Rate-limit error, `rateLimitHits >= RL_MAX_HITS` | `rateLimitHits++`, `attempts` un-charged, `status = failed`, `finishedAt = now()`, `lastError = message` |
 
 Rate-limit backoff uses the same equal-jitter formula with longer base and cap values. If the provider supplies a `Retry-After` header (integer seconds or HTTP-date), the computed jitter is floored at that value so the worker never retries before the provider allows.
 
@@ -403,7 +412,7 @@ Unknown handler types fail immediately without retry. This prevents an infinite 
 
 ### Active Per-Job Timeout
 
-Each `handler.process(job)` call is raced against an active timeout controlled by `ENRICHMENT_JOB_TIMEOUT_MS` (default `600000`, i.e. 10 minutes; `0` disables it). If the handler runs longer than this budget, the worker abandons the wait: the timeout rejects with a plain `Error` (`enrichment job execution timed out after <ms>ms (type="...")`), which — being neither a `RateLimitError` nor a `classifyRateLimit` match — flows through the **normal-failure retry path** exactly like any other thrown error: `attempts++`, exponential backoff via `scheduledFor`, retry while `attempts < MAX_ATTEMPTS`, then permanent `failed` with the timeout message as `lastError`.
+Each `handler.process(job)` call is raced against an active timeout. The budget is **per job type**: the two video job types — `video_face_detection` and `social_media_detection` — use `ENRICHMENT_VIDEO_JOB_TIMEOUT_MS` (default `1200000`, i.e. 20 minutes), and every other type uses `ENRICHMENT_JOB_TIMEOUT_MS` (default `600000`, i.e. 10 minutes). `0` disables the timeout for the affected types. The video types get a wider budget because a legitimate multi-GB video download plus ffmpeg frame extraction plus per-frame provider calls routinely exceeds the 10-minute global default on a low-compute VPS — and the queue's design goal is slow-but-alive over crashing, so valid video work must not be killed as "hung". If the handler runs longer than its budget, the worker abandons the wait: the timeout rejects with a plain `Error` (`enrichment job execution timed out after <ms>ms (type="...")`), which — being neither a `RateLimitError` nor a `classifyRateLimit` match — flows through the **normal-failure retry path** exactly like any other thrown error: exponential backoff via `scheduledFor`, retry while the claim-charged `attempts < MAX_ATTEMPTS`, then permanent `failed` with the timeout message as `lastError`.
 
 The point of the active timeout is that the worker slot is **freed immediately** when the timeout fires. Before this, a hung handler call blocked the worker indefinitely — at `ENRICHMENT_WORKER_CONCURRENCY=1` a single hang stalled the entire queue, and recovery depended solely on the `EnrichmentStuckResetTask` cron (runs every 10 min, resets jobs `running` past the stuck threshold — see [Section 11 — Stuck Threshold](#stuck-threshold-settings-driven), currently a settings-driven value defaulting to 3 minutes), up to a ≈13-minute worst case at the current default. With the active timeout, one hang no longer stalls the queue: the tick completes, the slot is released, and the next tick claims the following job.
 
@@ -546,7 +555,7 @@ The `/admin/jobs` dashboard surfaces a per-row "backing off" badge when `schedul
 | Endpoint | Permission | Behavior |
 |----------|------------|---------|
 | `POST /api/admin/jobs/retry-failed` | `jobs:write` | `updateMany` all `failed` jobs to `pending`. Optional body `{ type }` to scope by job type. |
-| `POST /api/admin/jobs/reset-stuck` | `jobs:write` | `updateMany` all stuck `running` jobs (incl. `startedAt IS NULL` zombies, aged by `createdAt`) back to `pending`, clearing `startedAt` and `scheduledFor`. `olderThanMinutes` in the request body is now optional with no hard-coded default — when omitted, the `jobs.stuckThresholdMinutes` system setting (default 3 minutes) is used. |
+| `POST /api/admin/jobs/reset-stuck` | `jobs:write` | Recover stuck `running` jobs (incl. `startedAt IS NULL` zombies, aged by `createdAt`). Because `attempts` is charged at claim time, a stuck job whose `attempts >= ENRICHMENT_MAX_ATTEMPTS` is marked **`failed`** (with `lastError = "process terminated during execution (attempt N/M)"`) instead of requeued — bounding a poison-pill/OOM job to `ENRICHMENT_MAX_ATTEMPTS` crashes; jobs still under budget are reset to `pending`, clearing `startedAt` and `scheduledFor`. Returns `{ reset, failed }`. `olderThanMinutes` in the request body is optional with no hard-coded default — when omitted, the `jobs.stuckThresholdMinutes` system setting (default 3 minutes) is used. |
 
 ---
 
@@ -740,7 +749,9 @@ No dashboard code changes are needed.
 | `FACE_JOB_POLL_MS` | `'5000'` | Legacy alias for `ENRICHMENT_JOB_POLL_MS`. |
 | `ENRICHMENT_WORKER_CONCURRENCY` | `'1'` | Worker-pool size — the number of long-lived worker loops, fixed at startup. Each loop independently claims and processes one job at a time; there is no batch barrier, so a slow/hung job only stalls its own slot. Raise for throughput; the per-provider throttle gate keeps higher values 429-safe. Memory scales with this value (each concurrent job buffers a decoded image). See [Section 8 — Concurrency (Pool Size)](#concurrency-pool-size). |
 | `FACE_WORKER_CONCURRENCY` | `'1'` | Legacy alias for `ENRICHMENT_WORKER_CONCURRENCY`. |
-| `ENRICHMENT_JOB_TIMEOUT_MS` | `600000` | Active per-job execution timeout (ms). A handler running longer is aborted, its worker slot freed, and the job routed through the normal-failure retry path (`attempts++`, backoff, permanent-fail after `ENRICHMENT_MAX_ATTEMPTS`). `0` disables. Must exceed the longest legitimate single-job runtime. See [Section 8 — Active Per-Job Timeout](#active-per-job-timeout). |
+| `ENRICHMENT_JOB_TIMEOUT_MS` | `600000` | Active per-job execution timeout (ms) for all job types EXCEPT the two video types below. A handler running longer is aborted, its worker slot freed, and the job routed through the normal-failure retry path (backoff, permanent-fail after `ENRICHMENT_MAX_ATTEMPTS`). `0` disables. Must exceed the longest legitimate single-job runtime. See [Section 8 — Active Per-Job Timeout](#active-per-job-timeout). |
+| `ENRICHMENT_VIDEO_JOB_TIMEOUT_MS` | `1200000` | Per-type execution-timeout override for `video_face_detection` and `social_media_detection` (all other types use `ENRICHMENT_JOB_TIMEOUT_MS`). Wider default (20 min) because video download + ffmpeg + per-frame provider calls legitimately exceed the 10-min global default on low-compute hosts. `0` disables the timeout for these two types. See [Section 8 — Active Per-Job Timeout](#active-per-job-timeout). |
+| `VIDEO_ENRICHMENT_MAX_BYTES` | `0` | Optional hard cap (bytes) on videos processed by BOTH `video_face_detection` and `social_media_detection`; a single shared knob. `0` disables. Over-cap videos are skipped WITHOUT downloading — video face detection marks the item `no_faces`; social-media detection routes through its clean/skip path (`matchedRule: skip-size-cap`). Checked before any download; complements the fixed-headroom disk-space pre-flight guard (`assertDiskSpaceForDownload`). |
 | `ENRICHMENT_STUCK_MINUTES` | _(unset)_ | **Legacy fallback only.** The stuck threshold is now a runtime System Setting, `jobs.stuckThresholdMinutes` (integer, 1–120, default **3** minutes), editable in Admin Settings without a restart — see [Section 11 — Stuck Threshold (Settings-Driven)](#stuck-threshold-settings-driven). This env var is consulted only to compute the setting's *default* the first time it is read (`defaultStuckThresholdMinutes()`), clamped to 120; once the setting has an explicit value in the database, this env var has no further effect. This is a CRASH backstop only — live handler hangs are handled by `ENRICHMENT_JOB_TIMEOUT_MS`. The effective threshold must exceed the longest legitimate single-job runtime, or long-running-but-legitimate jobs get reset to `pending` and may be picked up and run a second time concurrently with the still-running original. |
 
 ### Normal-failure retry
@@ -793,7 +804,7 @@ For the full provider rate-limit classification matrix and OOM/crash recovery ru
 
 ## 14. Operational Notes
 
-**Stuck-running recovery.** If the worker process crashes or the container restarts while a job is in `running` status, that job will never transition out of `running` on its own. This is the crash backstop that the automatic `EnrichmentStuckResetTask` cron and the manual `POST /api/admin/jobs/reset-stuck` endpoint exist for — both return stale running jobs to `pending`, resolving the threshold from the `jobs.stuckThresholdMinutes` system setting (default 3 minutes) when no explicit `olderThanMinutes` is given. Note this is distinct from a handler that *hangs* while the worker is still alive: that case is now handled promptly by the active per-job timeout (`ENRICHMENT_JOB_TIMEOUT_MS`, see [Section 8 — Active Per-Job Timeout](#active-per-job-timeout)), which frees the slot without waiting for the stuck-reset cron. The stuck-reset path only covers rows orphaned by a dead worker process. **The threshold must exceed the longest legitimate single-job runtime** — set too low, a still-legitimately-running job gets reset to `pending` and can be re-claimed and run a second time concurrently with the original; adjust `jobs.stuckThresholdMinutes` in Admin Settings if your handlers are expected to take longer than the 3-minute default.
+**Stuck-running recovery.** If the worker process crashes or the container restarts while a job is in `running` status, that job will never transition out of `running` on its own. This is the crash backstop that the automatic `EnrichmentStuckResetTask` cron and the manual `POST /api/admin/jobs/reset-stuck` endpoint exist for, resolving the threshold from the `jobs.stuckThresholdMinutes` system setting (default 3 minutes) when no explicit `olderThanMinutes` is given. Both now split the recovery by the claim-charged `attempts`: a stuck job still under `ENRICHMENT_MAX_ATTEMPTS` is returned to `pending` (counted in the `{ reset, failed }` result's `reset`), while one that has already exhausted its budget is marked **`failed`** (counted in `failed`) rather than requeued — so a job that OOM-`SIGKILL`s the worker on every claim is bounded to `ENRICHMENT_MAX_ATTEMPTS` process crashes instead of looping forever. Note this is distinct from a handler that *hangs* while the worker is still alive: that case is now handled promptly by the active per-job timeout (`ENRICHMENT_JOB_TIMEOUT_MS`, see [Section 8 — Active Per-Job Timeout](#active-per-job-timeout)), which frees the slot without waiting for the stuck-reset cron. The stuck-reset path only covers rows orphaned by a dead worker process. **The threshold must exceed the longest legitimate single-job runtime** — set too low, a still-legitimately-running job gets reset to `pending` and can be re-claimed and run a second time concurrently with the original; adjust `jobs.stuckThresholdMinutes` in Admin Settings if your handlers are expected to take longer than the 3-minute default.
 
 **Zombie rows (`startedAt IS NULL`).** A running job whose `startedAt` stamp write was lost — the row was claimed but the process died or errored before the follow-up update — is now included in stuck detection (aged by `createdAt` instead of `startedAt`) rather than sitting permanently un-recoverable. See [Section 11 — Zombie Rows](#zombie-rows-startedat-is-null).
 
@@ -873,3 +884,4 @@ Each of these would: implement `EnrichmentHandler`, self-register via `onModuleI
 | 1.7 | July 2026 | AI Assistant | Section 13 config table: fixed stale `ENRICHMENT_WORKER_CONCURRENCY` note (was "jobs per tick", now correctly describes the fixed-at-startup worker-pool size, consistent with Section 8); added missing `ENRICHMENT_STUCK_MINUTES` row; added new "Tuning for large runs / bulk backfills" subsection with recommended presets, on-demand admin controls, and job-history-retention pointer |
 | 1.8 | July 2026 | AI Assistant | Corrected worker lifecycle hook: pool startup (and the enable/disable env-var check) moved from `OnModuleInit` to `OnApplicationBootstrap` to close a module-registration race causing permanently-failed jobs during boot (Section 8, Section 8 "Disabling the Worker") |
 | 1.9 | July 2026 | AI Assistant | Settings-driven stuck threshold: new `jobs.stuckThresholdMinutes` system setting (1–120, default 3 min, falls back to legacy `ENRICHMENT_STUCK_MINUTES` env var) now shared by `GET /api/admin/jobs/stats` (`stuckRunning`, new `stuckThresholdMinutes` field), `POST /api/admin/jobs/reset-stuck` (`olderThanMinutes` now optional, no hard-coded default), and the `EnrichmentStuckResetTask` cron, replacing three previously-disagreeing thresholds (10/10/15 min); zombie-row fix for `running` jobs with `startedAt IS NULL`, previously invisible to all three stuck-job consumers; `EnrichmentJobWorker.safeTerminalUpdate` retries a failed terminal status write once before leaving the row for the stuck-reset cron; Section 11 rewrite, Section 13 config row, Section 14 operational notes |
+| 2.0 | July 2026 | AI Assistant | Claim-time attempt charging: `attempts` is now incremented in the claim `update` (means "attempts started"), so an OOM-`SIGKILL`ed job still consumes its attempt and `resetStuck` marks a budget-exhausted stuck job `failed` instead of requeueing it forever (returns `{ reset, failed }`); rate-limit path un-charges the increment. Per-type video execution timeout: new `ENRICHMENT_VIDEO_JOB_TIMEOUT_MS` (default 20 min) for `video_face_detection`/`social_media_detection`, all other types keep `ENRICHMENT_JOB_TIMEOUT_MS`. New `VIDEO_ENRICHMENT_MAX_BYTES` shared size cap (skip-without-download) for both video handlers, plus the `assertDiskSpaceForDownload` disk pre-flight guard and `TempFileJanitorTask` orphan sweep. Section 6 Atomic Claim, Section 8 timeout/retry tables, Section 11 reset-stuck row, Section 13 config rows, Section 14 operational notes |

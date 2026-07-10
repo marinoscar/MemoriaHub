@@ -118,6 +118,29 @@ Both gates are defense-in-depth on top of the gate-then-fan-out ordering, not a 
 
 `SocialMediaDetectionHandler` reads persisted ffprobe container metadata from `StorageObject.metadata._processing['video-probe']` (written by the `video-probe` storage processor at upload time — see `apps/api/src/storage/processing/processors/video-probe.processor.ts`). For videos uploaded **before** this feature existed, that block is absent; the handler downloads the video and re-runs ffprobe on the fly (`reprobe()`, writing to a temp file and cleaning up in a `finally` block) so backfill works uniformly across old and new library items.
 
+### 2.5 Pre-Flight Caps and Orientation Gate
+
+Before any download, the handler applies two cheap filters — in this order, cheapest first — so most non-social videos never touch the disk or the OCR engine on a low-compute VPS. Both are deliberate **precision-over-compute** tradeoffs consistent with the feature's precision-over-recall stance (§9.2).
+
+**1. Size / duration caps (no download).** Evaluated against persisted metadata + object size:
+
+| Order | Condition | Outcome |
+|---|---|---|
+| 1 | `VIDEO_ENRICHMENT_MAX_BYTES > 0` and object size exceeds it | clean, `matchedRule: skip-size-cap` |
+| 2 | duration known and `> socialMedia.maxDurationSeconds` | clean, `matchedRule: skip-duration-cap` |
+| 3 | duration unknown and object size `> socialMedia.maxSizeBytes` | clean, `matchedRule: skip-size-cap` |
+
+Duration is taken from the persisted `video-probe` block, falling back to `mediaItem.durationMs`. The operator domain fact behind the duration cap: genuine TikTok/Instagram/Facebook re-uploads never exceed ~5 minutes, so a longer video is overwhelmingly likely to be real home footage. The size caps are the fallback signal when no duration is known. A capped video is routed through the **normal clean path** — `applyClean(...)` still strips any stale system tags and clears `social_media_source` if the item was previously flagged, and the withheld `video_face_detection` job still fans out via `enqueueVideoPostDetectionEnrichment` — so a cap decision is fully equivalent to a genuine "clean" classification, just cheaper.
+
+**2. Orientation gate (no download for the download-dependent tiers).** A strictly-**landscape** video (`width > height`, from persisted probe or `mediaItem` dimensions) is never downloaded for this job. TikTok and Instagram videos are never landscape; Facebook can be, but landscape Facebook re-shares are accepted as adequately covered by the Tier-1 filename/container-metadata rules alone. A landscape video therefore:
+
+- runs **Tier 1** on its filename plus whatever container metadata is already persisted (even if incomplete) — it does **not** trigger the legacy re-probe download that a portrait legacy item would (§2.4);
+- **never runs Tier-2 OCR** — `recommendTier2` is forced off for landscape input regardless of what Tier 1 recommends.
+
+The blind spot this accepts: a landscape re-share detectable only by reading a burned-in watermark via OCR is missed (classified clean). This is intentional — the download + OCR compute for every landscape video is not worth the marginal recall on a memory-constrained host.
+
+The caps run before the orientation gate because they are cheaper still (pure comparisons, no metadata reasoning) and can short-circuit the whole job; orientation only gates the download-dependent work that survives the caps.
+
 ---
 
 ## 3. Detection Engine
@@ -226,7 +249,7 @@ One row per video media item that has (or had) a social-media detection outcome,
 | `platform` | String? | `'tiktok'` \| `'instagram'` \| `'facebook'` \| `'other'`; null when clean |
 | `detectionMethod` | String? | `'metadata'` \| `'filename'` \| `'ocr'`; null when clean |
 | `confidence` | Float? | 0–1; null when clean |
-| `matchedRule` | String? | The winning rule/heuristic ID (e.g. `tt-comment-vid`, `ocr-instagram-word`); null when clean |
+| `matchedRule` | String? | The winning rule/heuristic ID (e.g. `tt-comment-vid`, `ocr-instagram-word`) when detected; for a video skipped by a pre-flight cap (§2.5) it records WHY it read as clean — `skip-duration-cap` or `skip-size-cap` — even though `isSocialMedia` is false; null for a genuine no-match clean |
 | `processedAt` | DateTime? | |
 | `lastError` | String? | |
 | `createdAt` / `updatedAt` | DateTime | |
@@ -270,6 +293,8 @@ Two tag names are applied on detection: the umbrella tag **`Social Media`** (alw
 | `socialMedia.ocrMaxFrames` | integer | 2–6 | `4` | Hard cap on frames OCR'd per video. |
 | `socialMedia.ocrTimeoutSeconds` | integer | 10–300 | `60` | Soft timeout for the whole OCR phase; partial results are kept on timeout. |
 | `socialMedia.minConfidence` | number | 0.5–1.0 | `0.8` | Decision threshold shared by both tiers — the minimum confidence a Tier 1 or Tier 2 candidate must meet to classify a video as detected. |
+| `socialMedia.maxDurationSeconds` | integer | 60–3600 | `300` | A video whose known duration exceeds this is treated as CLEAN without downloading or OCR — genuine social-media clips never exceed ~5 minutes. Recorded as `matchedRule: skip-duration-cap`. See [§2.5](#25-pre-flight-caps-and-orientation-gate). |
+| `socialMedia.maxSizeBytes` | integer | ≥ 10_000_000 | `500_000_000` | Size fallback used only when the video's duration is unknown (no persisted ffprobe metadata) — an over-cap video is treated as CLEAN, `matchedRule: skip-size-cap`. Distinct from the unconditional `VIDEO_ENRICHMENT_MAX_BYTES` env cap (§5.2), which is checked first regardless of duration. |
 
 All `socialMedia.*` values are validated by the same Zod schema used for every other system-settings write path (`apps/api/src/common/schemas/settings.schema.ts`), round-tripped through `PATCH /api/system-settings` / `PUT /api/system-settings` like every other setting group.
 
@@ -278,6 +303,7 @@ All `socialMedia.*` values are validated by the same Zod schema used for every o
 | Variable | Default | Description |
 |----------|---------|--------------|
 | `SOCIAL_MEDIA_DETECTION_ENABLED` | `true` | Environment kill-switch. Set to `false` to disable upload-time `social_media_detection` enqueue regardless of `features.socialMediaDetection` — same pattern as `DUPLICATE_DETECTION_ENABLED`, `LOCATION_INFERENCE_ENABLED`, `BURST_DETECTION_ENABLED`. When killed, videos fall back to the legacy direct `video_face_detection` enqueue path. |
+| `VIDEO_ENRICHMENT_MAX_BYTES` | `0` | Optional unconditional hard cap (bytes) on videos this handler will process, **shared with `video_face_detection`** so one knob covers both. `0` disables. An over-cap video is treated as CLEAN without downloading (`matchedRule: skip-size-cap`), checked before both the duration/size settings caps and the orientation gate. See [§2.5](#25-pre-flight-caps-and-orientation-gate). |
 | `MODELS_DIR` | `./data/models` | Persistent-volume directory; the OCR tier caches downloaded tesseract `traineddata` under `${MODELS_DIR}/tesseract` (same volume already used for the CLIP model — see [duplicate-detection.md §4.1](duplicate-detection.md#41-model-distribution)). |
 
 The shared enrichment worker variables (`ENRICHMENT_WORKER_ENABLED`, `ENRICHMENT_JOB_POLL_MS`, `ENRICHMENT_WORKER_CONCURRENCY`) govern the queue that runs `social_media_detection` alongside every other enrichment type — see [enrichment-queue.md](enrichment-queue.md).
@@ -487,3 +513,4 @@ The `system` tag source (§4.3) ensures a user's own manual tagging is never sil
 |---------|------|--------|---------|
 | 1.0 | July 2026 | AI Assistant | Initial specification, documenting the shipped implementation: gate-then-fan-out video routing, two-tier (metadata/filename + OCR) detection engine, `media_social_status` / `social_media_source` / `MediaTagSource.system` data model, settings and env configuration, the four API endpoints, Doctor integration, degraded-mode and precision-over-recall rationale, and known test-coverage gaps |
 | 1.1 | July 2026 | AI Assistant | Documented the new Tier-1 caption/hashtag/@mention signal (`detectCaptionSignal`, rules `caption-tt-token`/`caption-ig-token`/`caption-fb-token`/`caption-generic`/`caption-single-hashtag`, numeric-hashtag exclusion guard), the new `heur-caption-mention` suspicion heuristic, the three corresponding Tier-2 OCR platform-token signals (`ocr-tiktok-token`/`ocr-instagram-token`/`ocr-facebook-token`), and the Instagram cross-post detection rationale plus cross-post platform-attribution caveat in §9.2 |
+| 1.2 | July 2026 | AI Assistant | New §2.5 pre-flight caps + orientation gate: `socialMedia.maxDurationSeconds` (default 300) and `socialMedia.maxSizeBytes` (default 500 MB) settings and the shared `VIDEO_ENRICHMENT_MAX_BYTES` env cap skip over-long/over-size videos as clean without downloading (`matchedRule: skip-duration-cap` / `skip-size-cap`); strictly-landscape videos are never downloaded (Tier-1-only, no OCR re-probe/OCR). §4.1 `matchedRule` row, §5.1 settings table, §5.2 env table updated |

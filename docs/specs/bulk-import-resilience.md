@@ -12,7 +12,7 @@ A "bulk import" session can run for hours or days. The system must survive these
 
 | Failure mode | Without resilience | With resilience |
 |---|---|---|
-| API process OOM-killed or restarted mid-job | Enrichment jobs stuck in `running` forever | Auto-reset by stuck-job cron within `jobs.stuckThresholdMinutes` (system setting, default 3 min) |
+| API process OOM-killed or restarted mid-job | Enrichment jobs stuck in `running` forever | Recovered by stuck-job cron within `jobs.stuckThresholdMinutes` (system setting, default 3 min): reset to `pending` while under budget, or marked `failed` once the claim-charged `attempts` reaches `ENRICHMENT_MAX_ATTEMPTS` — a job that OOMs the process on every run self-limits instead of looping forever |
 | API process OOM-killed or restarted mid-upload processing (content-hash/exif/dimensions/video-probe/geocode/thumbnail/visual-hash) | `StorageObject` stuck at `status='processing'` forever — no thumbnail, dimensions, or EXIF ever generated for that photo/video, and no existing recovery path touches it | Auto-recovered by `StorageProcessingRecoveryTask` within `STORAGE_PROCESSING_STUCK_MINUTES` (default 10 min), capped at `STORAGE_PROCESSING_MAX_RETRIES` attempts |
 | Provider rate limit (429 / 529 / `OVER_QUERY_LIMIT`) | Job retried as normal error, or silently marked processed with no data | Job deferred on separate `rateLimitHits` counter; provider gate backs off sibling jobs |
 | Geocode provider quota | `null` return → job marked `processed` with no geo data; no retry | Provider throws `RateLimitError` → job deferred; status stays `pending` until retry succeeds |
@@ -29,7 +29,8 @@ The enrichment worker (`EnrichmentJobWorker`) branches on error type:
 
 **Normal failure path** — uses the `attempts` counter:
 
-- Any error not classified as a rate limit increments `attempts`.
+- `attempts` is charged at **claim time** (incremented in the atomic claim `update`), not at failure time — it means "attempts STARTED". This is what makes crash-loop protection possible: a job that OOM-`SIGKILL`s the worker mid-run never reaches this failure path, but it still consumed its attempt at claim, so the stuck-reset path can permanently fail it once the budget is exhausted (see below) instead of requeueing it forever.
+- On a normal (non-rate-limit) error the worker does NOT re-increment; it just decides the outcome from the already-charged `attempts`.
 - When `attempts < ENRICHMENT_MAX_ATTEMPTS`: job reset to `pending` with `scheduledFor = now + backoff`.
 - When `attempts >= ENRICHMENT_MAX_ATTEMPTS`: job marked `failed`.
 - Backoff: equal-jitter exponential starting at `ENRICHMENT_RETRY_BASE_MS`, capped at `ENRICHMENT_RETRY_MAX_MS`.
@@ -37,7 +38,7 @@ The enrichment worker (`EnrichmentJobWorker`) branches on error type:
 **Rate-limit deferral path** — uses the `rateLimitHits` counter:
 
 - Handler throws `RateLimitError` explicitly, or `classifyRateLimit` detects HTTP 429, HTTP 529 (Anthropic "Overloaded"), or a known AWS throttling exception name.
-- `attempts` is NOT incremented. The two counters are completely independent — ordinary transient errors do not consume rate-limit quota, and vice versa.
+- The claim-time `attempts` increment is **un-charged** (`attempts = job.attempts - 1`), so a rate-limit deferral never consumes the normal-failure budget. The two counters remain completely independent — ordinary transient errors do not consume rate-limit quota, and vice versa.
 - When `rateLimitHits < ENRICHMENT_RATELIMIT_MAX_HITS`: job reset to `pending` with `scheduledFor = now + backoff`.
 - When exhausted: job marked `failed`.
 - Backoff: equal-jitter exponential starting at `ENRICHMENT_RATELIMIT_BASE_MS`, capped at `ENRICHMENT_RATELIMIT_MAX_MS`. If the provider returned a `Retry-After` header, that value takes precedence over the computed ramp.
@@ -53,7 +54,7 @@ Jobs are claimed atomically inside a Prisma `$transaction` (`findFirst` + `updat
 
 When the API process is OOM-killed or restarted, any job that was `running` at that moment has no worker to complete it. It stays `running` indefinitely unless something resets it.
 
-`EnrichmentStuckResetTask` runs every 10 minutes via `@Cron(EVERY_10_MINUTES)`. It resets jobs that have been in `running` state (including zombie rows where `startedAt` was never stamped, aged by `createdAt` instead) for longer than the threshold back to `pending`, so the worker can re-claim them on the next tick.
+`EnrichmentStuckResetTask` runs every 10 minutes via `@Cron(EVERY_10_MINUTES)`. It recovers jobs that have been in `running` state (including zombie rows where `startedAt` was never stamped, aged by `createdAt` instead) for longer than the threshold. Because `attempts` is charged at claim time, the recovery splits by budget: a stuck job still under `ENRICHMENT_MAX_ATTEMPTS` is reset to `pending` so the worker can re-claim it, while one whose `attempts` is already exhausted is marked `failed` (`lastError = "process terminated during execution (attempt N/M)"`) rather than requeued — bounding a poison-pill/OOM job to `ENRICHMENT_MAX_ATTEMPTS` process crashes. `resetStuck` returns `{ reset, failed }` reflecting the two counts.
 
 The task is gated on `ENRICHMENT_WORKER_ENABLED !== 'false'` so non-worker instances (web-only replicas, read replicas) do not interfere. It delegates to `EnrichmentAdminService.resetStuck()` with no argument — the same implementation used by `POST /api/admin/jobs/reset-stuck` when its `olderThanMinutes` body field is omitted — so the cron, the stats `stuckRunning` count, and the manual reset endpoint always agree on one threshold.
 
@@ -72,7 +73,12 @@ The threshold is the `jobs.stuckThresholdMinutes` **system setting** (integer, 1
 | `ENRICHMENT_RATELIMIT_BASE_MS` | `30000` | Base backoff for rate-limit deferrals |
 | `ENRICHMENT_RATELIMIT_MAX_MS` | `900000` | Max backoff cap for rate-limit deferrals (15 min) |
 | `ENRICHMENT_RATELIMIT_MAX_HITS` | `10` | Max rate-limit deferrals before permanent failure |
+| `ENRICHMENT_JOB_TIMEOUT_MS` | `600000` | Active per-job execution timeout (ms) for all job types except the two video types below; `0` disables. Handler running longer is aborted and routed through the normal-failure retry path. |
+| `ENRICHMENT_VIDEO_JOB_TIMEOUT_MS` | `1200000` | Per-type execution-timeout override (20 min) for `video_face_detection` and `social_media_detection` — video download + ffmpeg + per-frame provider calls legitimately exceed the 10-min global default on a low-compute VPS. `0` disables the timeout for these two types. |
+| `VIDEO_ENRICHMENT_MAX_BYTES` | `0` | Optional hard cap (bytes) on videos processed by BOTH video handlers; over-cap videos are skipped without downloading (video face → `no_faces`; social-media → clean, `skip-size-cap`). `0` disables. The single biggest disk/memory offender in a bulk import is a multi-GB video download — cap it to protect the temp filesystem. |
 | `ENRICHMENT_STUCK_MINUTES` | _(unset)_ | **Legacy fallback only.** The stuck-job threshold is now the runtime `jobs.stuckThresholdMinutes` system setting (1–120, default 3 min), editable in Admin Settings; this env var seeds that setting's default (clamped to 120) only until an explicit value is saved. Must exceed the longest expected single-job runtime. |
+
+**Video download disk/temp resilience.** The video-enrichment handlers stream downloads to `memoriaHub-*` temp files in `os.tmpdir()`. Two guards keep this safe under bulk-import pressure: (1) a **disk-space pre-flight** (`assertDiskSpaceForDownload`) requires free space `>= object size × 1.2` before a download and otherwise fails fast through the normal retry path — no half-written temp file left behind; (2) the **`TempFileJanitorTask`** sweeps `memoriaHub-*` files older than 6h from `os.tmpdir()` on startup and hourly, reclaiming orphans left by a job SIGKILLed (OOM) before its `finally`-block cleanup ran. The janitor respects `ENRICHMENT_WORKER_ENABLED=false` (only worker instances create these files). Neither has a tunable env var; combine them with `VIDEO_ENRICHMENT_MAX_BYTES` to bound worst-case disk use.
 
 ### Stuck StorageObject auto-reset cron (new — `StorageProcessingRecoveryTask`)
 
@@ -228,7 +234,7 @@ Runs before every `sync` or `retry` command:
 
 ### After an OOM kill or process restart
 
-Enrichment jobs left in `running` state — including zombie rows whose `startedAt` was never stamped — are auto-reset within the configured `jobs.stuckThresholdMinutes` (default 3 min) by `EnrichmentStuckResetTask`. No manual action is required for typical restarts.
+Enrichment jobs left in `running` state — including zombie rows whose `startedAt` was never stamped — are recovered within the configured `jobs.stuckThresholdMinutes` (default 3 min) by `EnrichmentStuckResetTask`: reset to `pending` while under budget, or marked `failed` once their claim-charged `attempts` hits `ENRICHMENT_MAX_ATTEMPTS` (so a job that OOMs the process on every claim stops after `ENRICHMENT_MAX_ATTEMPTS` crashes rather than looping). No manual action is required for typical restarts.
 
 For immediate recovery: `POST /api/admin/jobs/reset-stuck` with no body (uses the configured threshold) or an explicit `{ olderThanMinutes: 5 }` override.
 

@@ -66,7 +66,10 @@ Set these in `infra/compose/.env` (they take effect on an API restart — no ima
 4. **Container `memory:` limit** (`prod.compose.yml`) — raise **only if the host has the RAM**.
    Concurrency scales with this. If you want concurrency 4, you need the limit high enough to hold baseline + 4× per-job — realistically ~1–1.25 GB.
 
-> **A heap cap does not make higher concurrency safe by itself.** Concurrency's cost is off-heap; the only things that make concurrency > 1 safe are a bigger container limit and/or smaller per-job buffers (`*_MAX_IMAGE_DIM`).
+5. **`VIDEO_ENRICHMENT_MAX_BYTES`** — the video-specific escape hatch.
+   Photo levers above don't help with video: a `video_face_detection` / `social_media_detection` job streams the whole video to a `memoriaHub-*` temp file, so its dominant cost is **disk** (temp space), not the JS heap. Set a byte cap (e.g. a few hundred MB) to skip huge videos entirely — no download — in both handlers. `0` (default) processes all sizes. A disk-space pre-flight guard (free space `>= size × 1.2`) and an hourly `TempFileJanitorTask` orphan sweep back this up (see §6), but a cap is what keeps a multi-GB clip from ever touching the disk. If, conversely, large *legitimate* videos are being killed as "timed out", raise `ENRICHMENT_VIDEO_JOB_TIMEOUT_MS` (default 20 min, vs. the 10-min `ENRICHMENT_JOB_TIMEOUT_MS` for non-video jobs) rather than the photo levers.
+
+> **A heap cap does not make higher concurrency safe by itself.** Concurrency's cost is off-heap; the only things that make concurrency > 1 safe are a bigger container limit and/or smaller per-job buffers (`*_MAX_IMAGE_DIM`). Video cost is different again — it's temp disk, bounded by `VIDEO_ENRICHMENT_MAX_BYTES`, not RAM.
 
 ---
 
@@ -124,7 +127,7 @@ Restarts and OOM kills leave debris. None of it is lost data — jobs live in Po
 
 Reprocessing interrupted jobs is safe: face detection re-detects, auto-tagging overwrites its own `source='ai'` tags, geocode/metadata recompute, duplicate/burst detection are read-time non-destructive. No duplicates, no corruption. The same applies to reprocessing a stuck `StorageObject` — content-hash is deterministic and thumbnail upload is an idempotent upsert.
 
-The video thumbnail/probe path has also been hardened since the reference run below: video downloads now stream to a temp file with constant memory instead of buffering the whole MP4 in RAM, which was a significant OOM contributor on constrained VPS deployments — reducing how often you'll hit the recovery steps above during video-heavy imports.
+The video thumbnail/probe path has also been hardened since the reference run below: video downloads now stream to a temp file with constant memory instead of buffering the whole MP4 in RAM, which was a significant OOM contributor on constrained VPS deployments — reducing how often you'll hit the recovery steps above during video-heavy imports. Two further guards protect the **temp disk** those streamed downloads use: a **disk-space pre-flight** (`assertDiskSpaceForDownload`) refuses a video download unless free space `>= object size × 1.2`, failing the job fast through the normal retry path instead of half-filling the disk; and the **`TempFileJanitorTask`** sweeps `memoriaHub-*` temp files older than 6h from `os.tmpdir()` on startup and hourly, reclaiming orphans left when a job is OOM-`SIGKILL`ed mid-download before its cleanup runs. Cap the largest videos out entirely with `VIDEO_ENRICHMENT_MAX_BYTES` (see §3, lever 5).
 
 ---
 
@@ -183,3 +186,4 @@ All the environment variables referenced here are documented in full in [Enrichm
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 1.0 | July 2026 | AI Assistant | Initial runbook: two-pool memory model (V8 heap vs off-heap), why bulk imports OOM, the four tuning levers, per-container-size presets, OOM diagnosis via dmesg, post-run recovery, and reference throughput/failure numbers from a real ~20k-job / ~4,200-photo import on a 512MB container |
+| 1.1 | July 2026 | AI Assistant | Added the video-specific tuning lever (§3 lever 5): `VIDEO_ENRICHMENT_MAX_BYTES` size cap (skip huge videos, no download) and `ENRICHMENT_VIDEO_JOB_TIMEOUT_MS` (20-min per-type video timeout); documented the temp-disk guards in §6 — `assertDiskSpaceForDownload` disk pre-flight and the `TempFileJanitorTask` orphan sweep |
