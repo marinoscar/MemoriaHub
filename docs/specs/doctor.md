@@ -24,7 +24,7 @@
 
 ## 1. Overview and Goals
 
-Doctor is an admin-only, on-demand configuration health sweep. A single button click (or `POST` call) runs twenty-one checks across core infrastructure, authentication, storage, AI, face recognition, geo, and the job queue, and returns a structured `DoctorReport`. It exists to give admins one place to verify that the application is correctly configured — instead of manually cross-checking environment variables, system settings, and provider credentials across half a dozen separate admin pages.
+Doctor is an admin-only, on-demand configuration health sweep. A single button click (or `POST` call) runs twenty-five checks across core infrastructure, authentication, storage, AI, face recognition, geo, the job queue, and the distributed worker-node fleet, and returns a structured `DoctorReport`. It exists to give admins one place to verify that the application is correctly configured — instead of manually cross-checking environment variables, system settings, and provider credentials across half a dozen separate admin pages.
 
 A common failure mode Doctor is designed to catch: a feature flag is turned on (e.g. `features.autoTagging`) but the corresponding provider was never configured, so uploads silently enqueue jobs that will fail forever. Doctor's flag-consistency checks surface this class of misconfiguration directly, with an actionable next step.
 
@@ -124,7 +124,7 @@ Example response (`POST /api/admin/doctor/run`):
 
 ## 4. Check Catalog
 
-Twenty-one checks across seven sections, defined in `DoctorService.runDiagnostics()` (`apps/api/src/doctor/doctor.service.ts`). Section status is the worst of its listed checks.
+Twenty-five checks across eight sections, defined in `DoctorService.runDiagnostics()` (`apps/api/src/doctor/doctor.service.ts`). Section status is the worst of its listed checks.
 
 ### Core (`core`)
 
@@ -181,6 +181,17 @@ Twenty-one checks across seven sections, defined in `DoctorService.runDiagnostic
 | `jobs.workerEnabled` | Enrichment worker enabled | `isEnrichmentWorkerEnabled()`; if disabled but any of `features.autoTagging` / `features.faceRecognition` / `features.burstDetection` is on, escalates to `error` | `error` — "Set ENRICHMENT_WORKER_ENABLED=true so enrichment jobs get processed."; otherwise plain `warning` — "Enrichment worker is disabled." |
 | `jobs.queueHealth` | Queue health | `EnrichmentAdminService.getStats()`: warns on stuck-running jobs, then on any failed jobs | `warning` — "Reset stuck jobs from the Job Queue page." / "Review and retry failed jobs from the Job Queue page." |
 | `jobs.burstConfig` | Burst detection | Reports `ok` when `features.burstDetection` is on (no provider dependency — relies only on the enrichment worker); `skipped` when off | n/a (informational only, never `error`/`warning`) |
+
+### Worker Nodes (`nodes`)
+
+Distributed compute fleet health (see [distributed-nodes.md §10.2](distributed-nodes.md)). All checks are pure DB reads — worker nodes are optional, so an unused fleet never fails.
+
+| Check key | Label | What it verifies | Failure → status + action item |
+|-----------|-------|-------------------|----------------------------------|
+| `nodes.registeredCount` | Registered nodes | Counts `worker_nodes` rows (and how many are `online`); `skipped` when none are registered | n/a (informational only) |
+| `nodes.heartbeatFreshness` | Heartbeat freshness | For `status='online'` nodes, flags any whose `lastHeartbeatAt` is null or older than `NODE_HEARTBEAT_STALE_SECONDS` (default 60s); `skipped` if no online nodes | `warning` if some online nodes are stale, `error` if ALL are — message/action item names the stale node(s) |
+| `nodes.staleLeases` | Expired leases | Counts `enrichment_jobs` where `status='running'` and `leaseExpiresAt < now()` (claiming node likely died) | `warning` — "Reset stuck jobs from the Job Queue page (reset-stuck) so they are requeued." |
+| `nodes.capabilityHealth` | Node capability health | Inspects each online node's reported `capabilities` JSON for a degraded/error capability backing one of its `eligibleTypes`; `skipped` if no node has reported capabilities yet | `warning` — "Run `memoriahub node doctor` on the affected machine(s) to resolve the failing capability." |
 
 ---
 
@@ -324,3 +335,4 @@ Because `settings` is fetched once and reused across all checks, if an admin cha
 |---------|------|--------|---------|
 | 1.0 | July 2026 | AI Assistant | Initial specification |
 | 1.1 | July 2026 | AI Assistant | Add `ai.socialMedia` check (AI & Enrichment section) covering the social-media video detection feature flag, env override, `socialMedia.*` range validation, and OCR degraded-mode probing; check catalog is now twenty-one checks |
+| 1.2 | July 2026 | AI Assistant | Add `nodes` section (Worker Nodes) with four checks — `nodes.registeredCount`, `nodes.heartbeatFreshness`, `nodes.staleLeases`, `nodes.capabilityHealth` — covering the distributed compute fleet ([distributed-nodes.md §10.2](distributed-nodes.md)); check catalog is now twenty-five checks across eight sections |
