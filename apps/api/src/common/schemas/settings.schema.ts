@@ -132,7 +132,8 @@ export const systemSettingsSchema = z.object({
       retentionDays: z.number().int().min(1).max(365).default(30),
       purgeEnabled: z.boolean().default(true),
     }).default({ retentionDays: 30, purgeEnabled: true }),
-  }).optional().default({ history: { retentionDays: 30, purgeEnabled: true } }),
+    stuckThresholdMinutes: z.number().int().min(1).max(120).default(3),
+  }).optional().default({ history: { retentionDays: 30, purgeEnabled: true }, stuckThresholdMinutes: 3 }),
 });
 
 export type SystemSettingsDto = z.infer<typeof systemSettingsSchema>;
@@ -215,5 +216,6 @@ export const systemSettingsPatchSchema = z.object({
       retentionDays: z.number().int().min(1).max(365).optional(),
       purgeEnabled: z.boolean().optional(),
     }).optional(),
+    stuckThresholdMinutes: z.number().int().min(1).max(120).optional(),
   }).optional(),
 });

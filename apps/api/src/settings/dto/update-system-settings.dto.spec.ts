@@ -595,5 +595,85 @@ describe('PatchSystemSettingsDto (PATCH)', () => {
         expect(result.features?.duplicateDetection).toBe(false);
       });
     });
+
+    describe('jobs.stuckThresholdMinutes branch', () => {
+      it('should preserve jobs.stuckThresholdMinutes when valid', () => {
+        const result = patchSystemSettingsSchema.parse({
+          jobs: { stuckThresholdMinutes: 15 },
+        });
+
+        expect(result.jobs?.stuckThresholdMinutes).toBe(15);
+      });
+
+      it('should accept the minimum valid value of 1', () => {
+        const result = patchSystemSettingsSchema.parse({
+          jobs: { stuckThresholdMinutes: 1 },
+        });
+
+        expect(result.jobs?.stuckThresholdMinutes).toBe(1);
+      });
+
+      it('should accept the maximum valid value of 120', () => {
+        const result = patchSystemSettingsSchema.parse({
+          jobs: { stuckThresholdMinutes: 120 },
+        });
+
+        expect(result.jobs?.stuckThresholdMinutes).toBe(120);
+      });
+
+      it('should throw when jobs.stuckThresholdMinutes is 0 (below minimum)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            jobs: { stuckThresholdMinutes: 0 },
+          }),
+        ).toThrow();
+      });
+
+      it('should throw when jobs.stuckThresholdMinutes is 121 (above maximum)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            jobs: { stuckThresholdMinutes: 121 },
+          }),
+        ).toThrow();
+      });
+
+      it('should throw when jobs.stuckThresholdMinutes is a non-integer', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            jobs: { stuckThresholdMinutes: 15.5 },
+          }),
+        ).toThrow();
+      });
+
+      it('should allow patching stuckThresholdMinutes without touching jobs.history', () => {
+        const result = patchSystemSettingsSchema.parse({
+          jobs: { stuckThresholdMinutes: 20 },
+        });
+
+        expect(result.jobs?.stuckThresholdMinutes).toBe(20);
+        expect(result.jobs?.history).toBeUndefined();
+      });
+
+      it('should allow patching jobs.history without touching stuckThresholdMinutes', () => {
+        const result = patchSystemSettingsSchema.parse({
+          jobs: { history: { retentionDays: 10 } },
+        });
+
+        expect(result.jobs?.history?.retentionDays).toBe(10);
+        expect(result.jobs?.stuckThresholdMinutes).toBeUndefined();
+      });
+
+      it('should accept an empty jobs block (all sub-fields optional)', () => {
+        const result = patchSystemSettingsSchema.parse({ jobs: {} });
+
+        expect(result.jobs).toEqual({});
+      });
+
+      it('should make jobs field optional overall', () => {
+        const result = patchSystemSettingsSchema.parse({});
+
+        expect(result.jobs).toBeUndefined();
+      });
+    });
   });
 });

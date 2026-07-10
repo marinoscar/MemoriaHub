@@ -765,6 +765,167 @@ describe('SystemSettingsService', () => {
         });
       });
     });
+
+    // -------------------------------------------------------------------------
+    // jobs.stuckThresholdMinutes handling — mirrors the jobs.history
+    // preservation/default/explicit-update coverage above.
+    // -------------------------------------------------------------------------
+    describe('jobs.stuckThresholdMinutes handling', () => {
+      // Save/restore ENRICHMENT_STUCK_MINUTES so the "applies the default (3)"
+      // assertion below is deterministic regardless of the ambient test env.
+      const SAVED_STUCK_MINUTES_ENV = process.env['ENRICHMENT_STUCK_MINUTES'];
+
+      beforeEach(() => {
+        delete process.env['ENRICHMENT_STUCK_MINUTES'];
+      });
+
+      afterEach(() => {
+        if (SAVED_STUCK_MINUTES_ENV === undefined) {
+          delete process.env['ENRICHMENT_STUCK_MINUTES'];
+        } else {
+          process.env['ENRICHMENT_STUCK_MINUTES'] = SAVED_STUCK_MINUTES_ENV;
+        }
+      });
+
+      it('preserves a non-default stuckThresholdMinutes value when patching an unrelated field', async () => {
+        const existingValue = {
+          ...DEFAULT_SYSTEM_SETTINGS,
+          jobs: {
+            history: DEFAULT_SYSTEM_SETTINGS.jobs!.history,
+            stuckThresholdMinutes: 45,
+          },
+        };
+        mockPrisma.systemSettings.findUnique.mockResolvedValue({
+          ...mockSystemSettings,
+          value: existingValue as any,
+        } as any);
+
+        const savedValue = {
+          ...existingValue,
+          ui: { allowUserThemeOverride: false },
+        };
+        mockPrisma.systemSettings.update.mockResolvedValue({
+          ...mockSystemSettings,
+          value: savedValue as any,
+          version: 2,
+        } as any);
+        mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+        const result = await service.patchSettings(
+          { ui: { allowUserThemeOverride: false } },
+          mockUserId,
+        );
+
+        const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+        expect(updateCall.data.value).toMatchObject({
+          jobs: expect.objectContaining({ stuckThresholdMinutes: 45 }),
+        });
+        expect((result as any).jobs.stuckThresholdMinutes).toBe(45);
+      });
+
+      it('applies the default (3) when stuckThresholdMinutes has never been set', async () => {
+        // Existing settings predate the stuckThresholdMinutes field entirely.
+        const existingValue = {
+          ...DEFAULT_SYSTEM_SETTINGS,
+          jobs: { history: DEFAULT_SYSTEM_SETTINGS.jobs!.history } as any,
+        };
+        mockPrisma.systemSettings.findUnique.mockResolvedValue({
+          ...mockSystemSettings,
+          value: existingValue as any,
+        } as any);
+
+        mockPrisma.systemSettings.update.mockResolvedValue({
+          ...mockSystemSettings,
+          value: {
+            ...existingValue,
+            jobs: { ...existingValue.jobs, stuckThresholdMinutes: 3 },
+          } as any,
+          version: 2,
+        } as any);
+        mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+        const result = await service.patchSettings(
+          { ui: { allowUserThemeOverride: true } },
+          mockUserId,
+        );
+
+        const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+        expect((updateCall.data.value as any).jobs.stuckThresholdMinutes).toBe(3);
+        expect((result as any).jobs.stuckThresholdMinutes).toBe(3);
+      });
+
+      it('updates stuckThresholdMinutes when explicitly included in the PATCH dto', async () => {
+        mockPrisma.systemSettings.update.mockResolvedValue({
+          ...mockSystemSettings,
+          value: {
+            ...DEFAULT_SYSTEM_SETTINGS,
+            jobs: { history: DEFAULT_SYSTEM_SETTINGS.jobs!.history, stuckThresholdMinutes: 60 },
+          } as any,
+          version: 2,
+        } as any);
+        mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+        await service.patchSettings(
+          { jobs: { stuckThresholdMinutes: 60 } } as any,
+          mockUserId,
+        );
+
+        const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+        expect(updateCall.data.value).toMatchObject({
+          jobs: expect.objectContaining({ stuckThresholdMinutes: 60 }),
+        });
+      });
+
+      it('rejects an out-of-range stuckThresholdMinutes via schema validation on the merged result', async () => {
+        // patchSettings re-validates the merged object with systemSettingsSchema;
+        // an invalid explicit PATCH value must throw rather than silently clamp.
+        await expect(
+          service.patchSettings(
+            { jobs: { stuckThresholdMinutes: 0 } } as any,
+            mockUserId,
+          ),
+        ).rejects.toThrow();
+
+        await expect(
+          service.patchSettings(
+            { jobs: { stuckThresholdMinutes: 121 } } as any,
+            mockUserId,
+          ),
+        ).rejects.toThrow();
+      });
+
+      it('does not reset stuckThresholdMinutes when only jobs.history is patched', async () => {
+        const existingValue = {
+          ...DEFAULT_SYSTEM_SETTINGS,
+          jobs: { history: { retentionDays: 30, purgeEnabled: true }, stuckThresholdMinutes: 90 },
+        };
+        mockPrisma.systemSettings.findUnique.mockResolvedValue({
+          ...mockSystemSettings,
+          value: existingValue as any,
+        } as any);
+
+        mockPrisma.systemSettings.update.mockResolvedValue({
+          ...mockSystemSettings,
+          value: {
+            ...existingValue,
+            jobs: { history: { retentionDays: 7, purgeEnabled: true }, stuckThresholdMinutes: 90 },
+          } as any,
+          version: 2,
+        } as any);
+        mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+        await service.patchSettings(
+          { jobs: { history: { retentionDays: 7 } } } as any,
+          mockUserId,
+        );
+
+        const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+        expect((updateCall.data.value as any).jobs).toMatchObject({
+          history: expect.objectContaining({ retentionDays: 7 }),
+          stuckThresholdMinutes: 90,
+        });
+      });
+    });
   });
 
   describe('getSettingValue', () => {

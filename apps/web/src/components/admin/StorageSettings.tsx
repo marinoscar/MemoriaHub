@@ -17,6 +17,10 @@ const DEFAULT_JOB_RETENTION_DAYS = 30;
 const MIN_JOB_RETENTION_DAYS = 1;
 const MAX_JOB_RETENTION_DAYS = 365;
 
+const DEFAULT_STUCK_THRESHOLD_MINUTES = 3;
+const MIN_STUCK_THRESHOLD_MINUTES = 1;
+const MAX_STUCK_THRESHOLD_MINUTES = 120;
+
 interface StorageInsightsConfig {
   refreshIntervalHours?: number;
 }
@@ -37,6 +41,7 @@ interface JobsHistoryConfig {
 
 interface JobsConfig {
   history?: JobsHistoryConfig;
+  stuckThresholdMinutes?: number;
 }
 
 interface StorageSettingsProps {
@@ -65,6 +70,10 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, on
   const [jobPurgeEnabled, setJobPurgeEnabled] = useState<boolean>(
     jobsSettings?.history?.purgeEnabled ?? true,
   );
+  const [stuckThresholdMinutes, setStuckThresholdMinutes] = useState<number>(
+    jobsSettings?.stuckThresholdMinutes ?? DEFAULT_STUCK_THRESHOLD_MINUTES,
+  );
+  const [stuckThresholdError, setStuckThresholdError] = useState<string | null>(null);
   const [isSavingJobs, setIsSavingJobs] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
@@ -76,6 +85,7 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, on
   useEffect(() => {
     setJobRetentionDays(jobsSettings?.history?.retentionDays ?? DEFAULT_JOB_RETENTION_DAYS);
     setJobPurgeEnabled(jobsSettings?.history?.purgeEnabled ?? true);
+    setStuckThresholdMinutes(jobsSettings?.stuckThresholdMinutes ?? DEFAULT_STUCK_THRESHOLD_MINUTES);
   }, [jobsSettings]);
 
   const hasChanges =
@@ -86,7 +96,9 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, on
     jobRetentionDays !== (jobsSettings?.history?.retentionDays ?? DEFAULT_JOB_RETENTION_DAYS);
   const hasJobPurgeChanges =
     jobPurgeEnabled !== (jobsSettings?.history?.purgeEnabled ?? true);
-  const hasJobChanges = hasJobRetentionChanges || hasJobPurgeChanges;
+  const hasStuckThresholdChanges =
+    stuckThresholdMinutes !== (jobsSettings?.stuckThresholdMinutes ?? DEFAULT_STUCK_THRESHOLD_MINUTES);
+  const hasJobChanges = hasJobRetentionChanges || hasJobPurgeChanges || hasStuckThresholdChanges;
 
   const handleRefreshChange = (raw: string) => {
     const val = parseInt(raw, 10);
@@ -120,8 +132,18 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, on
     }
   };
 
+  const handleStuckThresholdChange = (raw: string) => {
+    const val = parseInt(raw, 10);
+    setStuckThresholdMinutes(isNaN(val) ? 0 : val);
+    if (isNaN(val) || val < MIN_STUCK_THRESHOLD_MINUTES || val > MAX_STUCK_THRESHOLD_MINUTES) {
+      setStuckThresholdError(`Must be between ${MIN_STUCK_THRESHOLD_MINUTES} and ${MAX_STUCK_THRESHOLD_MINUTES}`);
+    } else {
+      setStuckThresholdError(null);
+    }
+  };
+
   const handleSaveJobs = async () => {
-    if (jobRetentionError || !hasJobChanges || !onSaveJobs) return;
+    if (jobRetentionError || stuckThresholdError || !hasJobChanges || !onSaveJobs) return;
     setIsSavingJobs(true);
     try {
       await onSaveJobs({
@@ -129,6 +151,7 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, on
           retentionDays: jobRetentionDays,
           purgeEnabled: jobPurgeEnabled,
         },
+        stuckThresholdMinutes,
       });
     } finally {
       setIsSavingJobs(false);
@@ -227,11 +250,30 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, on
             </Typography>
           </Box>
 
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, mt: 3 }}>
+            Stuck Jobs
+          </Typography>
+
+          <TextField
+            label="Stuck job threshold (minutes)"
+            type="number"
+            value={stuckThresholdMinutes}
+            onChange={(e) => handleStuckThresholdChange(e.target.value)}
+            disabled={disabled}
+            error={!!stuckThresholdError}
+            helperText={
+              stuckThresholdError ??
+              'Running jobs older than this are auto-reset to pending. Must exceed your longest expected single-job runtime.'
+            }
+            slotProps={{ htmlInput: { min: MIN_STUCK_THRESHOLD_MINUTES, max: MAX_STUCK_THRESHOLD_MINUTES, step: 1 } }}
+            sx={{ width: 320 }}
+          />
+
           <Box sx={{ mt: 3, display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
             <Button
               variant="contained"
               onClick={() => void handleSaveJobs()}
-              disabled={disabled || !hasJobChanges || isSavingJobs || !!jobRetentionError}
+              disabled={disabled || !hasJobChanges || isSavingJobs || !!jobRetentionError || !!stuckThresholdError}
             >
               {isSavingJobs ? 'Saving...' : 'Save Job Settings'}
             </Button>

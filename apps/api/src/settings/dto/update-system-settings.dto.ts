@@ -80,6 +80,7 @@ export const patchSystemSettingsSchema = z.object({
           purgeEnabled: z.boolean().optional(),
         })
         .optional(),
+      stuckThresholdMinutes: z.number().int().min(1).max(120).optional(),
     })
     .optional(),
   storage: z

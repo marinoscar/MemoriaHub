@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
-import { EnrichmentJob, JobStatus } from '@prisma/client';
+import { EnrichmentJob, JobStatus, Prisma } from '@prisma/client';
 import { RateLimitError, classifyRateLimit } from './rate-limit.error';
 import { computeQueueBackoffMs } from './backoff.util';
 import { ProviderThrottleService } from './provider-throttle.service';
@@ -238,6 +238,38 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
     return Promise.race([work, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
   }
 
+  /**
+   * Write a job's terminal/requeue state with one retry. If the status update
+   * throws (e.g. a transient DB error), the row would otherwise be orphaned in
+   * `running` forever — retry once after a short delay; if that also fails, log
+   * and swallow so the worker slot is freed (the stuck-reset cron recovers the
+   * row via the settings-driven threshold).
+   */
+  private async safeTerminalUpdate(
+    jobId: string,
+    jobType: string,
+    data: Prisma.EnrichmentJobUpdateInput,
+  ): Promise<void> {
+    try {
+      await this.prisma.enrichmentJob.update({ where: { id: jobId }, data });
+    } catch (firstErr) {
+      const firstMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+      this.logger.warn(
+        `EnrichmentJob ${jobId} (type="${jobType}"): status update failed (${firstMsg}); retrying once`,
+      );
+      await this.sleep(1_000);
+      try {
+        await this.prisma.enrichmentJob.update({ where: { id: jobId }, data });
+      } catch (retryErr) {
+        const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+        this.logger.error(
+          `EnrichmentJob ${jobId} (type="${jobType}"): status update failed after retry (${retryMsg}); ` +
+            'leaving row in running — the stuck-reset cron will recover it',
+        );
+      }
+    }
+  }
+
   private async processJob(job: EnrichmentJob): Promise<void> {
     const handler = this.registry.get(job.type);
 
@@ -277,12 +309,9 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
         this.throttle.recordSuccess(throttleKey);
       }
 
-      await this.prisma.enrichmentJob.update({
-        where: { id: job.id },
-        data: {
-          status: JobStatus.succeeded,
-          finishedAt: new Date(),
-        },
+      await this.safeTerminalUpdate(job.id, job.type, {
+        status: JobStatus.succeeded,
+        finishedAt: new Date(),
       });
 
       this.logger.log(`EnrichmentJob ${job.id} (type="${job.type}") succeeded for MediaItem ${job.mediaItemId ?? 'global'}`);
@@ -307,17 +336,14 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
         });
         const giveUp = hits >= RL_MAX_HITS;
 
-        await this.prisma.enrichmentJob.update({
-          where: { id: job.id },
-          data: {
-            status: giveUp ? JobStatus.failed : JobStatus.pending,
-            rateLimitHits: hits,
-            rateLimitedAt: new Date(),
-            scheduledFor: giveUp ? null : new Date(Date.now() + delayMs),
-            lastError: rl.message,
-            // attempts is NOT incremented for rate-limit deferrals
-            ...(giveUp ? { finishedAt: new Date() } : {}),
-          },
+        await this.safeTerminalUpdate(job.id, job.type, {
+          status: giveUp ? JobStatus.failed : JobStatus.pending,
+          rateLimitHits: hits,
+          rateLimitedAt: new Date(),
+          scheduledFor: giveUp ? null : new Date(Date.now() + delayMs),
+          lastError: rl.message,
+          // attempts is NOT incremented for rate-limit deferrals
+          ...(giveUp ? { finishedAt: new Date() } : {}),
         });
 
         this.logger.warn(
@@ -336,15 +362,12 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
           maxMs: RETRY_MAX_MS,
         });
 
-        await this.prisma.enrichmentJob.update({
-          where: { id: job.id },
-          data: {
-            status: shouldRetry ? JobStatus.pending : JobStatus.failed,
-            attempts: newAttempts,
-            lastError: message,
-            scheduledFor: shouldRetry ? new Date(Date.now() + delayMs) : null,
-            ...(!shouldRetry ? { finishedAt: new Date() } : {}),
-          },
+        await this.safeTerminalUpdate(job.id, job.type, {
+          status: shouldRetry ? JobStatus.pending : JobStatus.failed,
+          attempts: newAttempts,
+          lastError: message,
+          scheduledFor: shouldRetry ? new Date(Date.now() + delayMs) : null,
+          ...(!shouldRetry ? { finishedAt: new Date() } : {}),
         });
 
         this.logger.warn(

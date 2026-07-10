@@ -7,7 +7,10 @@
 // or restarted mid-flight — they remain running=true with no worker to complete
 // them. This cron auto-recovers them so they can be re-claimed on the next tick.
 //
-// The threshold defaults to 15 minutes (configurable via ENRICHMENT_STUCK_MINUTES).
+// The threshold is resolved by EnrichmentAdminService.resetStuck() from the
+// jobs.stuckThresholdMinutes system setting (default 3 minutes; the legacy
+// ENRICHMENT_STUCK_MINUTES env var acts as fallback when the setting is unset),
+// so stats, the admin endpoint, and this cron all share one threshold.
 // Only active on instances that run the enrichment worker (same disable flag).
 // =============================================================================
 
@@ -29,10 +32,9 @@ export class EnrichmentStuckResetTask {
       return;
     }
 
-    const minutes = parseInt(process.env['ENRICHMENT_STUCK_MINUTES'] ?? '15', 10);
-
     try {
-      const { reset } = await this.enrichmentAdminService.resetStuck(minutes);
+      // No argument: the service resolves the settings-driven threshold.
+      const { reset } = await this.enrichmentAdminService.resetStuck();
       if (reset > 0) {
         this.logger.log(`Reset ${reset} stuck enrichment job(s)`);
       }

@@ -47,6 +47,7 @@ export interface SystemSettings {
       retentionDays?: number;
       purgeEnabled?: boolean;
     };
+    stuckThresholdMinutes?: number;
   };
   burst?: {
     timeGapSeconds?: number;

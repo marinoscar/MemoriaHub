@@ -16,6 +16,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { JobStatus } from '@prisma/client';
 import { EnrichmentAdminService, INSIGHTS_WINDOW_DAYS } from './enrichment-admin.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 // ---------------------------------------------------------------------------
@@ -97,10 +98,25 @@ function setupGroupByMocks(
     throughputByType?: Array<{ type: string; _count: { id: number } }>;
   } = {},
 ) {
+  // NOTE: getStats() now resolves the settings-driven stuck threshold via
+  // `await this.getStuckThresholdMinutes()` BEFORE its own Promise.all of
+  // groupBy/count calls. Because getInsights() calls getStats() as one
+  // element of its own outer Promise.all (alongside a sibling groupBy call
+  // for tpByType), that extra await means getStats()'s two groupBy calls are
+  // no longer guaranteed to be the first two invocations overall — the
+  // sibling tpByType groupBy call (which has no such await) can fire first.
+  // Discriminate by the `by` argument instead of by call order so this mock
+  // is robust to that interleaving.
   const gb = mockPrisma.enrichmentJob.groupBy as jest.Mock;
-  gb.mockResolvedValueOnce(opts.statusGroups ?? []);
-  gb.mockResolvedValueOnce(opts.typeStatusGroups ?? []);
-  gb.mockResolvedValueOnce(opts.throughputByType ?? []);
+  gb.mockImplementation(async (args: { by?: string[] } = {}) => {
+    const by = args.by ?? [];
+    if (by.length === 1 && by[0] === 'status') return opts.statusGroups ?? [];
+    if (by.length === 2 && by.includes('type') && by.includes('status')) {
+      return opts.typeStatusGroups ?? [];
+    }
+    if (by.length === 1 && by[0] === 'type') return opts.throughputByType ?? [];
+    return [];
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -118,10 +134,20 @@ describe('EnrichmentAdminService.getInsights', () => {
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
 
+    // getInsights() calls getStats() internally, which now resolves the
+    // stuck-running threshold via SystemSettingsService.getSettings()
+    // (jobs.stuckThresholdMinutes). Provide a minimal mock so DI resolves.
+    const mockSettingsService = {
+      getSettings: jest.fn().mockResolvedValue({
+        jobs: { stuckThresholdMinutes: 3 },
+      }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         EnrichmentAdminService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: SystemSettingsService, useValue: mockSettingsService },
       ],
     }).compile();
 
@@ -621,14 +647,18 @@ describe('EnrichmentAdminService.getInsights', () => {
     it('propagates rateLimited count into live.rateLimited', async () => {
       setupGroupByMocks(mockPrisma);
 
-      // First two count calls: stuckRunning=0, scheduledCount=0 (from getStats)
-      // Next two count calls: rateLimited=3, retried=0 (from getInsights)
+      // getStats()'s stuckRunning/scheduledCount count() calls now fire AFTER
+      // its internal settings-driven await, so they are no longer guaranteed
+      // to be the first two count() invocations relative to the sibling
+      // rateLimited/retried count() calls in getInsights()'s own Promise.all.
+      // Discriminate by `where` shape instead of call order.
       const countMock = mockPrisma.enrichmentJob.count as jest.Mock;
-      countMock
-        .mockResolvedValueOnce(0) // stuckRunning
-        .mockResolvedValueOnce(0) // scheduledCount
-        .mockResolvedValueOnce(3) // rateLimited
-        .mockResolvedValueOnce(0); // retried
+      countMock.mockImplementation(async (args: { where?: Record<string, unknown> } = {}) => {
+        const where = args.where ?? {};
+        if ('rateLimitHits' in where) return 3; // rateLimited
+        if ('attempts' in where) return 0; // retried
+        return 0; // stuckRunning / scheduledCount
+      });
 
       (mockPrisma.$queryRaw as jest.Mock)
         .mockResolvedValueOnce([])
@@ -643,11 +673,12 @@ describe('EnrichmentAdminService.getInsights', () => {
       setupGroupByMocks(mockPrisma);
 
       const countMock = mockPrisma.enrichmentJob.count as jest.Mock;
-      countMock
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(7); // retried
+      countMock.mockImplementation(async (args: { where?: Record<string, unknown> } = {}) => {
+        const where = args.where ?? {};
+        if ('rateLimitHits' in where) return 0; // rateLimited
+        if ('attempts' in where) return 7; // retried
+        return 0; // stuckRunning / scheduledCount
+      });
 
       (mockPrisma.$queryRaw as jest.Mock)
         .mockResolvedValueOnce([])

@@ -253,7 +253,7 @@ function JobsPageContent() {
 
   const handleResetStuck = async () => {
     try {
-      const result = await resetStuck(10);
+      const result = await resetStuck();
       setSuccessMessage(`${result.reset} stuck job(s) reset to pending`);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to reset stuck jobs');
@@ -450,7 +450,7 @@ function JobsPageContent() {
               disabled={mutating || !stats || stats.stuckRunning === 0}
               onClick={() => void handleResetStuck()}
             >
-              Reset stuck (&gt;10 min)
+              Reset stuck (&gt;{stats?.stuckThresholdMinutes ?? 3} min)
             </Button>
 
             <Button

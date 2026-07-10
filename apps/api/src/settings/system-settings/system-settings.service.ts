@@ -10,6 +10,7 @@ import { PatchSystemSettingsDto } from '../dto/update-system-settings.dto';
 import {
   DEFAULT_SYSTEM_SETTINGS,
   SystemSettingsValue,
+  defaultStuckThresholdMinutes,
 } from '../../common/types/settings.types';
 import { systemSettingsSchema } from '../../common/schemas/settings.schema';
 
@@ -348,6 +349,10 @@ export class SystemSettingsService {
             (current as any).jobs?.history?.purgeEnabled ??
             true,
         },
+        stuckThresholdMinutes:
+          (dto as any).jobs?.stuckThresholdMinutes ??
+          (current as any).jobs?.stuckThresholdMinutes ??
+          defaultStuckThresholdMinutes(),
       },
     };
 

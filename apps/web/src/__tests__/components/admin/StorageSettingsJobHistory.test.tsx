@@ -3,7 +3,10 @@
  *
  * Tests: job history retention input renders, accepts valid values (1, 365),
  * shows error for out-of-range (0, 366), the purge switch renders and toggles,
- * saving calls onSaveJobs with { history: { retentionDays, purgeEnabled } }.
+ * saving calls onSaveJobs with { history: { retentionDays, purgeEnabled },
+ * stuckThresholdMinutes }. Also covers the "Stuck job threshold (minutes)"
+ * field: default value 3, range validation (1-120), and inclusion in the save
+ * payload.
  *
  * The Job History section is only rendered when onSaveJobs prop is provided.
  */
@@ -23,7 +26,10 @@ const defaultStorageSettings = {
   trash: { retentionDays: 30 },
 };
 
-const defaultJobsSettings = {
+const defaultJobsSettings: {
+  history: { retentionDays: number; purgeEnabled: boolean };
+  stuckThresholdMinutes?: number;
+} = {
   history: { retentionDays: 30, purgeEnabled: true },
 };
 
@@ -157,6 +163,47 @@ describe('StorageSettings — Job History section', () => {
   });
 
   // =========================================================================
+  // Rendering — stuckThresholdMinutes
+  // =========================================================================
+
+  describe('Rendering — stuck job threshold', () => {
+    it('renders the stuck job threshold input', () => {
+      render(<StorageSettings {...makeProps()} />);
+
+      expect(
+        screen.getByRole('spinbutton', { name: /Stuck job threshold/i }),
+      ).toBeInTheDocument();
+    });
+
+    it('defaults to 3 when jobsSettings.stuckThresholdMinutes is not provided', () => {
+      render(<StorageSettings {...makeProps()} />);
+
+      const input = screen.getByRole('spinbutton', {
+        name: /Stuck job threshold/i,
+      }) as HTMLInputElement;
+      expect(input.value).toBe('3');
+    });
+
+    it('reflects a custom stuckThresholdMinutes from jobsSettings prop', () => {
+      render(
+        <StorageSettings
+          {...makeProps({
+            jobsSettings: {
+              history: { retentionDays: 30, purgeEnabled: true },
+              stuckThresholdMinutes: 45,
+            },
+          })}
+        />,
+      );
+
+      const input = screen.getByRole('spinbutton', {
+        name: /Stuck job threshold/i,
+      }) as HTMLInputElement;
+      expect(input.value).toBe('45');
+    });
+  });
+
+  // =========================================================================
   // Validation — retentionDays
   // =========================================================================
 
@@ -213,6 +260,62 @@ describe('StorageSettings — Job History section', () => {
   });
 
   // =========================================================================
+  // Validation — stuckThresholdMinutes
+  // =========================================================================
+
+  describe('stuckThresholdMinutes validation', () => {
+    it('shows an error message when stuckThresholdMinutes = 0 (below minimum)', () => {
+      render(<StorageSettings {...makeProps()} />);
+
+      const input = screen.getByRole('spinbutton', { name: /Stuck job threshold/i });
+      fireEvent.change(input, { target: { value: '0' } });
+
+      expect(screen.getByText(/Must be between 1 and 120/i)).toBeInTheDocument();
+    });
+
+    it('shows an error message when stuckThresholdMinutes = 121 (above maximum)', () => {
+      render(<StorageSettings {...makeProps()} />);
+
+      const input = screen.getByRole('spinbutton', { name: /Stuck job threshold/i });
+      fireEvent.change(input, { target: { value: '121' } });
+
+      expect(screen.getByText(/Must be between 1 and 120/i)).toBeInTheDocument();
+    });
+
+    it('disables Save Job Settings button when stuckThresholdMinutes is invalid', () => {
+      render(<StorageSettings {...makeProps()} />);
+
+      const input = screen.getByRole('spinbutton', { name: /Stuck job threshold/i });
+      fireEvent.change(input, { target: { value: '0' } });
+
+      const saveBtn = screen.getByRole('button', { name: /Save Job Settings/i });
+      expect(saveBtn).toBeDisabled();
+    });
+
+    it('accepts stuckThresholdMinutes = 1 (minimum) with no error', async () => {
+      const user = userEvent.setup();
+      render(<StorageSettings {...makeProps()} />);
+
+      const input = screen.getByRole('spinbutton', { name: /Stuck job threshold/i });
+      await user.clear(input);
+      await user.type(input, '1');
+
+      expect(screen.queryByText(/Must be between 1 and 120/i)).not.toBeInTheDocument();
+    });
+
+    it('accepts stuckThresholdMinutes = 120 (maximum) with no error', async () => {
+      const user = userEvent.setup();
+      render(<StorageSettings {...makeProps()} />);
+
+      const input = screen.getByRole('spinbutton', { name: /Stuck job threshold/i });
+      await user.clear(input);
+      await user.type(input, '120');
+
+      expect(screen.queryByText(/Must be between 1 and 120/i)).not.toBeInTheDocument();
+    });
+  });
+
+  // =========================================================================
   // Save — calls onSaveJobs with correct payload
   // =========================================================================
 
@@ -236,6 +339,37 @@ describe('StorageSettings — Job History section', () => {
           }),
         );
       });
+    });
+
+    it('calls onSaveJobs with updated stuckThresholdMinutes when saved', async () => {
+      const mockOnSaveJobs = vi.fn().mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      render(<StorageSettings {...makeProps({ onSaveJobs: mockOnSaveJobs })} />);
+
+      const input = screen.getByRole('spinbutton', { name: /Stuck job threshold/i });
+      await user.clear(input);
+      await user.type(input, '45');
+
+      const saveBtn = screen.getByRole('button', { name: /Save Job Settings/i });
+      await user.click(saveBtn);
+
+      await waitFor(() => {
+        expect(mockOnSaveJobs).toHaveBeenCalledWith(
+          expect.objectContaining({ stuckThresholdMinutes: 45 }),
+        );
+      });
+    });
+
+    it('enables Save Job Settings button when stuckThresholdMinutes changes', async () => {
+      const user = userEvent.setup();
+      render(<StorageSettings {...makeProps()} />);
+
+      const input = screen.getByRole('spinbutton', { name: /Stuck job threshold/i });
+      await user.clear(input);
+      await user.type(input, '10');
+
+      const saveBtn = screen.getByRole('button', { name: /Save Job Settings/i });
+      expect(saveBtn).not.toBeDisabled();
     });
 
     it('calls onSaveJobs with purgeEnabled when switch is toggled', async () => {
@@ -277,6 +411,7 @@ describe('StorageSettings — Job History section', () => {
             retentionDays: 60,
             purgeEnabled: true, // unchanged
           },
+          stuckThresholdMinutes: 3, // unchanged (default)
         });
       });
     });

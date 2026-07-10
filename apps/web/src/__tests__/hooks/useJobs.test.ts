@@ -47,6 +47,7 @@ const sampleStats: JobStats = {
   ],
   stuckRunning: 0,
   scheduled: 0,
+  stuckThresholdMinutes: 3,
 };
 
 const sampleListResponse: JobsListResponse = {
