@@ -84,6 +84,10 @@ export interface SystemSettings {
     ocrMaxFrames?: number;
     ocrTimeoutSeconds?: number;
     minConfidence?: number;
+    /** Videos longer than this are treated as clean without download/OCR. */
+    maxDurationSeconds?: number;
+    /** Size fallback (bytes) used only when the duration is unknown. */
+    maxSizeBytes?: number;
   };
   updatedAt: string;
   updatedBy: { id: string; email: string } | null;

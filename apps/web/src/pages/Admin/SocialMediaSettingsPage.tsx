@@ -36,6 +36,8 @@ function SocialMediaSettingsContent() {
   const [ocrMaxFrames, setOcrMaxFrames] = useState(4);
   const [ocrTimeoutSeconds, setOcrTimeoutSeconds] = useState(60);
   const [ocrLanguages, setOcrLanguages] = useState('eng');
+  const [maxDurationSeconds, setMaxDurationSeconds] = useState(300);
+  const [maxSizeBytes, setMaxSizeBytes] = useState(500_000_000);
   const [paramSaving, setParamSaving] = useState(false);
 
   // Backfill state
@@ -73,6 +75,8 @@ function SocialMediaSettingsContent() {
     setOcrMaxFrames(settings.socialMedia?.ocrMaxFrames ?? 4);
     setOcrTimeoutSeconds(settings.socialMedia?.ocrTimeoutSeconds ?? 60);
     setOcrLanguages((settings.socialMedia?.ocrLanguages ?? ['eng']).join(', '));
+    setMaxDurationSeconds(settings.socialMedia?.maxDurationSeconds ?? 300);
+    setMaxSizeBytes(settings.socialMedia?.maxSizeBytes ?? 500_000_000);
   }, [settings]);
 
   const featureEnabled = settings?.features?.socialMediaDetection ?? false;
@@ -91,6 +95,11 @@ function SocialMediaSettingsContent() {
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
 
+    // Guard to the backend-documented ranges before saving so an
+    // out-of-range value never fails the whole PATCH.
+    const clampedMaxDuration = Math.min(3600, Math.max(60, Math.round(maxDurationSeconds)));
+    const clampedMaxSizeBytes = Math.max(10_000_000, Math.round(maxSizeBytes));
+
     setParamSaving(true);
     updateSettings({
       socialMedia: {
@@ -100,6 +109,8 @@ function SocialMediaSettingsContent() {
         ocrMaxFrames,
         ocrTimeoutSeconds,
         ocrLanguages: languages.length > 0 ? languages : ['eng'],
+        maxDurationSeconds: clampedMaxDuration,
+        maxSizeBytes: clampedMaxSizeBytes,
       },
     })
       .then(() => setSuccessMessage('Social media detection settings saved'))
@@ -322,6 +333,40 @@ function SocialMediaSettingsContent() {
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
                 Comma-separated Tesseract language codes (e.g. <code>eng, spa</code>). Defaults to{' '}
                 <code>eng</code>.
+              </Typography>
+            </Box>
+
+            <Box>
+              <TextField
+                label="Max video duration (seconds)"
+                type="number"
+                size="small"
+                value={maxDurationSeconds}
+                onChange={(e) => setMaxDurationSeconds(Number(e.target.value))}
+                slotProps={{ htmlInput: { min: 60, max: 3600, step: 1 } }}
+                disabled={!featureEnabled}
+                sx={{ maxWidth: 240 }}
+              />
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                Videos longer than this (60–3600 s) are treated as clean without downloading or OCR —
+                genuine social-media clips never exceed ~5 minutes.
+              </Typography>
+            </Box>
+
+            <Box>
+              <TextField
+                label="Max video size (MB)"
+                type="number"
+                size="small"
+                value={Math.round(maxSizeBytes / 1_000_000)}
+                onChange={(e) => setMaxSizeBytes(Number(e.target.value) * 1_000_000)}
+                slotProps={{ htmlInput: { min: 10, step: 1 } }}
+                disabled={!featureEnabled}
+                sx={{ maxWidth: 240 }}
+              />
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                Size fallback (minimum 10 MB) used only when a video&rsquo;s duration is unknown; larger
+                videos are skipped as clean.
               </Typography>
             </Box>
           </Stack>
