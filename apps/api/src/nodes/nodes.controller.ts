@@ -249,7 +249,12 @@ export class NodesController {
   @Get('models/manifest')
   @Auth({ permissions: [PERMISSIONS.JOBS_READ] })
   @ApiOperation({ summary: 'Get the parity model manifest worker nodes must download' })
-  @ApiResponse({ status: 200, description: 'Static list of parity models with download URLs' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Bare array of parity model entries ({ name, url, sha256, bytes, targetSubdir }) — the ' +
+      'CLI unwraps the { data } envelope and iterates the array directly',
+  })
   async getModelManifest() {
     return this.nodesService.getModelManifest();
   }

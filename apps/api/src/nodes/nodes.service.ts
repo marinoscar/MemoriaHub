@@ -480,10 +480,14 @@ export class NodesService {
    * enrichment output matches the server. Structure matters more than exact
    * values here.
    *
+   * Returns a BARE ARRAY (not `{ models: [...] }`): the CLI's
+   * `ApiClient.getModelManifest(): Promise<ModelManifestEntry[]>` unwraps the
+   * global `{ data }` envelope and then iterates the result directly.
+   *
    * TODO: fill real sha256/bytes hashes
    */
   getModelManifest() {
-    return { models: [
+    return [
       {
         name: 'clip-vit-b32-vision-quantized.onnx',
         url: 'https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx',
@@ -512,6 +516,6 @@ export class NodesService {
         bytes: null,
         targetSubdir: 'human',
       },
-    ] };
+    ];
   }
 }
