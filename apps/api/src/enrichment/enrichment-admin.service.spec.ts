@@ -251,7 +251,7 @@ describe('EnrichmentAdminService', () => {
       expect(threshold.getTime()).toBeLessThanOrEqual(expectedUpperBound);
     });
 
-    it('includes the NULL-guard OR branch (startedAt=null aged by createdAt) in the stuckRunning where clause', async () => {
+    it('includes the NULL-guard and lease-expiry OR branches in the stuckRunning where clause', async () => {
       (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([]);
       (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
 
@@ -261,13 +261,16 @@ describe('EnrichmentAdminService', () => {
       const stuckCountCall = countCalls.find((c) => c[0].where?.status === JobStatus.running);
       const where = stuckCountCall![0].where;
 
-      expect(where.OR).toHaveLength(2);
+      expect(where.OR).toHaveLength(3);
       // Branch 1: normal running jobs, aged by startedAt
       expect(where.OR[0]).toMatchObject({ startedAt: { lt: expect.any(Date) } });
       // Branch 2: zombie rows with startedAt=null, aged by createdAt instead
       expect(where.OR[1]).toMatchObject({ startedAt: null, createdAt: { lt: expect.any(Date) } });
+      // Branch 3: lease-expired running jobs (leaseExpiresAt < now) — the
+      // multi-process-safe stuck signal for a dead claimer.
+      expect(where.OR[2]).toMatchObject({ leaseExpiresAt: { lt: expect.any(Date) } });
 
-      // Both branches must share the same threshold instant.
+      // The two age-based branches must share the same threshold instant.
       const t1: Date = where.OR[0].startedAt.lt;
       const t2: Date = where.OR[1].createdAt.lt;
       expect(t1.getTime()).toBe(t2.getTime());
@@ -612,12 +615,13 @@ describe('EnrichmentAdminService', () => {
       const updateManyCall = (mockPrisma.enrichmentJob.updateMany as jest.Mock).mock.calls[0][0];
 
       expect(updateManyCall.where.status).toBe(JobStatus.running);
-      expect(updateManyCall.where.OR).toHaveLength(2);
+      expect(updateManyCall.where.OR).toHaveLength(3);
       expect(updateManyCall.where.OR[0]).toMatchObject({ startedAt: { lt: expect.any(Date) } });
       expect(updateManyCall.where.OR[1]).toMatchObject({
         startedAt: null,
         createdAt: { lt: expect.any(Date) },
       });
+      expect(updateManyCall.where.OR[2]).toMatchObject({ leaseExpiresAt: { lt: expect.any(Date) } });
       // The bulk reset only touches jobs whose attempts budget is NOT yet
       // exhausted — exhausted ones are handled by the per-row failed path.
       expect(updateManyCall.where.attempts).toEqual({ lt: ENRICHMENT_MAX_ATTEMPTS });
@@ -756,12 +760,13 @@ describe('EnrichmentAdminService', () => {
 
       expect(findManyCall.where.status).toBe(JobStatus.running);
       expect(findManyCall.where.attempts).toEqual({ gte: ENRICHMENT_MAX_ATTEMPTS });
-      expect(findManyCall.where.OR).toHaveLength(2);
+      expect(findManyCall.where.OR).toHaveLength(3);
       expect(findManyCall.where.OR[0]).toMatchObject({ startedAt: { lt: expect.any(Date) } });
       expect(findManyCall.where.OR[1]).toMatchObject({
         startedAt: null,
         createdAt: { lt: expect.any(Date) },
       });
+      expect(findManyCall.where.OR[2]).toMatchObject({ leaseExpiresAt: { lt: expect.any(Date) } });
       expect(findManyCall.select).toEqual({ id: true, type: true, attempts: true });
     });
 

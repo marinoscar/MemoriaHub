@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
 import { EnrichmentJobService } from './enrichment-job.service';
 import { EnrichmentJobWorker } from './enrichment-job.worker';
+import { EnrichmentClaimService } from './enrichment-claim.service';
 import { EnrichmentAdminService } from './enrichment-admin.service';
 import { EnrichmentAdminController } from './enrichment-admin.controller';
 import { EnrichmentStuckResetTask } from './enrichment-stuck-reset.task';
@@ -19,6 +20,7 @@ import { SettingsModule } from '../settings/settings.module';
     EnrichmentHandlerRegistry,
     EnrichmentJobService,
     EnrichmentJobWorker,
+    EnrichmentClaimService,
     EnrichmentAdminService,
     EnrichmentStuckResetTask,
     TempFileJanitorTask,
@@ -26,6 +28,11 @@ import { SettingsModule } from '../settings/settings.module';
     JobHistoryPurgeHandler,
     JobHistoryPurgeTask,
   ],
-  exports: [EnrichmentJobService, EnrichmentHandlerRegistry, EnrichmentAdminService],
+  exports: [
+    EnrichmentJobService,
+    EnrichmentHandlerRegistry,
+    EnrichmentClaimService,
+    EnrichmentAdminService,
+  ],
 })
 export class EnrichmentModule {}

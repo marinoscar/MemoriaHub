@@ -187,17 +187,24 @@ export class EnrichmentAdminService {
   }
 
   /**
-   * Where-clause matching running jobs stuck past the given threshold.
-   * Includes zombie rows with startedAt=null (claimed but never stamped — e.g.
-   * the process died between claim and stamp, or the terminal-status write was
-   * lost), aged by createdAt instead, so they are counted and recoverable.
+   * Where-clause matching running jobs that are stuck. A running job is stuck
+   * when ANY of:
+   *   - its lease has expired (`leaseExpiresAt < now`) — the multi-process-safe
+   *     signal: a claimer (server or remote node) stamped a lease at claim time
+   *     and never renewed/cleared it, so its owner is presumed dead;
+   *   - it was started before the age threshold (`startedAt < threshold`);
+   *   - it is a zombie with `startedAt = null` (claimed but never stamped — the
+   *     process died between claim and stamp, or the terminal-status write was
+   *     lost), aged by `createdAt` instead.
+   * All three are recoverable/countable.
    */
-  private stuckRunningWhere(threshold: Date): Prisma.EnrichmentJobWhereInput {
+  private stuckRunningWhere(threshold: Date, now: Date): Prisma.EnrichmentJobWhereInput {
     return {
       status: JobStatus.running,
       OR: [
         { startedAt: { lt: threshold } },
         { startedAt: null, createdAt: { lt: threshold } },
+        { leaseExpiresAt: { lt: now } },
       ],
     };
   }
@@ -223,9 +230,9 @@ export class EnrichmentAdminService {
         by: ['type', 'status'],
         _count: { id: true },
       }),
-      // Count stuck running jobs (incl. startedAt=null zombies)
+      // Count stuck running jobs (lease-expired, aged, or startedAt=null zombies)
       this.prisma.enrichmentJob.count({
-        where: this.stuckRunningWhere(stuckThreshold),
+        where: this.stuckRunningWhere(stuckThreshold, now),
       }),
       // Count pending jobs that are backed off (scheduledFor in the future)
       this.prisma.enrichmentJob.count({
@@ -719,8 +726,9 @@ export class EnrichmentAdminService {
 
   async resetStuck(olderThanMinutes?: number): Promise<{ reset: number; failed: number }> {
     const minutes = olderThanMinutes ?? (await this.getStuckThresholdMinutes());
-    const threshold = new Date(Date.now() - minutes * 60 * 1000);
-    const stuckWhere = this.stuckRunningWhere(threshold);
+    const now = new Date();
+    const threshold = new Date(now.getTime() - minutes * 60 * 1000);
+    const stuckWhere = this.stuckRunningWhere(threshold, now);
 
     // Attempts are charged at CLAIM time (see EnrichmentJobWorker.claimNextJob),
     // so a job that repeatedly kills the process (e.g. OOM SIGKILL) still
@@ -760,6 +768,10 @@ export class EnrichmentAdminService {
         status: JobStatus.pending,
         startedAt: null,
         scheduledFor: null,
+        // Release the (dead) claim so the job is unowned and re-claimable.
+        claimedByNodeId: null,
+        leaseExpiresAt: null,
+        executor: null,
       },
     });
 

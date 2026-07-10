@@ -41,11 +41,54 @@ import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
 import { RateLimitError } from './rate-limit.error';
 // Import with a regular import; for the isolated-module tests we re-import below.
 import { EnrichmentJobWorker } from './enrichment-job.worker';
+import { EnrichmentClaimService } from './enrichment-claim.service';
 import { ProviderThrottleService } from './provider-throttle.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * A mock EnrichmentClaimService whose claim() DELEGATES to the same prisma mock
+ * the old in-process claimNextJob used (findFirst → update). This keeps every
+ * existing per-test `findFirst`/`update` setup — and the assertions on the
+ * claim UPDATE's attempts/scheduledFor/status — driving the claim path even
+ * though claiming has moved into the shared, DB-atomic claim service.
+ */
+function makeClaimMock(mockPrisma: MockPrismaService): { claim: jest.Mock } {
+  return {
+    claim: jest.fn(async (): Promise<EnrichmentJob[]> => {
+      const now = new Date();
+      const job = await (mockPrisma.enrichmentJob.findFirst as jest.Mock)({
+        where: {
+          status: JobStatus.pending,
+          OR: [{ scheduledFor: null }, { scheduledFor: { lte: now } }],
+        },
+        orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
+      });
+      if (!job) return [];
+      const claimed = await (mockPrisma.enrichmentJob.update as jest.Mock)({
+        where: { id: job.id },
+        data: {
+          status: JobStatus.running,
+          startedAt: new Date(),
+          scheduledFor: null,
+          // Claim-time attempt charge, mirroring the real claim SQL.
+          attempts: { increment: 1 },
+        },
+      });
+      return [claimed as EnrichmentJob];
+    }),
+  };
+}
+
+/** A mock handler registry exposing the get()/types() surface the worker uses. */
+function makeRegistryMock(handler: unknown): { get: jest.Mock; types: jest.Mock } {
+  return {
+    get: jest.fn().mockReturnValue(handler),
+    types: jest.fn().mockReturnValue(['face_detection', 'metadata_extraction']),
+  };
+}
 
 function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
   return {
@@ -76,10 +119,16 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
 
 async function buildWorker(
   WorkerClass: typeof EnrichmentJobWorker,
-): Promise<{ worker: EnrichmentJobWorker; mockPrisma: MockPrismaService; mockHandler: { type: string; process: jest.Mock } }> {
+): Promise<{
+  worker: EnrichmentJobWorker;
+  mockPrisma: MockPrismaService;
+  mockHandler: { type: string; process: jest.Mock };
+  mockClaim: { claim: jest.Mock };
+}> {
   const mockPrisma = createMockPrismaService();
   const mockHandler = { type: 'face_detection', process: jest.fn() };
-  const mockRegistry = { get: jest.fn().mockReturnValue(mockHandler) };
+  const mockRegistry = makeRegistryMock(mockHandler);
+  const mockClaim = makeClaimMock(mockPrisma);
 
   (mockPrisma.$transaction as jest.Mock).mockImplementation(async (fn: (tx: unknown) => unknown) =>
     fn(mockPrisma),
@@ -95,13 +144,16 @@ async function buildWorker(
       // optional hooks); provide a real no-clock instance so throttle calls are
       // genuine no-ops during these tests.
       { provide: ProviderThrottleService, useValue: new ProviderThrottleService() },
+      // Claiming now goes through the shared, DB-atomic claim service; the mock
+      // delegates to the same prisma findFirst/update mock the old claim used.
+      { provide: EnrichmentClaimService, useValue: mockClaim },
     ],
   }).compile();
 
   const worker = module.get<EnrichmentJobWorker>(WorkerClass);
   worker.onApplicationBootstrap();
 
-  return { worker, mockPrisma, mockHandler };
+  return { worker, mockPrisma, mockHandler, mockClaim };
 }
 
 // ---------------------------------------------------------------------------
@@ -200,13 +252,14 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       (await buildWorker(EnrichmentJobWorker)).mockHandler.process.mockResolvedValue(undefined);
 
       // Re-use the same worker's handler
-      const mockRegistry = { get: jest.fn().mockReturnValue({ type: 'face_detection', process: jest.fn().mockResolvedValue(undefined) }) };
+      const mockRegistry = makeRegistryMock({ type: 'face_detection', process: jest.fn().mockResolvedValue(undefined) });
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           EnrichmentJobWorker,
           { provide: PrismaService, useValue: mockPrisma },
           { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
           { provide: ProviderThrottleService, useValue: new ProviderThrottleService() },
+          { provide: EnrichmentClaimService, useValue: makeClaimMock(mockPrisma) },
         ],
       }).compile();
       const w2 = module.get<EnrichmentJobWorker>(EnrichmentJobWorker);
@@ -826,64 +879,51 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
   });
 
   // =========================================================================
-  // Continuous worker pool — claim serialization
+  // Continuous worker pool — DB-atomic claiming
   //
-  // The pool replaced the old setInterval+Promise.all-batch model with N
-  // long-lived loops that each claim→process→repeat. Claims are serialized by
-  // an in-process promise-chain mutex (claimOne) so two loops never select+claim
-  // the same pending row under Prisma's read-committed findFirst→update. The
-  // pool itself is not started in tests (ENRICHMENT_WORKER_ENABLED='false'), so
-  // these tests drive the seams (claimOne/tick) directly.
+  // The in-process promise-chain claim mutex has been REMOVED. Claiming now goes
+  // through the shared EnrichmentClaimService (UPDATE ... FOR UPDATE SKIP
+  // LOCKED), which is multi-process safe: serialization lives in Postgres, so a
+  // server worker and a remote CLI node never claim the same row. These tests
+  // assert the worker delegates claiming to that service and that a slow slot
+  // does not block an independent tick.
   // =========================================================================
 
-  describe('continuous pool — claim serialization', () => {
+  describe('continuous pool — DB-atomic claiming', () => {
     // Flush the microtask + macrotask queue so pending awaits make progress.
     const flush = () => new Promise((r) => setImmediate(r));
 
-    it('serializes two concurrent claimOne() calls — the second claim only begins after the first resolves, and results are distinct', async () => {
-      const { worker } = await buildWorker(EnrichmentJobWorker);
+    it('delegates claiming to the shared claim service with the server-plane args, taking the first returned job', async () => {
+      const { worker, mockClaim } = await buildWorker(EnrichmentJobWorker);
 
-      const jobA = makeJob({ id: 'job-A' });
-      const jobB = makeJob({ id: 'job-B' });
+      const jobA = makeJob({ id: 'job-A', type: 'metadata_extraction', status: JobStatus.running });
+      // Override the delegating default: return a single claimed job.
+      mockClaim.claim.mockResolvedValueOnce([jobA]);
 
-      // Gate the first claim so we can observe whether the second one starts
-      // while the first is still in flight (it must not, thanks to the mutex).
-      let releaseFirst!: () => void;
-      const firstGate = new Promise<void>((r) => (releaseFirst = r));
-      let secondStarted = false;
+      const claimed = await (worker as any).claimNextJob();
 
-      const claimSpy = jest
-        .spyOn(worker as any, 'claimNextJob')
-        .mockImplementationOnce(async () => {
-          await firstGate;
-          return jobA;
-        })
-        .mockImplementationOnce(async () => {
-          secondStarted = true;
-          return jobB;
-        });
+      expect(mockClaim.claim).toHaveBeenCalledTimes(1);
+      const args = mockClaim.claim.mock.calls[0][0];
+      // Server in-process worker: unowned claim, executor='server', one at a time.
+      expect(args.nodeId).toBeNull();
+      expect(args.executor).toBe('server');
+      expect(args.limit).toBe(1);
+      expect(Array.isArray(args.eligibleTypes)).toBe(true);
+      expect(typeof args.leaseMs).toBe('number');
+      expect(args.leaseMs).toBeGreaterThan(0);
+      // Takes the first row from the returned batch.
+      expect(claimed).toBe(jobA);
 
-      // Fire both claims back-to-back (synchronously), as two pool loops would.
-      const p1 = (worker as any).claimOne() as Promise<EnrichmentJob | null>;
-      const p2 = (worker as any).claimOne() as Promise<EnrichmentJob | null>;
+      worker.onModuleDestroy();
+    });
 
-      await flush();
+    it('returns null when the claim service claims nothing (empty queue)', async () => {
+      const { worker, mockClaim } = await buildWorker(EnrichmentJobWorker);
 
-      // Mutex holds: only the first claim has begun; the second is blocked
-      // behind the lock and has NOT touched claimNextJob yet.
-      expect(claimSpy).toHaveBeenCalledTimes(1);
-      expect(secondStarted).toBe(false);
+      mockClaim.claim.mockResolvedValueOnce([]);
 
-      // Release the first claim; now the second is free to run.
-      releaseFirst();
-      const [r1, r2] = await Promise.all([p1, p2]);
-
-      expect(claimSpy).toHaveBeenCalledTimes(2);
-      expect(secondStarted).toBe(true);
-      // The two loops claimed different rows — never the same job.
-      expect(r1).toBe(jobA);
-      expect(r2).toBe(jobB);
-      expect(r1).not.toBe(r2);
+      const claimed = await (worker as any).claimNextJob();
+      expect(claimed).toBeNull();
 
       worker.onModuleDestroy();
     });
@@ -1037,7 +1077,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       jest.spyOn(worker as any, 'sleep').mockResolvedValue(undefined);
 
       const job = makeJob({ id: 'job-e2e-1', attempts: 0 });
-      const mockRegistry = { get: jest.fn().mockReturnValue({ type: 'face_detection', process: jest.fn().mockResolvedValue(undefined) }) };
+      const mockRegistry = makeRegistryMock({ type: 'face_detection', process: jest.fn().mockResolvedValue(undefined) });
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
@@ -1045,6 +1085,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
           { provide: PrismaService, useValue: mockPrisma },
           { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
           { provide: ProviderThrottleService, useValue: new ProviderThrottleService() },
+          { provide: EnrichmentClaimService, useValue: makeClaimMock(mockPrisma) },
         ],
       }).compile();
       const w2 = module.get<EnrichmentJobWorker>(EnrichmentJobWorker);
