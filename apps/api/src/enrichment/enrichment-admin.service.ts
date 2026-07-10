@@ -67,6 +67,9 @@ export interface JobListItem {
   scheduledFor: Date | null;
   rateLimitedAt: Date | null;
   rateLimitHits: number;
+  executor: string | null;
+  claimedByNodeId: string | null;
+  claimedByNode: { id: string; name: string; hostname: string } | null;
 }
 
 export interface JobListResult {
@@ -620,6 +623,9 @@ export class EnrichmentAdminService {
           scheduledFor: true,
           rateLimitedAt: true,
           rateLimitHits: true,
+          executor: true,
+          claimedByNodeId: true,
+          claimedByNode: { select: { id: true, name: true, hostname: true } },
         },
       }),
       this.prisma.enrichmentJob.count({ where }),
@@ -683,6 +689,9 @@ export class EnrichmentAdminService {
         scheduledFor: true,
         rateLimitedAt: true,
         rateLimitHits: true,
+        executor: true,
+        claimedByNodeId: true,
+        claimedByNode: { select: { id: true, name: true, hostname: true } },
       },
     });
 
