@@ -6,11 +6,11 @@
 //   POST /api/nodes/:id/jobs/:jobId/result   → SubmitJobResultDto
 //   POST /api/nodes/:id/jobs/:jobId/failure  → ReportJobFailureDto
 //
-// Per-job-type RESULT payload schemas also live here for now (currently only
-// duplicate_detection). A shared parity package (@memoriahub/enrichment-compute)
-// is being built concurrently and will become the canonical home for these —
-// this file will then re-export from it. Deliberately import-free of that
-// package until it lands.
+// Per-job-type RESULT payload schemas live in the shared parity package
+// (@memoriahub/enrichment-compute/dto) so the CLI producer and the API
+// consumer validate against the exact same shapes; they are re-exported at
+// the bottom of this file for API-layer convenience. Only the endpoint
+// request-body DTOs are defined locally.
 // =============================================================================
 
 import { createZodDto } from 'nestjs-zod';
@@ -48,19 +48,20 @@ export const reportJobFailureSchema = z.object({
 export class ReportJobFailureDto extends createZodDto(reportJobFailureSchema) {}
 
 // ---------------------------------------------------------------------------
-// Per-job-type result payload schemas
+// Per-job-type result payload schemas (canonical home: shared parity package)
 // ---------------------------------------------------------------------------
 
-/**
- * Result payload a node submits for a `duplicate_detection` job: the CLIP
- * ViT-B/32 visual embedding (512-d) plus the 64-bit dHash as a decimal string
- * (unsigned 64-bit — NEVER a number/bigint; see the perceptual_hash storage
- * rationale in CLAUDE.md).
- */
-export const duplicateDetectionNodeResultSchema = z.object({
-  model: z.string().min(1),
-  embedding: z.array(z.number()).length(512),
-  dHash: z.string().regex(/^\d+$/),
-});
-
-export type DuplicateDetectionNodeResult = z.infer<typeof duplicateDetectionNodeResultSchema>;
+export {
+  duplicateDetectionResultSchema,
+  faceDetectionResultSchema,
+  metadataExtractionResultSchema,
+  socialMediaDetectionResultSchema,
+  thumbnailResultSchema,
+} from '@memoriahub/enrichment-compute/dto';
+export type {
+  DuplicateDetectionResult,
+  FaceDetectionResult,
+  MetadataExtractionResult,
+  SocialMediaDetectionResult,
+  ThumbnailResult,
+} from '@memoriahub/enrichment-compute/dto';
