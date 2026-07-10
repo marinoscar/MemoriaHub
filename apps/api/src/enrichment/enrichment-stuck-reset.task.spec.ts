@@ -24,7 +24,9 @@ describe('EnrichmentStuckResetTask', () => {
   const SAVED_STUCK_MINUTES = process.env['ENRICHMENT_STUCK_MINUTES'];
 
   beforeEach(async () => {
-    resetStuck = jest.fn().mockResolvedValue({ reset: 0 });
+    // resetStuck now returns { reset, failed } — failed counts stuck jobs whose
+    // claim-time-charged attempts budget was exhausted (marked failed, not requeued).
+    resetStuck = jest.fn().mockResolvedValue({ reset: 0, failed: 0 });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -103,9 +105,31 @@ describe('EnrichmentStuckResetTask', () => {
       expect(resetStuck.mock.calls[0]).toHaveLength(0);
     });
 
-    it('does not throw when resetStuck returns { reset: 0 }', async () => {
+    it('does not throw when resetStuck returns { reset: 0, failed: 0 }', async () => {
       delete process.env['ENRICHMENT_WORKER_ENABLED'];
-      resetStuck.mockResolvedValue({ reset: 0 });
+      resetStuck.mockResolvedValue({ reset: 0, failed: 0 });
+
+      await expect(task.handleStuckReset()).resolves.toBeUndefined();
+    });
+
+    it('does not throw when resetStuck reports reset jobs only', async () => {
+      delete process.env['ENRICHMENT_WORKER_ENABLED'];
+      resetStuck.mockResolvedValue({ reset: 3, failed: 0 });
+
+      await expect(task.handleStuckReset()).resolves.toBeUndefined();
+    });
+
+    it('does not throw when resetStuck reports exhausted-attempts jobs marked failed', async () => {
+      delete process.env['ENRICHMENT_WORKER_ENABLED'];
+      resetStuck.mockResolvedValue({ reset: 2, failed: 1 });
+
+      await expect(task.handleStuckReset()).resolves.toBeUndefined();
+      expect(resetStuck).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not throw when only failed jobs are reported (reset: 0, failed > 0)', async () => {
+      delete process.env['ENRICHMENT_WORKER_ENABLED'];
+      resetStuck.mockResolvedValue({ reset: 0, failed: 4 });
 
       await expect(task.handleStuckReset()).resolves.toBeUndefined();
     });

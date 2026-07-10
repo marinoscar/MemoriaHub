@@ -204,23 +204,31 @@ describe('EnrichmentAdminController', () => {
 
   describe('resetStuck', () => {
     it('delegates to adminService.resetStuck with olderThanMinutes from body', async () => {
-      mockAdminService.resetStuck.mockResolvedValue({ reset: 3 });
+      mockAdminService.resetStuck.mockResolvedValue({ reset: 3, failed: 0 });
 
       const dto = { olderThanMinutes: 15 } as ResetStuckDto;
       const result = await controller.resetStuck(dto);
 
       expect(mockAdminService.resetStuck).toHaveBeenCalledWith(15);
-      expect(result).toEqual({ reset: 3 });
+      expect(result).toEqual({ reset: 3, failed: 0 });
     });
 
     it('passes undefined to adminService.resetStuck when olderThanMinutes is absent', async () => {
-      mockAdminService.resetStuck.mockResolvedValue({ reset: 0 });
+      mockAdminService.resetStuck.mockResolvedValue({ reset: 0, failed: 0 });
 
       const dto = {} as ResetStuckDto;
       const result = await controller.resetStuck(dto);
 
       expect(mockAdminService.resetStuck).toHaveBeenCalledWith(undefined);
-      expect(result).toEqual({ reset: 0 });
+      expect(result).toEqual({ reset: 0, failed: 0 });
+    });
+
+    it('passes the service\'s failed counter through unchanged (exhausted-attempts jobs)', async () => {
+      mockAdminService.resetStuck.mockResolvedValue({ reset: 2, failed: 1 });
+
+      const result = await controller.resetStuck({} as ResetStuckDto);
+
+      expect(result).toEqual({ reset: 2, failed: 1 });
     });
 
     // -----------------------------------------------------------------------

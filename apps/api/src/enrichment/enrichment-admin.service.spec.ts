@@ -3,14 +3,18 @@
  *
  * Tests: getStats (empty and populated groupBy results, stuck count threshold),
  * listJobs (pagination, filters, empty results), retryJob (404, 400, success),
- * retryAllFailed (with/without type filter), resetStuck (time threshold, count),
- * deleteJob (404, 400 running, success).
+ * retryAllFailed (with/without type filter), resetStuck (time threshold, count,
+ * and the exhausted-attempts path: stuck running jobs whose claim-time-charged
+ * attempts have reached ENRICHMENT_MAX_ATTEMPTS are marked failed — not
+ * requeued — and reported in the new `failed` counter of the
+ * { reset, failed } return shape), deleteJob (404, 400 running, success).
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { JobStatus } from '@prisma/client';
 import { EnrichmentAdminService } from './enrichment-admin.service';
+import { ENRICHMENT_MAX_ATTEMPTS } from './enrichment-job.worker';
 import { PrismaService } from '../prisma/prisma.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { defaultStuckThresholdMinutes } from '../common/types/settings.types';
@@ -576,12 +580,19 @@ describe('EnrichmentAdminService', () => {
   // =========================================================================
 
   describe('resetStuck', () => {
+    beforeEach(() => {
+      // resetStuck now first queries stuck jobs whose attempts budget is
+      // exhausted (findMany); default to none so the pre-existing reset-path
+      // tests exercise the same behavior as before.
+      (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([]);
+    });
+
     it('resets running jobs older than the settings-resolved default threshold and returns count', async () => {
       (mockPrisma.enrichmentJob.updateMany as jest.Mock).mockResolvedValue({ count: 4 });
 
       const result = await service.resetStuck();
 
-      expect(result).toEqual({ reset: 4 });
+      expect(result).toEqual({ reset: 4, failed: 0 });
       expect(mockSettingsService.getSettings).toHaveBeenCalled();
     });
 
@@ -604,6 +615,9 @@ describe('EnrichmentAdminService', () => {
         startedAt: null,
         createdAt: { lt: expect.any(Date) },
       });
+      // The bulk reset only touches jobs whose attempts budget is NOT yet
+      // exhausted — exhausted ones are handled by the per-row failed path.
+      expect(updateManyCall.where.attempts).toEqual({ lt: ENRICHMENT_MAX_ATTEMPTS });
 
       const threshold: Date = updateManyCall.where.OR[0].startedAt.lt;
       expect(threshold).toBeInstanceOf(Date);
@@ -706,12 +720,142 @@ describe('EnrichmentAdminService', () => {
       });
     });
 
-    it('returns reset:0 when no stuck jobs found', async () => {
+    it('returns reset:0 and failed:0 when no stuck jobs found', async () => {
       (mockPrisma.enrichmentJob.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
 
       const result = await service.resetStuck();
 
-      expect(result).toEqual({ reset: 0 });
+      expect(result).toEqual({ reset: 0, failed: 0 });
+    });
+  });
+
+  // =========================================================================
+  // resetStuck — exhausted-attempts jobs are FAILED, not requeued
+  //
+  // Attempts are charged at claim time (EnrichmentJobWorker.claimNextJob), so
+  // a poison-pill job that keeps SIGKILLing the process still carries its
+  // charge when the stuck-reset finds it. Once attempts >= ENRICHMENT_MAX_ATTEMPTS
+  // the service marks it failed (per-row, guarded on status=running) instead
+  // of requeueing it into an infinite crash loop.
+  // =========================================================================
+
+  describe('resetStuck — exhausted-attempts jobs marked failed', () => {
+    beforeEach(() => {
+      (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.enrichmentJob.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+    });
+
+    it('queries exhausted candidates with the stuck where clause plus attempts >= ENRICHMENT_MAX_ATTEMPTS', async () => {
+      await service.resetStuck();
+
+      expect(mockPrisma.enrichmentJob.findMany).toHaveBeenCalledTimes(1);
+      const findManyCall = (mockPrisma.enrichmentJob.findMany as jest.Mock).mock.calls[0][0];
+
+      expect(findManyCall.where.status).toBe(JobStatus.running);
+      expect(findManyCall.where.attempts).toEqual({ gte: ENRICHMENT_MAX_ATTEMPTS });
+      expect(findManyCall.where.OR).toHaveLength(2);
+      expect(findManyCall.where.OR[0]).toMatchObject({ startedAt: { lt: expect.any(Date) } });
+      expect(findManyCall.where.OR[1]).toMatchObject({
+        startedAt: null,
+        createdAt: { lt: expect.any(Date) },
+      });
+      expect(findManyCall.select).toEqual({ id: true, type: true, attempts: true });
+    });
+
+    it('marks an exhausted stuck job failed with the attempt-count lastError, finishedAt, and cleared scheduledFor', async () => {
+      (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([
+        { id: 'job-poison', type: 'video_face_detection', attempts: ENRICHMENT_MAX_ATTEMPTS },
+      ]);
+      (mockPrisma.enrichmentJob.updateMany as jest.Mock).mockImplementation(
+        async (args: { where: { id?: string } }) => (args.where.id ? { count: 1 } : { count: 0 }),
+      );
+
+      const result = await service.resetStuck();
+
+      // Per-row update: guarded on status=running so a job that finished
+      // between findMany and here is not clobbered.
+      const perRowCall = (mockPrisma.enrichmentJob.updateMany as jest.Mock).mock.calls.find(
+        (c: any[]) => c[0].where.id === 'job-poison',
+      );
+      expect(perRowCall).toBeDefined();
+      expect(perRowCall![0].where).toEqual({ id: 'job-poison', status: JobStatus.running });
+      expect(perRowCall![0].data).toEqual({
+        status: JobStatus.failed,
+        lastError: `process terminated during execution (attempt ${ENRICHMENT_MAX_ATTEMPTS}/${ENRICHMENT_MAX_ATTEMPTS})`,
+        finishedAt: expect.any(Date),
+        scheduledFor: null,
+      });
+
+      expect(result.failed).toBe(1);
+      expect(result.reset).toBe(0);
+    });
+
+    it('lastError carries the per-job attempts count when it exceeds the budget', async () => {
+      (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([
+        { id: 'job-over', type: 'face_detection', attempts: ENRICHMENT_MAX_ATTEMPTS + 2 },
+      ]);
+      (mockPrisma.enrichmentJob.updateMany as jest.Mock).mockImplementation(
+        async (args: { where: { id?: string } }) => (args.where.id ? { count: 1 } : { count: 0 }),
+      );
+
+      await service.resetStuck();
+
+      const perRowCall = (mockPrisma.enrichmentJob.updateMany as jest.Mock).mock.calls.find(
+        (c: any[]) => c[0].where.id === 'job-over',
+      );
+      expect(perRowCall![0].data.lastError).toBe(
+        `process terminated during execution (attempt ${ENRICHMENT_MAX_ATTEMPTS + 2}/${ENRICHMENT_MAX_ATTEMPTS})`,
+      );
+    });
+
+    it('splits the counts: exhausted jobs counted in failed, the rest in reset', async () => {
+      (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([
+        { id: 'job-a', type: 'video_face_detection', attempts: 3 },
+        { id: 'job-b', type: 'social_media_detection', attempts: 5 },
+      ]);
+      (mockPrisma.enrichmentJob.updateMany as jest.Mock).mockImplementation(
+        async (args: { where: { id?: string } }) => (args.where.id ? { count: 1 } : { count: 4 }),
+      );
+
+      const result = await service.resetStuck();
+
+      expect(result).toEqual({ reset: 4, failed: 2 });
+    });
+
+    it('does NOT count a job that stopped running between findMany and the guarded update', async () => {
+      (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([
+        { id: 'job-gone', type: 'face_detection', attempts: 3 },
+      ]);
+      // Guarded per-row update matches nothing (row no longer running).
+      (mockPrisma.enrichmentJob.updateMany as jest.Mock).mockImplementation(
+        async (args: { where: { id?: string } }) => (args.where.id ? { count: 0 } : { count: 0 }),
+      );
+
+      const result = await service.resetStuck();
+
+      expect(result.failed).toBe(0);
+    });
+
+    it('exhausted jobs are excluded from the bulk requeue (attempts < max filter on the reset updateMany)', async () => {
+      (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([
+        { id: 'job-a', type: 'face_detection', attempts: 3 },
+      ]);
+      (mockPrisma.enrichmentJob.updateMany as jest.Mock).mockImplementation(
+        async (args: { where: { id?: string } }) => (args.where.id ? { count: 1 } : { count: 0 }),
+      );
+
+      await service.resetStuck();
+
+      const bulkResetCall = (mockPrisma.enrichmentJob.updateMany as jest.Mock).mock.calls.find(
+        (c: any[]) => c[0].where.id === undefined,
+      );
+      expect(bulkResetCall).toBeDefined();
+      expect(bulkResetCall![0].where.attempts).toEqual({ lt: ENRICHMENT_MAX_ATTEMPTS });
+      expect(bulkResetCall![0].data).toMatchObject({
+        status: JobStatus.pending,
+        startedAt: null,
+        scheduledFor: null,
+      });
     });
   });
 
@@ -884,6 +1028,11 @@ describe('EnrichmentAdminService', () => {
   // =========================================================================
 
   describe('resetStuck — sets scheduledFor: null', () => {
+    beforeEach(() => {
+      // No exhausted-attempts stuck jobs in these cases.
+      (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([]);
+    });
+
     it('includes scheduledFor: null in the resetStuck data payload', async () => {
       (mockPrisma.enrichmentJob.updateMany as jest.Mock).mockResolvedValue({ count: 3 });
 

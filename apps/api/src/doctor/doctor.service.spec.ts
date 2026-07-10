@@ -605,6 +605,8 @@ describe('DoctorService', () => {
             ocrMaxFrames: 4,
             ocrTimeoutSeconds: 60,
             minConfidence: 0.8,
+            maxDurationSeconds: 300,
+            maxSizeBytes: 500_000_000,
           },
         }),
       );
@@ -631,6 +633,8 @@ describe('DoctorService', () => {
             ocrMaxFrames: 4,
             ocrTimeoutSeconds: 60,
             minConfidence: 0.8,
+            maxDurationSeconds: 300,
+            maxSizeBytes: 500_000_000,
           },
         }),
       );

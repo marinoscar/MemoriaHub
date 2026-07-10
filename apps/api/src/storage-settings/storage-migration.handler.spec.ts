@@ -10,8 +10,11 @@
  *  - process() idempotent: item already completed → returns immediately, no copy
  *  - process() cancelled run → item skipped, skippedCount incremented, no copy
  *  - process() already-on-target: object already on targetProvider+destBucket → marks completed without copying
- *  - process() terminal failure: when job.attempts+1 >= MAX_ATTEMPTS and copy throws
- *    → item marked failed + failedCount incremented before rethrow
+ *  - process() terminal failure: when job.attempts >= MAX_ATTEMPTS and copy throws
+ *    → item marked failed + failedCount incremented before rethrow. NOTE:
+ *    attempts are charged at CLAIM time by the worker, so the job row process()
+ *    receives already counts the in-flight attempt (a job on its final attempt
+ *    arrives with attempts === MAX_ATTEMPTS).
  *  - process() missing payload → throws with descriptive error
  */
 
@@ -47,7 +50,8 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
       itemId: 'item-1',
       objectId: 'obj-1',
     },
-    attempts: 0,
+    // Attempts are charged at claim time — a running job always carries >= 1.
+    attempts: 1,
     lastError: null,
     startedAt: new Date(),
     finishedAt: null,
@@ -434,9 +438,10 @@ describe('StorageMigrationHandler', () => {
       mockPrisma.storageMigrationItem.update.mockResolvedValue({} as any);
       mockPrisma.storageMigrationRun.update.mockResolvedValue({} as any);
 
-      // Simulate terminal attempt: attempts + 1 >= MAX_ATTEMPTS (default 3)
-      // So set attempts = 2 (2 + 1 = 3 >= 3)
-      const terminalJob = makeJob({ attempts: 2 });
+      // Simulate terminal attempt: attempts >= MAX_ATTEMPTS (default 3).
+      // The worker charges attempts at CLAIM time, so a job on its final
+      // attempt arrives at process() with attempts = 3 (3 >= 3 → terminal).
+      const terminalJob = makeJob({ attempts: 3 });
 
       await expect(handler.process(terminalJob)).rejects.toThrow('S3 connection refused');
 
@@ -471,8 +476,9 @@ describe('StorageMigrationHandler', () => {
       mockPrisma.storageMigrationItem.update.mockResolvedValue({} as any);
       mockPrisma.storageMigrationRun.update.mockResolvedValue({} as any);
 
-      // Non-terminal attempt: attempts = 0 (0 + 1 = 1 < 3)
-      const nonTerminalJob = makeJob({ attempts: 0 });
+      // Non-terminal attempt under claim-time charging: a claimed job always
+      // has attempts >= 1; use the last retryable value (2 < 3 → retry left).
+      const nonTerminalJob = makeJob({ attempts: 2 });
 
       await expect(handler.process(nonTerminalJob)).rejects.toThrow('transient error');
 

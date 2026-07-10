@@ -4,14 +4,26 @@
  * Extends coverage in face/processing/face-job.worker.spec.ts (which covers
  * the basic worker lifecycle). This file focuses on:
  *
- *  1. claimNextJob where clause includes the scheduledFor OR-filter
+ *  1. claimNextJob where clause includes the scheduledFor OR-filter, and the
+ *     claim UPDATE charges the attempt up-front (attempts: { increment: 1 })
+ *     so OOM crash loops self-limit (attempts = "attempts STARTED")
  *  2. Rate-limit deferral path (RateLimitError thrown or classified from 429):
- *     - rateLimitHits incremented, attempts NOT incremented
+ *     - rateLimitHits incremented; the claim-time attempt charge is UN-charged
+ *       (attempts written back to job.attempts - 1, the pre-claim value)
  *     - scheduledFor set to a future date, status stays pending
  *     - after RL_MAX_HITS hits → status becomes failed
  *  3. Normal error retry path:
- *     - attempts incremented, scheduledFor set for backoff, status pending
- *     - after MAX_ATTEMPTS exhausted → status becomes failed
+ *     - attempts NOT written (already charged at claim time); scheduledFor set
+ *       for backoff, status pending while claimed attempts < MAX_ATTEMPTS
+ *     - once the claimed row's attempts reach MAX_ATTEMPTS → status failed
+ *  4. Per-type execution timeout: video_face_detection / social_media_detection
+ *     use ENRICHMENT_VIDEO_JOB_TIMEOUT_MS (default 20 min); all other types
+ *     keep the global ENRICHMENT_JOB_TIMEOUT_MS (default 10 min)
+ *
+ * NOTE on claim mocks: claimNextJob() returns the row from the claim UPDATE,
+ * which in production carries the claim-time increment. Claim mocks therefore
+ * echo `attempts: job.attempts + 1` so the processJob failure paths see the
+ * same charged value the real DB would return.
  *
  * IMPORTANT: The worker reads env vars into module-level constants at import
  * time (e.g. const RL_MAX_HITS = getEnvInt('ENRICHMENT_RATELIMIT_MAX_HITS', 10)).
@@ -175,11 +187,11 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       expect(lteDate.getTime()).toBeLessThanOrEqual(after + 100);
     });
 
-    it('claim update sets scheduledFor: null and status: running', async () => {
+    it('claim update sets scheduledFor: null, status: running, and charges the attempt', async () => {
       const job = makeJob();
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running })
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({ ...job, status: JobStatus.succeeded });
 
       (await buildWorker(EnrichmentJobWorker)).mockHandler.process.mockResolvedValue(undefined);
@@ -202,6 +214,10 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const firstUpdate = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls[0][0];
       expect(firstUpdate.data.scheduledFor).toBeNull();
       expect(firstUpdate.data.status).toBe(JobStatus.running);
+      // Claim-time attempt charging: the claim UPDATE itself increments
+      // attempts so a job that SIGKILLs the process still carries its charge.
+      expect(firstUpdate.data.attempts).toEqual({ increment: 1 });
+      expect(firstUpdate.data.startedAt).toBeInstanceOf(Date);
 
       w2.onModuleDestroy();
     });
@@ -224,12 +240,12 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       worker.onModuleDestroy();
     });
 
-    it('increments rateLimitHits, does NOT increment attempts, sets scheduledFor, status stays pending', async () => {
+    it('increments rateLimitHits, un-charges the claim-time attempt, sets scheduledFor, status stays pending', async () => {
       const job = makeJob({ rateLimitHits: 0, attempts: 0 });
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running })
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new RateLimitError('rate limited', undefined, 'anthropic'));
@@ -241,8 +257,10 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       // hits incremented to 1
       expect(rlUpdate.data.rateLimitHits).toBe(1);
-      // attempts NOT changed — should not be in the data at all
-      expect(rlUpdate.data.attempts).toBeUndefined();
+      // attempts NOT net-charged for rate-limit deferrals: the claim-time
+      // increment is un-charged with an absolute write back to the pre-claim
+      // value (claimed row had attempts=1 → written back to 0).
+      expect(rlUpdate.data.attempts).toBe(0);
       // status remains pending (hits=1 < max=10)
       expect(rlUpdate.data.status).toBe(JobStatus.pending);
       // scheduledFor is a future Date
@@ -260,7 +278,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running })
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new RateLimitError('rate limited', retryAfterMs));
@@ -280,7 +298,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const job = makeJob({ rateLimitHits: 8, attempts: 0 }); // hits 8 → 9 < 10 → still pending
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running })
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new RateLimitError('rate limited'));
@@ -318,7 +336,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running })
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new RateLimitError('rate limited'));
@@ -333,8 +351,9 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       expect(rlUpdate.data.finishedAt).toBeInstanceOf(Date);
       // scheduledFor cleared on giveUp
       expect(rlUpdate.data.scheduledFor).toBeNull();
-      // attempts is NOT changed on rate-limit path
-      expect(rlUpdate.data.attempts).toBeUndefined();
+      // attempts NOT net-charged: claim-time increment un-charged back to the
+      // pre-claim value (claimed 1 → written back to 0), even on giveUp.
+      expect(rlUpdate.data.attempts).toBe(0);
     });
 
     it('last error message is stored from RateLimitError on giveUp', async () => {
@@ -342,7 +361,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running })
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new RateLimitError('too many requests from Anthropic'));
@@ -378,7 +397,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running })
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       // Plain object with status=429 (not a RateLimitError instance)
@@ -391,8 +410,8 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       expect(rlUpdate.data.rateLimitHits).toBe(1);
       expect(rlUpdate.data.status).toBe(JobStatus.pending);
-      // attempts is NOT set (not the normal-retry path)
-      expect(rlUpdate.data.attempts).toBeUndefined();
+      // attempts un-charged back to the pre-claim value (claimed 1 → 0)
+      expect(rlUpdate.data.attempts).toBe(0);
     });
 
     it('detects AWS ThrottlingException via classifyRateLimit', async () => {
@@ -400,7 +419,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running })
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue({
@@ -414,7 +433,8 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const rlUpdate = updateCalls[updateCalls.length - 1][0];
 
       expect(rlUpdate.data.rateLimitHits).toBe(1);
-      expect(rlUpdate.data.attempts).toBeUndefined(); // NOT incremented
+      // un-charged back to the pre-claim value (claimed 2 → written back 1)
+      expect(rlUpdate.data.attempts).toBe(1);
       expect(rlUpdate.data.status).toBe(JobStatus.pending);
     });
   });
@@ -436,12 +456,13 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       worker.onModuleDestroy();
     });
 
-    it('increments attempts and sets scheduledFor for retry when attempts < MAX_ATTEMPTS', async () => {
+    it('does NOT write attempts (already charged at claim) and schedules a backoff retry while claimed attempts < MAX_ATTEMPTS', async () => {
       const job = makeJob({ attempts: 0, rateLimitHits: 0 });
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running })
+        // Claimed row carries the claim-time charge: attempts=1 (< MAX 3)
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new Error('transient failure'));
@@ -451,7 +472,9 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
       const retryUpdate = updateCalls[updateCalls.length - 1][0];
 
-      expect(retryUpdate.data.attempts).toBe(1); // 0+1
+      // attempts already charged at claim time — the failure write must not
+      // touch it (no double-charge).
+      expect(retryUpdate.data.attempts).toBeUndefined();
       expect(retryUpdate.data.status).toBe(JobStatus.pending);
       expect(retryUpdate.data.scheduledFor).toBeInstanceOf(Date);
       expect((retryUpdate.data.scheduledFor as Date).getTime()).toBeGreaterThan(Date.now());
@@ -462,13 +485,35 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       expect(retryUpdate.data.finishedAt).toBeUndefined();
     });
 
-    it('marks job as failed when newAttempts reaches MAX_ATTEMPTS (default 3)', async () => {
-      // attempts=2 → newAttempts=3 → 3 >= 3 → giveUp
+    it('retries (pending + backoff) when the claimed attempts are one below MAX_ATTEMPTS', async () => {
+      // attempts=1 pre-claim → claimed row carries 2 (< MAX 3) → one retry left
+      const job = makeJob({ attempts: 1, rateLimitHits: 0 });
+
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
+      (mockPrisma.enrichmentJob.update as jest.Mock)
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({});
+
+      mockHandler.process.mockRejectedValue(new Error('still failing'));
+
+      await (worker as any).tick();
+
+      const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
+      const retryUpdate = updateCalls[updateCalls.length - 1][0];
+
+      expect(retryUpdate.data.status).toBe(JobStatus.pending);
+      expect(retryUpdate.data.attempts).toBeUndefined();
+      expect(retryUpdate.data.scheduledFor).toBeInstanceOf(Date);
+      expect(retryUpdate.data.finishedAt).toBeUndefined();
+    });
+
+    it('marks job as failed when the claimed attempts reach MAX_ATTEMPTS (default 3)', async () => {
+      // attempts=2 pre-claim → claim charges to 3 → 3 < 3 is false → giveUp
       const job = makeJob({ attempts: 2, rateLimitHits: 0 });
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running })
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new Error('fatal error'));
@@ -478,7 +523,8 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
       const failUpdate = updateCalls[updateCalls.length - 1][0];
 
-      expect(failUpdate.data.attempts).toBe(3);
+      // attempts is not written on the failure path (claim already charged it)
+      expect(failUpdate.data.attempts).toBeUndefined();
       expect(failUpdate.data.status).toBe(JobStatus.failed);
       expect(failUpdate.data.finishedAt).toBeInstanceOf(Date);
       expect(failUpdate.data.scheduledFor).toBeNull();
@@ -489,7 +535,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running })
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new Error('non-rl error'));
@@ -501,7 +547,9 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       // rateLimitHits is not set in the normal-retry data payload
       expect(retryUpdate.data.rateLimitHits).toBeUndefined();
-      expect(retryUpdate.data.attempts).toBe(1);
+      // and attempts is no longer written here either (charged at claim time)
+      expect(retryUpdate.data.attempts).toBeUndefined();
+      expect(retryUpdate.data.status).toBe(JobStatus.pending);
     });
   });
 
@@ -515,7 +563,8 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
   // time is instantaneous regardless of magnitude), keeping the test fast and
   // deterministic. A hung handler is raced against the timeout; when the timeout
   // wins it rejects with a plain Error that flows through the normal-failure
-  // retry path (attempts++, backoff, permanent-fail after MAX_ATTEMPTS).
+  // retry path (attempt already charged at claim time; backoff; permanent-fail
+  // once the claimed attempts reach MAX_ATTEMPTS).
   // =========================================================================
 
   describe('active per-job timeout (ENRICHMENT_JOB_TIMEOUT_MS)', () => {
@@ -534,7 +583,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const job = makeJob({ type: 'metadata_extraction', attempts: 0, rateLimitHits: 0 });
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running })
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       // Handler never resolves — only the timeout can settle the race.
@@ -548,10 +597,11 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
       const timeoutUpdate = updateCalls[updateCalls.length - 1][0];
 
-      // normal-failure path: attempts incremented, rateLimitHits untouched
-      expect(timeoutUpdate.data.attempts).toBe(1);
+      // normal-failure path: attempts already charged at claim time (not
+      // rewritten here), rateLimitHits untouched
+      expect(timeoutUpdate.data.attempts).toBeUndefined();
       expect(timeoutUpdate.data.rateLimitHits).toBeUndefined();
-      // still retryable (1 < MAX_ATTEMPTS default 3): pending + future scheduledFor
+      // still retryable (claimed attempts 1 < MAX_ATTEMPTS default 3): pending + future scheduledFor
       expect(timeoutUpdate.data.status).toBe(JobStatus.pending);
       expect(timeoutUpdate.data.scheduledFor).toBeInstanceOf(Date);
       expect((timeoutUpdate.data.scheduledFor as Date).getTime()).toBeGreaterThan(Date.now());
@@ -566,11 +616,11 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
     it('permanently fails a repeatedly-hanging job once attempts reach MAX_ATTEMPTS', async () => {
       const { worker, mockPrisma, mockHandler } = await buildWorker(EnrichmentJobWorker);
 
-      // attempts=2 → this timeout makes newAttempts=3 = MAX_ATTEMPTS (default 3) → failed
+      // attempts=2 pre-claim → claim charges to 3 = MAX_ATTEMPTS (default 3) → failed
       const job = makeJob({ type: 'metadata_extraction', attempts: 2, rateLimitHits: 0 });
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running })
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockReturnValue(new Promise<void>(() => {}));
@@ -583,7 +633,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
       const failUpdate = updateCalls[updateCalls.length - 1][0];
 
-      expect(failUpdate.data.attempts).toBe(3);
+      expect(failUpdate.data.attempts).toBeUndefined();
       expect(failUpdate.data.status).toBe(JobStatus.failed);
       expect(failUpdate.data.finishedAt).toBeInstanceOf(Date);
       expect(failUpdate.data.scheduledFor).toBeNull();
@@ -605,9 +655,9 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       // The claim update returns the claimed job (processJob uses its id/type),
       // so each tick's claim must echo the right job back.
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...jobA, status: JobStatus.running }) // tick 1 claim
+        .mockResolvedValueOnce({ ...jobA, status: JobStatus.running, attempts: 1 }) // tick 1 claim
         .mockResolvedValueOnce({}) // tick 1 timeout-failure update
-        .mockResolvedValueOnce({ ...jobB, status: JobStatus.running }) // tick 2 claim
+        .mockResolvedValueOnce({ ...jobB, status: JobStatus.running, attempts: 1 }) // tick 2 claim
         .mockResolvedValueOnce({}); // tick 2 success update
 
       // A hangs (times out); B resolves normally.
@@ -634,6 +684,118 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const lastUpdate = updateCalls[updateCalls.length - 1][0];
       expect(lastUpdate.where.id).toBe('job-B');
       expect(lastUpdate.data.status).toBe(JobStatus.succeeded);
+
+      worker.onModuleDestroy();
+    });
+  });
+
+  // =========================================================================
+  // Per-type timeout override (ENRICHMENT_VIDEO_JOB_TIMEOUT_MS)
+  //
+  // video_face_detection and social_media_detection legitimately run far longer
+  // than the global default (download + ffmpeg + per-frame provider calls), so
+  // they are governed by ENRICHMENT_VIDEO_JOB_TIMEOUT_MS (default 1_200_000 ms)
+  // instead of ENRICHMENT_JOB_TIMEOUT_MS (default 600_000 ms). Neither env var
+  // is set in tests, so the module-level defaults apply; fake timers make the
+  // magnitudes instantaneous.
+  // =========================================================================
+
+  describe('per-type timeout override for video job types', () => {
+    const GLOBAL_TIMEOUT_MS = 600_000; // ENRICHMENT_JOB_TIMEOUT_MS default
+    const VIDEO_TIMEOUT_MS = 1_200_000; // ENRICHMENT_VIDEO_JOB_TIMEOUT_MS default
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('a hung video_face_detection job survives the global timeout and only fails at the video timeout', async () => {
+      const { worker, mockPrisma, mockHandler } = await buildWorker(EnrichmentJobWorker);
+
+      const job = makeJob({ id: 'job-video', type: 'video_face_detection', attempts: 0 });
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
+      (mockPrisma.enrichmentJob.update as jest.Mock)
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({});
+
+      // Handler never resolves — only a timeout can settle the race.
+      mockHandler.process.mockReturnValue(new Promise<void>(() => {}));
+
+      jest.useFakeTimers();
+      let settled = false;
+      const tickPromise = ((worker as any).tick() as Promise<boolean>).then(() => {
+        settled = true;
+      });
+
+      // Just past the GLOBAL timeout: a video-type job must still be running —
+      // only the claim update has happened, and tick() has not settled.
+      await jest.advanceTimersByTimeAsync(GLOBAL_TIMEOUT_MS + 1_000);
+      expect(settled).toBe(false);
+      expect((mockPrisma.enrichmentJob.update as jest.Mock).mock.calls).toHaveLength(1);
+
+      // Past the VIDEO timeout: the job now fails through the normal-failure path.
+      await jest.advanceTimersByTimeAsync(VIDEO_TIMEOUT_MS - GLOBAL_TIMEOUT_MS);
+      await tickPromise;
+      expect(settled).toBe(true);
+
+      const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
+      const timeoutUpdate = updateCalls[updateCalls.length - 1][0];
+      expect(String(timeoutUpdate.data.lastError)).toContain(`timed out after ${VIDEO_TIMEOUT_MS}ms`);
+      // Claimed attempts 1 < MAX 3 → retryable
+      expect(timeoutUpdate.data.status).toBe(JobStatus.pending);
+      expect(timeoutUpdate.data.scheduledFor).toBeInstanceOf(Date);
+
+      worker.onModuleDestroy();
+    });
+
+    it('social_media_detection is also governed by the video timeout', async () => {
+      const { worker, mockPrisma, mockHandler } = await buildWorker(EnrichmentJobWorker);
+
+      const job = makeJob({ id: 'job-social', type: 'social_media_detection', attempts: 0 });
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
+      (mockPrisma.enrichmentJob.update as jest.Mock)
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({});
+
+      mockHandler.process.mockReturnValue(new Promise<void>(() => {}));
+
+      jest.useFakeTimers();
+      let settled = false;
+      const tickPromise = ((worker as any).tick() as Promise<boolean>).then(() => {
+        settled = true;
+      });
+
+      await jest.advanceTimersByTimeAsync(GLOBAL_TIMEOUT_MS + 1_000);
+      expect(settled).toBe(false);
+
+      await jest.advanceTimersByTimeAsync(VIDEO_TIMEOUT_MS - GLOBAL_TIMEOUT_MS);
+      await tickPromise;
+
+      const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
+      const timeoutUpdate = updateCalls[updateCalls.length - 1][0];
+      expect(String(timeoutUpdate.data.lastError)).toContain(`timed out after ${VIDEO_TIMEOUT_MS}ms`);
+
+      worker.onModuleDestroy();
+    });
+
+    it('a non-video type still times out at the global ENRICHMENT_JOB_TIMEOUT_MS', async () => {
+      const { worker, mockPrisma, mockHandler } = await buildWorker(EnrichmentJobWorker);
+
+      const job = makeJob({ type: 'metadata_extraction', attempts: 0 });
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
+      (mockPrisma.enrichmentJob.update as jest.Mock)
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({});
+
+      mockHandler.process.mockReturnValue(new Promise<void>(() => {}));
+
+      jest.useFakeTimers();
+      const tickPromise = (worker as any).tick();
+      await jest.advanceTimersByTimeAsync(GLOBAL_TIMEOUT_MS + 500);
+      await tickPromise;
+
+      const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
+      const timeoutUpdate = updateCalls[updateCalls.length - 1][0];
+      expect(String(timeoutUpdate.data.lastError)).toContain(`timed out after ${GLOBAL_TIMEOUT_MS}ms`);
 
       worker.onModuleDestroy();
     });
