@@ -10,13 +10,18 @@
 
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { EnrichmentJob, JobStatus, NodeStatus, WorkerNode } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentClaimService } from '../enrichment/enrichment-claim.service';
+import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
+import { EnrichmentTerminalService } from '../enrichment/enrichment-terminal.service';
 import { ObjectsService } from '../storage/objects/objects.service';
 
 // ---------------------------------------------------------------------------
@@ -53,9 +58,13 @@ function staleWindowMs(): number {
 
 @Injectable()
 export class NodesService {
+  private readonly logger = new Logger(NodesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly enrichmentClaimService: EnrichmentClaimService,
+    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly terminal: EnrichmentTerminalService,
     private readonly objectsService: ObjectsService,
   ) {}
 
@@ -261,6 +270,132 @@ export class NodesService {
   }
 
   // -------------------------------------------------------------------------
+  // Result / failure ingestion
+  // -------------------------------------------------------------------------
+
+  /**
+   * Assert that `nodeId` (owned by `userId`) currently HOLDS the running job
+   * `jobId` under a live lease, and return the job row.
+   *
+   * 404 when the job does not exist; 409 (Conflict) when the job is not
+   * claimed by this node, is no longer running, or its lease has expired.
+   * The lease check is what rejects LATE results: once the lease-expiry reaper
+   * has requeued (or another executor has re-claimed) the job, a straggler
+   * node's result/failure report must not double-persist or clobber the newer
+   * execution's state.
+   */
+  async assertJobHeldByNode(
+    userId: string,
+    nodeId: string,
+    jobId: string,
+  ): Promise<EnrichmentJob> {
+    await this.assertOwnership(userId, nodeId);
+
+    const job = await this.prisma.enrichmentJob.findUnique({ where: { id: jobId } });
+    if (!job) {
+      throw new NotFoundException(`EnrichmentJob ${jobId} not found`);
+    }
+
+    if (
+      job.claimedByNodeId !== nodeId ||
+      job.status !== JobStatus.running ||
+      !job.leaseExpiresAt ||
+      job.leaseExpiresAt <= new Date()
+    ) {
+      throw new ConflictException(
+        'job is not held by this node (not claimed by it, not running, or lease expired)',
+      );
+    }
+
+    return job;
+  }
+
+  /**
+   * Ingest a node-computed result for a claimed job: validate it against the
+   * handler's nodeResultSchema, persist via the handler's persistNodeResult
+   * (the persist half of the compute/persist split), then complete the job
+   * through the shared terminal service (same succeeded semantics as the
+   * in-process worker).
+   */
+  async submitJobResult(
+    userId: string,
+    nodeId: string,
+    jobId: string,
+    body: { type: string; result: unknown },
+  ): Promise<{ ok: true }> {
+    const job = await this.assertJobHeldByNode(userId, nodeId, jobId);
+
+    if (body.type !== job.type) {
+      throw new BadRequestException(
+        `result type "${body.type}" does not match job type "${job.type}"`,
+      );
+    }
+
+    const handler = this.registry.get(job.type);
+    if (!handler?.persistNodeResult || !handler.nodeResultSchema) {
+      throw new BadRequestException(`job type "${job.type}" is not node-persistable`);
+    }
+
+    // Manual .parse (not the global ZodValidationPipe) since the schema is
+    // resolved per-job-type at runtime; wrap so the ZodError surfaces as a
+    // clean 400 instead of an unhandled 500.
+    let parsed: unknown;
+    try {
+      parsed = handler.nodeResultSchema.parse(body.result);
+    } catch (err) {
+      throw new BadRequestException(
+        `invalid ${job.type} result payload: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    try {
+      await handler.persistNodeResult(job, parsed);
+    } catch (err) {
+      // DESIGN CHOICE: a persist crash is treated as a JOB failure — the job is
+      // routed through the shared failure/retry state machine (backoff, attempts
+      // budget) exactly as if the server-side handler had thrown, and the node
+      // receives a 500 so it knows the result was NOT accepted. The node must
+      // not retry the submit itself: the server now owns the job's retry
+      // lifecycle (the row is back to pending/failed, no longer held under this
+      // node's lease).
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `Node ${nodeId} result persist failed for EnrichmentJob ${jobId} (type="${job.type}"): ${msg}`,
+      );
+      await this.terminal.completeFailed(job, err);
+      throw new InternalServerErrorException(
+        'failed to persist node result; job routed through the failure/retry path',
+      );
+    }
+
+    await this.terminal.completeSucceeded(job);
+    return { ok: true };
+  }
+
+  /**
+   * Ingest a node-reported failure for a claimed job. Routed through the same
+   * terminal failure state machine as the in-process worker: rate-limited
+   * reports enter the deferral path (and trip the shared provider-throttle
+   * gate); everything else enters the exponential-retry path. The node's
+   * `willRetry` flag is advisory only — the server's attempts budget decides.
+   */
+  async reportJobFailure(
+    userId: string,
+    nodeId: string,
+    jobId: string,
+    body: { error: string; rateLimited?: boolean; retryAfterMs?: number | null },
+  ): Promise<{ ok: true }> {
+    const job = await this.assertJobHeldByNode(userId, nodeId, jobId);
+
+    await this.terminal.completeFailed(job, body.error, {
+      rateLimited: body.rateLimited,
+      retryAfterMs: body.retryAfterMs ?? null,
+    });
+
+    return { ok: true };
+  }
+
+  // -------------------------------------------------------------------------
   // listNodes
   // -------------------------------------------------------------------------
 
@@ -348,37 +483,35 @@ export class NodesService {
    * TODO: fill real sha256/bytes hashes
    */
   getModelManifest() {
-    return {
-      models: [
-        {
-          name: 'clip-vit-b32-vision-quantized.onnx',
-          url: 'https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx',
-          sha256: null,
-          bytes: null,
-          targetSubdir: 'models',
-        },
-        {
-          name: 'blazeface-back.json',
-          url: 'https://github.com/vladmandic/human-models/raw/main/models/blazeface-back.json',
-          sha256: null,
-          bytes: null,
-          targetSubdir: 'human',
-        },
-        {
-          name: 'faceres.json',
-          url: 'https://github.com/vladmandic/human-models/raw/main/models/faceres.json',
-          sha256: null,
-          bytes: null,
-          targetSubdir: 'human',
-        },
-        {
-          name: 'faceres.bin',
-          url: 'https://github.com/vladmandic/human-models/raw/main/models/faceres.bin',
-          sha256: null,
-          bytes: null,
-          targetSubdir: 'human',
-        },
-      ],
-    };
+    return { models: [
+      {
+        name: 'clip-vit-b32-vision-quantized.onnx',
+        url: 'https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx',
+        sha256: null,
+        bytes: null,
+        targetSubdir: 'models',
+      },
+      {
+        name: 'blazeface-back.json',
+        url: 'https://github.com/vladmandic/human-models/raw/main/models/blazeface-back.json',
+        sha256: null,
+        bytes: null,
+        targetSubdir: 'human',
+      },
+      {
+        name: 'faceres.json',
+        url: 'https://github.com/vladmandic/human-models/raw/main/models/faceres.json',
+        sha256: null,
+        bytes: null,
+        targetSubdir: 'human',
+      },
+      {
+        name: 'faceres.bin',
+        url: 'https://github.com/vladmandic/human-models/raw/main/models/faceres.bin',
+        sha256: null,
+        bytes: null,
+        targetSubdir: 'human',
+      },
+    ] };
   }
 }

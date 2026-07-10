@@ -17,6 +17,7 @@ import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 import { NodeStatus } from '@prisma/client';
 import { NodesService } from './nodes.service';
+import { SubmitJobResultDto, ReportJobFailureDto } from './dto/compute-result.dto';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
@@ -167,6 +168,78 @@ export class NodesController {
     @Body() dto: RenewLeaseDto,
   ) {
     return this.nodesService.renewLease(user.id, id, jobId, dto.leaseMs);
+  }
+
+  // -------------------------------------------------------------------------
+  // POST /nodes/:id/jobs/:jobId/result
+  // -------------------------------------------------------------------------
+
+  @Post(':id/jobs/:jobId/result')
+  @Auth({ permissions: [PERMISSIONS.JOBS_WRITE] })
+  @ApiOperation({
+    summary: 'Submit a node-computed result for a claimed job',
+    description:
+      'Validates the payload against the job type\'s node-result schema, persists it via the ' +
+      'handler\'s persist-only path, and completes the job as succeeded (same terminal ' +
+      'semantics as the in-process worker). The job must still be held by this node under a ' +
+      'live lease — late results after lease expiry/re-claim are rejected with 409.',
+  })
+  @ApiParam({ name: 'id', description: 'Worker node UUID' })
+  @ApiParam({ name: 'jobId', description: 'Enrichment job UUID' })
+  @ApiResponse({ status: 201, description: 'Result persisted; job succeeded — { ok: true }' })
+  @ApiResponse({
+    status: 400,
+    description: 'Type mismatch, job type not node-persistable, or invalid result payload',
+  })
+  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
+  @ApiResponse({ status: 404, description: 'Node or job not found' })
+  @ApiResponse({
+    status: 409,
+    description: 'Job not held by this node (not claimed by it, not running, or lease expired)',
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Persist failed; job routed through the failure/retry path — do not resubmit',
+  })
+  async submitJobResult(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Param('jobId') jobId: string,
+    @Body() dto: SubmitJobResultDto,
+  ) {
+    return this.nodesService.submitJobResult(user.id, id, jobId, dto);
+  }
+
+  // -------------------------------------------------------------------------
+  // POST /nodes/:id/jobs/:jobId/failure
+  // -------------------------------------------------------------------------
+
+  @Post(':id/jobs/:jobId/failure')
+  @Auth({ permissions: [PERMISSIONS.JOBS_WRITE] })
+  @ApiOperation({
+    summary: 'Report a node-side failure for a claimed job',
+    description:
+      'Routes the job through the shared terminal failure state machine: rateLimited reports ' +
+      'enter the deferral path (and trip the shared provider-throttle gate); everything else ' +
+      'enters the exponential-retry path. willRetry is advisory only — the server\'s attempts ' +
+      'budget decides whether the job is requeued or permanently failed.',
+  })
+  @ApiParam({ name: 'id', description: 'Worker node UUID' })
+  @ApiParam({ name: 'jobId', description: 'Enrichment job UUID' })
+  @ApiResponse({ status: 201, description: 'Failure recorded — { ok: true }' })
+  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
+  @ApiResponse({ status: 404, description: 'Node or job not found' })
+  @ApiResponse({
+    status: 409,
+    description: 'Job not held by this node (not claimed by it, not running, or lease expired)',
+  })
+  async reportJobFailure(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Param('jobId') jobId: string,
+    @Body() dto: ReportJobFailureDto,
+  ) {
+    return this.nodesService.reportJobFailure(user.id, id, jobId, dto);
   }
 
   // -------------------------------------------------------------------------
