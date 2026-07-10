@@ -29,6 +29,16 @@
  *   thumbnail downscaling. We mock sharp before importing the handler so Jest
  *   intercepts the ESM-style default export and each test controls behaviour
  *   through the mock factory returned by jest.requireMock('sharp').
+ *
+ * OOM-fix coverage note:
+ *   VideoFaceDetectionHandler streams the downloaded video straight to a temp
+ *   file (`streamToTempFile`) instead of buffering it into memory, and cleans
+ *   that temp file up in a `finally` block after frame extraction + detection.
+ *   `fs`'s `promises.unlink` is spied on (delegating to the real implementation
+ *   so the temp file is actually removed and no test files leak) so we can
+ *   assert the cleanup happens on both the success and thrown-error paths,
+ *   without otherwise disturbing real `fs` behavior (`@prisma/client` needs the
+ *   real filesystem module to load).
  */
 
 // ---------------------------------------------------------------------------
@@ -82,11 +92,29 @@ jest.mock('fluent-ffmpeg', () => {
   return { default: ffmpegMock, __esModule: true, ...ffmpegMock };
 });
 
+// Spy on fs.promises.unlink (delegating to the real implementation) so tests
+// can assert the downloaded temp video file is actually cleaned up, without
+// replacing the rest of the real `fs` module — @prisma/client and other
+// transitive imports need real fs to load.
+jest.mock('fs', () => {
+  const actual = jest.requireActual('fs');
+  return {
+    ...actual,
+    promises: {
+      ...actual.promises,
+      unlink: jest.fn().mockImplementation((...args: unknown[]) =>
+        (actual.promises.unlink as (...a: unknown[]) => Promise<void>)(...args),
+      ),
+    },
+  };
+});
+
 // ---------------------------------------------------------------------------
 // Imports — after mocks so jest intercepts module loading
 // ---------------------------------------------------------------------------
 
 import { Readable } from 'stream';
+import { promises as fsPromises } from 'fs';
 import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
 import { VideoFaceDetectionHandler } from './video-face-detection.handler';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
@@ -720,6 +748,60 @@ describe('VideoFaceDetectionHandler', () => {
       await handler.process(makeJob());
 
       expect(mockPrisma.storageObject.upsert).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Downloaded temp video file cleanup (OOM fix regression coverage)
+  //
+  // VideoFaceDetectionHandler streams the download straight to a temp file
+  // (constant memory) instead of buffering the whole video into a Buffer, and
+  // removes that temp file in a `finally` block that wraps frame extraction +
+  // detection. These tests assert the `finally` actually fires — both when
+  // everything succeeds and when a downstream step throws.
+  // -------------------------------------------------------------------------
+
+  describe('downloaded temp video file cleanup (OOM fix)', () => {
+    const mockUnlink = fsPromises.unlink as jest.Mock;
+
+    it('cleans up the downloaded temp file exactly once after successful frame extraction', async () => {
+      await handler.process(makeJob());
+
+      // The path handed to extractFrames is the same one the handler must clean up.
+      const tmpVideoPath = mockFrameExtractor.extractFrames.mock.calls[0][0] as string;
+      expect(typeof tmpVideoPath).toBe('string');
+      expect(tmpVideoPath).toMatch(/memoriaHub-vface-dl-.*\.mp4$/);
+
+      expect(mockUnlink).toHaveBeenCalledTimes(1);
+      expect(mockUnlink).toHaveBeenCalledWith(tmpVideoPath);
+    });
+
+    it('still cleans up the downloaded temp file when frame extraction throws', async () => {
+      mockFrameExtractor.extractFrames.mockRejectedValue(new Error('ffmpeg exploded'));
+
+      await expect(handler.process(makeJob())).rejects.toThrow('ffmpeg exploded');
+
+      const tmpVideoPath = mockFrameExtractor.extractFrames.mock.calls[0][0] as string;
+      expect(mockUnlink).toHaveBeenCalledTimes(1);
+      expect(mockUnlink).toHaveBeenCalledWith(tmpVideoPath);
+    });
+
+    it('still cleans up the downloaded temp file when face detection throws mid-loop', async () => {
+      mockCore.detectWithThrottleMapping.mockRejectedValue(new Error('provider exploded'));
+
+      await expect(handler.process(makeJob())).rejects.toThrow('provider exploded');
+
+      const tmpVideoPath = mockFrameExtractor.extractFrames.mock.calls[0][0] as string;
+      expect(mockUnlink).toHaveBeenCalledTimes(1);
+      expect(mockUnlink).toHaveBeenCalledWith(tmpVideoPath);
+    });
+
+    it('never lets an unlink failure escape process() (cleanup errors are swallowed)', async () => {
+      mockUnlink.mockRejectedValueOnce(new Error('ENOENT: no such file'));
+
+      await expect(handler.process(makeJob())).resolves.toBeUndefined();
+
+      expect(mockUnlink).toHaveBeenCalledTimes(1);
     });
   });
 });

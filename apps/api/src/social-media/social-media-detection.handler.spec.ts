@@ -23,10 +23,46 @@
  *   - rerun previously-flagged now clean → strips system tags + clears source + fan-out
  *   - non-video / deleted / missing item / no storageObject → early return not_processed
  *   - handler error → status failed + rethrow
+ *   - OOM-fix regression: the memoized downloadVideo() temp-file path is
+ *     downloaded exactly once and cleaned up exactly once even when BOTH the
+ *     legacy re-probe path and the OCR path run in the same job (ffprobe is
+ *     mocked via ffprobe.util so no real ffmpeg binary is invoked for that
+ *     scenario)
  */
+
+// Mock ffprobe.util so the legacy re-probe branch never shells out to a real
+// ffprobe binary — only used by the OOM-fix "downloadVideo() memoization"
+// tests below, which deliberately omit the persisted `video-probe` block to
+// force that branch.
+jest.mock('../storage/processing/processors/ffprobe.util', () => ({
+  probeVideoFile: jest.fn().mockResolvedValue({}),
+  extractContainerMetadata: jest.fn().mockReturnValue({
+    formatTags: {},
+    streamTags: [],
+    formatName: 'mov,mp4,m4a,3gp,3g2,mj2',
+  }),
+}));
+
+// Spy on fs.promises.unlink (delegating to the real implementation) so tests
+// can assert the memoized downloaded temp file is cleaned up exactly once,
+// without replacing the rest of the real `fs` module — @prisma/client and
+// other transitive imports need real fs to load.
+jest.mock('fs', () => {
+  const actual = jest.requireActual('fs');
+  return {
+    ...actual,
+    promises: {
+      ...actual.promises,
+      unlink: jest.fn().mockImplementation((...args: unknown[]) =>
+        (actual.promises.unlink as (...a: unknown[]) => Promise<void>)(...args),
+      ),
+    },
+  };
+});
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { Readable } from 'stream';
+import { promises as fsPromises } from 'fs';
 import {
   EnrichmentJob,
   JobReason,
@@ -642,6 +678,97 @@ describe('SocialMediaDetectionHandler', () => {
 
       // The original error should still propagate (not the status-write error).
       await expect(handler.process(makeJob())).rejects.toThrow('DB exploded');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // OOM-fix regression: memoized downloadVideo() temp-file cleanup
+  //
+  // The handler streams the video to a temp file (constant memory) the first
+  // time downloadVideo() is called and memoizes the path so a second logical
+  // "use" in the same job run (legacy re-probe AND the OCR fallback) reuses
+  // the same file instead of downloading again. The temp file must be cleaned
+  // up EXACTLY ONCE, in the outer finally block, after every use is done.
+  // -------------------------------------------------------------------------
+  describe('downloaded temp file cleanup — memoized across legacy re-probe + OCR (OOM fix)', () => {
+    const mockUnlink = fsPromises.unlink as jest.Mock;
+    let mockDownload: jest.Mock;
+
+    /**
+     * No persisted `video-probe` block at all → readPersistedProbe() returns
+     * null, forcing the legacy re-probe branch (downloadVideo() call #1). The
+     * WhatsApp-reshare-style filename triggers heur-reshare-filename
+     * (suspicious, no conclusive tier-1 rule) so recommendTier2 is also true
+     * — the OCR fallback branch then calls downloadVideo() again (call #2,
+     * memoized) in the very same job run.
+     */
+    function makeLegacyMediaItemNeedingReprobeAndOcr(overrides: Record<string, any> = {}) {
+      return makeMediaItem({
+        originalFilename: 'VID-20260101-WA0012.mp4',
+        storageObject: {
+          storageKey: 'key-1',
+          storageProvider: 's3',
+          bucket: 'bucket-1',
+          name: 'video.mp4',
+          metadata: {},
+        },
+        ...overrides,
+      });
+    }
+
+    beforeEach(() => {
+      mockDownload = jest.fn().mockResolvedValue(Readable.from(Buffer.from('fake-video-bytes')));
+      mockResolver.getProviderFor.mockResolvedValue({ download: mockDownload });
+      mockOcr.recognizeVideo.mockResolvedValue({ texts: [], available: true });
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeLegacyMediaItemNeedingReprobeAndOcr() as any,
+      );
+    });
+
+    it('downloads exactly once even though both re-probe and OCR need the video', async () => {
+      await handler.process(makeJob());
+
+      // downloadVideo() is invoked from both the re-probe branch and the OCR
+      // branch, but the actual download (getProviderFor + provider.download)
+      // must only happen once — the second call reuses the memoized path.
+      expect(mockResolver.getProviderFor).toHaveBeenCalledTimes(1);
+      expect(mockDownload).toHaveBeenCalledTimes(1);
+      expect(mockOcr.recognizeVideo).toHaveBeenCalledTimes(1);
+    });
+
+    it('cleans up the memoized temp file exactly once, after both uses complete', async () => {
+      await handler.process(makeJob());
+
+      expect(mockUnlink).toHaveBeenCalledTimes(1);
+      const [tmpPath] = mockUnlink.mock.calls[0];
+      expect(tmpPath).toMatch(/memoriaHub-social-dl-.*\.mp4$/);
+
+      // The OCR call received the very same memoized path.
+      const [ocrPathArg] = mockOcr.recognizeVideo.mock.calls[0];
+      expect(ocrPathArg).toBe(tmpPath);
+    });
+
+    it('still cleans up the memoized temp file exactly once (not leaked, not double-cleaned) when the OCR call throws', async () => {
+      mockOcr.recognizeVideo.mockRejectedValue(new Error('tesseract exploded'));
+
+      await expect(handler.process(makeJob())).rejects.toThrow('tesseract exploded');
+
+      expect(mockDownload).toHaveBeenCalledTimes(1);
+      expect(mockUnlink).toHaveBeenCalledTimes(1);
+    });
+
+    it('still cleans up the memoized temp file exactly once when the legacy re-probe itself throws', async () => {
+      const ffprobeUtil = jest.requireMock(
+        '../storage/processing/processors/ffprobe.util',
+      ) as { probeVideoFile: jest.Mock };
+      ffprobeUtil.probeVideoFile.mockRejectedValueOnce(new Error('ffprobe exploded'));
+
+      await expect(handler.process(makeJob())).rejects.toThrow('ffprobe exploded');
+
+      // The OCR branch is never reached — the re-probe error aborts the job first.
+      expect(mockOcr.recognizeVideo).not.toHaveBeenCalled();
+      expect(mockDownload).toHaveBeenCalledTimes(1);
+      expect(mockUnlink).toHaveBeenCalledTimes(1);
     });
   });
 });
