@@ -116,12 +116,16 @@ export const systemSettingsSchema = z.object({
     ocrMaxFrames: z.number().int().min(2).max(6).default(4),
     ocrTimeoutSeconds: z.number().int().min(10).max(300).default(60),
     minConfidence: z.number().min(0.5).max(1.0).default(0.8),
+    maxDurationSeconds: z.number().int().min(60).max(3600).default(300),
+    maxSizeBytes: z.number().int().min(10_000_000).default(500_000_000),
   }).optional().default({
     ocrEnabled: true,
     ocrLanguages: ['eng'],
     ocrMaxFrames: 4,
     ocrTimeoutSeconds: 60,
     minConfidence: 0.8,
+    maxDurationSeconds: 300,
+    maxSizeBytes: 500_000_000,
   }),
   geo: z.object({
     reverseProvider: z.enum(['offline', 'nominatim', 'google']).default('offline'),
@@ -206,6 +210,8 @@ export const systemSettingsPatchSchema = z.object({
     ocrMaxFrames: z.number().int().min(2).max(6).optional(),
     ocrTimeoutSeconds: z.number().int().min(10).max(300).optional(),
     minConfidence: z.number().min(0.5).max(1.0).optional(),
+    maxDurationSeconds: z.number().int().min(60).max(3600).optional(),
+    maxSizeBytes: z.number().int().min(10_000_000).optional(),
   }).optional(),
   geo: z.object({
     reverseProvider: z.enum(['offline', 'nominatim', 'google']).optional(),

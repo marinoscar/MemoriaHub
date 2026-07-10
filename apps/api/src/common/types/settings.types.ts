@@ -98,6 +98,10 @@ export interface SystemSettingsValue {
     ocrMaxFrames: number;
     ocrTimeoutSeconds: number;
     minConfidence: number;
+    /** Videos longer than this are treated as clean without download/OCR. */
+    maxDurationSeconds: number;
+    /** Size fallback (bytes) used only when the duration is unknown. */
+    maxSizeBytes: number;
   };
   geo?: {
     reverseProvider: 'offline' | 'nominatim' | 'google';
@@ -216,6 +220,8 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     ocrMaxFrames: 4,
     ocrTimeoutSeconds: 60,
     minConfidence: 0.8,
+    maxDurationSeconds: 300,
+    maxSizeBytes: 500_000_000,
   },
   geo: {
     reverseProvider: process.env['GEO_PROVIDER'] === 'nominatim' ? 'nominatim' : 'offline',

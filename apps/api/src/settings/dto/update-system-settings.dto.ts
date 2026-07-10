@@ -129,6 +129,8 @@ export const patchSystemSettingsSchema = z.object({
       ocrMaxFrames: z.number().int().min(2).max(6).optional(),
       ocrTimeoutSeconds: z.number().int().min(10).max(300).optional(),
       minConfidence: z.number().min(0.5).max(1.0).optional(),
+      maxDurationSeconds: z.number().int().min(60).max(3600).optional(),
+      maxSizeBytes: z.number().int().min(10_000_000).optional(),
     })
     .optional(),
   geo: z

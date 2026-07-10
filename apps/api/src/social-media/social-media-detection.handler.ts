@@ -10,7 +10,9 @@
 //   2. Feature gate: features.socialMediaDetection + SOCIAL_MEDIA_DETECTION_ENABLED.
 //   3. Mark MediaSocialStatus → processing.
 //   4. Build VideoDetectionInput from persisted ffprobe metadata; re-probe legacy
-//      items (no formatTags) by downloading + ffprobe.
+//      items (no formatTags) by downloading + ffprobe. Pre-flight caps run
+//      first (duration/size → treat as clean, matchedRule 'skip-*-cap', no
+//      download), then the orientation gate (landscape → no download, no OCR).
 //   5. Tier-1 (metadata/filename) detection.
 //   6. Tier-2 OCR fallback when Tier-1 is inconclusive but suspicious.
 //   7a. Detected → apply tags ("Social Media" + platform), write status + source.
@@ -32,7 +34,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
-import { streamToTempFile } from '../storage/processing/processors/stream-utils';
+import { streamToTempFile, assertDiskSpaceForDownload } from '../storage/processing/processors/stream-utils';
 import { probeVideoFile, extractContainerMetadata } from '../storage/processing/processors/ffprobe.util';
 import {
   SocialMediaDetectorService,
@@ -55,6 +57,14 @@ const PLATFORM_TAG: Record<SocialPlatform, string | null> = {
 
 /** Every tag name this handler may apply — used to strip on a rerun-gone-clean. */
 const ALL_SOCIAL_TAG_NAMES = [SOCIAL_TAG, 'TikTok', 'Instagram', 'Facebook'];
+
+/**
+ * Optional hard cap (bytes) on videos processed by video enrichment; 0
+ * (default) disables the cap. Shared env var with video face detection so
+ * operators set one knob for both.
+ */
+const VIDEO_ENRICHMENT_MAX_BYTES = (): number =>
+  parseInt(process.env['VIDEO_ENRICHMENT_MAX_BYTES'] ?? '0', 10);
 
 @Injectable()
 export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleInit {
@@ -106,6 +116,7 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
             storageProvider: true,
             bucket: true,
             name: true,
+            size: true,
             metadata: true,
           },
         },
@@ -163,6 +174,63 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
 
       const probe = readPersistedProbe(mediaItem.storageObject.metadata);
 
+      // --- 4b. Pre-flight caps (cheapest checks first — no download) ---
+      // Operator domain fact: genuine social-media clips (TikTok/Instagram/
+      // Facebook re-uploads) never exceed ~5 minutes — anything longer is
+      // treated as CLEAN without downloading or OCR'ing a single byte. When
+      // the duration is unknown (no persisted probe), the object size is the
+      // fallback signal. The env hard cap (shared with video face detection)
+      // is checked first and unconditionally.
+      const knownDurationMs = probe?.durationMs ?? mediaItem.durationMs ?? undefined;
+      const sizeBytes = mediaItem.storageObject.size;
+      const maxDurationSeconds = settings.socialMedia?.maxDurationSeconds ?? 300;
+      const maxSizeBytes = settings.socialMedia?.maxSizeBytes ?? 500_000_000;
+      const hardCapBytes = VIDEO_ENRICHMENT_MAX_BYTES();
+
+      let skipRule: string | null = null;
+      if (hardCapBytes > 0 && sizeBytes > BigInt(hardCapBytes)) {
+        skipRule = 'skip-size-cap';
+      } else if (knownDurationMs !== undefined && knownDurationMs > maxDurationSeconds * 1000) {
+        skipRule = 'skip-duration-cap';
+      } else if (knownDurationMs === undefined && sizeBytes > BigInt(maxSizeBytes)) {
+        skipRule = 'skip-size-cap';
+      }
+
+      if (skipRule) {
+        // Route through the normal clean path so a previously-flagged item
+        // still gets its stale system tags stripped + source cleared, and the
+        // withheld downstream video enrichment still fans out.
+        await this.applyClean(mediaItem.id, mediaItem.socialMediaSource, skipRule);
+        this.logger.log(
+          `social_media_detection job ${job.id}: MediaItem ${mediaItemId} skipped as clean (${skipRule}) — ` +
+            `duration=${knownDurationMs !== undefined ? `${knownDurationMs}ms` : 'unknown'}, size=${sizeBytes} bytes`,
+        );
+        await this.mediaEnrichment.enqueueVideoPostDetectionEnrichment(
+          {
+            id: mediaItem.id,
+            type: mediaItem.type,
+            circleId: mediaItem.circleId,
+            deletedAt: mediaItem.deletedAt,
+          },
+          job.reason,
+        );
+        return;
+      }
+
+      // --- 4c. Orientation gate ---
+      // Operator domain fact: TikTok/Instagram videos are never landscape;
+      // Facebook can be, but landscape FB re-shares are accepted as covered by
+      // the filename/metadata rules alone. A strictly-landscape video is
+      // therefore never downloaded for this job: the legacy re-probe is
+      // skipped (Tier-1 runs on filename + whatever persisted metadata exists,
+      // even if incomplete) and Tier-2 OCR is forced off. Deliberate
+      // precision-over-compute tradeoff — a landscape video detectable only
+      // via watermark OCR is missed.
+      const knownWidth = probe?.width ?? mediaItem.width ?? undefined;
+      const knownHeight = probe?.height ?? mediaItem.height ?? undefined;
+      const isLandscape =
+        knownWidth !== undefined && knownHeight !== undefined && knownWidth > knownHeight;
+
       // Memoizes the temp file PATH (not a buffer) so repeated calls reuse
       // the same download.
       const downloadVideo = async (): Promise<string> => {
@@ -171,10 +239,15 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
           mediaItem.storageObject!.storageProvider,
           mediaItem.storageObject!.bucket,
         );
+        // Pre-flight: fail fast (through the normal retry/backoff path) when
+        // the temp filesystem cannot hold the download plus headroom.
+        await assertDiskSpaceForDownload(sizeBytes, tmpdir());
         const stream = await provider.download(mediaItem.storageObject!.storageKey);
         const tmpPath = join(tmpdir(), `memoriaHub-social-dl-${randomUUID()}${fileExt}`);
-        await streamToTempFile(stream, tmpPath);
+        // Record the path BEFORE streaming so the outer finally can unlink a
+        // partial file when streamToTempFile itself fails mid-download.
         downloadedVideoPath = tmpPath;
+        await streamToTempFile(stream, tmpPath);
         return downloadedVideoPath;
       };
 
@@ -193,6 +266,21 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
           height: probe.height ?? mediaItem.height ?? undefined,
         };
         durationMs = probe.durationMs ?? mediaItem.durationMs ?? undefined;
+      } else if (isLandscape) {
+        // Landscape + no persisted container tags: do NOT download for a
+        // re-probe (see orientation gate above) — run Tier-1 with the filename
+        // and whatever partial persisted metadata exists.
+        input = {
+          kind: 'video',
+          filename,
+          formatTags: probe?.formatTags,
+          streamTags: probe?.streamTags,
+          formatName: probe?.formatName,
+          durationMs: knownDurationMs,
+          width: knownWidth,
+          height: knownHeight,
+        };
+        durationMs = knownDurationMs;
       } else {
         // Legacy item probed before this feature existed → re-probe on the fly.
         const videoPath = await downloadVideo();
@@ -211,10 +299,10 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
       }
 
       // --- 5. Tier-1 detection ---
-      const { result: tier1Result, recommendTier2 } = this.detector.detectTier1(
-        input,
-        minConfidence,
-      );
+      const { result: tier1Result, recommendTier2: tier1RecommendsOcr } =
+        this.detector.detectTier1(input, minConfidence);
+      // Landscape videos never get OCR (see orientation gate above).
+      const recommendTier2 = tier1RecommendsOcr && !isLandscape;
 
       let result: DetectionResult | null = tier1Result;
 
@@ -349,10 +437,16 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
     });
   }
 
-  /** Clean: write status; if previously flagged, strip system tags + clear source. */
+  /**
+   * Clean: write status; if previously flagged, strip system tags + clear
+   * source. `matchedRule` records WHY the item read as clean when it was
+   * decided by a pre-flight cap (e.g. 'skip-duration-cap' / 'skip-size-cap')
+   * rather than a full two-tier pass; null for a genuine no-match.
+   */
   private async applyClean(
     mediaItemId: string,
     previousSource: string | null,
+    matchedRule: string | null = null,
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       await tx.mediaSocialStatus.upsert({
@@ -364,7 +458,7 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
           platform: null,
           detectionMethod: null,
           confidence: null,
-          matchedRule: null,
+          matchedRule,
           processedAt: new Date(),
           lastError: null,
         },
@@ -374,7 +468,7 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
           platform: null,
           detectionMethod: null,
           confidence: null,
-          matchedRule: null,
+          matchedRule,
           processedAt: new Date(),
           lastError: null,
         },

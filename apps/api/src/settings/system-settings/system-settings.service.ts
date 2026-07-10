@@ -327,6 +327,14 @@ export class SystemSettingsService {
           (dto as any).socialMedia?.minConfidence ??
           (current as any).socialMedia?.minConfidence ??
           0.8,
+        maxDurationSeconds:
+          (dto as any).socialMedia?.maxDurationSeconds ??
+          (current as any).socialMedia?.maxDurationSeconds ??
+          300,
+        maxSizeBytes:
+          (dto as any).socialMedia?.maxSizeBytes ??
+          (current as any).socialMedia?.maxSizeBytes ??
+          500_000_000,
       },
       geo: {
         reverseProvider:
