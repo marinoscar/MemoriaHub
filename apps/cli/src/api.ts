@@ -380,21 +380,25 @@ export class ApiClient {
   /**
    * Submit a completed job's result.
    *
-   * NOTE: the server-side result endpoint is not yet built. Callers should wrap
-   * this in try/catch and degrade gracefully until it lands.
+   * POSTs the typed envelope `{ type, result }` expected by
+   * `POST /api/nodes/:id/jobs/:jobId/result` — the server dispatches on `type`
+   * and zod-validates the per-type `result` payload (invalid → 400).
    */
-  submitJobResult(nodeId: string, jobId: string, result: unknown): Promise<unknown> {
+  submitJobResult(
+    nodeId: string,
+    jobId: string,
+    type: string,
+    result: unknown,
+  ): Promise<unknown> {
     return this.post<unknown>(
       `/api/nodes/${encodeURIComponent(nodeId)}/jobs/${encodeURIComponent(jobId)}/result`,
-      result,
+      { type, result },
     );
   }
 
   /**
-   * Report a job failure so the server can requeue/fail it.
-   *
-   * NOTE: like submitJobResult, this endpoint may not yet exist server-side;
-   * callers should degrade gracefully.
+   * Report a job failure so the server can requeue/fail it
+   * (`POST /api/nodes/:id/jobs/:jobId/failure`).
    */
   reportJobFailure(
     nodeId: string,

@@ -219,15 +219,16 @@ export class NodeEngine extends NodeTypedEmitter {
 
       const result = await this.dispatcher.compute(type, downloaded ? tmpPath : '', params ?? {});
 
-      // Submit the result. The endpoint may not exist yet server-side — degrade.
+      // Submit the typed result envelope; degrade gracefully on submit failure
+      // (the server lease reaper will requeue the job for another attempt).
       let submitted = false;
       try {
-        await this.api.submitJobResult(this.nodeId, jobId, result);
+        await this.api.submitJobResult(this.nodeId, jobId, type, result);
         submitted = true;
       } catch (err) {
         this.emit(NODE_EV.HEARTBEAT_FAIL, {
           error:
-            `result endpoint not yet available for job ${jobId}: ` +
+            `result submission failed for job ${jobId}: ` +
             `${err instanceof Error ? err.message : String(err)}`,
         });
       }
@@ -248,7 +249,7 @@ export class NodeEngine extends NodeTypedEmitter {
           willRetry: true,
         });
       } catch {
-        /* failure endpoint may not exist yet — degrade gracefully */
+        /* failure report is best-effort — server lease expiry requeues the job */
       }
       this.emit(NODE_EV.JOB_ERROR, { jobId, type, error: message, willRetry: true });
     } finally {
