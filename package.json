@@ -2,7 +2,8 @@
   "name": "enterprise-app",
   "private": true,
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
     "api": "npm -w apps/api",
@@ -16,7 +17,13 @@
   "overrides": {
     "@nestjs/common": "^11.1.12",
     "@nestjs/core": "^11.1.12",
-    "rxjs": "7.8.2"
+    "rxjs": "7.8.2",
+    "sharp": "0.35.1",
+    "onnxruntime-node": "1.27.0",
+    "@tensorflow/tfjs": "4.22.0",
+    "@tensorflow/tfjs-backend-wasm": "4.22.0",
+    "@vladmandic/human": "3.3.6",
+    "tesseract.js": "7.0.0"
   },
   "dependencies": {
     "ink": "^6.8.0"
