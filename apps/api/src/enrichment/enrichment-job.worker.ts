@@ -2,10 +2,14 @@ import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@ne
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
 import { EnrichmentClaimService } from './enrichment-claim.service';
-import { EnrichmentJob, JobStatus, Prisma } from '@prisma/client';
-import { RateLimitError, classifyRateLimit } from './rate-limit.error';
-import { computeQueueBackoffMs } from './backoff.util';
+import { EnrichmentTerminalService } from './enrichment-terminal.service';
+import { EnrichmentJob, JobStatus } from '@prisma/client';
 import { ProviderThrottleService } from './provider-throttle.service';
+
+// The terminal state machine (succeeded / rate-limit deferral / exponential
+// retry) lives in EnrichmentTerminalService so node-reported results share it.
+// ENRICHMENT_MAX_ATTEMPTS is re-exported here for existing consumers.
+export { ENRICHMENT_MAX_ATTEMPTS } from './enrichment-terminal.service';
 
 // ---------------------------------------------------------------------------
 // Config helpers — read from env at startup (same pattern as existing worker)
@@ -33,20 +37,6 @@ export function isEnrichmentWorkerEnabled(env: NodeJS.ProcessEnv = process.env):
   const faceEnabled = env['FACE_WORKER_ENABLED'];
   return !(enrichmentEnabled === 'false' || faceEnabled === 'false');
 }
-
-// Normal-failure retry config.
-// ENRICHMENT_MAX_ATTEMPTS is exported so other queue components (e.g. the
-// admin stuck-reset path, which must fail — not requeue — jobs whose attempts
-// budget is exhausted) share the exact same budget as the worker.
-export const ENRICHMENT_MAX_ATTEMPTS = getEnvInt('ENRICHMENT_MAX_ATTEMPTS', 3);
-const MAX_ATTEMPTS = ENRICHMENT_MAX_ATTEMPTS;
-const RETRY_BASE_MS = getEnvInt('ENRICHMENT_RETRY_BASE_MS', 2_000);
-const RETRY_MAX_MS = getEnvInt('ENRICHMENT_RETRY_MAX_MS', 60_000);
-
-// Rate-limit deferral config
-const RL_BASE_MS = getEnvInt('ENRICHMENT_RATELIMIT_BASE_MS', 30_000);
-const RL_MAX_MS = getEnvInt('ENRICHMENT_RATELIMIT_MAX_MS', 900_000);
-const RL_MAX_HITS = getEnvInt('ENRICHMENT_RATELIMIT_MAX_HITS', 10);
 
 // Active per-job execution timeout. A handler that runs longer than this is
 // aborted (its worker slot freed) and routed through the normal-failure retry
@@ -92,6 +82,7 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
     private readonly registry: EnrichmentHandlerRegistry,
     private readonly throttle: ProviderThrottleService,
     private readonly claimService: EnrichmentClaimService,
+    private readonly terminal: EnrichmentTerminalService,
   ) {}
 
   /**
@@ -242,38 +233,6 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
     return Promise.race([work, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
   }
 
-  /**
-   * Write a job's terminal/requeue state with one retry. If the status update
-   * throws (e.g. a transient DB error), the row would otherwise be orphaned in
-   * `running` forever — retry once after a short delay; if that also fails, log
-   * and swallow so the worker slot is freed (the stuck-reset cron recovers the
-   * row via the settings-driven threshold).
-   */
-  private async safeTerminalUpdate(
-    jobId: string,
-    jobType: string,
-    data: Prisma.EnrichmentJobUpdateInput,
-  ): Promise<void> {
-    try {
-      await this.prisma.enrichmentJob.update({ where: { id: jobId }, data });
-    } catch (firstErr) {
-      const firstMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
-      this.logger.warn(
-        `EnrichmentJob ${jobId} (type="${jobType}"): status update failed (${firstMsg}); retrying once`,
-      );
-      await this.sleep(1_000);
-      try {
-        await this.prisma.enrichmentJob.update({ where: { id: jobId }, data });
-      } catch (retryErr) {
-        const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-        this.logger.error(
-          `EnrichmentJob ${jobId} (type="${jobType}"): status update failed after retry (${retryMsg}); ` +
-            'leaving row in running — the stuck-reset cron will recover it',
-        );
-      }
-    }
-  }
-
   private async processJob(job: EnrichmentJob): Promise<void> {
     const handler = this.registry.get(job.type);
 
@@ -295,13 +254,10 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
       return;
     }
 
-    // Resolve a coarse provider key for the shared throttle gate.
-    // null = job type does not need provider-level throttling.
-    const throttleKey = ProviderThrottleService.resolveKey(job.type);
-
     try {
       // Wait out any active cooldown window before hitting the remote API.
       // No-op (zero cost) when the gate is idle or key is null.
+      const throttleKey = ProviderThrottleService.resolveKey(job.type);
       if (throttleKey) {
         await this.throttle.acquire(throttleKey);
       }
@@ -313,97 +269,14 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
         await handler.process(job);
       }
 
-      // Successful call — decay the exponential ramp toward baseline.
-      if (throttleKey) {
-        this.throttle.recordSuccess(throttleKey);
-      }
-
-      await this.safeTerminalUpdate(job.id, job.type, {
-        status: JobStatus.succeeded,
-        finishedAt: new Date(),
-        // Release the claim/lease so the terminal row is unowned.
-        claimedByNode: { disconnect: true },
-        leaseExpiresAt: null,
-        executor: null,
-      });
-
-      this.logger.log(`EnrichmentJob ${job.id} (type="${job.type}") succeeded for MediaItem ${job.mediaItemId ?? 'global'}`);
+      // Terminal success (throttle recordSuccess + succeeded write) is shared
+      // with node-reported results via EnrichmentTerminalService.
+      await this.terminal.completeSucceeded(job);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-
-      // Classify: did this handler throw (or cause) a rate-limit error?
-      const rl = error instanceof RateLimitError ? error : classifyRateLimit(error);
-
-      if (rl) {
-        // ── Rate-limit deferral path ──────────────────────────────────────
-        // Also trip the shared throttle gate so sibling jobs back off together.
-        if (throttleKey) {
-          this.throttle.trip(throttleKey, rl.retryAfterMs ?? null);
-        }
-
-        const hits = job.rateLimitHits + 1;
-        const delayMs = computeQueueBackoffMs(hits, {
-          baseMs: RL_BASE_MS,
-          maxMs: RL_MAX_MS,
-          retryAfterMs: rl.retryAfterMs ?? null,
-        });
-        const giveUp = hits >= RL_MAX_HITS;
-
-        await this.safeTerminalUpdate(job.id, job.type, {
-          status: giveUp ? JobStatus.failed : JobStatus.pending,
-          rateLimitHits: hits,
-          rateLimitedAt: new Date(),
-          scheduledFor: giveUp ? null : new Date(Date.now() + delayMs),
-          lastError: rl.message,
-          // attempts is NOT charged for rate-limit deferrals: un-charge the
-          // claim-time increment (absolute write, so a safeTerminalUpdate retry
-          // after a lost-ack first write can never double-decrement).
-          attempts: job.attempts - 1,
-          // Release the claim/lease so a requeued (or failed) job is unowned.
-          claimedByNode: { disconnect: true },
-          leaseExpiresAt: null,
-          executor: null,
-          ...(giveUp ? { finishedAt: new Date() } : {}),
-        });
-
-        this.logger.warn(
-          `EnrichmentJob ${job.id} (type="${job.type}"): rate-limited by ${rl.providerKey ?? 'provider'} ` +
-            `(hit ${hits}/${RL_MAX_HITS}); ` +
-            (giveUp
-              ? 'giving up — marked failed'
-              : `backing off ${Math.round(delayMs / 1000)}s (scheduledFor +${Math.round(delayMs / 1000)}s)`),
-        );
-      } else {
-        // ── Normal failure / exponential retry path ───────────────────────
-        // The claimed row already carries the claim-time charge, so
-        // job.attempts IS the number of attempts consumed including this one.
-        const shouldRetry = job.attempts < MAX_ATTEMPTS;
-        const delayMs = computeQueueBackoffMs(job.attempts, {
-          baseMs: RETRY_BASE_MS,
-          maxMs: RETRY_MAX_MS,
-        });
-
-        await this.safeTerminalUpdate(job.id, job.type, {
-          status: shouldRetry ? JobStatus.pending : JobStatus.failed,
-          lastError: message,
-          scheduledFor: shouldRetry ? new Date(Date.now() + delayMs) : null,
-          // Release the claim/lease so a requeued (or failed) job is unowned.
-          claimedByNode: { disconnect: true },
-          leaseExpiresAt: null,
-          executor: null,
-          ...(!shouldRetry ? { finishedAt: new Date() } : {}),
-        });
-
-        this.logger.warn(
-          `EnrichmentJob ${job.id} (type="${job.type}"): attempt ${job.attempts}/${MAX_ATTEMPTS} failed — ` +
-            (shouldRetry
-              ? `will retry in ${Math.round(delayMs / 1000)}s`
-              : 'marked failed'),
-        );
-      }
-
-      // Always log the underlying error for debugging
-      this.logger.error(`EnrichmentJob ${job.id}: ${message}`);
+      // Terminal failure (rate-limit deferral vs exponential retry, including
+      // tripping the shared throttle gate) is shared with node-reported
+      // failures via EnrichmentTerminalService.
+      await this.terminal.completeFailed(job, error);
     }
   }
 }

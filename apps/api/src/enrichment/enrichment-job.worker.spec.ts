@@ -42,6 +42,7 @@ import { RateLimitError } from './rate-limit.error';
 // Import with a regular import; for the isolated-module tests we re-import below.
 import { EnrichmentJobWorker } from './enrichment-job.worker';
 import { EnrichmentClaimService } from './enrichment-claim.service';
+import { EnrichmentTerminalService } from './enrichment-terminal.service';
 import { ProviderThrottleService } from './provider-throttle.service';
 
 // ---------------------------------------------------------------------------
@@ -147,6 +148,9 @@ async function buildWorker(
       // Claiming now goes through the shared, DB-atomic claim service; the mock
       // delegates to the same prisma findFirst/update mock the old claim used.
       { provide: EnrichmentClaimService, useValue: mockClaim },
+      // Real terminal service (wraps the same mock prisma + real throttle) so
+      // the extracted terminal state machine is exercised end-to-end.
+      EnrichmentTerminalService,
     ],
   }).compile();
 
@@ -260,6 +264,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
           { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
           { provide: ProviderThrottleService, useValue: new ProviderThrottleService() },
           { provide: EnrichmentClaimService, useValue: makeClaimMock(mockPrisma) },
+          EnrichmentTerminalService,
         ],
       }).compile();
       const w2 = module.get<EnrichmentJobWorker>(EnrichmentJobWorker);
@@ -986,17 +991,22 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
   //
   // Exercises the private safeTerminalUpdate(jobId, jobType, data) helper
   // directly (bypassing tick/processJob) so the retry/give-up behavior is
-  // isolated from claim/handler mechanics. The method's real implementation
-  // sleeps 1s between the first failure and the retry; that sleep is stubbed
-  // to resolve immediately so the test stays fast and deterministic.
+  // isolated from claim/handler mechanics. The helper now lives on
+  // EnrichmentTerminalService (extracted from the worker, behavior-preserving);
+  // it is reached via the worker's injected `terminal` instance. The method's
+  // real implementation sleeps 1s between the first failure and the retry;
+  // that sleep is stubbed to resolve immediately so the test stays fast and
+  // deterministic.
   // =========================================================================
 
   describe('safeTerminalUpdate — retry once on transient failure', () => {
     let worker: EnrichmentJobWorker;
+    let terminal: EnrichmentTerminalService;
     let mockPrisma: MockPrismaService;
 
     beforeEach(async () => {
       ({ worker, mockPrisma } = await buildWorker(EnrichmentJobWorker));
+      terminal = (worker as any).terminal as EnrichmentTerminalService;
     });
 
     afterEach(() => {
@@ -1004,16 +1014,16 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
     });
 
     it('retries once after the first update() throws, and succeeds on the retry', async () => {
-      const sleepSpy = jest.spyOn(worker as any, 'sleep').mockResolvedValue(undefined);
-      const loggerWarnSpy = jest.spyOn((worker as any).logger, 'warn').mockImplementation(() => {});
-      const loggerErrorSpy = jest.spyOn((worker as any).logger, 'error').mockImplementation(() => {});
+      const sleepSpy = jest.spyOn(terminal as any, 'sleep').mockResolvedValue(undefined);
+      const loggerWarnSpy = jest.spyOn((terminal as any).logger, 'warn').mockImplementation(() => {});
+      const loggerErrorSpy = jest.spyOn((terminal as any).logger, 'error').mockImplementation(() => {});
 
       (mockPrisma.enrichmentJob.update as jest.Mock)
         .mockRejectedValueOnce(new Error('transient DB error'))
         .mockResolvedValueOnce({});
 
       const data = { status: JobStatus.succeeded, finishedAt: new Date() };
-      await (worker as any).safeTerminalUpdate('job-retry-1', 'face_detection', data);
+      await (terminal as any).safeTerminalUpdate('job-retry-1', 'face_detection', data);
 
       // Both attempts used the same where/data payload.
       const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
@@ -1032,9 +1042,9 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
     });
 
     it('logs an error and swallows the failure (does not throw) when both attempts fail', async () => {
-      const sleepSpy = jest.spyOn(worker as any, 'sleep').mockResolvedValue(undefined);
-      const loggerWarnSpy = jest.spyOn((worker as any).logger, 'warn').mockImplementation(() => {});
-      const loggerErrorSpy = jest.spyOn((worker as any).logger, 'error').mockImplementation(() => {});
+      const sleepSpy = jest.spyOn(terminal as any, 'sleep').mockResolvedValue(undefined);
+      const loggerWarnSpy = jest.spyOn((terminal as any).logger, 'warn').mockImplementation(() => {});
+      const loggerErrorSpy = jest.spyOn((terminal as any).logger, 'error').mockImplementation(() => {});
 
       (mockPrisma.enrichmentJob.update as jest.Mock)
         .mockRejectedValueOnce(new Error('db down'))
@@ -1045,7 +1055,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       // Must not throw — the caller (processJob) relies on this being swallowed
       // so the worker slot is freed even when the DB write itself fails.
       await expect(
-        (worker as any).safeTerminalUpdate('job-retry-2', 'ocr', data),
+        (terminal as any).safeTerminalUpdate('job-retry-2', 'ocr', data),
       ).resolves.toBeUndefined();
 
       const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
@@ -1059,11 +1069,11 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
     });
 
     it('does not retry when the first update() succeeds', async () => {
-      const sleepSpy = jest.spyOn(worker as any, 'sleep').mockResolvedValue(undefined);
+      const sleepSpy = jest.spyOn(terminal as any, 'sleep').mockResolvedValue(undefined);
 
       (mockPrisma.enrichmentJob.update as jest.Mock).mockResolvedValueOnce({});
 
-      await (worker as any).safeTerminalUpdate('job-ok', 'face_detection', {
+      await (terminal as any).safeTerminalUpdate('job-ok', 'face_detection', {
         status: JobStatus.succeeded,
       });
 
@@ -1072,10 +1082,6 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
     });
 
     it('processJob success path routes through safeTerminalUpdate and recovers from one transient failure', async () => {
-      // Stub the retry-delay sleep so the test resolves immediately regardless
-      // of the requested duration.
-      jest.spyOn(worker as any, 'sleep').mockResolvedValue(undefined);
-
       const job = makeJob({ id: 'job-e2e-1', attempts: 0 });
       const mockRegistry = makeRegistryMock({ type: 'face_detection', process: jest.fn().mockResolvedValue(undefined) });
 
@@ -1086,10 +1092,15 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
           { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
           { provide: ProviderThrottleService, useValue: new ProviderThrottleService() },
           { provide: EnrichmentClaimService, useValue: makeClaimMock(mockPrisma) },
+          EnrichmentTerminalService,
         ],
       }).compile();
       const w2 = module.get<EnrichmentJobWorker>(EnrichmentJobWorker);
       w2.onApplicationBootstrap();
+
+      // Stub the terminal write's retry-delay sleep so the test resolves
+      // immediately regardless of the requested duration.
+      jest.spyOn((w2 as any).terminal, 'sleep').mockResolvedValue(undefined);
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValueOnce(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
