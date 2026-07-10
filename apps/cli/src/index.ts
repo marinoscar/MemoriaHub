@@ -15,6 +15,7 @@ import { settingsCommand } from './commands/settings.js';
 import { backupCommand } from './commands/backup.js';
 import { jobsCommand } from './commands/jobs.js';
 import { reportsCommand } from './commands/reports.js';
+import { nodeCommand } from './commands/node.js';
 import { printBanner } from './ui.js';
 import { printHeadlessUpdateNotice } from './update-notice.js';
 
@@ -56,6 +57,7 @@ program.addCommand(settingsCommand());
 program.addCommand(backupCommand());
 program.addCommand(jobsCommand());
 program.addCommand(reportsCommand());
+program.addCommand(nodeCommand());
 
 // Bare invocation: if TTY launch TUI, else show help
 if (process.argv.length === 2) {

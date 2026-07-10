@@ -131,6 +131,73 @@ export interface JobInsights {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Worker-node types
+// ---------------------------------------------------------------------------
+
+/** Per-capability availability summary reported in heartbeats. */
+export type NodeCapabilities = Record<string, { available: boolean; detail?: string }>;
+
+export interface NodeRegisterBody {
+  name: string;
+  hostname: string;
+  platform: string;
+  cliVersion: string;
+  eligibleTypes: string[];
+  concurrency: number;
+}
+
+export interface NodeRegisterResult {
+  nodeId: string;
+}
+
+export interface NodeHeartbeatBody {
+  status?: string;
+  capabilities?: NodeCapabilities;
+}
+
+export interface NodeClaimBody {
+  max?: number;
+  types?: string[];
+}
+
+/** A queued enrichment job as handed to a worker node. Shape is loosely typed
+ *  because the server owns the full job schema; only these fields are relied on. */
+export interface NodeJob {
+  id: string;
+  type: string;
+  mediaItemId?: string | null;
+  circleId?: string | null;
+  [key: string]: unknown;
+}
+
+export interface ClaimedNodeJob {
+  job: NodeJob;
+  /** Signed URL to download the job's input bytes (null for input-less jobs). */
+  inputUrl: string | null;
+  /** Job-specific parameters resolved server-side. */
+  params: Record<string, unknown>;
+}
+
+export interface NodeClaimResult {
+  jobs: ClaimedNodeJob[];
+}
+
+export interface NodeRenewBody {
+  leaseMs?: number;
+}
+
+export interface ModelManifestEntry {
+  name: string;
+  url: string;
+  /** Hex SHA-256; null skips verification. */
+  sha256: string | null;
+  /** Expected byte size; null skips verification. */
+  bytes: number | null;
+  /** Subdirectory under the models dir the file is stored in. */
+  targetSubdir: string;
+}
+
 export class ApiClient {
   private readonly baseUrl: string;
   private readonly pat: string;
@@ -262,6 +329,82 @@ export class ApiClient {
   getJobInsights(windowDays?: number): Promise<JobInsights> {
     const qs = windowDays !== undefined ? `?windowDays=${windowDays}` : '';
     return this.get<JobInsights>(`/api/admin/jobs/insights${qs}`);
+  }
+
+  // -------------------------------------------------------------------------
+  // Worker-node endpoints
+  // -------------------------------------------------------------------------
+
+  /** Register this machine as a worker node; returns the assigned nodeId. */
+  registerNode(body: NodeRegisterBody): Promise<NodeRegisterResult> {
+    return this.post<NodeRegisterResult>('/api/nodes/register', body);
+  }
+
+  /** Deregister a worker node (called on graceful shutdown). */
+  deregisterNode(nodeId: string): Promise<unknown> {
+    return this.post<unknown>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/deregister`,
+      {},
+    );
+  }
+
+  /** Post a heartbeat with optional status + capability summary. */
+  heartbeatNode(nodeId: string, body: NodeHeartbeatBody): Promise<unknown> {
+    return this.post<unknown>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/heartbeat`,
+      body,
+    );
+  }
+
+  /** Claim up to `max` jobs of the given types for processing. */
+  claimNodeJobs(nodeId: string, body: NodeClaimBody): Promise<NodeClaimResult> {
+    return this.post<NodeClaimResult>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/claim`,
+      body,
+    );
+  }
+
+  /** Renew the lease on an in-flight job so the server doesn't reclaim it. */
+  renewLease(nodeId: string, jobId: string, body: NodeRenewBody): Promise<unknown> {
+    return this.post<unknown>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/jobs/${encodeURIComponent(jobId)}/renew`,
+      body,
+    );
+  }
+
+  /** Fetch the model download manifest for node compute capabilities. */
+  getModelManifest(): Promise<ModelManifestEntry[]> {
+    return this.get<ModelManifestEntry[]>('/api/nodes/models/manifest');
+  }
+
+  /**
+   * Submit a completed job's result.
+   *
+   * NOTE: the server-side result endpoint is not yet built. Callers should wrap
+   * this in try/catch and degrade gracefully until it lands.
+   */
+  submitJobResult(nodeId: string, jobId: string, result: unknown): Promise<unknown> {
+    return this.post<unknown>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/jobs/${encodeURIComponent(jobId)}/result`,
+      result,
+    );
+  }
+
+  /**
+   * Report a job failure so the server can requeue/fail it.
+   *
+   * NOTE: like submitJobResult, this endpoint may not yet exist server-side;
+   * callers should degrade gracefully.
+   */
+  reportJobFailure(
+    nodeId: string,
+    jobId: string,
+    body: { error: string; willRetry?: boolean },
+  ): Promise<unknown> {
+    return this.post<unknown>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/jobs/${encodeURIComponent(jobId)}/failure`,
+      body,
+    );
   }
 
   /** Parse a successful JSON response, unwrapping the standard { data } envelope. */

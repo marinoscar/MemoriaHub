@@ -131,6 +131,19 @@ export class DoctorService {
       },
       { key: 'jobs.queueHealth', label: 'Queue health', fn: () => this.checkQueueHealth() },
       { key: 'jobs.burstConfig', label: 'Burst detection', fn: () => this.checkBurstConfig(settings) },
+      // Worker Nodes (distributed compute fleet)
+      { key: 'nodes.registeredCount', label: 'Registered nodes', fn: () => this.checkNodesRegistered() },
+      {
+        key: 'nodes.heartbeatFreshness',
+        label: 'Heartbeat freshness',
+        fn: () => this.checkNodesHeartbeat(),
+      },
+      { key: 'nodes.staleLeases', label: 'Expired leases', fn: () => this.checkNodesStaleLeases() },
+      {
+        key: 'nodes.capabilityHealth',
+        label: 'Node capability health',
+        fn: () => this.checkNodesCapabilityHealth(),
+      },
     ];
 
     const settled = await Promise.allSettled(defs.map((def) => this.runCheck(def)));
@@ -184,6 +197,16 @@ export class DoctorService {
         key: 'jobs',
         label: 'Job Queue & Worker',
         checkKeys: ['jobs.workerEnabled', 'jobs.queueHealth', 'jobs.burstConfig'],
+      },
+      {
+        key: 'nodes',
+        label: 'Worker Nodes',
+        checkKeys: [
+          'nodes.registeredCount',
+          'nodes.heartbeatFreshness',
+          'nodes.staleLeases',
+          'nodes.capabilityHealth',
+        ],
       },
     ];
 
@@ -749,5 +772,238 @@ export class DoctorService {
       status: 'ok',
       message: 'Burst detection enabled (no provider required; depends on the enrichment worker).',
     };
+  }
+
+  // ===========================================================================
+  // Worker Node checks (distributed compute fleet)
+  //
+  // Pure DB reads only — nodes are optional, so "none registered" is never a
+  // failure. The node-reported `capabilities` JSON is treated as untrusted,
+  // arbitrary shape and parsed defensively.
+  // ===========================================================================
+
+  /** Heartbeat freshness window (ms); mirrors NodesService's NODE_HEARTBEAT_STALE_SECONDS convention. */
+  private nodeStaleWindowMs(): number {
+    return (Number(process.env['NODE_HEARTBEAT_STALE_SECONDS']) || 60) * 1000;
+  }
+
+  private async checkNodesRegistered(): Promise<CheckOutcome> {
+    const [total, online] = await Promise.all([
+      this.prisma.workerNode.count(),
+      this.prisma.workerNode.count({ where: { status: 'online' } }),
+    ]);
+
+    if (total === 0) {
+      return {
+        status: 'skipped',
+        message: 'No worker nodes registered (distributed compute is optional).',
+      };
+    }
+
+    return {
+      status: 'ok',
+      message: `${total} worker node(s) registered, ${online} online.`,
+    };
+  }
+
+  private async checkNodesHeartbeat(): Promise<CheckOutcome> {
+    const onlineNodes = await this.prisma.workerNode.findMany({
+      where: { status: 'online' },
+      select: { name: true, lastHeartbeatAt: true },
+    });
+
+    if (onlineNodes.length === 0) {
+      return { status: 'skipped', message: 'No online worker nodes to check.' };
+    }
+
+    const staleMs = this.nodeStaleWindowMs();
+    const now = Date.now();
+    const stale = onlineNodes.filter(
+      (n) => !n.lastHeartbeatAt || now - n.lastHeartbeatAt.getTime() > staleMs,
+    );
+
+    if (stale.length === 0) {
+      return {
+        status: 'ok',
+        message: `All ${onlineNodes.length} online node(s) have reported a fresh heartbeat.`,
+      };
+    }
+
+    const staleNames = stale.map((n) => n.name).join(', ');
+    const windowSeconds = Math.round(staleMs / 1000);
+
+    if (stale.length === onlineNodes.length) {
+      return {
+        status: 'error',
+        message: `All ${onlineNodes.length} online node(s) are stale (no heartbeat within ${windowSeconds}s): ${staleNames}.`,
+        actionItem:
+          'Check that the node machines are awake and networked; they will be marked offline if they stay unreachable.',
+      };
+    }
+
+    return {
+      status: 'warning',
+      message: `${stale.length} of ${onlineNodes.length} online node(s) are stale (no heartbeat within ${windowSeconds}s): ${staleNames}.`,
+      actionItem: 'Check that the affected node machine(s) are awake and networked.',
+    };
+  }
+
+  private async checkNodesStaleLeases(): Promise<CheckOutcome> {
+    const expired = await this.prisma.enrichmentJob.count({
+      where: { status: 'running', leaseExpiresAt: { lt: new Date() } },
+    });
+
+    if (expired > 0) {
+      return {
+        status: 'warning',
+        message: `${expired} running job(s) have an expired lease (claiming node likely died).`,
+        actionItem:
+          'Reset stuck jobs from the Job Queue page (reset-stuck) so they are requeued for another worker or node.',
+      };
+    }
+
+    return { status: 'ok', message: 'No running jobs with an expired lease.' };
+  }
+
+  private async checkNodesCapabilityHealth(): Promise<CheckOutcome> {
+    const onlineNodes = await this.prisma.workerNode.findMany({
+      where: { status: 'online' },
+      select: { name: true, eligibleTypes: true, capabilities: true },
+    });
+
+    const reporting = onlineNodes.filter((n) => n.capabilities != null);
+    if (reporting.length === 0) {
+      return {
+        status: 'skipped',
+        message: 'No online node has reported a capability summary yet.',
+      };
+    }
+
+    const degradedNodes: string[] = [];
+    for (const node of reporting) {
+      const degraded = this.extractDegradedCapabilities(node.capabilities, node.eligibleTypes);
+      if (degraded.length > 0) {
+        degradedNodes.push(`${node.name} (${degraded.join(', ')})`);
+      }
+    }
+
+    if (degradedNodes.length > 0) {
+      return {
+        status: 'warning',
+        message: `Node(s) reporting a degraded capability among their eligible job types: ${degradedNodes.join('; ')}.`,
+        actionItem:
+          'Run `memoriahub node doctor` on the affected machine(s) to resolve the failing capability (e.g. missing model files, ffmpeg, or OCR data).',
+      };
+    }
+
+    return {
+      status: 'ok',
+      message: `All ${reporting.length} reporting node(s) advertise healthy capabilities.`,
+    };
+  }
+
+  /**
+   * Best-effort extraction of degraded/error capability names from a node's
+   * arbitrary-shaped `capabilities` JSON, filtered to those backing one of the
+   * node's advertised `eligibleTypes`. Handles the common shapes the node's
+   * `node doctor` output may take: a flat `{ face: 'ok', ocr: 'error' }` map,
+   * a `{ name: { status } }` map, or a list/report of `{ key, status }` checks.
+   */
+  private extractDegradedCapabilities(
+    capabilities: unknown,
+    eligibleTypes: string[],
+  ): string[] {
+    const entries = this.collectCapabilityEntries(capabilities);
+    const degraded = new Set<string>();
+
+    for (const { name, status } of entries) {
+      if (!this.isDegradedStatus(status)) continue;
+      if (this.capabilityBacksEligibleType(name, eligibleTypes)) {
+        degraded.add(name);
+      }
+    }
+
+    return [...degraded];
+  }
+
+  /** Flatten a capability summary into { name, status } pairs, tolerating several shapes. */
+  private collectCapabilityEntries(
+    capabilities: unknown,
+  ): Array<{ name: string; status: string }> {
+    const out: Array<{ name: string; status: string }> = [];
+    if (capabilities == null || typeof capabilities !== 'object') return out;
+
+    const consider = (name: unknown, status: unknown): void => {
+      if (typeof name !== 'string') return;
+      if (typeof status === 'string') out.push({ name, status });
+    };
+
+    // Array of checks: [{ key|name, status }, ...]
+    if (Array.isArray(capabilities)) {
+      for (const item of capabilities) {
+        if (item && typeof item === 'object') {
+          const rec = item as Record<string, unknown>;
+          consider(rec['key'] ?? rec['name'], rec['status']);
+        }
+      }
+      return out;
+    }
+
+    const record = capabilities as Record<string, unknown>;
+
+    // Nested report shapes: { checks: [...] } or { capabilities: {...}/[...] }
+    if (Array.isArray(record['checks'])) {
+      out.push(...this.collectCapabilityEntries(record['checks']));
+    }
+    if (record['capabilities'] != null && typeof record['capabilities'] === 'object') {
+      out.push(...this.collectCapabilityEntries(record['capabilities']));
+    }
+
+    // Flat map: { face: 'ok' } or { face: { status: 'error' } }
+    for (const [name, value] of Object.entries(record)) {
+      if (name === 'checks' || name === 'capabilities') continue;
+      if (typeof value === 'string') {
+        consider(name, value);
+      } else if (value && typeof value === 'object') {
+        const rec = value as Record<string, unknown>;
+        if (typeof rec['status'] === 'string') consider(name, rec['status']);
+      }
+    }
+
+    return out;
+  }
+
+  private isDegradedStatus(status: string): boolean {
+    const s = status.toLowerCase();
+    return s === 'error' || s === 'warning' || s === 'warn' || s === 'degraded' || s === 'fail' || s === 'failed';
+  }
+
+  /**
+   * Whether a capability name backs at least one of the node's eligible job types.
+   * Conservative: when the capability cannot be mapped or the node advertises no
+   * eligible types, treat it as relevant so a genuine degradation is not hidden.
+   */
+  private capabilityBacksEligibleType(name: string, eligibleTypes: string[]): boolean {
+    if (eligibleTypes.length === 0) return true;
+
+    const capToJobTypes: Record<string, string[]> = {
+      face: ['face_detection', 'video_face_detection'],
+      clip: ['duplicate_detection', 'duplicate_detection_batch'],
+      ocr: ['social_media_detection'],
+      ffmpeg: ['video_face_detection', 'social_media_detection'],
+      sharp: [
+        'face_detection',
+        'auto_tagging',
+        'duplicate_detection',
+        'duplicate_detection_batch',
+        'thumbnail_regen',
+      ],
+    };
+
+    const key = Object.keys(capToJobTypes).find((k) => name.toLowerCase().includes(k));
+    if (!key) return true; // unknown capability — surface it rather than silently drop
+
+    const backedTypes = capToJobTypes[key];
+    return backedTypes.some((t) => eligibleTypes.includes(t));
   }
 }

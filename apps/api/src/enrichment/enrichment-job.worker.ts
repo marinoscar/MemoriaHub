@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
+import { EnrichmentClaimService } from './enrichment-claim.service';
 import { EnrichmentJob, JobStatus, Prisma } from '@prisma/client';
 import { RateLimitError, classifyRateLimit } from './rate-limit.error';
 import { computeQueueBackoffMs } from './backoff.util';
@@ -58,6 +59,14 @@ const JOB_TIMEOUT_MS = getEnvInt('ENRICHMENT_JOB_TIMEOUT_MS', 600_000); // 10 mi
 // provider calls on multi-GB videos). 0 disables the timeout for these types.
 const VIDEO_JOB_TIMEOUT_MS = getEnvInt('ENRICHMENT_VIDEO_JOB_TIMEOUT_MS', 1_200_000); // 20 min
 
+// Lease duration (ms) stamped on a job at claim time. A running job whose lease
+// expires is considered stuck and reaped by the lease-based reaper
+// (EnrichmentAdminService.resetStuck). The server worker "renews" implicitly by
+// finishing fast; long-running jobs rely on this lease being comfortably above
+// the longest legitimate single-job runtime, so the default is set well above
+// the video job timeout (ENRICHMENT_VIDEO_JOB_TIMEOUT_MS default 1_200_000).
+const LEASE_MS = getEnvInt('ENRICHMENT_LEASE_MS', 1_800_000); // 30 min
+
 /** Job types governed by the video timeout override. */
 const VIDEO_JOB_TYPES = new Set(['video_face_detection', 'social_media_detection']);
 
@@ -74,10 +83,6 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
   private shuttingDown = false;
   private loops: Promise<void>[] = [];
   private pollMs = 5000;
-  // Promise-chain mutex serializing claims across the in-process pool loops so
-  // two loops never select+claim the same pending row (Prisma's read-committed
-  // findFirst→update can otherwise double-claim under concurrency).
-  private claimLock: Promise<void> = Promise.resolve();
   // Outstanding empty-queue sleep timers, tracked so onModuleDestroy can abort
   // them promptly for a fast shutdown.
   private readonly sleepTimers = new Set<ReturnType<typeof setTimeout>>();
@@ -86,6 +91,7 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
     private readonly prisma: PrismaService,
     private readonly registry: EnrichmentHandlerRegistry,
     private readonly throttle: ProviderThrottleService,
+    private readonly claimService: EnrichmentClaimService,
   ) {}
 
   /**
@@ -162,31 +168,17 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
   /**
    * Claim and process ONE job. Returns true if a job was processed, false if the
    * queue was empty. The continuous worker loops call this; unit tests drive it
-   * directly. Claims are serialized (see claimOne) so concurrent loops never
-   * double-claim; processing runs outside the claim lock.
+   * directly. Claiming goes through the shared, DB-atomic EnrichmentClaimService
+   * (UPDATE ... FOR UPDATE SKIP LOCKED), which is multi-process safe: no two
+   * loops — or a server worker and a remote node — ever claim the same row, so
+   * the old in-process claim mutex is no longer needed. Processing runs after
+   * the claim commits.
    */
   async tick(): Promise<boolean> {
-    const job = await this.claimOne();
+    const job = await this.claimNextJob();
     if (!job) return false;
     await this.processJob(job);
     return true;
-  }
-
-  /**
-   * Serialize claims with a promise-chain mutex so no two loops in this process
-   * select+claim the same row. The claim runs under the lock; the returned job
-   * is processed by the caller OUTSIDE the lock, keeping processing concurrent.
-   */
-  private async claimOne(): Promise<EnrichmentJob | null> {
-    let release!: () => void;
-    const prev = this.claimLock;
-    this.claimLock = new Promise<void>((r) => (release = r));
-    await prev;
-    try {
-      return await this.claimNextJob();
-    } finally {
-      release();
-    }
   }
 
   /**
@@ -208,36 +200,24 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
   }
 
   private async claimNextJob(): Promise<EnrichmentJob | null> {
-    // Atomic claim: find + update in one transaction.
-    // Skip jobs that are backed off (scheduledFor is in the future).
-    return this.prisma.$transaction(async (tx) => {
-      const now = new Date();
-      const job = await tx.enrichmentJob.findFirst({
-        where: {
-          status: JobStatus.pending,
-          OR: [{ scheduledFor: null }, { scheduledFor: { lte: now } }],
-        },
-        orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
-      });
-
-      if (!job) return null;
-
-      return tx.enrichmentJob.update({
-        where: { id: job.id },
-        data: {
-          status: JobStatus.running,
-          startedAt: new Date(),
-          scheduledFor: null,
-          // Charge the attempt at CLAIM time, not at in-process failure time.
-          // A job that takes the whole process down (OOM SIGKILL) never reaches
-          // the failure path — charging up front means the stuck-reset path can
-          // fail it once the budget is exhausted instead of requeueing it into
-          // an infinite crash loop. `attempts` therefore now means "attempts
-          // STARTED", not "attempts failed".
-          attempts: { increment: 1 },
-        },
-      });
+    // Multi-process-safe atomic claim via the shared claim service:
+    // UPDATE ... WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED). The server
+    // in-process worker claims with nodeId=null / executor='server' over every
+    // registered handler type, one job at a time. `attempts` is charged at
+    // CLAIM time inside the SQL (attempts + 1) — preserving the semantic that a
+    // job which takes the whole process down (OOM SIGKILL) before the in-process
+    // failure path still consumes its attempt, so the stuck/lease reaper can
+    // permanently fail it once the budget is exhausted instead of requeueing it
+    // into an infinite crash loop. `attempts` therefore means "attempts
+    // STARTED", not "attempts failed".
+    const claimed = await this.claimService.claim({
+      nodeId: null,
+      executor: 'server',
+      eligibleTypes: this.registry.types(),
+      limit: 1,
+      leaseMs: LEASE_MS,
     });
+    return claimed[0] ?? null;
   }
 
   /**
@@ -306,6 +286,10 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
           status: JobStatus.failed,
           lastError: errMsg,
           finishedAt: new Date(),
+          // Release the claim/lease on this terminal failure.
+          claimedByNode: { disconnect: true },
+          leaseExpiresAt: null,
+          executor: null,
         },
       });
       return;
@@ -337,6 +321,10 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
       await this.safeTerminalUpdate(job.id, job.type, {
         status: JobStatus.succeeded,
         finishedAt: new Date(),
+        // Release the claim/lease so the terminal row is unowned.
+        claimedByNode: { disconnect: true },
+        leaseExpiresAt: null,
+        executor: null,
       });
 
       this.logger.log(`EnrichmentJob ${job.id} (type="${job.type}") succeeded for MediaItem ${job.mediaItemId ?? 'global'}`);
@@ -371,6 +359,10 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
           // claim-time increment (absolute write, so a safeTerminalUpdate retry
           // after a lost-ack first write can never double-decrement).
           attempts: job.attempts - 1,
+          // Release the claim/lease so a requeued (or failed) job is unowned.
+          claimedByNode: { disconnect: true },
+          leaseExpiresAt: null,
+          executor: null,
           ...(giveUp ? { finishedAt: new Date() } : {}),
         });
 
@@ -395,6 +387,10 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
           status: shouldRetry ? JobStatus.pending : JobStatus.failed,
           lastError: message,
           scheduledFor: shouldRetry ? new Date(Date.now() + delayMs) : null,
+          // Release the claim/lease so a requeued (or failed) job is unowned.
+          claimedByNode: { disconnect: true },
+          leaseExpiresAt: null,
+          executor: null,
           ...(!shouldRetry ? { finishedAt: new Date() } : {}),
         });
 

@@ -28,6 +28,7 @@ import {
   ContentCopy as ContentCopyIcon,
   MyLocation as MyLocationIcon,
   WorkHistory as WorkHistoryIcon,
+  Hub as HubIcon,
   Insights as InsightsIcon,
   Public as PublicIcon,
 } from '@mui/icons-material';
@@ -83,6 +84,9 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     { label: 'Settings', icon: <AdminIcon />, path: '/admin/settings' },
     ...(hasPermission('jobs:read')
       ? [{ label: 'Job Queue', icon: <WorkHistoryIcon />, path: '/admin/settings/jobs' }]
+      : []),
+    ...(hasPermission('jobs:read')
+      ? [{ label: 'Worker Nodes', icon: <HubIcon />, path: '/admin/settings/nodes' }]
       : []),
     ...(hasPermission('system_settings:read')
       ? [{ label: 'Storage Insights', icon: <InsightsIcon />, path: '/admin/settings/storage/insights' }]

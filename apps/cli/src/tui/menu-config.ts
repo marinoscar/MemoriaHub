@@ -30,6 +30,8 @@ export type MenuActionId =
   | 'factory-reset'
   | 'jobs'
   | 'backup'
+  | 'node-dashboard'
+  | 'node-config'
   | 'help'
   | 'quit'
   | `report:${string}`;
@@ -132,6 +134,15 @@ export const MENU_TREE: MenuSubmenu = {
         { kind: 'action', label: 'Organize folder by date', action: 'organize', loggedOut: true },
         { kind: 'action', label: 'Job queue monitor', action: 'jobs' },
         { kind: 'action', label: 'Backup', action: 'backup' },
+        {
+          kind: 'submenu',
+          id: 'node',
+          label: 'Worker Node',
+          children: [
+            { kind: 'action', label: 'Node dashboard', action: 'node-dashboard' },
+            { kind: 'action', label: 'Node config', action: 'node-config' },
+          ],
+        },
       ],
     },
     { kind: 'action', label: 'Help', action: 'help', loggedOut: true },

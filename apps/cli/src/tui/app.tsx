@@ -39,6 +39,8 @@ import { SettingsScreen } from './SettingsScreen.js';
 import { FactoryResetScreen } from './FactoryResetScreen.js';
 import { BackupScreen } from './BackupScreen.js';
 import { JobsDashboard } from './JobsDashboard.js';
+import { NodeDashboard } from './NodeDashboard.js';
+import { NodeConfig } from './NodeConfig.js';
 import { BOX_BORDER } from './theme.js';
 import {
   MENU_TREE,
@@ -70,7 +72,9 @@ type Screen =
   | { kind: 'factoryReset' }
   | { kind: 'report'; reportId: string }
   | { kind: 'jobs' }
-  | { kind: 'backup' };
+  | { kind: 'backup' }
+  | { kind: 'nodeDashboard' }
+  | { kind: 'nodeConfig' };
 
 type NavFrame =
   | { kind: 'menu'; menuId: string }
@@ -238,6 +242,12 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
         break;
       case 'backup':
         push({ kind: 'screen', screen: { kind: 'backup' } });
+        break;
+      case 'node-dashboard':
+        push({ kind: 'screen', screen: { kind: 'nodeDashboard' } });
+        break;
+      case 'node-config':
+        push({ kind: 'screen', screen: { kind: 'nodeConfig' } });
         break;
       case 'help':
         push({ kind: 'screen', screen: { kind: 'help' } });
@@ -545,6 +555,42 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
         );
       }
       return <BackupScreen config={config} onBack={pop} />;
+
+    case 'nodeDashboard':
+      if (!config) {
+        return (
+          <Box paddingX={1} flexDirection="column" gap={1}>
+            <Text color="yellow">Not logged in. Please login first.</Text>
+            <Text dimColor>Press q to go back.</Text>
+            <KeyHandler onBack={pop} />
+          </Box>
+        );
+      }
+      return (
+        <NodeDashboard
+          config={config}
+          onBack={pop}
+          onOpenConfig={() => push({ kind: 'screen', screen: { kind: 'nodeConfig' } })}
+        />
+      );
+
+    case 'nodeConfig':
+      if (!config) {
+        return (
+          <Box paddingX={1} flexDirection="column" gap={1}>
+            <Text color="yellow">Not logged in. Please login first.</Text>
+            <Text dimColor>Press q to go back.</Text>
+            <KeyHandler onBack={pop} />
+          </Box>
+        );
+      }
+      return (
+        <NodeConfig
+          config={config}
+          onSaved={(cfg) => setAppState((prev) => ({ ...prev, config: cfg }))}
+          onBack={pop}
+        />
+      );
 
     case 'settings':
       return <SettingsScreen db={db} onBack={pop} />;

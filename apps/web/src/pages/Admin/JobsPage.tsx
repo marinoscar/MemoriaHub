@@ -579,6 +579,7 @@ function JobsPageContent() {
                     <TableCell>Type</TableCell>
                     <TableCell>Status</TableCell>
                     <TableCell>Reason</TableCell>
+                    <TableCell>Node</TableCell>
                     <TableCell>Model</TableCell>
                     <TableCell align="center">Priority</TableCell>
                     <TableCell align="center">Attempts</TableCell>
@@ -593,7 +594,7 @@ function JobsPageContent() {
                 <TableBody>
                   {jobs.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={12} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                      <TableCell colSpan={13} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                         No jobs found
                       </TableCell>
                     </TableRow>
@@ -629,6 +630,32 @@ function JobsPageContent() {
                           <Typography variant="body2" color="text.secondary">
                             {job.reason}
                           </Typography>
+                        </TableCell>
+                        <TableCell sx={{ maxWidth: 160 }}>
+                          {job.executor === 'node' && job.claimedByNode ? (
+                            <Tooltip title={`Node ${job.claimedByNode.id}`} arrow>
+                              <Box sx={{ cursor: 'help' }}>
+                                <Typography variant="body2" noWrap>
+                                  {job.claimedByNode.name}
+                                </Typography>
+                                <Typography
+                                  variant="caption"
+                                  sx={{ color: 'text.secondary', display: 'block' }}
+                                  noWrap
+                                >
+                                  {job.claimedByNode.hostname}
+                                </Typography>
+                              </Box>
+                            </Tooltip>
+                          ) : job.executor === 'server' ? (
+                            <Typography variant="body2" color="text.secondary">
+                              server
+                            </Typography>
+                          ) : (
+                            <Typography variant="body2" color="text.disabled">
+                              —
+                            </Typography>
+                          )}
                         </TableCell>
                         <TableCell sx={{ maxWidth: 180 }}>
                           {job.modelVersion ? (

@@ -14,6 +14,30 @@ export interface CliConfig {
    * expired.  Absent for tokens created via --token (expiry is unknown).
    */
   patExpiresAt?: string;
+
+  /**
+   * Worker-node identity assigned by `POST /api/nodes/register`.  Persisted so
+   * `node start` / `node status` / `node stop` can operate without re-registering.
+   * Absent until the machine has been registered as a worker node.
+   */
+  nodeId?: string;
+
+  /**
+   * Persisted worker-node settings.  All optional for back-compat — a config
+   * written before the node feature existed simply omits this key.
+   */
+  node?: NodeConfig;
+}
+
+export interface NodeConfig {
+  /** Worker pool concurrency (simultaneous jobs processed). */
+  concurrency?: number;
+  /** Job types this node advertises as eligible to process. */
+  eligibleTypes?: string[];
+  /** Interval (ms) between claim polls when the queue is idle. */
+  pollIntervalMs?: number;
+  /** Human-friendly node name shown server-side. */
+  name?: string;
 }
 
 export function configPath(): string {
