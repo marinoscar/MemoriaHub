@@ -38,7 +38,7 @@ import { FaceDetectionCore, NormalizedFace, VideoFaceFields } from './face-detec
 import { VideoFrameExtractionService } from './video-frame-extraction.service';
 import { FaceMatchingService } from './face-matching.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { streamToTempFile } from '../storage/processing/processors/stream-utils';
+import { streamToTempFile, assertDiskSpaceForDownload } from '../storage/processing/processors/stream-utils';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import { MediaFaceStatusType } from '@prisma/client';
 import { DetectedFace, FaceProvider, FaceProviderCredentials } from './providers/face-provider.interface';
@@ -46,6 +46,12 @@ import { DetectedFace, FaceProvider, FaceProviderCredentials } from './providers
 // Max long-edge for face detection on video frames (same env var as photo path)
 const FACE_MAX_IMAGE_DIM = (): number =>
   parseInt(process.env.FACE_MAX_IMAGE_DIM ?? '2000', 10);
+
+// Optional hard cap (bytes) on the size of videos processed by video
+// enrichment; 0 (default) disables the cap. Shared env var with
+// social-media detection so operators set one knob for both.
+const VIDEO_ENRICHMENT_MAX_BYTES = (): number =>
+  parseInt(process.env.VIDEO_ENRICHMENT_MAX_BYTES ?? '0', 10);
 
 // Max long-edge for frame thumbnail upload (fixed at 800 px like thumbnail processor)
 const FRAME_THUMB_MAX_DIM = 800;
@@ -140,6 +146,7 @@ export class VideoFaceDetectionHandler implements EnrichmentHandler, OnModuleIni
               storageProvider: true,
               bucket: true,
               name: true,
+              size: true,
             },
           },
         },
@@ -197,6 +204,26 @@ export class VideoFaceDetectionHandler implements EnrichmentHandler, OnModuleIni
       const sampleIntervalSeconds = videoSettings?.sampleIntervalSeconds ?? 5;
       const maxFrames = videoSettings?.maxFramesPerVideo ?? 60;
 
+      // --- 4b. Optional hard size cap ---
+      // When VIDEO_ENRICHMENT_MAX_BYTES is set, oversized videos are skipped
+      // entirely (marked no_faces, like the other skip paths above) without
+      // downloading a single byte.
+      const maxBytes = VIDEO_ENRICHMENT_MAX_BYTES();
+      if (maxBytes > 0 && mediaItem.storageObject.size > BigInt(maxBytes)) {
+        this.logger.warn(
+          `VideoFaceJob ${job.id}: skipping video face detection — object size ` +
+            `${mediaItem.storageObject.size} bytes exceeds VIDEO_ENRICHMENT_MAX_BYTES=${maxBytes}`,
+        );
+        await this.core.markStatus(
+          job.mediaItemId,
+          MediaFaceStatusType.no_faces,
+          0,
+          providerKey,
+          modelVersion,
+        );
+        return;
+      }
+
       // --- 5. Download video (stream directly to a temp file — constant memory) ---
       const fileExt = extname(mediaItem.storageObject.name || '') || '.mp4';
       const tmpVideoPath = join(tmpdir(), `memoriaHub-vface-dl-${randomUUID()}${fileExt}`);
@@ -205,11 +232,18 @@ export class VideoFaceDetectionHandler implements EnrichmentHandler, OnModuleIni
         mediaItem.storageObject.storageProvider,
         mediaItem.storageObject.bucket,
       );
-      const videoStream = await objectProvider.download(mediaItem.storageObject.storageKey);
-      await streamToTempFile(videoStream, tmpVideoPath);
+
+      // Pre-flight: fail fast (through the normal retry/backoff path) when the
+      // temp filesystem cannot hold the download plus headroom.
+      await assertDiskSpaceForDownload(mediaItem.storageObject.size, tmpdir());
 
       let allDetections: FrameDetection[];
       try {
+        // Download INSIDE the try so a failed/partial streamToTempFile still
+        // has its partial temp file unlinked by the finally below.
+        const videoStream = await objectProvider.download(mediaItem.storageObject.storageKey);
+        await streamToTempFile(videoStream, tmpVideoPath);
+
         // --- 6. Extract frames ---
         const frames = await this.frameExtractor.extractFrames(tmpVideoPath, {
           durationMs: mediaItem.durationMs,
@@ -266,8 +300,9 @@ export class VideoFaceDetectionHandler implements EnrichmentHandler, OnModuleIni
           }
         }
       } finally {
-        // The downloaded temp file is only needed for frame extraction above;
-        // always clean it up regardless of success/failure.
+        // The downloaded temp file is only needed for download + frame
+        // extraction above; always clean it up regardless of success/failure —
+        // including a partial file left behind by a failed streamToTempFile.
         await fs.unlink(tmpVideoPath).catch(() => {});
       }
 

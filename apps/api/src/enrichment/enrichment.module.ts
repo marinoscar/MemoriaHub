@@ -5,6 +5,7 @@ import { EnrichmentJobWorker } from './enrichment-job.worker';
 import { EnrichmentAdminService } from './enrichment-admin.service';
 import { EnrichmentAdminController } from './enrichment-admin.controller';
 import { EnrichmentStuckResetTask } from './enrichment-stuck-reset.task';
+import { TempFileJanitorTask } from './temp-file-janitor.task';
 import { ProviderThrottleService } from './provider-throttle.service';
 import { JobHistoryPurgeHandler } from './job-history-purge.handler';
 import { JobHistoryPurgeTask } from './job-history-purge.task';
@@ -20,6 +21,7 @@ import { SettingsModule } from '../settings/settings.module';
     EnrichmentJobWorker,
     EnrichmentAdminService,
     EnrichmentStuckResetTask,
+    TempFileJanitorTask,
     ProviderThrottleService,
     JobHistoryPurgeHandler,
     JobHistoryPurgeTask,
