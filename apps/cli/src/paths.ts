@@ -27,3 +27,8 @@ export function manifestsDir(): string {
 export function exportsDir(): string {
   return path.join(configDir(), 'exports');
 }
+
+/** Worker-node model download directory: ~/.memoriahub/models/ */
+export function modelsDir(): string {
+  return path.join(configDir(), 'models');
+}
