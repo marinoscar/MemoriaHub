@@ -8,7 +8,8 @@
 //   1. Guard: require mediaItemId; load MediaItem + StorageObject.
 //   2. Read face.video settings; if enabled===false, mark no_faces and return.
 //   3. Resolve provider/creds via FaceDetectionCore.
-//   4. Download video → buffer → extract frames via VideoFrameExtractionService.
+//   4. Download video → temp file (constant memory) → extract frames via
+//      VideoFrameExtractionService; temp file is cleaned up afterward.
 //   5. For each frame: prepareImageForProcessing → core.detectWithThrottleMapping.
 //   6. Cross-frame dedup: greedy clustering by cosine similarity ≥ clusterThreshold.
 //      Providers without embeddings (e.g. Rekognition) skip dedup and use every
@@ -26,6 +27,9 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { EnrichmentJob } from '@prisma/client';
 import { Readable } from 'stream';
 import { randomUUID } from 'crypto';
+import { tmpdir } from 'os';
+import { join, extname } from 'path';
+import { promises as fs } from 'fs';
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -34,9 +38,9 @@ import { FaceDetectionCore, NormalizedFace, VideoFaceFields } from './face-detec
 import { VideoFrameExtractionService } from './video-frame-extraction.service';
 import { FaceMatchingService } from './face-matching.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { streamToTempFile } from '../storage/processing/processors/stream-utils';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import { MediaFaceStatusType } from '@prisma/client';
-import { extname } from 'path';
 import { DetectedFace, FaceProvider, FaceProviderCredentials } from './providers/face-provider.interface';
 
 // Max long-edge for face detection on video frames (same env var as photo path)
@@ -193,70 +197,78 @@ export class VideoFaceDetectionHandler implements EnrichmentHandler, OnModuleIni
       const sampleIntervalSeconds = videoSettings?.sampleIntervalSeconds ?? 5;
       const maxFrames = videoSettings?.maxFramesPerVideo ?? 60;
 
-      // --- 5. Download video ---
+      // --- 5. Download video (stream directly to a temp file — constant memory) ---
+      const fileExt = extname(mediaItem.storageObject.name || '') || '.mp4';
+      const tmpVideoPath = join(tmpdir(), `memoriaHub-vface-dl-${randomUUID()}${fileExt}`);
+
       const objectProvider = await this.resolver.getProviderFor(
         mediaItem.storageObject.storageProvider,
         mediaItem.storageObject.bucket,
       );
       const videoStream = await objectProvider.download(mediaItem.storageObject.storageKey);
-      const videoBuffer = await streamToBuffer(videoStream);
+      await streamToTempFile(videoStream, tmpVideoPath);
 
-      const fileExt = extname(mediaItem.storageObject.name || '') || '.mp4';
-
-      // --- 6. Extract frames ---
-      const frames = await this.frameExtractor.extractFrames(videoBuffer, {
-        durationMs: mediaItem.durationMs,
-        sampleIntervalSeconds,
-        maxFrames,
-        fileExtension: fileExt,
-      });
-
-      this.logger.log(
-        `VideoFaceJob ${job.id}: extracted ${frames.length} frame(s) from MediaItem ${job.mediaItemId}`,
-      );
-
-      // --- 7. Detect faces in each frame ---
-      const allDetections: FrameDetection[] = [];
-
-      for (const frame of frames) {
-        // prepareImageForProcessing applies EXIF orientation + downscales
-        const prepared = await prepareImageForProcessing(frame.buffer, {
-          maxDim: FACE_MAX_IMAGE_DIM(),
+      let allDetections: FrameDetection[];
+      try {
+        // --- 6. Extract frames ---
+        const frames = await this.frameExtractor.extractFrames(tmpVideoPath, {
+          durationMs: mediaItem.durationMs,
+          sampleIntervalSeconds,
+          maxFrames,
+          fileExtension: fileExt,
         });
 
-        const frameBuf =
-          prepared.width > 0 ? prepared.buffer : frame.buffer;
-        const frameWidth = prepared.width > 0 ? prepared.width : (mediaItem.width ?? 0);
-        const frameHeight = prepared.height > 0 ? prepared.height : (mediaItem.height ?? 0);
+        this.logger.log(
+          `VideoFaceJob ${job.id}: extracted ${frames.length} frame(s) from MediaItem ${job.mediaItemId}`,
+        );
 
-        let detectedFaces: DetectedFace[];
-        try {
-          detectedFaces = await this.core.detectWithThrottleMapping(
-            provider,
-            creds,
-            frameBuf,
-            providerKey,
-          );
-        } catch (detectErr) {
-          // RateLimitError must propagate (worker handles deferral)
-          throw detectErr;
-        }
+        // --- 7. Detect faces in each frame ---
+        allDetections = [];
 
-        const logCtx = `VideoFaceJob ${job.id} frame@${frame.timestampMs}ms`;
-        for (const face of detectedFaces) {
-          const normalizedFace = this.core.normalizeFace(
-            face,
-            frameWidth,
-            frameHeight,
-            logCtx,
-          );
-          allDetections.push({
-            face,
-            normalizedFace,
-            timestampMs: frame.timestampMs,
-            frameBuf,
+        for (const frame of frames) {
+          // prepareImageForProcessing applies EXIF orientation + downscales
+          const prepared = await prepareImageForProcessing(frame.buffer, {
+            maxDim: FACE_MAX_IMAGE_DIM(),
           });
+
+          const frameBuf =
+            prepared.width > 0 ? prepared.buffer : frame.buffer;
+          const frameWidth = prepared.width > 0 ? prepared.width : (mediaItem.width ?? 0);
+          const frameHeight = prepared.height > 0 ? prepared.height : (mediaItem.height ?? 0);
+
+          let detectedFaces: DetectedFace[];
+          try {
+            detectedFaces = await this.core.detectWithThrottleMapping(
+              provider,
+              creds,
+              frameBuf,
+              providerKey,
+            );
+          } catch (detectErr) {
+            // RateLimitError must propagate (worker handles deferral)
+            throw detectErr;
+          }
+
+          const logCtx = `VideoFaceJob ${job.id} frame@${frame.timestampMs}ms`;
+          for (const face of detectedFaces) {
+            const normalizedFace = this.core.normalizeFace(
+              face,
+              frameWidth,
+              frameHeight,
+              logCtx,
+            );
+            allDetections.push({
+              face,
+              normalizedFace,
+              timestampMs: frame.timestampMs,
+              frameBuf,
+            });
+          }
         }
+      } finally {
+        // The downloaded temp file is only needed for frame extraction above;
+        // always clean it up regardless of success/failure.
+        await fs.unlink(tmpVideoPath).catch(() => {});
       }
 
       this.logger.log(
@@ -573,15 +585,3 @@ function isBetterRepresentative(
   return candBb.w * candBb.h > currBb.w * currBb.h;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-async function streamToBuffer(stream: Readable): Promise<Buffer> {
-  return new Promise<Buffer>((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    stream.on('data', (chunk: Buffer) => chunks.push(chunk));
-    stream.on('end', () => resolve(Buffer.concat(chunks)));
-    stream.on('error', reject);
-  });
-}
