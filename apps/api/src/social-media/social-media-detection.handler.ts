@@ -22,7 +22,6 @@
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { EnrichmentJob, MediaSocialStatusType, MediaTagSource, MediaType } from '@prisma/client';
-import { Readable } from 'stream';
 import { tmpdir } from 'os';
 import { join, extname } from 'path';
 import { randomUUID } from 'crypto';
@@ -33,6 +32,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
+import { streamToTempFile } from '../storage/processing/processors/stream-utils';
 import { probeVideoFile, extractContainerMetadata } from '../storage/processing/processors/ffprobe.util';
 import {
   SocialMediaDetectorService,
@@ -127,6 +127,12 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
       return;
     }
 
+    // Lazily-downloaded video, streamed directly to a temp file (constant
+    // memory) and shared between legacy re-probe and OCR. Memoized at this
+    // outer scope (not inside the try below) so the finally block can clean
+    // it up exactly once, after every use is done, regardless of outcome.
+    let downloadedVideoPath: string | null = null;
+
     try {
       // --- 2. Feature gate ---
       const settings = await this.systemSettings.getSettings();
@@ -157,17 +163,19 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
 
       const probe = readPersistedProbe(mediaItem.storageObject.metadata);
 
-      // Lazily-downloaded video buffer, shared between legacy re-probe and OCR.
-      let videoBuffer: Buffer | null = null;
-      const downloadVideo = async (): Promise<Buffer> => {
-        if (videoBuffer) return videoBuffer;
+      // Memoizes the temp file PATH (not a buffer) so repeated calls reuse
+      // the same download.
+      const downloadVideo = async (): Promise<string> => {
+        if (downloadedVideoPath) return downloadedVideoPath;
         const provider = await this.resolver.getProviderFor(
           mediaItem.storageObject!.storageProvider,
           mediaItem.storageObject!.bucket,
         );
         const stream = await provider.download(mediaItem.storageObject!.storageKey);
-        videoBuffer = await streamToBuffer(stream);
-        return videoBuffer;
+        const tmpPath = join(tmpdir(), `memoriaHub-social-dl-${randomUUID()}${fileExt}`);
+        await streamToTempFile(stream, tmpPath);
+        downloadedVideoPath = tmpPath;
+        return downloadedVideoPath;
       };
 
       let input: VideoDetectionInput;
@@ -187,8 +195,8 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
         durationMs = probe.durationMs ?? mediaItem.durationMs ?? undefined;
       } else {
         // Legacy item probed before this feature existed → re-probe on the fly.
-        const buffer = await downloadVideo();
-        const container = await this.reprobe(buffer, fileExt);
+        const videoPath = await downloadVideo();
+        const container = await this.reprobe(videoPath);
         input = {
           kind: 'video',
           filename,
@@ -213,8 +221,8 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
       // --- 6. Tier-2 OCR fallback ---
       const ocrEnabled = settings.socialMedia?.ocrEnabled !== false;
       if (!result && recommendTier2 && ocrEnabled) {
-        const buffer = await downloadVideo();
-        const { texts } = await this.ocr.recognizeVideo(buffer, {
+        const videoPath = await downloadVideo();
+        const { texts } = await this.ocr.recognizeVideo(videoPath, {
           durationMs,
           fileExtension: fileExt,
           maxFrames: settings.socialMedia?.ocrMaxFrames ?? 4,
@@ -264,6 +272,12 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
         lastError: errMsg,
       }).catch(() => {});
       throw err;
+    } finally {
+      // Clean up the downloaded temp file exactly once, after every use
+      // (legacy re-probe and/or OCR) is done — regardless of outcome.
+      if (downloadedVideoPath) {
+        await fs.unlink(downloadedVideoPath).catch(() => {});
+      }
     }
   }
 
@@ -408,16 +422,10 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
     });
   }
 
-  /** Materialize the buffer to a temp file and run ffprobe → ContainerMetadata. */
-  private async reprobe(buffer: Buffer, fileExt: string) {
-    const tmpPath = join(tmpdir(), `memoriaHub-social-probe-${randomUUID()}${fileExt}`);
-    try {
-      await fs.writeFile(tmpPath, buffer);
-      const data = await probeVideoFile(tmpPath);
-      return extractContainerMetadata(data);
-    } finally {
-      await fs.unlink(tmpPath).catch(() => {});
-    }
+  /** Run ffprobe → ContainerMetadata against an already-downloaded temp file. */
+  private async reprobe(videoPath: string) {
+    const data = await probeVideoFile(videoPath);
+    return extractContainerMetadata(data);
   }
 }
 
@@ -462,13 +470,4 @@ function readPersistedProbe(metadata: unknown): PersistedProbe | null {
     width: typeof p['width'] === 'number' ? (p['width'] as number) : undefined,
     height: typeof p['height'] === 'number' ? (p['height'] as number) : undefined,
   };
-}
-
-async function streamToBuffer(stream: Readable): Promise<Buffer> {
-  return new Promise<Buffer>((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    stream.on('data', (chunk: Buffer) => chunks.push(chunk));
-    stream.on('end', () => resolve(Buffer.concat(chunks)));
-    stream.on('error', reject);
-  });
 }

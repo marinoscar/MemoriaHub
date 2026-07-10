@@ -93,8 +93,9 @@ export class SocialMediaOcrService implements OnModuleDestroy {
   // ---------------------------------------------------------------------------
 
   /**
-   * Run OCR over a small set of frames sampled from `videoBuffer` and return the
-   * per-frame recognized text.
+   * Run OCR over a small set of frames sampled from the video already on disk
+   * at `videoPath` and return the per-frame recognized text. The caller owns
+   * downloading/materializing `videoPath` and cleaning it up afterward.
    *
    * Never throws:
    *   - degraded / worker-init failure → { texts: [], available: false }
@@ -102,7 +103,7 @@ export class SocialMediaOcrService implements OnModuleDestroy {
    *   - soft-timeout                    → { texts: <collected>, available: true }
    */
   async recognizeVideo(
-    videoBuffer: Buffer,
+    videoPath: string,
     opts: RecognizeVideoOpts,
   ): Promise<{ texts: string[]; available: boolean }> {
     if (this.degraded) {
@@ -125,7 +126,7 @@ export class SocialMediaOcrService implements OnModuleDestroy {
     let frames;
     try {
       frames = await this.frameExtractor.extractFramesAt(
-        videoBuffer,
+        videoPath,
         timestamps,
         opts.fileExtension,
       );
