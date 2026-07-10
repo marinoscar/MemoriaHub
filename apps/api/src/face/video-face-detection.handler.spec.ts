@@ -39,6 +39,15 @@
  *   assert the cleanup happens on both the success and thrown-error paths,
  *   without otherwise disturbing real `fs` behavior (`@prisma/client` needs the
  *   real filesystem module to load).
+ *
+ * Queue-resilience coverage note:
+ *   The same `fs` mock also replaces `promises.statfs` with a deterministic
+ *   stub (plenty of free space by default) because the handler now runs
+ *   `assertDiskSpaceForDownload` (statfs on os.tmpdir(), 20% headroom over the
+ *   object size) before any video download. Tests override it per-case to
+ *   simulate a full disk. The storageObject fixture gained a `size` (BigInt)
+ *   field for the disk guard and the optional VIDEO_ENRICHMENT_MAX_BYTES hard
+ *   cap (oversized → markStatus no_faces, no download).
  */
 
 // ---------------------------------------------------------------------------
@@ -105,6 +114,10 @@ jest.mock('fs', () => {
       unlink: jest.fn().mockImplementation((...args: unknown[]) =>
         (actual.promises.unlink as (...a: unknown[]) => Promise<void>)(...args),
       ),
+      // Deterministic statfs stub for the disk-space guard: default to ample
+      // free space (bavail * bsize = ~1 TB) so ordinary tests never trip it;
+      // disk-guard tests override per-call with mockResolvedValueOnce.
+      statfs: jest.fn().mockResolvedValue({ bavail: 1_000_000, bsize: 1_000_000 }),
     },
   };
 });
@@ -115,6 +128,7 @@ jest.mock('fs', () => {
 
 import { Readable } from 'stream';
 import { promises as fsPromises } from 'fs';
+import { tmpdir } from 'os';
 import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
 import { VideoFaceDetectionHandler } from './video-face-detection.handler';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
@@ -155,7 +169,7 @@ function makeMediaItem(overrides: Partial<{
   durationMs: number | null;
   width: number | null;
   height: number | null;
-  storageObject: { storageKey: string; storageProvider: string; bucket: string; name: string } | null;
+  storageObject: { storageKey: string; storageProvider: string; bucket: string; name: string; size: bigint } | null;
 }> = {}) {
   return {
     id: 'media-video-1',
@@ -169,6 +183,9 @@ function makeMediaItem(overrides: Partial<{
       storageProvider: 's3',
       bucket: 'my-bucket',
       name: 'video.mp4',
+      // The handler's select now includes size (BigInt) for the disk-space
+      // guard and the VIDEO_ENRICHMENT_MAX_BYTES hard cap.
+      size: BigInt(1024),
     },
     ...overrides,
   };
@@ -802,6 +819,130 @@ describe('VideoFaceDetectionHandler', () => {
       await expect(handler.process(makeJob())).resolves.toBeUndefined();
 
       expect(mockUnlink).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // VIDEO_ENRICHMENT_MAX_BYTES hard size cap (queue-resilience)
+  //
+  // When the env cap is set (> 0) and the storage object exceeds it, the
+  // handler marks the item no_faces — like the other skip paths — WITHOUT
+  // downloading a single byte. Default (0 / unset) disables the cap. The env
+  // var is read per-call, so no module re-import is needed.
+  // -------------------------------------------------------------------------
+
+  describe('VIDEO_ENRICHMENT_MAX_BYTES hard size cap', () => {
+    const SAVED_MAX_BYTES = process.env['VIDEO_ENRICHMENT_MAX_BYTES'];
+
+    afterEach(() => {
+      if (SAVED_MAX_BYTES === undefined) {
+        delete process.env['VIDEO_ENRICHMENT_MAX_BYTES'];
+      } else {
+        process.env['VIDEO_ENRICHMENT_MAX_BYTES'] = SAVED_MAX_BYTES;
+      }
+    });
+
+    it('marks no_faces and never downloads when the object size exceeds the cap', async () => {
+      process.env['VIDEO_ENRICHMENT_MAX_BYTES'] = '1000';
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem({
+          storageObject: { ...makeMediaItem().storageObject!, size: BigInt(5000) },
+        }),
+      );
+
+      await expect(handler.process(makeJob())).resolves.toBeUndefined();
+
+      expect(mockCore.markStatus).toHaveBeenCalledWith(
+        'media-video-1',
+        'no_faces',
+        0,
+        expect.any(String),
+        expect.any(String),
+      );
+      // Not a single byte downloaded, no frames, no thumbnails.
+      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockObjectStorageProvider.download).not.toHaveBeenCalled();
+      expect(mockFrameExtractor.extractFrames).not.toHaveBeenCalled();
+      expect(mockPrisma.storageObject.upsert).not.toHaveBeenCalled();
+    });
+
+    it('processes normally when the object size is within the cap', async () => {
+      process.env['VIDEO_ENRICHMENT_MAX_BYTES'] = '10000';
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem({
+          storageObject: { ...makeMediaItem().storageObject!, size: BigInt(5000) },
+        }),
+      );
+
+      await handler.process(makeJob());
+
+      expect(mockObjectStorageProvider.download).toHaveBeenCalledTimes(1);
+      expect(mockFrameExtractor.extractFrames).toHaveBeenCalledTimes(1);
+      expect(mockCore.persistAndMatchFaces).toHaveBeenCalled();
+    });
+
+    it('cap disabled (env unset, default 0) processes an arbitrarily large video normally', async () => {
+      delete process.env['VIDEO_ENRICHMENT_MAX_BYTES'];
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem({
+          storageObject: { ...makeMediaItem().storageObject!, size: BigInt(10_000_000_000) },
+        }),
+      );
+
+      await handler.process(makeJob());
+
+      expect(mockObjectStorageProvider.download).toHaveBeenCalledTimes(1);
+      expect(mockFrameExtractor.extractFrames).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Disk-space guard before download (queue-resilience)
+  //
+  // assertDiskSpaceForDownload(size, tmpdir()) runs BEFORE provider.download —
+  // when the temp filesystem lacks size * 1.2 headroom the job fails fast
+  // (through the worker's normal retry path) without writing a partial file.
+  // -------------------------------------------------------------------------
+
+  describe('disk-space guard before download', () => {
+    const mockStatfs = fsPromises.statfs as unknown as jest.Mock;
+    const mockUnlink = fsPromises.unlink as jest.Mock;
+
+    it('rejects with the insufficient-disk-space error and never starts the download when free space is too low', async () => {
+      // Zero free space on the temp filesystem.
+      mockStatfs.mockResolvedValueOnce({ bavail: 0, bsize: 4096 });
+
+      await expect(handler.process(makeJob())).rejects.toThrow(
+        /insufficient disk space for video download/,
+      );
+
+      expect(mockObjectStorageProvider.download).not.toHaveBeenCalled();
+      expect(mockFrameExtractor.extractFrames).not.toHaveBeenCalled();
+      // The guard throws before the download try/finally — no temp file was
+      // ever created, so nothing is unlinked.
+      expect(mockUnlink).not.toHaveBeenCalled();
+      // The failure is surfaced to the face status like any other error.
+      expect(mockCore.markFailed).toHaveBeenCalledWith(
+        'media-video-1',
+        expect.any(String),
+        expect.any(String),
+        expect.stringContaining('insufficient disk space'),
+      );
+    });
+
+    it('checks the temp directory filesystem (statfs on os.tmpdir())', async () => {
+      await handler.process(makeJob());
+
+      expect(mockStatfs).toHaveBeenCalledWith(tmpdir());
+    });
+
+    it('proceeds with the download when free space covers the size plus 20% headroom', async () => {
+      // size = 1024 bytes → needed = 1229; provide just enough.
+      mockStatfs.mockResolvedValueOnce({ bavail: 1229, bsize: 1 });
+
+      await handler.process(makeJob());
+
+      expect(mockObjectStorageProvider.download).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -28,6 +28,20 @@
  *     legacy re-probe path and the OCR path run in the same job (ffprobe is
  *     mocked via ffprobe.util so no real ffmpeg binary is invoked for that
  *     scenario)
+ *   - Pre-flight caps (queue-resilience): duration over
+ *     socialMedia.maxDurationSeconds → clean via 'skip-duration-cap' with no
+ *     download; unknown duration + size over socialMedia.maxSizeBytes (or the
+ *     VIDEO_ENRICHMENT_MAX_BYTES env hard cap) → 'skip-size-cap'; fan-out
+ *     still runs and previously-flagged items still get their tags stripped
+ *   - Landscape orientation gate: strictly-landscape videos are never
+ *     downloaded for the legacy re-probe and never get Tier-2 OCR (Tier-1
+ *     filename/persisted-metadata rules still run); portrait items with no
+ *     persisted probe still download + re-probe + OCR (control)
+ *   - Disk-space guard: downloadVideo() runs assertDiskSpaceForDownload
+ *     (statfs stubbed deterministically in the fs mock below) before streaming
+ *
+ * Fixture note: storageObject now carries `size` (BigInt) — the handler's
+ * select includes it for the pre-flight caps and the disk guard.
  */
 
 // Mock ffprobe.util so the legacy re-probe branch never shells out to a real
@@ -56,6 +70,10 @@ jest.mock('fs', () => {
       unlink: jest.fn().mockImplementation((...args: unknown[]) =>
         (actual.promises.unlink as (...a: unknown[]) => Promise<void>)(...args),
       ),
+      // Deterministic statfs stub for the disk-space guard in downloadVideo():
+      // default to ample free space (bavail * bsize = ~1 TB); the disk-guard
+      // test overrides per-call with mockResolvedValueOnce.
+      statfs: jest.fn().mockResolvedValue({ bavail: 1_000_000, bsize: 1_000_000 }),
     },
   };
 });
@@ -131,6 +149,9 @@ function makeMediaItem(overrides: Record<string, any> = {}) {
       storageProvider: 's3',
       bucket: 'bucket-1',
       name: 'video.mp4',
+      // Selected by the handler for the pre-flight caps + disk guard. Small
+      // enough that no size-based cap can trip by default.
+      size: BigInt(1024),
       metadata: {
         _processing: {
           'video-probe': {
@@ -148,7 +169,7 @@ function makeMediaItem(overrides: Record<string, any> = {}) {
   };
 }
 
-/** Default settings: feature ON, default minConfidence, OCR enabled. */
+/** Default settings: feature ON, default minConfidence, OCR enabled, default caps. */
 function makeSettings(overrides: Record<string, any> = {}) {
   return {
     features: { socialMediaDetection: true },
@@ -158,6 +179,11 @@ function makeSettings(overrides: Record<string, any> = {}) {
       ocrMaxFrames: 4,
       ocrLanguages: ['eng'],
       ocrTimeoutSeconds: 60,
+      // Pre-flight caps (schema defaults): clips longer than 5 minutes are
+      // treated as clean without download; the size cap only applies when the
+      // duration is unknown.
+      maxDurationSeconds: 300,
+      maxSizeBytes: 500_000_000,
       ...overrides.socialMedia,
     },
     ...overrides,
@@ -710,6 +736,7 @@ describe('SocialMediaDetectionHandler', () => {
           storageProvider: 's3',
           bucket: 'bucket-1',
           name: 'video.mp4',
+          size: BigInt(1024),
           metadata: {},
         },
         ...overrides,
@@ -769,6 +796,353 @@ describe('SocialMediaDetectionHandler', () => {
       expect(mockOcr.recognizeVideo).not.toHaveBeenCalled();
       expect(mockDownload).toHaveBeenCalledTimes(1);
       expect(mockUnlink).toHaveBeenCalledTimes(1);
+    });
+
+    it('fails fast with the insufficient-disk-space error BEFORE streaming when the temp filesystem is too full', async () => {
+      const mockStatfs = fsPromises.statfs as unknown as jest.Mock;
+      // Zero free space — assertDiskSpaceForDownload throws inside downloadVideo().
+      mockStatfs.mockResolvedValueOnce({ bavail: 0, bsize: 4096 });
+
+      await expect(handler.process(makeJob())).rejects.toThrow(
+        /insufficient disk space for video download/,
+      );
+
+      // The guard runs before provider.download and before the temp path is
+      // recorded — nothing was downloaded, so nothing needs cleanup.
+      expect(mockDownload).not.toHaveBeenCalled();
+      expect(mockUnlink).not.toHaveBeenCalled();
+
+      // The error routes through the normal failed-status path.
+      const finalCall =
+        mockPrisma.mediaSocialStatus.upsert.mock.calls[
+          mockPrisma.mediaSocialStatus.upsert.mock.calls.length - 1
+        ][0];
+      expect(finalCall.update.status).toBe(MediaSocialStatusType.failed);
+      expect(String(finalCall.update.lastError)).toContain('insufficient disk space');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Pre-flight caps (queue-resilience): skip-duration-cap / skip-size-cap
+  //
+  // Operator domain fact: genuine social-media clips never exceed ~5 minutes.
+  // Videos over socialMedia.maxDurationSeconds are treated as CLEAN via the
+  // normal clean path (status upsert records the skip in matchedRule, stale
+  // tags stripped for previously-flagged items, downstream video enrichment
+  // fans out) without downloading a single byte. When the duration is unknown,
+  // socialMedia.maxSizeBytes is the fallback signal; the shared
+  // VIDEO_ENRICHMENT_MAX_BYTES env hard cap is checked first, unconditionally.
+  // -------------------------------------------------------------------------
+
+  describe('pre-flight caps (skip-duration-cap / skip-size-cap)', () => {
+    const SAVED_MAX_BYTES = process.env['VIDEO_ENRICHMENT_MAX_BYTES'];
+
+    afterEach(() => {
+      if (SAVED_MAX_BYTES === undefined) {
+        delete process.env['VIDEO_ENRICHMENT_MAX_BYTES'];
+      } else {
+        process.env['VIDEO_ENRICHMENT_MAX_BYTES'] = SAVED_MAX_BYTES;
+      }
+    });
+
+    /** MediaItem whose persisted probe reports the given duration (ms). */
+    function makeItemWithProbeDuration(durationMs: number | undefined, overrides: Record<string, any> = {}) {
+      return makeMediaItem({
+        storageObject: {
+          ...makeMediaItem().storageObject,
+          metadata: {
+            _processing: {
+              'video-probe': {
+                formatTags: {},
+                streamTags: [],
+                formatName: 'mov,mp4,m4a,3gp,3g2,mj2',
+                ...(durationMs !== undefined ? { durationMs } : {}),
+                width: 1080,
+                height: 1920,
+              },
+            },
+          },
+        },
+        ...overrides,
+      });
+    }
+
+    function findSkipUpsert(rule: string) {
+      return mockPrisma.mediaSocialStatus.upsert.mock.calls.find(
+        (c: any[]) => c[0].create.matchedRule === rule,
+      );
+    }
+
+    it('duration over the cap → clean via skip-duration-cap, no download, fan-out still runs', async () => {
+      // 400 s > default maxDurationSeconds (300 s)
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeItemWithProbeDuration(400_000) as any,
+      );
+
+      await handler.process(makeJob({ reason: JobReason.upload }));
+
+      const skipCall = findSkipUpsert('skip-duration-cap');
+      expect(skipCall).toBeDefined();
+      expect(skipCall![0].update).toMatchObject({
+        status: MediaSocialStatusType.processed,
+        isSocialMedia: false,
+        platform: null,
+        detectionMethod: null,
+        matchedRule: 'skip-duration-cap',
+      });
+
+      // Not a single byte downloaded; no OCR; no tags applied.
+      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockOcr.recognizeVideo).not.toHaveBeenCalled();
+      expect(mockPrisma.tag.upsert).not.toHaveBeenCalled();
+
+      // Withheld downstream video enrichment still fans out.
+      expect(mockMediaEnrichment.enqueueVideoPostDetectionEnrichment).toHaveBeenCalledWith(
+        { id: 'media-1', type: MediaType.video, circleId: 'circle-1', deletedAt: null },
+        JobReason.upload,
+      );
+    });
+
+    it('duration exactly AT the cap is NOT skipped (strictly greater-than)', async () => {
+      // 300 s == maxDurationSeconds → not over the cap → full detection runs.
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeItemWithProbeDuration(300_000) as any,
+      );
+
+      await handler.process(makeJob());
+
+      expect(findSkipUpsert('skip-duration-cap')).toBeUndefined();
+      expect(findSkipUpsert('skip-size-cap')).toBeUndefined();
+    });
+
+    it('falls back to mediaItem.durationMs when the persisted probe has no duration', async () => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeItemWithProbeDuration(undefined, { durationMs: 400_000 }) as any,
+      );
+
+      await handler.process(makeJob());
+
+      expect(findSkipUpsert('skip-duration-cap')).toBeDefined();
+      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+    });
+
+    it('respects a custom socialMedia.maxDurationSeconds setting', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeSettings({ socialMedia: { maxDurationSeconds: 60 } }),
+      );
+      // 90 s is fine under the default 300 s but over the custom 60 s cap.
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeItemWithProbeDuration(90_000) as any,
+      );
+
+      await handler.process(makeJob());
+
+      expect(findSkipUpsert('skip-duration-cap')).toBeDefined();
+    });
+
+    it('unknown duration + size over socialMedia.maxSizeBytes → skip-size-cap without downloading', async () => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeItemWithProbeDuration(undefined, {
+          durationMs: null,
+          storageObject: {
+            ...makeMediaItem().storageObject,
+            size: BigInt(600_000_000), // > default 500 MB
+            metadata: {
+              _processing: {
+                'video-probe': { formatTags: {}, streamTags: [], formatName: 'mov' },
+              },
+            },
+          },
+        }) as any,
+      );
+
+      await handler.process(makeJob({ reason: JobReason.rerun }));
+
+      const skipCall = findSkipUpsert('skip-size-cap');
+      expect(skipCall).toBeDefined();
+      expect(skipCall![0].update.isSocialMedia).toBe(false);
+      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockMediaEnrichment.enqueueVideoPostDetectionEnrichment).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'media-1' }),
+        JobReason.rerun,
+      );
+    });
+
+    it('unknown duration + size under the cap is NOT skipped (size is only a fallback signal)', async () => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeItemWithProbeDuration(undefined, { durationMs: null }) as any, // size stays BigInt(1024)
+      );
+
+      await handler.process(makeJob());
+
+      expect(findSkipUpsert('skip-size-cap')).toBeUndefined();
+      expect(findSkipUpsert('skip-duration-cap')).toBeUndefined();
+      // Falls through to a genuine clean pass (matchedRule null) + fan-out.
+      expect(mockMediaEnrichment.enqueueVideoPostDetectionEnrichment).toHaveBeenCalled();
+    });
+
+    it('known short duration does NOT trigger the settings size cap even for a large file', async () => {
+      // Duration is known and small → the maxSizeBytes fallback must not apply.
+      // Dimensions are nulled so no suspicion heuristic can route this into
+      // the (unmocked-download) OCR path — the point here is only the cap.
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeItemWithProbeDuration(5_000, {
+          width: null,
+          height: null,
+          storageObject: {
+            ...makeMediaItem().storageObject,
+            size: BigInt(600_000_000),
+            metadata: {
+              _processing: {
+                'video-probe': {
+                  formatTags: {}, streamTags: [], formatName: 'mov', durationMs: 5_000,
+                },
+              },
+            },
+          },
+        }) as any,
+      );
+
+      await handler.process(makeJob());
+
+      expect(findSkipUpsert('skip-size-cap')).toBeUndefined();
+      expect(findSkipUpsert('skip-duration-cap')).toBeUndefined();
+    });
+
+    it('VIDEO_ENRICHMENT_MAX_BYTES env hard cap forces skip-size-cap even when the duration is short', async () => {
+      process.env['VIDEO_ENRICHMENT_MAX_BYTES'] = '1000';
+      // Default fixture: probe durationMs 5000 (well under the duration cap),
+      // size overridden above the env hard cap.
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem({
+          storageObject: { ...makeMediaItem().storageObject, size: BigInt(5000) },
+        }) as any,
+      );
+
+      await handler.process(makeJob());
+
+      expect(findSkipUpsert('skip-size-cap')).toBeDefined();
+      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+    });
+
+    it('a previously-flagged item skipped by a cap still gets its system tags stripped and source cleared', async () => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeItemWithProbeDuration(400_000, { socialMediaSource: 'tiktok' }) as any,
+      );
+
+      await handler.process(makeJob({ reason: JobReason.rerun }));
+
+      expect(mockPrisma.mediaTag.deleteMany).toHaveBeenCalledWith({
+        where: {
+          mediaItemId: 'media-1',
+          source: MediaTagSource.system,
+          tag: { name: { in: ['Social Media', 'TikTok', 'Instagram', 'Facebook'] } },
+        },
+      });
+      expect(mockPrisma.mediaItem.update).toHaveBeenCalledWith({
+        where: { id: 'media-1' },
+        data: { socialMediaSource: null },
+      });
+      expect(mockMediaEnrichment.enqueueVideoPostDetectionEnrichment).toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Landscape orientation gate (queue-resilience)
+  //
+  // TikTok/Instagram videos are never landscape — a strictly-landscape video
+  // is never downloaded for this job: the legacy re-probe is skipped (Tier-1
+  // runs on filename + whatever persisted metadata exists) and Tier-2 OCR is
+  // forced off even when Tier-1 recommends it. Filename rules still apply, so
+  // landscape re-shares with telltale names are still caught.
+  // -------------------------------------------------------------------------
+
+  describe('landscape orientation gate', () => {
+    let mockDownload: jest.Mock;
+
+    /** Landscape item with NO persisted probe (would otherwise re-probe). */
+    function makeLandscapeNoProbeItem(overrides: Record<string, any> = {}) {
+      return makeMediaItem({
+        // WhatsApp-reshare-style filename → heur-reshare-filename fires, so
+        // tier-1 RECOMMENDS OCR; the orientation gate must veto it.
+        originalFilename: 'VID-20260101-WA0012.mp4',
+        width: 1920,
+        height: 1080,
+        storageObject: {
+          storageKey: 'key-1',
+          storageProvider: 's3',
+          bucket: 'bucket-1',
+          name: 'video.mp4',
+          size: BigInt(1024),
+          metadata: {}, // no persisted probe
+        },
+        ...overrides,
+      });
+    }
+
+    beforeEach(() => {
+      mockDownload = jest.fn().mockResolvedValue(Readable.from(Buffer.from('fake-video-bytes')));
+      mockResolver.getProviderFor.mockResolvedValue({ download: mockDownload });
+      mockOcr.recognizeVideo.mockResolvedValue({ texts: [], available: true });
+    });
+
+    it('never downloads a strictly-landscape video for the legacy re-probe', async () => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(makeLandscapeNoProbeItem() as any);
+
+      await handler.process(makeJob());
+
+      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockDownload).not.toHaveBeenCalled();
+    });
+
+    it('never runs Tier-2 OCR on a landscape video, even when the suspicious filename recommends it — item reads clean and fans out', async () => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(makeLandscapeNoProbeItem() as any);
+
+      await handler.process(makeJob({ reason: JobReason.upload }));
+
+      expect(mockOcr.recognizeVideo).not.toHaveBeenCalled();
+
+      // Tier-1 alone was inconclusive → genuine clean (matchedRule null) + fan-out.
+      const finalCall =
+        mockPrisma.mediaSocialStatus.upsert.mock.calls[
+          mockPrisma.mediaSocialStatus.upsert.mock.calls.length - 1
+        ][0];
+      expect(finalCall.update).toMatchObject({
+        status: MediaSocialStatusType.processed,
+        isSocialMedia: false,
+        matchedRule: null,
+      });
+      expect(mockMediaEnrichment.enqueueVideoPostDetectionEnrichment).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'media-1' }),
+        JobReason.upload,
+      );
+    });
+
+    it('Tier-1 filename rules still fire for landscape videos (detected with no download, no fan-out)', async () => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeLandscapeNoProbeItem({ originalFilename: 'snaptik_export_video.mp4' }) as any,
+      );
+
+      await handler.process(makeJob());
+
+      // Detected via the filename rule without downloading a byte.
+      const tagNames = mockPrisma.tag.upsert.mock.calls.map((c: any[]) => c[0].create.name);
+      expect(tagNames).toEqual(['Social Media', 'TikTok']);
+      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockOcr.recognizeVideo).not.toHaveBeenCalled();
+      expect(mockMediaEnrichment.enqueueVideoPostDetectionEnrichment).not.toHaveBeenCalled();
+    });
+
+    it('portrait control: the same suspicious filename with no persisted probe still downloads for the re-probe and runs OCR', async () => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(
+        makeLandscapeNoProbeItem({ width: 1080, height: 1920 }) as any,
+      );
+
+      await handler.process(makeJob());
+
+      expect(mockResolver.getProviderFor).toHaveBeenCalledTimes(1);
+      expect(mockDownload).toHaveBeenCalledTimes(1);
+      expect(mockOcr.recognizeVideo).toHaveBeenCalledTimes(1);
     });
   });
 });
