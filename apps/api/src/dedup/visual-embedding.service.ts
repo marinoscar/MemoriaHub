@@ -18,11 +18,14 @@
  *
  * Degraded-mode contract: any failure to download/load/run the model is
  * caught internally. `isAvailable()` reflects the degraded flag, and
- * `embedImage` / `ensureEmbedding` return `null` / `'unavailable'` rather
- * than throwing. Callers (DuplicateDetectionService) MUST fall back to
- * hash-only matching when embeddings are unavailable — visual embeddings are
- * a best-effort enhancement, never a hard dependency for the dedup feature
- * to function.
+ * `embedImage` returns `null` rather than throwing. Callers
+ * (DuplicateDetectionService) MUST fall back to hash-only matching when
+ * embeddings are unavailable — visual embeddings are a best-effort
+ * enhancement, never a hard dependency for the dedup feature to function.
+ *
+ * Byte download is NOT this service's concern (compute/persist split):
+ * DuplicateDetectionService downloads the original once and feeds the buffer
+ * through `embedImage`, then persists via `persistEmbedding`.
  */
 
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
@@ -37,8 +40,6 @@ import {
   VISUAL_EMBEDDING_MODEL_TAG,
 } from '@memoriahub/enrichment-compute/clip';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 // Imported for the side effect of wiring the shared package's logger into
 // NestJS logging (and kept as the canonical orientation-prep import site).
 import '../storage/processing/image-orientation.util';
@@ -67,8 +68,6 @@ const MODEL_FILENAME = 'clip-vit-b32-vision-quantized.onnx';
 const MIN_MODEL_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB — the quantized vision tower is ~87 MB
 const IDLE_RELEASE_MS = 5 * 60 * 1000; // 5 minutes
 
-export type EnsureEmbeddingResult = 'exists' | 'created' | 'unavailable';
-
 // -----------------------------------------------------------------------------
 // Service
 // -----------------------------------------------------------------------------
@@ -83,10 +82,7 @@ export class VisualEmbeddingService implements OnModuleDestroy {
   private degraded = false;
   private degradedWarned = false;
 
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly resolver: StorageProviderResolver,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   onModuleDestroy(): void {
     if (this.idleTimer) {
@@ -237,61 +233,37 @@ export class VisualEmbeddingService implements OnModuleDestroy {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Persistence (server-only half of the compute/persist split)
+  // ---------------------------------------------------------------------------
+
   /**
-   * Ensure a visual embedding row exists for a media item — idempotent and
-   * resumable (checks existence first so backfill/batch handlers can retry
-   * freely without re-embedding already-processed items).
+   * Whether a visual-embedding row already exists for the media item. Row
+   * existence doubles as the "already processed" marker for backfill/batch
+   * idempotency — there is no separate per-item status table for duplicate
+   * detection.
    */
-  async ensureEmbedding(mediaItemId: string): Promise<EnsureEmbeddingResult> {
+  async hasEmbedding(mediaItemId: string): Promise<boolean> {
     const existing = await this.prisma.$queryRaw<{ exists: number }[]>`
       SELECT 1 AS exists FROM media_visual_embedding WHERE media_item_id = ${mediaItemId}::uuid LIMIT 1`;
+    return existing.length > 0;
+  }
 
-    if (existing.length > 0) {
-      return 'exists';
-    }
-
-    const item = await this.prisma.mediaItem.findUnique({
-      where: { id: mediaItemId },
-      select: { storageObjectId: true, circleId: true },
-    });
-
-    if (!item?.storageObjectId) {
-      return 'unavailable';
-    }
-
-    const storageObject = await this.prisma.storageObject.findUnique({
-      where: { id: item.storageObjectId },
-      select: { storageKey: true, storageProvider: true, bucket: true },
-    });
-
-    if (!storageObject?.storageKey) {
-      return 'unavailable';
-    }
-
-    let buffer: Buffer;
-    try {
-      const provider = await this.resolver.getProviderFor(storageObject.storageProvider, storageObject.bucket);
-      const stream = await provider.download(storageObject.storageKey);
-      buffer = await streamToBuffer(stream);
-    } catch (err) {
-      this.logger.warn(
-        `ensureEmbedding: failed to download bytes for MediaItem ${mediaItemId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return 'unavailable';
-    }
-
-    const embedding = await this.embedImage(buffer);
-    if (!embedding) {
-      return 'unavailable';
-    }
-
+  /**
+   * Upsert the media_visual_embedding row for a media item. Raw SQL because
+   * Prisma cannot handle the vector(512) column type.
+   */
+  async persistEmbedding(
+    mediaItemId: string,
+    circleId: string,
+    embedding: number[],
+    model: string = VISUAL_EMBEDDING_MODEL_TAG,
+  ): Promise<void> {
     const vectorLiteral = `[${embedding.join(',')}]`;
     await this.prisma.$executeRaw`
       INSERT INTO media_visual_embedding (media_item_id, circle_id, embedding, model)
-      VALUES (${mediaItemId}::uuid, ${item.circleId}::uuid, ${vectorLiteral}::vector, ${VISUAL_EMBEDDING_MODEL_TAG})
+      VALUES (${mediaItemId}::uuid, ${circleId}::uuid, ${vectorLiteral}::vector, ${model})
       ON CONFLICT (media_item_id) DO UPDATE
         SET embedding = EXCLUDED.embedding, model = EXCLUDED.model`;
-
-    return 'created';
   }
 }
