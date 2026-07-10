@@ -52,6 +52,12 @@ export interface EnrichmentJobDto {
   rateLimitedAt: string | null;
   /** How many times the job has been rate-limited; 0 if never. */
   rateLimitHits: number;
+  /** Which executor ran/claimed the job: 'server' (in-process worker), 'node' (distributed worker), or null (unclaimed). */
+  executor?: 'server' | 'node' | null;
+  /** ID of the worker node that claimed the job; null for server-executed or unclaimed jobs. */
+  claimedByNodeId?: string | null;
+  /** Summary of the worker node that claimed the job; null for server-executed or unclaimed jobs. */
+  claimedByNode?: { id: string; name: string; hostname: string } | null;
   payload?: unknown;
 }
 

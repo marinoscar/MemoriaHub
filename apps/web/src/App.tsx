@@ -29,6 +29,7 @@ const FaceSettingsPage = lazy(() => import('./pages/Admin/FaceSettingsPage'));
 const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
 const JobsPage = lazy(() => import('./pages/Admin/JobsPage'));
 const JobInsightsPage = lazy(() => import('./pages/Admin/JobInsightsPage'));
+const WorkersPage = lazy(() => import('./pages/Admin/WorkersPage'));
 const DoctorPage = lazy(() => import('./pages/Admin/DoctorPage'));
 const StorageInsightsPage = lazy(() => import('./pages/Admin/StorageInsightsPage'));
 const StorageProvidersPage = lazy(() => import('./pages/Admin/StorageProvidersPage'));
@@ -110,6 +111,7 @@ function AppRoutes() {
                 <Route path="/admin/settings/storage/insights" element={<StorageInsightsPage />} />
                 <Route path="/admin/settings/jobs" element={<JobsPage />} />
                 <Route path="/admin/settings/jobs/insights" element={<JobInsightsPage />} />
+                <Route path="/admin/settings/nodes" element={<WorkersPage />} />
                 <Route path="/admin/settings/doctor" element={<DoctorPage />} />
                 <Route path="/admin/settings/backup" element={<BackupPage />} />
                 <Route path="/admin/settings/sharing" element={<PublicSharesPage />} />

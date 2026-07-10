@@ -27,6 +27,7 @@ import {
   Public as PublicIcon,
   MonitorHeart as MonitorHeartIcon,
   Movie as MovieIcon,
+  Hub as HubIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 
@@ -181,6 +182,13 @@ export default function SettingsHubPage() {
           description: 'Live queue stats, per-type durations, and an ETA for the backlog.',
           icon: <QueryStatsIcon sx={{ fontSize: 40 }} color="primary" />,
           path: '/admin/settings/jobs/insights',
+          permission: 'jobs:read',
+        },
+        {
+          title: 'Worker Nodes',
+          description: 'Distributed CLI worker nodes: fleet health, heartbeats, and per-node job stats.',
+          icon: <HubIcon sx={{ fontSize: 40 }} color="primary" />,
+          path: '/admin/settings/nodes',
           permission: 'jobs:read',
         },
         {
