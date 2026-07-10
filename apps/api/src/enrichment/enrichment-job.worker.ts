@@ -53,6 +53,18 @@ const RL_MAX_HITS = getEnvInt('ENRICHMENT_RATELIMIT_MAX_HITS', 10);
 // runtime (e.g. long video face detection) to avoid killing valid work.
 const JOB_TIMEOUT_MS = getEnvInt('ENRICHMENT_JOB_TIMEOUT_MS', 600_000); // 10 min
 
+// Per-type override for the video job types, which legitimately run far longer
+// than the global default on low-compute hosts (download + ffmpeg + per-frame
+// provider calls on multi-GB videos). 0 disables the timeout for these types.
+const VIDEO_JOB_TIMEOUT_MS = getEnvInt('ENRICHMENT_VIDEO_JOB_TIMEOUT_MS', 1_200_000); // 20 min
+
+/** Job types governed by the video timeout override. */
+const VIDEO_JOB_TYPES = new Set(['video_face_detection', 'social_media_detection']);
+
+/** Resolve the effective execution timeout (ms) for a job type. */
+function timeoutMsForType(type: string): number {
+  return VIDEO_JOB_TYPES.has(type) ? VIDEO_JOB_TIMEOUT_MS : JOB_TIMEOUT_MS;
+}
 
 @Injectable()
 export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDestroy {
@@ -310,8 +322,9 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
         await this.throttle.acquire(throttleKey);
       }
 
-      if (JOB_TIMEOUT_MS > 0) {
-        await this.withTimeout(handler.process(job), JOB_TIMEOUT_MS, job);
+      const timeoutMs = timeoutMsForType(job.type);
+      if (timeoutMs > 0) {
+        await this.withTimeout(handler.process(job), timeoutMs, job);
       } else {
         await handler.process(job);
       }
