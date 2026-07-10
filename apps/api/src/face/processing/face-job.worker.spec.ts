@@ -13,6 +13,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EnrichmentJobWorker } from '../../enrichment/enrichment-job.worker';
 import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
+import { EnrichmentClaimService } from '../../enrichment/enrichment-claim.service';
+import { EnrichmentTerminalService } from '../../enrichment/enrichment-terminal.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
 import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
@@ -21,6 +23,38 @@ import { ProviderThrottleService } from '../../enrichment/provider-throttle.serv
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * A mock EnrichmentClaimService whose claim() DELEGATES to the same prisma mock
+ * the old in-process claimNextJob used (findFirst → update), mirroring
+ * enrichment-job.worker.spec.ts. The claim UPDATE charges the attempt
+ * (attempts + 1), matching the real claim SQL's claim-time charging.
+ */
+function makeClaimMock(mockPrisma: MockPrismaService): { claim: jest.Mock } {
+  return {
+    claim: jest.fn(async (): Promise<EnrichmentJob[]> => {
+      const now = new Date();
+      const job = await (mockPrisma.enrichmentJob.findFirst as jest.Mock)({
+        where: {
+          status: JobStatus.pending,
+          OR: [{ scheduledFor: null }, { scheduledFor: { lte: now } }],
+        },
+        orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
+      });
+      if (!job) return [];
+      const claimed = await (mockPrisma.enrichmentJob.update as jest.Mock)({
+        where: { id: job.id },
+        data: {
+          status: JobStatus.running,
+          startedAt: new Date(),
+          scheduledFor: null,
+          attempts: { increment: 1 },
+        },
+      });
+      return [claimed as EnrichmentJob];
+    }),
+  };
+}
 
 function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
   return {
@@ -56,7 +90,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
 describe('EnrichmentJobWorker', () => {
   let worker: EnrichmentJobWorker;
   let mockPrisma: MockPrismaService;
-  let mockRegistry: { get: jest.Mock };
+  let mockRegistry: { get: jest.Mock; types: jest.Mock };
   let mockHandler: { type: string; process: jest.Mock };
   let originalEnvEnabled: string | undefined;
   let originalEnvFaceEnabled: string | undefined;
@@ -74,7 +108,10 @@ describe('EnrichmentJobWorker', () => {
 
     mockPrisma = createMockPrismaService();
     mockHandler = { type: 'face_detection', process: jest.fn() };
-    mockRegistry = { get: jest.fn().mockReturnValue(mockHandler) };
+    mockRegistry = {
+      get: jest.fn().mockReturnValue(mockHandler),
+      types: jest.fn().mockReturnValue(['face_detection']),
+    };
 
     // Default $transaction: execute callback with the prisma client
     (mockPrisma.$transaction as jest.Mock).mockImplementation(async (fn: (tx: any) => any) =>
@@ -93,6 +130,11 @@ describe('EnrichmentJobWorker', () => {
         // a real no-clock instance so acquire/trip/recordSuccess are genuine
         // no-ops during these tests.
         { provide: ProviderThrottleService, useValue: new ProviderThrottleService() },
+        // Claiming goes through the shared, DB-atomic claim service; the mock
+        // delegates to the same prisma findFirst/update mock the old claim used.
+        { provide: EnrichmentClaimService, useValue: makeClaimMock(mockPrisma) },
+        // Real terminal service (wraps the same mock prisma + real throttle).
+        EnrichmentTerminalService,
       ],
     }).compile();
 
@@ -149,6 +191,8 @@ describe('EnrichmentJobWorker', () => {
           { provide: PrismaService, useValue: mockPrisma },
           { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
           { provide: ProviderThrottleService, useValue: new ProviderThrottleService() },
+          { provide: EnrichmentClaimService, useValue: makeClaimMock(mockPrisma) },
+          EnrichmentTerminalService,
         ],
       }).compile();
 
@@ -212,7 +256,7 @@ describe('EnrichmentJobWorker', () => {
       expect(finishUpdate.data.finishedAt).toBeInstanceOf(Date);
     });
 
-    it('atomically claims job: findFirst then update inside $transaction', async () => {
+    it('claims through the shared claim service with the pending + scheduledFor OR-filter', async () => {
       const job = makeJob();
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock).mockResolvedValue({ ...job, status: JobStatus.running });
@@ -220,8 +264,9 @@ describe('EnrichmentJobWorker', () => {
 
       await (worker as any).tick();
 
-      // $transaction was called (atomic claim)
-      expect(mockPrisma.$transaction).toHaveBeenCalled();
+      // Claiming is delegated to the shared, DB-atomic EnrichmentClaimService
+      // (FOR UPDATE SKIP LOCKED in production; the delegating mock preserves
+      // the observable findFirst filter shape here).
       // findFirst was called with pending status + scheduledFor OR-filter
       expect(mockPrisma.enrichmentJob.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -242,12 +287,13 @@ describe('EnrichmentJobWorker', () => {
   // -------------------------------------------------------------------------
 
   describe('job failure with retry', () => {
-    it('updates status back to pending with incremented attempts when attempts < 3', async () => {
-      const job = makeJob({ attempts: 1 }); // newAttempts=2 < MAX_ATTEMPTS=3 → retry
+    it('updates status back to pending (attempts charged at claim time) when claimed attempts < 3', async () => {
+      // attempts=1 pre-claim → claim charges to 2 < MAX_ATTEMPTS=3 → retry
+      const job = makeJob({ attempts: 1 });
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running })
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new Error('Detection failed'));
@@ -257,7 +303,9 @@ describe('EnrichmentJobWorker', () => {
       const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
       const retryUpdate = updateCalls[updateCalls.length - 1][0];
       expect(retryUpdate.data.status).toBe(JobStatus.pending);
-      expect(retryUpdate.data.attempts).toBe(2);
+      // attempts already charged at claim time — the failure write must not
+      // touch it (no double-charge).
+      expect(retryUpdate.data.attempts).toBeUndefined();
       expect(retryUpdate.data.lastError).toBe('Detection failed');
       // finishedAt should NOT be set on retry
       expect(retryUpdate.data.finishedAt).toBeUndefined();
@@ -269,13 +317,13 @@ describe('EnrichmentJobWorker', () => {
   // -------------------------------------------------------------------------
 
   describe('job failure — permanent', () => {
-    it('marks job as failed when newAttempts reaches MAX_ATTEMPTS (3)', async () => {
-      // attempts=2 → newAttempts=3 → 3 >= MAX_ATTEMPTS=3 → failed
+    it('marks job as failed when the claimed attempts reach MAX_ATTEMPTS (3)', async () => {
+      // attempts=2 pre-claim → claim charges to 3 → 3 < 3 is false → failed
       const job = makeJob({ attempts: 2 });
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running })
+        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new Error('Fatal error'));
@@ -285,7 +333,8 @@ describe('EnrichmentJobWorker', () => {
       const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
       const failUpdate = updateCalls[updateCalls.length - 1][0];
       expect(failUpdate.data.status).toBe(JobStatus.failed);
-      expect(failUpdate.data.attempts).toBe(3);
+      // attempts is not written on the failure path (claim already charged it)
+      expect(failUpdate.data.attempts).toBeUndefined();
       expect(failUpdate.data.lastError).toBe('Fatal error');
       expect(failUpdate.data.finishedAt).toBeInstanceOf(Date);
     });
