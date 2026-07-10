@@ -66,6 +66,9 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     scheduledFor: null,
     rateLimitedAt: null,
     rateLimitHits: 0,
+    claimedByNodeId: null,
+    leaseExpiresAt: null,
+    executor: null,
     createdAt: new Date(),
     ...overrides,
   };
@@ -241,7 +244,10 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
     });
 
     it('increments rateLimitHits, un-charges the claim-time attempt, sets scheduledFor, status stays pending', async () => {
-      const job = makeJob({ rateLimitHits: 0, attempts: 0 });
+      const job = makeJob({ rateLimitHits: 0,
+    claimedByNodeId: null,
+    leaseExpiresAt: null,
+    executor: null, attempts: 0 });
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
@@ -274,7 +280,10 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
     it('uses retryAfterMs from RateLimitError as floor for scheduledFor', async () => {
       const retryAfterMs = 30_000; // 30 seconds
-      const job = makeJob({ rateLimitHits: 0, attempts: 0 });
+      const job = makeJob({ rateLimitHits: 0,
+    claimedByNodeId: null,
+    leaseExpiresAt: null,
+    executor: null, attempts: 0 });
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
@@ -295,7 +304,10 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
     });
 
     it('keeps status pending when rateLimitHits is below RL_MAX_HITS (default 10)', async () => {
-      const job = makeJob({ rateLimitHits: 8, attempts: 0 }); // hits 8 → 9 < 10 → still pending
+      const job = makeJob({ rateLimitHits: 8,
+    claimedByNodeId: null,
+    leaseExpiresAt: null,
+    executor: null, attempts: 0 }); // hits 8 → 9 < 10 → still pending
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
         .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
@@ -332,7 +344,10 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
     it('marks job as failed when rateLimitHits reaches RL_MAX_HITS=10', async () => {
       // hits=9 → next hit=10 → giveUp (10 >= 10)
-      const job = makeJob({ rateLimitHits: 9, attempts: 0 });
+      const job = makeJob({ rateLimitHits: 9,
+    claimedByNodeId: null,
+    leaseExpiresAt: null,
+    executor: null, attempts: 0 });
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
@@ -357,7 +372,10 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
     });
 
     it('last error message is stored from RateLimitError on giveUp', async () => {
-      const job = makeJob({ rateLimitHits: 9, attempts: 0 });
+      const job = makeJob({ rateLimitHits: 9,
+    claimedByNodeId: null,
+    leaseExpiresAt: null,
+    executor: null, attempts: 0 });
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
@@ -393,7 +411,10 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
     });
 
     it('detects a 429-status error via classifyRateLimit and enters the RL deferral path', async () => {
-      const job = makeJob({ rateLimitHits: 0, attempts: 0 });
+      const job = makeJob({ rateLimitHits: 0,
+    claimedByNodeId: null,
+    leaseExpiresAt: null,
+    executor: null, attempts: 0 });
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
@@ -415,7 +436,10 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
     });
 
     it('detects AWS ThrottlingException via classifyRateLimit', async () => {
-      const job = makeJob({ rateLimitHits: 0, attempts: 1 });
+      const job = makeJob({ rateLimitHits: 0,
+    claimedByNodeId: null,
+    leaseExpiresAt: null,
+    executor: null, attempts: 1 });
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)

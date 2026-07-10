@@ -57,6 +57,9 @@ function makeJobRow(overrides: Record<string, unknown> = {}) {
     scheduledFor: null,
     rateLimitedAt: null,
     rateLimitHits: 0,
+    claimedByNodeId: null,
+    leaseExpiresAt: null,
+    executor: null,
     ...overrides,
   };
 }
@@ -927,6 +930,9 @@ describe('EnrichmentAdminService', () => {
         status: JobStatus.failed,
         scheduledFor: new Date(Date.now() + 60_000),
         rateLimitHits: 3,
+    claimedByNodeId: null,
+    leaseExpiresAt: null,
+    executor: null,
       });
       const updatedJob = makeJobRow({ status: JobStatus.pending, scheduledFor: null, rateLimitHits: 0 });
       (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(failedJob);
@@ -942,6 +948,9 @@ describe('EnrichmentAdminService', () => {
       const failedJob = makeJobRow({
         status: JobStatus.failed,
         rateLimitHits: 7,
+    claimedByNodeId: null,
+    leaseExpiresAt: null,
+    executor: null,
       });
       const updatedJob = makeJobRow({ status: JobStatus.pending, rateLimitHits: 0 });
       (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(failedJob);
@@ -960,6 +969,9 @@ describe('EnrichmentAdminService', () => {
         lastError: 'RL max hits reached',
         scheduledFor: new Date(Date.now() + 120_000),
         rateLimitHits: 10,
+    claimedByNodeId: null,
+    leaseExpiresAt: null,
+    executor: null,
         startedAt: new Date(),
         finishedAt: new Date(),
       });
@@ -978,6 +990,9 @@ describe('EnrichmentAdminService', () => {
         finishedAt: null,
         scheduledFor: null,
         rateLimitHits: 0,
+    claimedByNodeId: null,
+    leaseExpiresAt: null,
+    executor: null,
       });
     });
   });
@@ -1019,6 +1034,9 @@ describe('EnrichmentAdminService', () => {
         finishedAt: null,
         scheduledFor: null,
         rateLimitHits: 0,
+    claimedByNodeId: null,
+    leaseExpiresAt: null,
+    executor: null,
       });
     });
   });

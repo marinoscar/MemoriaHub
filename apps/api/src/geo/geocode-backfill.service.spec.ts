@@ -45,6 +45,9 @@ function makeJob(overrides: Record<string, unknown> = {}) {
     scheduledFor: null,
     rateLimitedAt: null,
     rateLimitHits: 0,
+    claimedByNodeId: null,
+    leaseExpiresAt: null,
+    executor: null,
     createdAt: new Date(),
     ...overrides,
   };

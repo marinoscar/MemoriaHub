@@ -63,6 +63,9 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     scheduledFor: null,
     rateLimitedAt: null,
     rateLimitHits: 0,
+    claimedByNodeId: null,
+    leaseExpiresAt: null,
+    executor: null,
     createdAt: new Date(),
     ...overrides,
   };
