@@ -5,6 +5,7 @@ import {
   retryJob as retryJobService,
   retryAllFailed as retryAllFailedService,
   resetStuck as resetStuckService,
+  repairThumbnails as repairThumbnailsService,
   deleteJob as deleteJobService,
 } from '../services/jobs';
 import type { JobStats, EnrichmentJobDto, JobsListResponse, ListJobsParams, JobStatus } from '../services/jobs';
@@ -41,6 +42,7 @@ export interface UseJobsResult {
   retryJob: (id: string) => Promise<void>;
   retryAllFailed: (type?: string) => Promise<{ retried: number }>;
   resetStuck: (olderThanMinutes?: number) => Promise<{ reset: number }>;
+  repairThumbnails: () => Promise<{ jobId: string; status: string }>;
   deleteJob: (id: string) => Promise<void>;
 }
 
@@ -162,6 +164,17 @@ export function useJobs(options: UseJobsOptions = {}): UseJobsResult {
     }
   }, [fetchStats, fetchJobs]);
 
+  const repairThumbnails = useCallback(async (): Promise<{ jobId: string; status: string }> => {
+    setMutating(true);
+    try {
+      const result = await repairThumbnailsService();
+      await Promise.all([fetchStats(), fetchJobs(filtersRef.current)]);
+      return result;
+    } finally {
+      setMutating(false);
+    }
+  }, [fetchStats, fetchJobs]);
+
   const deleteJob = useCallback(async (id: string) => {
     setMutating(true);
     try {
@@ -189,6 +202,7 @@ export function useJobs(options: UseJobsOptions = {}): UseJobsResult {
     retryJob,
     retryAllFailed,
     resetStuck,
+    repairThumbnails,
     deleteJob,
   };
 }

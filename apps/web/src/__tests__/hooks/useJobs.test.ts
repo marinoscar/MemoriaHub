@@ -19,6 +19,7 @@ vi.mock('../../services/jobs', () => ({
   retryJob: vi.fn(),
   retryAllFailed: vi.fn(),
   resetStuck: vi.fn(),
+  repairThumbnails: vi.fn(),
   deleteJob: vi.fn(),
 }));
 
@@ -31,6 +32,7 @@ const mockListJobs = vi.mocked(jobsService.listJobs);
 const mockRetryJob = vi.mocked(jobsService.retryJob);
 const mockRetryAllFailed = vi.mocked(jobsService.retryAllFailed);
 const mockResetStuck = vi.mocked(jobsService.resetStuck);
+const mockRepairThumbnails = vi.mocked(jobsService.repairThumbnails);
 const mockDeleteJob = vi.mocked(jobsService.deleteJob);
 
 // ---------------------------------------------------------------------------
@@ -90,6 +92,7 @@ describe('useJobs', () => {
     mockRetryJob.mockResolvedValue(sampleListResponse.items[0]);
     mockRetryAllFailed.mockResolvedValue({ retried: 3 });
     mockResetStuck.mockResolvedValue({ reset: 2 });
+    mockRepairThumbnails.mockResolvedValue({ jobId: 'repair-job-1', status: 'pending' });
     mockDeleteJob.mockResolvedValue({ deleted: true });
   });
 
@@ -471,6 +474,88 @@ describe('useJobs', () => {
       });
 
       expect(mockGetJobStats.mock.calls.length).toBeGreaterThan(statsCalls);
+    });
+  });
+
+  // =========================================================================
+  // Mutation: repairThumbnails
+  // =========================================================================
+
+  describe('repairThumbnails', () => {
+    it('calls repairThumbnails service', async () => {
+      const { result } = renderHook(() => useJobs({ autoRefresh: false }));
+
+      await waitFor(() => {
+        expect(result.current.stats).not.toBeNull();
+      });
+
+      await act(async () => {
+        await result.current.repairThumbnails();
+      });
+
+      expect(mockRepairThumbnails).toHaveBeenCalled();
+    });
+
+    it('returns the jobId and status from the service', async () => {
+      mockRepairThumbnails.mockResolvedValue({ jobId: 'job-xyz', status: 'pending' });
+
+      const { result } = renderHook(() => useJobs({ autoRefresh: false }));
+
+      await waitFor(() => {
+        expect(result.current.stats).not.toBeNull();
+      });
+
+      let returnValue!: { jobId: string; status: string };
+      await act(async () => {
+        returnValue = await result.current.repairThumbnails();
+      });
+
+      expect(returnValue).toEqual({ jobId: 'job-xyz', status: 'pending' });
+    });
+
+    it('refreshes stats and jobs after repairThumbnails completes', async () => {
+      const { result } = renderHook(() => useJobs({ autoRefresh: false }));
+
+      await waitFor(() => {
+        expect(result.current.stats).not.toBeNull();
+      });
+
+      const statsCalls = mockGetJobStats.mock.calls.length;
+
+      await act(async () => {
+        await result.current.repairThumbnails();
+      });
+
+      expect(mockGetJobStats.mock.calls.length).toBeGreaterThan(statsCalls);
+    });
+
+    it('sets mutating=true during repairThumbnails and false after', async () => {
+      let resolveFn!: () => void;
+      const pending = new Promise<{ jobId: string; status: string }>((resolve) => {
+        resolveFn = () => resolve({ jobId: 'job-xyz', status: 'pending' });
+      });
+      mockRepairThumbnails.mockReturnValue(pending);
+
+      const { result } = renderHook(() => useJobs({ autoRefresh: false }));
+
+      await waitFor(() => {
+        expect(result.current.stats).not.toBeNull();
+      });
+
+      act(() => {
+        void result.current.repairThumbnails();
+      });
+
+      expect(result.current.mutating).toBe(true);
+
+      await act(async () => {
+        resolveFn();
+        await pending;
+      });
+
+      await waitFor(() => {
+        expect(result.current.mutating).toBe(false);
+      });
     });
   });
 

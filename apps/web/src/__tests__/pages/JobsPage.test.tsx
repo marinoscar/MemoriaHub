@@ -77,6 +77,7 @@ function makeJobsHook(overrides: Partial<UseJobsResult> = {}): UseJobsResult {
     retryJob: vi.fn().mockResolvedValue(undefined),
     retryAllFailed: vi.fn().mockResolvedValue({ retried: 3 }),
     resetStuck: vi.fn().mockResolvedValue({ reset: 2 }),
+    repairThumbnails: vi.fn().mockResolvedValue({ jobId: 'repair-job-uuid', status: 'pending' }),
     deleteJob: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -517,6 +518,52 @@ describe('JobsPage', () => {
       await waitFor(() => {
         const btn = screen.getByRole('button', { name: /reset stuck/i });
         expect(btn).toBeDisabled();
+      });
+    });
+
+    it('calls repairThumbnails action when "Repair missing thumbnails" button is clicked', async () => {
+      const repairThumbnails = vi.fn().mockResolvedValue({ jobId: 'repair-uuid', status: 'pending' });
+      mockUseJobs.mockReturnValue(makeJobsHook({ repairThumbnails }));
+      const user = userEvent.setup();
+
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const repairBtn = await screen.findByRole('button', { name: /repair missing thumbnails/i });
+      await user.click(repairBtn);
+
+      expect(repairThumbnails).toHaveBeenCalled();
+    });
+
+    it('shows success snackbar with the jobId after repairThumbnails', async () => {
+      const repairThumbnails = vi
+        .fn()
+        .mockResolvedValue({ jobId: 'abcd1234-ffff', status: 'pending' });
+      mockUseJobs.mockReturnValue(makeJobsHook({ repairThumbnails }));
+      const user = userEvent.setup();
+
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const repairBtn = await screen.findByRole('button', { name: /repair missing thumbnails/i });
+      await user.click(repairBtn);
+
+      await waitFor(() => {
+        // Snackbar message includes shortId(jobId) = first 8 chars
+        expect(screen.getByText(/thumbnail repair queued \(job abcd1234…\)/i)).toBeInTheDocument();
+      });
+    });
+
+    it('shows error snackbar when repairThumbnails fails', async () => {
+      const repairThumbnails = vi.fn().mockRejectedValue(new Error('Repair boom'));
+      mockUseJobs.mockReturnValue(makeJobsHook({ repairThumbnails }));
+      const user = userEvent.setup();
+
+      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const repairBtn = await screen.findByRole('button', { name: /repair missing thumbnails/i });
+      await user.click(repairBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText(/repair boom/i)).toBeInTheDocument();
       });
     });
   });

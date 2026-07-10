@@ -47,6 +47,7 @@ import {
   Download as DownloadIcon,
   Schedule as ScheduleIcon,
   QueryStats as QueryStatsIcon,
+  AutoFixHigh as HealingIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useJobs } from '../../hooks/useJobs';
@@ -167,6 +168,7 @@ function JobsPageContent() {
     retryJob,
     retryAllFailed,
     resetStuck,
+    repairThumbnails,
     deleteJob,
   } = useJobs({ autoRefresh: true });
 
@@ -255,6 +257,15 @@ function JobsPageContent() {
       setSuccessMessage(`${result.reset} stuck job(s) reset to pending`);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to reset stuck jobs');
+    }
+  };
+
+  const handleRepairThumbnails = async () => {
+    try {
+      const result = await repairThumbnails();
+      setSuccessMessage(`Thumbnail repair queued (job ${shortId(result.jobId)}…)`);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to queue thumbnail repair');
     }
   };
 
@@ -440,6 +451,15 @@ function JobsPageContent() {
               onClick={() => void handleResetStuck()}
             >
               Reset stuck (&gt;10 min)
+            </Button>
+
+            <Button
+              variant="outlined"
+              startIcon={<HealingIcon />}
+              disabled={mutating}
+              onClick={() => void handleRepairThumbnails()}
+            >
+              Repair missing thumbnails
             </Button>
 
             <Button

@@ -113,6 +113,10 @@ export async function resetStuck(olderThanMinutes?: number): Promise<{ reset: nu
   return api.post<{ reset: number }>('/admin/jobs/reset-stuck', olderThanMinutes != null ? { olderThanMinutes } : {});
 }
 
+export async function repairThumbnails(): Promise<{ jobId: string; status: string }> {
+  return api.post<{ jobId: string; status: string }>('/admin/media/thumbnails/repair', {});
+}
+
 export async function deleteJob(id: string): Promise<{ deleted: boolean }> {
   return api.delete<{ deleted: boolean }>(`/admin/jobs/${id}`);
 }
