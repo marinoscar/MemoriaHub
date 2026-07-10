@@ -11,6 +11,11 @@
  *
  * tesseract.js's createWorker is mocked module-wide; VideoFrameExtractionService
  * is mocked via DI.
+ *
+ * `recognizeVideo` takes an already-materialized video file path (not a
+ * Buffer) — the caller owns downloading/cleaning up the input file. Tests
+ * pass a fake path string; VideoFrameExtractionService is fully mocked via DI
+ * so no real file is ever read.
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -23,6 +28,9 @@ const mockCreateWorker = jest.fn();
 jest.mock('tesseract.js', () => ({
   createWorker: (...args: unknown[]) => mockCreateWorker(...args),
 }));
+
+/** Fake already-materialized video path — VideoFrameExtractionService is mocked via DI. */
+const FAKE_VIDEO_PATH = '/tmp/fake-video-input.mp4';
 
 describe('SocialMediaOcrService', () => {
   let service: SocialMediaOcrService;
@@ -91,7 +99,7 @@ describe('SocialMediaOcrService', () => {
     it('returns { available: false, texts: [] } without throwing when worker init fails', async () => {
       mockCreateWorker.mockRejectedValue(new Error('wasm load failed'));
 
-      const result = await service.recognizeVideo(Buffer.from('video-bytes'), {
+      const result = await service.recognizeVideo(FAKE_VIDEO_PATH, {
         durationMs: 5000,
         maxFrames: 4,
         languages: ['eng'],
@@ -106,14 +114,14 @@ describe('SocialMediaOcrService', () => {
     it('stays degraded (sticky) on a subsequent call without re-attempting worker init', async () => {
       mockCreateWorker.mockRejectedValue(new Error('wasm load failed'));
 
-      await service.recognizeVideo(Buffer.from('a'), {
+      await service.recognizeVideo(FAKE_VIDEO_PATH, {
         maxFrames: 4,
         languages: ['eng'],
         timeoutMs: 5000,
       });
       mockCreateWorker.mockClear();
 
-      const secondResult = await service.recognizeVideo(Buffer.from('b'), {
+      const secondResult = await service.recognizeVideo(FAKE_VIDEO_PATH, {
         maxFrames: 4,
         languages: ['eng'],
         timeoutMs: 5000,
@@ -129,7 +137,7 @@ describe('SocialMediaOcrService', () => {
       mockCreateWorker.mockRejectedValue(new Error('boom'));
 
       await expect(
-        service.recognizeVideo(Buffer.from('x'), {
+        service.recognizeVideo(FAKE_VIDEO_PATH, {
           maxFrames: 4,
           languages: ['eng'],
           timeoutMs: 1000,
@@ -146,7 +154,7 @@ describe('SocialMediaOcrService', () => {
       mockCreateWorker.mockResolvedValue({ recognize: jest.fn(), terminate: jest.fn() });
       mockFrameExtractor.extractFramesAt.mockResolvedValue([]);
 
-      const result = await service.recognizeVideo(Buffer.from('video-bytes'), {
+      const result = await service.recognizeVideo(FAKE_VIDEO_PATH, {
         durationMs: 5000,
         maxFrames: 4,
         languages: ['eng'],
@@ -160,7 +168,7 @@ describe('SocialMediaOcrService', () => {
       mockCreateWorker.mockResolvedValue({ recognize: jest.fn(), terminate: jest.fn() });
       mockFrameExtractor.extractFramesAt.mockRejectedValue(new Error('ffmpeg exploded'));
 
-      const result = await service.recognizeVideo(Buffer.from('video-bytes'), {
+      const result = await service.recognizeVideo(FAKE_VIDEO_PATH, {
         durationMs: 5000,
         maxFrames: 4,
         languages: ['eng'],
@@ -200,7 +208,7 @@ describe('SocialMediaOcrService', () => {
         { timestampMs: 100, buffer: Buffer.from('frame1') },
       ]);
 
-      const result = await service.recognizeVideo(Buffer.from('video-bytes'), {
+      const result = await service.recognizeVideo(FAKE_VIDEO_PATH, {
         durationMs: 5000,
         maxFrames: 4,
         languages: ['eng'],
@@ -231,7 +239,7 @@ describe('SocialMediaOcrService', () => {
         { timestampMs: 0, buffer: Buffer.from('frame0') },
       ]);
 
-      const result = await service.recognizeVideo(Buffer.from('video-bytes'), {
+      const result = await service.recognizeVideo(FAKE_VIDEO_PATH, {
         durationMs: 1000,
         maxFrames: 4,
         languages: ['eng'],

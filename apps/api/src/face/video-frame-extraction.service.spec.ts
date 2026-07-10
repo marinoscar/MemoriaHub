@@ -5,9 +5,14 @@
  * which is exercised through `VideoFrameExtractionService.extractFrames` by
  * mocking fluent-ffmpeg so no real video decoding happens.
  *
+ * `extractFrames`/`extractFramesAt` take an already-materialized video file
+ * path (not a Buffer) — the caller owns downloading/cleaning up the input
+ * file. Tests pass a fake path string; no input file is ever read since
+ * fluent-ffmpeg is mocked.
+ *
  * We mock:
  *  - fluent-ffmpeg    — the ffmpeg binary call chain (seekInput/frames/output/run)
- *  - fs/promises      — writeFile and readFile / unlink so no temp files are created
+ *  - fs/promises      — readFile / unlink so no (output frame) temp files are created
  *
  * What we test:
  *  1. A 1-hour video at the default cap of 60 → ~60 evenly spaced timestamps ≤ duration.
@@ -48,11 +53,13 @@ jest.mock('fluent-ffmpeg', () => {
 // Mock fs/promises so we never touch the real filesystem
 jest.mock('fs', () => ({
   promises: {
-    writeFile: jest.fn().mockResolvedValue(undefined),
     readFile: jest.fn().mockResolvedValue(Buffer.from('fake-jpeg')),
     unlink: jest.fn().mockResolvedValue(undefined),
   },
 }));
+
+/** Fake already-materialized video path — no input file is ever read. */
+const FAKE_VIDEO_PATH = '/tmp/fake-video-input.mp4';
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -65,8 +72,7 @@ async function getTimestampsMs(
   maxFrames: number,
 ): Promise<number[]> {
   const svc = new VideoFrameExtractionService();
-  const fakeBuffer = Buffer.from('fake-video');
-  const frames = await svc.extractFrames(fakeBuffer, {
+  const frames = await svc.extractFrames(FAKE_VIDEO_PATH, {
     durationMs,
     sampleIntervalSeconds,
     maxFrames,
@@ -251,9 +257,8 @@ describe('VideoFrameExtractionService — timestamp computation', () => {
   describe('ExtractedFrame.timestampMs', () => {
     it('matches the computed seek timestamp (rounded to ms)', async () => {
       const svc = new VideoFrameExtractionService();
-      const fakeBuffer = Buffer.from('x');
       // 30 s video at 5 s interval → timestamps: 2500, 7500, 12500, 17500, 22500, 27500 ms
-      const frames = await svc.extractFrames(fakeBuffer, {
+      const frames = await svc.extractFrames(FAKE_VIDEO_PATH, {
         durationMs: 30000,
         sampleIntervalSeconds: 5,
         maxFrames: 60,
