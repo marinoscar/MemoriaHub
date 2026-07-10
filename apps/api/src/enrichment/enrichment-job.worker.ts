@@ -33,8 +33,12 @@ export function isEnrichmentWorkerEnabled(env: NodeJS.ProcessEnv = process.env):
   return !(enrichmentEnabled === 'false' || faceEnabled === 'false');
 }
 
-// Normal-failure retry config
-const MAX_ATTEMPTS = getEnvInt('ENRICHMENT_MAX_ATTEMPTS', 3);
+// Normal-failure retry config.
+// ENRICHMENT_MAX_ATTEMPTS is exported so other queue components (e.g. the
+// admin stuck-reset path, which must fail — not requeue — jobs whose attempts
+// budget is exhausted) share the exact same budget as the worker.
+export const ENRICHMENT_MAX_ATTEMPTS = getEnvInt('ENRICHMENT_MAX_ATTEMPTS', 3);
+const MAX_ATTEMPTS = ENRICHMENT_MAX_ATTEMPTS;
 const RETRY_BASE_MS = getEnvInt('ENRICHMENT_RETRY_BASE_MS', 2_000);
 const RETRY_MAX_MS = getEnvInt('ENRICHMENT_RETRY_MAX_MS', 60_000);
 
@@ -48,6 +52,7 @@ const RL_MAX_HITS = getEnvInt('ENRICHMENT_RATELIMIT_MAX_HITS', 10);
 // path. 0 disables the timeout. Must exceed the longest LEGITIMATE single-job
 // runtime (e.g. long video face detection) to avoid killing valid work.
 const JOB_TIMEOUT_MS = getEnvInt('ENRICHMENT_JOB_TIMEOUT_MS', 600_000); // 10 min
+
 
 @Injectable()
 export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDestroy {
@@ -211,6 +216,13 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
           status: JobStatus.running,
           startedAt: new Date(),
           scheduledFor: null,
+          // Charge the attempt at CLAIM time, not at in-process failure time.
+          // A job that takes the whole process down (OOM SIGKILL) never reaches
+          // the failure path — charging up front means the stuck-reset path can
+          // fail it once the budget is exhausted instead of requeueing it into
+          // an infinite crash loop. `attempts` therefore now means "attempts
+          // STARTED", not "attempts failed".
+          attempts: { increment: 1 },
         },
       });
     });
@@ -342,7 +354,10 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
           rateLimitedAt: new Date(),
           scheduledFor: giveUp ? null : new Date(Date.now() + delayMs),
           lastError: rl.message,
-          // attempts is NOT incremented for rate-limit deferrals
+          // attempts is NOT charged for rate-limit deferrals: un-charge the
+          // claim-time increment (absolute write, so a safeTerminalUpdate retry
+          // after a lost-ack first write can never double-decrement).
+          attempts: job.attempts - 1,
           ...(giveUp ? { finishedAt: new Date() } : {}),
         });
 
@@ -355,23 +370,23 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
         );
       } else {
         // ── Normal failure / exponential retry path ───────────────────────
-        const newAttempts = job.attempts + 1;
-        const shouldRetry = newAttempts < MAX_ATTEMPTS;
-        const delayMs = computeQueueBackoffMs(newAttempts, {
+        // The claimed row already carries the claim-time charge, so
+        // job.attempts IS the number of attempts consumed including this one.
+        const shouldRetry = job.attempts < MAX_ATTEMPTS;
+        const delayMs = computeQueueBackoffMs(job.attempts, {
           baseMs: RETRY_BASE_MS,
           maxMs: RETRY_MAX_MS,
         });
 
         await this.safeTerminalUpdate(job.id, job.type, {
           status: shouldRetry ? JobStatus.pending : JobStatus.failed,
-          attempts: newAttempts,
           lastError: message,
           scheduledFor: shouldRetry ? new Date(Date.now() + delayMs) : null,
           ...(!shouldRetry ? { finishedAt: new Date() } : {}),
         });
 
         this.logger.warn(
-          `EnrichmentJob ${job.id} (type="${job.type}"): attempt ${newAttempts}/${MAX_ATTEMPTS} failed — ` +
+          `EnrichmentJob ${job.id} (type="${job.type}"): attempt ${job.attempts}/${MAX_ATTEMPTS} failed — ` +
             (shouldRetry
               ? `will retry in ${Math.round(delayMs / 1000)}s`
               : 'marked failed'),

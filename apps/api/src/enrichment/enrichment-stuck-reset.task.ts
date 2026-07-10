@@ -34,9 +34,12 @@ export class EnrichmentStuckResetTask {
 
     try {
       // No argument: the service resolves the settings-driven threshold.
-      const { reset } = await this.enrichmentAdminService.resetStuck();
-      if (reset > 0) {
-        this.logger.log(`Reset ${reset} stuck enrichment job(s)`);
+      const { reset, failed } = await this.enrichmentAdminService.resetStuck();
+      if (reset > 0 || failed > 0) {
+        this.logger.log(
+          `Reset ${reset} stuck enrichment job(s)` +
+            (failed > 0 ? `; failed ${failed} with exhausted attempts` : ''),
+        );
       }
     } catch (err) {
       this.logger.error('Failed to reset stuck enrichment jobs', err as Error);

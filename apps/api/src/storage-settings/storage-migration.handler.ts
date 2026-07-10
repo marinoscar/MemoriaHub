@@ -27,7 +27,9 @@
 //      still throws): we catch the error INSIDE process(), mark the item failed
 //      and increment failedCount, then RETHROW so the worker can record the
 //      job as failed in enrichment_jobs.  We detect "this is the last attempt"
-//      by comparing job.attempts + 1 >= MAX_ATTEMPTS (read from env, default 3).
+//      by comparing job.attempts >= MAX_ATTEMPTS (read from env, default 3);
+//      attempts are charged at claim time, so the row we receive already counts
+//      the in-flight attempt.
 //   3. The status endpoint recomputes aggregate counts (migratedCount etc.) from
 //      a groupBy on StorageMigrationItem.status rather than trusting only the
 //      denormalized run counters — this makes the status display correct even if
@@ -166,10 +168,10 @@ export class StorageMigrationHandler implements EnrichmentHandler, OnModuleInit 
       const message = err instanceof Error ? err.message : String(err);
 
       // Determine whether this is the terminal attempt.
-      // job.attempts was NOT yet incremented when process() is called — the
-      // worker increments it in the failure path AFTER process() throws.
-      // So if attempts + 1 >= MAX_ATTEMPTS, there will be no further retry.
-      const isTerminal = job.attempts + 1 >= MAX_ATTEMPTS;
+      // The worker charges `attempts` at CLAIM time, so the job row we received
+      // already counts the in-flight attempt. If attempts >= MAX_ATTEMPTS,
+      // there will be no further retry.
+      const isTerminal = job.attempts >= MAX_ATTEMPTS;
 
       if (isTerminal) {
         // Record domain-level failure so the status endpoint reflects it.

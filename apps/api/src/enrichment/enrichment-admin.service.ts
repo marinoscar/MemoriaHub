@@ -11,6 +11,7 @@ import { Prisma, JobStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { defaultStuckThresholdMinutes } from '../common/types/settings.types';
+import { ENRICHMENT_MAX_ATTEMPTS } from './enrichment-job.worker';
 
 /** Default rolling window (days) for the duration-history aggregate. */
 export const INSIGHTS_WINDOW_DAYS = 7;
@@ -716,12 +717,45 @@ export class EnrichmentAdminService {
   // resetStuck
   // -------------------------------------------------------------------------
 
-  async resetStuck(olderThanMinutes?: number): Promise<{ reset: number }> {
+  async resetStuck(olderThanMinutes?: number): Promise<{ reset: number; failed: number }> {
     const minutes = olderThanMinutes ?? (await this.getStuckThresholdMinutes());
     const threshold = new Date(Date.now() - minutes * 60 * 1000);
+    const stuckWhere = this.stuckRunningWhere(threshold);
+
+    // Attempts are charged at CLAIM time (see EnrichmentJobWorker.claimNextJob),
+    // so a job that repeatedly kills the process (e.g. OOM SIGKILL) still
+    // carries its charge when it lands here as stuck. Once the budget is
+    // exhausted, mark it failed instead of requeueing — this is what bounds a
+    // poison-pill job to ENRICHMENT_MAX_ATTEMPTS crashes instead of an
+    // infinite crash loop. Per-row updates (guarded on status=running) so the
+    // lastError message can carry the per-job attempt count.
+    const exhausted = await this.prisma.enrichmentJob.findMany({
+      where: { ...stuckWhere, attempts: { gte: ENRICHMENT_MAX_ATTEMPTS } },
+      select: { id: true, type: true, attempts: true },
+    });
+
+    let failed = 0;
+    for (const job of exhausted) {
+      const result = await this.prisma.enrichmentJob.updateMany({
+        where: { id: job.id, status: JobStatus.running },
+        data: {
+          status: JobStatus.failed,
+          lastError: `process terminated during execution (attempt ${job.attempts}/${ENRICHMENT_MAX_ATTEMPTS})`,
+          finishedAt: new Date(),
+          scheduledFor: null,
+        },
+      });
+      if (result.count > 0) {
+        failed += result.count;
+        this.logger.warn(
+          `EnrichmentJob ${job.id} (type="${job.type}") stuck with attempts budget exhausted ` +
+            `(${job.attempts}/${ENRICHMENT_MAX_ATTEMPTS}) — marked failed instead of requeued`,
+        );
+      }
+    }
 
     const result = await this.prisma.enrichmentJob.updateMany({
-      where: this.stuckRunningWhere(threshold),
+      where: { ...stuckWhere, attempts: { lt: ENRICHMENT_MAX_ATTEMPTS } },
       data: {
         status: JobStatus.pending,
         startedAt: null,
@@ -730,10 +764,11 @@ export class EnrichmentAdminService {
     });
 
     this.logger.log(
-      `Admin reset ${result.count} stuck enrichment jobs (older than ${minutes} minutes)`,
+      `Admin reset ${result.count} stuck enrichment jobs (older than ${minutes} minutes)` +
+        (failed > 0 ? `; failed ${failed} with exhausted attempts` : ''),
     );
 
-    return { reset: result.count };
+    return { reset: result.count, failed };
   }
 
   // -------------------------------------------------------------------------
