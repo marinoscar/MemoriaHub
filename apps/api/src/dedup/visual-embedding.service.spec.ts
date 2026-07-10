@@ -45,7 +45,12 @@ jest.mock('sharp', () => {
   return mockSharpFn;
 });
 
-jest.mock('../storage/processing/image-orientation.util', () => ({
+// The preprocessing seam moved into the shared parity package — mock the
+// package's image module (the clip module imports prepareImageForProcessing
+// from there internally). setComputeLogger must be present because the API's
+// image-orientation.util re-export module calls it at import time.
+jest.mock('@memoriahub/enrichment-compute/image', () => ({
+  setComputeLogger: jest.fn(),
   prepareImageForProcessing: jest.fn().mockResolvedValue({
     buffer: Buffer.from('prepared'),
     width: 224,
@@ -78,7 +83,7 @@ import {
 } from './visual-embedding.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
+import { prepareImageForProcessing } from '@memoriahub/enrichment-compute/image';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 const CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073] as const;

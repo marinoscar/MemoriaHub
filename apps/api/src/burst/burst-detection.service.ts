@@ -11,22 +11,15 @@ import { computeAndPersistVisualHash } from '../storage/processing/hash-backfill
 import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
 
 /**
- * Computes the Hamming distance between two 64-bit perceptual hashes.
+ * Hamming distance between two 64-bit perceptual hashes (bigint form).
  *
- * Inputs are unsigned BigInts parsed from the TEXT column (unsigned decimal
- * strings), so they are always non-negative. The XOR of two non-negative
- * BigInts is also non-negative and the popcount loop terminates correctly
- * without any masking.
+ * The implementation lives in the shared parity package so burst detection,
+ * duplicate detection, and distributed worker nodes all share one popcount.
+ * Re-exported here under the historical name/signature for existing callers.
  */
-export function hammingDistance(a: bigint, b: bigint): number {
-  let x = a ^ b;
-  let count = 0;
-  while (x > 0n) {
-    x &= x - 1n;
-    count++;
-  }
-  return count;
-}
+import { hammingDistanceBigInt as hammingDistance } from '@memoriahub/enrichment-compute/dhash';
+
+export { hammingDistanceBigInt as hammingDistance } from '@memoriahub/enrichment-compute/dhash';
 
 /**
  * Normalizes an array of numbers to [0, 1] within the group.

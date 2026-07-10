@@ -17,7 +17,8 @@
 
 // Minimal mock for prepareImageForProcessing — just returns the buffer unchanged
 // with a known width so the processor continues past the guard check.
-jest.mock('../storage/processing/image-orientation.util', () => ({
+jest.mock('@memoriahub/enrichment-compute/image', () => ({
+  setComputeLogger: jest.fn(),
   prepareImageForProcessing: jest.fn().mockResolvedValue({
     buffer: Buffer.from('prepared'),
     width: 100,
@@ -130,7 +131,7 @@ function computeVariance(pixels: Uint8Array): number {
 // ---------------------------------------------------------------------------
 
 import { VisualHashProcessor } from '../storage/processing/processors/visual-hash.processor';
-import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
+import { prepareImageForProcessing } from '@memoriahub/enrichment-compute/image';
 import { StorageObject } from '@prisma/client';
 
 function makeStorageObject(overrides: Partial<StorageObject> = {}): StorageObject {

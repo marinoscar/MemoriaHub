@@ -6,15 +6,21 @@
  * `prepareImageForProcessing` before any computation, so portrait photos
  * rotated by EXIF are compared right-side-up.
  *
- * Returns `null` when the image cannot be decoded (width === 0 from
- * prepareImageForProcessing) or on any unhandled error. Callers handle null.
- * This function never throws.
+ * The computation itself lives in the shared parity package
+ * @memoriahub/enrichment-compute (dhash subpath) so distributed worker nodes
+ * produce bit-identical hashes to the server. This module keeps the
+ * historical bigint-typed signature for existing callers (burst detection,
+ * the visual-hash processor); the package's canonical form is the unsigned
+ * decimal STRING stored in media_items.perceptual_hash.
+ *
+ * Returns `null` when the image cannot be decoded or on any unhandled error.
+ * Callers handle null. This function never throws.
  */
 
-import { Logger } from '@nestjs/common';
-import { prepareImageForProcessing } from './image-orientation.util';
-
-const logger = new Logger('VisualHashUtil');
+import { computeVisualHash as computeVisualHashShared } from '@memoriahub/enrichment-compute/dhash';
+// Importing the re-export module (not the package directly) guarantees the
+// package logger is wired to NestJS before any hash computation runs.
+import './image-orientation.util';
 
 export interface VisualHashResult {
   perceptualHash: bigint;
@@ -30,59 +36,12 @@ export interface VisualHashResult {
 export async function computeVisualHash(
   buffer: Buffer,
 ): Promise<VisualHashResult | null> {
-  try {
-    // Apply EXIF orientation and downscale to 512px max dimension
-    const { buffer: preparedBuffer, width } = await prepareImageForProcessing(buffer, {
-      maxDim: 512,
-    });
-
-    if (width === 0) {
-      logger.warn('prepareImageForProcessing returned width=0; skipping visual-hash computation');
-      return null;
-    }
-
-    const sharp = (await import('sharp')).default;
-
-    // --- dHash: resize to 9x8 grayscale, compare adjacent pixels ---
-    // 8 columns × 8 rows of left-right comparisons = 64 bits
-    const { data: hashData } = await sharp(preparedBuffer)
-      .resize(9, 8, { fit: 'fill' })
-      .grayscale()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
-    let hash = 0n;
-    for (let row = 0; row < 8; row++) {
-      for (let col = 0; col < 8; col++) {
-        if (hashData[row * 9 + col] < hashData[row * 9 + col + 1]) {
-          hash |= 1n << BigInt(row * 8 + col);
-        }
-      }
-    }
-
-    // --- Laplacian sharpness: variance of Laplacian response ---
-    const { data: lapData, info: lapInfo } = await sharp(preparedBuffer)
-      .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
-      .grayscale()
-      .convolve({ width: 3, height: 3, kernel: [0, 1, 0, 1, -4, 1, 0, 1, 0] })
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
-    const n = lapInfo.width * lapInfo.height;
-    let sum = 0;
-    let sumSq = 0;
-    for (let i = 0; i < n; i++) {
-      const v = lapData[i];
-      sum += v;
-      sumSq += v * v;
-    }
-    const mean = sum / n;
-    const sharpnessScore = sumSq / n - mean * mean;
-
-    return { perceptualHash: hash, sharpnessScore };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logger.error(`computeVisualHash failed: ${message}`);
+  const result = await computeVisualHashShared(buffer);
+  if (!result) {
     return null;
   }
+  return {
+    perceptualHash: BigInt(result.perceptualHash),
+    sharpnessScore: result.sharpnessScore,
+  };
 }

@@ -9,6 +9,13 @@
  * and lazily loaded into an onnxruntime-node InferenceSession on first embed
  * call, then released after a period of inactivity to free memory.
  *
+ * The PURE compute (preprocessing, session creation, inference) lives in the
+ * shared parity package @memoriahub/enrichment-compute (clip subpath) so
+ * distributed worker nodes produce numerically identical vectors — see
+ * docs/specs/distributed-nodes.md §7. This service keeps the HOST concerns:
+ * model download/MODELS_DIR resolution, degraded-mode tracking, idle session
+ * release, and Prisma persistence.
+ *
  * Degraded-mode contract: any failure to download/load/run the model is
  * caught internally. `isAvailable()` reflects the degraded flag, and
  * `embedImage` / `ensureEmbedding` return `null` / `'unavailable'` rather
@@ -23,101 +30,44 @@ import type { InferenceSession } from 'onnxruntime-node';
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
+import {
+  createClipSession,
+  embedImageWithSession,
+  looksLikeOnnxModel,
+  VISUAL_EMBEDDING_MODEL_TAG,
+} from '@memoriahub/enrichment-compute/clip';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
-import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
+// Imported for the side effect of wiring the shared package's logger into
+// NestJS logging (and kept as the canonical orientation-prep import site).
+import '../storage/processing/image-orientation.util';
 
 // -----------------------------------------------------------------------------
-// Constants
+// Re-exports for import-compat — the pure functions/constants moved to the
+// shared parity package but existing import sites reference this module.
+// -----------------------------------------------------------------------------
+
+export {
+  preprocessImageForClip,
+  l2Normalize,
+  looksLikeOnnxModel,
+  VISUAL_EMBEDDING_MODEL_TAG,
+  VISUAL_EMBEDDING_DIMENSIONS,
+} from '@memoriahub/enrichment-compute/clip';
+
+// -----------------------------------------------------------------------------
+// Host-side constants (model download/lifecycle — NOT part of the compute)
 // -----------------------------------------------------------------------------
 
 const MODEL_URL =
   'https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx';
 const MODEL_FILENAME = 'clip-vit-b32-vision-quantized.onnx';
-/** Tag stored in media_visual_embedding.model so future model swaps are traceable. */
-export const VISUAL_EMBEDDING_MODEL_TAG = 'clip-vit-b32-q8';
-export const VISUAL_EMBEDDING_DIMENSIONS = 512;
 
 const MIN_MODEL_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB — the quantized vision tower is ~87 MB
 const IDLE_RELEASE_MS = 5 * 60 * 1000; // 5 minutes
 
-const CLIP_IMAGE_SIZE = 224;
-const CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073] as const;
-const CLIP_STD = [0.26862954, 0.26130258, 0.27577711] as const;
-
 export type EnsureEmbeddingResult = 'exists' | 'created' | 'unavailable';
-
-// -----------------------------------------------------------------------------
-// Pure, testable preprocessing helpers (no DI, no I/O beyond the buffer given)
-// -----------------------------------------------------------------------------
-
-/**
- * Resize an image buffer to 224x224 (fit=fill, matching CLIP's preprocessor),
- * apply EXIF orientation first via prepareImageForProcessing, then normalize
- * to CLIP's mean/std and lay out as a CHW float32 tensor.
- *
- * Returns null when the image cannot be decoded.
- */
-export async function preprocessImageForClip(buffer: Buffer): Promise<Float32Array | null> {
-  try {
-    const { buffer: prepared, width } = await prepareImageForProcessing(buffer);
-    if (width === 0) {
-      return null;
-    }
-
-    const sharp = (await import('sharp')).default;
-    const { data } = await sharp(prepared)
-      .resize(CLIP_IMAGE_SIZE, CLIP_IMAGE_SIZE, { fit: 'fill' })
-      .removeAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
-    const numPixels = CLIP_IMAGE_SIZE * CLIP_IMAGE_SIZE;
-    const out = new Float32Array(3 * numPixels);
-
-    for (let i = 0; i < numPixels; i++) {
-      const r = data[i * 3] / 255;
-      const g = data[i * 3 + 1] / 255;
-      const b = data[i * 3 + 2] / 255;
-      out[i] = (r - CLIP_MEAN[0]) / CLIP_STD[0]; // R plane
-      out[numPixels + i] = (g - CLIP_MEAN[1]) / CLIP_STD[1]; // G plane
-      out[2 * numPixels + i] = (b - CLIP_MEAN[2]) / CLIP_STD[2]; // B plane
-    }
-
-    return out;
-  } catch {
-    return null;
-  }
-}
-
-/** L2-normalize a vector so cosine similarity == dot product downstream. */
-export function l2Normalize(vec: number[]): number[] {
-  let sumSq = 0;
-  for (const v of vec) sumSq += v * v;
-  const norm = Math.sqrt(sumSq) || 1;
-  return vec.map((v) => v / norm);
-}
-
-/**
- * Heuristic ONNX file sanity check.
- *
- * ONNX files are serialized protobuf (ModelProto). There is no official
- * magic number, but protobuf serializers near-universally emit the first
- * field (ir_version, field #1, varint wiretype) first, producing a leading
- * byte of 0x08. This is a heuristic, not a guarantee.
- *
- * We deliberately do NOT pin a SHA-256 checksum here: Hugging Face may
- * rebuild/re-quantize the file over time, and this function must keep
- * working in offline/air-gapped deployments where a checksum could never be
- * refreshed without a code change. Combined with the size check and the fact
- * that `InferenceSession.create()` will throw on a genuinely corrupt file,
- * this heuristic is sufficient defense against downloading an HTML error
- * page or a truncated file in place of the real model.
- */
-export function looksLikeOnnxModel(buffer: Buffer): boolean {
-  return buffer.length > 4 && buffer[0] === 0x08;
-}
 
 // -----------------------------------------------------------------------------
 // Service
@@ -232,10 +182,7 @@ export class VisualEmbeddingService implements OnModuleDestroy {
   private async loadSession(): Promise<InferenceSession | null> {
     try {
       const modelPath = await this.ensureModel();
-      const ort = await import('onnxruntime-node');
-      const session = await ort.InferenceSession.create(modelPath, {
-        intraOpNumThreads: 2,
-      });
+      const session = await createClipSession(modelPath);
       this.session = session;
       this.resetIdleTimer();
       return session;
@@ -283,24 +230,7 @@ export class VisualEmbeddingService implements OnModuleDestroy {
     }
 
     try {
-      const tensorData = await preprocessImageForClip(buffer);
-      if (!tensorData) {
-        return null;
-      }
-
-      const ort = await import('onnxruntime-node');
-      const inputName = session.inputNames[0];
-      const outputName = session.outputNames[0];
-
-      const tensor = new ort.Tensor('float32', tensorData, [1, 3, CLIP_IMAGE_SIZE, CLIP_IMAGE_SIZE]);
-      const outputs = await session.run({ [inputName]: tensor });
-      const raw = outputs[outputName]?.data as Float32Array | undefined;
-
-      if (!raw || raw.length === 0) {
-        return null;
-      }
-
-      return l2Normalize(Array.from(raw));
+      return await embedImageWithSession(session, buffer);
     } catch (err) {
       this.logger.warn(`embedImage failed: ${err instanceof Error ? err.message : String(err)}`);
       return null;

@@ -6,6 +6,10 @@ module.exports = {
   transform: {
     '^.+\\.(t|j)s$': 'ts-jest',
   },
+  // The shared parity package resolves through a workspace symlink to a real
+  // path OUTSIDE node_modules, so the default /node_modules/ ignore pattern
+  // misses it. Its dist output is plain prebuilt CommonJS - never transform it.
+  transformIgnorePatterns: ['/node_modules/', '/packages/enrichment-compute/dist/'],
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/**/*.module.ts',
