@@ -2,7 +2,10 @@
 // VideoFrameExtractionService
 // =============================================================================
 //
-// Extracts JPEG frames from a video buffer at evenly spaced timestamps.
+// Extracts JPEG frames from a video already on disk (as a file path) at
+// evenly spaced timestamps. The caller owns downloading/materializing the
+// input file and cleaning it up afterward — this service only manages the
+// per-frame output temp files it creates internally.
 //
 // Sampling strategy:
 //   - Compute durationSec = durationMs / 1000 (or 0 when unknown).
@@ -16,7 +19,8 @@
 // Per-frame errors are logged and skipped rather than aborting the whole job,
 // so a single corrupted seek still yields frames from the other timestamps.
 //
-// All temp files are cleaned up in a finally block regardless of success/failure.
+// Per-frame output temp files are cleaned up in a finally block regardless of
+// success/failure.
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -54,20 +58,24 @@ export class VideoFrameExtractionService {
   // ---------------------------------------------------------------------------
 
   /**
-   * Write `videoBuffer` to a temp file, extract JPEG frames at computed
-   * timestamps, and return them as an array of `{ timestampMs, buffer }`.
+   * Extract JPEG frames at computed timestamps from the video already on disk
+   * at `videoPath`, and return them as an array of `{ timestampMs, buffer }`.
+   *
+   * `videoPath` must already be a seekable file on disk — the caller owns
+   * downloading/materializing it (and its cleanup); this method only owns the
+   * per-frame output temp files it creates internally.
    *
    * The returned array may be shorter than `maxFrames` when:
    *   - The video is shorter than expected.
    *   - Individual frame extractions fail (they are skipped with a warning).
    *
-   * Always cleans up temp files in a finally block.
+   * Always cleans up its own (per-frame output) temp files in a finally block.
    */
   async extractFrames(
-    videoBuffer: Buffer,
+    videoPath: string,
     opts: FrameExtractionOpts,
   ): Promise<ExtractedFrame[]> {
-    const { durationMs, sampleIntervalSeconds, maxFrames, fileExtension } = opts;
+    const { durationMs, sampleIntervalSeconds, maxFrames } = opts;
 
     // Compute seek timestamps (seconds)
     const seekTimestamps = computeSeekTimestamps(
@@ -82,16 +90,10 @@ export class VideoFrameExtractionService {
         `planned seeks=${seekTimestamps.length} (${seekTimestamps.map((s) => s.toFixed(1)).join(', ')} s)`,
     );
 
-    // Temp input file — ffmpeg requires a seekable path, not a stream
-    const ext = fileExtension || '.mp4';
-    const tmpIn = join(tmpdir(), `memoriaHub-vface-in-${randomUUID()}${ext}`);
-
     // We accumulate per-frame temp paths so they can all be cleaned up
     const tmpFramePaths: string[] = [];
 
     try {
-      await fs.writeFile(tmpIn, videoBuffer);
-
       const results: ExtractedFrame[] = [];
 
       for (const seekSecs of seekTimestamps) {
@@ -102,7 +104,7 @@ export class VideoFrameExtractionService {
         tmpFramePaths.push(tmpOut);
 
         try {
-          await extractFrame(tmpIn, tmpOut, seekSecs);
+          await extractFrame(videoPath, tmpOut, seekSecs);
           const buffer = await fs.readFile(tmpOut);
           results.push({ timestampMs: Math.round(seekSecs * 1000), buffer });
         } catch (frameErr) {
@@ -121,8 +123,7 @@ export class VideoFrameExtractionService {
 
       return results;
     } finally {
-      // Clean up all temp files regardless of success or failure
-      await fs.unlink(tmpIn).catch(() => {});
+      // Clean up our own per-frame output temp files regardless of success or failure
       for (const p of tmpFramePaths) {
         await fs.unlink(p).catch(() => {});
       }
@@ -140,13 +141,15 @@ export class VideoFrameExtractionService {
    * Used by OCR-based social-media detection, which wants a few targeted frames
    * (e.g. near the start and end of a clip where platform watermarks appear).
    *
-   * The video buffer is written to a temp file once; each requested timestamp is
-   * seeked independently. Timestamps are deduped and clamped to >= 0, then sorted
-   * ascending. Per-frame extraction failures are logged and skipped (never abort
-   * the batch). All temp files are cleaned up in a finally block.
+   * `videoPath` must already be a seekable file on disk — the caller owns
+   * downloading/materializing it (and its cleanup). Each requested timestamp is
+   * seeked independently against that file. Timestamps are deduped and clamped
+   * to >= 0, then sorted ascending. Per-frame extraction failures are logged and
+   * skipped (never abort the batch). This method only cleans up the per-frame
+   * output temp files it creates internally, in a finally block.
    */
   async extractFramesAt(
-    videoBuffer: Buffer,
+    videoPath: string,
     timestampsMs: number[],
     fileExtension?: string,
   ): Promise<ExtractedFrame[]> {
@@ -159,13 +162,9 @@ export class VideoFrameExtractionService {
       return [];
     }
 
-    const ext = fileExtension || '.mp4';
-    const tmpIn = join(tmpdir(), `memoriaHub-ocr-in-${randomUUID()}${ext}`);
     const tmpFramePaths: string[] = [];
 
     try {
-      await fs.writeFile(tmpIn, videoBuffer);
-
       const results: ExtractedFrame[] = [];
 
       for (const ms of cleaned) {
@@ -177,7 +176,7 @@ export class VideoFrameExtractionService {
         tmpFramePaths.push(tmpOut);
 
         try {
-          await extractFrame(tmpIn, tmpOut, seekSecs);
+          await extractFrame(videoPath, tmpOut, seekSecs);
           const buffer = await fs.readFile(tmpOut);
           results.push({ timestampMs: ms, buffer });
         } catch (frameErr) {
@@ -191,7 +190,6 @@ export class VideoFrameExtractionService {
 
       return results;
     } finally {
-      await fs.unlink(tmpIn).catch(() => {});
       for (const p of tmpFramePaths) {
         await fs.unlink(p).catch(() => {});
       }
