@@ -41,6 +41,7 @@ import { BackupScreen } from './BackupScreen.js';
 import { JobsDashboard } from './JobsDashboard.js';
 import { NodeDashboard } from './NodeDashboard.js';
 import { NodeConfig } from './NodeConfig.js';
+import { NodeStart } from './NodeStart.js';
 import { NodeDoctor } from './NodeDoctor.js';
 import { NodeRegister } from './NodeRegister.js';
 import { NodeList } from './NodeList.js';
@@ -80,6 +81,7 @@ type Screen =
   | { kind: 'backup' }
   | { kind: 'nodeDashboard' }
   | { kind: 'nodeConfig' }
+  | { kind: 'nodeStart' }
   | { kind: 'nodeDoctor' }
   | { kind: 'nodeRegister' }
   | { kind: 'nodeList' }
@@ -188,6 +190,11 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
     setStack((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
   }
 
+  /** Replace the top frame in place (e.g. Start Worker → Dashboard on success). */
+  function replaceTop(frame: NavFrame): void {
+    setStack((prev) => [...prev.slice(0, -1), frame]);
+  }
+
   function resetToRoot(): void {
     setStack([{ kind: 'menu', menuId: 'root' }]);
   }
@@ -258,6 +265,9 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
         break;
       case 'node-config':
         push({ kind: 'screen', screen: { kind: 'nodeConfig' } });
+        break;
+      case 'node-start':
+        push({ kind: 'screen', screen: { kind: 'nodeStart' } });
         break;
       case 'node-doctor':
         push({ kind: 'screen', screen: { kind: 'nodeDoctor' } });
@@ -613,6 +623,24 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
         <NodeConfig
           config={config}
           onSaved={(cfg) => setAppState((prev) => ({ ...prev, config: cfg }))}
+          onBack={pop}
+        />
+      );
+
+    case 'nodeStart':
+      if (!config) {
+        return (
+          <Box paddingX={1} flexDirection="column" gap={1}>
+            <Text color="yellow">Not logged in. Please login first.</Text>
+            <Text dimColor>Press q to go back.</Text>
+            <KeyHandler onBack={pop} />
+          </Box>
+        );
+      }
+      return (
+        <NodeStart
+          config={config}
+          onStarted={() => replaceTop({ kind: 'screen', screen: { kind: 'nodeDashboard' } })}
           onBack={pop}
         />
       );

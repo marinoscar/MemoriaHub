@@ -57,6 +57,7 @@ import {
 } from '../node/logger.js';
 import { startDaemonHost, readPidFile, isPidAlive } from '../node/daemon.js';
 import { connectToDaemon, isDaemonRunning, type DaemonMessage } from '../node/ipc-client.js';
+import { checkNodeAlreadyRunning } from '../node/daemon-launch.js';
 
 const require = createRequire(import.meta.url);
 
@@ -241,15 +242,15 @@ function startCmd(): Command {
         }
 
         // Refuse a second instance up front (pidfile OR live IPC socket).
-        const pidInfo = readPidFile(nodePidPath());
-        if (pidInfo && isPidAlive(pidInfo.pid)) {
+        const alreadyRunning = await checkNodeAlreadyRunning();
+        if (alreadyRunning.running && alreadyRunning.via === 'pidfile') {
           ui.error(
-            `A worker node is already running (pid ${pidInfo.pid}). ` +
+            `A worker node is already running (pid ${alreadyRunning.pid}). ` +
               'Use `memoriahub node status` or `memoriahub node stop`.',
           );
           process.exit(1);
         }
-        if (await isDaemonRunning()) {
+        if (alreadyRunning.running && alreadyRunning.via === 'ipc') {
           ui.error(
             'A worker node is already running (IPC socket is live). ' +
               'Use `memoriahub node status` or `memoriahub node stop`.',
