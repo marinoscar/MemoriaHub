@@ -47,6 +47,11 @@
       "import": "./dist/esm/metadata/index.js",
       "require": "./dist/cjs/metadata/index.js"
     },
+    "./social": {
+      "types": "./dist/types/social/index.d.ts",
+      "import": "./dist/esm/social/index.js",
+      "require": "./dist/cjs/social/index.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
