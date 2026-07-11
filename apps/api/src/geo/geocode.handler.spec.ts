@@ -424,4 +424,172 @@ describe('GeocodeHandler', () => {
       expect(mockPrisma.mediaItem.update).not.toHaveBeenCalled();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // nodeResultSchema — node-eligibility surface
+  // -------------------------------------------------------------------------
+
+  describe('nodeResultSchema', () => {
+    it('is the shared geocodeResultSchema from @memoriahub/enrichment-compute/dto', async () => {
+      const { geocodeResultSchema } = await import('@memoriahub/enrichment-compute/dto');
+      expect(handler.nodeResultSchema).toBe(geocodeResultSchema);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // persistGeocode — direct / node-result path.
+  //
+  // A distributed worker node resolves transient provider credentials via
+  // POST /nodes/:id/jobs/:jobId/credentials, calls the provider's HTTP API
+  // directly using @memoriahub/enrichment-compute/geo's fetch*/map* helpers,
+  // and submits the resulting GeocodeResult via
+  // POST /nodes/:id/jobs/:jobId/result. NodesService.submitJobResult calls
+  // GeocodeHandler.persistNodeResult -> this.persistGeocode(job, parsed) with
+  // NO preloaded MediaItem (unlike process() above, which passes one to avoid
+  // a redundant query) — these tests exercise that reload-from-scratch path
+  // directly and assert it writes the IDENTICAL geo columns as the in-process
+  // path exercised above via process().
+  // -------------------------------------------------------------------------
+
+  describe('persistGeocode (direct / node-result path, no preloaded MediaItem)', () => {
+    const nodeMediaItem = {
+      id: 'media-1',
+      circleId: 'circle-1',
+      deletedAt: null,
+    };
+
+    const canned = {
+      country: 'Costa Rica',
+      countryCode: 'CR',
+      admin1: 'Provincia de San José',
+      admin2: 'San José',
+      locality: 'San José',
+      placeName: 'San José, Provincia de San José, Costa Rica',
+      source: 'nominatim',
+    };
+
+    beforeEach(() => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(nodeMediaItem as any);
+      mockPrisma.mediaItem.update.mockResolvedValue({} as any);
+      mockPrisma.mediaGeocodeStatus.upsert.mockResolvedValue({} as any);
+    });
+
+    it('reloads the MediaItem itself when no preloaded item is passed', async () => {
+      await handler.persistGeocode(makeJob(), canned);
+
+      expect(mockPrisma.mediaItem.findUnique).toHaveBeenCalledWith({
+        where: { id: 'media-1' },
+        select: { id: true, circleId: true, deletedAt: true },
+      });
+    });
+
+    it('writes all geo columns identically to the in-process path', async () => {
+      await handler.persistGeocode(makeJob(), canned);
+
+      const updateCall = mockPrisma.mediaItem.update.mock.calls[0][0];
+      expect(updateCall.data.geoCountry).toBe('Costa Rica');
+      expect(updateCall.data.geoCountryCode).toBe('CR');
+      expect(updateCall.data.geoAdmin1).toBe('Provincia de San José');
+      expect(updateCall.data.geoAdmin2).toBe('San José');
+      expect(updateCall.data.geoLocality).toBe('San José');
+      expect(updateCall.data.geoPlaceName).toBe('San José, Provincia de San José, Costa Rica');
+      expect(updateCall.data.geoSource).toBe('nominatim');
+      expect(updateCall.data.geocodedAt).toBeInstanceOf(Date);
+    });
+
+    it('upserts media_geocode_status to processed', async () => {
+      await handler.persistGeocode(makeJob(), canned);
+
+      const calls = mockPrisma.mediaGeocodeStatus.upsert.mock.calls;
+      const finalCall = calls[calls.length - 1][0];
+      expect(finalCall.update.status).toBe(MediaMetadataStatusType.processed);
+    });
+
+    it('does not write geo columns when the result is all-null (provider found nothing)', async () => {
+      await handler.persistGeocode(makeJob(), {
+        country: null,
+        countryCode: null,
+        admin1: null,
+        admin2: null,
+        locality: null,
+        placeName: null,
+        source: 'nominatim',
+      });
+
+      expect(mockPrisma.mediaItem.update).not.toHaveBeenCalled();
+      const calls = mockPrisma.mediaGeocodeStatus.upsert.mock.calls;
+      expect(calls[calls.length - 1][0].update.status).toBe(MediaMetadataStatusType.processed);
+    });
+
+    it('throws when job.mediaItemId is missing', async () => {
+      await expect(
+        handler.persistGeocode(makeJob({ mediaItemId: null }), canned),
+      ).rejects.toThrow(/missing mediaItemId/);
+    });
+
+    it('throws when the MediaItem no longer exists', async () => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
+
+      await expect(handler.persistGeocode(makeJob(), canned)).rejects.toThrow(/not found or deleted/);
+    });
+
+    it('throws when the MediaItem is soft-deleted', async () => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({
+        ...nodeMediaItem,
+        deletedAt: new Date(),
+      } as any);
+
+      await expect(handler.persistGeocode(makeJob(), canned)).rejects.toThrow(/not found or deleted/);
+    });
+
+    it('performs no geocoder call — the node already computed the result', async () => {
+      await handler.persistGeocode(makeJob(), canned);
+
+      expect(mockGeoLocationService.reverseGeocode).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // persistNodeResult — schema re-parse + delegation
+  // -------------------------------------------------------------------------
+
+  describe('persistNodeResult', () => {
+    const nodeMediaItem = {
+      id: 'media-1',
+      circleId: 'circle-1',
+      deletedAt: null,
+    };
+
+    beforeEach(() => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(nodeMediaItem as any);
+      mockPrisma.mediaItem.update.mockResolvedValue({} as any);
+      mockPrisma.mediaGeocodeStatus.upsert.mockResolvedValue({} as any);
+    });
+
+    it('parses the payload against geocodeResultSchema and calls persistGeocode', async () => {
+      const job = makeJob();
+      const result = {
+        country: 'Costa Rica',
+        countryCode: 'CR',
+        admin1: null,
+        admin2: null,
+        locality: null,
+        placeName: null,
+        source: 'google',
+      };
+
+      await handler.persistNodeResult(job, result);
+
+      const updateCall = mockPrisma.mediaItem.update.mock.calls[0][0];
+      expect(updateCall.data.geoCountry).toBe('Costa Rica');
+      expect(updateCall.data.geoSource).toBe('google');
+    });
+
+    it('throws (does not persist) when the payload fails schema validation', async () => {
+      const job = makeJob();
+
+      await expect(handler.persistNodeResult(job, { country: 123 })).rejects.toThrow();
+      expect(mockPrisma.mediaItem.update).not.toHaveBeenCalled();
+    });
+  });
 });

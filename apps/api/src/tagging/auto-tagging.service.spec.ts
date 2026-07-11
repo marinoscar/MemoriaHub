@@ -1082,4 +1082,160 @@ describe('AutoTaggingService', () => {
       ).rejects.toBeInstanceOf(RateLimitError);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // persistAutoTagging — direct / node-result path.
+  //
+  // A distributed worker node computes the raw vision-model text locally
+  // (via @memoriahub/enrichment-compute/ai's callAnthropicVision with a
+  // transiently-fetched API key) and submits ONLY { rawText } via
+  // POST /nodes/:id/jobs/:jobId/result. AutoTaggingHandler.persistNodeResult
+  // calls service.persistAutoTagging(job, parsed) directly — bypassing
+  // processMediaItem entirely (no image download, no provider call). These
+  // tests call persistAutoTagging directly with a canned { rawText } DTO and
+  // assert IDENTICAL persistence behavior to the in-process path exercised
+  // above via processMediaItem.
+  // -------------------------------------------------------------------------
+
+  describe('persistAutoTagging (direct / node-result path)', () => {
+    function makeNodeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
+      // A node-result job already has providerKey/modelVersion recorded by
+      // NodesService.getJobCredentials (via recordModel) before the node
+      // even makes its provider call — persistAutoTagging reads them off the
+      // job row rather than resolving system settings again.
+      return makeJob({
+        providerKey: 'anthropic',
+        modelVersion: 'claude-3-5-sonnet',
+        claimedByNodeId: 'node-1',
+        executor: 'node',
+        ...overrides,
+      });
+    }
+
+    it('upserts only vocabulary-matched labels; drops unrecognised items (identical to the in-process path)', async () => {
+      await service.persistAutoTagging(makeNodeJob(), {
+        rawText: JSON.stringify({ tags: ['Beach', 'Sunset', 'Nonexistent Label'], description: 'Sun and water.' }),
+      });
+
+      expect(mockPrisma.tag.upsert).toHaveBeenCalledTimes(2);
+      const tagNames = (mockPrisma.tag.upsert as jest.Mock).mock.calls.map((c: any[]) => c[0].create.name);
+      expect(tagNames).toContain('Beach');
+      expect(tagNames).toContain('Sunset');
+      expect(tagNames).not.toContain('Nonexistent Label');
+    });
+
+    it('normalizes label case (case-insensitive vocabulary match) to the original TagLabel name', async () => {
+      await service.persistAutoTagging(makeNodeJob(), {
+        rawText: JSON.stringify({ tags: ['beach', 'SUNSET'], description: 'Sand.' }),
+      });
+
+      const tagNames = (mockPrisma.tag.upsert as jest.Mock).mock.calls.map((c: any[]) => c[0].create.name);
+      expect(tagNames).toContain('Beach');
+      expect(tagNames).toContain('Sunset');
+    });
+
+    it('strips ```json code fences before parsing', async () => {
+      await service.persistAutoTagging(makeNodeJob(), {
+        rawText: '```json\n{"tags":["Beach","Sunset"],"description":"Sand and waves."}\n```',
+      });
+
+      expect(mockPrisma.tag.upsert).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.mediaItem.update).toHaveBeenCalledWith({
+        where: { id: 'media-1' },
+        data: { description: 'Sand and waves.' },
+      });
+    });
+
+    it('extracts the JSON object via regex when the response has leading prose', async () => {
+      await service.persistAutoTagging(makeNodeJob(), {
+        rawText: 'Here is my analysis: {"tags":["Beach","Mountain"],"description":"Rocks and waves."}',
+      });
+
+      expect(mockPrisma.tag.upsert).toHaveBeenCalledTimes(2);
+    });
+
+    it('truncates description at 8192 characters', async () => {
+      const longDescription = 'a'.repeat(9000);
+
+      await service.persistAutoTagging(makeNodeJob(), {
+        rawText: JSON.stringify({ tags: ['Beach'], description: longDescription }),
+      });
+
+      const updateCall = (mockPrisma.mediaItem.update as jest.Mock).mock.calls[0][0];
+      expect(updateCall.data.description).toHaveLength(8192);
+      expect(updateCall.data.description).toBe(longDescription.slice(0, 8192));
+    });
+
+    it('sets MediaTagStatus to processed with providerKey/modelVersion read off the job row', async () => {
+      await service.persistAutoTagging(makeNodeJob(), {
+        rawText: JSON.stringify({ tags: ['Beach'], description: 'Sand.' }),
+      });
+
+      const calls = (mockPrisma.mediaTagStatus.upsert as jest.Mock).mock.calls;
+      const finalUpsert = calls[calls.length - 1][0];
+      expect(finalUpsert.create.status).toBe(MediaTagStatusType.processed);
+      expect(finalUpsert.create.providerKey).toBe('anthropic');
+      expect(finalUpsert.create.modelVersion).toBe('claude-3-5-sonnet');
+    });
+
+    it('performs no image download and no provider call (node already computed rawText)', async () => {
+      await service.persistAutoTagging(makeNodeJob(), {
+        rawText: JSON.stringify({ tags: ['Beach'], description: 'Sand.' }),
+      });
+
+      expect(mockStorageProvider.download).not.toHaveBeenCalled();
+      expect(mockProvider.analyzeImage).not.toHaveBeenCalled();
+    });
+
+    it('throws when job.providerKey/modelVersion are missing (recordModel must run first)', async () => {
+      const job = makeNodeJob({ providerKey: null, modelVersion: null });
+
+      await expect(
+        service.persistAutoTagging(job, { rawText: JSON.stringify({ tags: [], description: null }) }),
+      ).rejects.toThrow(/providerKey\/modelVersion/);
+    });
+
+    it('throws when job.mediaItemId is missing', async () => {
+      const job = makeNodeJob({ mediaItemId: null });
+
+      await expect(
+        service.persistAutoTagging(job, { rawText: JSON.stringify({ tags: [], description: null }) }),
+      ).rejects.toThrow(/missing mediaItemId/);
+    });
+
+    it('throws when the MediaItem no longer exists', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.persistAutoTagging(makeNodeJob(), {
+          rawText: JSON.stringify({ tags: [], description: null }),
+        }),
+      ).rejects.toThrow(/not found/);
+    });
+
+    // -----------------------------------------------------------------------
+    // Regression guard for the recordModel-doesn't-mutate-job bug fix:
+    // processMediaItem must explicitly set job.providerKey/job.modelVersion
+    // in-memory after calling recordModel (which only writes the DB row),
+    // since the same `job` object reference is passed straight into
+    // persistAutoTagging without a re-fetch. Without this explicit
+    // assignment, persistAutoTagging would throw "missing providerKey/
+    // modelVersion" on every in-process run.
+    // -----------------------------------------------------------------------
+
+    it('regression: processMediaItem mutates job.providerKey/modelVersion in-memory so persistAutoTagging can read them', async () => {
+      const job = makeJob();
+      expect(job.providerKey).toBeNull();
+      expect(job.modelVersion).toBeNull();
+
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach'], description: 'Sand.' }),
+      );
+
+      await service.processMediaItem(job);
+
+      expect(job.providerKey).toBe('openai');
+      expect(job.modelVersion).toBe('gpt-4o');
+    });
+  });
 });
