@@ -50,6 +50,14 @@ const subpaths = [
 
 pkg.exports = {
   '.': { require: './cjs/index.js', default: './cjs/index.js' },
+  // Some call sites (e.g. MUI's own internals, some test utilities) import
+  // the deep cjs path directly rather than the bare subpath name. Since
+  // defining `exports` makes resolution EXCLUSIVE — any path not listed here
+  // becomes forbidden, even ones that resolved fine before this field existed
+  // — a wildcard for the whole cjs/ directory is required, not just the named
+  // subpaths below.
+  './cjs/*.js': './cjs/*.js',
+  './package.json': './package.json',
 };
 for (const s of subpaths) {
   pkg.exports[`./${s}`] = {
