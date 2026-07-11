@@ -43,6 +43,13 @@ import { ensureModels } from '../node/models.js';
 import { runOperationalSelfTests } from '../node/self-test.js';
 import { runApiAccessChecks, checkDaemonLiveness } from '../node/doctor-checks.js';
 import {
+  summarizeCapabilities,
+  summarizeJobReadiness,
+  apiAccessLevel,
+  WORKER_NODE_SETUP_GUIDE_URL,
+  type CapabilityRowSummary,
+} from '../node/doctor-summary.js';
+import {
   NodeEngine,
   type NodeEngineOptions,
   type EngineSnapshot,
@@ -122,11 +129,13 @@ function printCapabilityTable(caps: Record<string, CapabilityStatus>): void {
  * `runOperationalSelfTests()` — a capability can be installed but not (yet)
  * operational (e.g. a model file not downloaded yet), which is not an error,
  * just not-ready-yet, so it renders yellow rather than red.
+ *
+ * Takes pre-classified/pre-filtered rows from `summarizeCapabilities()`
+ * (`node/doctor-summary.ts`) rather than the raw capability maps, so the
+ * caller decides which rows are worth a table row (e.g. issues-only) without
+ * this function needing to know about that policy.
  */
-function printOperationalCapabilityTable(
-  caps: Record<string, CapabilityStatus>,
-  operational: Record<string, CapabilityStatus>,
-): void {
+function printOperationalCapabilityTable(rows: CapabilityRowSummary[]): void {
   const table = new Table({
     head: [
       chalk.bold('Capability'),
@@ -136,21 +145,21 @@ function printOperationalCapabilityTable(
     ],
     style: { head: [], border: isTTY ? ['dim'] : [] },
   });
-  for (const [key, status] of Object.entries(caps)) {
-    const op = operational[key] ?? status;
+  for (const row of rows) {
+    const { installed, operational } = row;
     let operationalCell: string;
-    if (!status.available) {
+    if (!installed.available) {
       operationalCell = chalk.dim('n/a');
-    } else if (op.available) {
+    } else if (operational.available) {
       operationalCell = chalk.green('yes');
     } else {
       operationalCell = chalk.yellow('not yet');
     }
     table.push([
-      key,
-      status.available ? chalk.green('yes') : chalk.red('no'),
+      row.key,
+      installed.available ? chalk.green('yes') : chalk.red('no'),
       operationalCell,
-      op.detail ?? status.detail ?? '',
+      operational.detail ?? installed.detail ?? '',
     ]);
   }
   process.stdout.write(table.toString() + '\n');
@@ -849,27 +858,37 @@ function doctorCmd(): Command {
       //    roundtrip below and a real claim would consume a job.
       ui.step('API Access');
       const access = await runApiAccessChecks(api, cfg.nodeId);
-      if (access.authOk) {
-        ui.success(`Connected to ${cfg.serverUrl} (token valid). ${access.authDetail}`);
+      if (!access.authOk) hasError = true;
+      const accessLevel = apiAccessLevel(access);
+      if (accessLevel === 'ok') {
+        ui.success(`API access ok — ${access.authDetail}`);
       } else {
-        hasError = true;
-        ui.error(`Cannot reach API / token invalid: ${access.authDetail}`);
-      }
-      if (cfg.nodeId) {
-        if (access.nodeRegistrationOk === true) {
-          ui.success(`Node registration: ${access.nodeRegistrationDetail}`);
-        } else if (access.nodeRegistrationOk === false) {
-          ui.warn(`Node registration: ${access.nodeRegistrationDetail}`);
+        if (access.authOk) {
+          ui.success(`Connected to ${cfg.serverUrl} (token valid). ${access.authDetail}`);
         } else {
-          ui.dim(`Node registration: ${access.nodeRegistrationDetail}`);
+          ui.error(`Cannot reach API / token invalid: ${access.authDetail}`);
         }
-      } else {
-        ui.dim('Node registration: not registered locally — run `node register` first.');
+        if (cfg.nodeId) {
+          if (access.nodeRegistrationOk === true) {
+            ui.success(`Node registration: ${access.nodeRegistrationDetail}`);
+          } else if (access.nodeRegistrationOk === false) {
+            ui.warn(`Node registration: ${access.nodeRegistrationDetail}`);
+          } else {
+            ui.dim(`Node registration: ${access.nodeRegistrationDetail}`);
+          }
+        }
+        if (access.manifestOk) {
+          ui.success(`Model manifest: ${access.manifestDetail}`);
+        } else {
+          ui.warn(`Model manifest: ${access.manifestDetail}`);
+        }
       }
-      if (access.manifestOk) {
-        ui.success(`Model manifest: ${access.manifestDetail}`);
-      } else {
-        ui.warn(`Model manifest: ${access.manifestDetail}`);
+      // Special case preserved regardless of level: an unregistered machine
+      // is expected/informational, not a warning, so it always gets a pointer
+      // to `node register` even when the rest of the access check collapses
+      // to the one-line 'ok' summary above.
+      if (!cfg.nodeId) {
+        ui.dim('Node registration: not registered locally — run `node register` first.');
       }
       ui.blank();
 
@@ -881,7 +900,13 @@ function doctorCmd(): Command {
       //    for every capability reported present above. See node/self-test.ts.
       ui.step('Running operational self-tests…');
       const operationalCaps = await runOperationalSelfTests(caps);
-      printOperationalCapabilityTable(caps, operationalCaps);
+      const capsSummary = summarizeCapabilities(caps, operationalCaps);
+      if (capsSummary.issues.length === 0) {
+        ui.success(`All ${capsSummary.totalCount} capabilities operational.`);
+      } else {
+        ui.info(`${capsSummary.okCount}/${capsSummary.totalCount} capabilities fully operational`);
+        printOperationalCapabilityTable(capsSummary.issues);
+      }
       ui.blank();
 
       // 4. Required-capability check for eligible types — gated on the
@@ -896,14 +921,19 @@ function doctorCmd(): Command {
       if (eligibleTypes.length === 0) {
         ui.warn('No eligible job types configured/supported on this machine.');
       }
-      for (const t of eligibleTypes) {
+      const jobReadinessRows = eligibleTypes.map((t) => {
         const missing = missingRequirements(t, operationalCaps);
-        if (missing.length === 0) {
-          ui.success(`${t}: ready`);
-        } else {
-          hasError = true;
-          ui.error(`${t}: missing required capability → ${missing.join(', ')}`);
+        return { type: t, ready: missing.length === 0, missing };
+      });
+      const jobSummary = summarizeJobReadiness(jobReadinessRows);
+      if (jobSummary.issues.length > 0) {
+        hasError = true;
+        ui.info(`${jobSummary.readyCount}/${jobSummary.totalCount} job types ready`);
+        for (const row of jobSummary.issues) {
+          ui.error(`${row.type}: missing required capability → ${row.missing.join(', ')}`);
         }
+      } else if (jobSummary.totalCount > 0) {
+        ui.success(`All ${jobSummary.totalCount} job type(s) ready.`);
       }
       ui.blank();
 
@@ -954,6 +984,9 @@ function doctorCmd(): Command {
       } else {
         ui.info(daemon.detail);
       }
+      ui.blank();
+
+      ui.dim(`Dependency setup & troubleshooting guide: ${WORKER_NODE_SETUP_GUIDE_URL}`);
       ui.blank();
 
       if (hasError) {
