@@ -923,6 +923,8 @@ memoriahub node doctor
 
 A node needs several heavy native libraries to serve its job types: `sharp`, `onnxruntime-node` (CLIP), `@vladmandic/human` (face detection), and `tesseract.js` (OCR), plus the TensorFlow.js packages `@vladmandic/human` depends on. These are declared as `optionalDependencies` in the CLI's own `package.json` (matching the shared `packages/enrichment-compute` package's exact version pins), so a normal `memoriahub` install already attempts them — there is no separate install step required to run `node start`. Because they're optional, a platform where one of them fails to build or download doesn't break the rest of the CLI; that job type simply won't be operational until the dependency resolves, which `node doctor` reports clearly rather than crashing. Model files themselves (the CLIP ONNX model, the Human face-detector weights) are downloaded lazily on first `node start` (or `node doctor`) into `~/.memoriahub/models/`, verified against the sha256-pinned manifest the server publishes at `GET /api/nodes/models/manifest`.
 
+See [Worker Node Setup & Troubleshooting](../../docs/specs/worker-node-setup.md) for how to install and configure each dependency, and what to do when doctor reports a capability as installed-but-not-operational.
+
 ### Logs and live concurrency
 
 ```bash
