@@ -43,7 +43,7 @@ function findCheck(report: DoctorReport, key: string): DoctorCheck {
 
 /** Routes prisma.$queryRaw calls to a canned result based on substring match
  * against the joined template-literal SQL text, so tests don't depend on the
- * concurrent call ordering of the 20 checks. */
+ * concurrent call ordering of the 25 checks. */
 function mockQueryRawByText(prisma: MockPrismaService, handlers: Array<[string, unknown]>): void {
   (prisma.$queryRaw as unknown as jest.Mock).mockImplementation((strings: TemplateStringsArray) => {
     const text = Array.isArray(strings) ? strings.join('') : String(strings);
@@ -54,6 +54,16 @@ function mockQueryRawByText(prisma: MockPrismaService, handlers: Array<[string, 
     }
     return Promise.resolve([]);
   });
+}
+
+/** Mocks the worker-node/enrichment-job Prisma calls used by the Worker Nodes
+ * section's four checks so they resolve to 'skipped'/'ok' (no nodes
+ * registered) rather than throwing on the deep-mocked Prisma client's default
+ * `undefined` return value. */
+function mockNoWorkerNodes(prisma: MockPrismaService): void {
+  (prisma.workerNode.count as jest.Mock).mockResolvedValue(0);
+  (prisma.workerNode.findMany as jest.Mock).mockResolvedValue([]);
+  (prisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
 }
 
 function healthyQueryRawHandlers(): Array<[string, unknown]> {
@@ -212,9 +222,10 @@ describe('DoctorService', () => {
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
       mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
       mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
+      mockNoWorkerNodes(mockPrisma);
     });
 
-    it('returns sections in the documented order: core, auth, storage, ai, face, geo, jobs', async () => {
+    it('returns sections in the documented order: core, auth, storage, ai, face, geo, jobs, nodes', async () => {
       const report = await service.runDiagnostics();
 
       expect(report.sections.map((s) => s.key)).toEqual([
@@ -225,6 +236,7 @@ describe('DoctorService', () => {
         'face',
         'geo',
         'jobs',
+        'nodes',
       ]);
     });
 
@@ -260,7 +272,7 @@ describe('DoctorService', () => {
       }
     });
 
-    it('includes all 21 documented checks across the 7 sections', async () => {
+    it('includes all 25 documented checks across the 8 sections', async () => {
       const report = await service.runDiagnostics();
 
       const allKeys = report.sections.flatMap((s) => s.checks.map((c) => c.key));
@@ -286,6 +298,10 @@ describe('DoctorService', () => {
         'jobs.workerEnabled',
         'jobs.queueHealth',
         'jobs.burstConfig',
+        'nodes.registeredCount',
+        'nodes.heartbeatFreshness',
+        'nodes.staleLeases',
+        'nodes.capabilityHealth',
       ]);
     });
   });
@@ -329,7 +345,7 @@ describe('DoctorService', () => {
       // Unrelated checks are unaffected.
       expect(findCheck(report, 'core.database').status).toBe('ok');
       expect(findCheck(report, 'ai.search').status).toBe('ok');
-      expect(report.summary.total).toBe(21);
+      expect(report.summary.total).toBe(25);
     });
   });
 
@@ -369,7 +385,7 @@ describe('DoctorService', () => {
         // The rest of the report still completed normally.
         expect(findCheck(report, 'core.database').status).toBe('ok');
         expect(findCheck(report, 'ai.search').status).toBe('ok');
-        expect(report.summary.total).toBe(21);
+        expect(report.summary.total).toBe(25);
       } finally {
         jest.useRealTimers();
       }
@@ -395,6 +411,7 @@ describe('DoctorService', () => {
       mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
       mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
+      mockNoWorkerNodes(mockPrisma);
       // AI/face provider test methods should not even be called in this fixture,
       // but stub them defensively in case of an unexpected call.
       mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);

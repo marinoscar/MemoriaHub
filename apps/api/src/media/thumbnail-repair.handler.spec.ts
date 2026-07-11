@@ -17,6 +17,7 @@ import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.regi
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
+import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import type { EnrichmentJob } from '@prisma/client';
 
@@ -82,6 +83,7 @@ describe('ThumbnailRepairHandler', () => {
   let mockRegistry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
   let mockSync: jest.Mocked<Pick<MediaMetadataSyncService, 'syncFromStorageObject'>>;
   let mockRecovery: jest.Mocked<Pick<StorageProcessingRecoveryService, 'reprocessObjectNow'>>;
+  let mockThumbnailNodePersistService: jest.Mocked<Pick<ThumbnailNodePersistService, 'persistThumbnail'>>;
   let mockPrisma: MockPrismaService;
 
   beforeEach(async () => {
@@ -97,6 +99,10 @@ describe('ThumbnailRepairHandler', () => {
       reprocessObjectNow: jest.fn().mockResolvedValue(undefined),
     };
 
+    mockThumbnailNodePersistService = {
+      persistThumbnail: jest.fn().mockResolvedValue(undefined),
+    };
+
     mockPrisma = createMockPrismaService();
     mockPrisma.$queryRaw.mockResolvedValue([]);
 
@@ -107,6 +113,10 @@ describe('ThumbnailRepairHandler', () => {
         { provide: MediaMetadataSyncService, useValue: mockSync },
         { provide: StorageProcessingRecoveryService, useValue: mockRecovery },
         { provide: PrismaService, useValue: mockPrisma },
+        {
+          provide: ThumbnailNodePersistService,
+          useValue: mockThumbnailNodePersistService,
+        },
       ],
     }).compile();
 
@@ -323,6 +333,46 @@ describe('ThumbnailRepairHandler', () => {
 
       expect(mockSync.syncFromStorageObject).not.toHaveBeenCalled();
       expect(mockRecovery.reprocessObjectNow).not.toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // nodeResultSchema / persistNodeResult (distributed node path)
+  // =========================================================================
+  //
+  // See the nodeResultSchema doc comment on ThumbnailRepairHandler: wired for
+  // interface parity with ThumbnailRegenHandler, though this global sweep job
+  // type has no single mediaItemId in practice under the current claim model.
+
+  describe('nodeResultSchema / persistNodeResult', () => {
+    it('exposes a nodeResultSchema', () => {
+      expect(handler.nodeResultSchema).toBeDefined();
+    });
+
+    it('parses a valid result payload and delegates to ThumbnailNodePersistService.persistThumbnail', async () => {
+      const job = makeJob({ mediaItemId: 'media-1' });
+      const result = {
+        storageKey: 'thumbnails/some-object-id.jpg',
+        width: 400,
+        height: 300,
+        bytes: 12345,
+      };
+
+      await handler.persistNodeResult(job, result);
+
+      expect(mockThumbnailNodePersistService.persistThumbnail).toHaveBeenCalledTimes(1);
+      expect(mockThumbnailNodePersistService.persistThumbnail).toHaveBeenCalledWith(
+        job,
+        result,
+      );
+    });
+
+    it('rejects an invalid result payload without calling persistThumbnail', async () => {
+      const job = makeJob({ mediaItemId: 'media-1' });
+      const invalidResult = { storageKey: 'thumbnails/x.jpg', width: 0, height: 300, bytes: 12345 };
+
+      await expect(handler.persistNodeResult(job, invalidResult)).rejects.toThrow();
+      expect(mockThumbnailNodePersistService.persistThumbnail).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,20 +1,26 @@
 /**
  * tui/NodeDashboard.tsx — Ink live control surface for the worker-node engine.
  *
- * OWNS a NodeEngine instance (constructed with the ApiClient + persisted node
- * config, exactly like `memoriahub node start`) and renders its typed event
- * stream live: per-slot job state, throughput, counters, model-load status, and
- * a rolling error/heartbeat log.
+ * TWO data sources behind one interface (see tui/node-dashboard-source.ts):
  *
- * The engine is only constructed/started when the operator presses `s` (start),
- * so mounting the screen is cheap and never spins up compute automatically.
+ *   ATTACHED — a `memoriahub node start --daemon` process is already running.
+ *   The dashboard connects to its NDJSON IPC socket, hydrates from the
+ *   `snapshot` greeting, appends the daemon's log tail to the log pane, and
+ *   applies live `{kind:'event'}` frames through the same reducer the embedded
+ *   mode uses. Detaching (q/unmount) ONLY closes the socket — the daemon keeps
+ *   running. Keys: [d] drain, [x] stop daemon (with confirm), [r] doctor, and
+ *   after a socket loss [r] retries the connection.
  *
- * Keys:
- *   s       — start the engine (ensure models, then claim/compute loop)
- *   d       — drain & stop the engine
- *   r       — run the capability doctor (overlay)
- *   c       — open node config (when available)
- *   q / Esc — back to the menu (stops the engine on unmount)
+ *   EMBEDDED — no daemon is running. The dashboard OWNS a NodeEngine instance
+ *   (constructed with the ApiClient + persisted node config, exactly like
+ *   `memoriahub node start`) which is only constructed/started when the
+ *   operator presses `s`, so mounting the screen is cheap and never spins up
+ *   compute automatically. The engine is stopped on unmount. Keys: [s] start,
+ *   [d] drain/stop, [r] doctor.
+ *
+ * Both modes share the pure reducer in node-dashboard-source.ts, so per-slot
+ * job state, counters, history, heartbeat, and the error log update through a
+ * single code path.
  *
  * IMPORTANT: this component never statically imports any native model library.
  * It only touches the engine's public event/API surface and the capability
@@ -36,7 +42,19 @@ import {
 import { NodeEngine, type NodeEngineOptions } from '../node/node-engine.js';
 import { NODE_EV } from '../node/node-events.js';
 import { ensureModels } from '../node/models.js';
+import { isDaemonRunning } from '../node/ipc-client.js';
+import { readPidFile } from '../node/daemon.js';
 import { BOX_BORDER } from './theme.js';
+import {
+  appendLogLines,
+  createAttachedSource,
+  EmbeddedDashboardSource,
+  hydrateFromSnapshot,
+  initialDashboardState,
+  reduceNodeEvent,
+  type DashboardSource,
+  type DashboardState,
+} from './node-dashboard-source.js';
 
 // ---------------------------------------------------------------------------
 // Defaults (mirror commands/node.ts)
@@ -44,7 +62,7 @@ import { BOX_BORDER } from './theme.js';
 
 const DEFAULT_POLL_MS = 5000;
 const DEFAULT_CONCURRENCY = 1;
-const MAX_LOG = 15;
+const HISTORY_ROWS = 10;
 
 // ---------------------------------------------------------------------------
 // Props
@@ -62,29 +80,8 @@ export interface NodeDashboardProps {
 // Local state types
 // ---------------------------------------------------------------------------
 
+type SourceMode = 'detecting' | 'attached' | 'embedded';
 type EngineState = 'stopped' | 'starting' | 'running' | 'draining';
-
-interface ActiveJob {
-  jobId: string;
-  type: string;
-  mediaItemId: string | null;
-  startMs: number;
-  fraction: number;
-}
-
-interface HeartbeatState {
-  ok: boolean;
-  at: string | null;
-}
-
-type LogLevel = 'error' | 'warn';
-
-interface LogEntry {
-  id: number;
-  ts: Date;
-  level: LogLevel;
-  msg: string;
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -101,6 +98,44 @@ function shortId(id: string): string {
 
 function hhmmss(d: Date): string {
   return d.toTimeString().slice(0, 8);
+}
+
+/** "2h 13m" / "5m 12s" / "42s" uptime from an ISO anchor. */
+function formatUptime(startedAtIso: string | null, nowMs: number): string {
+  if (!startedAtIso) return '?';
+  const started = Date.parse(startedAtIso);
+  if (!Number.isFinite(started)) return '?';
+  let secs = Math.max(0, Math.floor((nowMs - started) / 1000));
+  const h = Math.floor(secs / 3600);
+  secs -= h * 3600;
+  const m = Math.floor(secs / 60);
+  secs -= m * 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${secs}s`;
+  return `${secs}s`;
+}
+
+/** "3s ago" / "4m ago" / "2h ago" relative time from an ISO timestamp. */
+function relTime(iso: string, nowMs: number): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '?';
+  const secs = Math.max(0, Math.floor((nowMs - t) / 1000));
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+/** "850ms" / "1.2s" / "2m 5s" duration rendering. */
+function fmtDuration(ms: number | undefined): string {
+  if (ms === undefined || !Number.isFinite(ms)) return '—';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const secs = ms / 1000;
+  if (secs < 60) return `${secs < 10 ? secs.toFixed(1) : Math.round(secs)}s`;
+  const m = Math.floor(secs / 60);
+  return `${m}m ${Math.round(secs - m * 60)}s`;
 }
 
 /** Resolve the effective engine options from persisted config + defaults. */
@@ -124,22 +159,21 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
   const options = resolveOptions(config);
   const registered = Boolean(config.nodeId);
 
-  // Engine + lifecycle
+  // Data source + mode
+  const sourceRef = useRef<DashboardSource | null>(null);
+  const [mode, setMode] = useState<SourceMode>('detecting');
+  const [disconnected, setDisconnected] = useState<boolean>(false);
+  const [daemonPid, setDaemonPid] = useState<number | null>(null);
+  const [confirmStop, setConfirmStop] = useState<boolean>(false);
+
+  // Embedded-engine lifecycle (unused in attached mode)
   const engineRef = useRef<NodeEngine | null>(null);
   const [engineState, setEngineState] = useState<EngineState>('stopped');
-  const [idle, setIdle] = useState<boolean>(false);
 
-  // Live state driven by engine events
-  const [heartbeat, setHeartbeat] = useState<HeartbeatState>({ ok: false, at: null });
-  const [activeJobs, setActiveJobs] = useState<Record<string, ActiveJob>>({});
-  const [succeeded, setSucceeded] = useState<number>(0);
-  const [failed, setFailed] = useState<number>(0);
-  const [modelStatus, setModelStatus] = useState<string | null>(null);
-  const [log, setLog] = useState<LogEntry[]>([]);
-
-  // Throughput bookkeeping
-  const completionsRef = useRef<number[]>([]);
-  const [jobsPerMin, setJobsPerMin] = useState<number>(0);
+  // All live view state flows through the shared reducer.
+  const [dash, setDash] = useState<DashboardState>(() =>
+    initialDashboardState(options.concurrency, options.eligibleTypes),
+  );
 
   // 1s ticker so elapsed times + throughput refresh
   const [, setTick] = useState<number>(0);
@@ -149,126 +183,104 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
   const [doctorLoading, setDoctorLoading] = useState<boolean>(false);
   const [doctorReport, setDoctorReport] = useState<Record<string, CapabilityStatus> | null>(null);
 
-  const logIdRef = useRef<number>(0);
+  const mountedRef = useRef<boolean>(true);
 
-  const pushLog = useCallback((level: LogLevel, msg: string): void => {
-    setLog((prev) => {
-      const entry: LogEntry = { id: ++logIdRef.current, ts: new Date(), level, msg };
-      return [...prev, entry].slice(-MAX_LOG);
-    });
+  const pushLog = useCallback((level: 'error' | 'warn' | 'info', msg: string): void => {
+    setDash((prev) => appendLogLines(prev, [{ level, msg }]));
+  }, []);
+
+  // The single event→state path shared by both modes.
+  const applyEvent = useCallback((ev: string, payload: unknown): void => {
+    setDash((prev) => reduceNodeEvent(prev, ev, payload, Date.now()));
+    if (ev === NODE_EV.STOPPED) {
+      // Embedded lifecycle: forget the stopped engine so `s` can start anew.
+      const src = sourceRef.current;
+      if (src instanceof EmbeddedDashboardSource) src.releaseEngine();
+      engineRef.current = null;
+      setEngineState('stopped');
+    }
   }, []);
 
   // -------------------------------------------------------------------------
-  // Ticker: recompute throughput + trigger elapsed re-render every second
+  // Source selection: attach to a running daemon, else embedded fallback
+  // -------------------------------------------------------------------------
+  const initSource = useCallback(async (): Promise<void> => {
+    setMode('detecting');
+    setDisconnected(false);
+
+    let attached: DashboardSource | null = null;
+    try {
+      if (await isDaemonRunning()) {
+        attached = await createAttachedSource();
+      }
+    } catch {
+      attached = null; // daemon vanished between probe and connect
+    }
+    if (!mountedRef.current) {
+      attached?.close();
+      return;
+    }
+
+    if (attached) {
+      sourceRef.current = attached;
+      setDaemonPid(readPidFile()?.pid ?? null);
+      setDash((prev) => {
+        let next = hydrateFromSnapshot(
+          initialDashboardState(prev.concurrency, prev.eligibleTypes ?? undefined),
+          attached.snapshot!,
+        );
+        next = appendLogLines(next, attached.logTail.map((msg) => ({ level: 'info' as const, msg })));
+        return next;
+      });
+      attached.onEvent(applyEvent);
+      attached.onDisconnect(() => {
+        if (mountedRef.current) setDisconnected(true);
+      });
+      setMode('attached');
+      return;
+    }
+
+    const embedded = new EmbeddedDashboardSource();
+    embedded.onEvent(applyEvent);
+    sourceRef.current = embedded;
+    setMode('embedded');
+  }, [applyEvent]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    void initSource();
+    return () => {
+      mountedRef.current = false;
+      // Attached: ONLY closes the socket (daemon keeps running).
+      // Embedded: stops the in-process engine so no worker is orphaned.
+      sourceRef.current?.close();
+      sourceRef.current = null;
+      engineRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Retry attach after a daemon disconnect (on `r`).
+  const retryAttach = useCallback((): void => {
+    sourceRef.current?.close();
+    sourceRef.current = null;
+    void initSource();
+  }, [initSource]);
+
+  // -------------------------------------------------------------------------
+  // Ticker: refresh elapsed times / uptime / throughput every second
   // -------------------------------------------------------------------------
   useEffect(() => {
-    const timer = setInterval(() => {
-      const now = Date.now();
-      const recent = completionsRef.current.filter((t) => now - t <= 60_000);
-      completionsRef.current = recent;
-      setJobsPerMin(recent.length);
-      setTick((n) => n + 1);
-    }, 1000);
+    const timer = setInterval(() => setTick((n) => n + 1), 1000);
     return () => clearInterval(timer);
   }, []);
 
   // -------------------------------------------------------------------------
-  // Cleanup on unmount — drain the engine so no worker is orphaned
-  // -------------------------------------------------------------------------
-  useEffect(() => {
-    return () => {
-      const e = engineRef.current;
-      if (e) {
-        e.removeAllListeners();
-        void e.stop('unmount');
-        engineRef.current = null;
-      }
-    };
-  }, []);
-
-  // -------------------------------------------------------------------------
-  // Attach engine event listeners
-  // -------------------------------------------------------------------------
-  const attachListeners = useCallback(
-    (engine: NodeEngine): void => {
-      engine.on(NODE_EV.CLAIMED, () => {
-        setIdle(false);
-      });
-      engine.on(NODE_EV.JOB_START, (p) => {
-        setIdle(false);
-        setActiveJobs((prev) => ({
-          ...prev,
-          [p.jobId]: {
-            jobId: p.jobId,
-            type: p.type,
-            mediaItemId: p.mediaItemId ?? null,
-            startMs: Date.now(),
-            fraction: 0,
-          },
-        }));
-      });
-      engine.on(NODE_EV.JOB_PROGRESS, (p) => {
-        setActiveJobs((prev) => {
-          const job = prev[p.jobId];
-          if (!job) return prev;
-          return { ...prev, [p.jobId]: { ...job, fraction: p.fraction } };
-        });
-      });
-      engine.on(NODE_EV.JOB_DONE, (p) => {
-        completionsRef.current.push(Date.now());
-        setSucceeded((n) => n + 1);
-        setActiveJobs((prev) => {
-          const next = { ...prev };
-          delete next[p.jobId];
-          return next;
-        });
-        if (!p.submitted) {
-          pushLog('warn', `job ${shortId(p.jobId)} (${p.type}) computed but result endpoint unavailable`);
-        }
-      });
-      engine.on(NODE_EV.JOB_ERROR, (p) => {
-        completionsRef.current.push(Date.now());
-        setFailed((n) => n + 1);
-        setActiveJobs((prev) => {
-          const next = { ...prev };
-          delete next[p.jobId];
-          return next;
-        });
-        pushLog('error', `job ${shortId(p.jobId)} (${p.type}) failed: ${p.error}`);
-      });
-      engine.on(NODE_EV.IDLE, () => {
-        setIdle(true);
-      });
-      engine.on(NODE_EV.HEARTBEAT_OK, (p) => {
-        setHeartbeat({ ok: true, at: p.at });
-      });
-      engine.on(NODE_EV.HEARTBEAT_FAIL, (p) => {
-        setHeartbeat((prev) => ({ ok: false, at: prev.at }));
-        pushLog('error', `heartbeat: ${p.error}`);
-      });
-      engine.on(NODE_EV.MODEL_LOADED, (p) => {
-        setModelStatus(
-          `Models loaded from ${p.targetDir} (${p.downloaded} downloaded, ${p.present} present` +
-            `${p.failed > 0 ? `, ${p.failed} failed` : ''})`,
-        );
-      });
-      engine.on(NODE_EV.STOPPED, () => {
-        setEngineState('stopped');
-        setIdle(false);
-        setActiveJobs({});
-        if (engineRef.current) {
-          engineRef.current.removeAllListeners();
-          engineRef.current = null;
-        }
-      });
-    },
-    [pushLog],
-  );
-
-  // -------------------------------------------------------------------------
-  // Start the engine (on `s`)
+  // Start the embedded engine (on `s`; embedded mode only)
   // -------------------------------------------------------------------------
   const startEngine = useCallback(async (): Promise<void> => {
+    const src = sourceRef.current;
+    if (!(src instanceof EmbeddedDashboardSource)) return;
     if (engineRef.current) return;
     if (!config.nodeId) {
       pushLog('error', 'Not registered — run `memoriahub node register` first.');
@@ -281,18 +293,23 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
     try {
       const manifest = await api.getModelManifest();
       if (manifest.length > 0) {
-        setModelStatus(`Ensuring ${manifest.length} model file(s)…`);
+        setDash((prev) => ({ ...prev, modelStatus: `Ensuring ${manifest.length} model file(s)…` }));
         const res = await ensureModels(manifest);
-        setModelStatus(
-          `Models ready in ${res.targetDir} (${res.downloaded.length} downloaded, ` +
+        setDash((prev) => ({
+          ...prev,
+          modelStatus:
+            `Models ready in ${res.targetDir} (${res.downloaded.length} downloaded, ` +
             `${res.present.length} present${res.failed.length > 0 ? `, ${res.failed.length} failed` : ''})`,
-        );
+        }));
         for (const f of res.failed) pushLog('warn', `model ${f.name}: ${f.error}`);
       } else {
-        setModelStatus('No model files listed in the server manifest.');
+        setDash((prev) => ({ ...prev, modelStatus: 'No model files listed in the server manifest.' }));
       }
     } catch (err) {
-      setModelStatus(`Model manifest unavailable: ${err instanceof Error ? err.message : String(err)}`);
+      setDash((prev) => ({
+        ...prev,
+        modelStatus: `Model manifest unavailable: ${err instanceof Error ? err.message : String(err)}`,
+      }));
     }
 
     const engine = new NodeEngine({
@@ -301,8 +318,9 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
       nodeId: config.nodeId,
       options,
     });
-    attachListeners(engine);
+    src.attachEngine(engine);
     engineRef.current = engine;
+    setDash((prev) => ({ ...prev, stopped: false }));
     setEngineState('running');
 
     // start() resolves only after stop(); don't await it in the handler.
@@ -312,20 +330,33 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
         pushLog('error', `engine crashed: ${err instanceof Error ? err.message : String(err)}`);
       })
       .finally(() => {
-        setEngineState('stopped');
-        setIdle(false);
+        if (mountedRef.current) setEngineState('stopped');
       });
-  }, [config, options, attachListeners, pushLog]);
+  }, [config, options, pushLog]);
 
   // -------------------------------------------------------------------------
-  // Drain & stop the engine (on `d`)
+  // Drain / stop (mode-dependent)
   // -------------------------------------------------------------------------
-  const stopEngine = useCallback((): void => {
-    const e = engineRef.current;
-    if (!e) return;
-    setEngineState('draining');
-    void e.stop('drain');
-  }, []);
+  const drainOrStop = useCallback((): void => {
+    const src = sourceRef.current;
+    if (!src) return;
+    if (src.mode === 'attached') {
+      // Graceful drain of the daemon: stop claiming, finish in-flight.
+      src.drain();
+      pushLog('info', 'drain requested — daemon stops claiming, finishes in-flight jobs');
+    } else {
+      if (!engineRef.current) return;
+      setEngineState('draining');
+      src.stop();
+    }
+  }, [pushLog]);
+
+  const stopDaemon = useCallback((): void => {
+    const src = sourceRef.current;
+    if (!src || src.mode !== 'attached') return;
+    src.stop();
+    pushLog('info', 'stop requested — daemon is shutting down');
+  }, [pushLog]);
 
   // -------------------------------------------------------------------------
   // Run doctor overlay (on `r`)
@@ -351,16 +382,32 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
       if (key.escape || input === 'q' || input === 'r') setShowDoctor(false);
       return;
     }
-    if (input === 's') {
+    if (confirmStop) {
+      if (input === 'y') {
+        setConfirmStop(false);
+        stopDaemon();
+      } else if (input === 'n' || key.escape || input === 'q') {
+        setConfirmStop(false);
+      }
+      return;
+    }
+    if (input === 's' && mode === 'embedded') {
       void startEngine();
     } else if (input === 'd') {
-      stopEngine();
+      drainOrStop();
+    } else if (input === 'x' && mode === 'attached' && !disconnected) {
+      setConfirmStop(true);
     } else if (input === 'r') {
-      void runDoctor();
+      if (mode === 'attached' && disconnected) {
+        retryAttach();
+      } else {
+        void runDoctor();
+      }
     } else if (input === 'c' && onOpenConfig) {
       onOpenConfig();
     } else if (input === 'q' || key.escape) {
-      // Engine is drained by the unmount cleanup effect.
+      // Attached: unmount cleanup only closes the socket (daemon keeps running).
+      // Embedded: unmount cleanup drains the engine.
       onBack ? onBack() : exit();
     }
   });
@@ -368,20 +415,43 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
   // -------------------------------------------------------------------------
   // Derived render values
   // -------------------------------------------------------------------------
-  const active = Object.values(activeJobs);
+  const active = Object.values(dash.activeJobs);
   const inFlight = active.length;
   const now = Date.now();
+  const jobsPerMin = dash.completions.filter((t) => now - t <= 60_000).length;
+  const eligibleTypes = dash.eligibleTypes ?? options.eligibleTypes;
+  const slotCount = Math.max(dash.concurrency, inFlight);
 
   // Connection status label + color
   let connLabel: string;
   let connColor: string;
-  if (engineState === 'stopped') {
+  if (mode === 'detecting') {
+    connLabel = 'detecting…';
+    connColor = 'yellow';
+  } else if (mode === 'attached') {
+    if (disconnected) {
+      connLabel = 'daemon disconnected';
+      connColor = 'red';
+    } else if (dash.stopped) {
+      connLabel = 'daemon stopped';
+      connColor = 'gray';
+    } else if (dash.draining) {
+      connLabel = 'draining';
+      connColor = 'yellow';
+    } else if (dash.heartbeat.ok) {
+      connLabel = 'online';
+      connColor = 'green';
+    } else {
+      connLabel = 'no heartbeat';
+      connColor = 'red';
+    }
+  } else if (engineState === 'stopped') {
     connLabel = 'stopped';
     connColor = 'gray';
   } else if (engineState === 'starting') {
     connLabel = 'starting…';
     connColor = 'yellow';
-  } else if (heartbeat.ok) {
+  } else if (dash.heartbeat.ok) {
     connLabel = engineState === 'draining' ? 'draining' : 'online';
     connColor = engineState === 'draining' ? 'yellow' : 'green';
   } else {
@@ -389,9 +459,22 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
     connColor = 'red';
   }
 
-  const hbLabel = heartbeat.at
-    ? `${hhmmss(new Date(heartbeat.at))}${heartbeat.ok ? '' : ' (failing)'}`
+  const hbLabel = dash.heartbeat.at
+    ? `${hhmmss(new Date(dash.heartbeat.at))}${dash.heartbeat.ok ? '' : ' (failing)'}`
     : 'never';
+
+  const slotIdleLabel =
+    mode === 'attached'
+      ? dash.idle
+        ? 'idle — waiting for work'
+        : 'waiting for work'
+      : engineState === 'running'
+        ? dash.idle
+          ? 'idle — waiting for work'
+          : 'waiting for work'
+        : 'idle';
+
+  const recentHistory = [...dash.history].slice(-HISTORY_ROWS).reverse();
 
   // -------------------------------------------------------------------------
   // Doctor overlay render
@@ -443,19 +526,59 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
           <Text dimColor>  {config.node?.name ?? '(unnamed)'}</Text>
           <Text dimColor>  {config.nodeId ? shortId(config.nodeId) : '(not registered)'}</Text>
           <Text>  status: <Text color={connColor}>{connLabel}</Text></Text>
+          {dash.draining && !disconnected ? <Text color="yellow" bold>  ⏸ DRAINING</Text> : null}
+        </Box>
+        <Box flexDirection="row">
+          {mode === 'attached' ? (
+            <Text>
+              <Text bold color={disconnected ? 'red' : 'magenta'}>ATTACHED</Text>
+              <Text dimColor>
+                {' '}to daemon (pid {daemonPid ?? '?'} · up {formatUptime(dash.startedAt, now)})
+              </Text>
+            </Text>
+          ) : mode === 'embedded' ? (
+            <Text>
+              <Text bold color="blue">EMBEDDED</Text>
+              <Text dimColor>
+                {' '}— no daemon running; press s to start in-process, or run `memoriahub node start --daemon`
+              </Text>
+            </Text>
+          ) : (
+            <Text dimColor><Spinner type="dots" /> checking for a running daemon…</Text>
+          )}
         </Box>
         <Box flexDirection="row">
           <Text dimColor>heartbeat: </Text>
-          <Text color={heartbeat.ok ? 'green' : engineState === 'stopped' ? 'gray' : 'red'}>{hbLabel}</Text>
-          <Text dimColor>   concurrency: {options.concurrency}</Text>
+          <Text
+            color={
+              dash.heartbeat.ok
+                ? 'green'
+                : mode === 'embedded' && engineState === 'stopped'
+                  ? 'gray'
+                  : dash.heartbeat.at
+                    ? 'red'
+                    : 'gray'
+            }
+          >
+            {hbLabel}
+          </Text>
+          <Text dimColor>   concurrency: {dash.concurrency}</Text>
           <Text dimColor>   poll: {options.pollIntervalMs}ms</Text>
         </Box>
         <Box flexDirection="row">
-          <Text dimColor>types: {truncate(options.eligibleTypes.join(', '), 72)}</Text>
+          <Text dimColor>types: {truncate(eligibleTypes.join(', '), 72)}</Text>
         </Box>
       </Box>
 
-      {!registered && (
+      {mode === 'attached' && disconnected && (
+        <Box paddingX={2}>
+          <Text color="red">
+            ✖ Daemon connection lost. Press [r] to reconnect (falls back to embedded if the daemon is gone).
+          </Text>
+        </Box>
+      )}
+
+      {mode === 'embedded' && !registered && (
         <Box paddingX={2}>
           <Text color="yellow">
             ⚠ This machine is not registered. Run `memoriahub node register` before starting.
@@ -466,15 +589,16 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
       {/* Counters band */}
       <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="row" paddingX={2} paddingY={0} gap={3}>
         <Text>In-flight: <Text color="cyan">{inFlight}</Text></Text>
-        <Text>Succeeded: <Text color="green">{succeeded}</Text></Text>
-        <Text>Failed: <Text color={failed > 0 ? 'red' : 'white'}>{failed}</Text></Text>
+        <Text>Claimed: <Text color="cyan">{dash.counters.claimed}</Text></Text>
+        <Text>Succeeded: <Text color="green">{dash.counters.succeeded}</Text></Text>
+        <Text>Failed: <Text color={dash.counters.failed > 0 ? 'red' : 'white'}>{dash.counters.failed}</Text></Text>
         <Text>Throughput: <Text color="cyan">{jobsPerMin}</Text><Text dimColor>/min</Text></Text>
       </Box>
 
       {/* Per-slot rows */}
       <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
         <Text bold color="cyan">Slots</Text>
-        {Array.from({ length: options.concurrency }, (_, i) => {
+        {Array.from({ length: slotCount }, (_, i) => {
           const job = active[i];
           if (job) {
             const elapsed = Math.max(0, Math.floor((now - job.startMs) / 1000));
@@ -489,40 +613,74 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
               </Box>
             );
           }
-          const label =
-            engineState === 'running' ? (idle ? 'idle — waiting for work' : 'waiting for work') : 'idle';
           return (
             <Box key={`slot-${i}`} flexDirection="row" gap={1}>
               <Text dimColor>{String(i + 1).padStart(2)}.</Text>
-              <Text dimColor>{label}</Text>
+              <Text dimColor>{slotIdleLabel}</Text>
             </Box>
           );
         })}
       </Box>
 
-      {/* Model status */}
-      <Box paddingX={2}>
-        <Text dimColor>models: </Text>
-        <Text dimColor>{modelStatus ?? '(not loaded — press s to start)'}</Text>
-      </Box>
-
-      {/* Error / heartbeat log */}
+      {/* Task history */}
       <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
-        <Text bold color="cyan">Log (errors / heartbeat)</Text>
-        {log.length === 0 && <Text dimColor>No errors.</Text>}
-        {log.map((e) => (
-          <Box key={e.id} flexDirection="row" gap={1}>
-            <Text dimColor>{hhmmss(e.ts)}</Text>
-            <Text color={e.level === 'error' ? 'red' : 'yellow'}>{e.level === 'error' ? '✖' : '⚠'}</Text>
-            <Text color={e.level === 'error' ? 'red' : 'yellow'}>{truncate(e.msg, 70)}</Text>
+        <Text bold color="cyan">History (last {HISTORY_ROWS})</Text>
+        {recentHistory.length === 0 && <Text dimColor>No completed jobs yet.</Text>}
+        {recentHistory.map((h, i) => (
+          <Box key={`${h.jobId}-${h.finishedAt}-${i}`} flexDirection="row" gap={1}>
+            <Text color={h.status === 'done' ? 'green' : 'red'}>{h.status === 'done' ? '✔' : '✖'}</Text>
+            <Text>{truncate(h.type, 22).padEnd(22)}</Text>
+            <Text dimColor>{fmtDuration(h.durationMs).padStart(7)}</Text>
+            <Text dimColor>{relTime(h.finishedAt, now).padStart(8)}</Text>
+            {h.error ? <Text color="red">  {truncate(h.error, 34)}</Text> : null}
           </Box>
         ))}
       </Box>
 
+      {/* Model status (embedded start flow surfaces model readiness here) */}
+      <Box paddingX={2}>
+        <Text dimColor>models: </Text>
+        <Text dimColor>
+          {dash.modelStatus ??
+            (mode === 'attached' ? '(managed by the daemon)' : '(not loaded — press s to start)')}
+        </Text>
+      </Box>
+
+      {/* Log pane (errors / warnings / daemon log tail) */}
+      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
+        <Text bold color="cyan">Log (errors / heartbeat)</Text>
+        {dash.log.length === 0 && <Text dimColor>No errors.</Text>}
+        {dash.log.map((e) => (
+          <Box key={e.id} flexDirection="row" gap={1}>
+            <Text dimColor>{hhmmss(e.ts)}</Text>
+            <Text color={e.level === 'error' ? 'red' : e.level === 'warn' ? 'yellow' : undefined} dimColor={e.level === 'info'}>
+              {e.level === 'error' ? '✖' : e.level === 'warn' ? '⚠' : '·'}
+            </Text>
+            <Text
+              color={e.level === 'error' ? 'red' : e.level === 'warn' ? 'yellow' : undefined}
+              dimColor={e.level === 'info'}
+            >
+              {truncate(e.msg, 70)}
+            </Text>
+          </Box>
+        ))}
+      </Box>
+
+      {/* Stop-daemon confirmation */}
+      {confirmStop && (
+        <Box paddingX={2}>
+          <Text color="red" bold>Stop the running daemon (finishes in-flight jobs, then exits)? [y] yes  [n] no</Text>
+        </Box>
+      )}
+
       {/* Footer */}
       <Box paddingX={2}>
         <Text dimColor>
-          [s] start   [d] drain/stop   [r] doctor{onOpenConfig ? '   [c] config' : ''}   [q] back
+          {mode === 'attached'
+            ? disconnected
+              ? `[r] retry connection${onOpenConfig ? '   [c] config' : ''}   [q] back`
+              : `[d] drain   [x] stop daemon   [r] doctor${onOpenConfig ? '   [c] config' : ''}   [q] detach`
+            : `[s] start   [d] drain/stop   [r] doctor${onOpenConfig ? '   [c] config' : ''}   [q] back`}
         </Text>
       </Box>
 

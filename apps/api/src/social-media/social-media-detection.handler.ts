@@ -28,6 +28,7 @@ import { tmpdir } from 'os';
 import { join, extname } from 'path';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
+import { socialMediaDetectionResultSchema, type SocialMediaDetectionResult } from '@memoriahub/enrichment-compute/dto';
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
@@ -69,6 +70,16 @@ const VIDEO_ENRICHMENT_MAX_BYTES = (): number =>
 @Injectable()
 export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleInit {
   readonly type = 'social_media_detection';
+
+  /**
+   * Node-eligibility (distributed workers): the payload a node submits via
+   * POST /api/nodes/:id/jobs/:jobId/result for this job type — the shared
+   * contract from @memoriahub/enrichment-compute/dto. The pre-flight caps
+   * (§4b), orientation gate (§4c), and tag/status persistence (§7) remain
+   * server-authoritative — see persistSocialMedia below; a node only ever
+   * computes the Tier-1/Tier-2 classification verdict (computeSocialMedia).
+   */
+  readonly nodeResultSchema = socialMediaDetectionResultSchema;
 
   private readonly logger = new Logger(SocialMediaDetectionHandler.name);
 
@@ -298,60 +309,34 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
         durationMs = container.durationMs ?? mediaItem.durationMs ?? undefined;
       }
 
-      // --- 5. Tier-1 detection ---
-      const { result: tier1Result, recommendTier2: tier1RecommendsOcr } =
-        this.detector.detectTier1(input, minConfidence);
-      // Landscape videos never get OCR (see orientation gate above).
-      const recommendTier2 = tier1RecommendsOcr && !isLandscape;
-
-      let result: DetectionResult | null = tier1Result;
-
-      // --- 6. Tier-2 OCR fallback ---
+      // --- 5-6. Compute half: Tier-1 detection + Tier-2 OCR fallback ---
       const ocrEnabled = settings.socialMedia?.ocrEnabled !== false;
-      if (!result && recommendTier2 && ocrEnabled) {
-        const videoPath = await downloadVideo();
-        const { texts } = await this.ocr.recognizeVideo(videoPath, {
-          durationMs,
-          fileExtension: fileExt,
-          maxFrames: settings.socialMedia?.ocrMaxFrames ?? 4,
-          languages: settings.socialMedia?.ocrLanguages ?? ['eng'],
-          timeoutMs: (settings.socialMedia?.ocrTimeoutSeconds ?? 60) * 1000,
-        });
-        const ocrResult = this.detector.detectFromOcr(texts, input, minConfidence);
-        if (ocrResult) {
-          result = ocrResult;
-        }
-      }
+      const computed = await this.computeSocialMedia(input, {
+        minConfidence,
+        isLandscape,
+        ocrEnabled,
+        downloadVideo,
+        durationMs,
+        fileExt,
+        ocrMaxFrames: settings.socialMedia?.ocrMaxFrames ?? 4,
+        ocrLanguages: settings.socialMedia?.ocrLanguages ?? ['eng'],
+        ocrTimeoutMs: (settings.socialMedia?.ocrTimeoutSeconds ?? 60) * 1000,
+      });
 
-      // --- 7. Apply result ---
-      if (result) {
-        await this.applyDetected(mediaItem.id, mediaItem.circleId, mediaItem.addedById, result);
+      // --- 7. Persist half ---
+      await this.persistSocialMedia(job, computed, mediaItem);
+
+      if (computed.verdict === 'detected') {
         this.logger.log(
-          `social_media_detection job ${job.id}: MediaItem ${mediaItemId} flagged ${result.platform} ` +
-            `(method=${result.method}, rule=${result.matchedRule}, confidence=${result.confidence})`,
+          `social_media_detection job ${job.id}: MediaItem ${mediaItemId} flagged ${computed.platform} ` +
+            `(method=${computed.detectionMethod}, rule=${computed.matchedRule}, confidence=${computed.confidence})`,
         );
-        // Detected items do NOT fan out to further video enrichment.
-        return;
+      } else {
+        this.logger.log(
+          `social_media_detection job ${job.id}: MediaItem ${mediaItemId} clean` +
+            (mediaItem.socialMediaSource ? ' (was previously flagged — tags cleared)' : ''),
+        );
       }
-
-      // --- 7b. Clean ---
-      await this.applyClean(mediaItem.id, mediaItem.socialMediaSource);
-      this.logger.log(
-        `social_media_detection job ${job.id}: MediaItem ${mediaItemId} clean` +
-          (mediaItem.socialMediaSource ? ' (was previously flagged — tags cleared)' : ''),
-      );
-
-      // Fan out the downstream video enrichment that was withheld while
-      // classification was pending.
-      await this.mediaEnrichment.enqueueVideoPostDetectionEnrichment(
-        {
-          id: mediaItem.id,
-          type: mediaItem.type,
-          circleId: mediaItem.circleId,
-          deletedAt: mediaItem.deletedAt,
-        },
-        job.reason,
-      );
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.error(`social_media_detection job ${job.id}: ${errMsg}`);
@@ -367,6 +352,176 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
         await fs.unlink(downloadedVideoPath).catch(() => {});
       }
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // computeSocialMedia — COMPUTE half of the split.
+  //
+  // Runs Tier-1 (metadata/filename) detection against the already-built
+  // VideoDetectionInput, then falls back to Tier-2 OCR when Tier-1 is
+  // inconclusive-but-suspicious and OCR is enabled. Returns the node-result
+  // DTO — the SAME shape a distributed worker node submits via
+  // POST /api/nodes/:id/jobs/:jobId/result for this job type.
+  //
+  // This is the SERVER-side compute half, used by the in-process path
+  // (process(), above) via the memoized `downloadVideo` closure it is handed.
+  // A distributed worker node runs the equivalent classification locally
+  // (its own ffprobe + Tier-1 + Tier-2 OCR against the downloaded file) and
+  // submits the resulting DTO directly, bypassing this method — the
+  // pre-flight caps, orientation gate, and VideoDetectionInput construction
+  // that precede this call in process() stay server-authoritative and are
+  // NOT part of what a node computes.
+  // ---------------------------------------------------------------------------
+
+  async computeSocialMedia(
+    input: VideoDetectionInput,
+    opts: {
+      minConfidence: number;
+      /** Landscape videos never get Tier-2 OCR — see the orientation gate in process(). */
+      isLandscape: boolean;
+      ocrEnabled: boolean;
+      /** Memoized video-download closure — called at most once, only if Tier-2 OCR actually runs. */
+      downloadVideo: () => Promise<string>;
+      durationMs: number | undefined;
+      fileExt: string;
+      ocrMaxFrames: number;
+      ocrLanguages: string[];
+      ocrTimeoutMs: number;
+    },
+  ): Promise<SocialMediaDetectionResult> {
+    const { result: tier1Result, recommendTier2: tier1RecommendsOcr } =
+      this.detector.detectTier1(input, opts.minConfidence);
+    const recommendTier2 = tier1RecommendsOcr && !opts.isLandscape;
+
+    let result: DetectionResult | null = tier1Result;
+    let ocrText: string | null = null;
+
+    if (!result && recommendTier2 && opts.ocrEnabled) {
+      const videoPath = await opts.downloadVideo();
+      const { texts } = await this.ocr.recognizeVideo(videoPath, {
+        durationMs: opts.durationMs,
+        fileExtension: opts.fileExt,
+        maxFrames: opts.ocrMaxFrames,
+        languages: opts.ocrLanguages,
+        timeoutMs: opts.ocrTimeoutMs,
+      });
+      ocrText = texts.length > 0 ? texts.join(' \n ') : null;
+      const ocrResult = this.detector.detectFromOcr(texts, input, opts.minConfidence);
+      if (ocrResult) {
+        result = ocrResult;
+      }
+    }
+
+    if (result) {
+      return {
+        verdict: 'detected',
+        score: result.confidence,
+        ocrText,
+        platform: result.platform,
+        detectionMethod: result.method,
+        matchedRule: result.matchedRule,
+        confidence: result.confidence,
+      };
+    }
+
+    return {
+      verdict: 'clean',
+      score: 0,
+      ocrText,
+      platform: null,
+      detectionMethod: null,
+      matchedRule: null,
+      confidence: 0,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // persistSocialMedia — PERSIST half of the split.
+  //
+  // Shared by the in-process path (process(), above, which passes the
+  // already-loaded mediaItem to avoid a redundant query) and the node
+  // result-ingestion path (persistNodeResult, below — which has no
+  // preloaded mediaItem and fetches it fresh). Applies tags/status/source
+  // for a 'detected' verdict, or strips stale tags + fans out withheld video
+  // enrichment for a 'clean' verdict — identical to the pre-split §7/§7b
+  // logic.
+  // ---------------------------------------------------------------------------
+
+  async persistSocialMedia(
+    job: EnrichmentJob,
+    result: SocialMediaDetectionResult,
+    preloadedMediaItem?: {
+      id: string;
+      circleId: string;
+      type: MediaType;
+      deletedAt: Date | null;
+      addedById: string;
+      socialMediaSource: string | null;
+    },
+  ): Promise<void> {
+    if (!job.mediaItemId) {
+      throw new Error('social_media_detection job missing mediaItemId');
+    }
+
+    const mediaItem =
+      preloadedMediaItem ??
+      (await this.prisma.mediaItem.findUnique({
+        where: { id: job.mediaItemId },
+        select: {
+          id: true,
+          circleId: true,
+          type: true,
+          deletedAt: true,
+          addedById: true,
+          socialMediaSource: true,
+        },
+      }));
+
+    if (!mediaItem) {
+      throw new Error(`MediaItem ${job.mediaItemId} not found`);
+    }
+
+    if (result.verdict === 'detected') {
+      if (!result.platform || !result.detectionMethod) {
+        throw new Error(
+          'social_media_detection result: platform and detectionMethod are required for a detected verdict',
+        );
+      }
+      const detectionResult: DetectionResult = {
+        platform: result.platform,
+        method: result.detectionMethod,
+        confidence: result.confidence,
+        matchedRule: result.matchedRule ?? 'unknown',
+      };
+      await this.applyDetected(mediaItem.id, mediaItem.circleId, mediaItem.addedById, detectionResult);
+      // Detected items do NOT fan out to further video enrichment.
+      return;
+    }
+
+    // Clean
+    await this.applyClean(mediaItem.id, mediaItem.socialMediaSource, result.matchedRule);
+
+    // Fan out the downstream video enrichment that was withheld while
+    // classification was pending.
+    await this.mediaEnrichment.enqueueVideoPostDetectionEnrichment(
+      {
+        id: mediaItem.id,
+        type: mediaItem.type,
+        circleId: mediaItem.circleId,
+        deletedAt: mediaItem.deletedAt,
+      },
+      job.reason,
+    );
+  }
+
+  /**
+   * Persist a node-computed social_media_detection result (already validated
+   * against nodeResultSchema by the ingestion endpoint; re-parsed here for
+   * type narrowing, mirroring DuplicateDetectionHandler's precedent).
+   */
+  async persistNodeResult(job: EnrichmentJob, result: unknown): Promise<void> {
+    const parsed = socialMediaDetectionResultSchema.parse(result);
+    await this.persistSocialMedia(job, parsed);
   }
 
   // ---------------------------------------------------------------------------

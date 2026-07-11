@@ -1,10 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { BurstGroupStatus, DuplicateGroupStatus, MediaType } from '@prisma/client';
+import { BurstGroupStatus, DuplicateGroupStatus, EnrichmentJob, MediaType } from '@prisma/client';
+import { computeVisualHash, hammingDistance } from '@memoriahub/enrichment-compute/dhash';
+import { VISUAL_EMBEDDING_MODEL_TAG } from '@memoriahub/enrichment-compute/clip';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-import { computeAndPersistVisualHash } from '../storage/processing/hash-backfill.util';
-import { hammingDistance } from '../burst/burst-detection.service';
 import { VisualEmbeddingService } from './visual-embedding.service';
 
 const DEFAULT_DEDUP_CONFIG = {
@@ -12,6 +13,35 @@ const DEFAULT_DEDUP_CONFIG = {
   hashMaxDistance: 6,
   knnCandidates: 20,
 };
+
+/**
+ * Output of the pure COMPUTE half of duplicate detection. This is a superset
+ * of the node result contract (`duplicateDetectionResult` in
+ * `@memoriahub/enrichment-compute/dto` — model/embedding/dHash): the
+ * sharpness score falls out of the same dHash pipeline pass and is persisted
+ * onto the MediaItem alongside the hash, so it rides along here rather than
+ * being recomputed in a second decode.
+ */
+export interface DuplicateComputeResult {
+  /** Model tag for the visual embedding (VISUAL_EMBEDDING_MODEL_TAG). */
+  model: string;
+  /** L2-normalized 512-d CLIP embedding, or null in degraded mode / undecodable image. */
+  embedding: number[] | null;
+  /** Unsigned 64-bit dHash as a decimal string, or null when undecodable. */
+  dHash: string | null;
+  /** Variance-of-Laplacian sharpness, or null when undecodable. */
+  sharpnessScore: number | null;
+}
+
+/** The subject row shape shared by the guard/persist/grouping steps. */
+interface EligibleItem {
+  id: string;
+  circleId: string;
+  capturedAt: Date | null;
+  perceptualHash: string | null;
+  storageObjectId: string | null;
+  burstGroupId: string | null;
+}
 
 /**
  * DuplicateDetectionService
@@ -32,6 +62,13 @@ const DEFAULT_DEDUP_CONFIG = {
  * READ-TIME computations performed by DuplicateService when a group is
  * listed/fetched — this service only maintains membership, mediaCount, and
  * the chronological capturedAt (earliest member).
+ *
+ * COMPUTE / PERSIST split (distributed-nodes spec §6): `computeDuplicate` is
+ * the pure compute half (CLIP embed + dHash, no Prisma) that a worker node
+ * runs against downloaded bytes; `persistDuplicate` is the server-only
+ * persist half (embedding row, perceptualHash column, KNN/hash matching and
+ * union-find grouping). The server's own `processMediaItem` composes the two
+ * around a single byte download.
  */
 @Injectable()
 export class DuplicateDetectionService {
@@ -44,8 +81,125 @@ export class DuplicateDetectionService {
     private readonly visualEmbeddingService: VisualEmbeddingService,
   ) {}
 
+  // ---------------------------------------------------------------------
+  // Server-side orchestration: load → download → compute → persist
+  // ---------------------------------------------------------------------
+
   async processMediaItem(mediaItemId: string): Promise<void> {
-    const rawItem = await this.prisma.mediaItem.findUnique({
+    const item = await this.loadEligibleItem(mediaItemId);
+    if (!item) {
+      return;
+    }
+
+    // Only touch the original bytes when something is actually missing —
+    // an item that already has both a perceptualHash and an embedding row
+    // goes straight to matching without a download.
+    const needsHash = item.perceptualHash === null;
+    const needsEmbedding =
+      this.visualEmbeddingService.isAvailable() &&
+      !(await this.visualEmbeddingService.hasEmbedding(item.id));
+
+    let result: DuplicateComputeResult | null = null;
+
+    if ((needsHash || needsEmbedding) && item.storageObjectId) {
+      const buffer = await this.downloadOriginalBytes(item, needsHash);
+      if (buffer) {
+        result = await this.computeDuplicate(buffer);
+      }
+    }
+
+    await this.persistForItem(item, result);
+  }
+
+  // ---------------------------------------------------------------------
+  // COMPUTE half — pure, no Prisma. This is exactly what a worker node runs.
+  // ---------------------------------------------------------------------
+
+  /**
+   * Compute the duplicate-detection artifacts for one image's bytes: CLIP
+   * visual embedding (best-effort; null in degraded mode or when the image
+   * cannot be decoded) and dHash + sharpness (null when undecodable).
+   */
+  async computeDuplicate(buffer: Buffer): Promise<DuplicateComputeResult> {
+    const embedding = await this.visualEmbeddingService.embedImage(buffer);
+    const visualHash = await computeVisualHash(buffer);
+
+    return {
+      model: VISUAL_EMBEDDING_MODEL_TAG,
+      embedding,
+      dHash: visualHash?.perceptualHash ?? null,
+      sharpnessScore: visualHash?.sharpnessScore ?? null,
+    };
+  }
+
+  // ---------------------------------------------------------------------
+  // PERSIST half — server-only Prisma writes + matching + grouping.
+  // ---------------------------------------------------------------------
+
+  /**
+   * Persist a compute result for the job's media item, then run matching and
+   * union-find grouping. Entry point for the (follow-up) node result-ingestion
+   * path; the in-process path composes the same internals via processMediaItem.
+   */
+  async persistDuplicate(job: EnrichmentJob, result: DuplicateComputeResult): Promise<void> {
+    if (!job.mediaItemId) {
+      this.logger.warn(`persistDuplicate: job ${job.id} has no mediaItemId; skipping`);
+      return;
+    }
+
+    const item = await this.loadEligibleItem(job.mediaItemId);
+    if (!item) {
+      return;
+    }
+
+    await this.persistForItem(item, result);
+  }
+
+  private async persistForItem(
+    item: EligibleItem,
+    result: DuplicateComputeResult | null,
+  ): Promise<void> {
+    let current = item;
+
+    if (result?.embedding) {
+      await this.visualEmbeddingService.persistEmbedding(
+        item.id,
+        item.circleId,
+        result.embedding,
+        result.model,
+      );
+    }
+
+    if (current.perceptualHash === null && result?.dHash) {
+      // Persist so subsequent runs (burst grouping, dedup matching, score
+      // recompute) benefit without re-downloading the image.
+      await this.prisma.mediaItem.update({
+        where: { id: item.id },
+        data: {
+          perceptualHash: result.dHash,
+          ...(result.sharpnessScore !== null ? { sharpnessScore: result.sharpnessScore } : {}),
+        },
+      });
+      this.logger.log(
+        `MediaItem ${item.id}: on-demand hash computed and persisted (dHash=${result.dHash})`,
+      );
+      current = { ...current, perceptualHash: result.dHash };
+    }
+
+    await this.linkAndGroup(current);
+  }
+
+  // ---------------------------------------------------------------------
+  // Guards
+  // ---------------------------------------------------------------------
+
+  /**
+   * Load the media item and apply the eligibility guards (exists, not
+   * deleted/archived, is a photo, not in a PENDING burst group). Returns
+   * null when the item should be skipped entirely.
+   */
+  private async loadEligibleItem(mediaItemId: string): Promise<EligibleItem | null> {
+    const item = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },
       select: {
         id: true,
@@ -61,71 +215,108 @@ export class DuplicateDetectionService {
       },
     });
 
-    if (!rawItem) {
+    if (!item) {
       this.logger.warn(`MediaItem ${mediaItemId} not found; skipping duplicate detection`);
-      return;
+      return null;
     }
 
-    if (rawItem.deletedAt || rawItem.archivedAt) {
+    if (item.deletedAt || item.archivedAt) {
       this.logger.debug(`MediaItem ${mediaItemId} is deleted/archived; skipping duplicate detection`);
-      return;
+      return null;
     }
 
-    if (rawItem.type !== MediaType.photo) {
+    if (item.type !== MediaType.photo) {
       this.logger.debug(`MediaItem ${mediaItemId} is not a photo; skipping duplicate detection`);
-      return;
+      return null;
     }
 
     // Skip entirely while the item is still in an unreviewed (pending) burst
     // group — burst review may soft-delete or reshuffle members, so running
     // dedup concurrently would race against that review.
-    if (rawItem.burstGroupId) {
+    if (item.burstGroupId) {
       const burstGroup = await this.prisma.burstGroup.findUnique({
-        where: { id: rawItem.burstGroupId },
+        where: { id: item.burstGroupId },
         select: { status: true },
       });
       if (burstGroup?.status === BurstGroupStatus.pending) {
         this.logger.debug(
           `MediaItem ${mediaItemId} is in a pending burst group; skipping duplicate detection`,
         );
-        return;
+        return null;
       }
     }
 
-    let item = rawItem;
+    return item;
+  }
 
-    // Ensure dHash for legacy items lacking one (same on-demand backfill path
-    // burst detection uses).
-    if (item.perceptualHash === null && item.storageObjectId) {
-      try {
-        const computed = await computeAndPersistVisualHash(
-          this.prisma,
-          this.resolver,
-          item.id,
-          item.storageObjectId,
-          this.logger,
-        );
-        if (computed) {
-          item = { ...item, perceptualHash: computed.perceptualHash.toString() };
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+  // ---------------------------------------------------------------------
+  // Byte download (server path only — a node receives a presigned URL instead)
+  // ---------------------------------------------------------------------
+
+  /**
+   * Download the item's original bytes from its own provider+bucket.
+   *
+   * Error semantics preserve the two pre-split code paths:
+   *  - When the hash is missing (`rethrowOnDownloadError`), a transient
+   *    storage error propagates so the enrichment worker's retry logic kicks
+   *    in (previous on-demand hash-backfill behavior).
+   *  - Otherwise the embedding is best-effort: failures are logged and the
+   *    item proceeds with hash-only matching (previous ensureEmbedding
+   *    behavior).
+   */
+  private async downloadOriginalBytes(
+    item: EligibleItem,
+    rethrowOnDownloadError: boolean,
+  ): Promise<Buffer | null> {
+    if (!item.storageObjectId) {
+      return null;
+    }
+
+    const storageObject = await this.prisma.storageObject.findUnique({
+      where: { id: item.storageObjectId },
+      select: { storageKey: true, storageProvider: true, bucket: true },
+    });
+
+    if (!storageObject?.storageKey) {
+      this.logger.warn(
+        `MediaItem ${item.id}: storageObject ${item.storageObjectId} not found or has no storageKey; cannot compute`,
+      );
+      return null;
+    }
+
+    try {
+      const provider = await this.resolver.getProviderFor(
+        storageObject.storageProvider,
+        storageObject.bucket,
+      );
+      const stream = await provider.download(storageObject.storageKey);
+      return await streamToBuffer(stream);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (rethrowOnDownloadError) {
         this.logger.error(
-          `MediaItem ${mediaItemId}: on-demand hash computation failed (will retry): ${msg}`,
+          `MediaItem ${item.id}: byte download for duplicate detection failed (will retry): ${msg}`,
         );
         throw err;
       }
+      this.logger.warn(
+        `MediaItem ${item.id}: byte download failed; continuing with hash-only matching: ${msg}`,
+      );
+      return null;
     }
+  }
 
-    // Ensure a visual embedding exists — best-effort; degraded mode returns
-    // 'unavailable' and we fall back to hash-only matching below.
-    await this.visualEmbeddingService.ensureEmbedding(mediaItemId);
+  // ---------------------------------------------------------------------
+  // Matching + union-find grouping
+  // ---------------------------------------------------------------------
 
+  private async linkAndGroup(item: EligibleItem): Promise<void> {
     const settings = await this.systemSettings.getSettings();
     const dedupConfig = settings.dedup ?? DEFAULT_DEDUP_CONFIG;
 
     const subjectBurstGroupId = item.burstGroupId;
     const circleId = item.circleId;
+    const mediaItemId = item.id;
 
     // ---------------------------------------------------------------------
     // Tier 1: KNN visual-embedding candidates (empty array when the subject
@@ -179,10 +370,9 @@ export class DuplicateDetectionService {
     }
 
     if (item.perceptualHash) {
-      const subjectHash = BigInt(item.perceptualHash);
       for (const candidate of hashCandidates) {
         if (!candidate.perceptualHash) continue;
-        const dist = hammingDistance(subjectHash, BigInt(candidate.perceptualHash));
+        const dist = hammingDistance(item.perceptualHash, candidate.perceptualHash);
         if (dist <= dedupConfig.hashMaxDistance) {
           matchedIds.add(candidate.id);
         }

@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { mapNominatimResponse } from '@memoriahub/enrichment-compute/geo';
 import type { GeoLocationProvider, GeoLocationResult } from './geo-location-provider.interface';
 import { RateLimitError, parseRetryAfterMs } from '../../enrichment/rate-limit.error';
 
@@ -70,36 +71,13 @@ export class NominatimGeoLocationProvider implements GeoLocationProvider {
         return null;
       }
 
-      const data = (await response.json()) as {
-        address?: {
-          country?: string;
-          country_code?: string;
-          state?: string;
-          county?: string;
-          city?: string;
-          town?: string;
-          village?: string;
-          neighbourhood?: string;
-          suburb?: string;
-        };
-        display_name?: string;
-      };
+      const data = await response.json();
 
-      if (!data?.address) return null;
-
-      const addr = data.address;
-
-      const locality =
-        addr.city ?? addr.town ?? addr.village ?? addr.neighbourhood ?? addr.suburb;
-
-      return {
-        country: addr.country,
-        countryCode: addr.country_code?.toUpperCase(),
-        admin1: addr.state,
-        admin2: addr.county,
-        locality,
-        placeName: data.display_name,
-      };
+      // Shared with the CLI's node compute module — see
+      // @memoriahub/enrichment-compute/geo mapNominatimResponse — so a
+      // distributed worker node and the server produce byte-identical
+      // GeoLocationResult-shaped values from the same raw Nominatim response.
+      return mapNominatimResponse(data);
     } catch (error) {
       // Re-throw RateLimitError — do not swallow it into a null return.
       if (error instanceof RateLimitError) {

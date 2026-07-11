@@ -1,20 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { StorageObject } from '@prisma/client';
 import { Readable } from 'stream';
+import { extractExif } from '@memoriahub/enrichment-compute/metadata';
 import { ObjectProcessor, ObjectProcessorResult } from '../object-processor.interface';
 import { streamToBuffer } from './stream-utils';
-
-// exifr ships ES-module and CJS builds; use dynamic import to work with ts-jest
-// and tsc targeting CommonJS output.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type ExifrModule = { parse: (src: Buffer, opts?: Record<string, unknown>) => Promise<Record<string, unknown> | undefined> };
-
-async function getExifr(): Promise<ExifrModule> {
-  // Dynamic import handles both ESM and CJS environments
-  const mod = await import('exifr');
-  // exifr default export is the parse function itself in some builds
-  return (mod.default ?? mod) as unknown as ExifrModule;
-}
 
 /**
  * ExifProcessor — extracts EXIF metadata from image files.
@@ -22,6 +11,13 @@ async function getExifr(): Promise<ExifrModule> {
  * Name:     exif
  * Priority: 20
  * Handles:  image/* MIME types only
+ *
+ * The field extraction itself (exifr parse + capturedAt/GPS/camera/orientation/
+ * burstUuid mapping) lives in the shared parity package
+ * @memoriahub/enrichment-compute/metadata (`extractExif`) so distributed worker
+ * nodes extract EXACTLY the same values as the server. This class keeps only
+ * the host concerns: streaming, logging, and the never-throws success/failure
+ * envelope.
  *
  * Extracted fields:
  *   capturedAt        — DateTimeOriginal as ISO 8601 UTC string
@@ -55,85 +51,7 @@ export class ExifProcessor implements ObjectProcessor {
       const stream = await getStream();
       const buffer = await streamToBuffer(stream);
 
-      const exifr = await getExifr();
-
-      const raw = await exifr.parse(buffer, {
-        tiff: true,
-        exif: true,
-        gps: true,
-        ifd0: true,
-        makerNote: true,
-        mergeOutput: true,
-        translateValues: false,
-        reviveValues: true,
-        sanitize: true,
-      }).catch(() => undefined);
-
-      if (!raw) {
-        // No EXIF data present — normal for screenshots, web graphics, etc.
-        return { success: true, metadata: {} };
-      }
-
-      const metadata: Record<string, unknown> = {};
-
-      // Captured timestamp
-      const dto = raw['DateTimeOriginal'];
-      if (dto instanceof Date) {
-        let ms = 0;
-        const subSec = raw['SubSecTimeOriginal'];
-        if (typeof subSec === 'string' && subSec.trim()) {
-          const trimmed = subSec.trim().replace(/^\./, '');
-          const frac = parseFloat('0.' + trimmed);
-          if (!isNaN(frac)) ms = Math.round(frac * 1000);
-        }
-        // Rebuild the timestamp from local-getter wall-clock components as UTC so
-        // the result is timezone-deterministic. EXIF DateTimeOriginal is tz-naive
-        // (e.g. "2026:06:20 20:16:07"); exifr parses it using the process's local
-        // timezone, so dto.getTime() varies by server TZ. The local getters
-        // (getFullYear/getMonth/…) always reflect the original wall-clock digits, so
-        // we re-encode them as UTC. On the production UTC container this produces
-        // the same value as before; on a non-UTC host it now produces the correct
-        // wall-clock UTC instead of an offset-shifted instant.
-        // The real capture-time offset is preserved separately in capturedAtOffset.
-        const ts = new Date(Date.UTC(
-          dto.getFullYear(), dto.getMonth(), dto.getDate(),
-          dto.getHours(), dto.getMinutes(), dto.getSeconds(), ms,
-        ));
-        metadata['capturedAt'] = ts.toISOString();
-      }
-
-      // UTC offset (stored as "+HH:MM" / "-HH:MM" or numeric minutes)
-      const offsetRaw = raw['OffsetTimeOriginal'] ?? raw['OffsetTime'];
-      if (typeof offsetRaw === 'string') {
-        const minutes = this.parseOffsetToMinutes(offsetRaw);
-        if (minutes !== null) metadata['capturedAtOffset'] = minutes;
-      }
-
-      // GPS
-      const lat = raw['latitude'] ?? raw['GPSLatitude'];
-      const lng = raw['longitude'] ?? raw['GPSLongitude'];
-      const alt = raw['altitude'] ?? raw['GPSAltitude'];
-
-      if (typeof lat === 'number') metadata['latitude'] = lat;
-      if (typeof lng === 'number') metadata['longitude'] = lng;
-      if (typeof alt === 'number') metadata['altitude'] = alt;
-
-      // Camera info
-      const make = raw['Make'];
-      const model = raw['Model'];
-      const orientation = raw['Orientation'];
-
-      if (typeof make === 'string' && make.trim()) metadata['cameraMake'] = make.trim();
-      if (typeof model === 'string' && model.trim()) metadata['cameraModel'] = model.trim();
-      if (typeof orientation === 'number') metadata['orientation'] = orientation;
-
-      // BurstUUID (Apple MakerNote)
-      const burstUuid =
-        (raw['BurstUUID'] as string | undefined) ??
-        ((raw['MakerNote'] as Record<string, unknown> | undefined)?.['BurstUUID'] as string | undefined);
-      if (typeof burstUuid === 'string' && burstUuid.trim()) {
-        metadata['burstUuid'] = burstUuid.trim();
-      }
+      const metadata = await extractExif(buffer);
 
       this.logger.debug(`EXIF extracted for object ${object.id}: ${JSON.stringify(Object.keys(metadata))}`);
 
@@ -143,18 +61,5 @@ export class ExifProcessor implements ObjectProcessor {
       this.logger.error(`exif failed for object ${object.id}: ${message}`);
       return { success: false, error: message };
     }
-  }
-
-  /**
-   * Parse an EXIF offset string like "+05:30" or "-06:00" into minutes.
-   * Returns null if the value cannot be parsed.
-   */
-  private parseOffsetToMinutes(offset: string): number | null {
-    const match = /^([+-])(\d{1,2}):(\d{2})$/.exec(offset.trim());
-    if (!match) return null;
-    const sign = match[1] === '-' ? -1 : 1;
-    const hours = parseInt(match[2], 10);
-    const minutes = parseInt(match[3], 10);
-    return sign * (hours * 60 + minutes);
   }
 }

@@ -17,6 +17,7 @@ import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 import { NodeStatus } from '@prisma/client';
 import { NodesService } from './nodes.service';
+import { SubmitJobResultDto, ReportJobFailureDto } from './dto/compute-result.dto';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
@@ -170,13 +171,212 @@ export class NodesController {
   }
 
   // -------------------------------------------------------------------------
+  // POST /nodes/:id/jobs/:jobId/upload-url
+  // -------------------------------------------------------------------------
+
+  @Post(':id/jobs/:jobId/upload-url')
+  @Auth({ permissions: [PERMISSIONS.JOBS_WRITE] })
+  @ApiOperation({
+    summary: 'Get a presigned upload URL for a claimed job to PUT output bytes to',
+    description:
+      'Currently used by the thumbnail node-compute path: the node computes a JPEG locally, ' +
+      'calls this endpoint to learn where to PUT it (the server chooses the storage key — ' +
+      'never the node), uploads directly to the returned presigned URL, then submits ' +
+      '{ storageKey, width, height, bytes } via POST /nodes/:id/jobs/:jobId/result. ' +
+      'Reuses the same held-job guard as the result/failure endpoints.',
+  })
+  @ApiParam({ name: 'id', description: 'Worker node UUID' })
+  @ApiParam({ name: 'jobId', description: 'Enrichment job UUID' })
+  @ApiResponse({
+    status: 201,
+    description: 'Presigned upload URL — { url, storageKey, expiresSeconds }',
+  })
+  @ApiResponse({ status: 400, description: 'Job has no mediaItemId or linked StorageObject' })
+  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
+  @ApiResponse({ status: 404, description: 'Node or job not found' })
+  @ApiResponse({
+    status: 409,
+    description: 'Job not held by this node (not claimed by it, not running, or lease expired)',
+  })
+  async getJobUploadUrl(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Param('jobId') jobId: string,
+  ) {
+    return this.nodesService.getJobUploadUrl(user.id, id, jobId);
+  }
+
+  // -------------------------------------------------------------------------
+  // POST /nodes/:id/jobs/:jobId/credentials
+  // -------------------------------------------------------------------------
+
+  @Post(':id/jobs/:jobId/credentials')
+  @Auth({ permissions: [PERMISSIONS.JOBS_WRITE] })
+  @ApiOperation({
+    summary: 'Get transient, per-job provider credentials for auto_tagging or geocode',
+    description:
+      'Resolves a plaintext provider API key scoped to THIS job only (mandated alternative to ' +
+      'the "AI-proxy" pattern in docs/specs/distributed-nodes.md, which is stale on this point) ' +
+      'so the node can call the provider\'s HTTP API directly. The node MUST hold the key only ' +
+      'in memory for the duration of the compute call and MUST NEVER persist it to disk, ' +
+      'config, or logs. Reuses the same held-job guard as the result/failure endpoints.',
+  })
+  @ApiParam({ name: 'id', description: 'Worker node UUID' })
+  @ApiParam({ name: 'jobId', description: 'Enrichment job UUID' })
+  @ApiResponse({
+    status: 201,
+    description:
+      'Transient job credentials — shape depends on job type (auto_tagging: ' +
+      '{ type, provider, model, apiKey, baseUrl?, system, prompt, mimeTypeHint }; geocode: ' +
+      '{ type, provider, apiKey?, baseUrl?, lat, lng })',
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Job type has no credentials contract, job/media item missing required data, or provider ' +
+      'not configured',
+  })
+  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
+  @ApiResponse({ status: 404, description: 'Node or job not found' })
+  @ApiResponse({
+    status: 409,
+    description: 'Job not held by this node (not claimed by it, not running, or lease expired)',
+  })
+  async getJobCredentials(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Param('jobId') jobId: string,
+  ) {
+    return this.nodesService.getJobCredentials(user.id, id, jobId);
+  }
+
+  // -------------------------------------------------------------------------
+  // POST /nodes/:id/jobs/:jobId/result
+  // -------------------------------------------------------------------------
+
+  @Post(':id/jobs/:jobId/result')
+  @Auth({ permissions: [PERMISSIONS.JOBS_WRITE] })
+  @ApiOperation({
+    summary: 'Submit a node-computed result for a claimed job',
+    description:
+      'Validates the payload against the job type\'s node-result schema, persists it via the ' +
+      'handler\'s persist-only path, and completes the job as succeeded (same terminal ' +
+      'semantics as the in-process worker). The job must still be held by this node under a ' +
+      'live lease — late results after lease expiry/re-claim are rejected with 409.',
+  })
+  @ApiParam({ name: 'id', description: 'Worker node UUID' })
+  @ApiParam({ name: 'jobId', description: 'Enrichment job UUID' })
+  @ApiResponse({ status: 201, description: 'Result persisted; job succeeded — { ok: true }' })
+  @ApiResponse({
+    status: 400,
+    description: 'Type mismatch, job type not node-persistable, or invalid result payload',
+  })
+  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
+  @ApiResponse({ status: 404, description: 'Node or job not found' })
+  @ApiResponse({
+    status: 409,
+    description: 'Job not held by this node (not claimed by it, not running, or lease expired)',
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Persist failed; job routed through the failure/retry path — do not resubmit',
+  })
+  async submitJobResult(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Param('jobId') jobId: string,
+    @Body() dto: SubmitJobResultDto,
+  ) {
+    return this.nodesService.submitJobResult(user.id, id, jobId, dto);
+  }
+
+  // -------------------------------------------------------------------------
+  // POST /nodes/:id/jobs/:jobId/failure
+  // -------------------------------------------------------------------------
+
+  @Post(':id/jobs/:jobId/failure')
+  @Auth({ permissions: [PERMISSIONS.JOBS_WRITE] })
+  @ApiOperation({
+    summary: 'Report a node-side failure for a claimed job',
+    description:
+      'Routes the job through the shared terminal failure state machine: rateLimited reports ' +
+      'enter the deferral path (and trip the shared provider-throttle gate); everything else ' +
+      'enters the exponential-retry path. willRetry is advisory only — the server\'s attempts ' +
+      'budget decides whether the job is requeued or permanently failed.',
+  })
+  @ApiParam({ name: 'id', description: 'Worker node UUID' })
+  @ApiParam({ name: 'jobId', description: 'Enrichment job UUID' })
+  @ApiResponse({ status: 201, description: 'Failure recorded — { ok: true }' })
+  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
+  @ApiResponse({ status: 404, description: 'Node or job not found' })
+  @ApiResponse({
+    status: 409,
+    description: 'Job not held by this node (not claimed by it, not running, or lease expired)',
+  })
+  async reportJobFailure(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Param('jobId') jobId: string,
+    @Body() dto: ReportJobFailureDto,
+  ) {
+    return this.nodesService.reportJobFailure(user.id, id, jobId, dto);
+  }
+
+  // -------------------------------------------------------------------------
+  // GET /nodes
+  // -------------------------------------------------------------------------
+  //
+  // Placement note: a single-segment `@Get(':id')` route below can never
+  // accidentally intercept the two-segment `@Get('models/manifest')` route
+  // (NestJS/Express match by path-segment count as well as literal-vs-param,
+  // and `/nodes/models/manifest` has 2 segments after `/nodes`, so it can
+  // only match a 2-segment route pattern). Route declaration order therefore
+  // doesn't actually matter here — but we still place the literal route
+  // before the param route as the safe, idiomatic convention.
+
+  @Get()
+  @Auth({ permissions: [PERMISSIONS.JOBS_WRITE] })
+  @ApiOperation({ summary: 'List worker nodes owned by the caller' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Bare array of owner-scoped node records, each with { ...node, health, jobCounts }',
+  })
+  async list(@CurrentUser() user: RequestUser) {
+    return this.nodesService.listNodes(user.id);
+  }
+
+  // -------------------------------------------------------------------------
+  // GET /nodes/:id
+  // -------------------------------------------------------------------------
+
+  @Get(':id')
+  @Auth({ permissions: [PERMISSIONS.JOBS_WRITE] })
+  @ApiOperation({ summary: 'Get a single worker node owned by the caller' })
+  @ApiParam({ name: 'id', description: 'Worker node UUID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Node record with { ...node, health, jobCounts }',
+  })
+  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
+  @ApiResponse({ status: 404, description: 'Node not found' })
+  async getOne(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.nodesService.getNode(user.id, id);
+  }
+
+  // -------------------------------------------------------------------------
   // GET /nodes/models/manifest
   // -------------------------------------------------------------------------
 
   @Get('models/manifest')
   @Auth({ permissions: [PERMISSIONS.JOBS_READ] })
   @ApiOperation({ summary: 'Get the parity model manifest worker nodes must download' })
-  @ApiResponse({ status: 200, description: 'Static list of parity models with download URLs' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Bare array of parity model entries ({ name, url, sha256, bytes, targetSubdir }) — the ' +
+      'CLI unwraps the { data } envelope and iterates the array directly',
+  })
   async getModelManifest() {
     return this.nodesService.getModelManifest();
   }

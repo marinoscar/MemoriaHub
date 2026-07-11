@@ -4,37 +4,32 @@
 //
 // Tier-2 OCR pass for social-media video detection.
 //
-// Extracts a handful of targeted frames from a video, preprocesses each frame
-// with sharp (downscale → grayscale → normalize), and runs tesseract.js OCR to
-// recover on-screen text (platform watermarks, @usernames, "reels", etc.). The
-// collected per-frame strings are handed to SocialMediaDetectorService.detectFromOcr.
+// Extracts a handful of targeted frames from a video and runs them through the
+// shared OCR engine in @memoriahub/enrichment-compute/ocr, which owns the pure
+// tesseract mechanics: worker creation with a pinned language/model dir, the
+// serialized recognize queue, frame preprocessing (downscale → grayscale →
+// normalize via sharp), and per-word confidence filtering. The collected
+// per-frame strings are handed to SocialMediaDetectorService.detectFromOcr.
 //
-// Design constraints:
+// What stays HERE (host concerns, per the compute/persist split):
 //   - NEVER throws. Any worker/model unavailability puts the service into a
 //     sticky "degraded" mode where every call returns { available: false }.
-//   - A single lazily-created tesseract worker is reused across calls; recognize
-//     calls are serialized through a promise chain so one worker is never asked
-//     to run two jobs concurrently.
 //   - The OCR phase is bounded by a soft timeout. On timeout we return whatever
 //     text was collected so far with available:true — a timeout is a budget
 //     limit, not a model failure.
+//   - Frame timestamp selection + extraction (ffmpeg via
+//     VideoFrameExtractionService).
 //   - Model/lang data is pinned under ${MODELS_DIR}/tesseract so downloaded
 //     traineddata survives container recreation (mirrors the CLIP MODELS_DIR
-//     precedent in dedup/visual-embedding.service.ts).
+//     precedent in dedup/visual-embedding.service.ts). The env read stays here;
+//     the package takes langDir as a parameter.
 // =============================================================================
 
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
-import { promises as fsp, existsSync } from 'fs';
 import { join } from 'path';
-import { createWorker, Worker, Page, WorkerOptions } from 'tesseract.js';
+import { createOcrEngine, OcrEngine } from '@memoriahub/enrichment-compute/ocr';
 import { VideoFrameExtractionService } from '../face/video-frame-extraction.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-
-/** Minimum per-word OCR confidence (0–100) for a token to be kept. */
-const WORD_CONFIDENCE_THRESHOLD = 60;
-
-/** Long-edge width the frame is downscaled to before OCR. */
-const OCR_FRAME_WIDTH = 720;
 
 export interface RecognizeVideoOpts {
   durationMs?: number;
@@ -58,16 +53,13 @@ export interface OcrStatus {
 export class SocialMediaOcrService implements OnModuleDestroy {
   private readonly logger = new Logger(SocialMediaOcrService.name);
 
-  private worker: Worker | null = null;
-  private workerInitPromise: Promise<Worker | null> | null = null;
+  private engine: OcrEngine | null = null;
+  private engineInitPromise: Promise<OcrEngine | null> | null = null;
   private currentLanguages: string[] = [];
 
   /** Sticky flag: once true, all calls short-circuit to unavailable. */
   private degraded = false;
   private degradedWarned = false;
-
-  /** Serializes recognize() calls so a single worker runs one job at a time. */
-  private recognizeChain: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly frameExtractor: VideoFrameExtractionService,
@@ -78,13 +70,9 @@ export class SocialMediaOcrService implements OnModuleDestroy {
   ) {}
 
   async onModuleDestroy(): Promise<void> {
-    if (this.worker) {
-      try {
-        await this.worker.terminate();
-      } catch {
-        // ignore teardown errors
-      }
-      this.worker = null;
+    if (this.engine) {
+      await this.engine.terminate();
+      this.engine = null;
     }
   }
 
@@ -116,10 +104,10 @@ export class SocialMediaOcrService implements OnModuleDestroy {
 
     const timestamps = computeOcrTimestamps(opts.durationMs, maxFrames);
 
-    // Ensure the worker is up before extracting frames so init failures degrade
+    // Ensure the engine is up before extracting frames so init failures degrade
     // cleanly without wasting ffmpeg work.
-    const worker = await this.ensureWorker(languages);
-    if (!worker) {
+    const engine = await this.ensureEngine(languages);
+    if (!engine) {
       return { texts: [], available: false };
     }
 
@@ -140,7 +128,6 @@ export class SocialMediaOcrService implements OnModuleDestroy {
       return { texts: [], available: true };
     }
 
-    const sharp = (await import('sharp')).default;
     const texts: string[] = [];
     let cancelled = false;
 
@@ -148,20 +135,8 @@ export class SocialMediaOcrService implements OnModuleDestroy {
       for (const frame of frames) {
         if (cancelled) return;
 
-        let prepared: Buffer;
-        try {
-          prepared = await sharp(frame.buffer)
-            .resize({ width: OCR_FRAME_WIDTH, withoutEnlargement: true })
-            .grayscale()
-            .normalize()
-            .toBuffer();
-        } catch {
-          prepared = frame.buffer;
-        }
-
-        if (cancelled) return;
-
-        const text = await this.recognizeFrame(worker, prepared);
+        const words = await engine.recognizeFrame(frame.buffer);
+        const text = words.join(' ');
         if (text) texts.push(text);
       }
     };
@@ -203,7 +178,7 @@ export class SocialMediaOcrService implements OnModuleDestroy {
 
   /**
    * Cheap availability probe for the admin status endpoint and Doctor. Attempts
-   * a lazy worker init (or returns cached degraded state) WITHOUT any frame
+   * a lazy engine init (or returns cached degraded state) WITHOUT any frame
    * extraction, so it returns quickly (well under 10 s).
    */
   async getStatus(): Promise<OcrStatus> {
@@ -211,9 +186,9 @@ export class SocialMediaOcrService implements OnModuleDestroy {
       this.currentLanguages.length > 0 ? this.currentLanguages : ['eng'];
 
     if (!this.degraded) {
-      const worker = await this.ensureWorker(languages);
-      if (!worker) {
-        // ensureWorker set degraded internally on failure
+      const engine = await this.ensureEngine(languages);
+      if (!engine) {
+        // ensureEngine set degraded internally on failure
       }
     }
 
@@ -226,7 +201,7 @@ export class SocialMediaOcrService implements OnModuleDestroy {
   }
 
   // ---------------------------------------------------------------------------
-  // Worker lifecycle
+  // Engine lifecycle
   // ---------------------------------------------------------------------------
 
   private tessDir(): string {
@@ -234,86 +209,57 @@ export class SocialMediaOcrService implements OnModuleDestroy {
   }
 
   /**
-   * Return a ready worker for the requested languages, creating (or recreating
-   * on language change) it lazily. Returns null and marks the service degraded
-   * on any init/language-load failure.
+   * Return a ready OCR engine for the requested languages, creating (or
+   * recreating on language change) it lazily. Returns null and marks the
+   * service degraded on any init/language-load failure.
    */
-  private async ensureWorker(languages: string[]): Promise<Worker | null> {
+  private async ensureEngine(languages: string[]): Promise<OcrEngine | null> {
     if (this.degraded) return null;
 
     const langKey = [...languages].sort().join('+');
     const currentKey = [...this.currentLanguages].sort().join('+');
 
-    if (this.worker && currentKey === langKey) {
-      return this.worker;
+    if (this.engine && currentKey === langKey) {
+      return this.engine;
     }
 
     // Coalesce concurrent init attempts for the same language set.
-    if (this.workerInitPromise && currentKey === langKey) {
-      return this.workerInitPromise;
+    if (this.engineInitPromise && currentKey === langKey) {
+      return this.engineInitPromise;
     }
 
-    this.workerInitPromise = this.initWorker(languages).catch((err) => {
+    this.engineInitPromise = this.initEngine(languages).catch((err) => {
       this.markDegraded(err);
       return null;
     });
 
-    return this.workerInitPromise;
+    return this.engineInitPromise;
   }
 
-  private async initWorker(languages: string[]): Promise<Worker> {
+  private async initEngine(languages: string[]): Promise<OcrEngine> {
     const langs = languages.length > 0 ? languages : ['eng'];
     const dir = this.tessDir();
-    await fsp.mkdir(dir, { recursive: true });
 
     // Recreate on language change.
-    if (this.worker) {
-      try {
-        await this.worker.terminate();
-      } catch {
-        // ignore
-      }
-      this.worker = null;
+    if (this.engine) {
+      await this.engine.terminate();
+      this.engine = null;
     }
 
-    const options: Partial<WorkerOptions> = {
-      // Downloaded traineddata is written here and read on subsequent runs, so
-      // the ~10 MB/lang download survives container recreation.
-      cachePath: dir,
-      // corePath is IGNORED by tesseract.js in Node (the wasm core is loaded via
-      // require('tesseract.js-core') — see worker-script/node/getCore.js), but we
-      // pin it under the models dir for parity with cachePath/langPath.
-      corePath: dir,
-      logger: () => {},
-      errorHandler: () => {},
-    };
+    const engine = await createOcrEngine({ langDir: dir, languages: langs });
 
-    // Air-gapped support: if the traineddata is already present under the models
-    // dir, read it from disk (langPath). Otherwise leave langPath unset so the
-    // first run downloads from the CDN default and caches into cachePath.
-    const allLangsPresent = langs.every(
-      (l) =>
-        existsSync(join(dir, `${l}.traineddata`)) ||
-        existsSync(join(dir, `${l}.traineddata.gz`)),
-    );
-    if (allLangsPresent) {
-      options.langPath = dir;
-    }
-
-    const worker = await createWorker(langs, undefined, options);
-
-    this.worker = worker;
+    this.engine = engine;
     this.currentLanguages = [...langs];
-    this.workerInitPromise = null;
+    this.engineInitPromise = null;
     this.logger.log(
-      `SocialMediaOcr: tesseract worker initialized (langs=${langs.join('+')}, dir=${dir}, langSource=${allLangsPresent ? 'local' : 'cdn'})`,
+      `SocialMediaOcr: tesseract worker initialized (langs=${langs.join('+')}, dir=${dir})`,
     );
-    return worker;
+    return engine;
   }
 
   private markDegraded(err: unknown): void {
     this.degraded = true;
-    this.workerInitPromise = null;
+    this.engineInitPromise = null;
     if (!this.degradedWarned) {
       this.degradedWarned = true;
       const msg = err instanceof Error ? err.message : String(err);
@@ -321,23 +267,6 @@ export class SocialMediaOcrService implements OnModuleDestroy {
         `SocialMediaOcr: OCR unavailable — running in degraded mode (metadata/filename detection only). ${msg}`,
       );
     }
-  }
-
-  /**
-   * Serialize a single-frame recognize through the worker's promise chain and
-   * return the confidence-filtered text.
-   */
-  private async recognizeFrame(worker: Worker, buffer: Buffer): Promise<string> {
-    const run = this.recognizeChain.then(async () => {
-      const { data } = await worker.recognize(buffer, {}, { blocks: true });
-      return extractConfidentText(data);
-    });
-    // Keep the chain alive regardless of this call's outcome.
-    this.recognizeChain = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
   }
 }
 
@@ -370,25 +299,4 @@ function computeOcrTimestamps(
   ];
 
   return candidates.slice(0, Math.max(1, maxFrames));
-}
-
-/**
- * Walk a tesseract Page's block→paragraph→line→word tree and join every word
- * whose recognition confidence meets WORD_CONFIDENCE_THRESHOLD.
- */
-function extractConfidentText(page: Page): string {
-  const words: string[] = [];
-  for (const block of page.blocks ?? []) {
-    for (const para of block.paragraphs ?? []) {
-      for (const line of para.lines ?? []) {
-        for (const word of line.words ?? []) {
-          const text = (word.text ?? '').trim();
-          if (text && (word.confidence ?? 0) >= WORD_CONFIDENCE_THRESHOLD) {
-            words.push(text);
-          }
-        }
-      }
-    }
-  }
-  return words.join(' ');
 }

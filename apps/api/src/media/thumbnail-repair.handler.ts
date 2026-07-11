@@ -30,11 +30,13 @@
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { EnrichmentJob, Prisma, StorageObject } from '@prisma/client';
+import { thumbnailResultSchema } from '@memoriahub/enrichment-compute/dto';
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
+import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
 
 const DEFAULT_BATCH_SIZE = 25;
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -52,6 +54,24 @@ type RepairOutcome = 'resynced' | 'reprocessed' | 'exhausted' | 'failed';
 export class ThumbnailRepairHandler implements EnrichmentHandler, OnModuleInit {
   readonly type = 'thumbnail_repair';
 
+  /**
+   * NOTE ON NODE ELIGIBILITY: `thumbnail_repair` is a GLOBAL sweep job
+   * (mediaItemId: null, circleId: null) that batch-repairs many media items
+   * per run (see repairOne() below) — it has no single input object for a
+   * node to download and no single output for persistNodeResult to receive.
+   * nodeResultSchema/persistNodeResult are wired here for interface parity
+   * with ThumbnailRegenHandler (and per the distributed-nodes contract that
+   * every thumbnail-producing handler exposes the same node result shape),
+   * but in the current claim model
+   * (`POST /api/nodes/:id/jobs/:jobId/claim` claims whole job rows, one node
+   * result per job) a node cannot actually claim and complete this job type
+   * end-to-end — that would require per-item claim granularity this global
+   * sweep job doesn't have. Real distributed thumbnail repair, if wanted,
+   * would need the sweep to fan out one `thumbnail_regen`-shaped job per
+   * candidate rather than repairing a batch in one job.
+   */
+  readonly nodeResultSchema = thumbnailResultSchema;
+
   private readonly logger = new Logger(ThumbnailRepairHandler.name);
 
   constructor(
@@ -59,10 +79,23 @@ export class ThumbnailRepairHandler implements EnrichmentHandler, OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly mediaMetadataSyncService: MediaMetadataSyncService,
     private readonly storageProcessingRecoveryService: StorageProcessingRecoveryService,
+    private readonly thumbnailNodePersistService: ThumbnailNodePersistService,
   ) {}
 
   onModuleInit(): void {
     this.registry.register(this);
+  }
+
+  /**
+   * See the nodeResultSchema doc comment above: wired for parity, but this
+   * global sweep job has no single mediaItemId for persistThumbnail to act
+   * on unless a future caller enqueues a per-item-shaped thumbnail_repair job
+   * (mediaItemId set) — persistThumbnail itself already handles that case
+   * correctly (it reads job.mediaItemId), so this passes straight through.
+   */
+  async persistNodeResult(job: EnrichmentJob, result: unknown): Promise<void> {
+    const parsed = thumbnailResultSchema.parse(result);
+    await this.thumbnailNodePersistService.persistThumbnail(job, parsed);
   }
 
   async process(_job: EnrichmentJob): Promise<void> {

@@ -183,4 +183,26 @@ export class LocalDiskStorageProvider implements StorageProvider {
     }
     this.logger.debug(`Multipart upload aborted: uploadId=${uploadId}, key=${key}`);
   }
+
+  /**
+   * Local disk has no HTTP endpoint a remote client can PUT to, so this
+   * returns a non-functional placeholder in the same style as
+   * getSignedUploadUrl's `internal://` multipart-part URLs above. A real
+   * distributed worker node cannot use local-disk storage for the
+   * node-thumbnail-upload flow; this exists only to satisfy the interface.
+   */
+  async getSignedPutUrl(
+    key: string,
+    _options?: { contentType?: string; expiresIn?: number },
+  ): Promise<string> {
+    return `internal://local/upload/${encodeURIComponent(key)}`;
+  }
+
+  async getObjectSize(key: string): Promise<number | null> {
+    const fullPath = this.resolvePath(key);
+    if (!fs.existsSync(fullPath)) {
+      return null;
+    }
+    return fs.statSync(fullPath).size;
+  }
 }

@@ -15,7 +15,13 @@
 // Top-level mocks (hoisted by Jest before imports)
 // ---------------------------------------------------------------------------
 
-jest.mock('./image-orientation.util', () => ({
+// The dHash computation moved into the shared parity package — mock the
+// package's image module (the package dhash module imports
+// prepareImageForProcessing from there internally). setComputeLogger must be
+// present because the API's image-orientation.util re-export module calls it
+// at import time.
+jest.mock('@memoriahub/enrichment-compute/image', () => ({
+  setComputeLogger: jest.fn(),
   prepareImageForProcessing: jest.fn().mockResolvedValue({
     buffer: Buffer.from('prepared'),
     width: 100,
@@ -48,7 +54,7 @@ jest.mock('sharp', () => {
 // ---------------------------------------------------------------------------
 
 import { computeVisualHash } from './visual-hash.util';
-import { prepareImageForProcessing } from './image-orientation.util';
+import { prepareImageForProcessing } from '@memoriahub/enrichment-compute/image';
 
 // ---------------------------------------------------------------------------
 // Helpers

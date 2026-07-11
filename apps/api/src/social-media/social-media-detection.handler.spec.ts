@@ -89,8 +89,12 @@ import {
   MediaTagSource,
   MediaType,
 } from '@prisma/client';
+import {
+  socialMediaDetectionResultSchema,
+  type SocialMediaDetectionResult,
+} from '@memoriahub/enrichment-compute/dto';
 import { SocialMediaDetectionHandler } from './social-media-detection.handler';
-import { SocialMediaDetectorService } from './social-media-detector.service';
+import { SocialMediaDetectorService, type VideoDetectionInput } from './social-media-detector.service';
 import { SocialMediaOcrService } from './social-media-ocr.service';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
@@ -1146,6 +1150,284 @@ describe('SocialMediaDetectionHandler', () => {
       expect(mockResolver.getProviderFor).toHaveBeenCalledTimes(1);
       expect(mockDownload).toHaveBeenCalledTimes(1);
       expect(mockOcr.recognizeVideo).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // node-result surface (distributed worker nodes)
+  // -------------------------------------------------------------------------
+
+  describe('node-result surface', () => {
+    const noopDownload = async () => 'unused-path';
+
+    it('exposes the shared package schema as nodeResultSchema', () => {
+      expect(handler.nodeResultSchema).toBe(socialMediaDetectionResultSchema);
+      const cleanPayload = {
+        verdict: 'clean' as const,
+        score: 0,
+        ocrText: null,
+        platform: null,
+        detectionMethod: null,
+        matchedRule: null,
+        confidence: 0,
+      };
+      expect(() => handler.nodeResultSchema.parse(cleanPayload)).not.toThrow();
+    });
+
+    describe('computeSocialMedia', () => {
+      it('returns a detected DTO from a Tier-1 filename match, without downloading', async () => {
+        const input: VideoDetectionInput = { kind: 'video', filename: 'snaptik_export_video.mp4' };
+
+        const result = await handler.computeSocialMedia(input, {
+          minConfidence: 0.8,
+          isLandscape: false,
+          ocrEnabled: true,
+          downloadVideo: noopDownload,
+          durationMs: 5000,
+          fileExt: '.mp4',
+          ocrMaxFrames: 4,
+          ocrLanguages: ['eng'],
+          ocrTimeoutMs: 60000,
+        });
+
+        expect(result.verdict).toBe('detected');
+        expect(result.platform).toBe('tiktok');
+        expect(result.detectionMethod).toBe('filename');
+        expect(result.matchedRule).toBe('tt-fn-downloader'); // "snaptik" downloader pattern
+        expect(result.confidence).toBeGreaterThanOrEqual(0.8);
+        expect(result.score).toBe(result.confidence);
+        expect(mockOcr.recognizeVideo).not.toHaveBeenCalled();
+      });
+
+      it('returns a clean DTO (matchedRule null) when Tier-1 is conclusively negative', async () => {
+        const input: VideoDetectionInput = { kind: 'video', filename: 'IMG_1234.MOV' };
+
+        const result = await handler.computeSocialMedia(input, {
+          minConfidence: 0.8,
+          isLandscape: false,
+          ocrEnabled: true,
+          downloadVideo: noopDownload,
+          durationMs: 5000,
+          fileExt: '.mov',
+          ocrMaxFrames: 4,
+          ocrLanguages: ['eng'],
+          ocrTimeoutMs: 60000,
+        });
+
+        expect(result).toEqual({
+          verdict: 'clean',
+          score: 0,
+          ocrText: null,
+          platform: null,
+          detectionMethod: null,
+          matchedRule: null,
+          confidence: 0,
+        });
+      });
+
+      it('falls back to Tier-2 OCR when Tier-1 is inconclusive-but-suspicious, calling the memoized downloadVideo exactly once', async () => {
+        // Portrait, short, no device-capture tags, epoch/missing creation_time
+        // → heur-portrait-short fires, recommending Tier-2.
+        const input: VideoDetectionInput = {
+          kind: 'video',
+          filename: 'clip.mp4',
+          width: 1080,
+          height: 1920,
+          durationMs: 10000,
+        };
+        mockOcr.recognizeVideo.mockResolvedValue({ texts: ['instagram'], available: true });
+        const downloadVideo = jest.fn().mockResolvedValue('/tmp/downloaded.mp4');
+
+        const result = await handler.computeSocialMedia(input, {
+          minConfidence: 0.8,
+          isLandscape: false,
+          ocrEnabled: true,
+          downloadVideo,
+          durationMs: 10000,
+          fileExt: '.mp4',
+          ocrMaxFrames: 4,
+          ocrLanguages: ['eng'],
+          ocrTimeoutMs: 60000,
+        });
+
+        expect(downloadVideo).toHaveBeenCalledTimes(1);
+        expect(mockOcr.recognizeVideo).toHaveBeenCalledTimes(1);
+        expect(result.verdict).toBe('detected');
+        expect(result.platform).toBe('instagram');
+        expect(result.detectionMethod).toBe('ocr');
+        expect(result.ocrText).toBe('instagram');
+      });
+
+      it('never calls downloadVideo/OCR when isLandscape is true, even if Tier-1 recommends Tier-2', async () => {
+        const input: VideoDetectionInput = {
+          kind: 'video',
+          filename: 'clip.mp4',
+          width: 1920,
+          height: 1080,
+          durationMs: 10000,
+        };
+        const downloadVideo = jest.fn().mockResolvedValue('/tmp/downloaded.mp4');
+
+        const result = await handler.computeSocialMedia(input, {
+          minConfidence: 0.8,
+          isLandscape: true,
+          ocrEnabled: true,
+          downloadVideo,
+          durationMs: 10000,
+          fileExt: '.mp4',
+          ocrMaxFrames: 4,
+          ocrLanguages: ['eng'],
+          ocrTimeoutMs: 60000,
+        });
+
+        expect(downloadVideo).not.toHaveBeenCalled();
+        expect(mockOcr.recognizeVideo).not.toHaveBeenCalled();
+        expect(result.verdict).toBe('clean');
+      });
+    });
+
+    describe('persistSocialMedia', () => {
+      function makeDetectedResult(overrides: Partial<SocialMediaDetectionResult> = {}): SocialMediaDetectionResult {
+        return {
+          verdict: 'detected',
+          score: 0.95,
+          ocrText: null,
+          platform: 'tiktok',
+          detectionMethod: 'filename',
+          matchedRule: 'tt-fn-word',
+          confidence: 0.95,
+          ...overrides,
+        };
+      }
+
+      function makeCleanResult(overrides: Partial<SocialMediaDetectionResult> = {}): SocialMediaDetectionResult {
+        return {
+          verdict: 'clean',
+          score: 0,
+          ocrText: null,
+          platform: null,
+          detectionMethod: null,
+          matchedRule: null,
+          confidence: 0,
+          ...overrides,
+        };
+      }
+
+      it('throws when job.mediaItemId is missing', async () => {
+        await expect(
+          handler.persistSocialMedia(makeJob({ mediaItemId: null }), makeCleanResult()),
+        ).rejects.toThrow('social_media_detection job missing mediaItemId');
+      });
+
+      it('throws when the MediaItem cannot be found and no preloaded item was supplied', async () => {
+        mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
+
+        await expect(
+          handler.persistSocialMedia(makeJob(), makeDetectedResult()),
+        ).rejects.toThrow('MediaItem media-1 not found');
+      });
+
+      it('re-fetches the MediaItem when no preloaded item is supplied (node persist path)', async () => {
+        mockPrisma.mediaItem.findUnique.mockResolvedValue(makeMediaItem() as any);
+
+        await handler.persistSocialMedia(makeJob(), makeCleanResult());
+
+        expect(mockPrisma.mediaItem.findUnique).toHaveBeenCalledWith({
+          where: { id: 'media-1' },
+          select: {
+            id: true,
+            circleId: true,
+            type: true,
+            deletedAt: true,
+            addedById: true,
+            socialMediaSource: true,
+          },
+        });
+      });
+
+      it('does NOT re-fetch the MediaItem when a preloaded item is supplied (in-process path)', async () => {
+        await handler.persistSocialMedia(makeJob(), makeCleanResult(), makeMediaItem() as any);
+
+        expect(mockPrisma.mediaItem.findUnique).not.toHaveBeenCalled();
+      });
+
+      it('applies tags + status + source for a detected verdict', async () => {
+        await handler.persistSocialMedia(makeJob(), makeDetectedResult(), makeMediaItem() as any);
+
+        const tagNames = mockPrisma.tag.upsert.mock.calls.map((c: any[]) => c[0].create.name);
+        expect(tagNames).toEqual(['Social Media', 'TikTok']);
+        expect(mockPrisma.mediaItem.update).toHaveBeenCalledWith({
+          where: { id: 'media-1' },
+          data: { socialMediaSource: 'tiktok' },
+        });
+        expect(mockMediaEnrichment.enqueueVideoPostDetectionEnrichment).not.toHaveBeenCalled();
+      });
+
+      it('throws when a detected verdict is missing platform/detectionMethod', async () => {
+        await expect(
+          handler.persistSocialMedia(
+            makeJob(),
+            makeDetectedResult({ platform: null }),
+            makeMediaItem() as any,
+          ),
+        ).rejects.toThrow('platform and detectionMethod are required');
+      });
+
+      it('strips stale tags, clears source, and fans out for a clean verdict on a previously-flagged item', async () => {
+        const previouslyFlagged = makeMediaItem({ socialMediaSource: 'tiktok' });
+
+        await handler.persistSocialMedia(makeJob({ reason: JobReason.rerun }), makeCleanResult(), previouslyFlagged as any);
+
+        expect(mockPrisma.mediaTag.deleteMany).toHaveBeenCalled();
+        expect(mockPrisma.mediaItem.update).toHaveBeenCalledWith({
+          where: { id: 'media-1' },
+          data: { socialMediaSource: null },
+        });
+        expect(mockMediaEnrichment.enqueueVideoPostDetectionEnrichment).toHaveBeenCalledWith(
+          expect.objectContaining({ id: 'media-1' }),
+          JobReason.rerun,
+        );
+      });
+
+      it('passes through matchedRule (e.g. a pre-flight skip reason) to the clean status row', async () => {
+        await handler.persistSocialMedia(
+          makeJob(),
+          makeCleanResult({ matchedRule: 'skip-duration-cap' }),
+          makeMediaItem() as any,
+        );
+
+        const call = mockPrisma.mediaSocialStatus.upsert.mock.calls[0][0];
+        expect(call.update.matchedRule).toBe('skip-duration-cap');
+      });
+    });
+
+    describe('persistNodeResult', () => {
+      it('parses the payload and delegates to persistSocialMedia (re-fetching the MediaItem)', async () => {
+        mockPrisma.mediaItem.findUnique.mockResolvedValue(makeMediaItem() as any);
+        const payload = {
+          verdict: 'detected',
+          score: 0.9,
+          ocrText: null,
+          platform: 'instagram',
+          detectionMethod: 'ocr',
+          matchedRule: 'ocr-instagram-word',
+          confidence: 0.9,
+        };
+
+        await handler.persistNodeResult(makeJob(), payload);
+
+        expect(mockPrisma.mediaItem.findUnique).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { id: 'media-1' } }),
+        );
+        const tagNames = mockPrisma.tag.upsert.mock.calls.map((c: any[]) => c[0].create.name);
+        expect(tagNames).toEqual(['Social Media', 'Instagram']);
+      });
+
+      it('rejects a schema-invalid payload without touching the database', async () => {
+        const bad = { verdict: 'maybe', score: 0.5 };
+        await expect(handler.persistNodeResult(makeJob(), bad)).rejects.toThrow();
+        expect(mockPrisma.mediaItem.findUnique).not.toHaveBeenCalled();
+      });
     });
   });
 });

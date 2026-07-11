@@ -198,6 +198,51 @@ export interface ModelManifestEntry {
   targetSubdir: string;
 }
 
+/** Response shape for POST /api/nodes/:id/jobs/:jobId/upload-url. */
+export interface JobUploadUrlResult {
+  /** Presigned PUT URL to upload output bytes to. */
+  url: string;
+  /** Server-chosen storage key — echo this back in the job result payload. */
+  storageKey: string;
+  /** How long `url` remains valid, in seconds. */
+  expiresSeconds: number;
+}
+
+/**
+ * Response shape for POST /api/nodes/:id/jobs/:jobId/credentials — TRANSIENT,
+ * per-job provider credentials (mandated alternative to the "AI-proxy"
+ * pattern documented, stale, in docs/specs/distributed-nodes.md). `apiKey` is
+ * scoped to a single job. Callers MUST hold it only in a local variable for
+ * the duration of the compute call and MUST NEVER persist it to disk,
+ * config, or logs (the node logger's redaction already covers `apiKey`).
+ */
+export interface AutoTaggingJobCredentials {
+  type: 'auto_tagging';
+  /** Configured tagging provider key, e.g. 'anthropic'. */
+  provider: string;
+  model: string;
+  apiKey: string;
+  baseUrl?: string;
+  system: string;
+  prompt: string;
+  /** Always 'image/jpeg' — the node re-encodes via prepareImageForProcessing. */
+  mimeTypeHint: string;
+}
+
+export interface GeocodeJobCredentials {
+  type: 'geocode';
+  /** 'offline' means the server-side GeoNames dataset is active — not node-eligible. */
+  provider: 'offline' | 'nominatim' | 'google';
+  /** Only present for provider='google'. */
+  apiKey?: string;
+  /** Only present for provider='nominatim'. */
+  baseUrl?: string;
+  lat: number;
+  lng: number;
+}
+
+export type JobCredentials = AutoTaggingJobCredentials | GeocodeJobCredentials;
+
 export class ApiClient {
   private readonly baseUrl: string;
   private readonly pat: string;
@@ -378,28 +423,66 @@ export class ApiClient {
   }
 
   /**
-   * Submit a completed job's result.
-   *
-   * NOTE: the server-side result endpoint is not yet built. Callers should wrap
-   * this in try/catch and degrade gracefully until it lands.
+   * Get a presigned upload URL for a claimed job to PUT output bytes to
+   * (`POST /api/nodes/:id/jobs/:jobId/upload-url`) — currently used by the
+   * thumbnail node-compute path: the server chooses the storage key, the
+   * node PUTs its computed JPEG directly to the returned `url`, then submits
+   * `{ storageKey, width, height, bytes }` via {@link submitJobResult}.
    */
-  submitJobResult(nodeId: string, jobId: string, result: unknown): Promise<unknown> {
-    return this.post<unknown>(
-      `/api/nodes/${encodeURIComponent(nodeId)}/jobs/${encodeURIComponent(jobId)}/result`,
-      result,
+  getJobUploadUrl(nodeId: string, jobId: string): Promise<JobUploadUrlResult> {
+    return this.post<JobUploadUrlResult>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/jobs/${encodeURIComponent(jobId)}/upload-url`,
+      {},
     );
   }
 
   /**
-   * Report a job failure so the server can requeue/fail it.
+   * Fetch TRANSIENT, per-job provider credentials for a node-eligible job
+   * (currently `auto_tagging` and `geocode`) via
+   * `POST /api/nodes/:id/jobs/:jobId/credentials`. The response contains a
+   * plaintext provider API key scoped to THIS job only — callers MUST hold
+   * it in a local variable only, for the duration of the compute call, and
+   * MUST NEVER persist it to disk, config, or logs.
+   */
+  getJobCredentials(nodeId: string, jobId: string): Promise<JobCredentials> {
+    return this.post<JobCredentials>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/jobs/${encodeURIComponent(jobId)}/credentials`,
+      {},
+    );
+  }
+
+  /**
+   * Submit a completed job's result.
    *
-   * NOTE: like submitJobResult, this endpoint may not yet exist server-side;
-   * callers should degrade gracefully.
+   * POSTs the typed envelope `{ type, result }` expected by
+   * `POST /api/nodes/:id/jobs/:jobId/result` — the server dispatches on `type`
+   * and zod-validates the per-type `result` payload (invalid → 400).
+   */
+  submitJobResult(
+    nodeId: string,
+    jobId: string,
+    type: string,
+    result: unknown,
+  ): Promise<unknown> {
+    return this.post<unknown>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/jobs/${encodeURIComponent(jobId)}/result`,
+      { type, result },
+    );
+  }
+
+  /**
+   * Report a job failure so the server can requeue/fail it
+   * (`POST /api/nodes/:id/jobs/:jobId/failure`). `rateLimited`/`retryAfterMs`
+   * mirror the server's `ReportJobFailureDto` (apps/api/src/nodes/dto/compute-result.dto.ts)
+   * — set by node-engine.ts's processJob when the compute failure was a
+   * `ProviderRateLimitError` (@memoriahub/enrichment-compute/rate-limit), so
+   * the server routes the job through `EnrichmentTerminalService`'s
+   * rate-limit deferral/backoff path instead of the normal-failure retry path.
    */
   reportJobFailure(
     nodeId: string,
     jobId: string,
-    body: { error: string; willRetry?: boolean },
+    body: { error: string; willRetry?: boolean; rateLimited?: boolean; retryAfterMs?: number },
   ): Promise<unknown> {
     return this.post<unknown>(
       `/api/nodes/${encodeURIComponent(nodeId)}/jobs/${encodeURIComponent(jobId)}/failure`,

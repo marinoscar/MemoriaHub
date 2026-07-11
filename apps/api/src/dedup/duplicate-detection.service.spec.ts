@@ -6,8 +6,11 @@
  *  - Guards: item in a PENDING burst group is skipped entirely (burst review
  *    may soft-delete/reshuffle members concurrently)
  *  - Link-rule matrix: embedding-only match, hash-only match, both, neither
- *  - Degraded mode: embedding unavailable ('unavailable') — hash-only linking
- *    still works because the KNN query naturally returns zero rows
+ *  - Degraded mode: embedding model unavailable — hash-only linking still
+ *    works because the KNN query naturally returns zero rows
+ *  - Compute/persist split: download-on-demand (only when hash or embedding
+ *    is missing), download-error semantics, and persistDuplicate (the entry
+ *    point the node result-ingestion path will call)
  *  - Union-find grouping: no existing group -> create; one existing group ->
  *    join (+ mediaCount increment via recomputeGroupMeta); multiple existing
  *    groups -> merge into the oldest and delete the emptied groups
@@ -16,13 +19,14 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { DuplicateDetectionService } from './duplicate-detection.service';
+import { Readable } from 'stream';
+import { DuplicateDetectionService, DuplicateComputeResult } from './duplicate-detection.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { VisualEmbeddingService } from './visual-embedding.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { BurstGroupStatus, MediaType } from '@prisma/client';
+import { BurstGroupStatus, EnrichmentJob, MediaType } from '@prisma/client';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -64,17 +68,29 @@ describe('DuplicateDetectionService', () => {
   let service: DuplicateDetectionService;
   let mockPrisma: MockPrismaService;
   let mockResolver: { getProviderFor: jest.Mock };
+  let mockProvider: { download: jest.Mock };
   let mockSystemSettings: { getSettings: jest.Mock };
-  let mockVisualEmbeddingService: { ensureEmbedding: jest.Mock };
+  let mockVisualEmbeddingService: {
+    isAvailable: jest.Mock;
+    hasEmbedding: jest.Mock;
+    embedImage: jest.Mock;
+    persistEmbedding: jest.Mock;
+  };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
-    mockResolver = { getProviderFor: jest.fn() };
+    mockProvider = { download: jest.fn() };
+    mockResolver = { getProviderFor: jest.fn().mockResolvedValue(mockProvider) };
     mockSystemSettings = {
       getSettings: jest.fn().mockResolvedValue({ dedup: DEDUP_CONFIG }),
     };
+    // Defaults model the steady state: model available, subject already has
+    // an embedding row (so no byte download is needed).
     mockVisualEmbeddingService = {
-      ensureEmbedding: jest.fn().mockResolvedValue('exists'),
+      isAvailable: jest.fn().mockReturnValue(true),
+      hasEmbedding: jest.fn().mockResolvedValue(true),
+      embedImage: jest.fn().mockResolvedValue(null),
+      persistEmbedding: jest.fn().mockResolvedValue(undefined),
     };
 
     // Default: no KNN candidates, no hash candidates, nothing to link.
@@ -108,7 +124,7 @@ describe('DuplicateDetectionService', () => {
 
       await service.processMediaItem(SUBJECT_ID);
 
-      expect(mockVisualEmbeddingService.ensureEmbedding).not.toHaveBeenCalled();
+      expect(mockVisualEmbeddingService.hasEmbedding).not.toHaveBeenCalled();
       expect(mockSystemSettings.getSettings).not.toHaveBeenCalled();
     });
 
@@ -119,7 +135,7 @@ describe('DuplicateDetectionService', () => {
 
       await service.processMediaItem(SUBJECT_ID);
 
-      expect(mockVisualEmbeddingService.ensureEmbedding).not.toHaveBeenCalled();
+      expect(mockVisualEmbeddingService.hasEmbedding).not.toHaveBeenCalled();
     });
 
     it('returns early when the mediaItem is archived', async () => {
@@ -129,7 +145,7 @@ describe('DuplicateDetectionService', () => {
 
       await service.processMediaItem(SUBJECT_ID);
 
-      expect(mockVisualEmbeddingService.ensureEmbedding).not.toHaveBeenCalled();
+      expect(mockVisualEmbeddingService.hasEmbedding).not.toHaveBeenCalled();
     });
 
     it('returns early when the mediaItem is not a photo', async () => {
@@ -139,7 +155,7 @@ describe('DuplicateDetectionService', () => {
 
       await service.processMediaItem(SUBJECT_ID);
 
-      expect(mockVisualEmbeddingService.ensureEmbedding).not.toHaveBeenCalled();
+      expect(mockVisualEmbeddingService.hasEmbedding).not.toHaveBeenCalled();
     });
 
     it('skips entirely when the item is in a PENDING burst group', async () => {
@@ -152,7 +168,7 @@ describe('DuplicateDetectionService', () => {
 
       await service.processMediaItem(SUBJECT_ID);
 
-      expect(mockVisualEmbeddingService.ensureEmbedding).not.toHaveBeenCalled();
+      expect(mockVisualEmbeddingService.hasEmbedding).not.toHaveBeenCalled();
     });
 
     it('proceeds when the item is in a RESOLVED (non-pending) burst group', async () => {
@@ -165,7 +181,7 @@ describe('DuplicateDetectionService', () => {
 
       await service.processMediaItem(SUBJECT_ID);
 
-      expect(mockVisualEmbeddingService.ensureEmbedding).toHaveBeenCalledWith(SUBJECT_ID);
+      expect(mockVisualEmbeddingService.hasEmbedding).toHaveBeenCalledWith(SUBJECT_ID);
     });
   });
 
@@ -314,8 +330,8 @@ describe('DuplicateDetectionService', () => {
   // -------------------------------------------------------------------------
 
   describe('degraded mode (VisualEmbeddingService unavailable)', () => {
-    it('still links via hash-only matching when ensureEmbedding returns "unavailable"', async () => {
-      mockVisualEmbeddingService.ensureEmbedding.mockResolvedValue('unavailable');
+    it('still links via hash-only matching when the embedding model is unavailable', async () => {
+      mockVisualEmbeddingService.isAvailable.mockReturnValue(false);
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
         makeSubjectItem({ perceptualHash: '0' }),
       );
@@ -338,15 +354,22 @@ describe('DuplicateDetectionService', () => {
       expect(mockPrisma.duplicateGroup.create).toHaveBeenCalled();
     });
 
-    it('calls ensureEmbedding regardless of outcome (best-effort, never blocks hash matching)', async () => {
-      mockVisualEmbeddingService.ensureEmbedding.mockResolvedValue('unavailable');
+    it('never downloads bytes or embeds in degraded mode when the hash already exists (best-effort, hash matching still runs)', async () => {
+      mockVisualEmbeddingService.isAvailable.mockReturnValue(false);
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeSubjectItem());
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
       (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
 
       await service.processMediaItem(SUBJECT_ID);
 
-      expect(mockVisualEmbeddingService.ensureEmbedding).toHaveBeenCalledWith(SUBJECT_ID);
+      // isAvailable=false short-circuits the embedding-existence probe, so
+      // nothing is downloaded and no embed is attempted...
+      expect(mockVisualEmbeddingService.hasEmbedding).not.toHaveBeenCalled();
+      expect(mockProvider.download).not.toHaveBeenCalled();
+      expect(mockVisualEmbeddingService.embedImage).not.toHaveBeenCalled();
+      // ...but matching (KNN + hash candidates) still executes.
+      expect(mockPrisma.$queryRaw).toHaveBeenCalled();
+      expect(mockPrisma.mediaItem.findMany).toHaveBeenCalled();
     });
   });
 
@@ -749,6 +772,173 @@ describe('DuplicateDetectionService', () => {
 
       expect(result).toEqual({ evicted: 0 });
       expect(evictSpy).not.toHaveBeenCalled();
+    });
+  });
+  // -------------------------------------------------------------------------
+  // Compute/persist split — download-on-demand and persistDuplicate
+  // -------------------------------------------------------------------------
+
+  describe('compute/persist split', () => {
+    async function makeRealJpeg(): Promise<Buffer> {
+      const sharp = (await import('sharp')).default;
+      return sharp({
+        create: { width: 64, height: 48, channels: 3, background: { r: 200, g: 30, b: 30 } },
+      })
+        .jpeg()
+        .toBuffer();
+    }
+
+    function setupDownloadableObject(bytes: Buffer) {
+      (mockPrisma.storageObject.findUnique as jest.Mock).mockResolvedValue({
+        storageKey: 'originals/photo.jpg',
+        storageProvider: 's3',
+        bucket: 'test-bucket',
+      });
+      mockProvider.download.mockResolvedValue(Readable.from([bytes]));
+    }
+
+    it('downloads once, computes, and persists BOTH hash and embedding when the hash is missing (real dHash pipeline)', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeSubjectItem({ perceptualHash: null }),
+      );
+      mockVisualEmbeddingService.hasEmbedding.mockResolvedValue(false);
+      mockVisualEmbeddingService.embedImage.mockResolvedValue([0.1, 0.2, 0.3]);
+      setupDownloadableObject(await makeRealJpeg());
+      (mockPrisma.mediaItem.update as jest.Mock).mockResolvedValue({});
+
+      await service.processMediaItem(SUBJECT_ID);
+
+      expect(mockProvider.download).toHaveBeenCalledTimes(1);
+      // Embedding persisted with the CLIP model tag
+      expect(mockVisualEmbeddingService.persistEmbedding).toHaveBeenCalledWith(
+        SUBJECT_ID,
+        CIRCLE_ID,
+        [0.1, 0.2, 0.3],
+        'clip-vit-b32-q8',
+      );
+      // Hash persisted as an unsigned decimal string, sharpness alongside it
+      expect(mockPrisma.mediaItem.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: SUBJECT_ID },
+          data: expect.objectContaining({
+            perceptualHash: expect.stringMatching(/^\d+$/),
+            sharpnessScore: expect.any(Number),
+          }),
+        }),
+      );
+      // Matching still ran after persistence
+      expect(mockPrisma.$queryRaw).toHaveBeenCalled();
+    });
+
+    it('propagates a byte-download failure when the hash is missing (worker retries)', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeSubjectItem({ perceptualHash: null }),
+      );
+      mockVisualEmbeddingService.hasEmbedding.mockResolvedValue(false);
+      (mockPrisma.storageObject.findUnique as jest.Mock).mockResolvedValue({
+        storageKey: 'originals/photo.jpg',
+        storageProvider: 's3',
+        bucket: 'test-bucket',
+      });
+      mockProvider.download.mockRejectedValue(new Error('S3 connection timeout'));
+
+      await expect(service.processMediaItem(SUBJECT_ID)).rejects.toThrow('S3 connection timeout');
+    });
+
+    it('swallows a byte-download failure when only the embedding is missing (best-effort; hash matching proceeds)', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeSubjectItem());
+      mockVisualEmbeddingService.hasEmbedding.mockResolvedValue(false);
+      (mockPrisma.storageObject.findUnique as jest.Mock).mockResolvedValue({
+        storageKey: 'originals/photo.jpg',
+        storageProvider: 's3',
+        bucket: 'test-bucket',
+      });
+      mockProvider.download.mockRejectedValue(new Error('S3 connection timeout'));
+
+      await expect(service.processMediaItem(SUBJECT_ID)).resolves.toBeUndefined();
+
+      expect(mockVisualEmbeddingService.persistEmbedding).not.toHaveBeenCalled();
+      expect(mockPrisma.$queryRaw).toHaveBeenCalled(); // matching still ran
+    });
+
+    it('computeDuplicate returns model tag + embedding + dHash + sharpness for decodable bytes', async () => {
+      mockVisualEmbeddingService.embedImage.mockResolvedValue([0.5, 0.5]);
+
+      const result = await service.computeDuplicate(await makeRealJpeg());
+
+      expect(result.model).toBe('clip-vit-b32-q8');
+      expect(result.embedding).toEqual([0.5, 0.5]);
+      expect(result.dHash).toMatch(/^\d+$/);
+      expect(result.sharpnessScore).not.toBeNull();
+    });
+
+    it('computeDuplicate returns null dHash/sharpness for undecodable bytes', async () => {
+      mockVisualEmbeddingService.embedImage.mockResolvedValue(null);
+
+      const result = await service.computeDuplicate(Buffer.from('this is not an image'));
+
+      expect(result.embedding).toBeNull();
+      expect(result.dHash).toBeNull();
+      expect(result.sharpnessScore).toBeNull();
+    });
+
+    it('persistDuplicate persists a supplied result for the job media item and runs matching (no download)', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeSubjectItem({ perceptualHash: null }),
+      );
+      (mockPrisma.mediaItem.update as jest.Mock).mockResolvedValue({});
+      const job = { id: 'job-1', mediaItemId: SUBJECT_ID } as EnrichmentJob;
+      const result: DuplicateComputeResult = {
+        model: 'clip-vit-b32-q8',
+        embedding: [0.9, 0.1],
+        dHash: '42',
+        sharpnessScore: 1.5,
+      };
+
+      await service.persistDuplicate(job, result);
+
+      expect(mockProvider.download).not.toHaveBeenCalled();
+      expect(mockVisualEmbeddingService.persistEmbedding).toHaveBeenCalledWith(
+        SUBJECT_ID,
+        CIRCLE_ID,
+        [0.9, 0.1],
+        'clip-vit-b32-q8',
+      );
+      expect(mockPrisma.mediaItem.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: SUBJECT_ID },
+          data: expect.objectContaining({ perceptualHash: '42', sharpnessScore: 1.5 }),
+        }),
+      );
+      expect(mockPrisma.$queryRaw).toHaveBeenCalled();
+    });
+
+    it('persistDuplicate never overwrites an existing perceptualHash', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeSubjectItem());
+      const job = { id: 'job-1', mediaItemId: SUBJECT_ID } as EnrichmentJob;
+
+      await service.persistDuplicate(job, {
+        model: 'clip-vit-b32-q8',
+        embedding: null,
+        dHash: '999',
+        sharpnessScore: 2,
+      });
+
+      expect(mockPrisma.mediaItem.update).not.toHaveBeenCalled();
+    });
+
+    it('persistDuplicate is a no-op for a job without a mediaItemId', async () => {
+      const job = { id: 'job-1', mediaItemId: null } as EnrichmentJob;
+
+      await service.persistDuplicate(job, {
+        model: 'clip-vit-b32-q8',
+        embedding: [0.1],
+        dHash: '1',
+        sharpnessScore: 0,
+      });
+
+      expect(mockPrisma.mediaItem.findUnique).not.toHaveBeenCalled();
+      expect(mockVisualEmbeddingService.persistEmbedding).not.toHaveBeenCalled();
     });
   });
 });

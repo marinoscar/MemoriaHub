@@ -25,6 +25,7 @@ import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaEnrichmentEnqueueListener } from './enrichment/media-enrichment-enqueue.listener';
 import { MediaThumbnailService } from './media-thumbnail.service';
 import { ThumbnailRegenHandler } from './thumbnail-regen.handler';
+import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
 
 /**
  * MediaModule
@@ -94,6 +95,7 @@ import { ThumbnailRegenHandler } from './thumbnail-regen.handler';
     MediaThumbnailService,
     MediaOrientationEditService,
     ThumbnailRegenHandler,
+    ThumbnailNodePersistService,
   ],
   exports: [MediaService, MediaReprocessService, MediaMetadataSyncService, MediaEnrichmentService, MediaThumbnailService],
 })

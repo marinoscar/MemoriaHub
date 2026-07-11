@@ -46,7 +46,7 @@ export class MetadataBackfillService {
               ],
             }),
       },
-      select: { id: true, circleId: true },
+      select: { id: true, circleId: true, storageObject: { select: { mimeType: true } } },
     });
 
     let enqueued = 0;
@@ -57,6 +57,8 @@ export class MetadataBackfillService {
         circleId: item.circleId,
         reason: JobReason.backfill,
         priority: 100,
+        // See MetadataController.rerunMetadata for why mimeType rides in payload.
+        payload: { mimeType: item.storageObject?.mimeType ?? 'application/octet-stream' },
       });
 
       await this.prisma.mediaMetadataStatus.upsert({

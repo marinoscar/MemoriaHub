@@ -1,6 +1,6 @@
 {
   "name": "@memoriahub/cli",
-  "version": "1.1.26",
+  "version": "1.1.30",
   "description": "CLI importer for MemoriaHub — import and sync photo/video folders",
   "type": "module",
   "bin": {
@@ -17,6 +17,7 @@
     "test:cov": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.config.js --coverage"
   },
   "dependencies": {
+    "@memoriahub/enrichment-compute": "0.1.0",
     "better-sqlite3": "^12.10.0",
     "boxen": "^5.1.2",
     "chalk": "^5.3.0",
@@ -34,12 +35,12 @@
     "react-reconciler": "^0.33.0"
   },
   "optionalDependencies": {
-    "@tensorflow/tfjs": "^4.22.0",
-    "@tensorflow/tfjs-backend-wasm": "^4.22.0",
-    "@vladmandic/human": "^3.3.5",
-    "onnxruntime-node": "^1.20.1",
-    "sharp": "^0.33.5",
-    "tesseract.js": "^5.1.1"
+    "@tensorflow/tfjs": "4.22.0",
+    "@tensorflow/tfjs-backend-wasm": "4.22.0",
+    "@vladmandic/human": "3.3.6",
+    "onnxruntime-node": "1.27.0",
+    "sharp": "0.35.1",
+    "tesseract.js": "7.0.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

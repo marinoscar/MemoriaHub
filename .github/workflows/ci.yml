@@ -26,6 +26,12 @@ jobs:
 
       - run: npm ci
 
+      # apps/api and apps/cli both import @memoriahub/enrichment-compute by
+      # subpath (e.g. .../clip, .../dto) resolved against its built dist/ —
+      # that output is git-ignored, so it must be built here on every fresh
+      # checkout before anything that imports it can typecheck or run.
+      - run: npm run build --workspace=@memoriahub/enrichment-compute
+
       - run: npx prisma generate
         working-directory: apps/api
 

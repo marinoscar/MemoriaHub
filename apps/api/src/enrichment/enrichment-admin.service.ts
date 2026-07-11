@@ -669,6 +669,10 @@ export class EnrichmentAdminService {
         finishedAt: null,
         scheduledFor: null,
         rateLimitHits: 0,
+        // Release any stale node claim so the job is unowned and re-claimable.
+        claimedByNodeId: null,
+        leaseExpiresAt: null,
+        executor: null,
       },
       select: {
         id: true,
@@ -719,6 +723,10 @@ export class EnrichmentAdminService {
         finishedAt: null,
         scheduledFor: null,
         rateLimitHits: 0,
+        // Release any stale node claim so the job is unowned and re-claimable.
+        claimedByNodeId: null,
+        leaseExpiresAt: null,
+        executor: null,
       },
     });
 

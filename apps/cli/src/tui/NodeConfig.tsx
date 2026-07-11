@@ -5,6 +5,14 @@
  * name, and the eligible job-type set) and persists it via saveConfig(). The
  * server URL is shown read-only (it is changed through Login, not here).
  *
+ * Concurrency is special-cased: after persisting to config (so the next
+ * `node start` picks it up), if a daemon is currently running we also push
+ * `{cmd:'set-concurrency'}` over the IPC socket so the change takes effect on
+ * the live process immediately (mirrors `node/daemon.ts`'s `set-concurrency`
+ * command, also used by the NodeDashboard config editor). The save message
+ * distinguishes "applied live to running daemon" from "will apply on next
+ * start" so the operator knows which happened.
+ *
  * Two input primitives are used:
  *   - ink-text-input (TextInput) for name / concurrency / poll interval, matching
  *     SettingsScreen's inline-edit pattern.
@@ -25,6 +33,7 @@ import TextInput from 'ink-text-input';
 
 import { saveConfig, type CliConfig } from '../config.js';
 import { NODE_JOB_TYPES } from '../node/capabilities.js';
+import { connectToDaemon, isDaemonRunning } from '../node/ipc-client.js';
 import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
@@ -63,6 +72,35 @@ interface SelectItem {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Push a live concurrency change to a running daemon over the IPC socket.
+ * Resolves `true` only when the daemon acknowledged the change; `false` when
+ * no daemon is running, the connection failed, or no ack arrived in time —
+ * in all of those cases the persisted config value still takes effect on the
+ * next `node start`.
+ */
+async function pushConcurrencyLive(value: number): Promise<boolean> {
+  if (!(await isDaemonRunning())) return false;
+  let client: Awaited<ReturnType<typeof connectToDaemon>>;
+  try {
+    client = await connectToDaemon();
+  } catch {
+    return false;
+  }
+  try {
+    client.send({ cmd: 'set-concurrency', value });
+    const ack = await client.waitFor(
+      (m) => m.kind === 'ack' && m.cmd === 'set-concurrency',
+      2000,
+    );
+    return ack.kind === 'ack';
+  } catch {
+    return false;
+  } finally {
+    client.close();
+  }
+}
 
 function initialDraft(config: CliConfig): Draft {
   return {
@@ -212,16 +250,23 @@ export function NodeConfig({ config, onSaved, onBack }: NodeConfigProps): React.
       }
       const n = parseInt(trimmed, 10);
       if (editingField === 'concurrency') {
-        if (isNaN(n) || n < 1 || String(n) !== trimmed) {
-          setErrorMsg(`Concurrency must be a positive integer (got "${trimmed}").`);
+        if (isNaN(n) || n < 1 || n > 64 || String(n) !== trimmed) {
+          setErrorMsg(`Concurrency must be an integer between 1 and 64 (got "${trimmed}").`);
           return;
         }
         const next = { ...draft, concurrency: n };
         setDraft(next);
         persist(next);
-        setSuccessMsg(`Saved concurrency = ${n}`);
         setErrorMsg('');
         setStep('menu');
+        setSuccessMsg(`Saved concurrency = ${n} (checking for a running daemon…)`);
+        void pushConcurrencyLive(n).then((applied) => {
+          setSuccessMsg(
+            applied
+              ? `Saved concurrency = ${n} — applied live to the running daemon.`
+              : `Saved concurrency = ${n} — will apply on next \`node start\`.`,
+          );
+        });
         return;
       }
       // poll

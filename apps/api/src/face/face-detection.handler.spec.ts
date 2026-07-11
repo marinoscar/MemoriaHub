@@ -12,6 +12,7 @@
 
 import { FaceDetectionHandler } from './face-detection.handler';
 import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
+import { faceDetectionResultSchema } from '@memoriahub/enrichment-compute/dto';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -44,18 +45,38 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
   };
 }
 
+/** Canned, schema-valid node result payload (Human provider, 4-d toy embedding). */
+function makeNodeResult() {
+  return {
+    modelVersion: 'human-faceres-1024',
+    providerKey: 'human',
+    imageWidth: 800,
+    imageHeight: 600,
+    faces: [
+      {
+        boundingBox: { x: 100, y: 120, width: 80, height: 90 },
+        confidence: 0.92,
+        embedding: [0.1, 0.2, 0.3, 0.4],
+      },
+    ],
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe('FaceDetectionHandler', () => {
   let mockRegistry: { register: jest.Mock };
-  let mockFaceDetectionService: { processMediaItem: jest.Mock };
+  let mockFaceDetectionService: { processMediaItem: jest.Mock; persistFaces: jest.Mock };
   let handler: FaceDetectionHandler;
 
   beforeEach(() => {
     mockRegistry = { register: jest.fn() };
-    mockFaceDetectionService = { processMediaItem: jest.fn() };
+    mockFaceDetectionService = {
+      processMediaItem: jest.fn(),
+      persistFaces: jest.fn().mockResolvedValue(undefined),
+    };
     // Instantiate directly — no NestJS testing module needed for this pure unit test
     handler = new FaceDetectionHandler(
       mockRegistry as any,
@@ -139,6 +160,36 @@ describe('FaceDetectionHandler', () => {
 
       // Act / Assert
       await expect(handler.process(job)).rejects.toBe('string rejection');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // node-result surface (distributed worker nodes)
+  // -------------------------------------------------------------------------
+
+  describe('node-result surface', () => {
+    it('exposes the shared package schema as nodeResultSchema', () => {
+      expect(handler.nodeResultSchema).toBe(faceDetectionResultSchema);
+      // Sanity: the schema accepts the canned payload used below.
+      expect(() => handler.nodeResultSchema.parse(makeNodeResult())).not.toThrow();
+    });
+
+    it('persistNodeResult forwards the parsed payload to faceDetectionService.persistFaces', async () => {
+      const job = makeJob();
+      const result = makeNodeResult();
+
+      await handler.persistNodeResult(job, result);
+
+      expect(mockFaceDetectionService.persistFaces).toHaveBeenCalledTimes(1);
+      const [passedJob, passedResult] = mockFaceDetectionService.persistFaces.mock.calls[0];
+      expect(passedJob).toBe(job);
+      expect(passedResult).toEqual(result);
+    });
+
+    it('persistNodeResult rejects a schema-invalid payload without touching the service', async () => {
+      const bad = { ...makeNodeResult(), faces: [{ boundingBox: { x: 1, y: 1 } }] }; // missing width/height/embedding
+      await expect(handler.persistNodeResult(makeJob(), bad)).rejects.toThrow();
+      expect(mockFaceDetectionService.persistFaces).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,0 +1,5 @@
+{
+  "//": "node10-resolution back-compat stub — apps/api compiles with moduleResolution 'node', which ignores the root exports map. Node.js runtime always uses the root exports map instead of this file.",
+  "main": "../dist/cjs/dhash/index.js",
+  "types": "../dist/types/dhash/index.d.ts"
+}

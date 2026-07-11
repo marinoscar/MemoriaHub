@@ -8,9 +8,12 @@
  *  - looksLikeOnnxModel: magic-byte + size heuristic
  *  - Degraded mode: a failed ONNX session load flips isAvailable() to false
  *    permanently and is only attempted once (no retry storm)
- *  - ensureEmbedding: 'exists' short-circuit (no download), 'unavailable'
- *    guards (no storageObjectId / no storageKey / download throws / embed
- *    fails), 'created' happy path (persists via $executeRaw upsert)
+ *  - hasEmbedding: row-existence probe used for backfill/batch idempotency
+ *  - persistEmbedding: $executeRaw upsert of the vector row
+ *
+ * (Byte download moved OUT of this service with the compute/persist split —
+ * DuplicateDetectionService downloads once and feeds embedImage a buffer;
+ * see duplicate-detection.service.spec.ts for the download-path coverage.)
  *
  * sharp and onnxruntime-node are mocked — real image decode / native ONNX
  * inference would require test fixtures and platform-specific binaries,
@@ -45,7 +48,12 @@ jest.mock('sharp', () => {
   return mockSharpFn;
 });
 
-jest.mock('../storage/processing/image-orientation.util', () => ({
+// The preprocessing seam moved into the shared parity package — mock the
+// package's image module (the clip module imports prepareImageForProcessing
+// from there internally). setComputeLogger must be present because the API's
+// image-orientation.util re-export module calls it at import time.
+jest.mock('@memoriahub/enrichment-compute/image', () => ({
+  setComputeLogger: jest.fn(),
   prepareImageForProcessing: jest.fn().mockResolvedValue({
     buffer: Buffer.from('prepared'),
     width: 224,
@@ -69,16 +77,15 @@ jest.mock('fs', () => ({
 // ---------------------------------------------------------------------------
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { Readable } from 'stream';
 import {
   VisualEmbeddingService,
   preprocessImageForClip,
   l2Normalize,
   looksLikeOnnxModel,
+  VISUAL_EMBEDDING_MODEL_TAG,
 } from './visual-embedding.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
+import { prepareImageForProcessing } from '@memoriahub/enrichment-compute/image';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 const CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073] as const;
@@ -230,18 +237,15 @@ describe('looksLikeOnnxModel (pure function)', () => {
 describe('VisualEmbeddingService — degraded mode', () => {
   let service: VisualEmbeddingService;
   let mockPrisma: MockPrismaService;
-  let mockResolver: { getProviderFor: jest.Mock };
 
   beforeEach(async () => {
     jest.clearAllMocks();
     mockPrisma = createMockPrismaService();
-    mockResolver = { getProviderFor: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         VisualEmbeddingService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: StorageProviderResolver, useValue: mockResolver },
       ],
     }).compile();
 
@@ -291,29 +295,26 @@ describe('VisualEmbeddingService — degraded mode', () => {
   });
 });
 
+
 // ---------------------------------------------------------------------------
-// Section C: ensureEmbedding
+// Section C: persistence half (hasEmbedding / persistEmbedding)
 // ---------------------------------------------------------------------------
 
-describe('VisualEmbeddingService.ensureEmbedding', () => {
+describe('VisualEmbeddingService — persistence half', () => {
   let service: VisualEmbeddingService;
   let mockPrisma: MockPrismaService;
-  let mockResolver: { getProviderFor: jest.Mock };
-  let mockProvider: { download: jest.Mock };
 
   const MEDIA_ITEM_ID = 'media-1';
+  const CIRCLE_ID = 'circle-1';
 
   beforeEach(async () => {
     jest.clearAllMocks();
     mockPrisma = createMockPrismaService();
-    mockProvider = { download: jest.fn() };
-    mockResolver = { getProviderFor: jest.fn().mockResolvedValue(mockProvider) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         VisualEmbeddingService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: StorageProviderResolver, useValue: mockResolver },
       ],
     }).compile();
 
@@ -324,127 +325,46 @@ describe('VisualEmbeddingService.ensureEmbedding', () => {
     service.onModuleDestroy();
   });
 
-  it("returns 'exists' without downloading when an embedding row is already present", async () => {
-    (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([{ exists: 1 }]);
+  describe('hasEmbedding', () => {
+    it('returns true when an embedding row exists', async () => {
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([{ exists: 1 }]);
 
-    const result = await service.ensureEmbedding(MEDIA_ITEM_ID);
+      await expect(service.hasEmbedding(MEDIA_ITEM_ID)).resolves.toBe(true);
+    });
 
-    expect(result).toBe('exists');
-    expect(mockPrisma.mediaItem.findUnique).not.toHaveBeenCalled();
-    expect(mockProvider.download).not.toHaveBeenCalled();
+    it('returns false when no embedding row exists', async () => {
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+
+      await expect(service.hasEmbedding(MEDIA_ITEM_ID)).resolves.toBe(false);
+    });
   });
 
-  it("returns 'unavailable' when the mediaItem has no storageObjectId", async () => {
-    (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-    (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
-      storageObjectId: null,
-      circleId: 'circle-1',
+  describe('persistEmbedding', () => {
+    it('upserts the vector row via a single $executeRaw', async () => {
+      (mockPrisma.$executeRaw as jest.Mock).mockResolvedValue(1);
+
+      await service.persistEmbedding(MEDIA_ITEM_ID, CIRCLE_ID, [0.1, 0.2, 0.3]);
+
+      expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(1);
     });
 
-    const result = await service.ensureEmbedding(MEDIA_ITEM_ID);
+    it('tags the row with VISUAL_EMBEDDING_MODEL_TAG when no model is given', async () => {
+      (mockPrisma.$executeRaw as jest.Mock).mockResolvedValue(1);
 
-    expect(result).toBe('unavailable');
-    expect(mockProvider.download).not.toHaveBeenCalled();
-  });
+      await service.persistEmbedding(MEDIA_ITEM_ID, CIRCLE_ID, [0.1, 0.2]);
 
-  it("returns 'unavailable' when the mediaItem is not found", async () => {
-    (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-    (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(null);
-
-    const result = await service.ensureEmbedding(MEDIA_ITEM_ID);
-
-    expect(result).toBe('unavailable');
-  });
-
-  it("returns 'unavailable' when the storageObject has no storageKey", async () => {
-    (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-    (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
-      storageObjectId: 'sobj-1',
-      circleId: 'circle-1',
+      // $executeRaw is a tagged-template call: values are the interpolations.
+      const callArgs = (mockPrisma.$executeRaw as jest.Mock).mock.calls[0];
+      expect(callArgs).toContain(VISUAL_EMBEDDING_MODEL_TAG);
     });
-    (mockPrisma.storageObject.findUnique as jest.Mock).mockResolvedValue(null);
 
-    const result = await service.ensureEmbedding(MEDIA_ITEM_ID);
+    it('passes an explicit model tag through to the row', async () => {
+      (mockPrisma.$executeRaw as jest.Mock).mockResolvedValue(1);
 
-    expect(result).toBe('unavailable');
-    expect(mockProvider.download).not.toHaveBeenCalled();
-  });
+      await service.persistEmbedding(MEDIA_ITEM_ID, CIRCLE_ID, [0.1, 0.2], 'some-future-model');
 
-  it("returns 'unavailable' (never throws) when the storage provider download rejects", async () => {
-    (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-    (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
-      storageObjectId: 'sobj-1',
-      circleId: 'circle-1',
+      const callArgs = (mockPrisma.$executeRaw as jest.Mock).mock.calls[0];
+      expect(callArgs).toContain('some-future-model');
     });
-    (mockPrisma.storageObject.findUnique as jest.Mock).mockResolvedValue({
-      storageKey: 'originals/photo.jpg',
-      storageProvider: 's3',
-      bucket: 'test-bucket',
-    });
-    mockProvider.download.mockRejectedValue(new Error('S3 timeout'));
-
-    await expect(service.ensureEmbedding(MEDIA_ITEM_ID)).resolves.toBe('unavailable');
-  });
-
-  it("returns 'unavailable' when embedImage fails to produce an embedding (e.g. degraded model)", async () => {
-    (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-    (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
-      storageObjectId: 'sobj-1',
-      circleId: 'circle-1',
-    });
-    (mockPrisma.storageObject.findUnique as jest.Mock).mockResolvedValue({
-      storageKey: 'originals/photo.jpg',
-      storageProvider: 's3',
-      bucket: 'test-bucket',
-    });
-    mockProvider.download.mockResolvedValue(Readable.from([Buffer.from('fake-bytes')]));
-    jest.spyOn(service, 'embedImage').mockResolvedValue(null);
-
-    const result = await service.ensureEmbedding(MEDIA_ITEM_ID);
-
-    expect(result).toBe('unavailable');
-    expect(mockPrisma.$executeRaw).not.toHaveBeenCalled();
-  });
-
-  it("returns 'created' and upserts the embedding via $executeRaw on the happy path", async () => {
-    (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-    (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
-      storageObjectId: 'sobj-1',
-      circleId: 'circle-1',
-    });
-    (mockPrisma.storageObject.findUnique as jest.Mock).mockResolvedValue({
-      storageKey: 'originals/photo.jpg',
-      storageProvider: 's3',
-      bucket: 'test-bucket',
-    });
-    mockProvider.download.mockResolvedValue(Readable.from([Buffer.from('fake-bytes')]));
-    jest.spyOn(service, 'embedImage').mockResolvedValue([0.1, 0.2, 0.3]);
-    (mockPrisma.$executeRaw as jest.Mock).mockResolvedValue(1);
-
-    const result = await service.ensureEmbedding(MEDIA_ITEM_ID);
-
-    expect(result).toBe('created');
-    expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(1);
-  });
-
-  it('downloads bytes from the resolved provider for the storage object\'s own provider+bucket', async () => {
-    (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-    (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
-      storageObjectId: 'sobj-1',
-      circleId: 'circle-1',
-    });
-    (mockPrisma.storageObject.findUnique as jest.Mock).mockResolvedValue({
-      storageKey: 'originals/photo.jpg',
-      storageProvider: 'r2',
-      bucket: 'r2-bucket',
-    });
-    mockProvider.download.mockResolvedValue(Readable.from([Buffer.from('fake-bytes')]));
-    jest.spyOn(service, 'embedImage').mockResolvedValue([0.1, 0.2, 0.3]);
-    (mockPrisma.$executeRaw as jest.Mock).mockResolvedValue(1);
-
-    await service.ensureEmbedding(MEDIA_ITEM_ID);
-
-    expect(mockResolver.getProviderFor).toHaveBeenCalledWith('r2', 'r2-bucket');
-    expect(mockProvider.download).toHaveBeenCalledWith('originals/photo.jpg');
   });
 });

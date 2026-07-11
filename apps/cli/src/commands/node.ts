@@ -6,22 +6,30 @@
  * laptops process the queue alongside the server.
  *
  * Subcommands:
- *   node register   — register this machine as a worker node
- *   node start      — run the claim/compute loop (headless event printer)
- *   node stop       — best-effort signal a running node to drain/stop
- *   node status     — show local config + a one-shot capability table
- *   node list       — list the user's registered nodes (best-effort)
- *   node doctor     — capability + connectivity + model health report
+ *   node register        — register this machine as a worker node
+ *   node start           — run the claim/compute loop; always hosts the IPC
+ *                          socket + file logging; --daemon detaches
+ *   node stop            — stop a running node: IPC → SIGTERM → server-side
+ *   node status          — live snapshot via IPC when running, else local
+ *   node logs            — print/tail the JSONL worker log
+ *   node set-concurrency — adjust concurrency live (IPC) or in config
+ *   node service         — install/uninstall/status of the systemd user unit
+ *   node list            — list the user's registered nodes (best-effort)
+ *   node doctor          — capability + connectivity + model health report
  */
 
 import { createRequire } from 'node:module';
+import { spawn, spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
 import * as os from 'node:os';
+import * as path from 'node:path';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import Table from 'cli-table3';
 import { requireConfig, saveConfig, type NodeConfig } from '../config.js';
 import { ApiClient, ApiError, type ModelManifestEntry } from '../api.js';
 import { ui, isTTY } from '../ui.js';
+import { logsDir, nodePidPath } from '../paths.js';
 import {
   detectCapabilities,
   missingRequirements,
@@ -32,8 +40,23 @@ import {
   type NodeJobType,
 } from '../node/capabilities.js';
 import { ensureModels } from '../node/models.js';
-import { NodeEngine, type NodeEngineOptions } from '../node/node-engine.js';
+import { runOperationalSelfTests } from '../node/self-test.js';
+import { runApiAccessChecks, checkDaemonLiveness } from '../node/doctor-checks.js';
+import {
+  NodeEngine,
+  type NodeEngineOptions,
+  type EngineSnapshot,
+} from '../node/node-engine.js';
 import { NODE_EV } from '../node/node-events.js';
+import {
+  createNodeLogger,
+  attachEngineLogging,
+  readLastLines,
+  followLog,
+  nodeLogPath,
+} from '../node/logger.js';
+import { startDaemonHost, readPidFile, isPidAlive } from '../node/daemon.js';
+import { connectToDaemon, isDaemonRunning, type DaemonMessage } from '../node/ipc-client.js';
 
 const require = createRequire(import.meta.url);
 
@@ -86,6 +109,47 @@ function printCapabilityTable(caps: Record<string, CapabilityStatus>): void {
       key,
       status.available ? chalk.green('yes') : chalk.red('no'),
       status.detail ?? '',
+    ]);
+  }
+  process.stdout.write(table.toString() + '\n');
+}
+
+/**
+ * Render the combined installed-vs-operational capability table used by
+ * `node doctor`. "Installed" is the require.resolve presence probe from
+ * `detectCapabilities()`; "Operational" is the real self-test result from
+ * `runOperationalSelfTests()` — a capability can be installed but not (yet)
+ * operational (e.g. a model file not downloaded yet), which is not an error,
+ * just not-ready-yet, so it renders yellow rather than red.
+ */
+function printOperationalCapabilityTable(
+  caps: Record<string, CapabilityStatus>,
+  operational: Record<string, CapabilityStatus>,
+): void {
+  const table = new Table({
+    head: [
+      chalk.bold('Capability'),
+      chalk.bold('Installed'),
+      chalk.bold('Operational'),
+      chalk.bold('Detail'),
+    ],
+    style: { head: [], border: isTTY ? ['dim'] : [] },
+  });
+  for (const [key, status] of Object.entries(caps)) {
+    const op = operational[key] ?? status;
+    let operationalCell: string;
+    if (!status.available) {
+      operationalCell = chalk.dim('n/a');
+    } else if (op.available) {
+      operationalCell = chalk.green('yes');
+    } else {
+      operationalCell = chalk.yellow('not yet');
+    }
+    table.push([
+      key,
+      status.available ? chalk.green('yes') : chalk.red('no'),
+      operationalCell,
+      op.detail ?? status.detail ?? '',
     ]);
   }
   process.stdout.write(table.toString() + '\n');
@@ -164,80 +228,140 @@ function startCmd(): Command {
   const cmd = new Command('start');
   cmd
     .description('Run the worker-node loop (claim → compute → submit)')
-    .option('--concurrency <n>', 'Override configured concurrency')
+    .option('--concurrency <n>', 'Set concurrency (persisted to config)')
     .option('--types <csv>', 'Override configured job types')
     .option('--poll <ms>', 'Override poll interval (ms) when idle')
-    .action(async (opts: { concurrency?: string; types?: string; poll?: string }) => {
-      const cfg = requireConfig();
-      if (!cfg.nodeId) {
-        ui.error('This machine is not registered. Run `memoriahub node register` first.');
-        process.exit(1);
-      }
-      const api = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
-
-      const concurrency = Math.max(
-        1,
-        parseInt(opts.concurrency ?? String(cfg.node?.concurrency ?? DEFAULT_CONCURRENCY), 10) ||
-          DEFAULT_CONCURRENCY,
-      );
-      const requested = parseTypes(opts.types);
-      const eligibleTypes =
-        requested.length > 0 ? requested : cfg.node?.eligibleTypes ?? [...NODE_JOB_TYPES];
-      const pollIntervalMs =
-        parseInt(opts.poll ?? String(cfg.node?.pollIntervalMs ?? DEFAULT_POLL_MS), 10) ||
-        DEFAULT_POLL_MS;
-
-      // 1. Ensure models are present before processing.
-      try {
-        const manifest = await api.getModelManifest();
-        if (manifest.length > 0) {
-          ui.step(`Ensuring ${manifest.length} model file(s)…`);
-          const modelRes = await ensureModels(manifest);
-          ui.success(
-            `Models ready in ${modelRes.targetDir} ` +
-              `(${modelRes.downloaded.length} downloaded, ${modelRes.present.length} present` +
-              `${modelRes.failed.length > 0 ? `, ${modelRes.failed.length} failed` : ''})`,
-          );
-          for (const f of modelRes.failed) {
-            ui.warn(`Model ${f.name} failed: ${f.error}`);
-          }
+    .option('--daemon', 'Detach and run in the background (logs under ~/.memoriahub/logs)')
+    .action(
+      async (opts: { concurrency?: string; types?: string; poll?: string; daemon?: boolean }) => {
+        const cfg = requireConfig();
+        if (!cfg.nodeId) {
+          ui.error('This machine is not registered. Run `memoriahub node register` first.');
+          process.exit(1);
         }
-      } catch (err) {
-        ui.warn(
-          `Could not fetch/ensure model manifest: ${(err as Error).message}. ` +
-            'Continuing — jobs needing local models may fail.',
+
+        // Refuse a second instance up front (pidfile OR live IPC socket).
+        const pidInfo = readPidFile(nodePidPath());
+        if (pidInfo && isPidAlive(pidInfo.pid)) {
+          ui.error(
+            `A worker node is already running (pid ${pidInfo.pid}). ` +
+              'Use `memoriahub node status` or `memoriahub node stop`.',
+          );
+          process.exit(1);
+        }
+        if (await isDaemonRunning()) {
+          ui.error(
+            'A worker node is already running (IPC socket is live). ' +
+              'Use `memoriahub node status` or `memoriahub node stop`.',
+          );
+          process.exit(1);
+        }
+
+        const api = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
+
+        const concurrency = Math.max(
+          1,
+          parseInt(opts.concurrency ?? String(cfg.node?.concurrency ?? DEFAULT_CONCURRENCY), 10) ||
+            DEFAULT_CONCURRENCY,
         );
-      }
 
-      // 2. Build and run the engine.
-      const options: NodeEngineOptions = { concurrency, eligibleTypes, pollIntervalMs };
-      const engine = new NodeEngine({
-        api,
-        dispatcher: new ComputeDispatcher(),
-        nodeId: cfg.nodeId,
-        options,
-      });
+        // --concurrency persists to NodeConfig so restarts (and the daemon
+        // child spawned below) pick it up.
+        if (opts.concurrency !== undefined) {
+          saveConfig({ ...cfg, node: { ...cfg.node, concurrency } });
+        }
 
-      attachHeadlessPrinter(engine);
+        // --daemon: re-spawn ourselves detached and exit. The child runs this
+        // same command minus --daemon, so it hosts the IPC socket + logging.
+        if (opts.daemon) {
+          const outPath = path.join(logsDir(), 'node.out.log');
+          const logFd = fs.openSync(outPath, 'a');
+          const args = process.argv.slice(2).filter((a) => a !== '--daemon');
+          const child = spawn(process.execPath, [process.argv[1], ...args], {
+            detached: true,
+            stdio: ['ignore', logFd, logFd],
+          });
+          child.unref();
+          fs.closeSync(logFd);
+          ui.success(`Worker node daemon started (pid ${child.pid}).`);
+          ui.dim(`Structured log : ${nodeLogPath()}`);
+          ui.dim(`Process output : ${outPath}`);
+          ui.dim('Manage it with `memoriahub node status|logs|set-concurrency|stop`.');
+          return;
+        }
+        const requested = parseTypes(opts.types);
+        const eligibleTypes =
+          requested.length > 0 ? requested : cfg.node?.eligibleTypes ?? [...NODE_JOB_TYPES];
+        const pollIntervalMs =
+          parseInt(opts.poll ?? String(cfg.node?.pollIntervalMs ?? DEFAULT_POLL_MS), 10) ||
+          DEFAULT_POLL_MS;
 
-      let stopping = false;
-      const onSignal = (): void => {
-        if (stopping) return;
-        stopping = true;
-        ui.blank();
-        ui.info('Draining — finishing in-flight jobs, then deregistering…');
-        void engine.stop('signal');
-      };
-      process.on('SIGINT', onSignal);
-      process.on('SIGTERM', onSignal);
+        // 1. Ensure models are present before processing.
+        try {
+          const manifest = await api.getModelManifest();
+          if (manifest.length > 0) {
+            ui.step(`Ensuring ${manifest.length} model file(s)…`);
+            const modelRes = await ensureModels(manifest);
+            ui.success(
+              `Models ready in ${modelRes.targetDir} ` +
+                `(${modelRes.downloaded.length} downloaded, ${modelRes.present.length} present` +
+                `${modelRes.failed.length > 0 ? `, ${modelRes.failed.length} failed` : ''})`,
+            );
+            for (const f of modelRes.failed) {
+              ui.warn(`Model ${f.name} failed: ${f.error}`);
+            }
+          }
+        } catch (err) {
+          ui.warn(
+            `Could not fetch/ensure model manifest: ${(err as Error).message}. ` +
+              'Continuing — jobs needing local models may fail.',
+          );
+        }
 
-      ui.step(
-        `Worker node online — concurrency ${concurrency}, ` +
-          `types [${eligibleTypes.join(', ')}], poll ${pollIntervalMs}ms. Ctrl-C to stop.`,
-      );
+        // 2. Build the engine with file logging and the IPC daemon host, so
+        //    every run (foreground or daemonized) is attachable by a second
+        //    CLI instance.
+        const options: NodeEngineOptions = { concurrency, eligibleTypes, pollIntervalMs };
+        const engine = new NodeEngine({
+          api,
+          dispatcher: new ComputeDispatcher(),
+          nodeId: cfg.nodeId,
+          options,
+        });
 
-      await engine.start();
-    });
+        const logger = createNodeLogger();
+        attachEngineLogging(logger, engine);
+        attachHeadlessPrinter(engine);
+
+        let host;
+        try {
+          host = await startDaemonHost(engine, logger);
+        } catch (err) {
+          ui.error(`Cannot start worker node: ${(err as Error).message}`);
+          process.exit(1);
+        }
+
+        let stopping = false;
+        const onSignal = (): void => {
+          if (stopping) return;
+          stopping = true;
+          ui.blank();
+          ui.info('Draining — finishing in-flight jobs, then deregistering…');
+          void engine.stop('signal');
+        };
+        process.on('SIGINT', onSignal);
+        process.on('SIGTERM', onSignal);
+
+        ui.step(
+          `Worker node online — concurrency ${concurrency}, ` +
+            `types [${eligibleTypes.join(', ')}], poll ${pollIntervalMs}ms. Ctrl-C to stop.`,
+        );
+        ui.dim(`Log: ${logger.logPath}`);
+        ui.dim(`IPC: ${host.socketPath}`);
+
+        await engine.start();
+      },
+    );
 
   return cmd;
 }
@@ -277,26 +401,59 @@ function attachHeadlessPrinter(engine: NodeEngine): void {
 function stopCmd(): Command {
   const cmd = new Command('stop');
   cmd
-    .description('Best-effort signal a running worker node to drain and stop')
+    .description('Stop a running worker node (IPC → SIGTERM → server-side deregister)')
     .action(async () => {
+      // 1. Preferred path: graceful stop over the IPC socket — drains
+      //    in-flight jobs and deregisters server-side.
+      if (await isDaemonRunning()) {
+        try {
+          const client = await connectToDaemon();
+          const closed = new Promise<void>((resolve) => client.onClose(resolve));
+          client.send({ cmd: 'stop' });
+          await client.waitFor((m) => m.kind === 'ack' && m['cmd'] === 'stop', 15_000);
+          // Wait for the daemon to actually go away (socket close) — bounded.
+          await Promise.race([
+            closed,
+            new Promise<void>((resolve) => setTimeout(resolve, 15_000).unref?.()),
+          ]);
+          client.close();
+          ui.success('Worker node stopped via IPC (drained and deregistered).');
+          return;
+        } catch (err) {
+          ui.warn(`IPC stop failed: ${(err as Error).message} — trying SIGTERM…`);
+        }
+      }
+
+      // 2. Fallback: SIGTERM via the pidfile — the start command's signal
+      //    handler drains and deregisters.
+      const pidInfo = readPidFile(nodePidPath());
+      if (pidInfo && isPidAlive(pidInfo.pid)) {
+        try {
+          process.kill(pidInfo.pid, 'SIGTERM');
+          ui.success(
+            `Sent SIGTERM to worker node (pid ${pidInfo.pid}) — it will drain and deregister.`,
+          );
+          return;
+        } catch (err) {
+          ui.warn(`Could not signal pid ${pidInfo.pid}: ${(err as Error).message}`);
+        }
+      }
+
+      // 3. Last resort: no local process found — deregister server-side so no
+      //    new jobs are dispatched to this node.
+      ui.info('No local worker node process found — falling back to server-side deregister.');
       const cfg = requireConfig();
       if (!cfg.nodeId) {
         ui.error('This machine is not registered as a worker node.');
         process.exit(1);
       }
       const api = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
-
-      // Single-process model: there is no local IPC to a running `start`. We
-      // deregister server-side so no new jobs are dispatched to this node; the
-      // running `start` process must be stopped with Ctrl-C to drain in-flight
-      // work and deregister cleanly.
       try {
         await api.deregisterNode(cfg.nodeId);
         ui.success('Node deregistered server-side (no new jobs will be dispatched).');
       } catch (err) {
         ui.warn(`Could not deregister node server-side: ${(err as Error).message}`);
       }
-      ui.info('If a `memoriahub node start` process is running here, press Ctrl-C to stop it.');
     });
 
   return cmd;
@@ -306,11 +463,79 @@ function stopCmd(): Command {
 // node status
 // ---------------------------------------------------------------------------
 
+/** Human-friendly duration, e.g. "2h 13m" / "45s". */
+function fmtDuration(ms: number): string {
+  if (ms < 0) ms = 0;
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  return `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+/** Render a live EngineSnapshot received over IPC. */
+function renderSnapshot(snap: EngineSnapshot): void {
+  ui.blank();
+  ui.step('Worker node — live status (via IPC)');
+  const uptime = snap.startedAt ? fmtDuration(Date.now() - Date.parse(snap.startedAt)) : '?';
+  const hbAge =
+    snap.lastHeartbeatAt != null
+      ? `${fmtDuration(Date.now() - Date.parse(snap.lastHeartbeatAt))} ago`
+      : chalk.yellow('never');
+  ui.line(`  Node ID       : ${snap.nodeId}`);
+  ui.line(`  Uptime        : ${uptime}`);
+  ui.line(`  State         : ${snap.draining ? chalk.yellow('draining') : chalk.green('online')}`);
+  ui.line(`  Concurrency   : ${snap.concurrency}`);
+  ui.line(`  Eligible types: ${snap.eligibleTypes.join(', ') || '(none)'}`);
+  ui.line(`  Last heartbeat: ${hbAge}`);
+  ui.line(
+    `  Jobs          : ${snap.counters.claimed} claimed, ` +
+      `${chalk.green(`${snap.counters.succeeded} succeeded`)}, ` +
+      `${snap.counters.failed > 0 ? chalk.red(`${snap.counters.failed} failed`) : '0 failed'}`,
+  );
+
+  if (snap.activeJobs.length > 0) {
+    ui.blank();
+    ui.step(`Active jobs (${snap.activeJobs.length})`);
+    for (const j of snap.activeJobs) {
+      ui.line(`  ${j.jobId} (${j.type}) — running ${fmtDuration(Date.now() - Date.parse(j.startedAt))}`);
+    }
+  }
+
+  const recent = snap.history.slice(-10);
+  if (recent.length > 0) {
+    ui.blank();
+    ui.step(`Recent jobs (last ${recent.length} of ${snap.history.length})`);
+    for (const h of recent) {
+      const mark = h.status === 'done' ? chalk.green('✓') : chalk.red('✗');
+      const dur = h.durationMs != null ? ` in ${fmtDuration(h.durationMs)}` : '';
+      const err = h.error ? ` — ${h.error}` : '';
+      ui.line(`  ${mark} ${h.jobId} (${h.type})${dur}${err}`);
+    }
+  }
+}
+
 function statusCmd(): Command {
   const cmd = new Command('status');
   cmd
     .description('Show this machine\'s node config and current capabilities')
     .action(async () => {
+      // Live path: an attached daemon answers with a fresh snapshot.
+      if (await isDaemonRunning()) {
+        try {
+          const client = await connectToDaemon();
+          client.send({ cmd: 'status' });
+          const msg = await client.waitFor((m) => m.kind === 'status', 5000);
+          client.close();
+          renderSnapshot(msg as unknown as EngineSnapshot);
+          return;
+        } catch (err) {
+          ui.warn(`Could not query running node over IPC: ${(err as Error).message}`);
+        }
+      }
+
       const cfg = requireConfig();
 
       ui.blank();
@@ -340,6 +565,213 @@ function statusCmd(): Command {
           // No per-node GET, insufficient permission, or offline — local config only.
         }
       }
+    });
+
+  return cmd;
+}
+
+// ---------------------------------------------------------------------------
+// node logs
+// ---------------------------------------------------------------------------
+
+function logsCmd(): Command {
+  const cmd = new Command('logs');
+  cmd
+    .description('Print (or tail) the worker-node JSONL log')
+    .option('-n, --lines <n>', 'Number of trailing lines to print', '50')
+    .option('--follow', 'Keep tailing the log as new lines are written')
+    .action((opts: { lines?: string; follow?: boolean }) => {
+      const n = Math.max(0, parseInt(opts.lines ?? '50', 10) || 50);
+      const lines = readLastLines(n);
+      if (lines.length === 0 && !opts.follow) {
+        ui.info(`No log lines yet (${nodeLogPath()}).`);
+        return;
+      }
+      for (const line of lines) process.stdout.write(line + '\n');
+      if (!opts.follow) return;
+
+      const stopFollow = followLog((line) => process.stdout.write(line + '\n'));
+      const onSignal = (): void => {
+        stopFollow();
+        process.exit(0);
+      };
+      process.on('SIGINT', onSignal);
+      process.on('SIGTERM', onSignal);
+      // The fs.watch handle inside followLog keeps the process alive.
+    });
+
+  return cmd;
+}
+
+// ---------------------------------------------------------------------------
+// node set-concurrency
+// ---------------------------------------------------------------------------
+
+function setConcurrencyCmd(): Command {
+  const cmd = new Command('set-concurrency');
+  cmd
+    .description('Adjust worker concurrency — live via IPC when running, else saved to config')
+    .argument('<n>', 'New concurrency (positive integer)')
+    .action(async (nStr: string) => {
+      const n = parseInt(nStr, 10);
+      if (!Number.isInteger(n) || n < 1 || n > 64) {
+        ui.error('Concurrency must be an integer between 1 and 64.');
+        process.exit(1);
+      }
+
+      if (await isDaemonRunning()) {
+        try {
+          const client = await connectToDaemon();
+          client.send({ cmd: 'set-concurrency', value: n });
+          const msg: DaemonMessage = await client.waitFor(
+            (m) => m.kind === 'ack' || m.kind === 'error',
+            5000,
+          );
+          client.close();
+          if (msg.kind === 'error') {
+            ui.error(String(msg['message'] ?? 'daemon rejected the command'));
+            process.exit(1);
+          }
+          ui.success(
+            `Concurrency set to ${n} on the running node ` +
+              '(applies from the next claim batch; persisted to config).',
+          );
+          return;
+        } catch (err) {
+          ui.warn(`IPC update failed: ${(err as Error).message} — saving to config only.`);
+        }
+      }
+
+      const cfg = requireConfig();
+      saveConfig({ ...cfg, node: { ...cfg.node, concurrency: n } });
+      ui.success(`Concurrency ${n} saved to config (applies on the next \`node start\`).`);
+    });
+
+  return cmd;
+}
+
+// ---------------------------------------------------------------------------
+// node service — systemd user unit management
+// ---------------------------------------------------------------------------
+
+const SERVICE_UNIT = 'memoriahub-node.service';
+
+function systemdUserDir(): string {
+  return path.join(os.homedir(), '.config', 'systemd', 'user');
+}
+
+/** True when a per-user systemd instance is reachable. */
+function hasUserSystemd(): boolean {
+  try {
+    const res = spawnSync('systemctl', ['--user', 'show-environment'], { stdio: 'ignore' });
+    return res.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+function printNoUserSystemdGuidance(): void {
+  ui.error('No per-user systemd instance is available.');
+  ui.info(
+    'On WSL, enable systemd by adding "[boot]\\nsystemd=true" to /etc/wsl.conf and restarting ' +
+      'the distro (`wsl --shutdown`), or skip systemd entirely with `memoriahub node start --daemon`.',
+  );
+}
+
+/** Run systemctl --user with the given args, exiting on failure. */
+function systemctlUser(args: string[]): void {
+  const res = spawnSync('systemctl', ['--user', ...args], { stdio: 'inherit' });
+  if (res.status !== 0) {
+    ui.error(`systemctl --user ${args.join(' ')} failed (exit ${res.status ?? 'signal'}).`);
+    process.exit(1);
+  }
+}
+
+function serviceCmd(): Command {
+  const cmd = new Command('service');
+  cmd.description('Manage the systemd user service that keeps the worker node always on');
+
+  cmd
+    .command('install')
+    .description(`Write ~/.config/systemd/user/${SERVICE_UNIT} and enable it now`)
+    .action(() => {
+      if (os.platform() === 'win32') {
+        ui.error('systemd services are not available on Windows — use `node start --daemon`.');
+        process.exit(1);
+      }
+      if (!hasUserSystemd()) {
+        printNoUserSystemdGuidance();
+        process.exit(1);
+      }
+
+      // process.argv[1] is the installed CLI entry (dist/index.js) both for a
+      // global install and a repo checkout.
+      const entry = path.resolve(process.argv[1]);
+      const unit = [
+        '[Unit]',
+        'Description=MemoriaHub worker node',
+        'After=network-online.target',
+        '',
+        '[Service]',
+        `ExecStart=${process.execPath} ${entry} node start`,
+        'Restart=on-failure',
+        'RestartSec=5',
+        'Environment=NODE_ENV=production',
+        '',
+        '[Install]',
+        'WantedBy=default.target',
+        '',
+      ].join('\n');
+
+      const dir = systemdUserDir();
+      fs.mkdirSync(dir, { recursive: true });
+      const unitPath = path.join(dir, SERVICE_UNIT);
+      fs.writeFileSync(unitPath, unit);
+      ui.success(`Wrote ${unitPath}`);
+
+      systemctlUser(['daemon-reload']);
+      systemctlUser(['enable', '--now', SERVICE_UNIT]);
+      ui.success('Service enabled and started.');
+      ui.dim(`Follow logs with \`memoriahub node logs --follow\` or ` +
+        `\`journalctl --user -u ${SERVICE_UNIT} -f\`.`);
+      ui.dim(
+        'Tip: `loginctl enable-linger $USER` keeps the service running after you log out.',
+      );
+    });
+
+  cmd
+    .command('uninstall')
+    .description('Stop, disable, and remove the systemd user service')
+    .action(() => {
+      if (!hasUserSystemd()) {
+        printNoUserSystemdGuidance();
+        process.exit(1);
+      }
+      const unitPath = path.join(systemdUserDir(), SERVICE_UNIT);
+      // disable --now is best-effort: the unit may already be gone.
+      spawnSync('systemctl', ['--user', 'disable', '--now', SERVICE_UNIT], { stdio: 'inherit' });
+      try {
+        fs.unlinkSync(unitPath);
+        ui.success(`Removed ${unitPath}`);
+      } catch {
+        ui.info(`Unit file not present (${unitPath}).`);
+      }
+      systemctlUser(['daemon-reload']);
+      ui.success('Service uninstalled.');
+    });
+
+  cmd
+    .command('status')
+    .description('Show systemd status for the worker-node service')
+    .action(() => {
+      if (!hasUserSystemd()) {
+        printNoUserSystemdGuidance();
+        process.exit(1);
+      }
+      // Exit code 3 = unit inactive — still useful output, so don't fail hard.
+      spawnSync('systemctl', ['--user', 'status', SERVICE_UNIT, '--no-pager'], {
+        stdio: 'inherit',
+      });
     });
 
   return cmd;
@@ -410,34 +842,61 @@ function doctorCmd(): Command {
       const api = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
       let hasError = false;
 
-      // 1. Connectivity
-      ui.step('Connectivity');
-      try {
-        await api.get<unknown>('/api/auth/me');
-        ui.success(`Connected to ${cfg.serverUrl} (token valid).`);
-      } catch (err) {
+      // 1. API Access — auth roundtrip, node-registration validity, and
+      //    model-manifest reachability. Claim permission (jobs:write) is not
+      //    probed separately since it shares the same PAT scope as the auth
+      //    roundtrip below and a real claim would consume a job.
+      ui.step('API Access');
+      const access = await runApiAccessChecks(api, cfg.nodeId);
+      if (access.authOk) {
+        ui.success(`Connected to ${cfg.serverUrl} (token valid). ${access.authDetail}`);
+      } else {
         hasError = true;
-        ui.error(`Cannot reach API / token invalid: ${(err as Error).message}`);
+        ui.error(`Cannot reach API / token invalid: ${access.authDetail}`);
+      }
+      if (cfg.nodeId) {
+        if (access.nodeRegistrationOk === true) {
+          ui.success(`Node registration: ${access.nodeRegistrationDetail}`);
+        } else if (access.nodeRegistrationOk === false) {
+          ui.warn(`Node registration: ${access.nodeRegistrationDetail}`);
+        } else {
+          ui.dim(`Node registration: ${access.nodeRegistrationDetail}`);
+        }
+      } else {
+        ui.dim('Node registration: not registered locally — run `node register` first.');
+      }
+      if (access.manifestOk) {
+        ui.success(`Model manifest: ${access.manifestDetail}`);
+      } else {
+        ui.warn(`Model manifest: ${access.manifestDetail}`);
       }
       ui.blank();
 
-      // 2. Capabilities
-      ui.step('Capabilities');
+      // 2. Capabilities — presence probe (require.resolve/binary detection).
+      ui.step('Capabilities (installed)');
       const caps = await detectCapabilities();
-      printCapabilityTable(caps);
+
+      // 3. Operational self-tests — a real decode/embed/detect/OCR-init pass
+      //    for every capability reported present above. See node/self-test.ts.
+      ui.step('Running operational self-tests…');
+      const operationalCaps = await runOperationalSelfTests(caps);
+      printOperationalCapabilityTable(caps, operationalCaps);
       ui.blank();
 
-      // 3. Required-capability check for eligible types
+      // 4. Required-capability check for eligible types — gated on the
+      //    OPERATIONAL result, not mere presence, so a node whose sharp binary
+      //    resolves but crashes on first use (or whose models aren't
+      //    downloaded yet) is correctly reported as not-ready.
       ui.step('Job-type readiness');
       const eligibleTypes =
         cfg.node?.eligibleTypes && cfg.node.eligibleTypes.length > 0
           ? cfg.node.eligibleTypes.filter(isNodeJobType)
-          : supportedTypes(caps);
+          : supportedTypes(operationalCaps);
       if (eligibleTypes.length === 0) {
         ui.warn('No eligible job types configured/supported on this machine.');
       }
       for (const t of eligibleTypes) {
-        const missing = missingRequirements(t, caps);
+        const missing = missingRequirements(t, operationalCaps);
         if (missing.length === 0) {
           ui.success(`${t}: ready`);
         } else {
@@ -447,7 +906,7 @@ function doctorCmd(): Command {
       }
       ui.blank();
 
-      // 4. Model presence
+      // 5. Model presence (download-and-verify, as `node start` does).
       ui.step('Models');
       try {
         const manifest = await api.getModelManifest();
@@ -466,6 +925,33 @@ function doctorCmd(): Command {
         }
       } catch (err) {
         ui.warn(`Could not verify models: ${(err as Error).message}`);
+      }
+      ui.blank();
+
+      // 6. Daemon liveness — is a `node start` process currently running on
+      //    this machine (with a quick live snapshot), or is there a stale
+      //    pidfile left behind by a crash. Informational only — does not
+      //    affect the exit code, since a stopped daemon isn't a "problem"
+      //    with the machine's capabilities.
+      ui.step('Daemon');
+      const daemon = await checkDaemonLiveness();
+      if (daemon.running) {
+        ui.success(`Worker node daemon is running — ${daemon.detail}`);
+        const snap = daemon.snapshot as
+          | { startedAt?: string; concurrency?: number; eligibleTypes?: string[] }
+          | null;
+        if (snap) {
+          if (snap.startedAt) {
+            const uptime = fmtDuration(Date.now() - Date.parse(snap.startedAt));
+            ui.dim(`  uptime: ${uptime}`);
+          }
+          if (snap.concurrency !== undefined) ui.dim(`  concurrency: ${snap.concurrency}`);
+          if (snap.eligibleTypes) ui.dim(`  eligible types: ${snap.eligibleTypes.join(', ')}`);
+        }
+      } else if (daemon.stalePidfile) {
+        ui.warn(daemon.detail);
+      } else {
+        ui.info(daemon.detail);
       }
       ui.blank();
 
@@ -491,6 +977,9 @@ export function nodeCommand(): Command {
   cmd.addCommand(startCmd());
   cmd.addCommand(stopCmd());
   cmd.addCommand(statusCmd());
+  cmd.addCommand(logsCmd());
+  cmd.addCommand(setConcurrencyCmd());
+  cmd.addCommand(serviceCmd());
   cmd.addCommand(listCmd());
   cmd.addCommand(doctorCmd());
 
