@@ -8,8 +8,15 @@
  *
  * Lifecycle:
  *   start()  → initial heartbeat, start heartbeat ticker, run the claim loop.
+ *   drain()  → stop claiming, finish in-flight jobs, keep heartbeating as
+ *              'draining' — does NOT deregister.
  *   stop()   → set draining, wake the idle sleep, await in-flight jobs,
  *              deregister, emit 'stopped'.
+ *
+ * Observability: getSnapshot() returns a point-in-time EngineSnapshot (active
+ * jobs, last-50 history ring, counters, heartbeat age) consumed by `node
+ * status` and the daemon IPC socket. setConcurrency() adjusts the cap live,
+ * applying from the next claim batch.
  *
  * Per-job flow (bounded by `concurrency` via runPool):
  *   download inputUrl → start lease-renew ticker → dispatcher.compute →
@@ -60,6 +67,42 @@ export interface NodeEngineDeps {
   tmpDir?: () => string;
 }
 
+/** One entry of the completed/failed job ring buffer. */
+export interface CompletedJobRecord {
+  jobId: string;
+  type: string;
+  status: 'done' | 'error';
+  durationMs?: number;
+  error?: string;
+  finishedAt: string;
+}
+
+/** A job currently being processed. */
+export interface ActiveJobInfo {
+  jobId: string;
+  type: string;
+  startedAt: string;
+}
+
+/** Point-in-time view of the engine, served over the daemon IPC socket. */
+export interface EngineSnapshot {
+  nodeId: string;
+  /** ISO timestamp of start(); null before the engine has started. */
+  startedAt: string | null;
+  /** Current live concurrency cap (see setConcurrency). */
+  concurrency: number;
+  eligibleTypes: string[];
+  activeJobs: ActiveJobInfo[];
+  /** Last 50 completed/failed jobs, oldest first. */
+  history: CompletedJobRecord[];
+  counters: { succeeded: number; failed: number; claimed: number };
+  lastHeartbeatAt: string | null;
+  draining: boolean;
+}
+
+/** Ring-buffer capacity for the completed-job history. */
+const HISTORY_LIMIT = 50;
+
 type Resolved = Required<Pick<NodeEngineDeps, 'downloadFn' | 'detectFn' | 'tmpDir'>>;
 
 export class NodeEngine extends NodeTypedEmitter {
@@ -77,16 +120,65 @@ export class NodeEngine extends NodeTypedEmitter {
   /** Promise for the running claim loop, awaited by stop(). */
   private loopPromise: Promise<void> | null = null;
 
+  /**
+   * Live-adjustable concurrency cap. Read at every loop iteration for both
+   * the claim size and the per-batch pool cap, so setConcurrency() takes
+   * effect from the NEXT claim batch (in-flight batches keep their cap).
+   */
+  private concurrencyCap: number;
+  /** ISO timestamp of start() — the uptime anchor for snapshots. */
+  private startedAtIso: string | null = null;
+  private lastHeartbeatAt: string | null = null;
+  /** Last HISTORY_LIMIT completed/failed jobs, oldest first. */
+  private readonly history: CompletedJobRecord[] = [];
+  private readonly counters = { succeeded: 0, failed: 0, claimed: 0 };
+  private readonly activeJobs = new Map<string, ActiveJobInfo>();
+
   constructor(deps: NodeEngineDeps) {
     super();
     this.api = deps.api;
     this.dispatcher = deps.dispatcher;
     this.nodeId = deps.nodeId;
     this.opts = deps.options;
+    this.concurrencyCap = Math.max(1, Math.floor(deps.options.concurrency));
     this.resolved = {
       downloadFn: deps.downloadFn ?? downloadToFile,
       detectFn: deps.detectFn ?? detectCapabilities,
       tmpDir: deps.tmpDir ?? (() => os.tmpdir()),
+    };
+  }
+
+  /**
+   * Adjust the concurrency cap of a running engine. Applies from the next
+   * claim batch — the current batch (if any) finishes under the old cap.
+   */
+  setConcurrency(n: number): void {
+    this.concurrencyCap = Math.max(1, Math.floor(n));
+  }
+
+  /**
+   * Stop claiming new jobs but finish everything in flight, WITHOUT
+   * deregistering from the server. Heartbeats keep running and report
+   * status 'draining'. Call stop() to fully shut down and deregister.
+   */
+  drain(): void {
+    if (this.draining) return;
+    this.draining = true;
+    this.idleResolve?.();
+  }
+
+  /** Point-in-time snapshot for status rendering and the IPC socket. */
+  getSnapshot(): EngineSnapshot {
+    return {
+      nodeId: this.nodeId,
+      startedAt: this.startedAtIso,
+      concurrency: this.concurrencyCap,
+      eligibleTypes: [...this.opts.eligibleTypes],
+      activeJobs: [...this.activeJobs.values()],
+      history: [...this.history],
+      counters: { ...this.counters },
+      lastHeartbeatAt: this.lastHeartbeatAt,
+      draining: this.draining,
     };
   }
 
@@ -96,6 +188,7 @@ export class NodeEngine extends NodeTypedEmitter {
     if (this.running) return;
     this.running = true;
     this.draining = false;
+    this.startedAtIso = new Date().toISOString();
 
     // Initial heartbeat (best-effort) then periodic ticker.
     await this.beat();
@@ -144,9 +237,12 @@ export class NodeEngine extends NodeTypedEmitter {
   // -------------------------------------------------------------------------
 
   private async loop(): Promise<void> {
-    const maxClaim = this.opts.maxClaim ?? this.opts.concurrency;
-
     while (!this.draining) {
+      // Read the mutable cap each iteration so setConcurrency() applies from
+      // the next claim batch.
+      const cap = this.concurrencyCap;
+      const maxClaim = this.opts.maxClaim ?? cap;
+
       let claimed: ClaimedNodeJob[] = [];
       try {
         const res = await this.api.claimNodeJobs(this.nodeId, {
@@ -168,12 +264,19 @@ export class NodeEngine extends NodeTypedEmitter {
         continue;
       }
 
+      this.counters.claimed += claimed.length;
       this.emit(NODE_EV.CLAIMED, { count: claimed.length });
 
-      await runPool(claimed, this.opts.concurrency, async (claim) => {
+      await runPool(claimed, cap, async (claim) => {
         await this.processJob(claim);
       });
     }
+  }
+
+  /** Append to the completed-job ring buffer, evicting the oldest past the cap. */
+  private recordHistory(record: CompletedJobRecord): void {
+    this.history.push(record);
+    if (this.history.length > HISTORY_LIMIT) this.history.shift();
   }
 
   private async processJob(claim: ClaimedNodeJob): Promise<void> {
@@ -182,6 +285,7 @@ export class NodeEngine extends NodeTypedEmitter {
     const type = job.type;
     const startMs = Date.now();
 
+    this.activeJobs.set(jobId, { jobId, type, startedAt: new Date().toISOString() });
     this.emit(NODE_EV.JOB_START, {
       jobId,
       type,
@@ -233,10 +337,19 @@ export class NodeEngine extends NodeTypedEmitter {
         });
       }
 
+      const durationMs = Date.now() - startMs;
+      this.counters.succeeded += 1;
+      this.recordHistory({
+        jobId,
+        type,
+        status: 'done',
+        durationMs,
+        finishedAt: new Date().toISOString(),
+      });
       this.emit(NODE_EV.JOB_DONE, {
         jobId,
         type,
-        durationMs: Date.now() - startMs,
+        durationMs,
         submitted,
       });
     } catch (err) {
@@ -251,8 +364,18 @@ export class NodeEngine extends NodeTypedEmitter {
       } catch {
         /* failure report is best-effort — server lease expiry requeues the job */
       }
+      this.counters.failed += 1;
+      this.recordHistory({
+        jobId,
+        type,
+        status: 'error',
+        durationMs: Date.now() - startMs,
+        error: message,
+        finishedAt: new Date().toISOString(),
+      });
       this.emit(NODE_EV.JOB_ERROR, { jobId, type, error: message, willRetry: true });
     } finally {
+      this.activeJobs.delete(jobId);
       if (leaseTimer) clearInterval(leaseTimer);
       if (downloaded) {
         try {
@@ -272,7 +395,8 @@ export class NodeEngine extends NodeTypedEmitter {
         status: this.draining ? 'draining' : 'online',
         capabilities,
       });
-      this.emit(NODE_EV.HEARTBEAT_OK, { at: new Date().toISOString() });
+      this.lastHeartbeatAt = new Date().toISOString();
+      this.emit(NODE_EV.HEARTBEAT_OK, { at: this.lastHeartbeatAt });
     } catch (err) {
       this.emit(NODE_EV.HEARTBEAT_FAIL, {
         error: err instanceof Error ? err.message : String(err),
