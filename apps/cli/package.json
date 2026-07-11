@@ -39,7 +39,7 @@
     "@tensorflow/tfjs-backend-wasm": "4.22.0",
     "@vladmandic/human": "3.3.6",
     "onnxruntime-node": "1.27.0",
-    "sharp": "0.35.1",
+    "sharp": "0.35.3",
     "tesseract.js": "7.0.0"
   },
   "devDependencies": {
