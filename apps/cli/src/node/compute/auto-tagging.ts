@@ -26,6 +26,15 @@
  * vocabulary stays server-side (AutoTaggingService.persistAutoTagging) — this
  * module only returns the raw text, matching autoTaggingResultSchema
  * (`{ rawText: string }`).
+ *
+ * RATE LIMITS: `callAnthropicVision` (package `/ai`) already classifies a
+ * 429/529 (Anthropic "Overloaded") SDK error into the shared
+ * `ProviderRateLimitError` (package `/rate-limit`) and throws it directly —
+ * no local duck-typing needed here. It propagates unchanged up through this
+ * compute function to node-engine.ts's processJob catch block, which detects
+ * `err instanceof ProviderRateLimitError` and forwards
+ * `{ rateLimited: true, retryAfterMs }` to the server's failure endpoint so
+ * the job backs off instead of burning through ENRICHMENT_MAX_ATTEMPTS.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -76,36 +85,19 @@ const computeAutoTagging: ComputeFn = async (inputPath, _params, ctx): Promise<A
   const imageBase64 = prepared.buffer.toString('base64');
 
   // --- 3. Call the provider directly. apiKey stays in this local variable
-  // only — never assigned to `this`/module-level state, never logged. ---
-  let rawText: string;
-  try {
-    rawText = await callAnthropicVision(
-      { apiKey: creds.apiKey, baseUrl: creds.baseUrl },
-      {
-        model: creds.model,
-        system: creds.system,
-        prompt: creds.prompt,
-        imageBase64,
-        mimeType: creds.mimeTypeHint,
-      },
-    );
-  } catch (err) {
-    // Classify 429/529 (Anthropic "Overloaded") the same way the server's
-    // in-process compute path does, and rethrow as a plain Error — the node
-    // engine's failure-report path (node-engine.ts's reportJobFailure call)
-    // currently only forwards { error, willRetry: true }, so there is no
-    // rateLimited/retryAfterMs signal to preserve on the CLI side yet.
-    const e = err as Record<string, unknown> | null;
-    const status = typeof e?.['status'] === 'number' ? e['status'] : undefined;
-    if (status === 429 || status === 529) {
-      throw new Error(
-        `Anthropic rate limit / overload (HTTP ${status}) — will retry: ${
-          typeof e?.['message'] === 'string' ? e['message'] : 'rate limited'
-        }`,
-      );
-    }
-    throw err;
-  }
+  // only — never assigned to `this`/module-level state, never logged.
+  // Rate-limit classification (429/529 -> ProviderRateLimitError) happens
+  // inside callAnthropicVision itself; nothing to catch here. ---
+  const rawText = await callAnthropicVision(
+    { apiKey: creds.apiKey, baseUrl: creds.baseUrl },
+    {
+      model: creds.model,
+      system: creds.system,
+      prompt: creds.prompt,
+      imageBase64,
+      mimeType: creds.mimeTypeHint,
+    },
+  );
 
   return { rawText };
 };

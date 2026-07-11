@@ -21,6 +21,17 @@
  * Per-job flow (bounded by `concurrency` via runPool):
  *   download inputUrl → start lease-renew ticker → dispatcher.compute →
  *   submit result (or report failure) → cleanup temp file.
+ *
+ * Rate-limit classification: a compute failure caused by a remote provider
+ * throttle (Anthropic 429/529 via auto-tagging, Nominatim/Google 429/5xx via
+ * geocode) surfaces as a `ProviderRateLimitError`
+ * (@memoriahub/enrichment-compute/rate-limit) — this is the ONE place that
+ * detects it (`err instanceof ProviderRateLimitError`) and forwards
+ * `{ rateLimited: true, retryAfterMs }` to the server's failure endpoint, so
+ * the job backs off through the server's rate-limit deferral path
+ * (`EnrichmentTerminalService.completeFailed`) instead of burning through
+ * `ENRICHMENT_MAX_ATTEMPTS`. Every other compute module type stays on the
+ * existing `{ willRetry: true }` path unchanged.
  */
 
 import * as fs from 'node:fs';
@@ -35,6 +46,7 @@ import {
   detectCapabilities,
   type CapabilityStatus,
 } from './capabilities.js';
+import { ProviderRateLimitError } from '@memoriahub/enrichment-compute/rate-limit';
 import type { ApiClient, ClaimedNodeJob } from '../api.js';
 
 export interface NodeEngineOptions {
@@ -357,12 +369,21 @@ export class NodeEngine extends NodeTypedEmitter {
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      // A provider throttle (Anthropic 429/529, Nominatim/Google 429/5xx)
+      // surfaces here as a ProviderRateLimitError regardless of which compute
+      // module threw it — forward rateLimited/retryAfterMs so the server
+      // defers with backoff instead of charging a normal retry attempt.
+      const rateLimit = err instanceof ProviderRateLimitError ? err : null;
       // Report failure so the server can requeue for another worker / the server
       // itself. willRetry=true — the server owns final attempt accounting.
       try {
         await this.api.reportJobFailure(this.nodeId, jobId, {
           error: message,
           willRetry: true,
+          ...(rateLimit && {
+            rateLimited: true,
+            ...(rateLimit.retryAfterMs !== undefined && { retryAfterMs: rateLimit.retryAfterMs }),
+          }),
         });
       } catch {
         /* failure report is best-effort — server lease expiry requeues the job */

@@ -472,12 +472,17 @@ export class ApiClient {
 
   /**
    * Report a job failure so the server can requeue/fail it
-   * (`POST /api/nodes/:id/jobs/:jobId/failure`).
+   * (`POST /api/nodes/:id/jobs/:jobId/failure`). `rateLimited`/`retryAfterMs`
+   * mirror the server's `ReportJobFailureDto` (apps/api/src/nodes/dto/compute-result.dto.ts)
+   * — set by node-engine.ts's processJob when the compute failure was a
+   * `ProviderRateLimitError` (@memoriahub/enrichment-compute/rate-limit), so
+   * the server routes the job through `EnrichmentTerminalService`'s
+   * rate-limit deferral/backoff path instead of the normal-failure retry path.
    */
   reportJobFailure(
     nodeId: string,
     jobId: string,
-    body: { error: string; willRetry?: boolean },
+    body: { error: string; willRetry?: boolean; rateLimited?: boolean; retryAfterMs?: number },
   ): Promise<unknown> {
     return this.post<unknown>(
       `/api/nodes/${encodeURIComponent(nodeId)}/jobs/${encodeURIComponent(jobId)}/failure`,
