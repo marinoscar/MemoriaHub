@@ -1,6 +1,44 @@
 # Distributed Worker Nodes — Implementation Handoff & Continuation Plan
 
-> **Purpose of this document.** The coordination, control-plane, UI, Doctor, and CLI
+> ## SUPERSEDED — Feature Complete
+>
+> **Status as of the `feat/finish-nodes` branch: the remaining-work checklist below is
+> done.** This document was the mid-implementation continuation plan written when the
+> feature had a working control plane (register/heartbeat/claim/renew) but no compute, no
+> result-ingestion path, and no shared parity package. All of that has since been built,
+> and this document is kept **only as implementation history** — for the current, accurate
+> design and API surface, read [`docs/specs/distributed-nodes.md`](distributed-nodes.md)
+> (v2.0) instead. Do not use the checklist or "what remains" sections below as a task list;
+> they describe a snapshot in time that no longer reflects the codebase.
+>
+> **The final architecture deviated from this handoff's plan in two significant ways:**
+>
+> 1. **§4.C's "AI-proxy" endpoints (`POST /nodes/:id/proxy/auto-tagging`, `/nodes/:id/proxy/geocode`) were never built.**
+>    That design — the server making the keyed provider call on the node's behalf — was
+>    explicitly rejected as a product decision partway through implementation. Instead,
+>    `auto_tagging` and `geocode` use **transient, per-job provider credentials**
+>    (`POST /api/nodes/:id/jobs/:jobId/credentials`): the node fetches a plaintext key
+>    scoped to the one job it holds, calls the provider directly, and never persists the
+>    key. See [distributed-nodes.md §2.7](distributed-nodes.md#27-security-tradeoff-transient-per-job-credentials-instead-of-an-ai-proxy)
+>    for the full rationale and [§8.2](distributed-nodes.md#82-transient-credentials-gated-opt-in--formerly-ai-proxy)
+>    for the per-type detail.
+> 2. **A worker daemon, systemd service mode, and TUI "attach" mode were added beyond this
+>    handoff's original scope.** None of §§1–8 below mention background/service operation —
+>    the original plan assumed `node start` simply ran in an open foreground terminal. Mid-
+>    implementation, a product requirement was added: the worker node needed to run as an
+>    always-on background service on a household machine, observable from a
+>    separately-launched TUI without stopping it. This produced `node start --daemon`, the
+>    pidfile + NDJSON IPC socket, `node service install|uninstall|status`, and the TUI's
+>    embedded-vs-attached dashboard source split — see
+>    [distributed-nodes.md §9.3](distributed-nodes.md#93-worker-daemon-systemd-service-and-tui-attach).
+>
+> Everything else below (the claim/lease model, the compute/persist split shape, the
+> parity-package concept, the job-type eligibility reasoning) held up largely as planned —
+> see distributed-nodes.md for the corrected specifics (exact endpoint paths, exact DTO
+> shapes, final per-job-type status including the `video_face_detection` and
+> `thumbnail_repair` gaps).
+
+> **Purpose of this document (historical).** The coordination, control-plane, UI, Doctor, and CLI
 > surfaces of the distributed worker-nodes feature are **built, typecheck-verified, and
 > pushed** on branch `claude/distributed-queue-cli-nodes-kudzja`. The remaining work — the
 > **actual local model compute**, the **server result-ingestion + persist path**, the
