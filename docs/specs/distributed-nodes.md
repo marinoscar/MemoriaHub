@@ -87,7 +87,7 @@ Because a node is "just" a PAT holder making authenticated API calls, all existi
 
 ### 2.5 Presigned URLs: Deliberately Ephemeral, Deliberately Unrevocable
 
-Every presigned URL issued to a node (for reading source media bytes, or for uploading a generated thumbnail — §6) is scoped to **one specific job** and expires on a short TTL (proposed default: 15 minutes, comfortably longer than any single-item compute step but far shorter than a job's overall lease). This is a deliberate design simplification, stated explicitly:
+Every presigned URL issued to a node (for reading source media bytes, or for uploading a generated thumbnail — §6) is scoped to **one specific job** and expires on a TTL far shorter than any long-lived storage credential. **As built**, both directions use the same 1-hour default: `NodesService.resolveInputUrl` calls `ObjectsService.getDownloadUrl` with no expiry override, so it falls through to that service's own default (the `storage.signedUrlExpiry` config value, 3600 seconds); `getJobUploadUrl` (the thumbnail-upload presigned PUT, §5.1/§5.3) hard-codes the same `expiresSeconds = 3600`. This is longer than the 15-minute figure the v1.0 draft proposed, but still comfortably shorter than `ENRICHMENT_LEASE_MS`'s 30-minute default lease and, more importantly, still bounded and job-scoped rather than a long-lived credential. This is a deliberate design simplification, stated explicitly:
 
 > Because a presigned URL is self-expiring, there is **no long-lived credential of any kind stored on the laptop**, and therefore **nothing to revoke or delete** when a node goes offline, is decommissioned, or is simply never heard from again. The alternative design — issuing each node its own scoped, rotatable storage credential (e.g. an S3 IAM role or R2 API token per node) — would require a full credential lifecycle: issuance, rotation, and revocation-on-deregistration, plus a way to audit which node used which credential for which access. Presigned URLs sidestep all of that at the cost of a small, time-boxed exposure window (see [Risks §11](#11-risks-and-open-questions)) that is judged acceptable for a household deployment.
 
@@ -209,7 +209,7 @@ This query subsumes and generalizes the existing [Atomic Claim](enrichment-queue
 
 ### 4.3 Lease-Expiry Reaper
 
-A node can go offline mid-job — the laptop is closed, loses Wi-Fi, or crashes — with no clean way to signal the API that its claimed jobs are now orphaned. The `leaseExpiresAt` column (§3.3) exists to bound this: a claim is only valid until its lease expires, and the node is responsible for renewing the lease (`POST /api/nodes/jobs/:jobId/renew`, §5) periodically while a long-running job is still in progress.
+A node can go offline mid-job — the laptop is closed, loses Wi-Fi, or crashes — with no clean way to signal the API that its claimed jobs are now orphaned. The `leaseExpiresAt` column (§3.3) exists to bound this: a claim is only valid until its lease expires, and the node is responsible for renewing the lease (`POST /api/nodes/:id/jobs/:jobId/renew`, §5) periodically while a long-running job is still in progress.
 
 The existing stuck-job-reset cron, `EnrichmentStuckResetTask` (see [enrichment-queue.md §11 — Stuck Threshold](enrichment-queue.md#stuck-threshold-settings-driven)), is augmented to additionally scan for `running` jobs whose `leaseExpiresAt` has passed:
 
@@ -221,10 +221,10 @@ The existing stuck-job-reset cron, `EnrichmentStuckResetTask` (see [enrichment-q
 ### 4.4 Lease Renewal
 
 ```
-POST /api/nodes/jobs/:jobId/renew
+POST /api/nodes/:id/jobs/:jobId/renew
 ```
 
-A node calls this periodically (proposed cadence: at roughly half the lease duration, e.g. every 3–4 minutes for a 7–8 minute lease) while a job it holds is still actively being processed. The endpoint extends `leaseExpiresAt` to `now() + leaseDuration`, provided the caller's node is still the job's `claimedByNodeId` and the job is still `running` — a renewal request for a job the caller no longer owns (already reaped and reclaimed elsewhere) is rejected, and the node should abandon local work on that job rather than continue computing toward a result no endpoint will accept.
+`NodeEngine.processJob` (`apps/cli/src/node/node-engine.ts`) starts a renewal timer for every in-flight job at `leaseRenewIntervalMs` (default 30 seconds — comfortably short relative to `ENRICHMENT_LEASE_MS`'s 30-minute default lease), calling this endpoint with an optional `{ leaseMs }` override on each tick. The endpoint extends `leaseExpiresAt` to `now() + leaseDuration`, provided the caller's node is still the job's `claimedByNodeId` and the job is still `running`. A renewal failure is treated as non-fatal by the engine (logged, not thrown) — the assumption is that a transient network blip will resolve before the lease actually expires; if it doesn't, the server's lease-expiry reaper (§4.3) simply requeues the job as normal, and the node abandons local work on it once it observes that its next result/failure submission is rejected with 409 (§5.1, §6.1's `assertJobHeldByNode`).
 
 ---
 
@@ -482,76 +482,103 @@ Every node-originated call of either type still competes for the exact same rate
 
 ## 9. CLI Control and Observability
 
-All node lifecycle actions are available as `apps/cli` subcommands:
+All node lifecycle actions are available as `apps/cli` subcommands (`apps/cli/src/commands/node.ts`):
 
 | Command | Description |
 |---------|-------------|
 | `node register` | Register this machine as a node (§2.4, §5.1) |
-| `node start` | Start local worker loops; runs the model-hash self-check (§7.3) before advertising any job type as eligible |
-| `node stop` | Stop local worker loops immediately; in-flight jobs are abandoned (their leases expire naturally and are reaped per §4.3) |
-| `node drain` | Set `status = draining` (§3.2); stop claiming new jobs but let in-flight jobs finish before exiting |
-| `node status` | Show this node's current registration, status, eligible types, and active job count |
-| `node list` | List all nodes registered under the caller's PAT |
-| `node doctor` | Run the node-scoped diagnostics sweep (§10) |
+| `node start [--daemon]` | Run the claim/compute loop; always hosts the IPC socket + file logging (§9.3); `--daemon` detaches into the background instead of running in the foreground |
+| `node stop` | Stop a running node: tries the IPC socket first (graceful drain + server-side deregister), falls back to `SIGTERM` via the pidfile, falls back to a server-side deregister call if no local process is found at all |
+| `node status` | Live snapshot via IPC when a daemon is running, else a local-only summary |
+| `node logs [--follow] [-n <lines>]` | Print or tail the JSONL worker log (§9.3) |
+| `node set-concurrency <n>` | Adjust concurrency live over IPC if a daemon is running, else persist to local config for the next `node start` |
+| `node service install\|uninstall\|status` | Install/remove/inspect the systemd user unit that keeps the worker node always on (§9.3) |
+| `node list` | List all nodes registered under the caller's PAT (backed by `GET /api/nodes`, §5.1) |
+| `node doctor` | Run the node-scoped diagnostics sweep (§10.1) |
+
+**Corrections from the v1.0 draft:** there is no standalone `node drain` subcommand — draining is reached via the daemon IPC (`{ cmd: 'drain' }`, sent internally by `node stop`'s graceful path) rather than a separate CLI verb. `node register` accepts `--types <csv>` to set the initial `eligibleTypes` explicitly (defaulting to every type the local capability probe supports).
 
 ### 9.1 Terminal UI Integration
 
-This repo's CLI already has an Ink-based Terminal UI, referenced elsewhere in this documentation set (see the CLI TUI described in [job-insights.md](job-insights.md)). Node control is proposed as a new **"Worker Node"** entry under the TUI's tools menu, with two screens:
+This repo's CLI has an Ink-based Terminal UI (see the CLI TUI described in [job-insights.md](job-insights.md)). Node control is a real **"Worker Node"** entry under the TUI's tools menu (`apps/cli/src/tui/menu-config.ts`), with two screens:
 
-- **Live dashboard:** per-slot state (running / waiting / idle), per-job progress, aggregate throughput, and a scrolling error log — the node-side analog of the admin web dashboard's job stats.
-- **Config screen:** concurrency, eligible job types presented as a checkbox list gated by the model-hash self-check from §7 (a job type whose model hash doesn't match the manifest is shown but disabled, with the mismatch reason inline), poll cadence, and lease-renew cadence.
+- **`NodeDashboard`:** per-job state (active jobs with elapsed time, a scrolling history of recent completions/failures, aggregate counters) — the node-side analog of the admin web dashboard's job stats. See §9.3 for how it can attach to an already-running daemon instead of only reflecting an in-process engine.
+- **`NodeConfig`:** concurrency (live-adjustable — §9.3), eligible job types as a checkbox list gated by capability/model-hash status, poll cadence, and lease-renew cadence.
 
 ### 9.2 Node Engine Events
 
-The node engine is event-driven; the following events drive both the TUI dashboard and structured CLI logs:
+The node engine is event-driven (`apps/cli/src/node/node-events.ts`'s `NODE_EV` map); the following events drive the TUI dashboard, structured file logs, and the daemon IPC socket alike:
 
 ```typescript
-type NodeEngineEvent =
-  | { type: 'job:start'; jobId: string; jobType: string }
-  | { type: 'job:progress'; jobId: string; progress: number /* 0..1 */ }
-  | { type: 'job:done'; jobId: string; durationMs: number }
-  | { type: 'job:error'; jobId: string; error: string }
-  | { type: 'idle'; slot: number }
-  | { type: 'heartbeat'; eligibleTypes: string[] }
-  | { type: 'lease:renew'; jobId: string; newExpiresAt: string }
-  | { type: 'model:loaded'; modelKey: string; sha256: string };
+export const NODE_EV = {
+  CLAIMED: 'claimed',
+  JOB_START: 'job:start',
+  JOB_PROGRESS: 'job:progress',
+  JOB_DONE: 'job:done',
+  JOB_ERROR: 'job:error',
+  IDLE: 'idle',
+  HEARTBEAT_OK: 'heartbeat:ok',
+  HEARTBEAT_FAIL: 'heartbeat:fail',
+  LEASE_RENEW: 'lease:renew',
+  MODEL_LOADED: 'model:loaded',
+  STOPPED: 'stopped',
+} as const;
 ```
+
+`JOB_DONE`'s payload carries a `submitted: boolean` flag (true once the result endpoint accepted the payload) and `JOB_ERROR`'s carries `willRetry: boolean` — both correct the v1.0 draft's simplified `{ durationMs }` / `{ error }` shapes.
+
+### 9.3 Worker Daemon, systemd Service, and TUI Attach
+
+This entire subsection is new relative to the v1.0 draft, which had no concept of a background/service mode — it was added mid-implementation as a product requirement: Oscar wanted a worker node to run as an always-on service on a household machine, not just as a foreground process tied to an open terminal.
+
+**Daemon mode (`node start --daemon`).** `node start` always hosts two things alongside the `NodeEngine` itself: a pidfile at `~/.memoriahub/node.pid` and a Unix domain socket (named pipe on Windows) at `~/.memoriahub/node.sock`. Passing `--daemon` detaches the process into the background instead of blocking the foreground terminal; without it, `node start` runs the same engine + IPC host in the foreground (useful for watching logs directly, e.g. during first-time setup). A stale pidfile (dead PID) is removed automatically on the next start attempt; a live one refuses a second concurrent daemon.
+
+**IPC protocol (`apps/cli/src/node/daemon.ts`, `apps/cli/src/node/ndjson.ts`).** The socket speaks one JSON object per line (NDJSON). Server → client frames: `{ kind: 'snapshot', ...EngineSnapshot }` (sent once on connect), `{ kind: 'log-tail', lines: string[] }` (recent log lines on connect), `{ kind: 'event', ev, payload, ts }` (every engine event, live), `{ kind: 'status', ...EngineSnapshot }` (reply to a status query), `{ kind: 'ack', cmd, ... }`, `{ kind: 'error', message }`. Client → server commands: `{ cmd: 'status' }`, `{ cmd: 'set-concurrency', value }`, `{ cmd: 'drain' }`, `{ cmd: 'stop' }`. This is how `node stop`, `node status`, `node set-concurrency`, and the TUI's attach mode (below) all talk to an already-running daemon without needing a second server-side round trip for every query.
+
+**`node service install|uninstall|status`.** Writes/removes a systemd **user** unit (`~/.config/systemd/user/<unit>`, `ExecStart=<node> <cli-entry> node start`, `Restart=on-failure`, `RestartSec=5`) and drives it via `systemctl --user`. `install` also runs `daemon-reload` and `enable --now`, and reminds the operator that `loginctl enable-linger $USER` is needed to keep the service running after logout. On Windows, `service install` refuses immediately and points the operator at `node start --daemon` instead (systemd has no Windows equivalent). On WSL without a per-user systemd instance available (`systemctl --user show-environment` failing), it prints explicit guidance: enable systemd via `[boot]\nsystemd=true` in `/etc/wsl.conf` plus `wsl --shutdown` to restart the distro, or skip systemd entirely with `node start --daemon`.
+
+**TUI attach mode (`apps/cli/src/tui/node-dashboard-source.ts`).** The `NodeDashboard` screen can render from two different sources, both feeding the same pure `reduceNodeEvent(state, ev, payload, now) → state` reducer over one `DashboardState` so the React component has exactly one update path regardless of where events originate:
+
+- **Embedded:** no daemon is running; the dashboard owns an in-process `NodeEngine` directly (the original, pre-daemon behavior).
+- **Attached:** a `node start --daemon` process is already running; a second CLI instance's TUI connects to its IPC socket, hydrates from the initial `snapshot` frame, and translates live `event` frames into the same state updates the embedded path would have produced.
+
+This means an operator can leave a worker node running headless as a systemd service and still open the TUI at any time — from the same terminal or a fresh SSH session — to watch it live, without stopping or restarting the underlying engine.
+
+**File logging and redaction (`apps/cli/src/node/logger.ts`).** JSONL logs are written to `~/.memoriahub/logs/node.log`, size-rotated at 5 MB (single-generation rollover to `node.log.1`), and readable via `node logs [-n <lines>] [--follow]`. Every log line is passed through `redactSensitive()` before being written: any field whose name matches `pat` (exact), or contains `token`/`api[-_]?key`/`secret`/`credential`/`password` (case-insensitive), is recursively replaced with `[REDACTED]` — so a PAT, a transient provider credential (§2.7), or a presigned URL query string can never land in a log file even by accident.
+
+**Live-adjustable concurrency (`node set-concurrency <n>`).** When a daemon is running, this sends `{ cmd: 'set-concurrency', value: n }` over IPC and the engine's `setConcurrency()` applies the new cap starting with the next claim batch — no restart required. When no daemon is running, the value is persisted to local config for the next `node start`. The same control is exposed from the TUI's `NodeConfig` screen.
 
 ---
 
 ## 10. Doctor Coverage
 
-This section extends both halves of the existing [Doctor Diagnostics](doctor.md) feature — the server-side admin sweep and, newly, a node-scoped CLI equivalent — following doctor.md's own conventions exactly: sections → checks, each check carrying `key`, `label`, `status` (`ok` \| `warning` \| `error` \| `skipped`), `message`, an optional `actionItem`, and `durationMs` (see [doctor.md §2 — Response Shape](doctor.md#2-response-shape)).
+This section extends both halves of the existing [Doctor Diagnostics](doctor.md) feature — the server-side admin sweep and a node-scoped CLI equivalent. The two halves ended up structurally different, and that difference is intentional (see the note at the end of §10.1): the server-side `nodes` section reuses `doctor.md`'s exact `DoctorReport` JSON shape (`key`/`label`/`status`/`message`/`actionItem?`/`durationMs`), because it is one more section folded into an existing structured report consumed by the admin web UI. `node doctor` is a CLI command whose audience is a human at a terminal, and it prints a plain-text report section by section rather than emitting that same JSON envelope.
 
 ### 10.1 CLI-Side: `node doctor`
 
-`node doctor` runs a local, node-scoped version of the same idea Doctor already applies server-side: a set of checks verifying every capability the node might advertise, reusing the same status/action-item shape:
+`node doctor` (`apps/cli/src/commands/node.ts`'s `doctorCmd`) runs six sections in order, each backed by real code (not the "presence-only" checks originally proposed):
 
-| Check key (proposed) | Label | What it verifies |
-|-----------------------|-------|--------------------|
-| `node.faceModel` | Face model presence + hash match | Local Human model files exist and their sha256 matches the manifest (§7.2) |
-| `node.clipModel` | CLIP model presence + hash match | Local CLIP ONNX weights exist and match the manifest |
-| `node.ocr` | OCR / tesseract availability | tesseract binary and language data are present and loadable, for `social_media_detection` eligibility |
-| `node.ffmpeg` | ffmpeg / ffprobe presence | Both binaries are on `PATH` and respond to a version probe, for video job types |
-| `node.sharpDecode` | sharp / libvips decode capability | `sharp` can decode a bundled test image, for the EXIF-orientation preprocessing step shared with the server (§7.2) |
-| `node.apiConnectivity` | API connectivity | The node's PAT can reach `GET /api/nodes/models/manifest` |
-| `node.storageReachability` | Storage reachability | A throwaway presigned GET round-trip against the configured storage provider — analogous to the write→read→delete round-trip `StorageSettingsService.testConnection()` performs server-side (see [doctor.md §6](doctor.md#6-reuse-of-existing-services)) |
-| `node.tempDisk` | Temp-disk space/health | Sufficient free space and write access on the local temp directory the node uses for downloaded media and intermediate output |
+1. **API Access** (`apps/cli/src/node/doctor-checks.ts`'s `runApiAccessChecks`) — an actual `GET /api/auth/me` roundtrip (proves the PAT is valid and, since claim/renew/result/failure share the same `jobs:write` permission, implies those will authenticate too), whether the locally-configured node ID still resolves server-side (`nodeRegistrationOk`), and whether `GET /api/nodes/models/manifest` is reachable.
+2. **Capabilities (installed)** — the existing presence-only probe from `apps/cli/src/node/capabilities.ts`'s `detectCapabilities()` (native module `require.resolve`, ffmpeg/ffprobe binary `-version` execution).
+3. **Operational self-tests** (`apps/cli/src/node/self-test.ts`'s `runOperationalSelfTests`) — **new**, and the most significant upgrade from the original proposal: for every capability reported present in step 2, a REAL minimal operation is attempted, not just a presence check. `testSharp` decodes+encodes a tiny synthetic raw buffer; `testClip` loads the CLIP ONNX session and embeds a synthetic JPEG (only when the model file has already been downloaded — a missing model is reported as "not yet operational," not "broken," since models are fetched lazily); `testHuman` loads the face detector and runs detection on a synthetic JPEG (same lazy-model caveat); `testTesseract` inits and terminates an OCR worker (only when language data is present). ffmpeg/ffprobe are left as the existing binary-execution presence probe — generating a synthetic media asset to decode would add real complexity for a check that already executes the real binary, unlike a `require.resolve()` check. Every self-test has its own timeout and is wrapped in try/catch, so a broken native binary or a hung model load can never crash the doctor run.
+4. **Job-type readiness** — for each of the node's configured (or, if unset, fully-supported) `eligibleTypes`, checks `missingRequirements(type, operationalCaps)` against the OPERATIONAL result from step 3, not mere presence from step 2 — so a node whose `sharp` binary resolves but crashes on first real use is correctly reported not-ready.
+5. **Models** — downloads-and-verifies every entry in `GET /api/nodes/models/manifest` via `ensureModels()`, the same call `node start` makes.
+6. **Daemon** (`apps/cli/src/node/doctor-checks.ts`'s `checkDaemonLiveness`) — **new**, and covers a health dimension the v1.0 draft had no concept of: is a `node start` process currently running on this machine (pidfile + a live IPC socket probe, with a quick snapshot if so), or is there a stale pidfile left behind by a crash. Informational only — a stopped daemon doesn't fail the overall doctor exit code, since "not currently running" isn't a problem with the machine's capabilities.
 
-A **failed check for a given capability stops the node from advertising the corresponding job type as eligible** — the check result feeds directly back into the `eligibleTypes` list reported on the next heartbeat, exactly as described in §7.3.
+A failed check in steps 3–4 for a given job type keeps that type out of `eligibleTypes` — the same gating principle §7.3 describes, just implemented as a CLI text report (exit code 1 if any hard problem was found) rather than a `DoctorReport`-shaped JSON payload.
 
-### 10.2 Server-Side: New `nodes` Section on the Admin Doctor Sweep
+### 10.2 Server-Side: `nodes` Section on the Admin Doctor Sweep
 
-`POST /api/admin/doctor/run` (see [doctor.md §7](doctor.md#7-api-endpoint-and-rbac)) gains a new `nodes` section, following the existing section/check shape used throughout the current twenty-one-check catalog (see [doctor.md §4](doctor.md#4-check-catalog)):
+`POST /api/admin/doctor/run` (see [doctor.md §7](doctor.md#7-api-endpoint-and-rbac)) has a `nodes` section (`apps/api/src/doctor/doctor.service.ts`), following the existing section/check shape used throughout the rest of the check catalog:
 
-| Check key (proposed) | Label | What it verifies | Failure → status + action item |
-|-----------------------|-------|--------------------|----------------------------------|
+| Check key | Label | What it verifies | Failure → status + action item |
+|-----------|-------|--------------------|----------------------------------|
 | `nodes.registeredCount` | Registered nodes | Reports how many `worker_nodes` rows exist; `skipped` if zero (feature is simply unused, not misconfigured) | n/a — informational only |
-| `nodes.heartbeatFreshness` | Node heartbeat freshness | Any node with `status='online'` but `lastHeartbeatAt` older than the expected heartbeat interval | `warning` — "One or more nodes have not reported in recently; check the laptop is still awake and networked." |
-| `nodes.staleLeases` | Stuck/expired leases | Count of `enrichment_jobs` rows with `status='running'`, `executor='node'`, and `leaseExpiresAt` in the past, not yet reaped | `warning` — "Run the lease-expiry reaper manually or wait for the next scheduled pass; jobs will requeue automatically." |
-| `nodes.capabilitySummary` | Per-node capability summary | Aggregates each node's last-reported `eligibleTypes` from its heartbeat payload into a human-readable summary (e.g. which job types have zero node coverage) | n/a — informational only, never `error`/`warning` |
+| `nodes.heartbeatFreshness` | Heartbeat freshness | Any node with `status='online'` but `lastHeartbeatAt` older than the expected heartbeat interval | `warning` — one or more nodes have not reported in recently |
+| `nodes.staleLeases` | Expired leases | Count of `enrichment_jobs` rows with `status='running'`, `executor='node'`, and `leaseExpiresAt` in the past, not yet reaped | `warning` — jobs will requeue automatically once the reaper runs |
+| `nodes.capabilityHealth` | Node capability health | Aggregates each node's last-reported `capabilities`/`node doctor` summary into a per-node health signal | n/a / `warning` depending on findings |
 
-This mirrors the existing `jobs.queueHealth` / `jobs.burstConfig` checks in doctor.md's Job Queue & Worker section in spirit — coarse, on-demand health signals rather than a full dashboard (Doctor's Job Queue Insights non-goal, see [doctor.md §1](doctor.md#non-goals), applies equally here: this is not a replacement for a full per-node throughput dashboard).
+**Correction from the v1.0 draft:** the fourth check's key is `nodes.capabilityHealth`, not `nodes.capabilitySummary`. This mirrors the existing `jobs.queueHealth` / `jobs.burstConfig` checks in doctor.md's Job Queue & Worker section in spirit — coarse, on-demand health signals rather than a full dashboard (this is not a replacement for a full per-node throughput dashboard).
 
 ---
 
@@ -559,7 +586,7 @@ This mirrors the existing `jobs.queueHealth` / `jobs.burstConfig` checks in doct
 
 This section is a candid accounting of what this design does not fully solve, in the same spirit as the "Operational Notes" and "Future Extension Ideas" sections of [enrichment-queue.md](enrichment-queue.md) and the "Gotchas and Implementation Notes" section of [doctor.md](doctor.md).
 
-**A malicious or buggy node can submit a garbage result.** Nothing stops a compromised or simply buggy node from submitting a corrupted embedding, a nonsensical bounding box, or a broken thumbnail through `POST /api/nodes/jobs/:jobId/result`. The API must apply exactly the same validation to a node-submitted result that it would apply to its own in-process handler's output — dimension checks on embeddings, sane bounding-box ranges, image-decodability checks on thumbnail bytes — before persisting anything. This is a genuinely **new trust boundary**: an in-process handler's output was implicitly trusted because it ran inside the API's own process under the API's own code; a node's output is, by construction, produced by code and hardware the API does not control. Validation that used to be "defense against a bug" becomes "defense against a bug *or* a hostile actor," and should be reviewed with that shift in mind.
+**A malicious or buggy node can submit a garbage result.** Nothing stops a compromised or simply buggy node from submitting a corrupted embedding, a nonsensical bounding box, or a broken thumbnail through `POST /api/nodes/:id/jobs/:jobId/result`. The zod `nodeResultSchema` validation described in §6/§6.1 is the concrete implementation of this defense — dimension checks on embeddings (where pinnable — see §6's note that face embedding length is intentionally NOT pinned, since it's provider-dependent), sane bounding-box ranges, decimal-string format on dHash — before persisting anything. This is a genuinely **new trust boundary**: an in-process handler's output was implicitly trusted because it ran inside the API's own process under the API's own code; a node's output is, by construction, produced by code and hardware the API does not control. Validation that used to be "defense against a bug" becomes "defense against a bug *or* a hostile actor," and should be reviewed with that shift in mind.
 
 **Presigned URL exposure window.** A presigned GET or PUT URL is, by design, usable by anyone who has it — including someone who intercepts it in transit — for as long as it remains valid. HTTPS protects the URL in transit under normal circumstances, and the short TTL proposed in §2.5 bounds the exposure window, but this is worth stating plainly rather than glossing over: a presigned URL is a bearer credential for the duration of its validity, just a very short-lived one. This is the accepted tradeoff described in §2.5 in exchange for never issuing nodes a long-lived storage credential.
 
@@ -567,7 +594,7 @@ This section is a candid accounting of what this design does not fully solve, in
 
 **Household network reliability.** Unlike the server, a laptop node has no uptime guarantee — it depends on being both physically awake and network-reachable. This means jobs claimed by nodes are structurally at higher risk of lease expiry and requeue churn than jobs the server's own in-process worker claims. Operators should expect some baseline rate of "job A got half-processed on a laptop that then went to sleep, and was requeued and finished by someone else" as a normal, not exceptional, occurrence of this feature — not a bug to chase.
 
-**AI-proxy quota sharing.** A node proxying `auto_tagging` or `geocode` calls (§8.2) burns the exact same rate-limited provider quota as the server's own jobs of those types — no separate quota is created or allocated per node. Nodes and the server worker are, from the provider's point of view, indistinguishable competitors for the same budget, and both are subject to the same rate-limit deferral path described in [enrichment-queue.md §8 — Rate-limit deferral path](enrichment-queue.md#retry-and-backoff). Enabling AI-proxy on several nodes at once does not multiply available AI throughput; it only changes which machine happens to be waiting on the shared quota at any given moment.
+**Shared provider quota (renamed from "AI-proxy quota sharing").** A node calling `auto_tagging` or `geocode` directly with its transient credential (§2.7, §8.2) burns the exact same rate-limited provider quota as the server's own jobs of those types — no separate quota is created or allocated per node. Nodes and the server worker are, from the provider's point of view, indistinguishable competitors for the same budget, and both are subject to the same rate-limit deferral path via the shared `ProviderRateLimitError` classification and `EnrichmentTerminalService` (§6, §6.1). Enabling these two job types on several nodes at once does not multiply available AI/geo throughput; it only changes which machine happens to be waiting on the shared quota at any given moment. Moving from an AI-proxy design to transient credentials (§2.7) does not change this risk at all — it was never about which side makes the HTTP call, only about how many concurrent callers share one provider-side budget.
 
 ---
 
@@ -575,4 +602,5 @@ This section is a candid accounting of what this design does not fully solve, in
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 1.0 | July 2026 | AI Assistant | Initial specification |
+| 1.0 | July 2026 | AI Assistant | Initial specification (proposal, pre-implementation) |
+| 2.0 | July 2026 | AI Assistant | Brought current with the completed implementation on `feat/finish-nodes`: replaced the AI-proxy design with transient per-job credentials (§2.7, §8.2); corrected all endpoint paths to include `:id` and added `credentials`/`upload-url`/owner-list endpoints (§5); documented the actual zod-schema result contract, its extended fields, and the compute/persist handler split (§6, §6.1); documented the real `packages/enrichment-compute` shared package, its dual-build/pinned-deps/subpath-export structure, and the golden-vector test (§7.3); updated per-job-type status including the `video_face_detection`/`thumbnail_repair` gaps (§8); documented the worker daemon, systemd service mode, and TUI attach mode added mid-implementation as a product requirement (§9.3); corrected the CLI/server Doctor coverage to the actual six-section report and `nodes.capabilityHealth` key (§10) |
