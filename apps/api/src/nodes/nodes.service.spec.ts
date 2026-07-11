@@ -9,11 +9,14 @@
  *     persist crash (completeFailed + 500, completeSucceeded NOT called)
  *  3. reportJobFailure — routes through EnrichmentTerminalService.completeFailed
  *     with the rateLimited/retryAfterMs opts; willRetry is advisory (ignored)
- *  4. getModelManifest — returns a BARE ARRAY (CLI contract), not { models }
+ *  4. getModelManifest — returns a BARE ARRAY (CLI contract), not { models },
+ *     with exactly 5 entries, all carrying non-null sha256/bytes
  *  5. getJobUploadUrl — reuses the held-job guard (404/409); 400 when the job
  *     has no mediaItemId or linked StorageObject; happy path derives the
  *     thumbnails/<storageObjectId>.jpg key and returns the resolver's signed
  *     PUT URL
+ *  6. getNode — owner-scoped single-node detail; shares deriveNodeHealth /
+ *     getJobCountsForNodes with listNodes; 404/403 mirror assertJobHeldByNode
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -429,6 +432,99 @@ describe('NodesService — result/failure ingestion', () => {
         expect(entry).toHaveProperty('sha256');
         expect(entry).toHaveProperty('bytes');
       }
+    });
+
+    it('returns exactly 5 entries', () => {
+      const manifest = service.getModelManifest();
+
+      expect(manifest).toHaveLength(5);
+    });
+
+    it('includes the blazeface-back.bin entry targeting the human subdir', () => {
+      const manifest = service.getModelManifest();
+
+      const entry = manifest.find((m) => m.name === 'blazeface-back.bin');
+      expect(entry).toBeDefined();
+      expect(entry?.targetSubdir).toBe('human');
+    });
+
+    it('has non-null sha256 (string) and bytes (number) on every entry', () => {
+      const manifest = service.getModelManifest();
+
+      for (const entry of manifest) {
+        expect(entry.sha256).not.toBeNull();
+        expect(typeof entry.sha256).toBe('string');
+        expect(entry.bytes).not.toBeNull();
+        expect(typeof entry.bytes).toBe('number');
+      }
+    });
+
+    it('has the exact committed sha256/bytes for blazeface-back.json and blazeface-back.bin', () => {
+      const manifest = service.getModelManifest();
+
+      const json = manifest.find((m) => m.name === 'blazeface-back.json');
+      expect(json).toMatchObject({
+        sha256: 'a765f7b2a6c1d841ecc0b0686e5f51b141b39b7bcdf2888542dc9d9fc4384a87',
+        bytes: 79043,
+      });
+
+      const bin = manifest.find((m) => m.name === 'blazeface-back.bin');
+      expect(bin).toMatchObject({
+        sha256: 'dc9a97fdc50bc43216554bdd69aa3e7b9361a519ee7bdd996a2f69a98a6f9b72',
+        bytes: 538928,
+      });
+    });
+  });
+
+  // =========================================================================
+  // getNode — owner-scoped single-node detail
+  // =========================================================================
+
+  describe('getNode', () => {
+    it('returns { ...node, health, jobCounts } for a node owned by the caller', async () => {
+      const node = makeNode({ lastHeartbeatAt: new Date() });
+      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(node);
+      (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([
+        { claimedByNodeId: NODE_ID, status: JobStatus.running, _count: { _all: 2 } },
+        { claimedByNodeId: NODE_ID, status: JobStatus.succeeded, _count: { _all: 5 } },
+        { claimedByNodeId: NODE_ID, status: JobStatus.failed, _count: { _all: 1 } },
+      ]);
+
+      const result = await service.getNode(USER_ID, NODE_ID);
+
+      expect(result).toMatchObject({
+        ...node,
+        health: 'healthy',
+        jobCounts: { running: 2, succeeded: 5, failed: 1 },
+      });
+    });
+
+    it('defaults jobCounts to zeros when the node has no claimed jobs', async () => {
+      const node = makeNode({ lastHeartbeatAt: new Date() });
+      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(node);
+      (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([]);
+
+      const result = await service.getNode(USER_ID, NODE_ID);
+
+      expect(result.jobCounts).toEqual({ running: 0, succeeded: 0, failed: 0 });
+    });
+
+    it('throws NotFoundException when the node does not exist', async () => {
+      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(service.getNode(USER_ID, NODE_ID)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('throws ForbiddenException when the node belongs to another user', async () => {
+      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(
+        makeNode({ createdById: 'someone-else' }),
+      );
+
+      await expect(service.getNode(USER_ID, NODE_ID)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
     });
   });
 });
