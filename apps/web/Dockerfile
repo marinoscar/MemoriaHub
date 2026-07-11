@@ -29,8 +29,16 @@ FROM base AS deps
 COPY package*.json ./
 COPY tsconfig.base.json ./
 COPY apps/web/package.json ./apps/web/package.json
-# Using npm install since this is a workspace package without its own lock file
-RUN npm install
+# --ignore-scripts: before this context widening, the build context was
+# scoped to apps/web, so the root package.json (and its postinstall,
+# scripts/patch-react-transition-group.js) was never even visible to this
+# install — the web image has always shipped with an unpatched
+# react-transition-group. Root package.json is now visible since the context
+# is the repo root, so the postinstall WOULD run without this flag; doing so
+# changes behavior and breaks the production `vite build` (rolldown-vite
+# rejects a subpath the patch's exports map doesn't cover). --ignore-scripts
+# keeps this build byte-for-byte equivalent to the pre-widening behavior.
+RUN npm install --ignore-scripts
 
 # -----------------------------------------------------------------------------
 # Development stage
