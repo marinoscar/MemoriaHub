@@ -37,11 +37,10 @@
  * the claimed job's id (to call `POST /nodes/:id/jobs/:jobId/upload-url`),
  * which is NOT part of a compute module's normal `(inputPath, params)`
  * arguments — see the `ctx` parameter added to `ComputeFn` in
- * ../capabilities.ts for the resolution and its current gap: the running
- * node engine does not yet pass `ctx`, so this module throws a clear error
- * when it's missing rather than silently doing nothing.
- * TODO(daemon-agent): pass `{ nodeId, jobId }` as the engine's 4th argument
- * to `ComputeDispatcher.compute()` once node-engine.ts is updated.
+ * ../capabilities.ts. `node-engine.ts` populates `{ nodeId, jobId }` on every
+ * claimed job, so `ctx` is always present in practice; the guard below stays
+ * as a defensive check for any future caller (e.g. a test harness) that
+ * constructs a `ComputeDispatcher` without it.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -101,9 +100,10 @@ const computeThumbnail: ComputeFn = async (inputPath, _params, ctx): Promise<Thu
   // --- 2. Job context required to request an upload URL — see file header ---
   if (!ctx) {
     throw new Error(
-      'job context not provided — engine update pending: node/node-engine.ts does not yet pass ' +
-        '{ nodeId, jobId } to ComputeDispatcher.compute(); thumbnail compute cannot request an ' +
-        'upload URL without it (see TODO(daemon-agent) in this file and in ../capabilities.ts)',
+      'job context not provided — thumbnail compute needs { nodeId, jobId } to request an ' +
+        'upload URL via ComputeDispatcher.compute(); the running node engine always supplies ' +
+        'this, so seeing this error means the dispatcher was invoked directly without it ' +
+        '(e.g. from a test harness) — see ../capabilities.ts',
     );
   }
 
