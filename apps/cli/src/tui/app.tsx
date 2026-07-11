@@ -41,6 +41,11 @@ import { BackupScreen } from './BackupScreen.js';
 import { JobsDashboard } from './JobsDashboard.js';
 import { NodeDashboard } from './NodeDashboard.js';
 import { NodeConfig } from './NodeConfig.js';
+import { NodeDoctor } from './NodeDoctor.js';
+import { NodeRegister } from './NodeRegister.js';
+import { NodeList } from './NodeList.js';
+import { NodeLogs } from './NodeLogs.js';
+import { NodeService } from './NodeService.js';
 import { BOX_BORDER } from './theme.js';
 import {
   MENU_TREE,
@@ -74,7 +79,12 @@ type Screen =
   | { kind: 'jobs' }
   | { kind: 'backup' }
   | { kind: 'nodeDashboard' }
-  | { kind: 'nodeConfig' };
+  | { kind: 'nodeConfig' }
+  | { kind: 'nodeDoctor' }
+  | { kind: 'nodeRegister' }
+  | { kind: 'nodeList' }
+  | { kind: 'nodeLogs' }
+  | { kind: 'nodeService' };
 
 type NavFrame =
   | { kind: 'menu'; menuId: string }
@@ -248,6 +258,21 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
         break;
       case 'node-config':
         push({ kind: 'screen', screen: { kind: 'nodeConfig' } });
+        break;
+      case 'node-doctor':
+        push({ kind: 'screen', screen: { kind: 'nodeDoctor' } });
+        break;
+      case 'node-register':
+        push({ kind: 'screen', screen: { kind: 'nodeRegister' } });
+        break;
+      case 'node-list':
+        push({ kind: 'screen', screen: { kind: 'nodeList' } });
+        break;
+      case 'node-logs':
+        push({ kind: 'screen', screen: { kind: 'nodeLogs' } });
+        break;
+      case 'node-service':
+        push({ kind: 'screen', screen: { kind: 'nodeService' } });
         break;
       case 'help':
         push({ kind: 'screen', screen: { kind: 'help' } });
@@ -591,6 +616,54 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
           onBack={pop}
         />
       );
+
+    case 'nodeDoctor':
+      if (!config) {
+        return (
+          <Box paddingX={1} flexDirection="column" gap={1}>
+            <Text color="yellow">Not logged in. Please login first.</Text>
+            <Text dimColor>Press q to go back.</Text>
+            <KeyHandler onBack={pop} />
+          </Box>
+        );
+      }
+      return <NodeDoctor config={config} onBack={pop} />;
+
+    case 'nodeRegister':
+      if (!config) {
+        return (
+          <Box paddingX={1} flexDirection="column" gap={1}>
+            <Text color="yellow">Not logged in. Please login first.</Text>
+            <Text dimColor>Press q to go back.</Text>
+            <KeyHandler onBack={pop} />
+          </Box>
+        );
+      }
+      return (
+        <NodeRegister
+          config={config}
+          onRegistered={(cfg) => setAppState((prev) => ({ ...prev, config: cfg }))}
+          onBack={pop}
+        />
+      );
+
+    case 'nodeList':
+      if (!config) {
+        return (
+          <Box paddingX={1} flexDirection="column" gap={1}>
+            <Text color="yellow">Not logged in. Please login first.</Text>
+            <Text dimColor>Press q to go back.</Text>
+            <KeyHandler onBack={pop} />
+          </Box>
+        );
+      }
+      return <NodeList config={config} onBack={pop} />;
+
+    case 'nodeLogs':
+      return <NodeLogs onBack={pop} />;
+
+    case 'nodeService':
+      return <NodeService onBack={pop} />;
 
     case 'settings':
       return <SettingsScreen db={db} onBack={pop} />;
