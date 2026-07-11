@@ -32,6 +32,13 @@ MemoriaHub is a personal media-ownership platform that gives families full contr
 - **Metadata-First**: All media metadata stored in typed columns and queryable; exportable in JSON and CSV
 - **Social-Media Video Detection**: Two-tier (container-metadata/filename + on-server OCR) classifier flags TikTok/Instagram/Facebook re-shares with a "Social Media" + platform tag, skips face detection on them, and leaves archive/delete to the user via tag search
 
+### Distributed Worker Nodes (Elastic Compute)
+- **CLI-Registered Workers**: `memoriahub node register/start/stop/status/list/doctor` turns a spare laptop or desktop into a worker node that claims and runs enrichment jobs — face detection, near-duplicate/CLIP embedding, thumbnail generation, metadata extraction, social-media video detection, AI auto-tagging, and reverse geocoding — locally, submitting results back to the server
+- **Byte-Identical Compute**: A shared `packages/enrichment-compute` package (dual CJS/ESM build, exact-pinned native dependencies, golden-vector regression test) guarantees a node's output is numerically identical to the server's in-process worker, so face clusters and duplicate groups stay correct regardless of which machine ran the job
+- **No Storage Credentials, No Long-Lived Secrets on the Node**: Media bytes stream directly between the node and S3/R2 via short-lived presigned URLs — never proxied through the API; AI and geo provider calls use a transient, per-job credential fetched from the server and held in memory only, never written to disk or logged
+- **Daemon and systemd Service Mode**: `node start --daemon` backgrounds the process behind a pidfile and a Unix-socket IPC channel; `node service install` sets up a systemd user unit for always-on operation; a Tools ▸ Worker Node TUI dashboard can attach to the running daemon from a second terminal to watch live job history and counters
+- **Fully Optional**: The server's own in-process worker keeps processing every job type with zero nodes registered — worker nodes are pure elastic extra capacity, authenticated via the existing Personal Access Token system, nothing new to manage
+
 ### Foundation
 - **Authentication**: Google OAuth 2.0 with JWT access tokens and refresh token rotation
 - **Device Authorization**: RFC 8628 Device Authorization Flow for CLI tools, mobile apps, and IoT devices
