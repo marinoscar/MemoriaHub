@@ -196,18 +196,11 @@ export function missingRequirements(
 // ---------------------------------------------------------------------------
 
 /**
- * Per-job context the engine can (optionally) supply to a compute module —
- * currently used only by the thumbnail compute path, which needs the node's
- * own id and the claimed job's id to request a presigned upload URL via
+ * Per-job context the engine supplies to a compute module — currently used
+ * only by the thumbnail compute path, which needs the node's own id and the
+ * claimed job's id to request a presigned upload URL via
  * `POST /api/nodes/:id/jobs/:jobId/upload-url` before it can return a result.
- *
- * TODO(daemon-agent): the running node engine (`node/node-engine.ts`, owned by
- * a concurrent daemon-focused change) currently calls
- * `dispatcher.compute(type, inputPath, params)` with no 4th argument — ctx is
- * always undefined until the engine is updated to pass
- * `{ nodeId: this.nodeId, jobId }` as documented here. Until that lands,
- * ctx-dependent compute paths (thumbnail) throw a clear error rather than
- * silently misbehaving; see node/compute/thumbnail.ts.
+ * Populated by `NodeEngine.processJob` on every claim.
  */
 export interface ComputeJobContext {
   nodeId: string;

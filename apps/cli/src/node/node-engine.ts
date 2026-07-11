@@ -321,7 +321,10 @@ export class NodeEngine extends NodeTypedEmitter {
         downloaded = true;
       }
 
-      const result = await this.dispatcher.compute(type, downloaded ? tmpPath : '', params ?? {});
+      const result = await this.dispatcher.compute(type, downloaded ? tmpPath : '', params ?? {}, {
+        nodeId: this.nodeId,
+        jobId,
+      });
 
       // Submit the typed result envelope; degrade gracefully on submit failure
       // (the server lease reaper will requeue the job for another attempt).
