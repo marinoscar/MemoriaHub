@@ -164,4 +164,4 @@ export function apiAccessLevel(access: ApiAccessCheckResult): HealthLevel {
  * does not ship the docs/ folder.
  */
 export const WORKER_NODE_SETUP_GUIDE_URL =
-  'https://github.com/marinoscar/MemoriaHub/blob/main/docs/specs/worker-node-setup.md';
+  'https://github.com/marinoscar/MemoriaHub/blob/main/docs/worker-node-setup.md';

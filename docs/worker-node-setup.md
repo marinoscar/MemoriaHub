@@ -18,7 +18,7 @@
 6. [Reading `node doctor` Output](#6-reading-node-doctor-output)
 7. [Troubleshooting](#7-troubleshooting)
 
-This is a practical setup/troubleshooting companion to the [Distributed Nodes spec](distributed-nodes.md), which covers the feature's architecture, security model, and API contract in full. This document does not repeat that content — it exists to answer "what do I install, and what do I do when `node doctor` says something is wrong."
+This is a practical setup/troubleshooting companion to the [Distributed Nodes spec](specs/distributed-nodes.md), which covers the feature's architecture, security model, and API contract in full. This document does not repeat that content — it exists to answer "what do I install, and what do I do when `node doctor` says something is wrong."
 
 ---
 
@@ -46,7 +46,7 @@ A worker node (`apps/cli`'s `memoriahub node start`) needs four things before it
 
 ## 3. Native Compute Dependencies
 
-All of the libraries below are declared as `optionalDependencies` in the CLI's own `package.json`, pinned to the exact versions the shared `packages/enrichment-compute` package and the root `package.json`'s `overrides` block also pin (so a node's compute is numerically identical to the server's — see [distributed-nodes.md §7.3](distributed-nodes.md#73-four-mechanisms-to-guarantee-parity--as-built)):
+All of the libraries below are declared as `optionalDependencies` in the CLI's own `package.json`, pinned to the exact versions the shared `packages/enrichment-compute` package and the root `package.json`'s `overrides` block also pin (so a node's compute is numerically identical to the server's — see [distributed-nodes.md §7.3](specs/distributed-nodes.md#73-four-mechanisms-to-guarantee-parity--as-built)):
 
 | Library | Version (pinned) | Purpose | Job types that need it |
 |---------|-------------------|---------|--------------------------|
@@ -78,7 +78,7 @@ These install automatically as part of a normal `memoriahub` install (curl insta
 
 **Verified path note:** both the Human model files (`targetSubdir: 'human'`, landing at `~/.memoriahub/models/human/`) and the CLIP manifest entry (`targetSubdir: ''`, landing directly at `~/.memoriahub/models/clip-vit-b32-vision-quantized.onnx`) are consistent end-to-end with where the consuming code looks for them — `apps/cli/src/node/compute/face-detection.ts` and `self-test.ts`'s `testHuman()` for the Human files, and `self-test.ts`'s `testClip()` and `apps/cli/src/node/compute/duplicate-detection.ts` for the CLIP model. No manual workaround is needed. (This previously required a manual workaround for the CLIP entry specifically — an earlier `targetSubdir: 'models'` value caused a double-nested download path, `~/.memoriahub/models/models/clip-vit-b32-vision-quantized.onnx` — fixed in the API's manifest; see `apps/api/src/nodes/nodes.service.ts`'s `getModelManifest()`, CLIP entry's `targetSubdir: ''`.)
 
-**Air-gapped / offline installs:** for the Human files, place them manually at `~/.memoriahub/models/human/<name>` before starting the node. For the CLIP model, place it directly at `~/.memoriahub/models/clip-vit-b32-vision-quantized.onnx` (the path the compute/self-test code reads) — `ensureModels()`'s own existing-file check (`isValid()`) will skip re-downloading a file already present there with a matching size/sha256. This mirrors the equivalent server-side escape hatch documented for the API's own copy of this model in [duplicate-detection.md](duplicate-detection.md#41-model-loading-and-lifecycle): "place the model file manually at `MODELS_DIR/clip-vit-b32-vision-quantized.onnx` before starting."
+**Air-gapped / offline installs:** for the Human files, place them manually at `~/.memoriahub/models/human/<name>` before starting the node. For the CLIP model, place it directly at `~/.memoriahub/models/clip-vit-b32-vision-quantized.onnx` (the path the compute/self-test code reads) — `ensureModels()`'s own existing-file check (`isValid()`) will skip re-downloading a file already present there with a matching size/sha256. This mirrors the equivalent server-side escape hatch documented for the API's own copy of this model in [duplicate-detection.md](specs/duplicate-detection.md#41-model-loading-and-lifecycle): "place the model file manually at `MODELS_DIR/clip-vit-b32-vision-quantized.onnx` before starting."
 
 ---
 
@@ -93,7 +93,7 @@ memoriahub node start --daemon # background
 memoriahub node service install # always-on systemd user service
 ```
 
-Equivalent TUI menu items: Tools ▸ Worker Node ▸ Register node / Start worker (background) / Node service (systemd). See `apps/cli/README.md`'s ["Worker Nodes (distributed compute)"](../../apps/cli/README.md#worker-nodes-distributed-compute) section for full command reference, flags, and the TUI dashboard's own doctor overlay — this document's job is dependency setup, not day-to-day operation.
+Equivalent TUI menu items: Tools ▸ Worker Node ▸ Register node / Start worker (background) / Node service (systemd). See `apps/cli/README.md`'s ["Worker Nodes (distributed compute)"](../apps/cli/README.md#worker-nodes-distributed-compute) section for full command reference, flags, and the TUI dashboard's own doctor overlay — this document's job is dependency setup, not day-to-day operation.
 
 ---
 
@@ -118,5 +118,5 @@ Both the CLI command (`memoriahub node doctor`) and the TUI screen (Tools ▸ Wo
 | A capability shows `no` (not installed) at all | The corresponding `optionalDependencies` entry failed to build/download for this platform — most commonly a missing native compile toolchain | Install the toolchain: `sudo apt install build-essential python3` (Debian/Ubuntu) or `xcode-select --install` (macOS) — the same guidance `apps/cli/README.md` documents for `better-sqlite3` — then reinstall/rebuild (`npm_config_build_from_source=true bash install.sh` if a prebuilt binary genuinely isn't available for this platform/Node version). |
 | `API error 404: Cannot GET /api/nodes/models/manifest` (or any `/api/nodes/*` 404) | Most likely explanation: the connected API server predates the Distributed Nodes feature, or a reverse-proxy path rewrite is stripping/misrouting the `/api` prefix. This is not typically a CLI bug. | Confirm the API server has been updated/redeployed to a version that includes the `/api/nodes/*` routes, and double-check the `serverUrl` in `~/.memoriahub/config.json` points at the correct `/api`-prefixed base. |
 | `node status`/`node list` shows the node as "not recognized by server" (a registered node ID the server 404s/403s on) | The node record was deleted or deregistered server-side — e.g. an admin removed it via `DELETE /api/admin/nodes/:id` on the Worker Nodes admin page, or another process ran `node deregister` for it | Run `memoriahub node register` again to create a fresh registration; the old node ID cannot be revived. |
-| `node service install` refuses, or reports systemd unavailable (WSL) | WSL distros often don't have a per-user systemd instance running by default (`systemctl --user show-environment` fails) | Enable systemd via `[boot]\nsystemd=true` in `/etc/wsl.conf`, then `wsl --shutdown` from Windows to restart the distro — or skip systemd entirely and use `memoriahub node start --daemon` instead. See [distributed-nodes.md §9.3](distributed-nodes.md#93-worker-daemon-systemd-service-and-tui-attach) and `apps/cli/README.md`'s "Always-on service" section. |
+| `node service install` refuses, or reports systemd unavailable (WSL) | WSL distros often don't have a per-user systemd instance running by default (`systemctl --user show-environment` fails) | Enable systemd via `[boot]\nsystemd=true` in `/etc/wsl.conf`, then `wsl --shutdown` from Windows to restart the distro — or skip systemd entirely and use `memoriahub node start --daemon` instead. See [distributed-nodes.md §9.3](specs/distributed-nodes.md#93-worker-daemon-systemd-service-and-tui-attach) and `apps/cli/README.md`'s "Always-on service" section. |
 | `node service install` refuses on Windows outright | systemd has no Windows equivalent — `service install` is a no-op there by design, not a bug | Use `memoriahub node start --daemon` instead. |
