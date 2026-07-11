@@ -42,6 +42,11 @@ import { readPidFile } from '../node/daemon.js';
 import { BOX_BORDER } from './theme.js';
 import { runNodeDoctorSweep, type DoctorSweepState } from './useNodeDoctorSweep.js';
 import {
+  summarizeCapabilities,
+  summarizeJobReadiness,
+  WORKER_NODE_SETUP_GUIDE_URL,
+} from '../node/doctor-summary.js';
+import {
   appendLogLines,
   createAttachedSource,
   EmbeddedDashboardSource,
@@ -481,6 +486,14 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
   // -------------------------------------------------------------------------
   if (showDoctor) {
     const sweeping = !doctorSweep || !doctorSweep.done;
+    // Collapse healthy sections to a one-line summary — mirrors the same
+    // shared classification NodeDoctor.tsx (the full-screen doctor) uses, via
+    // ../node/doctor-summary.js, so the two surfaces never drift.
+    const capsSummary =
+      doctorSweep?.caps && doctorSweep.operationalCaps
+        ? summarizeCapabilities(doctorSweep.caps, doctorSweep.operationalCaps)
+        : null;
+    const jobsSummary = doctorSweep?.jobReadiness ? summarizeJobReadiness(doctorSweep.jobReadiness) : null;
     return (
       <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Worker Node — Doctor</Text>
@@ -491,60 +504,78 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
             </Text>
           </Box>
         )}
-        {doctorSweep?.caps && doctorSweep.operationalCaps && (
+        {capsSummary && (
           <Box flexDirection="column" marginTop={1}>
-            <Box flexDirection="row">
-              <Text bold dimColor>{'Capability'.padEnd(14)}</Text>
-              <Text bold dimColor>{'Installed'.padEnd(11)}</Text>
-              <Text bold dimColor>{'Operational'.padEnd(13)}</Text>
-              <Text bold dimColor>Detail</Text>
-            </Box>
-            {Object.entries(doctorSweep.caps).map(([key, status]) => {
-              const op = doctorSweep.operationalCaps![key] ?? status;
-              let opLabel: string;
-              let opColor: string | undefined;
-              if (!status.available) {
-                opLabel = 'n/a';
-                opColor = undefined;
-              } else if (op.available) {
-                opLabel = 'yes';
-                opColor = 'green';
-              } else {
-                opLabel = 'not yet';
-                opColor = 'yellow';
-              }
-              return (
-                <Box key={key} flexDirection="row">
-                  <Text>{key.padEnd(14)}</Text>
-                  <Text color={status.available ? 'green' : 'red'}>
-                    {(status.available ? 'yes' : 'no').padEnd(11)}
-                  </Text>
-                  <Text color={opColor} dimColor={opColor === undefined}>
-                    {opLabel.padEnd(13)}
-                  </Text>
-                  <Text dimColor>{truncate(op.detail ?? status.detail ?? '', 40)}</Text>
+            {capsSummary.issues.length === 0 ? (
+              <Text color="green">✔ All {capsSummary.totalCount} capabilities operational.</Text>
+            ) : (
+              <>
+                <Text dimColor>
+                  {`${capsSummary.okCount}/${capsSummary.totalCount} capabilities operational — showing ${capsSummary.issues.length} needing attention:`}
+                </Text>
+                <Box flexDirection="row">
+                  <Text bold dimColor>{'Capability'.padEnd(14)}</Text>
+                  <Text bold dimColor>{'Installed'.padEnd(11)}</Text>
+                  <Text bold dimColor>{'Operational'.padEnd(13)}</Text>
+                  <Text bold dimColor>Detail</Text>
                 </Box>
-              );
-            })}
+                {capsSummary.issues.map(({ key, installed, operational, level }) => {
+                  let opLabel: string;
+                  let opColor: string | undefined;
+                  if (!installed.available) {
+                    opLabel = 'n/a';
+                    opColor = undefined;
+                  } else if (level === 'ok') {
+                    opLabel = 'yes';
+                    opColor = 'green';
+                  } else {
+                    opLabel = 'not yet';
+                    opColor = 'yellow';
+                  }
+                  return (
+                    <Box key={key} flexDirection="row">
+                      <Text>{key.padEnd(14)}</Text>
+                      <Text color={installed.available ? 'green' : 'red'}>
+                        {(installed.available ? 'yes' : 'no').padEnd(11)}
+                      </Text>
+                      <Text color={opColor} dimColor={opColor === undefined}>
+                        {opLabel.padEnd(13)}
+                      </Text>
+                      <Text dimColor>{truncate(operational.detail ?? installed.detail ?? '', 40)}</Text>
+                    </Box>
+                  );
+                })}
+              </>
+            )}
           </Box>
         )}
         {doctorSweep?.jobReadiness && (
           <Box flexDirection="column" marginTop={1}>
-            {doctorSweep.jobReadiness.map((row) => (
-              <Text key={row.type} color={row.ready ? 'green' : 'red'}>
-                {row.ready ? '✔' : '✖'} {row.type}
-                {!row.ready && <Text dimColor> — missing {row.missing.join(', ')}</Text>}
-              </Text>
-            ))}
+            {doctorSweep.jobReadiness.length === 0 ? (
+              <Text color="yellow">⚠ No eligible job types configured/supported on this machine.</Text>
+            ) : jobsSummary && jobsSummary.issues.length === 0 ? (
+              <Text color="green">✔ All {jobsSummary.totalCount} job type(s) ready.</Text>
+            ) : (
+              <>
+                <Text dimColor>{`${jobsSummary?.readyCount ?? 0}/${jobsSummary?.totalCount ?? 0} ready`}</Text>
+                {jobsSummary?.issues.map((row) => (
+                  <Text key={row.type} color="red">
+                    ✖ {row.type}
+                    <Text dimColor> — missing {row.missing.join(', ')}</Text>
+                  </Text>
+                ))}
+              </>
+            )}
           </Box>
         )}
         {doctorSweep?.done && (
-          <Box marginTop={1}>
+          <Box marginTop={1} flexDirection="column">
             {doctorSweep.hasError ? (
               <Text color="red" bold>✖ Doctor found problems.</Text>
             ) : (
               <Text color="green" bold>✔ Doctor: all checks passed.</Text>
             )}
+            <Text dimColor>Setup guide: {WORKER_NODE_SETUP_GUIDE_URL}</Text>
           </Box>
         )}
         <Box marginTop={1}>

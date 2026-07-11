@@ -13,6 +13,13 @@
  * calls `process.exit()` — the pass/fail verdict is rendered as a colored
  * summary line only.
  *
+ * Health classification (top checklist icons, and the collapse-to-one-line
+ * behavior for the Capabilities/Job-readiness/API-Access sections below) is
+ * delegated entirely to `../node/doctor-summary.js` — the single shared source
+ * of truth also used by `commands/node.ts`'s `doctorCmd()` and the compact
+ * doctor overlay in `tui/NodeDashboard.tsx`. This file only maps those
+ * classifications to Ink colors/glyphs; it never re-derives health logic.
+ *
  * `variant` prop:
  *   - 'screen'  (default) — full, menu-reachable screen. Owns its own
  *     Esc/q → onBack key handling (matches every other full-screen TUI
@@ -39,13 +46,21 @@ import Spinner from 'ink-spinner';
 
 import { ApiClient } from '../api.js';
 import type { CliConfig } from '../config.js';
-import type { CapabilityStatus } from '../node/capabilities.js';
+import {
+  apiAccessLevel,
+  summarizeCapabilities,
+  summarizeJobReadiness,
+  WORKER_NODE_SETUP_GUIDE_URL,
+  type CapabilityRowSummary,
+  type HealthLevel,
+} from '../node/doctor-summary.js';
 import { BOX_BORDER } from './theme.js';
 import {
   DOCTOR_STEP_ORDER,
   DOCTOR_STEP_LABELS,
   useNodeDoctorSweep,
   type DoctorStepKey,
+  type DoctorSweepState,
 } from './useNodeDoctorSweep.js';
 
 // ---------------------------------------------------------------------------
@@ -69,15 +84,88 @@ function truncate(s: string, max: number): string {
   return s.slice(0, Math.max(0, max - 1)) + '…';
 }
 
+/** Health level for a top-checklist step, plus the two non-`HealthLevel`
+ *  states the checklist also needs to render: not-yet-reached and
+ *  currently-running. */
+type StepDisplayLevel = HealthLevel | 'pending' | 'running';
+
+/**
+ * Classify a single top-checklist step's health from the current sweep
+ * state — "did this step find a problem", not merely "did it finish". Each
+ * branch reuses the shared doctor-summary.js classifiers so this file never
+ * re-derives health logic that already lives there.
+ */
+function computeStepLevel(step: DoctorStepKey, state: DoctorSweepState): StepDisplayLevel {
+  const running = state.currentStep === step;
+
+  switch (step) {
+    case 'apiAccess':
+      if (!state.apiAccess) return running ? 'running' : 'pending';
+      return apiAccessLevel(state.apiAccess);
+
+    case 'capabilities': {
+      if (!state.caps) return running ? 'running' : 'pending';
+      const anyMissing = Object.values(state.caps).some((s) => !s.available);
+      return anyMissing ? 'error' : 'ok';
+    }
+
+    case 'selfTest': {
+      if (!state.caps || !state.operationalCaps) return running ? 'running' : 'pending';
+      const summary = summarizeCapabilities(state.caps, state.operationalCaps);
+      if (summary.issues.some((row) => row.level === 'error')) return 'error';
+      if (summary.issues.length > 0) return 'warn';
+      return 'ok';
+    }
+
+    case 'jobReadiness': {
+      if (!state.jobReadiness) return running ? 'running' : 'pending';
+      const summary = summarizeJobReadiness(state.jobReadiness);
+      return summary.issues.length > 0 ? 'error' : 'ok';
+    }
+
+    case 'models': {
+      if (!state.models) return running ? 'running' : 'pending';
+      if (state.models.failed.length > 0) return 'error';
+      if (state.models.error) return 'warn';
+      return 'ok';
+    }
+
+    case 'daemon':
+      if (!state.daemon) return running ? 'running' : 'pending';
+      return state.daemon.stalePidfile ? 'warn' : 'ok';
+
+    default:
+      return 'pending';
+  }
+}
+
+/** Icon + color for a step-display level, matching the existing glyph set
+ *  (✔/⚠/✖/spinner/·) used throughout the doctor screens. */
+function stepIconAndColor(level: StepDisplayLevel): { icon: React.ReactNode; color: string | undefined; dim: boolean } {
+  switch (level) {
+    case 'ok':
+      return { icon: '✔', color: 'green', dim: false };
+    case 'warn':
+      return { icon: '⚠', color: 'yellow', dim: false };
+    case 'error':
+      return { icon: '✖', color: 'red', dim: false };
+    case 'running':
+      return { icon: <Spinner type="dots" />, color: 'cyan', dim: false };
+    case 'pending':
+    default:
+      return { icon: '·', color: undefined, dim: true };
+  }
+}
+
 /** Combined installed/operational capability row, mirroring
- *  printOperationalCapabilityTable in commands/node.ts. */
+ *  printOperationalCapabilityTable in commands/node.ts. Renders only the rows
+ *  it's given — callers pass the full row set for an all-issues view, or just
+ *  the issue subset when collapsing healthy rows away. */
 function CapabilityTable({
-  caps,
-  operational,
+  rows,
   detailWidth,
 }: {
-  caps: Record<string, CapabilityStatus>;
-  operational: Record<string, CapabilityStatus>;
+  rows: CapabilityRowSummary[];
   detailWidth: number;
 }): React.ReactElement {
   return (
@@ -88,14 +176,13 @@ function CapabilityTable({
         <Text bold dimColor>{'Operational'.padEnd(13)}</Text>
         <Text bold dimColor>Detail</Text>
       </Box>
-      {Object.entries(caps).map(([key, status]) => {
-        const op = operational[key] ?? status;
+      {rows.map(({ key, installed, operational, level }) => {
         let opLabel: string;
         let opColor: string | undefined;
-        if (!status.available) {
+        if (!installed.available) {
           opLabel = 'n/a';
           opColor = undefined;
-        } else if (op.available) {
+        } else if (level === 'ok') {
           opLabel = 'yes';
           opColor = 'green';
         } else {
@@ -105,13 +192,13 @@ function CapabilityTable({
         return (
           <Box key={key} flexDirection="row">
             <Text>{key.padEnd(14)}</Text>
-            <Text color={status.available ? 'green' : 'red'}>
-              {(status.available ? 'yes' : 'no').padEnd(11)}
+            <Text color={installed.available ? 'green' : 'red'}>
+              {(installed.available ? 'yes' : 'no').padEnd(11)}
             </Text>
             <Text color={opColor} dimColor={opColor === undefined}>
               {opLabel.padEnd(13)}
             </Text>
-            <Text dimColor>{truncate(op.detail ?? status.detail ?? '', detailWidth)}</Text>
+            <Text dimColor>{truncate(operational.detail ?? installed.detail ?? '', detailWidth)}</Text>
           </Box>
         );
       })}
@@ -135,7 +222,11 @@ export function NodeDoctor({ config, onBack, variant = 'screen' }: NodeDoctorPro
   });
 
   const compact = variant === 'overlay';
-  const stepDone = (step: DoctorStepKey): boolean => state.completedSteps.includes(step);
+
+  const apiLevel = state.apiAccess ? apiAccessLevel(state.apiAccess) : null;
+  const capsSummary =
+    state.caps && state.operationalCaps ? summarizeCapabilities(state.caps, state.operationalCaps) : null;
+  const jobsSummary = state.jobReadiness ? summarizeJobReadiness(state.jobReadiness) : null;
 
   return (
     <Box
@@ -151,14 +242,12 @@ export function NodeDoctor({ config, onBack, variant = 'screen' }: NodeDoctorPro
       {!compact && (
         <Box flexDirection="column" marginTop={1}>
           {DOCTOR_STEP_ORDER.map((step) => {
-            const done = stepDone(step);
-            const active = state.currentStep === step;
+            const level = computeStepLevel(step, state);
+            const { icon, color, dim } = stepIconAndColor(level);
             return (
               <Box key={step} flexDirection="row" gap={1}>
-                <Text color={done ? 'green' : active ? 'cyan' : undefined} dimColor={!done && !active}>
-                  {done ? '✔' : active ? <Spinner type="dots" /> : '·'}
-                </Text>
-                <Text color={active ? 'cyan' : undefined} dimColor={!done && !active}>
+                <Text color={color} dimColor={dim}>{icon}</Text>
+                <Text color={color} dimColor={dim}>
                   {DOCTOR_STEP_LABELS[step]}
                 </Text>
               </Box>
@@ -167,48 +256,75 @@ export function NodeDoctor({ config, onBack, variant = 'screen' }: NodeDoctorPro
         </Box>
       )}
 
-      {/* API Access detail — full screen only, once available. */}
+      {/* API Access detail — full screen only, once available. Collapses to
+          a single line when fully healthy; expands to the full three-line
+          breakdown otherwise so the actual problem stays visible. */}
       {!compact && state.apiAccess && (
         <Box flexDirection="column" marginTop={1}>
           <Text bold color="cyan">API Access</Text>
-          <Text color={state.apiAccess.authOk ? 'green' : 'red'}>
-            {state.apiAccess.authOk ? '✔' : '✖'} {truncate(state.apiAccess.authDetail, 84)}
-          </Text>
-          {state.apiAccess.nodeRegistrationOk !== null ? (
-            <Text color={state.apiAccess.nodeRegistrationOk ? 'green' : 'yellow'}>
-              {state.apiAccess.nodeRegistrationOk ? '✔' : '⚠'}{' '}
-              {truncate(state.apiAccess.nodeRegistrationDetail, 84)}
-            </Text>
+          {apiLevel === 'ok' ? (
+            <Text color="green">✔ API access ok — {truncate(state.apiAccess.authDetail, 84)}</Text>
           ) : (
-            <Text dimColor>· {truncate(state.apiAccess.nodeRegistrationDetail, 84)}</Text>
+            <>
+              <Text color={state.apiAccess.authOk ? 'green' : 'red'}>
+                {state.apiAccess.authOk ? '✔' : '✖'} {truncate(state.apiAccess.authDetail, 84)}
+              </Text>
+              {state.apiAccess.nodeRegistrationOk !== null ? (
+                <Text color={state.apiAccess.nodeRegistrationOk ? 'green' : 'yellow'}>
+                  {state.apiAccess.nodeRegistrationOk ? '✔' : '⚠'}{' '}
+                  {truncate(state.apiAccess.nodeRegistrationDetail, 84)}
+                </Text>
+              ) : (
+                <Text dimColor>· {truncate(state.apiAccess.nodeRegistrationDetail, 84)}</Text>
+              )}
+              <Text color={state.apiAccess.manifestOk ? 'green' : 'yellow'}>
+                {state.apiAccess.manifestOk ? '✔' : '⚠'} {truncate(state.apiAccess.manifestDetail, 84)}
+              </Text>
+            </>
           )}
-          <Text color={state.apiAccess.manifestOk ? 'green' : 'yellow'}>
-            {state.apiAccess.manifestOk ? '✔' : '⚠'} {truncate(state.apiAccess.manifestDetail, 84)}
-          </Text>
         </Box>
       )}
 
-      {/* Capability table — both variants, once available. */}
-      {state.caps && state.operationalCaps && (
+      {/* Capability table — both variants, once available. Collapses to a
+          single line when every capability is operational; otherwise shows a
+          one-line count summary followed by only the rows needing attention. */}
+      {capsSummary && (
         <Box flexDirection="column" marginTop={1}>
           {!compact && <Text bold color="cyan">Capabilities</Text>}
-          <CapabilityTable caps={state.caps} operational={state.operationalCaps} detailWidth={compact ? 40 : 60} />
+          {capsSummary.issues.length === 0 ? (
+            <Text color="green">✔ All {capsSummary.totalCount} capabilities operational.</Text>
+          ) : (
+            <>
+              <Text dimColor>
+                {`${capsSummary.okCount}/${capsSummary.totalCount} capabilities operational — showing ${capsSummary.issues.length} needing attention:`}
+              </Text>
+              <CapabilityTable rows={capsSummary.issues} detailWidth={compact ? 40 : 60} />
+            </>
+          )}
         </Box>
       )}
 
-      {/* Job-type readiness. */}
+      {/* Job-type readiness — collapses to a single line when every
+          configured/eligible type is ready; otherwise a one-line count
+          followed by only the not-ready rows. */}
       {state.jobReadiness && (
         <Box flexDirection="column" marginTop={1}>
           {!compact && <Text bold color="cyan">Job-type readiness</Text>}
-          {state.jobReadiness.length === 0 && (
+          {state.jobReadiness.length === 0 ? (
             <Text color="yellow">⚠ No eligible job types configured/supported on this machine.</Text>
+          ) : jobsSummary && jobsSummary.issues.length === 0 ? (
+            <Text color="green">✔ All {jobsSummary.totalCount} job type(s) ready.</Text>
+          ) : (
+            <>
+              <Text dimColor>{`${jobsSummary?.readyCount ?? 0}/${jobsSummary?.totalCount ?? 0} ready`}</Text>
+              {jobsSummary?.issues.map((row) => (
+                <Text key={row.type} color="red">
+                  ✖ {row.type}
+                  <Text dimColor> — missing {row.missing.join(', ')}</Text>
+                </Text>
+              ))}
+            </>
           )}
-          {state.jobReadiness.map((row) => (
-            <Text key={row.type} color={row.ready ? 'green' : 'red'}>
-              {row.ready ? '✔' : '✖'} {row.type}
-              {!row.ready && <Text dimColor> — missing {row.missing.join(', ')}</Text>}
-            </Text>
-          ))}
         </Box>
       )}
 
@@ -245,14 +361,15 @@ export function NodeDoctor({ config, onBack, variant = 'screen' }: NodeDoctorPro
         </Box>
       )}
 
-      {/* Final summary. */}
+      {/* Final summary + setup guide reference — shown every run. */}
       {state.done && (
-        <Box marginTop={1}>
+        <Box marginTop={1} flexDirection="column">
           {state.hasError ? (
             <Text color="red" bold>✖ Doctor found problems — this node cannot fully process its eligible types.</Text>
           ) : (
             <Text color="green" bold>✔ Doctor: all checks passed.</Text>
           )}
+          <Text dimColor>Setup guide: {WORKER_NODE_SETUP_GUIDE_URL}</Text>
         </Box>
       )}
 
