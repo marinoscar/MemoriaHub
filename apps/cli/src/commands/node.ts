@@ -40,6 +40,8 @@ import {
   type NodeJobType,
 } from '../node/capabilities.js';
 import { ensureModels } from '../node/models.js';
+import { runOperationalSelfTests } from '../node/self-test.js';
+import { runApiAccessChecks, checkDaemonLiveness } from '../node/doctor-checks.js';
 import {
   NodeEngine,
   type NodeEngineOptions,
@@ -107,6 +109,47 @@ function printCapabilityTable(caps: Record<string, CapabilityStatus>): void {
       key,
       status.available ? chalk.green('yes') : chalk.red('no'),
       status.detail ?? '',
+    ]);
+  }
+  process.stdout.write(table.toString() + '\n');
+}
+
+/**
+ * Render the combined installed-vs-operational capability table used by
+ * `node doctor`. "Installed" is the require.resolve presence probe from
+ * `detectCapabilities()`; "Operational" is the real self-test result from
+ * `runOperationalSelfTests()` — a capability can be installed but not (yet)
+ * operational (e.g. a model file not downloaded yet), which is not an error,
+ * just not-ready-yet, so it renders yellow rather than red.
+ */
+function printOperationalCapabilityTable(
+  caps: Record<string, CapabilityStatus>,
+  operational: Record<string, CapabilityStatus>,
+): void {
+  const table = new Table({
+    head: [
+      chalk.bold('Capability'),
+      chalk.bold('Installed'),
+      chalk.bold('Operational'),
+      chalk.bold('Detail'),
+    ],
+    style: { head: [], border: isTTY ? ['dim'] : [] },
+  });
+  for (const [key, status] of Object.entries(caps)) {
+    const op = operational[key] ?? status;
+    let operationalCell: string;
+    if (!status.available) {
+      operationalCell = chalk.dim('n/a');
+    } else if (op.available) {
+      operationalCell = chalk.green('yes');
+    } else {
+      operationalCell = chalk.yellow('not yet');
+    }
+    table.push([
+      key,
+      status.available ? chalk.green('yes') : chalk.red('no'),
+      operationalCell,
+      op.detail ?? status.detail ?? '',
     ]);
   }
   process.stdout.write(table.toString() + '\n');
@@ -799,34 +842,61 @@ function doctorCmd(): Command {
       const api = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
       let hasError = false;
 
-      // 1. Connectivity
-      ui.step('Connectivity');
-      try {
-        await api.get<unknown>('/api/auth/me');
-        ui.success(`Connected to ${cfg.serverUrl} (token valid).`);
-      } catch (err) {
+      // 1. API Access — auth roundtrip, node-registration validity, and
+      //    model-manifest reachability. Claim permission (jobs:write) is not
+      //    probed separately since it shares the same PAT scope as the auth
+      //    roundtrip below and a real claim would consume a job.
+      ui.step('API Access');
+      const access = await runApiAccessChecks(api, cfg.nodeId);
+      if (access.authOk) {
+        ui.success(`Connected to ${cfg.serverUrl} (token valid). ${access.authDetail}`);
+      } else {
         hasError = true;
-        ui.error(`Cannot reach API / token invalid: ${(err as Error).message}`);
+        ui.error(`Cannot reach API / token invalid: ${access.authDetail}`);
+      }
+      if (cfg.nodeId) {
+        if (access.nodeRegistrationOk === true) {
+          ui.success(`Node registration: ${access.nodeRegistrationDetail}`);
+        } else if (access.nodeRegistrationOk === false) {
+          ui.warn(`Node registration: ${access.nodeRegistrationDetail}`);
+        } else {
+          ui.dim(`Node registration: ${access.nodeRegistrationDetail}`);
+        }
+      } else {
+        ui.dim('Node registration: not registered locally — run `node register` first.');
+      }
+      if (access.manifestOk) {
+        ui.success(`Model manifest: ${access.manifestDetail}`);
+      } else {
+        ui.warn(`Model manifest: ${access.manifestDetail}`);
       }
       ui.blank();
 
-      // 2. Capabilities
-      ui.step('Capabilities');
+      // 2. Capabilities — presence probe (require.resolve/binary detection).
+      ui.step('Capabilities (installed)');
       const caps = await detectCapabilities();
-      printCapabilityTable(caps);
+
+      // 3. Operational self-tests — a real decode/embed/detect/OCR-init pass
+      //    for every capability reported present above. See node/self-test.ts.
+      ui.step('Running operational self-tests…');
+      const operationalCaps = await runOperationalSelfTests(caps);
+      printOperationalCapabilityTable(caps, operationalCaps);
       ui.blank();
 
-      // 3. Required-capability check for eligible types
+      // 4. Required-capability check for eligible types — gated on the
+      //    OPERATIONAL result, not mere presence, so a node whose sharp binary
+      //    resolves but crashes on first use (or whose models aren't
+      //    downloaded yet) is correctly reported as not-ready.
       ui.step('Job-type readiness');
       const eligibleTypes =
         cfg.node?.eligibleTypes && cfg.node.eligibleTypes.length > 0
           ? cfg.node.eligibleTypes.filter(isNodeJobType)
-          : supportedTypes(caps);
+          : supportedTypes(operationalCaps);
       if (eligibleTypes.length === 0) {
         ui.warn('No eligible job types configured/supported on this machine.');
       }
       for (const t of eligibleTypes) {
-        const missing = missingRequirements(t, caps);
+        const missing = missingRequirements(t, operationalCaps);
         if (missing.length === 0) {
           ui.success(`${t}: ready`);
         } else {
@@ -836,7 +906,7 @@ function doctorCmd(): Command {
       }
       ui.blank();
 
-      // 4. Model presence
+      // 5. Model presence (download-and-verify, as `node start` does).
       ui.step('Models');
       try {
         const manifest = await api.getModelManifest();
@@ -855,6 +925,33 @@ function doctorCmd(): Command {
         }
       } catch (err) {
         ui.warn(`Could not verify models: ${(err as Error).message}`);
+      }
+      ui.blank();
+
+      // 6. Daemon liveness — is a `node start` process currently running on
+      //    this machine (with a quick live snapshot), or is there a stale
+      //    pidfile left behind by a crash. Informational only — does not
+      //    affect the exit code, since a stopped daemon isn't a "problem"
+      //    with the machine's capabilities.
+      ui.step('Daemon');
+      const daemon = await checkDaemonLiveness();
+      if (daemon.running) {
+        ui.success(`Worker node daemon is running — ${daemon.detail}`);
+        const snap = daemon.snapshot as
+          | { startedAt?: string; concurrency?: number; eligibleTypes?: string[] }
+          | null;
+        if (snap) {
+          if (snap.startedAt) {
+            const uptime = fmtDuration(Date.now() - Date.parse(snap.startedAt));
+            ui.dim(`  uptime: ${uptime}`);
+          }
+          if (snap.concurrency !== undefined) ui.dim(`  concurrency: ${snap.concurrency}`);
+          if (snap.eligibleTypes) ui.dim(`  eligible types: ${snap.eligibleTypes.join(', ')}`);
+        }
+      } else if (daemon.stalePidfile) {
+        ui.warn(daemon.detail);
+      } else {
+        ui.info(daemon.detail);
       }
       ui.blank();
 
