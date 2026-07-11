@@ -260,6 +260,15 @@ The CLI validates any token (device-issued or manually supplied) by calling `GET
 | `reports show <id>` | `--json` | Run one report (`overview`, `runs`, `storage`, `duplicates`) and print a table (or JSON with `--json`) | Reports ▸ |
 | `jobs` (alias `queue`) | `--interval <sec>` / `--once` / `--json` / `--window <days>` | Live job queue dashboard (server load, ETA); requires an Admin PAT with `jobs:read` | Tools ▸ Job queue monitor |
 | `backup` | `--circle <id>` / `--all` / `--dest <path>` | Pull media blobs from the server to a local directory; requires an Admin PAT | Tools ▸ Backup |
+| `node register` | `--name <name>` / `--concurrency <n>` / `--types <csv>` | Register this machine as a worker node (one-time, PAT-based) | — |
+| `node start` | `--concurrency <n>` / `--types <csv>` / `--poll <ms>` / `--daemon` | Run the claim → compute → submit loop; `--daemon` detaches into the background | Tools ▸ Worker Node ▸ Node dashboard (`[s]` start) |
+| `node stop` | (none) | Stop a running node: IPC (graceful drain + deregister) → `SIGTERM` via pidfile → server-side deregister | Tools ▸ Worker Node ▸ Node dashboard (`[d]` drain / `[x]` stop daemon) |
+| `node status` | (none) | Live snapshot via IPC when a daemon is running, else a local config + capability summary | Tools ▸ Worker Node ▸ Node dashboard |
+| `node list` | (none) | List worker nodes registered under the caller's PAT | — |
+| `node doctor` | (none) | Capability self-test, API access, model, and daemon-liveness report | Tools ▸ Worker Node ▸ Node dashboard (`[r]` doctor — capability probe only, lighter than the full CLI command) |
+| `node logs` | `--follow` / `-n, --lines <n>` | Print or tail the JSONL worker-node log | — |
+| `node set-concurrency <n>` | (none) | Adjust concurrency live over IPC when a daemon is running, else persist to config | Tools ▸ Worker Node ▸ Node config |
+| `node service install\|uninstall\|status` | (none) | Install/remove/inspect the systemd user unit that keeps the node always on | — |
 | `import <folder>` | `-r, --recursive` / `--dry-run` | One-shot import alias for `sync <folder>` (legacy back-compat) | — |
 | `menu` | (none) | Launch the interactive terminal UI (requires a TTY) | — |
 
@@ -837,6 +846,115 @@ Each mode runs a plan → confirm → execute flow: it counts the convertible fi
 
 ---
 
+## Worker Nodes (distributed compute)
+
+A **worker node** turns a spare laptop or desktop into extra processing capacity for your MemoriaHub server. Enrichment jobs — face detection, near-duplicate/CLIP embedding, thumbnail generation, metadata extraction, social-media video detection, AI auto-tagging, and reverse geocoding — normally run inside the server's own in-process worker. Once a machine registers as a node, it claims eligible jobs from that same queue, runs the compute locally, and submits results back over HTTPS. The server's own worker keeps processing every job type exactly as before with zero nodes registered — a node is pure elastic extra capacity, never a dependency.
+
+A shared compute package (`packages/enrichment-compute`) is imported identically by the server and the CLI, so a node's face embeddings and CLIP visual embeddings are numerically identical to the server's — face clusters and duplicate groups stay correct no matter which machine produced the underlying vector.
+
+### Node-eligible job types
+
+- `face_detection`
+- `duplicate_detection`
+- `metadata_extraction`
+- `thumbnail_regen` (photos only — a video input falls back to the server's existing reprocess pipeline)
+- `social_media_detection`
+- `auto_tagging` (via a transient, per-job AI credential — see Security model below)
+- `geocode` (via a transient, per-job credential; only the `nominatim`/`google` providers are node-computable — the on-server `offline` provider has no node-side equivalent)
+
+`video_face_detection` and `thumbnail_repair` are listed for interface parity but are not yet fully distributable in practice — see the [Distributed Nodes spec](../../docs/specs/distributed-nodes.md#8-node-eligible-job-types) for the full status table and known gaps.
+
+### Register: `memoriahub node register`
+
+```bash
+memoriahub node register
+memoriahub node register --name office-mbp --concurrency 4
+memoriahub node register --types face_detection,duplicate_detection,metadata_extraction
+```
+
+Registration is one-time per machine and authenticates with the same Personal Access Token used everywhere else in the CLI — there is no separate node credential to create or manage. It records the node's hostname, platform, CLI version, and detected/selected eligible job types with the server, and saves the returned node ID locally.
+
+### Start: `memoriahub node start`
+
+```bash
+# Foreground — logs stream to the terminal, Ctrl-C stops
+memoriahub node start
+
+# Override concurrency (persisted to config) for this and future runs
+memoriahub node start --concurrency 4
+
+# Background it: detaches, returns immediately
+memoriahub node start --daemon
+```
+
+`node start` runs the claim → compute → submit loop. Every run — foreground or `--daemon` — hosts a pidfile (`~/.memoriahub/node.pid`) and a Unix-domain-socket IPC channel (`~/.memoriahub/node.sock`) so a second CLI instance (`node stop`, `node status`, `node set-concurrency`, or the TUI dashboard in attach mode) can talk to it live. `--daemon` re-spawns the process detached and returns control of the terminal immediately; without it, the loop runs in the foreground, useful the first time you bring a node online so you can watch it work directly. A stale pidfile left by a crashed process is cleaned up automatically on the next start; a genuinely live daemon refuses a second concurrent instance.
+
+### Always-on service: `memoriahub node service install|uninstall|status`
+
+```bash
+memoriahub node service install
+memoriahub node service status
+memoriahub node service uninstall
+```
+
+`service install` writes a systemd **user** unit (`~/.config/systemd/user/memoriahub-node.service`, `Restart=on-failure`) and enables it immediately via `systemctl --user`, so the node survives terminal closures and restarts on failure. Run `loginctl enable-linger $USER` afterward to keep the service running after you log out. On Windows, `service install` refuses immediately and points you at `node start --daemon` instead — systemd has no Windows equivalent. On WSL without a working per-user systemd instance (detected via `systemctl --user show-environment`), it prints explicit guidance: enable systemd via `[boot]\nsystemd=true` in `/etc/wsl.conf` plus `wsl --shutdown` to restart the distro, or skip systemd entirely with `node start --daemon`.
+
+### Stop, status, and list
+
+```bash
+memoriahub node stop
+memoriahub node status
+memoriahub node list
+```
+
+`node stop` tries three paths in order: a graceful stop over the IPC socket (drains in-flight jobs, then deregisters server-side) if a daemon is running; failing that, `SIGTERM` via the pidfile (the running process's own signal handler drains and deregisters); failing that, a direct server-side deregister call so no new jobs are dispatched to this node even when no local process can be found at all.
+
+`node status` queries a running daemon live over IPC for a real-time snapshot — uptime, state, concurrency, eligible types, last heartbeat, in-flight and recent jobs — when one exists; otherwise it prints the local persisted configuration and detected capabilities only.
+
+`node list` lists every worker node registered under the caller's PAT (`GET /api/nodes`) — useful for seeing your whole fleet from any one machine.
+
+### Doctor: `memoriahub node doctor`
+
+```bash
+memoriahub node doctor
+```
+
+`node doctor` runs a real diagnostic sweep, not just presence checks: an actual `GET /api/auth/me` round-trip confirming the PAT is valid, whether the locally-configured node ID still resolves server-side, and whether the model-manifest endpoint is reachable; a capability presence probe (native-module resolution, ffmpeg/ffprobe binary execution); **operational self-tests** for each present capability — `sharp` actually decodes/encodes a synthetic image, the CLIP model actually embeds a synthetic JPEG (once downloaded), the face detector actually runs detection, tesseract actually inits/terminates an OCR worker (once language data is present) — so a capability that resolves but crashes on first real use is caught, not just reported "available"; job-type readiness gated on those operational results, not mere presence; a model-manifest download-and-verify pass; and finally whether a `node start` process is currently running on this machine, with a live snapshot if so. The command exits non-zero if any hard problem was found.
+
+A node needs several heavy native libraries to serve its job types: `sharp`, `onnxruntime-node` (CLIP), `@vladmandic/human` (face detection), and `tesseract.js` (OCR), plus the TensorFlow.js packages `@vladmandic/human` depends on. These are declared as `optionalDependencies` in the CLI's own `package.json` (matching the shared `packages/enrichment-compute` package's exact version pins), so a normal `memoriahub` install already attempts them — there is no separate install step required to run `node start`. Because they're optional, a platform where one of them fails to build or download doesn't break the rest of the CLI; that job type simply won't be operational until the dependency resolves, which `node doctor` reports clearly rather than crashing. Model files themselves (the CLIP ONNX model, the Human face-detector weights) are downloaded lazily on first `node start` (or `node doctor`) into `~/.memoriahub/models/`, verified against the sha256-pinned manifest the server publishes at `GET /api/nodes/models/manifest`.
+
+### Logs and live concurrency
+
+```bash
+memoriahub node logs
+memoriahub node logs --follow
+memoriahub node logs -n 200
+
+memoriahub node set-concurrency 4
+```
+
+`node logs` prints (or, with `--follow`, tails) the JSONL structured log at `~/.memoriahub/logs/node.log`, size-rotated at 5 MB. Every line is passed through a redaction filter before being written — a PAT, a transient provider credential, or a presigned URL query string can never land in the log file, even by accident.
+
+`node set-concurrency <n>` pushes the change live over IPC to a running daemon (applied starting with the next claim batch, no restart) when one exists, or otherwise persists it to local config for the next `node start`.
+
+### The TUI: Tools ▸ Worker Node
+
+The flagship way to operate a node day-to-day is the interactive dashboard, reachable from the main menu under **Tools ▸ Worker Node**:
+
+- **Node dashboard** — live per-slot job state (active jobs with elapsed time and progress), a rolling history of recent completions/failures, aggregate counters (claimed/succeeded/failed, throughput), heartbeat status, and a quick doctor overlay (`[r]`, a capability probe). Crucially, this screen can either **own** an embedded engine (press `[s]` to start it in-process — a quick foreground session) or **attach** to an already-running `node start --daemon` process over the same IPC socket the `node status`/`stop`/`set-concurrency` commands use. Attaching hydrates from a snapshot and then live-updates from the daemon's own event stream — leaving the screen (`[q]`) only closes the socket, it never stops an attached daemon. This is what makes a systemd-managed, headless node genuinely observable: open the TUI from any terminal (or a fresh SSH session) at any time to watch it work, without stopping or restarting it.
+- **Node config** — edit node name, concurrency (pushed live to a running daemon), poll interval, and the eligible-job-type checkbox list, all persisted immediately.
+
+### Security model in plain language
+
+- **No storage credentials ever reach the node.** A node reads and writes media bytes via short-lived presigned URLs issued by the server for one specific job — never a long-lived S3/R2 access key.
+- **No long-lived AI or geo provider key reaches the node either.** For the two job types that need a keyed provider call (`auto_tagging`, `geocode`), the node fetches a transient credential scoped to the one job it currently holds, uses it in memory for that single call, and discards it — never written to disk, config, or logs.
+- **Authentication is your existing Personal Access Token.** There is no separate node credential system: revoking the PAT immediately cuts off every node registered with it.
+- **Nothing lingers on the node beyond models and logs.** Model files are cached locally for reuse across runs; media bytes downloaded for a job are not retained once it completes.
+
+See the [Distributed Nodes spec](../../docs/specs/distributed-nodes.md) for the full design, including the multi-process-safe database claim mechanism, the exact result-payload contract per job type, and known gaps.
+
+---
+
 ## Data locations
 
 | Path | Purpose |
@@ -847,6 +965,10 @@ Each mode runs a plan → confirm → execute flow: it counts the convertible fi
 | `~/.memoriahub/exports/` | Auto-exported Excel workbooks: `scan-<id>.xlsx` per scan (see [Scan](#scan-dry-run-preview)) and `sync-<runId>.xlsx` per completed sync run (see [After sync](#after-sync)) |
 | `~/.memoriahub/app/` | Installed CLI app (dist + node_modules) |
 | `~/.local/bin/memoriahub` | Shell shim |
+| `~/.memoriahub/node.pid` | Worker-node daemon pidfile (see [Worker Nodes](#worker-nodes-distributed-compute)) |
+| `~/.memoriahub/node.sock` | Worker-node daemon IPC socket (Unix domain socket; a named pipe `\\.\pipe\memoriahub-node` on Windows) |
+| `~/.memoriahub/logs/node.log` | Worker-node JSONL structured log, size-rotated at 5 MB (`memoriahub node logs`) |
+| `~/.memoriahub/models/` | Downloaded worker-node model files (CLIP ONNX, Human face-detector weights), verified against the server's sha256-pinned manifest |
 
 ---
 
@@ -987,5 +1109,6 @@ The binary name registered in `package.json` is `memoriahub`.
 
 - [Metadata override (`memoriahub.json`) specification](../../docs/specs/cli-metadata-override.md)
 - [Phase 05 — CLI Importer](../../docs/plan/phase-05-cli-importer.md)
+- [Distributed Nodes specification](../../docs/specs/distributed-nodes.md)
 - [API Reference](../../docs/API.md)
 - [Architecture](../../docs/ARCHITECTURE.md)
