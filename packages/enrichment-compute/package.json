@@ -52,6 +52,11 @@
       "import": "./dist/esm/social/index.js",
       "require": "./dist/cjs/social/index.js"
     },
+    "./video": {
+      "types": "./dist/types/video/index.d.ts",
+      "import": "./dist/esm/video/index.js",
+      "require": "./dist/cjs/video/index.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {

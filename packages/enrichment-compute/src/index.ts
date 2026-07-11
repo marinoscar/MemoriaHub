@@ -21,4 +21,5 @@ export * from './face/index.js';
 export * from './ocr/index.js';
 export * from './metadata/index.js';
 export * from './social/index.js';
+export * from './video/index.js';
 export { nodeRequire, nodeResolve } from './node-require.cjs';
