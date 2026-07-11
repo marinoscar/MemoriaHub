@@ -33,11 +33,17 @@ export type DuplicateDetectionResult = z.infer<typeof duplicateDetectionResultSc
 export const faceDetectionResultSchema = z.object({
   modelVersion: z.string().min(1),
   providerKey: z.string().min(1),
+  /** Decoded/prepared (post prepareImageForProcessing) pixel dimensions. */
   imageWidth: z.number().int().positive(),
   imageHeight: z.number().int().positive(),
   faces: z.array(
     z.object({
-      /** Normalized 0–1 bounding box, matching the faces table convention. */
+      /**
+       * PIXEL bounding box relative to imageWidth/imageHeight (NOT normalized
+       * 0-1) — normalization to the faces-table 0-1 convention happens on the
+       * server persist half (mirrors where FaceDetectionCore.normalizeFace
+       * runs today for the in-process path).
+       */
       boundingBox: z.object({
         x: z.number(),
         y: z.number(),
@@ -52,6 +58,13 @@ export const faceDetectionResultSchema = z.object({
        * active provider's expected dimensions.
        */
       embedding: z.array(z.number()).min(1),
+      /**
+       * Provider-specific landmark data (e.g. CompreFace facial landmarks).
+       * Opaque passthrough — persisted verbatim, never interpreted by the
+       * compute/persist split. Absent for providers that don't report
+       * landmarks (e.g. the node's Human provider).
+       */
+      landmarks: z.unknown().optional(),
     }),
   ),
 });
@@ -74,8 +87,33 @@ export type MetadataExtractionResult = z.infer<typeof metadataExtractionResultSc
 
 export const socialMediaDetectionResultSchema = z.object({
   verdict: z.enum(['detected', 'clean']),
+  /**
+   * Legacy/general decision score (0..1) — kept for back-compat with the
+   * shape originally proposed in distributed-nodes.md §6. Mirrors
+   * `confidence` for a 'detected' verdict; downstream persistence reads
+   * `confidence`, not this field.
+   */
   score: z.number(),
   ocrText: z.string().nullable(),
+  /**
+   * Extended beyond the originally-proposed { verdict, score, ocrText } shape
+   * (distributed-nodes.md §6) because media_social_status persists platform,
+   * detectionMethod, and matchedRule as first-class audit-trail columns — the
+   * persist half needs them from the node, it cannot re-derive them from
+   * verdict/score alone.
+   */
+  /** Detected platform; null when verdict='clean' or platform is unresolved. */
+  platform: z.enum(['tiktok', 'instagram', 'facebook', 'other']).nullable(),
+  /** Tier/method that produced the verdict; null when clean or pre-flight-capped. */
+  detectionMethod: z.enum(['metadata', 'filename', 'ocr']).nullable(),
+  /**
+   * Winning rule/heuristic id (e.g. 'tt-fn-word'), or the pre-flight skip
+   * reason (e.g. 'skip-duration-cap', 'skip-size-cap'); null when neither
+   * applies (a genuine no-match clean result).
+   */
+  matchedRule: z.string().nullable(),
+  /** Decision confidence in 0..1 — the field media_social_status.confidence persists. */
+  confidence: z.number().min(0).max(1),
 });
 export type SocialMediaDetectionResult = z.infer<typeof socialMediaDetectionResultSchema>;
 
