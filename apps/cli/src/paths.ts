@@ -5,6 +5,7 @@
  * can import a single source of truth instead of duplicating os.homedir() calls.
  */
 
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -31,4 +32,40 @@ export function exportsDir(): string {
 /** Worker-node model download directory: ~/.memoriahub/models/ */
 export function modelsDir(): string {
   return path.join(configDir(), 'models');
+}
+
+/** Worker-node log directory: ~/.memoriahub/logs/ (created on demand). */
+export function logsDir(): string {
+  const dir = path.join(configDir(), 'logs');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/**
+ * Runtime-state directory for the worker-node daemon's pidfile and IPC socket:
+ * ~/.memoriahub (created on demand).
+ */
+export function runDir(): string {
+  const dir = configDir();
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/** Worker-node daemon pidfile: ~/.memoriahub/node.pid */
+export function nodePidPath(): string {
+  return path.join(runDir(), 'node.pid');
+}
+
+/**
+ * Worker-node daemon IPC endpoint.
+ *
+ * Linux/macOS/WSL: a unix domain socket at ~/.memoriahub/node.sock.
+ * Windows: the named pipe \\.\pipe\memoriahub-node (named pipes are not
+ * filesystem paths — no unlink/chmod applies there).
+ */
+export function nodeSocketPath(): string {
+  if (os.platform() === 'win32') {
+    return '\\\\.\\pipe\\memoriahub-node';
+  }
+  return path.join(runDir(), 'node.sock');
 }
