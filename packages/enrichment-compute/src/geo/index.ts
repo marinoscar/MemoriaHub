@@ -14,7 +14,15 @@
  * providers (thin delegates) and the CLI node compute module so a node and
  * the server produce byte-identical `GeoLocationResult`-shaped values from
  * the same raw provider response.
+ *
+ * `GeoProviderRateLimitError` extends the shared `ProviderRateLimitError`
+ * (../rate-limit/index.ts) so a generic `err instanceof ProviderRateLimitError`
+ * check (used by apps/cli's node-engine.ts) catches geo-origin throttles the
+ * same way it catches `/ai`-origin ones — see rate-limit/index.ts's header
+ * for the full rationale.
  */
+
+import { ProviderRateLimitError, parseRetryAfterMs } from '../rate-limit/index.js';
 
 // ---------------------------------------------------------------------------
 // Mapped result shape — structurally identical to
@@ -96,7 +104,12 @@ export async function fetchNominatim(baseUrl: string, lat: number, lng: number):
   });
 
   if (response.status === 429 || response.status >= 500) {
-    throw new GeoProviderRateLimitError(`Nominatim throttled (HTTP ${response.status})`, 'nominatim');
+    const retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'));
+    throw new GeoProviderRateLimitError(
+      `Nominatim throttled (HTTP ${response.status})`,
+      'nominatim',
+      retryAfterMs,
+    );
   }
   if (!response.ok) {
     throw new Error(`Nominatim returned HTTP ${response.status}`);
@@ -157,11 +170,18 @@ export async function fetchGoogleReverse(apiKey: string, lat: number, lng: numbe
   const response = await fetch(url);
 
   if (response.status === 429 || response.status >= 500) {
-    throw new GeoProviderRateLimitError(`Google Geocoding API returned HTTP ${response.status}`, 'google');
+    const retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'));
+    throw new GeoProviderRateLimitError(
+      `Google Geocoding API returned HTTP ${response.status}`,
+      'google',
+      retryAfterMs,
+    );
   }
 
   const data = (await response.json()) as GoogleGeocodeResponse;
 
+  // Google's quota-exhaustion signal rides in the JSON `status` field, not an
+  // HTTP status code or a Retry-After header — no retryAfterMs available.
   if (data.status === 'OVER_QUERY_LIMIT' || data.status === 'RESOURCE_EXHAUSTED') {
     throw new GeoProviderRateLimitError(`Google Geocoding quota exceeded (${data.status})`, 'google');
   }
@@ -178,14 +198,18 @@ export async function fetchGoogleReverse(apiKey: string, lat: number, lng: numbe
  * signal (HTTP 429/5xx, or Google's OVER_QUERY_LIMIT/RESOURCE_EXHAUSTED
  * status). Framework-agnostic (this package has no NestJS dependency) — a
  * caller that wants server-style rate-limit-deferral semantics (e.g.
- * apps/api's RateLimitError) should catch this and re-wrap it.
+ * apps/api's RateLimitError) should catch this and re-wrap it; a caller that
+ * only cares "was this a rate limit, from any provider" can instead check
+ * `err instanceof ProviderRateLimitError` (../rate-limit/index.ts), which
+ * this class extends.
  */
-export class GeoProviderRateLimitError extends Error {
-  constructor(
-    message: string,
-    public readonly provider: string,
-  ) {
-    super(message);
+export class GeoProviderRateLimitError extends ProviderRateLimitError {
+  /** Narrows the base class's optional `provider?: string` — always set here. */
+  public readonly provider: string;
+
+  constructor(message: string, provider: string, retryAfterMs?: number) {
+    super(message, provider, retryAfterMs);
+    this.provider = provider;
     this.name = 'GeoProviderRateLimitError';
   }
 }

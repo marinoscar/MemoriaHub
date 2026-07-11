@@ -27,6 +27,11 @@
       "import": "./dist/esm/geo/index.js",
       "require": "./dist/cjs/geo/index.js"
     },
+    "./rate-limit": {
+      "types": "./dist/types/rate-limit/index.d.ts",
+      "import": "./dist/esm/rate-limit/index.js",
+      "require": "./dist/cjs/rate-limit/index.js"
+    },
     "./clip": {
       "types": "./dist/types/clip/index.d.ts",
       "import": "./dist/esm/clip/index.js",

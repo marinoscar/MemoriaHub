@@ -18,9 +18,20 @@
  * ported here — a node job configured for a non-Anthropic tagging provider
  * throws CapabilityUnavailableError client-side and the job stays
  * server-only, exactly as before this change.
+ *
+ * RATE-LIMIT CLASSIFICATION: the Anthropic SDK throws a typed `APIError`
+ * (`.status`, `.headers`) for both HTTP 429 (rate limit) and 529 ("Overloaded")
+ * responses — see `apps/api/src/enrichment/rate-limit.error.ts`'s
+ * `classifyRateLimit`, which treats both the same way server-side.
+ * `callAnthropicVision` classifies these into the shared
+ * `ProviderRateLimitError` (../rate-limit/index.ts) so every caller — the
+ * server's in-process auto-tagging path and a distributed CLI worker node
+ * alike — gets one consistent signal to react to, instead of each having to
+ * duck-type the SDK error itself. All other errors propagate unchanged.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+import { ProviderRateLimitError, parseRetryAfterMs } from '../rate-limit/index.js';
 
 export interface AnthropicVisionCredentials {
   apiKey: string;
@@ -52,33 +63,60 @@ export async function callAnthropicVision(
     ...(creds.baseUrl && { baseURL: creds.baseUrl }),
   });
 
-  const response = await client.messages.create({
-    model: req.model,
-    max_tokens: 1024,
-    ...(req.system && { system: req.system }),
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: {
-              type: 'base64',
-              media_type: req.mimeType as Anthropic.Base64ImageSource['media_type'],
-              data: req.imageBase64,
+  let response: Anthropic.Message;
+  try {
+    response = await client.messages.create({
+      model: req.model,
+      max_tokens: 1024,
+      ...(req.system && { system: req.system }),
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: req.mimeType as Anthropic.Base64ImageSource['media_type'],
+                data: req.imageBase64,
+              },
             },
-          },
-          {
-            type: 'text',
-            text: req.prompt,
-          },
-        ],
-      },
-    ],
-  });
+            {
+              type: 'text',
+              text: req.prompt,
+            },
+          ],
+        },
+      ],
+    });
+  } catch (err) {
+    throw classifyAnthropicRateLimit(err) ?? err;
+  }
 
   return response.content
     .filter((block): block is Anthropic.TextBlock => block.type === 'text')
     .map((block) => block.text)
     .join('');
+}
+
+/**
+ * Classifies an Anthropic SDK error as a rate limit / overload throttle.
+ * Returns a `ProviderRateLimitError` for HTTP 429 or 529 ("Overloaded" — see
+ * the module header), with `retryAfterMs` populated from the response's
+ * `Retry-After` header when present. Returns `null` for any other error,
+ * which callers should rethrow unchanged.
+ *
+ * Exported for direct use/testing; `callAnthropicVision` above applies this
+ * automatically.
+ */
+export function classifyAnthropicRateLimit(err: unknown): ProviderRateLimitError | null {
+  if (!(err instanceof Anthropic.APIError)) return null;
+  if (err.status !== 429 && err.status !== 529) return null;
+
+  const retryAfterMs = parseRetryAfterMs(err.headers?.get('retry-after') ?? null);
+  return new ProviderRateLimitError(
+    `Anthropic rate limit / overload (HTTP ${err.status}): ${err.message}`,
+    'anthropic',
+    retryAfterMs,
+  );
 }
