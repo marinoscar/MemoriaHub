@@ -401,6 +401,22 @@ info "Installing CLI workspace dependencies …"
 }
 ok "Dependencies installed"
 
+# apps/cli imports the shared @memoriahub/enrichment-compute package by
+# subpath (e.g. .../clip, .../dto) resolved against its built dist/ — that
+# output is git-ignored, so it must be built here on every fresh checkout
+# before the CLI's TypeScript can compile (mirrors the identical fix already
+# applied to .github/workflows/ci.yml).
+info "Building shared enrichment-compute package …"
+(
+  cd "$TMP_DIR"
+  npm run build --workspace=@memoriahub/enrichment-compute 2>&1 \
+    | grep -v "^$" | while IFS= read -r line; do dim "$line"; done
+) || {
+  err "Failed to build @memoriahub/enrichment-compute"
+  exit 1
+}
+ok "Shared package built"
+
 info "Compiling TypeScript …"
 (
   cd "$TMP_DIR"
