@@ -1,6 +1,21 @@
 # =============================================================================
 # API Dockerfile - Multi-stage build
 # =============================================================================
+# Build context: the REPOSITORY ROOT (see infra/compose/base.compose.yml:
+# `context: ../.., dockerfile: apps/api/Dockerfile`). This is required
+# because apps/api depends on the local npm workspace package
+# @memoriahub/enrichment-compute (packages/enrichment-compute) — npm
+# workspace linking needs the root package.json/lockfile and the workspace
+# member's package.json to be visible in the same install, which an
+# apps/api-scoped context cannot provide.
+#
+# WORKDIR is /app (repo root) through the deps stage so npm install resolves
+# workspaces correctly and apps/api/tsconfig.json's "../../tsconfig.base.json"
+# extends path lines up once apps/api is copied to /app/apps/api. Runtime
+# stages then switch WORKDIR to /app/apps/api so npm scripts, CMD entries,
+# and relative env-var defaults (e.g. MODELS_DIR="./data/models") behave
+# exactly as they did when the context was apps/api alone.
+# =============================================================================
 
 # -----------------------------------------------------------------------------
 # Base stage
@@ -14,13 +29,24 @@ RUN apk add --no-cache openssl openssl-dev ffmpeg
 # Dependencies stage
 # -----------------------------------------------------------------------------
 FROM base AS deps
+# Root workspace manifests plus the two workspace members apps/api needs:
+# itself, and the local @memoriahub/enrichment-compute package it depends on.
+# Copying manifests (not full source) first keeps this layer cache-friendly.
 COPY package*.json ./
-COPY prisma ./prisma/
-COPY scripts ./scripts/
+COPY tsconfig.base.json ./
+COPY apps/api/package.json ./apps/api/package.json
+COPY apps/api/prisma ./apps/api/prisma/
+COPY apps/api/scripts ./apps/api/scripts/
+COPY packages/enrichment-compute ./packages/enrichment-compute/
 # Using npm install since this is a workspace package without its own lock file
+RUN npm install --ignore-scripts
+
+# Build the shared enrichment-compute workspace package so its dist/ is
+# present before apps/api (which imports it) is compiled or run.
+RUN npm run build -w @memoriahub/enrichment-compute
+
 # Set dummy DATABASE_URL for Prisma generate (actual connection not needed at build time)
-RUN npm install --ignore-scripts && \
-    DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npx prisma generate
+RUN cd apps/api && DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npx prisma generate
 
 # Download @vladmandic/human model files (blazeface-back detector + faceres
 # descriptor) for offline in-process face detection. The build FAILS if any
@@ -36,9 +62,16 @@ RUN mkdir -p /app/models/human && \
 # Development stage
 # -----------------------------------------------------------------------------
 FROM base AS development
-COPY --from=deps /app/node_modules ./node_modules
+# node_modules and packages/ must land at the same absolute paths they were
+# installed/built at (/app/node_modules, /app/packages) — npm workspace
+# linking uses relative symlinks (node_modules/@memoriahub/enrichment-compute
+# -> ../../packages/enrichment-compute) that would break if the layout shifted.
+COPY --from=deps /app/node_modules /app/node_modules
+COPY --from=deps /app/packages /app/packages
+COPY --from=deps /app/tsconfig.base.json /app/tsconfig.base.json
 COPY --from=deps /app/models /app/models
-COPY . .
+COPY apps/api ./apps/api
+WORKDIR /app/apps/api
 EXPOSE 3000
 CMD ["npm", "run", "start:dev"]
 
@@ -46,19 +79,25 @@ CMD ["npm", "run", "start:dev"]
 # Build stage
 # -----------------------------------------------------------------------------
 FROM base AS build
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY --from=deps /app/node_modules /app/node_modules
+COPY --from=deps /app/packages /app/packages
+COPY --from=deps /app/tsconfig.base.json /app/tsconfig.base.json
+COPY apps/api ./apps/api
+WORKDIR /app/apps/api
 RUN npm run build
 
 # -----------------------------------------------------------------------------
 # Production stage
 # -----------------------------------------------------------------------------
 FROM base AS production
-COPY --from=build /app/dist ./dist
-COPY --from=deps /app/node_modules ./node_modules
+COPY --from=build /app/apps/api/dist /app/apps/api/dist
+COPY --from=deps /app/node_modules /app/node_modules
+COPY --from=deps /app/packages /app/packages
 COPY --from=deps /app/models /app/models
-COPY package*.json ./
-COPY prisma ./prisma/
-COPY scripts ./scripts/
+COPY --from=deps /app/tsconfig.base.json /app/tsconfig.base.json
+COPY apps/api/package.json ./apps/api/package.json
+COPY apps/api/prisma ./apps/api/prisma/
+COPY apps/api/scripts ./apps/api/scripts/
+WORKDIR /app/apps/api
 EXPOSE 3000
 CMD ["npm", "run", "start:prod"]

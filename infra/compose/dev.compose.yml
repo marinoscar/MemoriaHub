@@ -14,9 +14,14 @@ services:
   api:
     build:
       target: development
+    # Bind-mount targets moved from /app/src and /app/prisma to
+    # /app/apps/api/src and /app/apps/api/prisma: the api Dockerfile now
+    # builds with WORKDIR /app/apps/api (repo-root-relative context; see
+    # apps/api/Dockerfile), so that's where the source lives inside the
+    # running container.
     volumes:
-      - ../../apps/api/src:/app/src:ro
-      - ../../apps/api/prisma:/app/prisma:ro
+      - ../../apps/api/src:/app/apps/api/src:ro
+      - ../../apps/api/prisma:/app/apps/api/prisma:ro
     environment:
       - NODE_ENV=development
     command: npm run start:dev
@@ -27,8 +32,10 @@ services:
   web:
     build:
       target: development
+    # See the api service note above: the web Dockerfile now builds with
+    # WORKDIR /app/apps/web, so the bind-mount target moved accordingly.
     volumes:
-      - ../../apps/web/src:/app/src:ro
+      - ../../apps/web/src:/app/apps/web/src:ro
     environment:
       - NODE_ENV=development
     command: npm run dev
