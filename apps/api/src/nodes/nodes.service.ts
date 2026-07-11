@@ -743,36 +743,52 @@ export class NodesService {
    * `ApiClient.getModelManifest(): Promise<ModelManifestEntry[]>` unwraps the
    * global `{ data }` envelope and then iterates the result directly.
    *
-   * TODO: fill real sha256/bytes hashes
+   * NOTE on the `clip-vit-b32-vision-quantized.onnx` entry's `sha256`
+   * specifically: Hugging Face may rebuild/re-quantize that file over time
+   * (same caveat documented above `looksLikeOnnxModel()` in
+   * `packages/enrichment-compute/src/clip/index.ts`), so this hash is a
+   * point-in-time snapshot, not an eternal guarantee — a stale pinned hash
+   * would break air-gapped/offline deployments if never refreshed. If a
+   * node's download of this entry ever fails hash verification
+   * unexpectedly, the correct response is to re-download and re-hash that
+   * one manifest entry (update this table), not to assume the file itself
+   * is corrupt.
    */
   getModelManifest() {
     return [
       {
         name: 'clip-vit-b32-vision-quantized.onnx',
         url: 'https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx',
-        sha256: null,
-        bytes: null,
+        sha256: '583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299',
+        bytes: 89117001,
         targetSubdir: 'models',
       },
       {
         name: 'blazeface-back.json',
         url: 'https://github.com/vladmandic/human-models/raw/main/models/blazeface-back.json',
-        sha256: null,
-        bytes: null,
+        sha256: 'a765f7b2a6c1d841ecc0b0686e5f51b141b39b7bcdf2888542dc9d9fc4384a87',
+        bytes: 79043,
+        targetSubdir: 'human',
+      },
+      {
+        name: 'blazeface-back.bin',
+        url: 'https://github.com/vladmandic/human-models/raw/main/models/blazeface-back.bin',
+        sha256: 'dc9a97fdc50bc43216554bdd69aa3e7b9361a519ee7bdd996a2f69a98a6f9b72',
+        bytes: 538928,
         targetSubdir: 'human',
       },
       {
         name: 'faceres.json',
         url: 'https://github.com/vladmandic/human-models/raw/main/models/faceres.json',
-        sha256: null,
-        bytes: null,
+        sha256: '5b83d49c0385d2e68a05122441b94226313677cae9fcc40b9587ad50079eb4df',
+        bytes: 71432,
         targetSubdir: 'human',
       },
       {
         name: 'faceres.bin',
         url: 'https://github.com/vladmandic/human-models/raw/main/models/faceres.bin',
-        sha256: null,
-        bytes: null,
+        sha256: '2c7d2d62b76c97528b736527aa09d310ea71743c9e3e79fb6c62d4b2d73af79b',
+        bytes: 6978814,
         targetSubdir: 'human',
       },
     ];
