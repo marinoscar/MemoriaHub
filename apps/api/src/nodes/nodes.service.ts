@@ -761,7 +761,14 @@ export class NodesService {
         url: 'https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx',
         sha256: '583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299',
         bytes: 89117001,
-        targetSubdir: 'models',
+        // Empty string (not 'models'): `targetDir` passed to ensureModels() is
+        // ALREADY the models root (~/.memoriahub/models), so this file must
+        // land directly there — matching where testClip() and
+        // duplicate-detection.ts's getClipSession() look for it
+        // (path.join(modelsDir(), CLIP_MODEL_FILENAME), no subdirectory). A
+        // non-empty subdir here previously caused a double-nested download
+        // path invisible to the code that consumes the file.
+        targetSubdir: '',
       },
       {
         name: 'blazeface-back.json',

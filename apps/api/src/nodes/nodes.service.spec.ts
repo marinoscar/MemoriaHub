@@ -448,6 +448,24 @@ describe('NodesService — result/failure ingestion', () => {
       expect(entry?.targetSubdir).toBe('human');
     });
 
+    it('targets the CLIP entry at the models root, not a nested "models" subdir', () => {
+      // Regression test: ensureModels() in apps/cli/src/node/models.ts joins
+      // `targetDir` (already the models ROOT, e.g. ~/.memoriahub/models) with
+      // `targetSubdir`. A previous `targetSubdir: 'models'` value caused the
+      // CLIP file to land one directory too deep
+      // (~/.memoriahub/models/models/<name>), where neither
+      // apps/cli/src/node/self-test.ts's testClip() nor
+      // apps/cli/src/node/compute/duplicate-detection.ts look for it — so a
+      // freshly-downloaded CLIP model was permanently invisible to the code
+      // meant to consume it.
+      const manifest = service.getModelManifest();
+
+      const entry = manifest.find((m) => m.name === 'clip-vit-b32-vision-quantized.onnx');
+      expect(entry).toBeDefined();
+      expect(entry?.targetSubdir).toBe('');
+      expect(entry?.targetSubdir).not.toBe('models');
+    });
+
     it('has non-null sha256 (string) and bytes (number) on every entry', () => {
       const manifest = service.getModelManifest();
 
