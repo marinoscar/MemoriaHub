@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { mapGoogleResponse } from '@memoriahub/enrichment-compute/geo';
 import { GeoLocationResult } from './geo-location-provider.interface';
 import { RateLimitError, parseRetryAfterMs } from '../../enrichment/rate-limit.error';
 
@@ -51,21 +52,11 @@ export class GoogleGeoLocationProvider {
         return null;
       }
 
-      const first = data.results[0];
-      if (!first) return null;
-
-      const components = first.address_components;
-      const get = (type: string, name: 'long_name' | 'short_name') =>
-        components.find(c => c.types.includes(type))?.[name];
-
-      return {
-        country: get('country', 'long_name'),
-        countryCode: get('country', 'short_name'),
-        admin1: get('administrative_area_level_1', 'long_name'),
-        admin2: get('administrative_area_level_2', 'long_name'),
-        locality: get('locality', 'long_name') ?? get('postal_town', 'long_name'),
-        placeName: first.formatted_address,
-      };
+      // Shared with the CLI's node compute module — see
+      // @memoriahub/enrichment-compute/geo mapGoogleResponse — so a
+      // distributed worker node and the server produce byte-identical
+      // GeoLocationResult-shaped values from the same raw Google response.
+      return mapGoogleResponse(data);
     } catch (error) {
       // Re-throw RateLimitError — do not swallow it into a null return, or the
       // geocode handler will mark the job "processed" with no data.

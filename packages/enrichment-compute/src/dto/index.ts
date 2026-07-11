@@ -141,3 +141,34 @@ export const thumbnailResultSchema = z.object({
   bytes: z.number().int().positive(),
 });
 export type ThumbnailResult = z.infer<typeof thumbnailResultSchema>;
+
+// ---------------------------------------------------------------------------
+// auto_tagging
+// ---------------------------------------------------------------------------
+
+/**
+ * The RAW, unparsed vision-model response text. Parsing/validation against
+ * the enabled TagLabel vocabulary stays server-side (in
+ * AutoTaggingService.persistAutoTagging) since it needs a DB-loaded label
+ * set — both the in-process compute path and a node submit this same shape.
+ */
+export const autoTaggingResultSchema = z.object({
+  rawText: z.string(),
+});
+export type AutoTaggingResult = z.infer<typeof autoTaggingResultSchema>;
+
+// ---------------------------------------------------------------------------
+// geocode
+// ---------------------------------------------------------------------------
+
+export const geocodeResultSchema = z.object({
+  country: z.string().nullable(),
+  countryCode: z.string().nullable(),
+  admin1: z.string().nullable(),
+  admin2: z.string().nullable(),
+  locality: z.string().nullable(),
+  placeName: z.string().nullable(),
+  /** Which provider produced this result, e.g. 'nominatim' | 'google'. */
+  source: z.string(),
+});
+export type GeocodeResult = z.infer<typeof geocodeResultSchema>;

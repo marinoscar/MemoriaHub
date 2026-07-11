@@ -22,6 +22,11 @@
       "import": "./dist/esm/ai/index.js",
       "require": "./dist/cjs/ai/index.js"
     },
+    "./geo": {
+      "types": "./dist/types/geo/index.d.ts",
+      "import": "./dist/esm/geo/index.js",
+      "require": "./dist/cjs/geo/index.js"
+    },
     "./clip": {
       "types": "./dist/types/clip/index.d.ts",
       "import": "./dist/esm/clip/index.js",
