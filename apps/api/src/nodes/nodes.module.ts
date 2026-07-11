@@ -5,9 +5,18 @@ import { NodesAdminController } from './nodes-admin.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { StorageModule } from '../storage/storage.module';
+import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 
+/**
+ * Imports StorageProvidersModule (exports StorageProviderResolver) so
+ * NodesService can resolve the active storage provider for
+ * `POST /nodes/:id/jobs/:jobId/upload-url` — the presigned PUT URL a node
+ * uses to upload a computed thumbnail directly to the same
+ * provider/bucket new uploads land in, mirroring
+ * ThumbnailProcessor.uploadThumbnail's provider resolution.
+ */
 @Module({
-  imports: [PrismaModule, EnrichmentModule, StorageModule],
+  imports: [PrismaModule, EnrichmentModule, StorageModule, StorageProvidersModule],
   controllers: [NodesController, NodesAdminController],
   providers: [NodesService],
 })
