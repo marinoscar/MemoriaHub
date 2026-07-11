@@ -401,6 +401,22 @@ info "Installing CLI workspace dependencies …"
 }
 ok "Dependencies installed"
 
+# apps/cli imports the shared @memoriahub/enrichment-compute package by
+# subpath (e.g. .../clip, .../dto) resolved against its built dist/ — that
+# output is git-ignored, so it must be built here on every fresh checkout
+# before the CLI's TypeScript can compile (mirrors the identical fix already
+# applied to .github/workflows/ci.yml).
+info "Building shared enrichment-compute package …"
+(
+  cd "$TMP_DIR"
+  npm run build --workspace=@memoriahub/enrichment-compute 2>&1 \
+    | grep -v "^$" | while IFS= read -r line; do dim "$line"; done
+) || {
+  err "Failed to build @memoriahub/enrichment-compute"
+  exit 1
+}
+ok "Shared package built"
+
 info "Compiling TypeScript …"
 (
   cd "$TMP_DIR"
@@ -431,6 +447,35 @@ if [[ -f "$TMP_DIR/apps/cli/README.md" ]]; then
 fi
 
 ok "Copied dist + package.json to $APP_DIR"
+
+# ---------------------------------------------------------------------------
+# Step 4a: Vendor the shared enrichment-compute package
+# ---------------------------------------------------------------------------
+# $APP_DIR runs OUTSIDE the monorepo, but apps/cli/package.json lists
+# @memoriahub/enrichment-compute as a real runtime dependency (its compiled
+# dist/*.js does `require()`/`import` the package by subpath, e.g. .../clip,
+# .../dto — the same reason it had to be built in Step 3). It is a private,
+# unpublished workspace package, so the runtime `npm install --omit=dev`
+# below can never resolve it from the npm registry by name/version. Vendor
+# the already-built package into the deployed app directory and repoint the
+# dependency at it via a local `file:` reference so npm links it from disk
+# instead of trying (and failing) to fetch it from the registry.
+info "Vendoring shared enrichment-compute package …"
+mkdir -p "$APP_DIR/vendor/enrichment-compute"
+cp -r "$TMP_DIR/packages/enrichment-compute/dist"         "$APP_DIR/vendor/enrichment-compute/dist"
+cp    "$TMP_DIR/packages/enrichment-compute/package.json" "$APP_DIR/vendor/enrichment-compute/package.json"
+node -e '
+  const fs = require("fs");
+  const p = process.argv[1];
+  const pkg = JSON.parse(fs.readFileSync(p, "utf8"));
+  pkg.dependencies = pkg.dependencies || {};
+  pkg.dependencies["@memoriahub/enrichment-compute"] = "file:./vendor/enrichment-compute";
+  fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + "\n");
+' "$APP_DIR/package.json" || {
+  err "Failed to vendor @memoriahub/enrichment-compute into $APP_DIR"
+  exit 1
+}
+ok "Vendored enrichment-compute package"
 
 info "Installing runtime dependencies (omitting devDeps) …"
 # This runs OUTSIDE the monorepo, so npm installs only the CLI's own
