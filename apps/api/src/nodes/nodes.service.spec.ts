@@ -10,10 +10,6 @@
  *  3. reportJobFailure — routes through EnrichmentTerminalService.completeFailed
  *     with the rateLimited/retryAfterMs opts; willRetry is advisory (ignored)
  *  4. getModelManifest — returns a BARE ARRAY (CLI contract), not { models }
- *  5. getJobUploadUrl — reuses the held-job guard (404/409); 400 when the job
- *     has no mediaItemId or linked StorageObject; happy path derives the
- *     thumbnails/<storageObjectId>.jpg key and returns the resolver's signed
- *     PUT URL
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -32,7 +28,6 @@ import { EnrichmentClaimService } from '../enrichment/enrichment-claim.service';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { EnrichmentTerminalService } from '../enrichment/enrichment-terminal.service';
 import { ObjectsService } from '../storage/objects/objects.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 // ---------------------------------------------------------------------------
@@ -76,8 +71,6 @@ describe('NodesService — result/failure ingestion', () => {
   let mockPrisma: MockPrismaService;
   let mockRegistry: { get: jest.Mock; types: jest.Mock };
   let mockTerminal: { completeSucceeded: jest.Mock; completeFailed: jest.Mock };
-  let mockResolver: { getActiveProvider: jest.Mock };
-  let mockActiveProvider: { getSignedPutUrl: jest.Mock; getBucket: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -85,15 +78,6 @@ describe('NodesService — result/failure ingestion', () => {
     mockTerminal = {
       completeSucceeded: jest.fn().mockResolvedValue(undefined),
       completeFailed: jest.fn().mockResolvedValue(undefined),
-    };
-    mockActiveProvider = {
-      getSignedPutUrl: jest.fn().mockResolvedValue('https://mock-presigned-url.example/put'),
-      getBucket: jest.fn().mockReturnValue('test-bucket'),
-    };
-    mockResolver = {
-      getActiveProvider: jest
-        .fn()
-        .mockResolvedValue({ id: 's3', provider: mockActiveProvider }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -104,7 +88,6 @@ describe('NodesService — result/failure ingestion', () => {
         { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
         { provide: EnrichmentTerminalService, useValue: mockTerminal },
         { provide: ObjectsService, useValue: { getDownloadUrl: jest.fn() } },
-        { provide: StorageProviderResolver, useValue: mockResolver },
       ],
     }).compile();
 
@@ -332,69 +315,6 @@ describe('NodesService — result/failure ingestion', () => {
         service.reportJobFailure(USER_ID, NODE_ID, JOB_ID, { error: 'late report' }),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(mockTerminal.completeFailed).not.toHaveBeenCalled();
-    });
-  });
-
-  // =========================================================================
-  // getJobUploadUrl
-  // =========================================================================
-
-  describe('getJobUploadUrl', () => {
-    it('reuses the held-job guard: 404 when the job does not exist', async () => {
-      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(null);
-
-      await expect(
-        service.getJobUploadUrl(USER_ID, NODE_ID, JOB_ID),
-      ).rejects.toBeInstanceOf(NotFoundException);
-    });
-
-    it('reuses the held-job guard: 409 when the lease has expired', async () => {
-      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(
-        makeHeldJob({ leaseExpiresAt: new Date(Date.now() - 1) }),
-      );
-
-      await expect(
-        service.getJobUploadUrl(USER_ID, NODE_ID, JOB_ID),
-      ).rejects.toBeInstanceOf(ConflictException);
-      expect(mockResolver.getActiveProvider).not.toHaveBeenCalled();
-    });
-
-    it('rejects with 400 when the job has no mediaItemId', async () => {
-      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(
-        makeHeldJob({ mediaItemId: null }),
-      );
-
-      await expect(
-        service.getJobUploadUrl(USER_ID, NODE_ID, JOB_ID),
-      ).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('rejects with 400 when the MediaItem has no linked StorageObject', async () => {
-      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(makeHeldJob());
-      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
-        storageObjectId: null,
-      });
-
-      await expect(
-        service.getJobUploadUrl(USER_ID, NODE_ID, JOB_ID),
-      ).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('derives the thumbnails/<storageObjectId>.jpg key and returns the resolver-signed PUT URL', async () => {
-      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(makeHeldJob());
-      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
-        storageObjectId: 'original-object-id',
-      });
-
-      const res = await service.getJobUploadUrl(USER_ID, NODE_ID, JOB_ID);
-
-      expect(res.storageKey).toBe('thumbnails/original-object-id.jpg');
-      expect(res.url).toBe('https://mock-presigned-url.example/put');
-      expect(res.expiresSeconds).toBeGreaterThan(0);
-      expect(mockActiveProvider.getSignedPutUrl).toHaveBeenCalledWith(
-        'thumbnails/original-object-id.jpg',
-        expect.objectContaining({ contentType: 'image/jpeg' }),
-      );
     });
   });
 

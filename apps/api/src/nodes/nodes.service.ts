@@ -23,7 +23,6 @@ import { EnrichmentClaimService } from '../enrichment/enrichment-claim.service';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { EnrichmentTerminalService } from '../enrichment/enrichment-terminal.service';
 import { ObjectsService } from '../storage/objects/objects.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 
 // ---------------------------------------------------------------------------
 // Input shapes
@@ -67,7 +66,6 @@ export class NodesService {
     private readonly registry: EnrichmentHandlerRegistry,
     private readonly terminal: EnrichmentTerminalService,
     private readonly objectsService: ObjectsService,
-    private readonly storageProviderResolver: StorageProviderResolver,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -310,65 +308,6 @@ export class NodesService {
     }
 
     return job;
-  }
-
-  // -------------------------------------------------------------------------
-  // getJobUploadUrl
-  // -------------------------------------------------------------------------
-
-  /**
-   * Issue a presigned PUT URL for a claimed job to upload output bytes to —
-   * currently used by the thumbnail node-compute path (`thumbnail_regen` /
-   * `thumbnail_repair`): the node computes a JPEG locally, calls this
-   * endpoint to learn WHERE to put it, PUTs the bytes directly to the
-   * returned URL, then submits `{ storageKey, width, height, bytes }` via
-   * `POST /nodes/:id/jobs/:jobId/result`.
-   *
-   * Reuses the same held-job guard as submitJobResult/reportJobFailure (404
-   * unknown job, 409 if not held by this node under a live lease) so a
-   * straggler node past lease expiry cannot obtain a fresh upload URL either.
-   *
-   * The SERVER chooses the storage key — never the node — using the exact
-   * same convention as the in-process pipeline
-   * (`ThumbnailProcessor.uploadThumbnail`): `thumbnails/<originalObjectId>.jpg`,
-   * keyed off the target MediaItem's StorageObject id, so a node-produced
-   * thumbnail is indistinguishable in storage layout from a server-produced
-   * one.
-   */
-  async getJobUploadUrl(
-    userId: string,
-    nodeId: string,
-    jobId: string,
-  ): Promise<{ url: string; storageKey: string; expiresSeconds: number }> {
-    const job = await this.assertJobHeldByNode(userId, nodeId, jobId);
-
-    if (!job.mediaItemId) {
-      throw new BadRequestException(
-        `job ${jobId} has no mediaItemId — an upload URL cannot be derived for a global job`,
-      );
-    }
-
-    const mediaItem = await this.prisma.mediaItem.findUnique({
-      where: { id: job.mediaItemId },
-      select: { storageObjectId: true },
-    });
-
-    if (!mediaItem?.storageObjectId) {
-      throw new BadRequestException(
-        `MediaItem ${job.mediaItemId} for job ${jobId} has no linked StorageObject`,
-      );
-    }
-
-    const storageKey = `thumbnails/${mediaItem.storageObjectId}.jpg`;
-    const expiresSeconds = 3600;
-
-    const { provider } = await this.storageProviderResolver.getActiveProvider();
-    const url = await provider.getSignedPutUrl(storageKey, {
-      contentType: 'image/jpeg',
-      expiresIn: expiresSeconds,
-    });
-
-    return { url, storageKey, expiresSeconds };
   }
 
   /**

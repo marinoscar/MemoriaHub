@@ -171,42 +171,6 @@ export class NodesController {
   }
 
   // -------------------------------------------------------------------------
-  // POST /nodes/:id/jobs/:jobId/upload-url
-  // -------------------------------------------------------------------------
-
-  @Post(':id/jobs/:jobId/upload-url')
-  @Auth({ permissions: [PERMISSIONS.JOBS_WRITE] })
-  @ApiOperation({
-    summary: 'Get a presigned upload URL for a claimed job to PUT output bytes to',
-    description:
-      'Currently used by the thumbnail node-compute path: the node computes a JPEG locally, ' +
-      'calls this endpoint to learn where to PUT it (the server chooses the storage key — ' +
-      'never the node), uploads directly to the returned presigned URL, then submits ' +
-      '{ storageKey, width, height, bytes } via POST /nodes/:id/jobs/:jobId/result. ' +
-      'Reuses the same held-job guard as the result/failure endpoints.',
-  })
-  @ApiParam({ name: 'id', description: 'Worker node UUID' })
-  @ApiParam({ name: 'jobId', description: 'Enrichment job UUID' })
-  @ApiResponse({
-    status: 201,
-    description: 'Presigned upload URL — { url, storageKey, expiresSeconds }',
-  })
-  @ApiResponse({ status: 400, description: 'Job has no mediaItemId or linked StorageObject' })
-  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
-  @ApiResponse({ status: 404, description: 'Node or job not found' })
-  @ApiResponse({
-    status: 409,
-    description: 'Job not held by this node (not claimed by it, not running, or lease expired)',
-  })
-  async getJobUploadUrl(
-    @CurrentUser() user: RequestUser,
-    @Param('id') id: string,
-    @Param('jobId') jobId: string,
-  ) {
-    return this.nodesService.getJobUploadUrl(user.id, id, jobId);
-  }
-
-  // -------------------------------------------------------------------------
   // POST /nodes/:id/jobs/:jobId/result
   // -------------------------------------------------------------------------
 
