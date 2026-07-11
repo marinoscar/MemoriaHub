@@ -15,6 +15,7 @@ import { ThumbnailRegenHandler } from './thumbnail-regen.handler';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
+import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
 import {
   createMockPrismaService,
   MockPrismaService,
@@ -84,6 +85,7 @@ describe('ThumbnailRegenHandler', () => {
   let handler: ThumbnailRegenHandler;
   let mockRegistry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
   let mockRecoveryService: jest.Mocked<Pick<StorageProcessingRecoveryService, 'reprocessObjectNow'>>;
+  let mockThumbnailNodePersistService: jest.Mocked<Pick<ThumbnailNodePersistService, 'persistThumbnail'>>;
   let mockPrisma: MockPrismaService;
 
   beforeEach(async () => {
@@ -93,6 +95,10 @@ describe('ThumbnailRegenHandler', () => {
 
     mockRecoveryService = {
       reprocessObjectNow: jest.fn().mockResolvedValue(undefined),
+    };
+
+    mockThumbnailNodePersistService = {
+      persistThumbnail: jest.fn().mockResolvedValue(undefined),
     };
 
     mockPrisma = createMockPrismaService();
@@ -105,6 +111,10 @@ describe('ThumbnailRegenHandler', () => {
         {
           provide: StorageProcessingRecoveryService,
           useValue: mockRecoveryService,
+        },
+        {
+          provide: ThumbnailNodePersistService,
+          useValue: mockThumbnailNodePersistService,
         },
       ],
     }).compile();
@@ -240,6 +250,42 @@ describe('ThumbnailRegenHandler', () => {
       await expect(handler.process(job)).rejects.toThrow(
         'DB connection lost',
       );
+    });
+  });
+
+  // =========================================================================
+  // nodeResultSchema / persistNodeResult (distributed node path)
+  // =========================================================================
+
+  describe('nodeResultSchema / persistNodeResult', () => {
+    it('exposes a nodeResultSchema', () => {
+      expect(handler.nodeResultSchema).toBeDefined();
+    });
+
+    it('parses a valid result payload and delegates to ThumbnailNodePersistService.persistThumbnail', async () => {
+      const job = makeJob();
+      const result = {
+        storageKey: 'thumbnails/some-object-id.jpg',
+        width: 400,
+        height: 300,
+        bytes: 12345,
+      };
+
+      await handler.persistNodeResult(job, result);
+
+      expect(mockThumbnailNodePersistService.persistThumbnail).toHaveBeenCalledTimes(1);
+      expect(mockThumbnailNodePersistService.persistThumbnail).toHaveBeenCalledWith(
+        job,
+        result,
+      );
+    });
+
+    it('rejects an invalid result payload without calling persistThumbnail', async () => {
+      const job = makeJob();
+      const invalidResult = { storageKey: '', width: 400, height: 300, bytes: 12345 };
+
+      await expect(handler.persistNodeResult(job, invalidResult)).rejects.toThrow();
+      expect(mockThumbnailNodePersistService.persistThumbnail).not.toHaveBeenCalled();
     });
   });
 });
