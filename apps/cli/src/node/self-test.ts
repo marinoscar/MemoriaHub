@@ -45,9 +45,10 @@ import {
 } from '@memoriahub/enrichment-compute/clip';
 import { createFaceDetector } from '@memoriahub/enrichment-compute/face';
 import { createOcrEngine } from '@memoriahub/enrichment-compute/ocr';
+import { testComprefaceStatus } from '@memoriahub/enrichment-compute/face-compreface';
 
 import { modelsDir } from '../paths.js';
-import type { CapabilityStatus } from './capabilities.js';
+import { DEFAULT_COMPREFACE_URL, type CapabilityStatus } from './capabilities.js';
 
 /** Must match apps/cli/src/node/compute/duplicate-detection.ts's CLIP_MODEL_FILENAME. */
 const CLIP_MODEL_FILENAME = 'clip-vit-b32-vision-quantized.onnx';
@@ -57,6 +58,7 @@ const SHARP_TIMEOUT_MS = 5_000;
 const CLIP_TIMEOUT_MS = 20_000;
 const HUMAN_TIMEOUT_MS = 25_000;
 const TESSERACT_TIMEOUT_MS = 20_000;
+const COMPREFACE_TIMEOUT_MS = 5_000;
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -260,6 +262,34 @@ export async function testTesseract(): Promise<CapabilityStatus> {
 }
 
 /**
+ * CompreFace self-test: probes a live compreface-core sidecar's `/status`
+ * endpoint via the shared package's client (full reuse — no HTTP logic is
+ * reimplemented here). Only invoked when `detectCapabilities()` already
+ * reported the sidecar reachable; wraps the call with this module's own
+ * timeout/error-handling conventions.
+ */
+export async function testCompreface(baseUrl: string): Promise<CapabilityStatus> {
+  try {
+    return await withTimeout(
+      async () => {
+        const result = await testComprefaceStatus(baseUrl);
+        if (!result.ok) {
+          return {
+            available: false,
+            detail: `compreface self-test failed: ${result.error ?? 'unknown error'}`,
+          };
+        }
+        return { available: true, detail: `CompreFace core ok at ${baseUrl}` };
+      },
+      COMPREFACE_TIMEOUT_MS,
+      'compreface self-test',
+    );
+  } catch (err) {
+    return { available: false, detail: `compreface self-test failed: ${errMsg(err)}` };
+  }
+}
+
+/**
  * Run every applicable operational self-test against a `detectCapabilities()`
  * snapshot. Only capabilities reported PRESENT are exercised; anything
  * already `available: false` (or not one of the tested keys — ffmpeg/ffprobe)
@@ -270,6 +300,7 @@ export async function testTesseract(): Promise<CapabilityStatus> {
  */
 export async function runOperationalSelfTests(
   caps: Record<string, CapabilityStatus>,
+  opts?: { comprefaceUrl?: string },
 ): Promise<Record<string, CapabilityStatus>> {
   const result: Record<string, CapabilityStatus> = { ...caps };
 
@@ -284,6 +315,9 @@ export async function runOperationalSelfTests(
   }
   if (caps['tesseract']?.available) {
     result['tesseract'] = await testTesseract();
+  }
+  if (caps['compreface']?.available) {
+    result['compreface'] = await testCompreface(opts?.comprefaceUrl ?? DEFAULT_COMPREFACE_URL);
   }
   // ffmpeg/ffprobe/tfjs/tfjsWasm: left as the presence-only probe — see the
   // module docstring for tfjs/tfjsWasm (exercised transitively by testHuman)

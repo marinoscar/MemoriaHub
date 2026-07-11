@@ -38,6 +38,14 @@ export interface NodeConfig {
   pollIntervalMs?: number;
   /** Human-friendly node name shown server-side. */
   name?: string;
+  /** Face-detection provider this node uses for local compute (default 'human'). */
+  faceProvider?: 'human' | 'compreface';
+  /**
+   * Base URL of a locally-running compreface-core sidecar this node calls for
+   * face detection. Only meaningful when faceProvider is 'compreface'.
+   * Default: http://localhost:3000.
+   */
+  comprefaceUrl?: string;
 }
 
 export function configPath(): string {

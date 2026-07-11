@@ -36,6 +36,7 @@ import {
   NODE_JOB_TYPES,
   isNodeJobType,
   ComputeDispatcher,
+  DEFAULT_COMPREFACE_URL,
   type CapabilityStatus,
   type NodeJobType,
 } from '../node/capabilities.js';
@@ -102,8 +103,19 @@ function parseTypes(csv?: string): string[] {
 }
 
 /** Job types whose required capabilities are all satisfied by `caps`. */
-function supportedTypes(caps: Record<string, CapabilityStatus>): NodeJobType[] {
-  return NODE_JOB_TYPES.filter((t) => missingRequirements(t, caps).length === 0);
+function supportedTypes(
+  caps: Record<string, CapabilityStatus>,
+  faceProvider: 'human' | 'compreface' = 'human',
+): NodeJobType[] {
+  return NODE_JOB_TYPES.filter((t) => missingRequirements(t, caps, faceProvider).length === 0);
+}
+
+/** Validate --face-provider, exiting with a clear error on an unknown value. */
+function parseFaceProvider(value: string | undefined): 'human' | 'compreface' | undefined {
+  if (value === undefined) return undefined;
+  if (value === 'human' || value === 'compreface') return value;
+  ui.error(`Unknown --face-provider value: ${value}. Valid values: human, compreface`);
+  process.exit(1);
 }
 
 /** Render a capability table to stdout. */
@@ -176,56 +188,76 @@ function registerCmd(): Command {
     .option('--name <name>', 'Human-friendly node name (default: hostname)')
     .option('--concurrency <n>', 'Simultaneous jobs to process', String(DEFAULT_CONCURRENCY))
     .option('--types <csv>', 'Comma-separated job types (default: all supported)')
-    .action(async (opts: { name?: string; concurrency?: string; types?: string }) => {
-      const cfg = requireConfig();
-      const api = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
+    .option('--face-provider <human|compreface>', 'Face-detection provider this node uses (default: human)')
+    .option(
+      '--compreface-url <url>',
+      'Base URL of a locally-running compreface-core sidecar (only used with --face-provider compreface)',
+    )
+    .action(
+      async (opts: {
+        name?: string;
+        concurrency?: string;
+        types?: string;
+        faceProvider?: string;
+        comprefaceUrl?: string;
+      }) => {
+        const cfg = requireConfig();
+        const api = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
 
-      const hostname = os.hostname();
-      const name = opts.name ?? hostname;
-      const concurrency = Math.max(1, parseInt(opts.concurrency ?? String(DEFAULT_CONCURRENCY), 10) || DEFAULT_CONCURRENCY);
+        const hostname = os.hostname();
+        const name = opts.name ?? hostname;
+        const concurrency = Math.max(1, parseInt(opts.concurrency ?? String(DEFAULT_CONCURRENCY), 10) || DEFAULT_CONCURRENCY);
+        const faceProvider = parseFaceProvider(opts.faceProvider) ?? 'human';
+        const comprefaceUrl = opts.comprefaceUrl;
 
-      const caps = await detectCapabilities();
-      const requested = parseTypes(opts.types);
-      const eligibleTypes = requested.length > 0 ? requested : supportedTypes(caps);
+        const caps = await detectCapabilities({ comprefaceUrl });
+        const requested = parseTypes(opts.types);
+        const eligibleTypes = requested.length > 0 ? requested : supportedTypes(caps, faceProvider);
 
-      if (eligibleTypes.length === 0) {
-        ui.warn(
-          'No job types are supported on this machine (missing native libraries / ffmpeg). ' +
-            'Registering with an empty type list — install dependencies and re-register.',
-        );
-      }
+        if (eligibleTypes.length === 0) {
+          ui.warn(
+            'No job types are supported on this machine (missing native libraries / ffmpeg). ' +
+              'Registering with an empty type list — install dependencies and re-register.',
+          );
+        }
 
-      let res;
-      try {
-        res = await api.registerNode({
-          name,
-          hostname,
-          platform: os.platform(),
-          cliVersion: cliVersion(),
-          eligibleTypes,
-          concurrency,
-        });
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 403) {
-          ui.error('This command requires a token permitted to register worker nodes.');
+        let res;
+        try {
+          res = await api.registerNode({
+            name,
+            hostname,
+            platform: os.platform(),
+            cliVersion: cliVersion(),
+            eligibleTypes,
+            concurrency,
+          });
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 403) {
+            ui.error('This command requires a token permitted to register worker nodes.');
+            process.exit(1);
+          }
+          ui.error(`Failed to register node: ${(err as Error).message}`);
           process.exit(1);
         }
-        ui.error(`Failed to register node: ${(err as Error).message}`);
-        process.exit(1);
-      }
 
-      const node: NodeConfig = {
-        name,
-        concurrency,
-        eligibleTypes,
-        pollIntervalMs: cfg.node?.pollIntervalMs ?? DEFAULT_POLL_MS,
-      };
-      saveConfig({ ...cfg, nodeId: res.nodeId, node });
+        const node: NodeConfig = {
+          name,
+          concurrency,
+          eligibleTypes,
+          pollIntervalMs: cfg.node?.pollIntervalMs ?? DEFAULT_POLL_MS,
+          faceProvider,
+          comprefaceUrl,
+        };
+        saveConfig({ ...cfg, nodeId: res.nodeId, node });
 
-      ui.success(`Registered as worker node: ${name} (${res.nodeId})`);
-      ui.dim(`Eligible types: ${eligibleTypes.join(', ') || '(none)'}`);
-      ui.dim('Run `memoriahub node start` to begin processing jobs.');
-    });
+        ui.success(`Registered as worker node: ${name} (${res.nodeId})`);
+        ui.dim(`Eligible types: ${eligibleTypes.join(', ') || '(none)'}`);
+        if (faceProvider === 'compreface') {
+          ui.dim(`Face provider: compreface (${comprefaceUrl ?? DEFAULT_COMPREFACE_URL})`);
+        }
+        ui.dim('Run `memoriahub node start` to begin processing jobs.');
+      },
+    );
 
   return cmd;
 }
@@ -242,8 +274,20 @@ function startCmd(): Command {
     .option('--types <csv>', 'Override configured job types')
     .option('--poll <ms>', 'Override poll interval (ms) when idle')
     .option('--daemon', 'Detach and run in the background (logs under ~/.memoriahub/logs)')
+    .option('--face-provider <human|compreface>', 'Set face-detection provider (persisted to config)')
+    .option(
+      '--compreface-url <url>',
+      'Set the compreface-core sidecar URL (persisted to config; only used with --face-provider compreface)',
+    )
     .action(
-      async (opts: { concurrency?: string; types?: string; poll?: string; daemon?: boolean }) => {
+      async (opts: {
+        concurrency?: string;
+        types?: string;
+        poll?: string;
+        daemon?: boolean;
+        faceProvider?: string;
+        comprefaceUrl?: string;
+      }) => {
         const cfg = requireConfig();
         if (!cfg.nodeId) {
           ui.error('This machine is not registered. Run `memoriahub node register` first.');
@@ -274,11 +318,27 @@ function startCmd(): Command {
           parseInt(opts.concurrency ?? String(cfg.node?.concurrency ?? DEFAULT_CONCURRENCY), 10) ||
             DEFAULT_CONCURRENCY,
         );
+        const validatedFaceProvider = parseFaceProvider(opts.faceProvider);
 
-        // --concurrency persists to NodeConfig so restarts (and the daemon
-        // child spawned below) pick it up.
-        if (opts.concurrency !== undefined) {
-          saveConfig({ ...cfg, node: { ...cfg.node, concurrency } });
+        // --concurrency / --face-provider / --compreface-url persist to
+        // NodeConfig so restarts (and the daemon child spawned below) pick
+        // them up. Only the fields actually passed on this invocation are
+        // written — an omitted flag must never clobber a previously-
+        // persisted value with undefined.
+        if (
+          opts.concurrency !== undefined ||
+          validatedFaceProvider !== undefined ||
+          opts.comprefaceUrl !== undefined
+        ) {
+          saveConfig({
+            ...cfg,
+            node: {
+              ...cfg.node,
+              ...(opts.concurrency !== undefined ? { concurrency } : {}),
+              ...(validatedFaceProvider !== undefined ? { faceProvider: validatedFaceProvider } : {}),
+              ...(opts.comprefaceUrl !== undefined ? { comprefaceUrl: opts.comprefaceUrl } : {}),
+            },
+          });
         }
 
         // --daemon: re-spawn ourselves detached and exit. The child runs this
@@ -893,13 +953,18 @@ function doctorCmd(): Command {
       ui.blank();
 
       // 2. Capabilities — presence probe (require.resolve/binary detection).
+      //    comprefaceUrl is threaded through so the compreface probe row (and
+      //    the self-test below) checks the operator's configured sidecar URL
+      //    rather than always defaulting to localhost.
       ui.step('Capabilities (installed)');
-      const caps = await detectCapabilities();
+      const faceProvider = cfg.node?.faceProvider ?? 'human';
+      const comprefaceUrl = cfg.node?.comprefaceUrl;
+      const caps = await detectCapabilities({ comprefaceUrl });
 
       // 3. Operational self-tests — a real decode/embed/detect/OCR-init pass
       //    for every capability reported present above. See node/self-test.ts.
       ui.step('Running operational self-tests…');
-      const operationalCaps = await runOperationalSelfTests(caps);
+      const operationalCaps = await runOperationalSelfTests(caps, { comprefaceUrl });
       const capsSummary = summarizeCapabilities(caps, operationalCaps);
       if (capsSummary.issues.length === 0) {
         ui.success(`All ${capsSummary.totalCount} capabilities operational.`);
@@ -912,17 +977,20 @@ function doctorCmd(): Command {
       // 4. Required-capability check for eligible types — gated on the
       //    OPERATIONAL result, not mere presence, so a node whose sharp binary
       //    resolves but crashes on first use (or whose models aren't
-      //    downloaded yet) is correctly reported as not-ready.
+      //    downloaded yet) is correctly reported as not-ready. `faceProvider`
+      //    is threaded through so face_detection/video_face_detection are
+      //    checked against the node's actually-configured provider instead of
+      //    always assuming Human.
       ui.step('Job-type readiness');
       const eligibleTypes =
         cfg.node?.eligibleTypes && cfg.node.eligibleTypes.length > 0
           ? cfg.node.eligibleTypes.filter(isNodeJobType)
-          : supportedTypes(operationalCaps);
+          : supportedTypes(operationalCaps, faceProvider);
       if (eligibleTypes.length === 0) {
         ui.warn('No eligible job types configured/supported on this machine.');
       }
       const jobReadinessRows = eligibleTypes.map((t) => {
-        const missing = missingRequirements(t, operationalCaps);
+        const missing = missingRequirements(t, operationalCaps, faceProvider);
         return { type: t, ready: missing.length === 0, missing };
       });
       const jobSummary = summarizeJobReadiness(jobReadinessRows);
