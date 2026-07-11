@@ -198,6 +198,16 @@ export interface ModelManifestEntry {
   targetSubdir: string;
 }
 
+/** Response shape for POST /api/nodes/:id/jobs/:jobId/upload-url. */
+export interface JobUploadUrlResult {
+  /** Presigned PUT URL to upload output bytes to. */
+  url: string;
+  /** Server-chosen storage key — echo this back in the job result payload. */
+  storageKey: string;
+  /** How long `url` remains valid, in seconds. */
+  expiresSeconds: number;
+}
+
 export class ApiClient {
   private readonly baseUrl: string;
   private readonly pat: string;
@@ -375,6 +385,20 @@ export class ApiClient {
   /** Fetch the model download manifest for node compute capabilities. */
   getModelManifest(): Promise<ModelManifestEntry[]> {
     return this.get<ModelManifestEntry[]>('/api/nodes/models/manifest');
+  }
+
+  /**
+   * Get a presigned upload URL for a claimed job to PUT output bytes to
+   * (`POST /api/nodes/:id/jobs/:jobId/upload-url`) — currently used by the
+   * thumbnail node-compute path: the server chooses the storage key, the
+   * node PUTs its computed JPEG directly to the returned `url`, then submits
+   * `{ storageKey, width, height, bytes }` via {@link submitJobResult}.
+   */
+  getJobUploadUrl(nodeId: string, jobId: string): Promise<JobUploadUrlResult> {
+    return this.post<JobUploadUrlResult>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/jobs/${encodeURIComponent(jobId)}/upload-url`,
+      {},
+    );
   }
 
   /**
