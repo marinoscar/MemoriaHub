@@ -52,6 +52,11 @@
       "import": "./dist/esm/face/index.js",
       "require": "./dist/cjs/face/index.js"
     },
+    "./face-compreface": {
+      "types": "./dist/types/face-compreface/index.d.ts",
+      "import": "./dist/esm/face-compreface/index.js",
+      "require": "./dist/cjs/face-compreface/index.js"
+    },
     "./ocr": {
       "types": "./dist/types/ocr/index.d.ts",
       "import": "./dist/esm/ocr/index.js",
