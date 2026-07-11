@@ -161,7 +161,7 @@ describe('NodeDashboard doctor overlay ([r]) — all healthy', () => {
     expect(plain).toContain('✔ All 2 capabilities operational.');
     expect(plain).toContain('✔ All 2 job type(s) ready.');
     expect(plain).toContain('✔ Doctor: all checks passed.');
-    expect(plain).toContain('https://github.com/marinoscar/MemoriaHub/blob/main/docs/specs/worker-node-setup.md');
+    expect(plain).toContain('https://github.com/marinoscar/MemoriaHub/blob/main/docs/worker-node-setup.md');
     // The per-row table must not render when nothing needs attention.
     expect(plain).not.toContain('Detail');
     unmount();
