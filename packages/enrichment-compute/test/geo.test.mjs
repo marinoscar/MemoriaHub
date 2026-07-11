@@ -265,6 +265,37 @@ test('fetchNominatim throws a plain Error on other non-OK statuses', async () =>
   }
 });
 
+test('fetchNominatim populates retryAfterMs from the Retry-After header on HTTP 429', async () => {
+  const { fetchNominatim } = await import('@memoriahub/enrichment-compute/geo');
+
+  const restore = stubFetchOnce(
+    async () => new Response('rate limited', { status: 429, headers: { 'retry-after': '30' } }),
+  );
+
+  try {
+    await assert.rejects(
+      () => fetchNominatim('https://nominatim.openstreetmap.org', 0, 0),
+      (err) => {
+        assert.equal(err.retryAfterMs, 30_000);
+        return true;
+      },
+    );
+  } finally {
+    restore();
+  }
+});
+
+test('GeoProviderRateLimitError is an instance of the shared ProviderRateLimitError', async () => {
+  const { GeoProviderRateLimitError } = await import('@memoriahub/enrichment-compute/geo');
+  const { ProviderRateLimitError } = await import('@memoriahub/enrichment-compute/rate-limit');
+
+  const err = new GeoProviderRateLimitError('throttled', 'nominatim', 5000);
+  assert.ok(err instanceof ProviderRateLimitError);
+  assert.ok(err instanceof GeoProviderRateLimitError);
+  assert.equal(err.provider, 'nominatim');
+  assert.equal(err.retryAfterMs, 5000);
+});
+
 // ---------------------------------------------------------------------------
 // fetchGoogleReverse
 // ---------------------------------------------------------------------------
@@ -322,6 +353,46 @@ test('fetchGoogleReverse throws GeoProviderRateLimitError on OVER_QUERY_LIMIT / 
     } finally {
       restore();
     }
+  }
+});
+
+test('fetchGoogleReverse populates retryAfterMs from the Retry-After header on HTTP 429', async () => {
+  const { fetchGoogleReverse } = await import('@memoriahub/enrichment-compute/geo');
+
+  const restore = stubFetchOnce(
+    async () => new Response('rate limited', { status: 429, headers: { 'retry-after': '15' } }),
+  );
+
+  try {
+    await assert.rejects(
+      () => fetchGoogleReverse('key', 0, 0),
+      (err) => {
+        assert.equal(err.retryAfterMs, 15_000);
+        return true;
+      },
+    );
+  } finally {
+    restore();
+  }
+});
+
+test('fetchGoogleReverse has no retryAfterMs for OVER_QUERY_LIMIT (no header to read)', async () => {
+  const { fetchGoogleReverse } = await import('@memoriahub/enrichment-compute/geo');
+
+  const restore = stubFetchOnce(
+    async () => new Response(JSON.stringify({ status: 'OVER_QUERY_LIMIT', results: [] }), { status: 200 }),
+  );
+
+  try {
+    await assert.rejects(
+      () => fetchGoogleReverse('key', 0, 0),
+      (err) => {
+        assert.equal(err.retryAfterMs, undefined);
+        return true;
+      },
+    );
+  } finally {
+    restore();
   }
 });
 

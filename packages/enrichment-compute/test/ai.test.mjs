@@ -148,6 +148,110 @@ test('callAnthropicVision joins multiple text content blocks in the response', a
   }
 });
 
+// ---------------------------------------------------------------------------
+// Rate-limit classification
+// ---------------------------------------------------------------------------
+
+test('callAnthropicVision throws ProviderRateLimitError on HTTP 429, with retryAfterMs from the header', async () => {
+  const { callAnthropicVision } = await import('@memoriahub/enrichment-compute/ai');
+  const { ProviderRateLimitError } = await import('@memoriahub/enrichment-compute/rate-limit');
+
+  const originalFetch = globalThis.fetch;
+  // 'x-should-retry: false' stops the SDK's own retry loop so this test makes
+  // exactly one fetch call instead of waiting through maxRetries backoffs.
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ error: { type: 'rate_limit_error', message: 'too many requests' } }), {
+      status: 429,
+      headers: { 'content-type': 'application/json', 'x-should-retry': 'false', 'retry-after': '30' },
+    });
+
+  try {
+    await assert.rejects(
+      () =>
+        callAnthropicVision(
+          { apiKey: 'sk-test-key' },
+          { model: 'claude-3-5-sonnet-20241022', prompt: 'p', imageBase64: 'ZmFrZQ==', mimeType: 'image/jpeg' },
+        ),
+      (err) => {
+        assert.ok(err instanceof ProviderRateLimitError);
+        assert.equal(err.provider, 'anthropic');
+        assert.equal(err.retryAfterMs, 30_000);
+        assert.match(err.message, /HTTP 429/);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('callAnthropicVision throws ProviderRateLimitError on HTTP 529 (Overloaded), with no retryAfterMs when the header is absent', async () => {
+  const { callAnthropicVision } = await import('@memoriahub/enrichment-compute/ai');
+  const { ProviderRateLimitError } = await import('@memoriahub/enrichment-compute/rate-limit');
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ error: { type: 'overloaded_error', message: 'Overloaded' } }), {
+      status: 529,
+      headers: { 'content-type': 'application/json', 'x-should-retry': 'false' },
+    });
+
+  try {
+    await assert.rejects(
+      () =>
+        callAnthropicVision(
+          { apiKey: 'sk-test-key' },
+          { model: 'claude-3-5-sonnet-20241022', prompt: 'p', imageBase64: 'ZmFrZQ==', mimeType: 'image/jpeg' },
+        ),
+      (err) => {
+        assert.ok(err instanceof ProviderRateLimitError);
+        assert.equal(err.provider, 'anthropic');
+        assert.equal(err.retryAfterMs, undefined);
+        assert.match(err.message, /HTTP 529/);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('callAnthropicVision rethrows non-rate-limit errors unchanged (e.g. HTTP 400)', async () => {
+  const { callAnthropicVision } = await import('@memoriahub/enrichment-compute/ai');
+  const { ProviderRateLimitError } = await import('@memoriahub/enrichment-compute/rate-limit');
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ error: { type: 'invalid_request_error', message: 'bad request' } }), {
+      status: 400,
+      headers: { 'content-type': 'application/json', 'x-should-retry': 'false' },
+    });
+
+  try {
+    await assert.rejects(
+      () =>
+        callAnthropicVision(
+          { apiKey: 'sk-test-key' },
+          { model: 'claude-3-5-sonnet-20241022', prompt: 'p', imageBase64: 'ZmFrZQ==', mimeType: 'image/jpeg' },
+        ),
+      (err) => {
+        assert.equal(err instanceof ProviderRateLimitError, false);
+        assert.match(err.message, /400/);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('classifyAnthropicRateLimit returns null for a plain (non-APIError) error', async () => {
+  const { classifyAnthropicRateLimit } = await import('@memoriahub/enrichment-compute/ai');
+
+  assert.equal(classifyAnthropicRateLimit(new Error('some unrelated failure')), null);
+  assert.equal(classifyAnthropicRateLimit('not even an error'), null);
+});
+
 test('callAnthropicVision routes requests through creds.baseUrl when provided', async () => {
   const { callAnthropicVision } = await import('@memoriahub/enrichment-compute/ai');
 
