@@ -65,6 +65,14 @@ export const faceDetectionResultSchema = z.object({
        * landmarks (e.g. the node's Human provider).
        */
       landmarks: z.unknown().optional(),
+      /**
+       * Provider-assigned face ID for delegated-recognition providers (e.g.
+       * AWS Rekognition collections). Absent for keyless/embedding-based
+       * providers (Human, CompreFace) and for every node-computed result — a
+       * distributed worker node always runs the keyless Human provider, never
+       * a delegated one.
+       */
+      externalFaceId: z.string().optional(),
     }),
   ),
 });
