@@ -31,8 +31,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentClaimService } from '../enrichment/enrichment-claim.service';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { EnrichmentTerminalService } from '../enrichment/enrichment-terminal.service';
+import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { ObjectsService } from '../storage/objects/objects.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { AiSettingsService } from '../ai/ai-settings.service';
+import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { AutoTaggingService } from '../tagging/auto-tagging.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 // ---------------------------------------------------------------------------
@@ -105,6 +109,14 @@ describe('NodesService — result/failure ingestion', () => {
         { provide: EnrichmentTerminalService, useValue: mockTerminal },
         { provide: ObjectsService, useValue: { getDownloadUrl: jest.fn() } },
         { provide: StorageProviderResolver, useValue: mockResolver },
+        // getJobCredentials dependencies (auto_tagging/geocode transient
+        // credentials) — not exercised by this spec file's existing coverage
+        // (see nodes.service.credentials.spec.ts for that); stubbed here only
+        // so NodesService's constructor resolves.
+        { provide: EnrichmentJobService, useValue: { recordModel: jest.fn() } },
+        { provide: AiSettingsService, useValue: { resolveCredentials: jest.fn() } },
+        { provide: SystemSettingsService, useValue: { getSettings: jest.fn().mockResolvedValue({}) } },
+        { provide: AutoTaggingService, useValue: { buildPrompt: jest.fn() } },
       ],
     }).compile();
 

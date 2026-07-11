@@ -207,6 +207,50 @@ export class NodesController {
   }
 
   // -------------------------------------------------------------------------
+  // POST /nodes/:id/jobs/:jobId/credentials
+  // -------------------------------------------------------------------------
+
+  @Post(':id/jobs/:jobId/credentials')
+  @Auth({ permissions: [PERMISSIONS.JOBS_WRITE] })
+  @ApiOperation({
+    summary: 'Get transient, per-job provider credentials for auto_tagging or geocode',
+    description:
+      'Resolves a plaintext provider API key scoped to THIS job only (mandated alternative to ' +
+      'the "AI-proxy" pattern in docs/specs/distributed-nodes.md, which is stale on this point) ' +
+      'so the node can call the provider\'s HTTP API directly. The node MUST hold the key only ' +
+      'in memory for the duration of the compute call and MUST NEVER persist it to disk, ' +
+      'config, or logs. Reuses the same held-job guard as the result/failure endpoints.',
+  })
+  @ApiParam({ name: 'id', description: 'Worker node UUID' })
+  @ApiParam({ name: 'jobId', description: 'Enrichment job UUID' })
+  @ApiResponse({
+    status: 201,
+    description:
+      'Transient job credentials — shape depends on job type (auto_tagging: ' +
+      '{ type, provider, model, apiKey, baseUrl?, system, prompt, mimeTypeHint }; geocode: ' +
+      '{ type, provider, apiKey?, baseUrl?, lat, lng })',
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Job type has no credentials contract, job/media item missing required data, or provider ' +
+      'not configured',
+  })
+  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
+  @ApiResponse({ status: 404, description: 'Node or job not found' })
+  @ApiResponse({
+    status: 409,
+    description: 'Job not held by this node (not claimed by it, not running, or lease expired)',
+  })
+  async getJobCredentials(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Param('jobId') jobId: string,
+  ) {
+    return this.nodesService.getJobCredentials(user.id, id, jobId);
+  }
+
+  // -------------------------------------------------------------------------
   // POST /nodes/:id/jobs/:jobId/result
   // -------------------------------------------------------------------------
 

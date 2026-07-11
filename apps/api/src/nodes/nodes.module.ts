@@ -6,6 +6,9 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { StorageModule } from '../storage/storage.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
+import { AiModule } from '../ai/ai.module';
+import { SettingsModule } from '../settings/settings.module';
+import { TaggingModule } from '../tagging/tagging.module';
 
 /**
  * Imports StorageProvidersModule (exports StorageProviderResolver) so
@@ -14,9 +17,24 @@ import { StorageProvidersModule } from '../storage/providers/storage-providers.m
  * uses to upload a computed thumbnail directly to the same
  * provider/bucket new uploads land in, mirroring
  * ThumbnailProcessor.uploadThumbnail's provider resolution.
+ *
+ * Also imports AiModule (AiSettingsService — resolveCredentials),
+ * SettingsModule (SystemSettingsService — active tagging/geo provider config),
+ * and TaggingModule (AutoTaggingService — shared prompt builder) so
+ * `POST /nodes/:id/jobs/:jobId/credentials` can resolve TRANSIENT, per-job
+ * provider credentials for the auto_tagging/geocode job types without a node
+ * ever seeing the server's stored credential row directly.
  */
 @Module({
-  imports: [PrismaModule, EnrichmentModule, StorageModule, StorageProvidersModule],
+  imports: [
+    PrismaModule,
+    EnrichmentModule,
+    StorageModule,
+    StorageProvidersModule,
+    AiModule,
+    SettingsModule,
+    TaggingModule,
+  ],
   controllers: [NodesController, NodesAdminController],
   providers: [NodesService],
 })

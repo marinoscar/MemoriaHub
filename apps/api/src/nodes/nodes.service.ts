@@ -22,8 +22,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentClaimService } from '../enrichment/enrichment-claim.service';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { EnrichmentTerminalService } from '../enrichment/enrichment-terminal.service';
+import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { ObjectsService } from '../storage/objects/objects.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { AiSettingsService } from '../ai/ai-settings.service';
+import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { AutoTaggingService } from '../tagging/auto-tagging.service';
+import { decryptSecret } from '../common/crypto/secret-cipher';
+import type { JobCredentialsResult } from './dto/job-credentials.dto';
 
 // ---------------------------------------------------------------------------
 // Input shapes
@@ -68,6 +74,10 @@ export class NodesService {
     private readonly terminal: EnrichmentTerminalService,
     private readonly objectsService: ObjectsService,
     private readonly storageProviderResolver: StorageProviderResolver,
+    private readonly enrichmentJobService: EnrichmentJobService,
+    private readonly aiSettingsService: AiSettingsService,
+    private readonly systemSettings: SystemSettingsService,
+    private readonly autoTaggingService: AutoTaggingService,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -369,6 +379,155 @@ export class NodesService {
     });
 
     return { url, storageKey, expiresSeconds };
+  }
+
+  // -------------------------------------------------------------------------
+  // getJobCredentials
+  // -------------------------------------------------------------------------
+
+  /**
+   * Resolve TRANSIENT, per-job provider credentials for a node-eligible job
+   * (currently `auto_tagging` and `geocode`) — the mandated alternative to the
+   * "AI-proxy" pattern documented (stale) in docs/specs/distributed-nodes.md:
+   * the node fetches a plaintext provider API key scoped to THIS job only,
+   * calls the provider's HTTP API directly, and never persists the key to
+   * disk/config/logs. The response is never logged server-side either — no
+   * interceptor in this app logs response bodies (LoggingInterceptor only
+   * logs method/url/duration; Fastify's built-in request logger logs
+   * standard req/res metadata with no custom body serializers).
+   *
+   * Reuses the same held-job guard as submitJobResult/reportJobFailure (404
+   * unknown job, 409 if not held by this node under a live lease).
+   */
+  async getJobCredentials(
+    userId: string,
+    nodeId: string,
+    jobId: string,
+  ): Promise<JobCredentialsResult> {
+    const job = await this.assertJobHeldByNode(userId, nodeId, jobId);
+
+    if (job.type === 'auto_tagging') {
+      return this.getAutoTaggingCredentials(job);
+    }
+    if (job.type === 'geocode') {
+      return this.getGeocodeCredentials(job);
+    }
+    throw new BadRequestException(`credentials not applicable to job type "${job.type}"`);
+  }
+
+  private async getAutoTaggingCredentials(job: EnrichmentJob): Promise<JobCredentialsResult> {
+    if (!job.mediaItemId) {
+      throw new BadRequestException(`auto_tagging job ${job.id} has no mediaItemId`);
+    }
+
+    const mediaItem = await this.prisma.mediaItem.findUnique({
+      where: { id: job.mediaItemId },
+      select: { id: true },
+    });
+    if (!mediaItem) {
+      throw new BadRequestException(`MediaItem ${job.mediaItemId} not found`);
+    }
+
+    // Resolve provider/model exactly like AutoTaggingService.processMediaItem
+    // does (step d) so a node and the server agree on which vision model runs.
+    const row = await this.prisma.systemSettings.findUnique({ where: { key: 'global' } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const taggingConfig = (row?.value as any)?.ai?.features?.tagging as
+      | { provider?: string; model?: string }
+      | undefined;
+    const provider = taggingConfig?.provider;
+    const model = taggingConfig?.model;
+    if (!provider || !model) {
+      throw new BadRequestException('AI tagging provider or model not configured in system settings');
+    }
+
+    // Record on the job row so persistAutoTagging (called later via
+    // persistNodeResult, after a fresh DB read in assertJobHeldByNode) knows
+    // which provider/model produced the result.
+    await this.enrichmentJobService.recordModel(job.id, provider, model);
+
+    const creds = await this.aiSettingsService.resolveCredentials(provider);
+
+    const tagLabels = await this.prisma.tagLabel.findMany({
+      where: { enabled: true },
+      select: { name: true },
+      orderBy: { name: 'asc' },
+    });
+    const labelNames = tagLabels.map((t) => t.name);
+
+    const faces = await this.prisma.face.findMany({
+      where: {
+        mediaItemId: job.mediaItemId,
+        personId: { not: null },
+        person: { deletedAt: null, mergedIntoId: null },
+      },
+      select: { person: { select: { name: true } } },
+    });
+    const peopleNames = [
+      ...new Set(faces.map((f) => f.person?.name).filter((n): n is string => !!n)),
+    ];
+
+    const { system, prompt } = this.autoTaggingService.buildPrompt(labelNames, peopleNames);
+
+    return {
+      type: 'auto_tagging',
+      provider,
+      model,
+      apiKey: creds.apiKey,
+      baseUrl: creds.baseUrl,
+      system,
+      prompt,
+      mimeTypeHint: 'image/jpeg',
+    };
+  }
+
+  private async getGeocodeCredentials(job: EnrichmentJob): Promise<JobCredentialsResult> {
+    if (!job.mediaItemId) {
+      throw new BadRequestException(`geocode job ${job.id} has no mediaItemId`);
+    }
+
+    const mediaItem = await this.prisma.mediaItem.findUnique({
+      where: { id: job.mediaItemId },
+      select: { takenLat: true, takenLng: true },
+    });
+    if (!mediaItem || !Number.isFinite(mediaItem.takenLat) || !Number.isFinite(mediaItem.takenLng)) {
+      throw new BadRequestException(`MediaItem ${job.mediaItemId} has no usable GPS coordinates`);
+    }
+    const lat = mediaItem.takenLat as number;
+    const lng = mediaItem.takenLng as number;
+
+    // Resolve the active provider exactly like GeoLocationService.reverseGeocode does.
+    const settings = await this.systemSettings.getSettings();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const activeProvider =
+      ((settings as any).geo?.reverseProvider as string | undefined) ??
+      process.env['GEO_PROVIDER'] ??
+      'offline';
+
+    if (activeProvider === 'google') {
+      const cred = await this.prisma.geoProviderCredential.findUnique({ where: { provider: 'google' } });
+      if (!cred || !cred.enabled) {
+        // Mirrors GeoLocationService's own fallback-to-offline behavior when
+        // google is configured active but the credential is missing/disabled.
+        return { type: 'geocode', provider: 'offline', lat, lng };
+      }
+      const apiKey = decryptSecret(cred.encryptedKey);
+      return { type: 'geocode', provider: 'google', apiKey, lat, lng };
+    }
+
+    if (activeProvider === 'nominatim') {
+      return {
+        type: 'geocode',
+        provider: 'nominatim',
+        baseUrl: process.env['NOMINATIM_BASE_URL'] ?? 'https://nominatim.openstreetmap.org',
+        lat,
+        lng,
+      };
+    }
+
+    // default: offline — not node-eligible; the CLI declines with
+    // CapabilityUnavailableError rather than attempting a lookup.
+    return { type: 'geocode', provider: 'offline', lat, lng };
   }
 
   /**
