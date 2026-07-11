@@ -90,7 +90,7 @@ describe('menu-config', () => {
       expect(labels(nodes)).toEqual(['Convert videos to MP4', 'Organize folder by date']);
     });
 
-    it('within Tools when logged in, all four tools are visible in order', () => {
+    it('within Tools when logged in, all five tools are visible in order', () => {
       const tools = findSubmenu('tools')!;
       const nodes = visibleChildren(tools, true);
       expect(labels(nodes)).toEqual([
@@ -98,6 +98,7 @@ describe('menu-config', () => {
         'Organize folder by date',
         'Job queue monitor',
         'Backup',
+        'Worker Node',
       ]);
     });
   });

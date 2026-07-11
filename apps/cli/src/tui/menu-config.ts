@@ -32,6 +32,11 @@ export type MenuActionId =
   | 'backup'
   | 'node-dashboard'
   | 'node-config'
+  | 'node-doctor'
+  | 'node-register'
+  | 'node-list'
+  | 'node-logs'
+  | 'node-service'
   | 'help'
   | 'quit'
   | `report:${string}`;
@@ -140,7 +145,12 @@ export const MENU_TREE: MenuSubmenu = {
           label: 'Worker Node',
           children: [
             { kind: 'action', label: 'Node dashboard', action: 'node-dashboard' },
+            { kind: 'action', label: 'Register node', action: 'node-register' },
             { kind: 'action', label: 'Node config', action: 'node-config' },
+            { kind: 'action', label: 'List nodes', action: 'node-list' },
+            { kind: 'action', label: 'Node doctor', action: 'node-doctor' },
+            { kind: 'action', label: 'Node logs', action: 'node-logs' },
+            { kind: 'action', label: 'Node service (systemd)', action: 'node-service' },
           ],
         },
       ],
