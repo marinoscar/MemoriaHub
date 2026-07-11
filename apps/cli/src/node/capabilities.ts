@@ -107,7 +107,7 @@ export const NODE_JOB_TYPES = [
   'face_detection',
   'video_face_detection',
   'duplicate_detection',
-  'metadata',
+  'metadata_extraction',
   'social_media_detection',
   'thumbnail_regen',
   'thumbnail_repair',
@@ -132,7 +132,7 @@ export const JOB_TYPE_REQUIREMENTS: Record<NodeJobType, string[]> = {
   face_detection: ['sharp', 'human'],
   video_face_detection: ['sharp', 'human', 'ffmpeg'],
   duplicate_detection: ['sharp'], // onnxruntime optional → dHash degraded mode
-  metadata: ['sharp'],
+  metadata_extraction: ['sharp'],
   social_media_detection: ['ffprobe'], // tesseract optional → Tier-1-only mode
   thumbnail_regen: ['sharp'],
   thumbnail_repair: ['sharp'],
@@ -195,10 +195,36 @@ export function missingRequirements(
 // Compute dispatcher
 // ---------------------------------------------------------------------------
 
-/** A per-type compute function: takes the local input path + resolved params. */
+/**
+ * Per-job context the engine can (optionally) supply to a compute module —
+ * currently used only by the thumbnail compute path, which needs the node's
+ * own id and the claimed job's id to request a presigned upload URL via
+ * `POST /api/nodes/:id/jobs/:jobId/upload-url` before it can return a result.
+ *
+ * TODO(daemon-agent): the running node engine (`node/node-engine.ts`, owned by
+ * a concurrent daemon-focused change) currently calls
+ * `dispatcher.compute(type, inputPath, params)` with no 4th argument — ctx is
+ * always undefined until the engine is updated to pass
+ * `{ nodeId: this.nodeId, jobId }` as documented here. Until that lands,
+ * ctx-dependent compute paths (thumbnail) throw a clear error rather than
+ * silently misbehaving; see node/compute/thumbnail.ts.
+ */
+export interface ComputeJobContext {
+  nodeId: string;
+  jobId: string;
+}
+
+/**
+ * A per-type compute function: takes the local input path + resolved params,
+ * plus an optional job context (nodeId/jobId) for compute paths that need to
+ * call back into the API mid-compute (e.g. requesting a presigned upload URL).
+ * The third parameter is additive — existing two-arg compute modules remain
+ * valid ComputeFn implementations.
+ */
 export type ComputeFn = (
   inputPath: string,
   params: Record<string, unknown>,
+  ctx?: ComputeJobContext,
 ) => Promise<unknown>;
 
 /**
@@ -230,7 +256,7 @@ export class ComputeDispatcher {
         () => import('./compute/duplicate-detection.js'),
         'duplicate_detection',
       ),
-      metadata: lazy(() => import('./compute/metadata.js'), 'metadata'),
+      metadata_extraction: lazy(() => import('./compute/metadata.js'), 'metadata_extraction'),
       social_media_detection: lazy(
         () => import('./compute/social-media-detection.js'),
         'social_media_detection',
@@ -242,12 +268,20 @@ export class ComputeDispatcher {
     };
   }
 
-  /** Compute a job's result locally. Throws CapabilityUnavailableError when the
-   *  type is unknown or its compute path is unavailable/unimplemented. */
+  /**
+   * Compute a job's result locally. Throws CapabilityUnavailableError when the
+   * type is unknown or its compute path is unavailable/unimplemented.
+   *
+   * `ctx`, when supplied, is forwarded as the compute module's 3rd argument —
+   * see {@link ComputeJobContext}. Optional and currently unpopulated by the
+   * running engine (see the TODO on ComputeJobContext); ctx-dependent compute
+   * paths handle `ctx === undefined` themselves.
+   */
   async compute(
     jobType: string,
     inputPath: string,
     params: Record<string, unknown>,
+    ctx?: ComputeJobContext,
   ): Promise<unknown> {
     if (!isNodeJobType(jobType)) {
       throw new CapabilityUnavailableError(
@@ -257,6 +291,6 @@ export class ComputeDispatcher {
     }
     const loader = this.routes[jobType];
     const mod = await loader();
-    return mod.default(inputPath, params);
+    return mod.default(inputPath, params, ctx);
   }
 }
