@@ -17,6 +17,7 @@
     "test:cov": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.config.js --coverage"
   },
   "dependencies": {
+    "@memoriahub/enrichment-compute": "0.1.0",
     "better-sqlite3": "^12.10.0",
     "boxen": "^5.1.2",
     "chalk": "^5.3.0",
