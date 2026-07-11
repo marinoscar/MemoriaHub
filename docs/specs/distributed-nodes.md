@@ -399,9 +399,15 @@ Per this repo's existing conventions (see the main CLAUDE.md reference and [face
 
 Any node-side implementation of face or CLIP compute must reproduce this exact stack — same model weights, same quantization, same orientation-correction step — bit-for-bit where possible, or the parity guarantee in §7.1 does not hold.
 
-### 7.3 Four Mechanisms to Guarantee Parity
+### 7.3 Four Mechanisms to Guarantee Parity — As Built
 
-**1. A shared compute workspace package.** Proposed as a new workspace package, `packages/enrichment-compute`, containing the model-loading, preprocessing, and inference code for every node-eligible job type. Both `apps/api` and `apps/cli` import this package **identically** — not two independently-maintained reimplementations of "run Human on an image" that could quietly drift apart over time, but exactly one implementation with exactly one set of pinned native dependency versions (exact `onnxruntime-node`, `@vladmandic/human`/tfjs-wasm, and `sharp` versions, locked identically in both `apps/api/package.json` and `apps/cli/package.json`, or hoisted to the shared package's own lockfile). Any change to preprocessing or model version happens in one place and ships to both compute surfaces together.
+**1. A shared compute workspace package: `packages/enrichment-compute`.** Built as a real workspace package (added to the root `package.json`'s `"workspaces": ["apps/*", "packages/*"]`), containing the model-loading, preprocessing, and inference code for every node-eligible job type. Both `apps/api` and `apps/cli` import this package **identically** — not two independently-maintained reimplementations of "run Human on an image" that could quietly drift apart over time, but exactly one implementation.
+
+- **Dual CJS + ESM build.** `apps/api` (NestJS, CommonJS) and `apps/cli` (ESM) need the SAME compiled output in two different module formats. The package's `build` script (`tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json && node ./scripts/write-dist-stubs.mjs`) compiles both, and `package.json`'s `exports` map serves `require`/`import`/`types` conditions per subpath so each consumer's bundler picks the right artifact automatically.
+- **Exact-pinned native dependencies, enforced at the root.** The package's own `dependencies`/`optionalDependencies` pin exact versions — `sharp@0.35.1`, `onnxruntime-node@1.27.0`, `@tensorflow/tfjs@4.22.0`, `@tensorflow/tfjs-backend-wasm@4.22.0`, `@vladmandic/human@3.3.6`, `tesseract.js@7.0.0` — and the **root** `package.json`'s `overrides` block repeats the exact same pins, so npm's workspace resolution cannot let `apps/api` or `apps/cli` end up with a different patch version of any of these than the shared package itself uses (a version-skew bug the parity guarantee in §7.1 depends on preventing). The heavy model libraries (`@tensorflow/tfjs*`, `@vladmandic/human`, `tesseract.js`) are declared as `optionalDependencies` so a lean CLI install doesn't force-download them — see §8 for the per-job-type degraded-mode behavior when they're absent.
+- **Subpath exports, one per compute domain.** `package.json`'s `exports` map publishes twelve entry points, each independently buildable/importable: `.` (root), `/image` (`prepareImageForProcessing` + orientation), `/clip` (CLIP ONNX session + embedding), `/dhash` (perceptual hash), `/face` (Human face detector), `/ocr` (tesseract wrapper), `/metadata` (EXIF/ffprobe extraction), `/social` (social-media detection rule engine), `/video` (ffmpeg frame extraction), `/ai` (Anthropic vision call), `/geo` (Nominatim/Google reverse-geocode calls), `/dto` (the zod result schemas — §6), `/rate-limit` (`ProviderRateLimitError`). A consumer imports only the subpath(s) it needs (`@memoriahub/enrichment-compute/clip`, etc.) rather than the whole package.
+
+Any change to preprocessing or model version happens in one place (this package) and ships to both compute surfaces together.
 
 **2. An API-served, sha256-pinned model manifest.**
 
@@ -409,52 +415,57 @@ Any node-side implementation of face or CLIP compute must reproduce this exact s
 GET /api/nodes/models/manifest
 ```
 
+Returns a **bare array** (not `{ models: [...] }` — the CLI's `ApiClient.getModelManifest()` unwraps the standard `{ data }` response envelope and iterates the array directly):
+
 ```typescript
-// proposed response shape
-interface ModelManifest {
-  models: Array<{
-    key: string;         // e.g. 'human-face-1024', 'clip-vit-b32-q8'
-    jobTypes: string[];  // job types this model backs, e.g. ['face_detection', 'video_face_detection']
-    sha256: string;      // hash of the model weight file the server is currently running
-    version: string;     // human-readable model version tag
-  }>;
+// actual response shape — apps/api/src/nodes/nodes.service.ts getModelManifest()
+interface ModelManifestEntry {
+  name: string;         // e.g. 'clip-vit-b32-vision-quantized.onnx'
+  url: string;          // download URL (Hugging Face / vladmandic/human-models GitHub release)
+  sha256: string;       // real, computed hash — no longer a null placeholder (see below)
+  bytes: number;        // expected file size
+  targetSubdir: string; // 'models' or 'human' — where under the node's model dir to place it
 }
 ```
 
-A node fetches this manifest and compares it against the sha256 of its own local model files before advertising the corresponding job type in its `eligibleTypes` (§3.1). Byte-identical weights are the concrete, checkable proxy for "this node will produce embeddings comparable to the server's."
+The manifest currently lists **five** files with real `sha256`/`bytes` values (§7.2 / §8): the CLIP ONNX vision model, and four Human face-recognition files — `blazeface-back.json` + **`blazeface-back.bin`** (the detector's weights) + `faceres.json` + `faceres.bin`. `blazeface-back.bin` did not exist in the early implementation pass — an earlier manifest was missing it entirely, which would have left the Human face detector unable to load its detector weights on any node that tried; it was added alongside the other four once the gap was found. A node fetches this manifest and compares it against the sha256 of its own local model files before advertising the corresponding job type in its `eligibleTypes` (§3.1). Byte-identical weights are the concrete, checkable proxy for "this node will produce embeddings comparable to the server's." (The CLIP entry's hash is documented as a point-in-time snapshot, not an eternal guarantee — Hugging Face may rebuild/re-quantize that file over time, so an unexpected hash-verification failure on that one entry should prompt a re-download-and-re-hash, not an assumption that the local file is corrupt.)
 
-**3. A CLI startup model-hash self-check.** On `memoriahub node start` (§9), the CLI hashes every local model file it has and diffs the result against the current manifest from mechanism 2. Any mismatch — a stale model file, a corrupted download, a version the operator never updated — means that job type is **not advertised as eligible** for this run; the node simply omits it from `eligibleTypes` on its next heartbeat rather than claiming jobs it cannot compute correctly. This ties directly into the node-side Doctor checks in §10.
+**3. A CLI startup model-hash self-check.** On `memoriahub node start` (§9), the CLI's model manager (`apps/cli/src/node/models.ts`, invoked as `ensureModels(manifest)`) downloads-and-verifies every manifest entry against its pinned sha256 before the node advertises the corresponding job type as eligible; `node doctor` runs the same check on demand (§10.1). A mismatch — a stale model file, a corrupted download, a version the operator never updated — keeps that job type out of `eligibleTypes` rather than letting the node claim jobs it cannot compute correctly.
 
-**4. A golden-vector regression test.** A fixed set of test images with known-good embedding vectors (or an accepted cosine-similarity tolerance band around them) is checked into the repo and run in CI against **both** the API's compute path and the CLI's compute path (via `packages/enrichment-compute`, mechanism 1). This is the automated backstop that catches silent drift — e.g. a routine `onnxruntime-node` version bump that quietly changes numerical output — *before* it ships, rather than relying solely on mechanisms 2 and 3 to catch it at runtime after the fact.
+**4. A golden-vector regression test.** `packages/enrichment-compute/test/golden.test.mjs` (run via `node --test`, the package's own `npm test`) is the actual regression guard: a committed fixture image (`test/fixtures/golden-fixture.jpg`) plus a committed golden 512-d CLIP vector (`test/fixtures/golden-clip-512.json`) and a pinned dHash value. The dHash assertion is bit-exact (no tolerance — dHash is resize + adjacent-pixel comparison, fully deterministic). The CLIP assertion uses a `1e-4` max-element-wise-diff tolerance rather than exact equality, specifically to absorb cross-platform floating-point reduction-order noise (a worker node without AVX2, or a future `onnxruntime-node` point release, can reorder matmul reductions and produce tiny non-zero diffs even for bit-identical model/input) while still catching a real regression (wrong preprocessing, wrong mean/std, wrong model, transposed tensor layout — all of which produce diffs many orders of magnitude larger than `1e-4`). The CLIP test **skips** (not fails) when the ~89 MB model file isn't present locally, so it degrades gracefully on CI/machines without the model downloaded — only the dHash/Hamming-distance assertions, which have no such dependency, always run.
 
 ---
 
 ## 8. Node-Eligible Job Types
 
-Not every enrichment handler is a good candidate for remote execution. Job types fall into three tiers:
+Not every enrichment handler is a good candidate for remote execution. `apps/cli/src/node/capabilities.ts`'s `NODE_JOB_TYPES` constant is the authoritative list of types a node's compute dispatcher knows about at all; `JOB_TYPE_REQUIREMENTS` maps each to the native capabilities that gate it. Job types fall into three tiers:
 
-### 8.1 High-Value, No Secrets Needed (Freely Node-Eligible)
+### 8.1 High-Value, No Secrets Needed (Freely Node-Eligible) — Final Status
 
-| Job type | Why it fits |
-|----------|-------------|
-| `face_detection` | Pure per-item CPU/GPU compute, no provider secret required for the `human` provider path (§7.2) |
-| `video_face_detection` | Same as above, plus ffmpeg frame extraction — CPU-heavy, a good fit for a spare laptop |
-| `duplicate_detection` | CLIP embedding compute, no provider secret required |
-| `metadata_extraction` | EXIF/dimensions/video-probe extraction, no provider secret required |
-| `social_media_detection` | ffprobe + on-server OCR, no provider secret required |
-| `thumbnail_regen` | Image resize/encode via sharp, no provider secret required |
-| `thumbnail_repair` | Same underlying compute as `thumbnail_regen` |
+| Job type | Status | Notes |
+|----------|--------|-------|
+| `face_detection` | ✅ Implemented | Real compute via `@memoriahub/enrichment-compute/face` (Human) |
+| `duplicate_detection` | ✅ Implemented | Real compute via `@memoriahub/enrichment-compute/clip` + `/dhash`; degrades to dHash-only when `onnxruntime` is absent (not a hard requirement — see `JOB_TYPE_REQUIREMENTS`) |
+| `metadata_extraction` | ✅ Implemented | **Note the type name:** the job type (and the `NODE_JOB_TYPES` entry) is `metadata_extraction`, not `metadata` |
+| `thumbnail_regen` | ✅ Implemented, photos only | Shares one compute module with `thumbnail_repair` (`apps/cli/src/node/compute/thumbnail.ts`); uploads generated bytes via the new `POST /api/nodes/:id/jobs/:jobId/upload-url` presigned-PUT flow (§5.1, §5.3) instead of returning bytes inline. A video input surfaces as a sharp decode failure, mapped to `CapabilityUnavailableError` — video thumbnails still fall back to the server's existing in-process `StorageProcessingRecoveryService.reprocessObjectNow` path, nothing regresses |
+| `thumbnail_repair` | ⚠️ Interface parity only, not end-to-end node-claimable | Listed in `NODE_JOB_TYPES` and shares the same compute module as `thumbnail_regen` for future-proofing, but `ThumbnailRepairTask` enqueues it as a single **global sweep job** (`mediaItemId: null`, `circleId: null`) that iterates many media items server-side in one job — a node claiming it gets no `inputUrl` (§5.1's `resolveInputUrl` returns `null` for any job with no `mediaItemId`) and has no way to iterate the underlying candidate set itself. Honest status: wired for the day this job type becomes per-item, not currently distributable |
+| `social_media_detection` | ✅ Implemented, with a known gap | Real two-tier compute (ffprobe/filename Tier 1, on-device OCR Tier 2) via `@memoriahub/enrichment-compute/metadata` + `/social` + `/video` + `/ocr`. **Known gap:** `job.payload` is currently `null` server-side for this job type (`MediaEnrichmentService`'s enqueue call), so a node has no reliable original filename to feed Tier-1's filename rules — only the container-metadata rules (read from the downloaded bytes via ffprobe) are guaranteed to fire. The pre-flight caps, landscape-no-OCR gate, and feature flag remain entirely server-authoritative regardless |
+| `video_face_detection` | ⚠️ **DEFERRED — scaffold only** | `apps/cli/src/node/compute/video-face-detection.ts` proves the required native libs (`sharp`, `human`) load, then unconditionally throws `CapabilityUnavailableError` — cross-frame embedding dedup and `frameThumbnailKey` upload were never wired. Frame extraction itself WAS extracted into the shared package (`/video`'s `extractFramesAt`, used by the social-media-detection compute module above), but the video-face compute module does not yet call it. This job type stays server-only in practice today, despite appearing in `NODE_JOB_TYPES` |
+| `auto_tagging` | ✅ Implemented, via transient credentials | See §8.2 — moved out of the "AI-Proxy" tier this section originally proposed |
+| `geocode` | ✅ Implemented, via transient credentials, with a provider gap | See §8.2. The `offline` reverse-geocode provider (server-side GeoNames dataset) has no node-side equivalent; `apps/cli/src/node/compute/geocode.ts` declines gracefully with `CapabilityUnavailableError` when the transient credential response reports `provider: 'offline'`, leaving that job server-only. Only `nominatim`/`google` are node-computable |
 
-These are the primary target of this feature — CPU/GPU-bound, per-item, secret-free work that scales cleanly across however many nodes a household has online.
+These remain the primary target of this feature — CPU/GPU-bound, per-item, secret-free work that scales cleanly across however many nodes a household has online.
 
-### 8.2 AI-Proxy (Gated, Opt-In)
+### 8.2 Transient Credentials (Gated, Opt-In) — Formerly "AI-Proxy"
 
-| Job type | Why it's gated |
-|----------|-----------------|
-| `auto_tagging` | Requires a keyed call to the configured AI provider (Anthropic/OpenAI/etc.) — routed through `POST /api/nodes/jobs/:jobId/ai-proxy/tagging` so the provider key never leaves the server, but the call still burns the household's shared provider quota |
-| `geocode` | Requires a keyed call to the active reverse-geocoding provider (when `google` is active) — routed through `POST /api/nodes/jobs/:jobId/ai-proxy/geocode`, same quota-sharing caveat |
+This section was originally titled "AI-Proxy" and described `auto_tagging`/`geocode` calls being routed through the server so the provider key never left it. That design was rejected — see §2.7 for the full rationale. As built:
 
-A node must explicitly opt in to claiming these two types (a per-node config flag, distinct from the model-hash-driven `eligibleTypes` gating in §7 — this is a policy choice, not a capability check), because every AI-proxy call a node makes competes for the exact same rate-limited provider budget as the server's own jobs (see [Risks §11](#11-risks-and-open-questions)).
+| Job type | Why it needs a credential | How the node gets it |
+|----------|---------------------------|------------------------|
+| `auto_tagging` | Requires a keyed call to the configured AI provider (currently Anthropic only — see §7.3/§8.1's note on OpenAI not being ported to the shared package) | `POST /api/nodes/:id/jobs/:jobId/credentials` returns `{ type: 'auto_tagging', provider, model, apiKey, baseUrl?, system, prompt, mimeTypeHint }`; the node calls `packages/enrichment-compute/src/ai/index.ts`'s `callAnthropicVision` directly with the returned key, held in memory only |
+| `geocode` | Requires a keyed call to the active reverse-geocoding provider (`nominatim` or `google`; `offline` declines — §8.1) | `POST /api/nodes/:id/jobs/:jobId/credentials` returns `{ type: 'geocode', provider, apiKey?, baseUrl?, lat, lng }`; the node calls `fetchNominatim`/`fetchGoogleReverse` directly |
+
+Every node-originated call of either type still competes for the exact same rate-limited provider budget as the server's own jobs — enabling these types on several nodes at once does not multiply available AI/geo throughput (see [Risks §11](#11-risks-and-open-questions)); a node's `ProviderRateLimitError` classification (§6) routes it through the identical deferral path a server-side rate limit would.
 
 ### 8.3 Server-Only (Never Node-Eligible)
 
