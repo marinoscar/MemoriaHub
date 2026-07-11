@@ -36,8 +36,11 @@ services:
   # ---------------------------------------------------------------------------
   api:
     build:
-      context: ../../apps/api
-      dockerfile: Dockerfile
+      # Context is the repo root (not apps/api) so npm workspaces can
+      # resolve the local @memoriahub/enrichment-compute package under
+      # packages/enrichment-compute. See apps/api/Dockerfile for detail.
+      context: ../..
+      dockerfile: apps/api/Dockerfile
     # Load every variable from .env (APP_URL, COOKIE_SECRET, STORAGE_*, DEVICE_*,
     # etc.) so newly added env vars don't have to be enumerated below. The explicit
     # `environment` entries still take precedence over values from the env_file.
@@ -85,8 +88,11 @@ services:
   # ---------------------------------------------------------------------------
   web:
     build:
-      context: ../../apps/web
-      dockerfile: Dockerfile
+      # Context widened to the repo root to match the api service's
+      # convention, so a future workspace dependency doesn't require
+      # revisiting this file again.
+      context: ../..
+      dockerfile: apps/web/Dockerfile
     networks:
       - app-network
 

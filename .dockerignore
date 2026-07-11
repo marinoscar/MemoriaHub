@@ -1,0 +1,78 @@
+# =============================================================================
+# Root .dockerignore
+# =============================================================================
+# The api and web Docker build contexts were widened to the repository root
+# (see infra/compose/base.compose.yml) so npm workspaces can resolve the
+# local @memoriahub/enrichment-compute package. Docker only reads a
+# .dockerignore from the context root, so this single file governs both
+# builds. Their Dockerfiles COPY only the specific paths they need
+# (apps/api, apps/web, packages/enrichment-compute, root manifests), but
+# everything below still gets uploaded as part of the build context unless
+# excluded here — most importantly `worktrees/`, which would otherwise
+# recursively include this very checkout.
+# =============================================================================
+
+# Git worktrees (git-ignored, never committed; would self-reference this
+# checkout and balloon/break the build context if not excluded)
+worktrees/
+
+# Version control
+.git/
+.gitignore
+
+# Dependencies (installed fresh inside the container)
+**/node_modules/
+
+# Build outputs (rebuilt inside the container)
+**/dist/
+**/build/
+**/.next/
+**/*.tsbuildinfo
+
+# Environment files (provided via Docker Compose env_file/environment)
+.env
+.env.*
+!.env.example
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+**/logs/
+**/*.log
+npm-debug.log*
+
+# Testing
+**/coverage/
+**/.nyc_output/
+
+# Prisma local dev artifacts
+apps/api/prisma/*.db
+apps/api/prisma/*.db-journal
+
+# SQLite sync databases (CLI)
+**/sync.db
+**/sync.db-journal
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Apps not needed for the api/web Docker images
+apps/android/
+apps/cli/
+
+# Misc top-level content not needed inside the images
+docs/
+tests/
+media/
+.github/
+.claude/
+CHANGELOG.md
+VISION.MD
+*.tgz
+.cache/
+nul
