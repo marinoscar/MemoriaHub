@@ -32,6 +32,21 @@
       "import": "./dist/esm/dto/index.js",
       "require": "./dist/cjs/dto/index.js"
     },
+    "./face": {
+      "types": "./dist/types/face/index.d.ts",
+      "import": "./dist/esm/face/index.js",
+      "require": "./dist/cjs/face/index.js"
+    },
+    "./ocr": {
+      "types": "./dist/types/ocr/index.d.ts",
+      "import": "./dist/esm/ocr/index.js",
+      "require": "./dist/cjs/ocr/index.js"
+    },
+    "./metadata": {
+      "types": "./dist/types/metadata/index.d.ts",
+      "import": "./dist/esm/metadata/index.js",
+      "require": "./dist/cjs/metadata/index.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -40,6 +55,8 @@
     "test": "node --test"
   },
   "dependencies": {
+    "exifr": "7.1.3",
+    "fluent-ffmpeg": "2.1.3",
     "onnxruntime-node": "1.27.0",
     "sharp": "0.35.1",
     "zod": "^4.4.3"

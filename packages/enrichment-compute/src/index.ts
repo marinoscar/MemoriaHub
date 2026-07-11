@@ -17,4 +17,7 @@ export * from './image/index.js';
 export * from './clip/index.js';
 export * from './dhash/index.js';
 export * from './dto/index.js';
-export { nodeRequire } from './node-require.cjs';
+export * from './face/index.js';
+export * from './ocr/index.js';
+export * from './metadata/index.js';
+export { nodeRequire, nodeResolve } from './node-require.cjs';
