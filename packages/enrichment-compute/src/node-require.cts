@@ -11,3 +11,13 @@
 export function nodeRequire(id: string): unknown {
   return require(id);
 }
+
+/**
+ * `require.resolve` counterpart — used to locate files INSIDE an optional
+ * dependency's install tree (e.g. @vladmandic/human's node-wasm build, the
+ * tfjs WASM binaries) without loading the module. Same CJS-everywhere
+ * guarantee as `nodeRequire`.
+ */
+export function nodeResolve(id: string): string {
+  return require.resolve(id);
+}
