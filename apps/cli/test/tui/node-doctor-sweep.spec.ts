@@ -268,6 +268,65 @@ describe('runNodeDoctorSweep — hasError aggregation', () => {
 });
 
 // ---------------------------------------------------------------------------
+// CompreFace config threading (faceProvider / comprefaceUrl)
+// ---------------------------------------------------------------------------
+
+describe('runNodeDoctorSweep — threads faceProvider/comprefaceUrl from config', () => {
+  it('passes cfg.node.comprefaceUrl to detectCapabilities and runOperationalSelfTests when configured', async () => {
+    await runNodeDoctorSweep(fakeApi() as never, {
+      nodeId: 'node-1',
+      node: { comprefaceUrl: 'http://sidecar.local:9000' },
+    });
+
+    expect(mockDetectCapabilities).toHaveBeenCalledWith({ comprefaceUrl: 'http://sidecar.local:9000' });
+    expect(mockRunOperationalSelfTests).toHaveBeenCalledWith(
+      expect.anything(),
+      { comprefaceUrl: 'http://sidecar.local:9000' },
+    );
+  });
+
+  it('passes comprefaceUrl: undefined through when the node has no comprefaceUrl configured', async () => {
+    await runNodeDoctorSweep(fakeApi() as never, { nodeId: undefined, node: undefined });
+
+    expect(mockDetectCapabilities).toHaveBeenCalledWith({ comprefaceUrl: undefined });
+    expect(mockRunOperationalSelfTests).toHaveBeenCalledWith(expect.anything(), { comprefaceUrl: undefined });
+  });
+
+  it("calls missingRequirements with faceProvider='compreface' for every job-readiness row when configured", async () => {
+    mockMissingRequirements.mockReset().mockReturnValue([]);
+
+    await runNodeDoctorSweep(fakeApi() as never, {
+      nodeId: undefined,
+      node: { faceProvider: 'compreface', eligibleTypes: ['face_detection', 'auto_tagging'] },
+    });
+
+    expect(mockMissingRequirements).toHaveBeenCalledWith('face_detection', expect.anything(), 'compreface');
+    expect(mockMissingRequirements).toHaveBeenCalledWith('auto_tagging', expect.anything(), 'compreface');
+  });
+
+  it("defaults to faceProvider='human' when the node config omits it", async () => {
+    mockMissingRequirements.mockReset().mockReturnValue([]);
+
+    await runNodeDoctorSweep(fakeApi() as never, {
+      nodeId: undefined,
+      node: { eligibleTypes: ['face_detection'] },
+    });
+
+    expect(mockMissingRequirements).toHaveBeenCalledWith('face_detection', expect.anything(), 'human');
+  });
+
+  it("uses faceProvider='human' for the auto-detected (unconfigured eligibleTypes) job-readiness path too", async () => {
+    mockMissingRequirements.mockReset().mockReturnValue([]);
+
+    await runNodeDoctorSweep(fakeApi() as never, { nodeId: undefined, node: undefined });
+
+    for (const t of NODE_JOB_TYPES) {
+      expect(mockMissingRequirements).toHaveBeenCalledWith(t, expect.anything(), 'human');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Never-throws error isolation
 // ---------------------------------------------------------------------------
 
