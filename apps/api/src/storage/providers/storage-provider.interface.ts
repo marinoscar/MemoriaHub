@@ -141,4 +141,32 @@ export interface StorageProvider {
    * @returns Bucket name
    */
   getBucket(): string;
+
+  /**
+   * Generate a signed URL for a DIRECT (single-part) PUT upload to `key` —
+   * distinct from {@link getSignedUploadUrl}, which signs one PART of an
+   * already-initiated multipart upload and requires a matching
+   * completeMultipartUpload call. This is for callers that only need a plain
+   * "PUT these bytes here" URL with no multipart bookkeeping — currently the
+   * node data-plane's thumbnail-upload flow
+   * (`POST /api/nodes/:id/jobs/:jobId/upload-url`).
+   *
+   * @param key - Unique identifier for the file in storage
+   * @param options - Optional content type and URL expiration (seconds)
+   * @returns Pre-signed URL for a direct PUT
+   */
+  getSignedPutUrl(
+    key: string,
+    options?: { contentType?: string; expiresIn?: number },
+  ): Promise<string>;
+
+  /**
+   * Get the byte size of an object, or null if it does not exist.
+   *
+   * Used to validate a client-reported byte count (e.g. a node's thumbnail
+   * upload) against what was actually written to storage.
+   *
+   * @param key - Unique identifier for the file in storage
+   */
+  getObjectSize(key: string): Promise<number | null>;
 }

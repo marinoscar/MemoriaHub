@@ -55,4 +55,10 @@ export const createMockStorageProvider = (): jest.Mocked<StorageProvider> => ({
   exists: jest.fn().mockResolvedValue(true),
 
   getBucket: jest.fn().mockReturnValue('test-bucket'),
+
+  getSignedPutUrl: jest
+    .fn()
+    .mockResolvedValue('https://mock-presigned-url.com/put'),
+
+  getObjectSize: jest.fn().mockResolvedValue(1024),
 });

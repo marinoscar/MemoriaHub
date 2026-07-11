@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   S3Client,
   GetObjectCommand,
+  PutObjectCommand,
   DeleteObjectCommand,
   HeadObjectCommand,
   CopyObjectCommand,
@@ -533,5 +534,57 @@ export class S3StorageProvider implements StorageProvider {
    */
   getBucket(): string {
     return this.bucket;
+  }
+
+  /**
+   * Generate a signed URL for a direct (single-part) PUT upload.
+   */
+  async getSignedPutUrl(
+    key: string,
+    options?: { contentType?: string; expiresIn?: number },
+  ): Promise<string> {
+    this.logger.debug(`Generating signed PUT URL for key: ${key}`);
+
+    try {
+      const command = new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        ...(options?.contentType ? { ContentType: options.contentType } : {}),
+      });
+
+      return await getSignedUrl(this.s3Client, command, {
+        expiresIn: options?.expiresIn ?? 3600,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : undefined;
+      this.logger.error(`Failed to generate signed PUT URL for key ${key}: ${message}`, stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the byte size of an object, or null if it does not exist.
+   */
+  async getObjectSize(key: string): Promise<number | null> {
+    try {
+      const command = new HeadObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+      });
+      const result = await this.s3Client.send(command);
+      return typeof result.ContentLength === 'number' ? result.ContentLength : null;
+    } catch (error) {
+      if (
+        error instanceof NotFound ||
+        (error && typeof error === 'object' && 'name' in error && error.name === 'NotFound')
+      ) {
+        return null;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : undefined;
+      this.logger.error(`Failed to get object size for key ${key}: ${message}`, stack);
+      throw error;
+    }
   }
 }
