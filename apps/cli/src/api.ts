@@ -208,6 +208,41 @@ export interface JobUploadUrlResult {
   expiresSeconds: number;
 }
 
+/**
+ * Response shape for POST /api/nodes/:id/jobs/:jobId/credentials — TRANSIENT,
+ * per-job provider credentials (mandated alternative to the "AI-proxy"
+ * pattern documented, stale, in docs/specs/distributed-nodes.md). `apiKey` is
+ * scoped to a single job. Callers MUST hold it only in a local variable for
+ * the duration of the compute call and MUST NEVER persist it to disk,
+ * config, or logs (the node logger's redaction already covers `apiKey`).
+ */
+export interface AutoTaggingJobCredentials {
+  type: 'auto_tagging';
+  /** Configured tagging provider key, e.g. 'anthropic'. */
+  provider: string;
+  model: string;
+  apiKey: string;
+  baseUrl?: string;
+  system: string;
+  prompt: string;
+  /** Always 'image/jpeg' — the node re-encodes via prepareImageForProcessing. */
+  mimeTypeHint: string;
+}
+
+export interface GeocodeJobCredentials {
+  type: 'geocode';
+  /** 'offline' means the server-side GeoNames dataset is active — not node-eligible. */
+  provider: 'offline' | 'nominatim' | 'google';
+  /** Only present for provider='google'. */
+  apiKey?: string;
+  /** Only present for provider='nominatim'. */
+  baseUrl?: string;
+  lat: number;
+  lng: number;
+}
+
+export type JobCredentials = AutoTaggingJobCredentials | GeocodeJobCredentials;
+
 export class ApiClient {
   private readonly baseUrl: string;
   private readonly pat: string;
@@ -397,6 +432,21 @@ export class ApiClient {
   getJobUploadUrl(nodeId: string, jobId: string): Promise<JobUploadUrlResult> {
     return this.post<JobUploadUrlResult>(
       `/api/nodes/${encodeURIComponent(nodeId)}/jobs/${encodeURIComponent(jobId)}/upload-url`,
+      {},
+    );
+  }
+
+  /**
+   * Fetch TRANSIENT, per-job provider credentials for a node-eligible job
+   * (currently `auto_tagging` and `geocode`) via
+   * `POST /api/nodes/:id/jobs/:jobId/credentials`. The response contains a
+   * plaintext provider API key scoped to THIS job only — callers MUST hold
+   * it in a local variable only, for the duration of the compute call, and
+   * MUST NEVER persist it to disk, config, or logs.
+   */
+  getJobCredentials(nodeId: string, jobId: string): Promise<JobCredentials> {
+    return this.post<JobCredentials>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/jobs/${encodeURIComponent(jobId)}/credentials`,
       {},
     );
   }
