@@ -17,5 +17,6 @@ import { AdminTaggingController } from './admin-tagging.controller';
   imports: [EnrichmentModule, AiModule, StorageProvidersModule, PrismaModule, CirclesModule, SettingsModule],
   controllers: [TaggingController, TagLabelsController, AdminTaggingController],
   providers: [AutoTaggingHandler, AutoTaggingService, TagLabelsService, TaggingBackfillService],
+  exports: [AutoTaggingService],
 })
 export class TaggingModule {}

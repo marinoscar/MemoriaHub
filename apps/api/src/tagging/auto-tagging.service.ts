@@ -1,9 +1,11 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EnrichmentJob, MediaTagSource, MediaTagStatusType, MediaType } from '@prisma/client';
 import { Readable } from 'stream';
+import { autoTaggingResultSchema, type AutoTaggingResult } from '@memoriahub/enrichment-compute/dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiSettingsService } from '../ai/ai-settings.service';
 import { AiProviderRegistry } from '../ai/providers/ai-provider.registry';
+import type { AiProvider, AiProviderCredentials } from '../ai/providers/ai-provider.interface';
 import {
   STORAGE_PROVIDER,
   StorageProvider,
@@ -13,6 +15,20 @@ import { prepareImageForProcessing } from '../storage/processing/image-orientati
 import { detectImageMime } from './image-mime.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { RateLimitError, parseRetryAfterMs, classifyRateLimit } from '../enrichment/rate-limit.error';
+
+/**
+ * System prompt sent alongside every tagging vision call. Extracted to a
+ * module-level constant so `AutoTaggingService.buildPrompt` (shared by the
+ * in-process compute path AND the node transient-credentials endpoint,
+ * NodesService.getJobCredentials) can hand back the EXACT same prompt a node
+ * would use — no duplicated prompt-string construction between the two call
+ * sites.
+ */
+const AUTO_TAGGING_SYSTEM_PROMPT =
+  'You are an image analysis assistant. Your job is to analyze the given image and return a JSON object with two keys: "tags" and "description". ' +
+  '"tags" must be a JSON array of strings — each string must exactly match one of the labels in the provided allowed list; return an empty array if none apply. ' +
+  '"description" must be a brief 1-3 sentence description of the photo. ' +
+  'Respond with ONLY a JSON object with those two keys — no explanation, no code fences, no extra text.';
 
 /**
  * Maximum image dimension (long edge) before downscaling.
@@ -115,6 +131,15 @@ export class AutoTaggingService {
     }
 
     await this.enrichmentJobService.recordModel(job.id, provider, model);
+    // recordModel only writes the DB row — keep the in-memory job object
+    // (which persistAutoTagging reads providerKey/modelVersion from) in sync
+    // too, since this same `job` reference is passed to persistAutoTagging
+    // below without a re-fetch. The node path doesn't need this: by the time
+    // NodesService.submitJobResult re-fetches the job row (in
+    // assertJobHeldByNode), NodesService.getJobCredentials has already
+    // written providerKey/modelVersion via its own recordModel call.
+    job.providerKey = provider;
+    job.modelVersion = model;
 
     // e. Resolve credentials — non-throwing gate
     let creds: { apiKey: string; baseUrl?: string };
@@ -204,10 +229,9 @@ export class AutoTaggingService {
         return;
       }
 
-      // j. Convert to base64
-      const imageBase64 = imageBuffer.toString('base64');
-
-      // j2. Load assigned people names for this media item
+      // j2. Load assigned people names for this media item (needed to build
+      // the prompt below; persistAutoTagging reloads this independently for
+      // the node-result path, since a node has no preloaded context here).
       const faces = await this.prisma.face.findMany({
         where: {
           mediaItemId: job.mediaItemId,
@@ -222,132 +246,237 @@ export class AutoTaggingService {
         ),
       ];
 
-      // k. Build prompt and call analyzeImage
+      // k. Build prompt (shared with the node transient-credentials endpoint
+      // — see NodesService.getJobCredentials — via buildPrompt below)
       const labelNames = tagLabels.map((t) => t.name);
-      const userPrompt = buildTaggingPrompt(labelNames, peopleNames);
-      const systemPrompt =
-        'You are an image analysis assistant. Your job is to analyze the given image and return a JSON object with two keys: "tags" and "description". ' +
-        '"tags" must be a JSON array of strings — each string must exactly match one of the labels in the provided allowed list; return an empty array if none apply. ' +
-        '"description" must be a brief 1-3 sentence description of the photo. ' +
-        'Respond with ONLY a JSON object with those two keys — no explanation, no code fences, no extra text.';
+      const { system: systemPrompt, prompt: userPrompt } = this.buildPrompt(labelNames, peopleNames);
 
-      let raw: string;
-      try {
-        raw = await aiProvider.analyzeImage(creds, {
-          model,
-          system: systemPrompt,
-          prompt: userPrompt,
-          imageBase64,
-          mimeType,
-        });
-      } catch (providerErr) {
-        // Surface provider-level 429 / rate-limit errors explicitly so the
-        // worker routes them through the rate-limit deferral path instead of
-        // the normal exponential-retry path.
-        const e = providerErr as Record<string, unknown> | null;
-        const httpStatus =
-          typeof e?.['status'] === 'number' ? e['status'] : undefined;
-        // 529 = Anthropic "Overloaded" — transient, treat the same as 429
-        if (httpStatus === 429 || httpStatus === 529) {
-          const retryHeader =
-            typeof (e?.['headers'] as Record<string, unknown> | undefined)?.['retry-after'] === 'string'
-              ? ((e?.['headers'] as Record<string, unknown>)['retry-after'] as string)
-              : typeof (e?.['response'] as Record<string, unknown> | undefined)?.['headers'] === 'object'
-                ? (((e?.['response'] as Record<string, unknown>)['headers'] as Record<string, unknown>)['retry-after'] as string | undefined)
-                : undefined;
-          const retryAfterMs = parseRetryAfterMs(retryHeader) ?? undefined;
-          throw new RateLimitError(
-            (typeof e?.['message'] === 'string' ? e['message'] : 'AI provider rate limit exceeded (429)'),
-            retryAfterMs,
-            provider,
-          );
-        }
-        throw providerErr;
-      }
-
-      // l. Parse and validate response
-      const labelNames2 = tagLabels.map((t) => t.name);
-      const { tags: validRaw, description, parseOk } = parseAnalysisResult(raw, labelNames2);
-
-      // Normalize case to match the original TagLabel name
-      const labelByLower = new Map(labelNames2.map((n) => [n.toLowerCase(), n]));
-      const normalizedLabels = validRaw.map(
-        (item) => labelByLower.get(item.toLowerCase()) ?? item,
-      );
-
-      // m. Reconcile AI tags: remove stale AI tags, upsert current labels with source=ai
-      //    Also persist description when parseOk is true.
-      await this.prisma.$transaction(async (tx) => {
-        // Remove AI-sourced tags no longer produced by the model
-        await tx.mediaTag.deleteMany({
-          where: {
-            mediaItemId: mediaItem.id,
-            source: MediaTagSource.ai,
-            tag: { name: { notIn: normalizedLabels } },
-          },
-        });
-        // Upsert current labels as AI tags (never downgrade manual to ai)
-        for (const labelName of normalizedLabels) {
-          const tag = await tx.tag.upsert({
-            where: { circleId_name: { circleId: mediaItem.circleId, name: labelName } },
-            create: { addedById: mediaItem.addedById, circleId: mediaItem.circleId, name: labelName },
-            update: {},
-          });
-          await tx.mediaTag.upsert({
-            where: { tagId_mediaItemId: { tagId: tag.id, mediaItemId: mediaItem.id } },
-            create: { tagId: tag.id, mediaItemId: mediaItem.id, source: MediaTagSource.ai },
-            update: {}, // do NOT downgrade manual tag to ai
-          });
-        }
-        // Persist description only when parse succeeded
-        if (parseOk) {
-          await tx.mediaItem.update({
-            where: { id: mediaItem.id },
-            data: { description },
-          });
-        }
+      // COMPUTE half — same seam a distributed worker node uses locally
+      // (with a transiently-fetched API key) via
+      // @memoriahub/enrichment-compute/ai's callAnthropicVision.
+      const { rawText } = await this.computeAutoTagging(imageBuffer, {
+        model,
+        system: systemPrompt,
+        prompt: userPrompt,
+        mimeType,
+        creds,
+        aiProvider,
+        providerKey: provider,
       });
 
-      // n. Best-effort embedding — must not fail the tagging job
-      await this.embedAndStore(
-        mediaItem.id,
-        mediaItem.circleId,
-        description,
-        normalizedLabels,
-        peopleNames,
-      );
-
-      // o. Upsert mediaTagStatus → processed
-      await this.prisma.mediaTagStatus.upsert({
-        where: { mediaItemId: job.mediaItemId },
-        create: {
-          mediaItemId: job.mediaItemId,
-          circleId: mediaItem.circleId,
-          status: MediaTagStatusType.processed,
-          providerKey: provider,
-          modelVersion: model,
-          tagCount: normalizedLabels.length,
-          processedAt: new Date(),
-        },
-        update: {
-          status: MediaTagStatusType.processed,
-          providerKey: provider,
-          modelVersion: model,
-          tagCount: normalizedLabels.length,
-          processedAt: new Date(),
-          lastError: null,
-        },
-      });
-
-      this.logger.log(
-        `AutoTagJob ${job.id}: assigned ${normalizedLabels.length} tag(s) to MediaItem ${job.mediaItemId} using ${provider}/${model}`,
-      );
+      // PERSIST half — identical whether the raw text came from this
+      // in-process call or a node's POST /nodes/:id/jobs/:jobId/result.
+      await this.persistAutoTagging(job, { rawText });
     } catch (err) {
       // p. On unexpected error from step i onwards: mark failed and rethrow (let worker retry)
       const errMsg = err instanceof Error ? err.message : String(err);
       await this.markFailed(job.mediaItemId, mediaItem.circleId, provider, model, errMsg);
       throw err;
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // buildPrompt — shared prompt construction.
+  //
+  // Used by BOTH the in-process compute path above (processMediaItem) and the
+  // node transient-credentials endpoint (NodesService.getJobCredentials) so a
+  // distributed worker node receives the EXACT same system/user prompt the
+  // server would have sent — no duplicated prompt-string construction.
+  // ---------------------------------------------------------------------------
+
+  buildPrompt(labelNames: string[], peopleNames: string[]): { system: string; prompt: string } {
+    return {
+      system: AUTO_TAGGING_SYSTEM_PROMPT,
+      prompt: buildTaggingPrompt(labelNames, peopleNames),
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // computeAutoTagging — COMPUTE half of the split.
+  //
+  // Thin wrapper around aiProvider.analyzeImage: base64-encodes the already-
+  // prepared image buffer and calls the vision provider, with the same
+  // 429/529 rate-limit detection the in-process path always had. A
+  // distributed worker node runs the equivalent call locally via
+  // @memoriahub/enrichment-compute/ai's callAnthropicVision (the same
+  // function AnthropicProvider.analyzeImage now delegates to) using a
+  // transiently-fetched API key, and submits the resulting { rawText }
+  // directly — bypassing this method entirely.
+  // ---------------------------------------------------------------------------
+
+  async computeAutoTagging(
+    imageBuffer: Buffer,
+    ctx: {
+      model: string;
+      system: string;
+      prompt: string;
+      mimeType: string;
+      creds: AiProviderCredentials;
+      aiProvider: AiProvider;
+      /** Provider key, for tagging a thrown RateLimitError. */
+      providerKey: string;
+    },
+  ): Promise<AutoTaggingResult> {
+    const imageBase64 = imageBuffer.toString('base64');
+
+    try {
+      const rawText = await ctx.aiProvider.analyzeImage(ctx.creds, {
+        model: ctx.model,
+        system: ctx.system,
+        prompt: ctx.prompt,
+        imageBase64,
+        mimeType: ctx.mimeType,
+      });
+      return { rawText };
+    } catch (providerErr) {
+      // Surface provider-level 429 / rate-limit errors explicitly so the
+      // worker routes them through the rate-limit deferral path instead of
+      // the normal exponential-retry path.
+      const e = providerErr as Record<string, unknown> | null;
+      const httpStatus =
+        typeof e?.['status'] === 'number' ? e['status'] : undefined;
+      // 529 = Anthropic "Overloaded" — transient, treat the same as 429
+      if (httpStatus === 429 || httpStatus === 529) {
+        const retryHeader =
+          typeof (e?.['headers'] as Record<string, unknown> | undefined)?.['retry-after'] === 'string'
+            ? ((e?.['headers'] as Record<string, unknown>)['retry-after'] as string)
+            : typeof (e?.['response'] as Record<string, unknown> | undefined)?.['headers'] === 'object'
+              ? (((e?.['response'] as Record<string, unknown>)['headers'] as Record<string, unknown>)['retry-after'] as string | undefined)
+              : undefined;
+        const retryAfterMs = parseRetryAfterMs(retryHeader) ?? undefined;
+        throw new RateLimitError(
+          (typeof e?.['message'] === 'string' ? e['message'] : 'AI provider rate limit exceeded (429)'),
+          retryAfterMs,
+          ctx.providerKey,
+        );
+      }
+      throw providerErr;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // persistAutoTagging — PERSIST half of the split.
+  //
+  // Self-contained: reloads the MediaItem, enabled TagLabel vocabulary, and
+  // assigned people names itself (the node-result path has no preloaded
+  // context to reuse), so a node's raw text is validated against the
+  // IDENTICAL vocabulary the in-process path would have used. Used by BOTH
+  // processMediaItem (above) and AutoTaggingHandler.persistNodeResult.
+  // ---------------------------------------------------------------------------
+
+  async persistAutoTagging(job: EnrichmentJob, result: AutoTaggingResult): Promise<void> {
+    if (!job.mediaItemId) {
+      throw new Error('auto_tagging job missing mediaItemId');
+    }
+
+    const mediaItem = await this.prisma.mediaItem.findUnique({
+      where: { id: job.mediaItemId },
+      select: { id: true, circleId: true, addedById: true },
+    });
+    if (!mediaItem) {
+      throw new Error(`MediaItem ${job.mediaItemId} not found`);
+    }
+
+    // provider/model are recorded on the job row (via recordModel) by
+    // whichever path resolved them — processMediaItem (step d/e above) or
+    // NodesService.getJobCredentials for a node-computed result.
+    const provider = job.providerKey;
+    const model = job.modelVersion;
+    if (!provider || !model) {
+      throw new Error(
+        `auto_tagging job ${job.id} missing providerKey/modelVersion — recordModel must be called before persisting a result`,
+      );
+    }
+
+    const tagLabels = await this.prisma.tagLabel.findMany({
+      where: { enabled: true },
+      select: { name: true },
+      orderBy: { name: 'asc' },
+    });
+    const labelNames = tagLabels.map((t) => t.name);
+
+    // Parse and validate response
+    const { tags: validRaw, description, parseOk } = parseAnalysisResult(result.rawText, labelNames);
+
+    // Normalize case to match the original TagLabel name
+    const labelByLower = new Map(labelNames.map((n) => [n.toLowerCase(), n]));
+    const normalizedLabels = validRaw.map(
+      (item) => labelByLower.get(item.toLowerCase()) ?? item,
+    );
+
+    // Reconcile AI tags: remove stale AI tags, upsert current labels with source=ai.
+    // Also persist description when parseOk is true.
+    await this.prisma.$transaction(async (tx) => {
+      // Remove AI-sourced tags no longer produced by the model
+      await tx.mediaTag.deleteMany({
+        where: {
+          mediaItemId: mediaItem.id,
+          source: MediaTagSource.ai,
+          tag: { name: { notIn: normalizedLabels } },
+        },
+      });
+      // Upsert current labels as AI tags (never downgrade manual to ai)
+      for (const labelName of normalizedLabels) {
+        const tag = await tx.tag.upsert({
+          where: { circleId_name: { circleId: mediaItem.circleId, name: labelName } },
+          create: { addedById: mediaItem.addedById, circleId: mediaItem.circleId, name: labelName },
+          update: {},
+        });
+        await tx.mediaTag.upsert({
+          where: { tagId_mediaItemId: { tagId: tag.id, mediaItemId: mediaItem.id } },
+          create: { tagId: tag.id, mediaItemId: mediaItem.id, source: MediaTagSource.ai },
+          update: {}, // do NOT downgrade manual tag to ai
+        });
+      }
+      // Persist description only when parse succeeded
+      if (parseOk) {
+        await tx.mediaItem.update({
+          where: { id: mediaItem.id },
+          data: { description },
+        });
+      }
+    });
+
+    // Best-effort embedding — must not fail the tagging job. Reloads people
+    // names independently since a node-result call has no preloaded context.
+    const faces = await this.prisma.face.findMany({
+      where: {
+        mediaItemId: mediaItem.id,
+        personId: { not: null },
+        person: { deletedAt: null, mergedIntoId: null },
+      },
+      select: { person: { select: { name: true } } },
+    });
+    const peopleNames = [
+      ...new Set(faces.map((f) => f.person?.name).filter((n): n is string => !!n)),
+    ];
+    await this.embedAndStore(mediaItem.id, mediaItem.circleId, description, normalizedLabels, peopleNames);
+
+    // Upsert mediaTagStatus → processed
+    await this.prisma.mediaTagStatus.upsert({
+      where: { mediaItemId: job.mediaItemId },
+      create: {
+        mediaItemId: job.mediaItemId,
+        circleId: mediaItem.circleId,
+        status: MediaTagStatusType.processed,
+        providerKey: provider,
+        modelVersion: model,
+        tagCount: normalizedLabels.length,
+        processedAt: new Date(),
+      },
+      update: {
+        status: MediaTagStatusType.processed,
+        providerKey: provider,
+        modelVersion: model,
+        tagCount: normalizedLabels.length,
+        processedAt: new Date(),
+        lastError: null,
+      },
+    });
+
+    this.logger.log(
+      `AutoTagJob ${job.id}: assigned ${normalizedLabels.length} tag(s) to MediaItem ${job.mediaItemId} using ${provider}/${model}`,
+    );
   }
 
   /**
