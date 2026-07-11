@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { callAnthropicVision } from '@memoriahub/enrichment-compute/ai';
 import type {
   AiProvider,
   AiProviderCredentials,
@@ -205,40 +206,11 @@ export class AnthropicProvider implements AiProvider {
     creds: AiProviderCredentials,
     req: AnalyzeImageRequest,
   ): Promise<string> {
-    const client = new Anthropic({
-      apiKey: creds.apiKey,
-      ...(creds.baseUrl && { baseURL: creds.baseUrl }),
-    });
-
-    const response = await client.messages.create({
-      model: req.model,
-      max_tokens: 1024,
-      ...(req.system && { system: req.system }),
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: req.mimeType as Anthropic.Base64ImageSource['media_type'],
-                data: req.imageBase64,
-              },
-            },
-            {
-              type: 'text',
-              text: req.prompt,
-            },
-          ],
-        },
-      ],
-    });
-
-    return response.content
-      .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-      .map(block => block.text)
-      .join('');
+    // Delegates to the shared parity package so the server and distributed
+    // worker nodes (which call callAnthropicVision directly with a
+    // transiently-fetched API key — see NodesService.getJobCredentials)
+    // send byte-identical requests. See @memoriahub/enrichment-compute/ai.
+    return callAnthropicVision(creds, req);
   }
 
   embedText(_creds: AiProviderCredentials, _model: string, _input: string): Promise<number[]> {
