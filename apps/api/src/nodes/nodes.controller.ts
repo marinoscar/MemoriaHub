@@ -323,6 +323,48 @@ export class NodesController {
   }
 
   // -------------------------------------------------------------------------
+  // GET /nodes
+  // -------------------------------------------------------------------------
+  //
+  // Placement note: a single-segment `@Get(':id')` route below can never
+  // accidentally intercept the two-segment `@Get('models/manifest')` route
+  // (NestJS/Express match by path-segment count as well as literal-vs-param,
+  // and `/nodes/models/manifest` has 2 segments after `/nodes`, so it can
+  // only match a 2-segment route pattern). Route declaration order therefore
+  // doesn't actually matter here — but we still place the literal route
+  // before the param route as the safe, idiomatic convention.
+
+  @Get()
+  @Auth({ permissions: [PERMISSIONS.JOBS_WRITE] })
+  @ApiOperation({ summary: 'List worker nodes owned by the caller' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Bare array of owner-scoped node records, each with { ...node, health, jobCounts }',
+  })
+  async list(@CurrentUser() user: RequestUser) {
+    return this.nodesService.listNodes(user.id);
+  }
+
+  // -------------------------------------------------------------------------
+  // GET /nodes/:id
+  // -------------------------------------------------------------------------
+
+  @Get(':id')
+  @Auth({ permissions: [PERMISSIONS.JOBS_WRITE] })
+  @ApiOperation({ summary: 'Get a single worker node owned by the caller' })
+  @ApiParam({ name: 'id', description: 'Worker node UUID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Node record with { ...node, health, jobCounts }',
+  })
+  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
+  @ApiResponse({ status: 404, description: 'Node not found' })
+  async getOne(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.nodesService.getNode(user.id, id);
+  }
+
+  // -------------------------------------------------------------------------
   // GET /nodes/models/manifest
   // -------------------------------------------------------------------------
 

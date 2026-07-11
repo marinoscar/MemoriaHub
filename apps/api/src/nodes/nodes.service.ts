@@ -616,21 +616,35 @@ export class NodesService {
   }
 
   // -------------------------------------------------------------------------
-  // listNodes
+  // listNodes / getNode shared helpers
   // -------------------------------------------------------------------------
 
-  async listNodes(userId?: string) {
-    const nodes = await this.prisma.workerNode.findMany({
-      where: userId ? { createdById: userId } : undefined,
-      orderBy: { registeredAt: 'desc' },
-    });
-
-    if (nodes.length === 0) {
-      return [];
+  /**
+   * Derive a node's health bucket from its status and heartbeat freshness.
+   * Shared between `listNodes` (bulk) and `getNode` (single-node detail) so
+   * the two surfaces can never silently drift apart.
+   */
+  private deriveNodeHealth(node: WorkerNode): 'healthy' | 'stale' | 'offline' {
+    if (node.status === NodeStatus.offline || node.status === NodeStatus.disabled) {
+      return 'offline';
     }
+    const now = Date.now();
+    const staleMs = staleWindowMs();
+    if (node.lastHeartbeatAt && now - node.lastHeartbeatAt.getTime() <= staleMs) {
+      return 'healthy';
+    }
+    return 'stale';
+  }
 
-    // Fold per-node claimed-job counts by status in a single grouped query.
-    const nodeIds = nodes.map((n) => n.id);
+  /**
+   * Fold per-node claimed-job counts by status in a single grouped query.
+   * Dumb "counts for these ids" helper — callers are responsible for
+   * ensuring `nodeIds` is already owner-scoped (e.g. `getNode` passes a
+   * single already-ownership-checked id).
+   */
+  private async getJobCountsForNodes(
+    nodeIds: string[],
+  ): Promise<Map<string, { running: number; succeeded: number; failed: number }>> {
     const grouped = await this.prisma.enrichmentJob.groupBy({
       by: ['claimedByNodeId', 'status'],
       where: { claimedByNodeId: { in: nodeIds } },
@@ -657,28 +671,53 @@ export class NodesService {
       }
       countsByNode.set(row.claimedByNodeId, bucket);
     }
+    return countsByNode;
+  }
 
-    const now = Date.now();
-    const staleMs = staleWindowMs();
+  // -------------------------------------------------------------------------
+  // listNodes
+  // -------------------------------------------------------------------------
+
+  async listNodes(userId?: string) {
+    const nodes = await this.prisma.workerNode.findMany({
+      where: userId ? { createdById: userId } : undefined,
+      orderBy: { registeredAt: 'desc' },
+    });
+
+    if (nodes.length === 0) {
+      return [];
+    }
+
+    const nodeIds = nodes.map((n) => n.id);
+    const countsByNode = await this.getJobCountsForNodes(nodeIds);
 
     return nodes.map((node) => {
-      let health: 'healthy' | 'stale' | 'offline';
-      if (node.status === NodeStatus.offline || node.status === NodeStatus.disabled) {
-        health = 'offline';
-      } else if (
-        node.lastHeartbeatAt &&
-        now - node.lastHeartbeatAt.getTime() <= staleMs
-      ) {
-        health = 'healthy';
-      } else {
-        health = 'stale';
-      }
-
+      const health = this.deriveNodeHealth(node);
       const jobCounts =
         countsByNode.get(node.id) ?? { running: 0, succeeded: 0, failed: 0 };
 
       return { ...node, health, jobCounts };
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // getNode (owner-scoped single-node detail)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Single-node counterpart to `listNodes`. `assertOwnership` gives us both
+   * the 404 (not found) / 403 (not owner) behavior AND the raw node row in
+   * one query, so no second DB fetch is needed here.
+   */
+  async getNode(userId: string, nodeId: string) {
+    const node = await this.assertOwnership(userId, nodeId);
+
+    const health = this.deriveNodeHealth(node);
+    const countsByNode = await this.getJobCountsForNodes([nodeId]);
+    const jobCounts =
+      countsByNode.get(nodeId) ?? { running: 0, succeeded: 0, failed: 0 };
+
+    return { ...node, health, jobCounts };
   }
 
   // -------------------------------------------------------------------------
