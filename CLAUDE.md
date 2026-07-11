@@ -1035,7 +1035,8 @@ Detailed specs live under `docs/specs/`:
 - [Social Media Detection](docs/specs/social-media-detection.md) — gate-then-fan-out video routing that withholds `video_face_detection` pending classification, two-tier (ffprobe metadata/filename rule catalog + on-server OCR) detection engine, `media_social_status`/`social_media_source`/`MediaTagSource.system` data model and tag-protection rules, settings/env configuration, admin backfill and status API, Doctor `ai.socialMedia` check, precision-over-recall rationale and WhatsApp/Telegram re-encode limitation
 - [Doctor Diagnostics](docs/specs/doctor.md) — on-demand configuration health sweep, 25-check catalog across 8 sections, status semantics, `runCheck` concurrency/timeout/exception-normalization design, reuse of existing settings test-connection services
 - [Distributed Nodes](docs/specs/distributed-nodes.md) — CLI-driven worker node registration and lifecycle, PAT-auth node control plane, presigned-URL byte streaming (no storage credentials on the node), DB-atomic `FOR UPDATE SKIP LOCKED` job claiming shared with the in-process worker, lease/renewal/reaper model, admin fleet monitoring
-- [Worker Node Setup & Troubleshooting](docs/specs/worker-node-setup.md) — per-OS ffmpeg install, native dependency (sharp/onnxruntime/Human/tesseract) installed-vs-operational troubleshooting, model manifest download, common doctor error remediation
+
+See also: [Worker Node Setup & Troubleshooting](docs/worker-node-setup.md) — a practical setup/troubleshooting companion (not an architecture spec) covering per-OS ffmpeg install, native dependency (sharp/onnxruntime/Human/tesseract) installed-vs-operational troubleshooting, model manifest download, and common doctor error remediation.
 
 ## Audits
 
