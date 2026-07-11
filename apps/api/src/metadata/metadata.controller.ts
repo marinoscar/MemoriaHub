@@ -63,6 +63,10 @@ export class MetadataController {
       circleId: mediaItem.circleId,
       reason: JobReason.rerun,
       priority: 0,
+      // mimeType rides in the job payload so a distributed worker node can
+      // dispatch to the image vs. video compute path without a second lookup —
+      // the node only has the presigned download URL, not the DB row.
+      payload: { mimeType: mediaItem.mimeType },
     });
 
     await this.prisma.mediaMetadataStatus.upsert({
@@ -124,10 +128,15 @@ export class MetadataController {
     mediaItemId: string,
     user: RequestUser,
     requiredRole: CircleRole = 'viewer' as CircleRole,
-  ): Promise<{ id: string; circleId: string }> {
+  ): Promise<{ id: string; circleId: string; mimeType: string }> {
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },
-      select: { id: true, circleId: true, deletedAt: true },
+      select: {
+        id: true,
+        circleId: true,
+        deletedAt: true,
+        storageObject: { select: { mimeType: true } },
+      },
     });
 
     if (!mediaItem || mediaItem.deletedAt) {
@@ -141,6 +150,10 @@ export class MetadataController {
       requiredRole,
     );
 
-    return { id: mediaItem.id, circleId: mediaItem.circleId };
+    return {
+      id: mediaItem.id,
+      circleId: mediaItem.circleId,
+      mimeType: mediaItem.storageObject?.mimeType ?? 'application/octet-stream',
+    };
   }
 }
