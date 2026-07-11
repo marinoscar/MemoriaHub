@@ -143,6 +143,8 @@ Some users may want to store everything in AWS. Others may want local storage at
 
 The product should support a model where media can be stored, copied, and replicated across multiple locations.
 
+This flexibility should extend to compute, not just storage — a household's own hardware should be able to help process its own library. See the "Shipped: distributed worker nodes" note under Extensible Enrichment below.
+
 ### 7. Extensible Enrichment
 
 Uploading a file should be only the beginning.
@@ -163,6 +165,8 @@ Examples of future enrichment include:
 * Low-value media detection
 
 The MVP should establish the foundation for this extensibility, even if only basic metadata extraction is available at first.
+
+**Shipped: distributed worker nodes.** The infrastructure that lets this extensibility scale without buying more server capacity is now real. A household member runs `memoriahub node register` and `memoriahub node start` on a spare laptop or desktop to register it as a worker node: it authenticates with an existing Personal Access Token, claims eligible jobs — face detection, near-duplicate/CLIP embedding, thumbnail generation, metadata extraction, social-media video detection, AI auto-tagging, and reverse geocoding — from the same queue the server's own in-process worker draws from, and runs the compute on that machine instead. A shared compute package guarantees a node's output (face embeddings, CLIP visual embeddings) is numerically identical to the server's, so results are correct and comparable no matter which machine produced them. No storage credential and no long-lived provider key is ever placed on the node — media bytes move via short-lived presigned URLs, and AI/geo calls use a transient, per-job credential held in memory only — and the feature is entirely opt-in: with zero nodes registered, the server processes every job type exactly as it always has. See [docs/specs/distributed-nodes.md](docs/specs/distributed-nodes.md) for the full design.
 
 ### 8. Simple Export and Exit
 
@@ -459,6 +463,8 @@ Every user belongs to at least one circle. On signup, a personal circle is autom
 ### Local-Drive Backup
 
 System admins can trigger a server-side backup job (`POST /api/admin/backup`) that replicates ready media blobs from S3 (for a given circle or all circles) to a local disk path (`BACKUP_LOCAL_PATH`). A per-circle manifest is written alongside the blobs. Backup runs are tracked in the audit event log. The CLI provides a complementary `memoriahub backup` command for operators who prefer to pull blobs to their own machine using a Personal Access Token.
+
+The same principle — a household's own machines participating in the operation of its shared library, not just consuming it — extends from storage to compute: see [Distributed Worker Nodes](docs/specs/distributed-nodes.md), where a spare laptop or desktop registers via the CLI and processes the enrichment queue alongside the server.
 
 ## What MemoriaHub Is Not in the MVP
 
