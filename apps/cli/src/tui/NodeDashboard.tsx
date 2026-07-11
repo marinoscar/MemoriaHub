@@ -33,18 +33,14 @@ import Spinner from 'ink-spinner';
 
 import { ApiClient } from '../api.js';
 import type { CliConfig } from '../config.js';
-import {
-  ComputeDispatcher,
-  detectCapabilities,
-  NODE_JOB_TYPES,
-  type CapabilityStatus,
-} from '../node/capabilities.js';
+import { ComputeDispatcher, NODE_JOB_TYPES } from '../node/capabilities.js';
 import { NodeEngine, type NodeEngineOptions } from '../node/node-engine.js';
 import { NODE_EV } from '../node/node-events.js';
 import { ensureModels } from '../node/models.js';
 import { isDaemonRunning } from '../node/ipc-client.js';
 import { readPidFile } from '../node/daemon.js';
 import { BOX_BORDER } from './theme.js';
+import { runNodeDoctorSweep, type DoctorSweepState } from './useNodeDoctorSweep.js';
 import {
   appendLogLines,
   createAttachedSource,
@@ -178,10 +174,11 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
   // 1s ticker so elapsed times + throughput refresh
   const [, setTick] = useState<number>(0);
 
-  // Doctor overlay
+  // Doctor overlay — runs the full sweep via useNodeDoctorSweep.js (see the
+  // module header comment above for why this reuses the shared sweep
+  // function rather than mounting <NodeDoctor> directly).
   const [showDoctor, setShowDoctor] = useState<boolean>(false);
-  const [doctorLoading, setDoctorLoading] = useState<boolean>(false);
-  const [doctorReport, setDoctorReport] = useState<Record<string, CapabilityStatus> | null>(null);
+  const [doctorSweep, setDoctorSweep] = useState<DoctorSweepState | null>(null);
 
   const mountedRef = useRef<boolean>(true);
 
@@ -359,20 +356,23 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
   }, [pushLog]);
 
   // -------------------------------------------------------------------------
-  // Run doctor overlay (on `r`)
+  // Run doctor overlay (on `r`) — the FULL sweep (API access, installed
+  // capabilities, real operational self-tests, job-type readiness, models,
+  // daemon liveness), not just the old presence-only detectCapabilities()
+  // probe. See useNodeDoctorSweep.js for the step list and rationale.
   // -------------------------------------------------------------------------
   const runDoctor = useCallback(async (): Promise<void> => {
     setShowDoctor(true);
-    setDoctorLoading(true);
+    setDoctorSweep(null);
     try {
-      const caps = await detectCapabilities();
-      setDoctorReport(caps);
+      const api = new ApiClient(config);
+      await runNodeDoctorSweep(api, config, (state) => {
+        if (mountedRef.current) setDoctorSweep(state);
+      });
     } catch (err) {
       pushLog('error', `doctor failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setDoctorLoading(false);
     }
-  }, [pushLog]);
+  }, [config, pushLog]);
 
   // -------------------------------------------------------------------------
   // Key handling
@@ -480,30 +480,71 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
   // Doctor overlay render
   // -------------------------------------------------------------------------
   if (showDoctor) {
+    const sweeping = !doctorSweep || !doctorSweep.done;
     return (
       <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
-        <Text bold color="cyan">Worker Node — Capability Doctor</Text>
-        {doctorLoading && (
+        <Text bold color="cyan">Worker Node — Doctor</Text>
+        {sweeping && (
           <Box marginTop={1}>
-            <Text color="cyan"><Spinner type="dots" /> probing capabilities…</Text>
+            <Text color="cyan">
+              <Spinner type="dots" /> {doctorSweep?.currentStep ? `running: ${doctorSweep.currentStep}…` : 'starting…'}
+            </Text>
           </Box>
         )}
-        {!doctorLoading && doctorReport && (
+        {doctorSweep?.caps && doctorSweep.operationalCaps && (
           <Box flexDirection="column" marginTop={1}>
             <Box flexDirection="row">
               <Text bold dimColor>{'Capability'.padEnd(14)}</Text>
-              <Text bold dimColor>{'Status'.padEnd(8)}</Text>
+              <Text bold dimColor>{'Installed'.padEnd(11)}</Text>
+              <Text bold dimColor>{'Operational'.padEnd(13)}</Text>
               <Text bold dimColor>Detail</Text>
             </Box>
-            {Object.entries(doctorReport).map(([key, status]) => (
-              <Box key={key} flexDirection="row">
-                <Text>{key.padEnd(14)}</Text>
-                <Text color={status.available ? 'green' : 'red'}>
-                  {(status.available ? 'yes' : 'no').padEnd(8)}
-                </Text>
-                <Text dimColor>{truncate(status.detail ?? '', 44)}</Text>
-              </Box>
+            {Object.entries(doctorSweep.caps).map(([key, status]) => {
+              const op = doctorSweep.operationalCaps![key] ?? status;
+              let opLabel: string;
+              let opColor: string | undefined;
+              if (!status.available) {
+                opLabel = 'n/a';
+                opColor = undefined;
+              } else if (op.available) {
+                opLabel = 'yes';
+                opColor = 'green';
+              } else {
+                opLabel = 'not yet';
+                opColor = 'yellow';
+              }
+              return (
+                <Box key={key} flexDirection="row">
+                  <Text>{key.padEnd(14)}</Text>
+                  <Text color={status.available ? 'green' : 'red'}>
+                    {(status.available ? 'yes' : 'no').padEnd(11)}
+                  </Text>
+                  <Text color={opColor} dimColor={opColor === undefined}>
+                    {opLabel.padEnd(13)}
+                  </Text>
+                  <Text dimColor>{truncate(op.detail ?? status.detail ?? '', 40)}</Text>
+                </Box>
+              );
+            })}
+          </Box>
+        )}
+        {doctorSweep?.jobReadiness && (
+          <Box flexDirection="column" marginTop={1}>
+            {doctorSweep.jobReadiness.map((row) => (
+              <Text key={row.type} color={row.ready ? 'green' : 'red'}>
+                {row.ready ? '✔' : '✖'} {row.type}
+                {!row.ready && <Text dimColor> — missing {row.missing.join(', ')}</Text>}
+              </Text>
             ))}
+          </Box>
+        )}
+        {doctorSweep?.done && (
+          <Box marginTop={1}>
+            {doctorSweep.hasError ? (
+              <Text color="red" bold>✖ Doctor found problems.</Text>
+            ) : (
+              <Text color="green" bold>✔ Doctor: all checks passed.</Text>
+            )}
           </Box>
         )}
         <Box marginTop={1}>
