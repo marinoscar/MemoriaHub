@@ -216,8 +216,14 @@ export async function testHuman(): Promise<CapabilityStatus> {
   }
 }
 
-/** Must match apps/cli/src/node/compute/social-media-detection.ts's tessDir(). */
-function tesseractLangDir(): string {
+/**
+ * Must match apps/cli/src/node/compute/social-media-detection.ts's tessDir().
+ * Exported for reuse by node/install-deps.ts, which needs the exact same
+ * directory to proactively trigger the tesseract.js language-data download
+ * (see that module's docstring for why "check" and "install" are the same
+ * operation for tesseract).
+ */
+export function tesseractLangDir(): string {
   return path.join(process.env['MODELS_DIR'] ?? modelsDir(), 'tesseract');
 }
 

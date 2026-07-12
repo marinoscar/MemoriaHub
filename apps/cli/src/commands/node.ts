@@ -26,7 +26,7 @@ import * as path from 'node:path';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import Table from 'cli-table3';
-import { requireConfig, saveConfig, type NodeConfig } from '../config.js';
+import { requireConfig, saveConfig, loadConfig, type NodeConfig } from '../config.js';
 import { ApiClient, ApiError, type ModelManifestEntry } from '../api.js';
 import { ui, isTTY } from '../ui.js';
 import { logsDir, nodePidPath } from '../paths.js';
@@ -66,6 +66,17 @@ import {
 import { startDaemonHost, readPidFile, isPidAlive } from '../node/daemon.js';
 import { connectToDaemon, isDaemonRunning, type DaemonMessage } from '../node/ipc-client.js';
 import { checkNodeAlreadyRunning } from '../node/daemon-launch.js';
+import {
+  detectLinuxDistro,
+  ensureNpmNativeDeps,
+  ensureFfmpeg,
+  ensureTesseractLanguageData,
+  ensureModelsIfConfigured,
+  ensureDocker,
+  ensureComprefaceContainer,
+  verifyCompreface,
+  type InstallStepResult,
+} from '../node/install-deps.js';
 
 const require = createRequire(import.meta.url);
 
@@ -1068,6 +1079,185 @@ function doctorCmd(): Command {
 }
 
 // ---------------------------------------------------------------------------
+// node install-deps
+// ---------------------------------------------------------------------------
+
+/** Default port the local compreface-core sidecar is exposed on. */
+const DEFAULT_COMPREFACE_PORT = 3000;
+
+/** Print one InstallStepResult using this file's existing ui.* conventions. */
+function printStepResult(r: InstallStepResult): void {
+  const line = `${r.step}: ${r.detail}`;
+  switch (r.status) {
+    case 'installed':
+    case 'skipped':
+      ui.success(line);
+      break;
+    case 'unsupported':
+      ui.warn(line);
+      break;
+    case 'failed':
+      ui.error(line);
+      break;
+  }
+}
+
+function installDepsCmd(): Command {
+  const cmd = new Command('install-deps');
+  cmd
+    .description(
+      'Install every dependency this machine needs to become a worker node ' +
+        '(ffmpeg, native compute libraries, tesseract OCR data, Docker + compreface-core) — Linux only',
+    )
+    .option('--dry-run', 'Announce what would be installed/run without making any changes')
+    .option('--skip-compreface', 'Skip Docker and the compreface-core sidecar setup')
+    .option(
+      '--compreface-port <port>',
+      'Port to expose the compreface-core sidecar on',
+      String(DEFAULT_COMPREFACE_PORT),
+    )
+    .action(
+      async (opts: { dryRun?: boolean; skipCompreface?: boolean; comprefacePort?: string }) => {
+        // 1. Platform gate — this command is Linux-only for now.
+        if (process.platform !== 'linux') {
+          ui.error(
+            'This command currently only supports Linux — see docs/worker-node-setup.md for manual per-platform setup.',
+          );
+          process.exit(1);
+        }
+
+        // 2. Upfront, non-blocking notice — this command must work
+        //    non-interactively (e.g. in scripts/CI), so this is informational
+        //    only, not a confirmation prompt.
+        ui.blank();
+        ui.info(
+          'This command may install system packages and Docker using sudo. You will be prompted ' +
+            'for your password if privileges are needed. Each such step is announced before it runs.',
+        );
+        ui.blank();
+
+        const dryRun = Boolean(opts.dryRun);
+        const port = Math.max(
+          1,
+          parseInt(opts.comprefacePort ?? String(DEFAULT_COMPREFACE_PORT), 10) ||
+            DEFAULT_COMPREFACE_PORT,
+        );
+
+        const cfg = loadConfig();
+        const comprefaceUrl = cfg?.node?.comprefaceUrl ?? `http://localhost:${port}`;
+
+        const results: InstallStepResult[] = [];
+        const report = (r: InstallStepResult): InstallStepResult => {
+          printStepResult(r);
+          results.push(r);
+          return r;
+        };
+
+        // Resolve the CLI's own install directory (the one containing its
+        // package.json) so `npm install` runs against the right workspace,
+        // whether this is a repo checkout or the standalone installed CLI —
+        // same resolution style as cliVersion() above.
+        let cliInstallDir: string;
+        try {
+          cliInstallDir = path.dirname(require.resolve('../../package.json'));
+        } catch {
+          cliInstallDir = process.cwd();
+        }
+
+        ui.step('Detecting current capabilities…');
+        let caps = await detectCapabilities({ comprefaceUrl });
+
+        // 3–4. npm native deps + ffmpeg, then re-detect + operational self-tests.
+        report(await ensureNpmNativeDeps(cliInstallDir, caps, { dryRun }));
+        report(await ensureFfmpeg(caps, { dryRun }));
+
+        caps = await detectCapabilities({ comprefaceUrl });
+        let operationalCaps = await runOperationalSelfTests(caps, { comprefaceUrl });
+
+        // 5. Tesseract OCR language data.
+        report(await ensureTesseractLanguageData(operationalCaps));
+
+        // 6. Model files (best-effort — skips gracefully if not logged in).
+        report(await ensureModelsIfConfigured());
+
+        // 7. Docker + compreface-core, unless explicitly skipped.
+        if (!opts.skipCompreface) {
+          const dockerResult = report(await ensureDocker({ dryRun }));
+          const dockerHealthy = dockerResult.status === 'installed' || dockerResult.status === 'skipped';
+
+          if (dockerHealthy) {
+            const containerResult = report(await ensureComprefaceContainer(port, { dryRun }));
+            const containerHealthy =
+              containerResult.status === 'installed' || containerResult.status === 'skipped';
+            if (containerHealthy && !dryRun) {
+              report(await verifyCompreface(comprefaceUrl));
+            } else if (containerHealthy && dryRun) {
+              report({
+                step: 'CompreFace verification',
+                status: 'skipped',
+                detail: 'Dry run — skipping live verification.',
+              });
+            } else {
+              report({
+                step: 'CompreFace verification',
+                status: 'skipped',
+                detail: 'Skipped because the compreface-core container could not be started.',
+              });
+            }
+          } else {
+            report({
+              step: 'CompreFace container',
+              status: 'skipped',
+              detail: "Skipped because Docker isn't available.",
+            });
+            report({
+              step: 'CompreFace verification',
+              status: 'skipped',
+              detail: "Skipped because Docker isn't available.",
+            });
+          }
+        }
+
+        // 9. Final report — fresh post-install sweep, printed with the exact
+        //    same tables `node doctor` uses so the user sees a familiar
+        //    before-vs-after outcome.
+        ui.blank();
+        ui.step('Final capability report');
+        caps = await detectCapabilities({ comprefaceUrl });
+        operationalCaps = await runOperationalSelfTests(caps, { comprefaceUrl });
+        const capsSummary = summarizeCapabilities(caps, operationalCaps);
+        if (capsSummary.issues.length === 0) {
+          ui.success(`All ${capsSummary.totalCount} capabilities operational.`);
+        } else {
+          ui.info(`${capsSummary.okCount}/${capsSummary.totalCount} capabilities fully operational`);
+          printOperationalCapabilityTable(capsSummary.issues);
+        }
+        ui.blank();
+
+        const relogin = results.some((r) => r.requiresRelogin);
+        if (relogin) {
+          ui.warn(
+            'Docker group membership was just updated for the current user — log out/in (or run ' +
+              '`newgrp docker`) before plain `docker` commands or `memoriahub node doctor` reflect it. ' +
+              'This run itself was not affected since every docker command in this run used sudo.',
+          );
+          ui.blank();
+        }
+
+        // 10. Exit code — only a real 'failed' step is a hard failure.
+        const anyFailed = results.some((r) => r.status === 'failed');
+        if (anyFailed) {
+          ui.error('One or more steps failed — see the details above.');
+          process.exit(1);
+        }
+        ui.success('install-deps complete — all steps succeeded, were skipped, or are unsupported on this system.');
+      },
+    );
+
+  return cmd;
+}
+
+// ---------------------------------------------------------------------------
 // Top-level `node` command group
 // ---------------------------------------------------------------------------
 
@@ -1084,6 +1274,7 @@ export function nodeCommand(): Command {
   cmd.addCommand(serviceCmd());
   cmd.addCommand(listCmd());
   cmd.addCommand(doctorCmd());
+  cmd.addCommand(installDepsCmd());
 
   return cmd;
 }
