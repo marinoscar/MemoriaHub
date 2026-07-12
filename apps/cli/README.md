@@ -258,6 +258,8 @@ The CLI validates any token (device-issued or manually supplied) by calling `GET
 | `settings set <key> <value>` | (none) | Set a setting value | Settings ▸ App settings |
 | `reports list` | `--json` | List available reports (id, label, description) from the shared reports registry | Reports ▸ |
 | `reports show <id>` | `--json` | Run one report (`overview`, `runs`, `storage`, `duplicates`) and print a table (or JSON with `--json`) | Reports ▸ |
+| `date-infer diagnose [folder...]` | `--all` / `-r, --recursive` / `--concurrency <n>` / `--json` / `--format xlsx\|csv` | Report-only: show which files have no capture date and what would be inferred from their filenames | Tools ▸ Date Inference ▸ Diagnose (report only) |
+| `date-infer apply [folder...]` | `--all` / `-r, --recursive` / `--concurrency <n>` / `--json` / `--format xlsx\|csv` | Infer missing capture dates from filenames AND write them into each file via ExifTool | Tools ▸ Date Inference ▸ Infer & write dates |
 | `jobs` (alias `queue`) | `--interval <sec>` / `--once` / `--json` / `--window <days>` | Live job queue dashboard (server load, ETA); requires an Admin PAT with `jobs:read` | Tools ▸ Job queue monitor |
 | `backup` | `--circle <id>` / `--all` / `--dest <path>` | Pull media blobs from the server to a local directory; requires an Admin PAT | Tools ▸ Backup |
 | `node install-deps` | `--dry-run` / `--skip-compreface` / `--compreface-port <port>` | Linux-only one-command installer for everything a machine needs to become a worker node (ffmpeg/ffprobe, npm native compute libs, tesseract OCR language data, model files, Docker + compreface-core) | — |
@@ -847,6 +849,66 @@ Each mode runs a plan → confirm → execute flow: it counts the convertible fi
 
 ---
 
+## Date Inference (fill in missing capture dates from filenames)
+
+Some files carry no capture date at all — no EXIF `DateTimeOriginal`, and (for videos) no usable container date either. This is common for old exports and re-shares where the original metadata was stripped, but the filename itself still encodes the date, e.g.:
+
+- `20151107_135151000_iOS.jpg` — an iOS-style timestamped export
+- `IMG-20151228-WA0007.jpg` — a WhatsApp re-share
+
+`date-infer` is a fully offline, local-only tool that finds files with no existing capture date, tries to parse one out of the filename, and — only when you explicitly ask it to — writes that date into the file itself so it becomes a real, permanent EXIF/container date. Like `scan`/`organize`/`convert`, it needs no PAT and no server connection.
+
+> **Requires [ExifTool](https://exiftool.org/) — but not one you install yourself.** The `apply` command writes dates via the `exiftool-vendored` npm package, an **optional dependency** that vendors ExifTool itself: `exiftool-vendored.pl` (a Perl script) on macOS/Linux, or a self-contained `exiftool-vendored.exe` on Windows. On POSIX systems this only needs a `perl` interpreter on your `PATH`, which ships by default on virtually every Linux/macOS install — there is nothing separate to download or install. `diagnose` never touches this dependency at all (it's read-only). If the optional dependency was skipped at install time (e.g. `npm install --no-optional`) or `perl` is missing, `apply` exits up front with a per-platform install/recovery hint rather than partially writing files.
+
+### Filenames it recognizes
+
+Four patterns are tried against the basename, most specific first, and the first structurally- and calendar-valid match wins (year 2003–current year, real month/day, including a leap-year-correct calendar round-trip check):
+
+| Priority | Pattern | Example | Time captured? |
+|----------|---------|---------|-----------------|
+| 1 | `whatsapp` — `IMG-YYYYMMDD-WA####` / `VID-YYYYMMDD-WA####` | `IMG-20151228-WA0007.jpg` | No |
+| 2 | `timestamp` — `YYYYMMDD` + `_`/`-` + `HHMMSS` (+ optional milliseconds) | `20151107_135151000_iOS.jpg`, `PXL_20260704_120000.mp4`, `Screenshot_20260704-120000.png` | Yes |
+| 3 | `delimited` — `YYYY-MM-DD` / `YYYY_MM_DD` / `YYYY.MM.DD` | `2015-01-15_beach.jpg` | No |
+| 4 | `bare` — bare 8-digit `YYYYMMDD`, guarded so it never matches inside a longer digit run (a 10/13-digit unix timestamp, a long numeric ID) | `20150115.jpg` | No |
+
+When a matched pattern has no time component, the written time defaults to **local noon** (`12:00:00`) rather than midnight — the same convention used by [`memoriahub.json`'s date-only expansion](#metadata-override-memoriahubjson): noon can never be shifted across a calendar-day boundary by a later timezone reinterpretation, while midnight sits right at the edge of one.
+
+### `memoriahub date-infer`
+
+```bash
+memoriahub date-infer diagnose [folder...] [--all] [-r|--recursive] [--concurrency <n>] [--json] [--format xlsx|csv]
+memoriahub date-infer apply    [folder...] [--all] [-r|--recursive] [--concurrency <n>] [--json] [--format xlsx|csv]
+```
+
+```bash
+# Preview what would be inferred, no writes
+memoriahub date-infer diagnose ~/Pictures/OldScans
+
+# Same, across every registered enabled folder
+memoriahub date-infer diagnose --all
+
+# Actually write the inferred dates into the files via ExifTool
+memoriahub date-infer apply ~/Pictures/OldScans
+
+# CSV report instead of the default xlsx
+memoriahub date-infer apply ~/Pictures/OldScans --format csv
+```
+
+Run `diagnose` first to see what would happen, then `apply` once you're satisfied — there is no interactive confirmation prompt in headless mode, the same pattern as `organize`/`convert`. Unknown folder paths are auto-registered, same as `scan`/`sync`.
+
+For every file, `date-infer` first checks for an existing capture date the same way `organize` does — a full-file EXIF read for photos, container metadata for videos. A file that already has a date is left alone entirely; the filename is never even parsed. Only files with no existing date go through filename parsing, so `date-infer` can never overwrite or second-guess a date a file already has.
+
+- **`diagnose`** is fully read-only: it reports which files have no date and what would be inferred, and writes nothing.
+- **`apply`** does everything `diagnose` does, and additionally writes each inferred date into the file via ExifTool's `AllDates` tag (`DateTimeOriginal`/`CreateDate`/`ModifyDate` for photos, the QuickTime/MP4 `CreateDate`/`ModifyDate` atoms for videos) with `-overwrite_original` — the write is in place, destructively, with no `<file>_original` backup copy left behind. Re-running `diagnose` afterward shows those files as already having a date, since the write is real EXIF/container metadata now.
+
+Both commands write a Summary + Detail report (or Detail-only for `--format csv`) to `~/.memoriahub/exports/date-infer-<diagnose|apply>-<timestamp>.xlsx`, the same report-export pattern used by `scan`. Unlike `scan`, there is no persisted run history in the local database — the exported file is the only durable record of a run.
+
+### Interactive UI
+
+`date-infer` is also reachable from the interactive menu under **Tools ▸ Date Inference**, with two entries: **Diagnose (report only)** and **Infer & write dates**. Both always run a read-only diagnose pass first and show the same report (counts plus a sample of matched filename → date pairs), auto-exported the same way as the headless command. From **Infer & write dates**, if candidates were found, pressing `[a]` checks ExifTool availability, then shows an explicit confirm step (`[y]` writes, `[q]`/Esc cancels back to the report) before the real write pass runs with live progress.
+
+---
+
 ## Worker Nodes (distributed compute)
 
 A **worker node** turns a spare laptop or desktop into extra processing capacity for your MemoriaHub server. Enrichment jobs — face detection, near-duplicate/CLIP embedding, thumbnail generation, metadata extraction, social-media video detection, AI auto-tagging, and reverse geocoding — normally run inside the server's own in-process worker. Once a machine registers as a node, it claims eligible jobs from that same queue, runs the compute locally, and submits results back over HTTPS. The server's own worker keeps processing every job type exactly as before with zero nodes registered — a node is pure elastic extra capacity, never a dependency.
@@ -1135,6 +1197,7 @@ The binary name registered in `package.json` is `memoriahub`.
 ## Related documentation
 
 - [Metadata override (`memoriahub.json`) specification](../../docs/specs/cli-metadata-override.md)
+- [Date Inference specification](../../docs/specs/cli-date-inference.md)
 - [Phase 05 — CLI Importer](../../docs/plan/phase-05-cli-importer.md)
 - [Distributed Nodes specification](../../docs/specs/distributed-nodes.md)
 - [API Reference](../../docs/API.md)
