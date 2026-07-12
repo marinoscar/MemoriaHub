@@ -17,6 +17,7 @@ import { FaceBackfillService } from './face-backfill.service';
 import { AdminFaceBackfillController } from './admin-face-backfill.controller';
 import { FaceDetectionCore } from './face-detection-core.service';
 import { VideoFrameExtractionService } from './video-frame-extraction.service';
+import { VideoFaceDetectionService } from './video-face-detection.service';
 import { VideoFaceDetectionHandler } from './video-face-detection.handler';
 import { MediaModule } from '../media/media.module';
 
@@ -34,6 +35,7 @@ import { MediaModule } from '../media/media.module';
     FaceDetectionHandler,
     FaceBackfillService,
     VideoFrameExtractionService,
+    VideoFaceDetectionService,
     VideoFaceDetectionHandler,
   ],
   exports: [FaceSettingsService, FaceProviderRegistry, FaceMatchingService, FaceClusteringService, VideoFrameExtractionService],

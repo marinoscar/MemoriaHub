@@ -85,6 +85,8 @@ describe('NodesService — result/failure ingestion', () => {
   let mockTerminal: { completeSucceeded: jest.Mock; completeFailed: jest.Mock };
   let mockResolver: { getActiveProvider: jest.Mock };
   let mockActiveProvider: { getSignedPutUrl: jest.Mock; getBucket: jest.Mock };
+  let mockClaimService: { claim: jest.Mock };
+  let mockSystemSettings: { getSettings: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -102,12 +104,14 @@ describe('NodesService — result/failure ingestion', () => {
         .fn()
         .mockResolvedValue({ id: 's3', provider: mockActiveProvider }),
     };
+    mockClaimService = { claim: jest.fn().mockResolvedValue([]) };
+    mockSystemSettings = { getSettings: jest.fn().mockResolvedValue({}) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         NodesService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: EnrichmentClaimService, useValue: { claim: jest.fn() } },
+        { provide: EnrichmentClaimService, useValue: mockClaimService },
         { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
         { provide: EnrichmentTerminalService, useValue: mockTerminal },
         { provide: ObjectsService, useValue: { getDownloadUrl: jest.fn() } },
@@ -118,7 +122,7 @@ describe('NodesService — result/failure ingestion', () => {
         // so NodesService's constructor resolves.
         { provide: EnrichmentJobService, useValue: { recordModel: jest.fn() } },
         { provide: AiSettingsService, useValue: { resolveCredentials: jest.fn() } },
-        { provide: SystemSettingsService, useValue: { getSettings: jest.fn().mockResolvedValue({}) } },
+        { provide: SystemSettingsService, useValue: mockSystemSettings },
         { provide: AutoTaggingService, useValue: { buildPrompt: jest.fn() } },
       ],
     }).compile();
@@ -351,6 +355,88 @@ describe('NodesService — result/failure ingestion', () => {
   });
 
   // =========================================================================
+  // claim — per-job-type params resolution
+  // =========================================================================
+
+  describe('claim', () => {
+    function claimedJob(overrides: Record<string, unknown> = {}) {
+      return {
+        id: JOB_ID,
+        type: 'duplicate_detection',
+        mediaItemId: null,
+        circleId: null,
+        payload: null,
+        ...overrides,
+      };
+    }
+
+    it('leaves params as job.payload for non-video_face_detection job types (unchanged behavior)', async () => {
+      mockClaimService.claim.mockResolvedValue([
+        claimedJob({ type: 'duplicate_detection', payload: { foo: 'bar' } }),
+      ]);
+
+      const { jobs } = await service.claim(USER_ID, NODE_ID, 1, ['duplicate_detection']);
+
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0].params).toEqual({ foo: 'bar' });
+      expect(mockSystemSettings.getSettings).not.toHaveBeenCalled();
+    });
+
+    it('defaults params to null when job.payload is null for a non-video job type', async () => {
+      mockClaimService.claim.mockResolvedValue([claimedJob({ payload: null })]);
+
+      const { jobs } = await service.claim(USER_ID, NODE_ID, 1, ['duplicate_detection']);
+
+      expect(jobs[0].params).toBeNull();
+    });
+
+    it('merges fresh face.video.* settings into params for video_face_detection jobs', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        face: { video: { sampleIntervalSeconds: 7, maxFramesPerVideo: 42 } },
+      });
+      mockClaimService.claim.mockResolvedValue([
+        claimedJob({ type: 'video_face_detection', mediaItemId: 'media-1', payload: null }),
+      ]);
+
+      const { jobs } = await service.claim(USER_ID, NODE_ID, 1, ['video_face_detection']);
+
+      expect(jobs[0].params).toEqual({ sampleIntervalSeconds: 7, maxFramesPerVideo: 42 });
+    });
+
+    it('falls back to defaults (5, 60) when face.video settings are absent', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({});
+      mockClaimService.claim.mockResolvedValue([
+        claimedJob({ type: 'video_face_detection', mediaItemId: 'media-1', payload: null }),
+      ]);
+
+      const { jobs } = await service.claim(USER_ID, NODE_ID, 1, ['video_face_detection']);
+
+      expect(jobs[0].params).toEqual({ sampleIntervalSeconds: 5, maxFramesPerVideo: 60 });
+    });
+
+    it('preserves existing job.payload fields when merging settings for video_face_detection', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        face: { video: { sampleIntervalSeconds: 7, maxFramesPerVideo: 42 } },
+      });
+      mockClaimService.claim.mockResolvedValue([
+        claimedJob({
+          type: 'video_face_detection',
+          mediaItemId: 'media-1',
+          payload: { mode: 'sweep' },
+        }),
+      ]);
+
+      const { jobs } = await service.claim(USER_ID, NODE_ID, 1, ['video_face_detection']);
+
+      expect(jobs[0].params).toEqual({
+        mode: 'sweep',
+        sampleIntervalSeconds: 7,
+        maxFramesPerVideo: 42,
+      });
+    });
+  });
+
+  // =========================================================================
   // getJobUploadUrl
   // =========================================================================
 
@@ -385,7 +471,9 @@ describe('NodesService — result/failure ingestion', () => {
     });
 
     it('rejects with 400 when the MediaItem has no linked StorageObject', async () => {
-      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(makeHeldJob());
+      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(
+        makeHeldJob({ type: 'thumbnail_regen' }),
+      );
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
         storageObjectId: null,
       });
@@ -395,8 +483,10 @@ describe('NodesService — result/failure ingestion', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it('derives the thumbnails/<storageObjectId>.jpg key and returns the resolver-signed PUT URL', async () => {
-      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(makeHeldJob());
+    it('derives the thumbnails/<storageObjectId>.jpg key and returns the resolver-signed PUT URL (thumbnail_regen)', async () => {
+      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(
+        makeHeldJob({ type: 'thumbnail_regen' }),
+      );
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
         storageObjectId: 'original-object-id',
       });
@@ -410,6 +500,52 @@ describe('NodesService — result/failure ingestion', () => {
         'thumbnails/original-object-id.jpg',
         expect.objectContaining({ contentType: 'image/jpeg' }),
       );
+    });
+
+    it('derives the same deterministic key for thumbnail_repair', async () => {
+      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(
+        makeHeldJob({ type: 'thumbnail_repair' }),
+      );
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
+        storageObjectId: 'original-object-id',
+      });
+
+      const res = await service.getJobUploadUrl(USER_ID, NODE_ID, JOB_ID);
+
+      expect(res.storageKey).toBe('thumbnails/original-object-id.jpg');
+    });
+
+    it('derives a fresh randomized video-faces/<mediaItemId>/<uuid>.jpg key for video_face_detection', async () => {
+      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(
+        makeHeldJob({ type: 'video_face_detection', mediaItemId: 'media-1' }),
+      );
+
+      const res = await service.getJobUploadUrl(USER_ID, NODE_ID, JOB_ID);
+
+      expect(res.storageKey).toMatch(/^video-faces\/media-1\/[0-9a-f-]+\.jpg$/);
+      // No StorageObject lookup needed for this job type.
+      expect(mockPrisma.mediaItem.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('issues a distinct key on each call for video_face_detection (no reuse across calls)', async () => {
+      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(
+        makeHeldJob({ type: 'video_face_detection', mediaItemId: 'media-1' }),
+      );
+
+      const first = await service.getJobUploadUrl(USER_ID, NODE_ID, JOB_ID);
+      const second = await service.getJobUploadUrl(USER_ID, NODE_ID, JOB_ID);
+
+      expect(first.storageKey).not.toBe(second.storageKey);
+    });
+
+    it('rejects with 400 for a job type that does not support upload-url issuance', async () => {
+      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(
+        makeHeldJob({ type: 'duplicate_detection' }),
+      );
+
+      await expect(
+        service.getJobUploadUrl(USER_ID, NODE_ID, JOB_ID),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 
