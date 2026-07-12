@@ -19,9 +19,16 @@ import { ProviderRateLimitError } from '@memoriahub/enrichment-compute/rate-limi
 import type { ApiClient, ClaimedNodeJob } from '../../src/api.js';
 import type { ComputeDispatcher } from '../../src/node/capabilities.js';
 
-/** Build a claimed job with no input download. */
-function claim(id: string, type: string): ClaimedNodeJob {
-  return { job: { id, type }, inputUrl: null, params: {} };
+/**
+ * Build a claimed job. Defaults to `inputUrl: null` (no input download) for
+ * job types that don't need one (e.g. geocode). auto_tagging is one of the
+ * INPUT_REQUIRED_TYPES in node-engine.ts — a null inputUrl now makes
+ * processJob fail BEFORE dispatch (see node-engine-input-guard.spec.ts), so
+ * any auto_tagging case here that means to exercise the dispatcher/failure
+ * path must pass a non-null inputUrl explicitly.
+ */
+function claim(id: string, type: string, inputUrl: string | null = null): ClaimedNodeJob {
+  return { job: { id, type }, inputUrl, params: {} };
 }
 
 interface FailureCall {
@@ -74,9 +81,11 @@ function buildEngine(batch: ClaimedNodeJob[], computeThrows: () => unknown): { e
       heartbeatIntervalMs: 60_000,
     },
     detectFn: async () => ({}),
-    downloadFn: async () => {
-      throw new Error('no downloads expected (inputUrl is null)');
-    },
+    // No-op: geocode cases keep inputUrl:null (never reaches downloadFn);
+    // auto_tagging cases below now pass a non-null inputUrl so the
+    // INPUT_REQUIRED_TYPES guard lets them reach the dispatcher, which
+    // requires downloadFn to succeed rather than throw.
+    downloadFn: async () => 0,
   });
   return { engine, failureCalls };
 }
@@ -91,7 +100,7 @@ async function runUntilIdle(engine: NodeEngine): Promise<void> {
 describe('NodeEngine rate-limit failure classification', () => {
   it('forwards rateLimited:true and retryAfterMs when the compute module throws ProviderRateLimitError', async () => {
     const { engine, failureCalls } = buildEngine(
-      [claim('j1', 'auto_tagging')],
+      [claim('j1', 'auto_tagging', 'https://storage.example.com/signed/j1')],
       () => new ProviderRateLimitError('Anthropic rate limit / overload (HTTP 429): slow down', 'anthropic', 5000),
     );
 
@@ -127,7 +136,7 @@ describe('NodeEngine rate-limit failure classification', () => {
 
   it('omits rateLimited entirely for a plain Error — no regression on the existing failure path', async () => {
     const { engine, failureCalls } = buildEngine(
-      [claim('j1', 'auto_tagging')],
+      [claim('j1', 'auto_tagging', 'https://storage.example.com/signed/j1')],
       () => new Error('some unrelated compute failure'),
     );
 
