@@ -54,6 +54,7 @@ export class ReportJobFailureDto extends createZodDto(reportJobFailureSchema) {}
 export {
   duplicateDetectionResultSchema,
   faceDetectionResultSchema,
+  videoFaceDetectionResultSchema,
   metadataExtractionResultSchema,
   socialMediaDetectionResultSchema,
   thumbnailResultSchema,
@@ -61,6 +62,7 @@ export {
 export type {
   DuplicateDetectionResult,
   FaceDetectionResult,
+  VideoFaceDetectionResult,
   MetadataExtractionResult,
   SocialMediaDetectionResult,
   ThumbnailResult,
