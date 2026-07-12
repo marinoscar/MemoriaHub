@@ -14,9 +14,15 @@ import { NODE_EV } from '../../src/node/node-events.js';
 import type { ApiClient, ClaimedNodeJob } from '../../src/api.js';
 import type { ComputeDispatcher } from '../../src/node/capabilities.js';
 
-/** Build a claimed job with no input download. */
-function claim(id: string, type: string): ClaimedNodeJob {
-  return { job: { id, type }, inputUrl: null, params: {} };
+/**
+ * Build a claimed job. Defaults to `inputUrl: null`. face_detection is one
+ * of the INPUT_REQUIRED_TYPES in node-engine.ts — a null inputUrl now makes
+ * processJob fail BEFORE dispatch (see node-engine-input-guard.spec.ts), so
+ * any face_detection case here that means to exercise compute must pass a
+ * non-null inputUrl explicitly.
+ */
+function claim(id: string, type: string, inputUrl: string | null = null): ClaimedNodeJob {
+  return { job: { id, type }, inputUrl, params: {} };
 }
 
 interface StubApi {
@@ -67,9 +73,10 @@ function buildEngine(batches: ClaimedNodeJob[][], concurrency = 2): NodeEngine {
       heartbeatIntervalMs: 60_000,
     },
     detectFn: async () => ({}),
-    downloadFn: async () => {
-      throw new Error('no downloads expected (inputUrl is null)');
-    },
+    // No-op: face_detection cases below now pass a non-null inputUrl (it's
+    // an INPUT_REQUIRED_TYPES entry) so the guard lets them reach the
+    // dispatcher, which requires downloadFn to succeed rather than throw.
+    downloadFn: async () => 0,
   });
 }
 
@@ -84,7 +91,11 @@ async function runUntilIdle(engine: NodeEngine): Promise<void> {
 describe('NodeEngine snapshot & counters', () => {
   it('tracks claimed/succeeded/failed counters and the history ring', async () => {
     const engine = buildEngine([
-      [claim('j1', 'face_detection'), claim('j2', 'bad_type'), claim('j3', 'face_detection')],
+      [
+        claim('j1', 'face_detection', 'https://storage.example.com/signed/j1'),
+        claim('j2', 'bad_type'),
+        claim('j3', 'face_detection', 'https://storage.example.com/signed/j3'),
+      ],
     ]);
     await runUntilIdle(engine);
     const snap: EngineSnapshot = engine.getSnapshot();
@@ -110,7 +121,9 @@ describe('NodeEngine snapshot & counters', () => {
   });
 
   it('caps the history ring buffer at 50 entries, evicting the oldest', async () => {
-    const jobs = Array.from({ length: 60 }, (_, i) => claim(`j${i}`, 'face_detection'));
+    const jobs = Array.from({ length: 60 }, (_, i) =>
+      claim(`j${i}`, 'face_detection', `https://storage.example.com/signed/j${i}`),
+    );
     const engine = buildEngine([jobs], 8);
     await runUntilIdle(engine);
     const snap = engine.getSnapshot();

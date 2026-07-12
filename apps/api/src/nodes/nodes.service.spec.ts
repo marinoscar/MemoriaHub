@@ -87,6 +87,7 @@ describe('NodesService — result/failure ingestion', () => {
   let mockActiveProvider: { getSignedPutUrl: jest.Mock; getBucket: jest.Mock };
   let mockClaimService: { claim: jest.Mock };
   let mockSystemSettings: { getSettings: jest.Mock };
+  let mockObjects: { getDownloadUrl: jest.Mock; getInternalDownloadUrl: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -114,7 +115,13 @@ describe('NodesService — result/failure ingestion', () => {
         { provide: EnrichmentClaimService, useValue: mockClaimService },
         { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
         { provide: EnrichmentTerminalService, useValue: mockTerminal },
-        { provide: ObjectsService, useValue: { getDownloadUrl: jest.fn() } },
+        {
+          provide: ObjectsService,
+          useValue: {
+            getDownloadUrl: jest.fn(),
+            getInternalDownloadUrl: jest.fn(),
+          },
+        },
         { provide: StorageProviderResolver, useValue: mockResolver },
         // getJobCredentials dependencies (auto_tagging/geocode transient
         // credentials) — not exercised by this spec file's existing coverage
@@ -128,6 +135,7 @@ describe('NodesService — result/failure ingestion', () => {
     }).compile();
 
     service = module.get(NodesService);
+    mockObjects = module.get(ObjectsService);
 
     // Default: node exists and is owned by the caller.
     (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(makeNode());
@@ -433,6 +441,72 @@ describe('NodesService — result/failure ingestion', () => {
         sampleIntervalSeconds: 7,
         maxFramesPerVideo: 42,
       });
+    });
+
+    // -----------------------------------------------------------------------
+    // inputUrl resolution (resolveInputUrl)
+    // -----------------------------------------------------------------------
+
+    it('presigns via getInternalDownloadUrl for a still-processing object (regression: used to return null)', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
+        storageObjectId: 'object-1',
+      });
+      // getInternalDownloadUrl deliberately skips the ready+auth checks that
+      // made the old getDownloadUrl path throw (and swallow to null) while the
+      // object was still status='processing'.
+      mockObjects.getInternalDownloadUrl.mockResolvedValue(
+        'https://mock-presigned-url.example/get',
+      );
+      mockClaimService.claim.mockResolvedValue([
+        claimedJob({ type: 'duplicate_detection', mediaItemId: 'media-1', payload: null }),
+      ]);
+
+      const { jobs } = await service.claim(USER_ID, NODE_ID, 1, ['duplicate_detection']);
+
+      expect(jobs[0].inputUrl).toBe('https://mock-presigned-url.example/get');
+      expect(mockObjects.getInternalDownloadUrl).toHaveBeenCalledWith('object-1');
+      // The user-facing, ready+auth-gated path must NOT be used for node claims.
+      expect(mockObjects.getDownloadUrl).not.toHaveBeenCalled();
+    });
+
+    it('returns null inputUrl for a global/system job with no mediaItemId', async () => {
+      mockClaimService.claim.mockResolvedValue([
+        claimedJob({ type: 'duplicate_detection', mediaItemId: null, payload: null }),
+      ]);
+
+      const { jobs } = await service.claim(USER_ID, NODE_ID, 1, ['duplicate_detection']);
+
+      expect(jobs[0].inputUrl).toBeNull();
+      expect(mockPrisma.mediaItem.findUnique).not.toHaveBeenCalled();
+      expect(mockObjects.getInternalDownloadUrl).not.toHaveBeenCalled();
+    });
+
+    it('returns null inputUrl when the media item has no storageObjectId', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
+        storageObjectId: null,
+      });
+      mockClaimService.claim.mockResolvedValue([
+        claimedJob({ type: 'duplicate_detection', mediaItemId: 'media-1', payload: null }),
+      ]);
+
+      const { jobs } = await service.claim(USER_ID, NODE_ID, 1, ['duplicate_detection']);
+
+      expect(jobs[0].inputUrl).toBeNull();
+      expect(mockObjects.getInternalDownloadUrl).not.toHaveBeenCalled();
+    });
+
+    it('returns null inputUrl when the object row is absent (getInternalDownloadUrl → null)', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
+        storageObjectId: 'missing-object',
+      });
+      mockObjects.getInternalDownloadUrl.mockResolvedValue(null);
+      mockClaimService.claim.mockResolvedValue([
+        claimedJob({ type: 'duplicate_detection', mediaItemId: 'media-1', payload: null }),
+      ]);
+
+      const { jobs } = await service.claim(USER_ID, NODE_ID, 1, ['duplicate_detection']);
+
+      expect(jobs[0].inputUrl).toBeNull();
     });
   });
 

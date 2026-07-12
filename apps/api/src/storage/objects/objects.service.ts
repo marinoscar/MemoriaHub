@@ -571,6 +571,51 @@ export class ObjectsService {
   }
 
   /**
+   * Presign a download URL for a storage object for a TRUSTED INTERNAL EXECUTOR.
+   *
+   * This deliberately differs from {@link getDownloadUrl} in two ways:
+   *   1. It does NOT gate on `status === 'ready'`. The raw uploaded bytes exist
+   *      at `storageKey` the moment the upload completes — long before the
+   *      in-process processing pipeline flips the object to `ready`. The
+   *      in-process enrichment worker reads those bytes directly via
+   *      `provider.download(storageKey)` with no status check (e.g.
+   *      FaceDetectionService), so a distributed worker node claiming the same
+   *      job must be able to presign the same bytes even while the object is
+   *      still `status='processing'`.
+   *   2. It does NOT run any per-user ownership/circle-membership auth check.
+   *      This is for server-trusted callers only (worker node job claiming),
+   *      mirroring the in-process worker's unauthenticated byte access. NEVER
+   *      expose this on a user-facing route — the public download path
+   *      ({@link getDownloadUrl}) keeps its ready + auth guards.
+   *
+   * @returns a presigned GET URL, or `null` when the object row is missing or
+   *          has no `storageKey`.
+   */
+  async getInternalDownloadUrl(
+    objectId: string,
+    expiresIn?: number,
+  ): Promise<string | null> {
+    const object = await this.prisma.storageObject.findUnique({
+      where: { id: objectId },
+      select: { storageKey: true, storageProvider: true, bucket: true },
+    });
+
+    if (!object || !object.storageKey) {
+      return null;
+    }
+
+    const provider = await this.resolver.getProviderFor(
+      object.storageProvider,
+      object.bucket,
+    );
+
+    return provider.getSignedDownloadUrl(object.storageKey, {
+      expiresIn:
+        expiresIn ?? this.config.get<number>('storage.signedUrlExpiry', 3600),
+    });
+  }
+
+  /**
    * Delete object from storage and database
    */
   async delete(id: string, userId: string, userPermissions: string[]): Promise<void> {

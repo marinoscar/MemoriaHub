@@ -833,6 +833,51 @@ describe('ObjectsService', () => {
     });
   });
 
+  describe('getInternalDownloadUrl', () => {
+    it('presigns a still-processing object without the ready gate or an auth check', async () => {
+      mockPrisma.storageObject.findUnique.mockResolvedValue({
+        storageKey: mockStorageObject.storageKey,
+        storageProvider: mockStorageObject.storageProvider,
+        bucket: mockStorageObject.bucket,
+        status: 'processing',
+      } as any);
+      mockConfig.get.mockReturnValue(3600);
+      mockStorageProvider.getSignedDownloadUrl.mockResolvedValue(
+        'https://signed-url.com/internal',
+      );
+
+      const url = await service.getInternalDownloadUrl(mockStorageObject.id);
+
+      expect(url).toBe('https://signed-url.com/internal');
+      expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledWith(
+        mockStorageObject.storageKey,
+        { expiresIn: 3600 },
+      );
+    });
+
+    it('returns null when the object row is missing', async () => {
+      mockPrisma.storageObject.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.getInternalDownloadUrl('missing-object'),
+      ).resolves.toBeNull();
+      expect(mockStorageProvider.getSignedDownloadUrl).not.toHaveBeenCalled();
+    });
+
+    it('returns null when the object has no storageKey', async () => {
+      mockPrisma.storageObject.findUnique.mockResolvedValue({
+        storageKey: '',
+        storageProvider: mockStorageObject.storageProvider,
+        bucket: mockStorageObject.bucket,
+      } as any);
+
+      await expect(
+        service.getInternalDownloadUrl(mockStorageObject.id),
+      ).resolves.toBeNull();
+      expect(mockStorageProvider.getSignedDownloadUrl).not.toHaveBeenCalled();
+    });
+  });
+
   describe('delete', () => {
     it('should delete from storage and database', async () => {
       mockPrisma.storageObject.findUnique.mockResolvedValue(mockStorageObject as any);
