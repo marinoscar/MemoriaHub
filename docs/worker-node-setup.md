@@ -77,7 +77,33 @@ By default, a worker node performs face detection with the keyless Human provide
 
 If your server runs with `compreface` as the active face provider, configure your worker nodes to match it exactly by opting into CompreFace as the node's own local face-detection provider.
 
-### 4.1 Prerequisite: run your own local CompreFace sidecar
+### 4.1 Install Docker
+
+Face detection via CompreFace is the only capability in this whole guide that requires a container runtime — every other native dependency (`sharp`, `onnxruntime-node`, `@vladmandic/human`, `tesseract.js`) is a plain npm package installed alongside the CLI (see §4.6 below for how CompreFace's container-based model differs from those). To opt a node into `--face-provider compreface`, install Docker on that node machine first so it can run the `compreface-core` sidecar container.
+
+- **macOS**: Docker Desktop is the standard path — download it from [docker.com](https://www.docker.com/products/docker-desktop/), or `brew install --cask docker`. Either way, launch Docker Desktop once after installing to complete setup; the Docker daemon runs as part of Docker Desktop, not as a separate background service.
+- **Debian/Ubuntu**: Docker's official apt repository install (`docker-ce`, `docker-ce-cli`, `containerd.io` — see [Docker's own install docs](https://docs.docker.com/engine/install/ubuntu/)) is the most current, officially-supported path. `sudo apt install docker.io` is a simpler distro-packaged alternative that also works, though it may lag behind in version — use your judgement based on how current you need Docker to be. After installing, add your user to the `docker` group so `docker` commands don't require `sudo` on every invocation:
+  ```bash
+  sudo usermod -aG docker $USER
+  ```
+  then log out and back in (or run `newgrp docker`) for the group membership to take effect. Enable the daemon to start on boot:
+  ```bash
+  sudo systemctl enable --now docker
+  ```
+- **Windows**: Docker Desktop with the WSL2 backend is the standard recommended setup. If the node itself runs inside WSL — a common setup for this CLI, per the WSL guidance elsewhere in this guide (see §8's Troubleshooting table) — Docker Desktop's WSL2 integration must be enabled for that specific distro (Docker Desktop ▸ Settings ▸ Resources ▸ WSL Integration).
+
+Verify the install before moving on:
+
+```bash
+docker --version
+docker run hello-world
+```
+
+`docker --version` should print a version string. `docker run hello-world` should pull and run Docker's canonical smoke-test image, ending with a "Hello from Docker!" message — that confirms both that Docker is installed and that the daemon is actually running and reachable, not just that the CLI binary exists.
+
+### 4.2 Prerequisite: run your own local CompreFace sidecar
+
+Docker must be installed and running first — see §4.1.
 
 A node opting into CompreFace runs its OWN local `compreface-core` container — the same image the server itself runs (see `infra/compose/base.compose.yml`'s `compreface-core` service block). The node's compute calls this container directly at `http://localhost:<port>`, NOT proxied through the server: the server's own sidecar has no port exposed externally by design, and routing a node's face-detection calls through the server would defeat the whole point of a distributed worker.
 
@@ -89,6 +115,12 @@ docker run -d --name compreface-core -p 3000:3000 \
   exadel/compreface-core:1.2.0-mobilenet
 ```
 
+Optionally, pull the image separately first to confirm it downloads successfully, as a step distinct from actually starting the container — useful for diagnosing a slow/failed pull vs. a container-runtime problem:
+
+```bash
+docker pull exadel/compreface-core:1.2.0-mobilenet
+```
+
 Confirm it's reachable:
 
 ```bash
@@ -97,7 +129,7 @@ curl http://localhost:3000/status
 
 A healthy response reports `"status": "OK"`.
 
-### 4.2 CLI usage
+### 4.3 CLI usage
 
 Two new flags on `node register` and `node start`:
 
@@ -115,15 +147,15 @@ Both settings are stored in local node config only (`faceProvider`, `comprefaceU
 
 The equivalent TUI path is Tools ▸ Worker Node ▸ Register node / Node config — both screens gain a face-provider toggle alongside the existing concurrency and job-type fields.
 
-### 4.3 Hard-fail behavior — no silent fallback to Human
+### 4.4 Hard-fail behavior — no silent fallback to Human
 
 If a node is configured `faceProvider: 'compreface'` but its local sidecar is unreachable, `node doctor` reports the `compreface` capability unavailable, and `face_detection`/`video_face_detection` are **NOT READY** on that node — it simply stops advertising those job types as eligible, rather than silently falling back to Human. This is deliberate: a silent fallback would reintroduce the exact embedding-space mismatch this feature exists to prevent (see the overview above). See §8 (Troubleshooting) below for the exact symptom and fix.
 
-### 4.4 `node doctor` coverage
+### 4.5 `node doctor` coverage
 
 `node doctor` (CLI and TUI) gains one new capability row, `compreface`, reported using the exact same installed-vs-operational model described in §7 for every other capability: **installed** means the configured `comprefaceUrl` responds at all to a `GET /status` call; **operational** means that response actually reports `status: 'OK'`. Like every other capability, a clean, fully-healthy node collapses this row into the one-line summary count; only a real problem expands it with detail.
 
-### 4.5 How this differs from the CLIP/Human model-file pattern
+### 4.6 How this differs from the CLIP/Human model-file pattern
 
 Unlike the CLIP ONNX model or the Human face-detector files documented in §5 below, CompreFace isn't a downloadable model file `ensureModels()` fetches into `~/.memoriahub/models/`. It's a separate, long-running local service — a Docker container — that the operator starts and keeps running themselves. There is nothing for `node start`/`node doctor` to download or sha256-verify here; the capability check is a live HTTP reachability probe against whatever `comprefaceUrl` is configured, not a file-presence check.
 
@@ -173,6 +205,7 @@ Both the CLI command (`memoriahub node doctor`) and the TUI screen (Tools ▸ Wo
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
+| `docker: command not found` or `docker run` fails with a daemon-connection error | Docker isn't installed, or the Docker daemon isn't running | See §4.1 for per-OS install instructions; on Linux confirm the daemon is running with `sudo systemctl status docker` |
 | `compreface` capability shows unavailable / `face_detection` not ready when faceProvider is set to compreface | local `compreface-core` container isn't running or isn't reachable at the configured URL | start/check the container (`docker ps`, `curl http://localhost:3000/status`), or fix `comprefaceUrl` if it's using a non-default port |
 | `tesseract: installed / not yet operational — language data not present` | `tesseract.js`'s trained-data file(s) for the configured language(s) haven't been downloaded/cached yet at `~/.memoriahub/models/tesseract/` — this only happens on real first-use, not proactively | Ensure network access and write permission to `~/.memoriahub/models/tesseract/`, then let a real OCR pass run once (a `social_media_detection` job reaching Tier 2). Until then, `social_media_detection` runs Tier-1-only (degraded, not broken). See §3. |
 | A capability shows `no` (not installed) at all | The corresponding `optionalDependencies` entry failed to build/download for this platform — most commonly a missing native compile toolchain | Install the toolchain: `sudo apt install build-essential python3` (Debian/Ubuntu) or `xcode-select --install` (macOS) — the same guidance `apps/cli/README.md` documents for `better-sqlite3` — then reinstall/rebuild (`npm_config_build_from_source=true bash install.sh` if a prebuilt binary genuinely isn't available for this platform/Node version). |
