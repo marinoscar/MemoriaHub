@@ -17,6 +17,7 @@ import {
   ConflictException,
   InternalServerErrorException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { EnrichmentJob, JobStatus, NodeStatus, WorkerNode } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentClaimService } from '../enrichment/enrichment-claim.service';
@@ -199,11 +200,42 @@ export class NodesService {
       claimed.map(async (job) => ({
         job,
         inputUrl: await this.resolveInputUrl(job, userId, /* userPermissions */ []),
-        params: job.payload ?? null,
+        params: await this.resolveJobParams(job),
       })),
     );
 
     return { jobs };
+  }
+
+  /**
+   * Resolve the `params` a claimed job should carry back to the node.
+   *
+   * For every job type except `video_face_detection` this is unchanged:
+   * `job.payload ?? null`. `video_face_detection` jobs are enqueued with NO
+   * payload at all (see MediaEnrichmentService.enqueueVideoPostDetectionEnrichment)
+   * — the in-process worker instead reads `face.video.sampleIntervalSeconds`
+   * and `face.video.maxFramesPerVideo` FRESH from system settings at process
+   * time (VideoFaceDetectionHandler.process, defaults 5 and 60). A node has
+   * no DB access and no other way to learn these two values, so this method
+   * reads them fresh here (as close to "read settings live, right before
+   * compute" as the claim-then-compute model allows) and merges them into
+   * the returned params, preserving any existing job.payload fields.
+   */
+  private async resolveJobParams(job: EnrichmentJob): Promise<unknown> {
+    if (job.type !== 'video_face_detection') {
+      return job.payload ?? null;
+    }
+
+    const settings = await this.systemSettings.getSettings();
+    const sampleIntervalSeconds = settings.face?.video?.sampleIntervalSeconds ?? 5;
+    const maxFramesPerVideo = settings.face?.video?.maxFramesPerVideo ?? 60;
+
+    const basePayload =
+      job.payload && typeof job.payload === 'object' && !Array.isArray(job.payload)
+        ? (job.payload as Record<string, unknown>)
+        : {};
+
+    return { ...basePayload, sampleIntervalSeconds, maxFramesPerVideo };
   }
 
   /**
@@ -327,23 +359,33 @@ export class NodesService {
   // -------------------------------------------------------------------------
 
   /**
-   * Issue a presigned PUT URL for a claimed job to upload output bytes to —
-   * currently used by the thumbnail node-compute path (`thumbnail_regen` /
-   * `thumbnail_repair`): the node computes a JPEG locally, calls this
-   * endpoint to learn WHERE to put it, PUTs the bytes directly to the
-   * returned URL, then submits `{ storageKey, width, height, bytes }` via
-   * `POST /nodes/:id/jobs/:jobId/result`.
+   * Issue a presigned PUT URL for a claimed job to upload output bytes to.
+   * The node computes a JPEG locally, calls this endpoint to learn WHERE to
+   * put it, PUTs the bytes directly to the returned URL, then submits its
+   * result via `POST /nodes/:id/jobs/:jobId/result`.
    *
    * Reuses the same held-job guard as submitJobResult/reportJobFailure (404
    * unknown job, 409 if not held by this node under a live lease) so a
    * straggler node past lease expiry cannot obtain a fresh upload URL either.
    *
-   * The SERVER chooses the storage key — never the node — using the exact
-   * same convention as the in-process pipeline
-   * (`ThumbnailProcessor.uploadThumbnail`): `thumbnails/<originalObjectId>.jpg`,
-   * keyed off the target MediaItem's StorageObject id, so a node-produced
-   * thumbnail is indistinguishable in storage layout from a server-produced
-   * one.
+   * The SERVER chooses the storage key — never the node — with a
+   * per-job-type convention:
+   *
+   *   - `thumbnail_regen` / `thumbnail_repair`: DETERMINISTIC key, matching
+   *     the exact convention the in-process pipeline uses
+   *     (`ThumbnailProcessor.uploadThumbnail`): `thumbnails/<originalObjectId>.jpg`,
+   *     keyed off the target MediaItem's StorageObject id, so a node-produced
+   *     thumbnail is indistinguishable in storage layout from a
+   *     server-produced one. Re-running the job overwrites the same key.
+   *
+   *   - `video_face_detection`: a FRESH randomized key per call —
+   *     `video-faces/<mediaItemId>/<uuid>.jpg` — matching the in-process
+   *     handler's own convention (each detected face cluster gets its own
+   *     representative-frame thumbnail; the set of clusters can differ
+   *     between runs, so there is no single deterministic key to reuse).
+   *
+   *   - Any other job type: rejected with 400 — only the three types above
+   *     currently produce node-uploaded output bytes.
    */
   async getJobUploadUrl(
     userId: string,
@@ -358,18 +400,29 @@ export class NodesService {
       );
     }
 
-    const mediaItem = await this.prisma.mediaItem.findUnique({
-      where: { id: job.mediaItemId },
-      select: { storageObjectId: true },
-    });
+    let storageKey: string;
 
-    if (!mediaItem?.storageObjectId) {
+    if (job.type === 'thumbnail_regen' || job.type === 'thumbnail_repair') {
+      const mediaItem = await this.prisma.mediaItem.findUnique({
+        where: { id: job.mediaItemId },
+        select: { storageObjectId: true },
+      });
+
+      if (!mediaItem?.storageObjectId) {
+        throw new BadRequestException(
+          `MediaItem ${job.mediaItemId} for job ${jobId} has no linked StorageObject`,
+        );
+      }
+
+      storageKey = `thumbnails/${mediaItem.storageObjectId}.jpg`;
+    } else if (job.type === 'video_face_detection') {
+      storageKey = `video-faces/${job.mediaItemId}/${randomUUID()}.jpg`;
+    } else {
       throw new BadRequestException(
-        `MediaItem ${job.mediaItemId} for job ${jobId} has no linked StorageObject`,
+        `job type "${job.type}" does not support upload-url issuance`,
       );
     }
 
-    const storageKey = `thumbnails/${mediaItem.storageObjectId}.jpg`;
     const expiresSeconds = 3600;
 
     const { provider } = await this.storageProviderResolver.getActiveProvider();
