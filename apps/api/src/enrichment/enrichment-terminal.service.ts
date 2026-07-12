@@ -84,10 +84,11 @@ export class EnrichmentTerminalService {
     await this.safeTerminalUpdate(job.id, job.type, {
       status: JobStatus.succeeded,
       finishedAt: new Date(),
-      // Release the claim/lease so the terminal row is unowned.
+      // Release the claim/lease so the terminal row is unowned. `executor` is
+      // intentionally NOT nulled here — succeeded is always terminal, so the
+      // audit value of which side (server/node) ran the job must be preserved.
       claimedByNode: { disconnect: true },
       leaseExpiresAt: null,
-      executor: null,
     });
 
     this.logger.log(
@@ -161,7 +162,10 @@ export class EnrichmentTerminalService {
         // Release the claim/lease so a requeued (or failed) job is unowned.
         claimedByNode: { disconnect: true },
         leaseExpiresAt: null,
-        executor: null,
+        // `executor` is only cleared when the job is being released back to
+        // pending for a fresh, unowned claim. A given-up (terminal) failure
+        // must preserve the audit value of which side ran the job.
+        ...(giveUp ? {} : { executor: null }),
         ...(giveUp ? { finishedAt: new Date() } : {}),
       });
 
@@ -189,7 +193,10 @@ export class EnrichmentTerminalService {
         // Release the claim/lease so a requeued (or failed) job is unowned.
         claimedByNode: { disconnect: true },
         leaseExpiresAt: null,
-        executor: null,
+        // `executor` is only cleared when the job is being released back to
+        // pending for a fresh, unowned claim. A given-up (terminal) failure
+        // must preserve the audit value of which side ran the job.
+        ...(shouldRetry ? { executor: null } : {}),
         ...(!shouldRetry ? { finishedAt: new Date() } : {}),
       });
 
