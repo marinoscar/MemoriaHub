@@ -13,6 +13,14 @@
  * fluent-ffmpeg is loaded lazily via nodeRequire (mirrors /metadata's
  * loadFfmpeg) so importing this subpath is always safe; the ffmpeg/ffprobe
  * binaries on PATH remain a host/deployment concern.
+ *
+ * Also exports `extractPosterFrame` — a single-frame "poster frame" extractor
+ * used by thumbnail generation (video poster/cover images), as opposed to the
+ * multi-frame sampling functions above used by face detection / OCR. It was
+ * ported out of `apps/api/src/storage/processing/processors/thumbnail.processor.ts`
+ * so both the API's ThumbnailProcessor and a distributed worker node's
+ * thumbnail compute module share one, numerically-identical implementation of
+ * the three-attempt fallback ladder (seek 1s → seek 0s → `thumbnail` filter).
  */
 
 import { tmpdir } from 'node:os';
@@ -43,10 +51,12 @@ export interface FrameExtractionOpts {
 
 type FfmpegChain = {
   seekInput(seconds: number): FfmpegChain;
+  videoFilters(filter: string): FfmpegChain;
   frames(n: number): FfmpegChain;
   output(path: string): FfmpegChain;
   on(event: 'end' | 'error', cb: (err?: Error) => void): FfmpegChain;
   run(): void;
+  kill(signal: string): void;
 };
 type FfmpegModule = (input: string) => FfmpegChain;
 
@@ -173,6 +183,162 @@ export async function extractFramesAt(
       await fs.unlink(p).catch(() => {});
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// extractPosterFrame — single-frame poster/cover extraction (thumbnails)
+// ---------------------------------------------------------------------------
+
+export interface PosterFrameOpts {
+  /**
+   * Per-attempt ffmpeg timeout in ms before SIGKILL. Defaults to the
+   * `FFMPEG_TIMEOUT_MS` env var (read at call time, since this package has no
+   * NestJS DI/config), falling back to 60000 when unset/unparsable.
+   */
+  ffmpegTimeoutMs?: number;
+}
+
+/**
+ * Extract a single "poster frame" JPEG from the video already on disk at
+ * `videoPath`, via a three-attempt fallback ladder ported verbatim (by
+ * behavior) from the server's `ThumbnailProcessor.processVideo`:
+ *   1. seek to 1 s
+ *   2. seek to 0 s
+ *   3. no seek — apply the ffmpeg `thumbnail` video filter instead, which
+ *      picks a representative frame heuristically
+ *
+ * Each attempt writes to its OWN temp output path and is validated
+ * non-empty afterward (ffmpeg can exit 0 without writing a frame, e.g. a
+ * seek past the end of a short clip); the previous attempt's temp file is
+ * unlinked before the next attempt runs. Each attempt is also individually
+ * bounded by `opts.ffmpegTimeoutMs` (or `FFMPEG_TIMEOUT_MS`, default 60000)
+ * and killed with SIGKILL if it hangs — a corrupt input or codec loop must
+ * never wedge the caller.
+ *
+ * If all three attempts fail, throws the LAST attempt's error (matching the
+ * server's `if (!frameExtracted) throw lastError;`).
+ *
+ * On success, reads the winning temp file into a Buffer and returns it. This
+ * function does NOT resize/re-encode via sharp — it returns the raw
+ * extracted JPEG bytes only; the caller runs the result through its OWN
+ * sharp resize pipeline, exactly mirroring how the server's
+ * `processVideo` does `extractFrame` → `fs.readFile` → `sharp(...).resize(...)`.
+ * ALL per-attempt temp files (including the winning one) are cleaned up in a
+ * finally block.
+ *
+ * `videoPath` must already be a seekable file on disk — like `extractFrames`/
+ * `extractFramesAt` above, this function does NOT take ownership of it; the
+ * caller owns downloading/materializing the source video and its cleanup.
+ */
+export async function extractPosterFrame(videoPath: string, opts?: PosterFrameOpts): Promise<Buffer> {
+  const ffmpegTimeoutMs =
+    opts?.ffmpegTimeoutMs ?? parseInt(process.env.FFMPEG_TIMEOUT_MS ?? '60000', 10);
+
+  const attempts: Array<{ label: string; seekSecs: number | null }> = [
+    { label: '1s seek', seekSecs: 1 },
+    { label: '0s seek', seekSecs: 0 },
+    { label: 'thumbnail filter', seekSecs: null },
+  ];
+
+  const tmpOutPaths: string[] = [];
+  let winningPath: string | null = null;
+  let lastError: Error = new Error('poster frame extraction not attempted');
+
+  try {
+    for (const attempt of attempts) {
+      const tmpOut = join(tmpdir(), `memoriaHub-poster-${randomUUID()}.jpg`);
+      tmpOutPaths.push(tmpOut);
+
+      try {
+        await extractPosterFrameAttempt(videoPath, tmpOut, attempt.seekSecs, ffmpegTimeoutMs);
+        await assertNonEmptyFile(tmpOut);
+        winningPath = tmpOut;
+        break;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        computeLog.warn(
+          `extractPosterFrame: attempt (${attempt.label}) failed for ${videoPath} — ` +
+            `${lastError.message}; falling back to next attempt`,
+        );
+      }
+    }
+
+    if (!winningPath) {
+      throw lastError;
+    }
+
+    return await fs.readFile(winningPath);
+  } finally {
+    for (const p of tmpOutPaths) {
+      await fs.unlink(p).catch(() => {});
+    }
+  }
+}
+
+/**
+ * Reject unless `path` exists with size > 0 — ffmpeg can exit 0 without
+ * writing a frame (e.g. a seek past the end of the stream).
+ */
+async function assertNonEmptyFile(path: string): Promise<void> {
+  const stats = await fs.stat(path);
+  if (stats.size === 0) {
+    throw new Error(`ffmpeg produced an empty output file: ${path}`);
+  }
+}
+
+/**
+ * Run a single poster-frame extraction attempt from `tmpIn` into `tmpOut`.
+ * With `seekSecs` set, seeks to that timestamp; with `seekSecs === null`,
+ * applies the ffmpeg `thumbnail` video filter instead (no seek — last rung
+ * of the fallback ladder).
+ *
+ * The command is killed with SIGKILL once `timeoutMs` elapses. The `settled`
+ * guard ensures the promise settles exactly once: the timer cannot fire
+ * after 'end'/'error', and a late 'error' emitted by the kill is a no-op.
+ */
+function extractPosterFrameAttempt(
+  tmpIn: string,
+  tmpOut: string,
+  seekSecs: number | null,
+  timeoutMs: number,
+): Promise<void> {
+  const ffmpeg = loadFfmpeg();
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let timer: NodeJS.Timeout | null = null;
+
+    const settle = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (err) reject(err);
+      else resolve();
+    };
+
+    const cmd = ffmpeg(tmpIn);
+    if (seekSecs !== null) {
+      cmd.seekInput(seekSecs);
+    } else {
+      cmd.videoFilters('thumbnail');
+    }
+    cmd
+      .frames(1)
+      .output(tmpOut)
+      .on('end', () => settle())
+      .on('error', (err?: Error) => settle(err));
+
+    timer = setTimeout(() => {
+      // SIGKILL — ffmpeg can ignore the default SIGTERM mid-decode
+      try {
+        cmd.kill('SIGKILL');
+      } catch {
+        // Process already gone
+      }
+      settle(new Error(`ffmpeg frame extraction timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    cmd.run();
+  });
 }
 
 // ---------------------------------------------------------------------------
