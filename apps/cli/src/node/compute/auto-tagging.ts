@@ -17,7 +17,7 @@
  *   3. Call the provider directly via
  *      @memoriahub/enrichment-compute/ai's callAnthropicVision.
  *
- * Only the 'anthropic' tagging provider is supported on nodes this pass
+ * Both the 'anthropic' and 'openai' tagging providers are supported on nodes
  * (mirrors the parity package — see packages/enrichment-compute/src/ai). A
  * job configured for any other provider declines with
  * CapabilityUnavailableError so the server keeps handling it in-process.
@@ -27,19 +27,25 @@
  * module only returns the raw text, matching autoTaggingResultSchema
  * (`{ rawText: string }`).
  *
- * RATE LIMITS: `callAnthropicVision` (package `/ai`) already classifies a
- * 429/529 (Anthropic "Overloaded") SDK error into the shared
- * `ProviderRateLimitError` (package `/rate-limit`) and throws it directly —
- * no local duck-typing needed here. It propagates unchanged up through this
- * compute function to node-engine.ts's processJob catch block, which detects
+ * RATE LIMITS: `callAnthropicVision`/`callOpenAiVision` (package `/ai`)
+ * already classify a rate-limit/overload SDK error (Anthropic 429/529,
+ * OpenAI 429) into the shared `ProviderRateLimitError` (package
+ * `/rate-limit`) and throw it directly — no local duck-typing needed here.
+ * It propagates unchanged up through this compute function to
+ * node-engine.ts's processJob catch block, which detects
  * `err instanceof ProviderRateLimitError` and forwards
  * `{ rateLimited: true, retryAfterMs }` to the server's failure endpoint so
  * the job backs off instead of burning through ENRICHMENT_MAX_ATTEMPTS.
+ *
+ * Credential handling is identical for both providers: `creds.apiKey` flows
+ * directly into the local `visionCreds` object passed to the vision call
+ * below and is never assigned to any longer-lived variable, written to any
+ * file, or passed to a logger.
  */
 
 import { readFile } from 'node:fs/promises';
 import { prepareImageForProcessing } from '@memoriahub/enrichment-compute/image';
-import { callAnthropicVision } from '@memoriahub/enrichment-compute/ai';
+import { callAnthropicVision, callOpenAiVision } from '@memoriahub/enrichment-compute/ai';
 import { CapabilityUnavailableError, type ComputeFn } from '../capabilities.js';
 import { ApiClient } from '../../api.js';
 import { loadConfig } from '../../config.js';
@@ -69,7 +75,7 @@ const computeAutoTagging: ComputeFn = async (inputPath, _params, ctx): Promise<A
   if (creds.type !== 'auto_tagging') {
     throw new Error(`unexpected credentials type "${creds.type}" for auto_tagging job`);
   }
-  if (creds.provider !== 'anthropic') {
+  if (creds.provider !== 'anthropic' && creds.provider !== 'openai') {
     throw new CapabilityUnavailableError(
       `auto_tagging via provider "${creds.provider}" not yet supported on nodes`,
       'auto_tagging',
@@ -87,17 +93,20 @@ const computeAutoTagging: ComputeFn = async (inputPath, _params, ctx): Promise<A
   // --- 3. Call the provider directly. apiKey stays in this local variable
   // only — never assigned to `this`/module-level state, never logged.
   // Rate-limit classification (429/529 -> ProviderRateLimitError) happens
-  // inside callAnthropicVision itself; nothing to catch here. ---
-  const rawText = await callAnthropicVision(
-    { apiKey: creds.apiKey, baseUrl: creds.baseUrl },
-    {
-      model: creds.model,
-      system: creds.system,
-      prompt: creds.prompt,
-      imageBase64,
-      mimeType: creds.mimeTypeHint,
-    },
-  );
+  // inside callAnthropicVision/callOpenAiVision itself; nothing to catch
+  // here. ---
+  const visionCreds = { apiKey: creds.apiKey, baseUrl: creds.baseUrl };
+  const visionReq = {
+    model: creds.model,
+    system: creds.system,
+    prompt: creds.prompt,
+    imageBase64,
+    mimeType: creds.mimeTypeHint,
+  };
+  const rawText =
+    creds.provider === 'anthropic'
+      ? await callAnthropicVision(visionCreds, visionReq)
+      : await callOpenAiVision(visionCreds, visionReq);
 
   return { rawText };
 };
