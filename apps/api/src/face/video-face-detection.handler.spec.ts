@@ -131,6 +131,7 @@ import { promises as fsPromises } from 'fs';
 import { tmpdir } from 'os';
 import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
 import { VideoFaceDetectionHandler } from './video-face-detection.handler';
+import { VideoFaceDetectionService } from './video-face-detection.service';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 
 // ---------------------------------------------------------------------------
@@ -368,16 +369,25 @@ describe('VideoFaceDetectionHandler', () => {
     mockRegistry = { register: jest.fn() };
 
     // -----------------------------------------------------------------------
-    // Instantiate the handler directly
+    // Instantiate the service (holds all the pipeline logic), then the thin
+    // handler that delegates process()/persistNodeResult() to it — mirrors
+    // the FaceDetectionHandler/FaceDetectionService split exactly. All the
+    // mocked collaborators above are now the service's dependencies, not the
+    // handler's, but every test still drives everything through the public
+    // handler.process(job) entry point, unchanged.
     // -----------------------------------------------------------------------
-    handler = new VideoFaceDetectionHandler(
-      mockRegistry as any,
+    const videoFaceDetectionService = new VideoFaceDetectionService(
       mockPrisma as any,
       mockCore as any,
       mockFrameExtractor as any,
       mockMatchingService as any,
       mockResolver as any,
       mockEnrichmentJobService as any,
+    );
+
+    handler = new VideoFaceDetectionHandler(
+      mockRegistry as any,
+      videoFaceDetectionService,
     );
   });
 

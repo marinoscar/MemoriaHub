@@ -78,6 +78,46 @@ export const faceDetectionResultSchema = z.object({
 });
 export type FaceDetectionResult = z.infer<typeof faceDetectionResultSchema>;
 
+/**
+ * video_face_detection — one cluster per detected identity across sampled
+ * frames (the compute/persist split's node-submitted result shape). Unlike
+ * faceDetectionResultSchema (single photo, pixel-space bbox shared across all
+ * faces via top-level imageWidth/imageHeight), each cluster here carries its
+ * OWN imageWidth/imageHeight since different sampled frames of the same video
+ * can differ in prepared dimensions. `frameThumbnailKey` is optional because
+ * uploading the representative-frame JPEG is a best-effort step (a storage
+ * upload failure still persists the face, just without a thumbnail key).
+ */
+export const videoFaceDetectionResultSchema = z.object({
+  modelVersion: z.string().min(1),
+  providerKey: z.string().min(1),
+  clusters: z.array(
+    z.object({
+      /** PIXEL bounding box relative to this cluster's own imageWidth/imageHeight. */
+      boundingBox: z.object({
+        x: z.number(),
+        y: z.number(),
+        width: z.number(),
+        height: z.number(),
+      }),
+      imageWidth: z.number().int().positive(),
+      imageHeight: z.number().int().positive(),
+      confidence: z.number().optional(),
+      /** Provider-dependent dimensionality, same rationale as faceDetectionResultSchema. */
+      embedding: z.array(z.number()).min(1),
+      /** Opaque passthrough, same rationale as faceDetectionResultSchema. */
+      landmarks: z.unknown().optional(),
+      /** Representative frame's appearance timestamp, milliseconds from video start. */
+      videoTimestampMs: z.number().int().min(0),
+      /** All sampled-frame timestamps where this identity was observed. */
+      videoTimestamps: z.array(z.number().int().min(0)).min(1),
+      /** Storage key of the uploaded representative-frame JPEG; absent if the upload failed. */
+      frameThumbnailKey: z.string().min(1).optional(),
+    }),
+  ),
+});
+export type VideoFaceDetectionResult = z.infer<typeof videoFaceDetectionResultSchema>;
+
 // ---------------------------------------------------------------------------
 // metadata_extraction
 // ---------------------------------------------------------------------------

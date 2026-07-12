@@ -5,7 +5,7 @@ import { tmpdir } from 'os';
 import { join, extname } from 'path';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
-import ffmpeg from 'fluent-ffmpeg';
+import { extractPosterFrame } from '@memoriahub/enrichment-compute/video';
 import { ObjectProcessor, ObjectProcessorResult } from '../object-processor.interface';
 import { STORAGE_PROVIDER, StorageProvider } from '../../providers/storage-provider.interface';
 import { StorageProviderResolver } from '../../providers/storage-provider.resolver';
@@ -32,15 +32,21 @@ import { streamToBuffer, streamToTempFile } from './stream-utils';
  * Video path:
  *   1. Streams the download to a temp file with constant memory (buffering the
  *      whole video in RAM previously OOM'd the process on large MP4s).
- *   2. Extracts one frame with fluent-ffmpeg into a temp JPEG via a
- *      three-attempt fallback ladder: seek 1 s → seek 0 s → `thumbnail` video
- *      filter (no seek).  After each attempt the output is validated to exist
- *      and be non-empty — ffmpeg can exit 0 without writing a frame.  Every
- *      attempt is killed (SIGKILL) after FFMPEG_TIMEOUT_MS so a hung ffmpeg
- *      never wedges the pipeline.
+ *   2. Extracts one poster frame via the shared
+ *      `@memoriahub/enrichment-compute/video`'s `extractPosterFrame()`, which
+ *      runs the three-attempt fallback ladder (seek 1 s → seek 0 s →
+ *      `thumbnail` video filter, no seek) against fluent-ffmpeg, validating
+ *      each attempt's output is non-empty (ffmpeg can exit 0 without writing
+ *      a frame) and killing (SIGKILL) any attempt that exceeds
+ *      FFMPEG_TIMEOUT_MS so a hung ffmpeg never wedges the pipeline. This is
+ *      the same extraction code a distributed worker node's thumbnail
+ *      compute module falls back to, guaranteeing identical behavior
+ *      whether a video thumbnail is generated in-process or on a node.
  *   3. Runs the extracted frame through sharp (same resize/quality settings as
  *      the image path) for consistency.
- *   4. Uploads → StorageObject.  All temp files cleaned up in finally.
+ *   4. Uploads → StorageObject.  All temp files cleaned up in finally (the
+ *      input temp file here; the shared extractor manages its own
+ *      per-attempt output temp files internally).
  *
  * Shared upload/StorageObject-creation code is factored into
  * uploadThumbnail() to avoid duplication between the two paths.
@@ -149,46 +155,21 @@ export class ThumbnailProcessor implements ObjectProcessor {
     // fall back to .mp4 when the extension is absent or unknown.
     const origExt = extname(object.name || '') || '.mp4';
     const tmpIn = join(tmpdir(), `memoriaHub-thumb-in-${randomUUID()}${origExt}`);
-    const tmpOut = join(tmpdir(), `memoriaHub-thumb-out-${randomUUID()}.jpg`);
 
     try {
       // 1. Stream the video to a temp file (ffmpeg requires a seekable path)
       const stream = await getStream();
       await streamToTempFile(stream, tmpIn);
 
-      // 2. Extract a single frame — three-attempt fallback ladder.  Each
-      //    attempt's output is validated (ffmpeg can exit 0 with an empty or
-      //    missing output file) and unlinked before the next attempt.
-      const attempts: Array<{ label: string; seekSecs: number | null }> = [
-        { label: '1s seek', seekSecs: 1 },
-        { label: '0s seek', seekSecs: 0 },
-        { label: 'thumbnail filter', seekSecs: null },
-      ];
-      let frameExtracted = false;
-      let lastError: Error = new Error('frame extraction not attempted');
-      for (const attempt of attempts) {
-        try {
-          await this.extractFrame(tmpIn, tmpOut, attempt.seekSecs);
-          await this.assertNonEmptyFile(tmpOut);
-          frameExtracted = true;
-          break;
-        } catch (err) {
-          lastError = err instanceof Error ? err : new Error(String(err));
-          this.logger.debug(
-            `frame extraction (${attempt.label}) failed for object ${object.id}: ` +
-              `${lastError.message}; falling back to next attempt`,
-          );
-          await fs.unlink(tmpOut).catch(() => {});
-        }
-      }
+      // 2. Extract a single poster frame via the shared package's three-attempt
+      //    fallback ladder (seek 1s → seek 0s → `thumbnail` filter). It manages
+      //    its own per-attempt temp output files internally.
+      const frameBuffer = await extractPosterFrame(tmpIn, {
+        ffmpegTimeoutMs: this.ffmpegTimeoutMs,
+      });
 
-      if (!frameExtracted) {
-        throw lastError;
-      }
-
-      // 3. Read the extracted frame and run it through sharp (consistent sizing
-      //    and quality with the image path)
-      const frameBuffer = await fs.readFile(tmpOut);
+      // 3. Run the extracted frame through sharp (consistent sizing and
+      //    quality with the image path)
       const sharp = (await import('sharp')).default;
       const thumbBuffer = await sharp(frameBuffer)
         .resize({
@@ -206,75 +187,9 @@ export class ThumbnailProcessor implements ObjectProcessor {
       this.logger.error(`thumbnail(video) failed for object ${object.id}: ${message}`);
       return { success: false, error: message };
     } finally {
-      // Clean up both temp files regardless of success/failure
+      // Clean up the downloaded input temp file. The output frame's temp
+      // file(s) are owned and cleaned up internally by extractPosterFrame.
       await fs.unlink(tmpIn).catch(() => {});
-      await fs.unlink(tmpOut).catch(() => {});
-    }
-  }
-
-  /**
-   * Extract a single frame from the video into `tmpOut`.  With `seekSecs` set,
-   * seeks to that timestamp; with `seekSecs === null`, applies the ffmpeg
-   * `thumbnail` video filter instead (picks a representative frame without
-   * seeking — last rung of the fallback ladder).
-   *
-   * The command is killed with SIGKILL once FFMPEG_TIMEOUT_MS elapses — a hung
-   * ffmpeg (corrupt input, codec loop) must never wedge the pipeline.  The
-   * settled guard ensures the promise settles exactly once: the timer cannot
-   * fire after 'end'/'error', and a late 'error' emitted by the kill is a no-op.
-   *
-   * `ffmpeg(input)` is the factory call — fluent-ffmpeg's default export is a
-   * callable function, not a class constructor.  `ffmpeg.FfmpegCommand` does not
-   * exist at runtime; calling `new ffmpeg.FfmpegCommand(...)` throws
-   * "ffmpeg.FfmpegCommand is not a constructor".
-   */
-  private extractFrame(tmpIn: string, tmpOut: string, seekSecs: number | null): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      let settled = false;
-      let timer: NodeJS.Timeout | null = null;
-
-      const settle = (err?: Error) => {
-        if (settled) return;
-        settled = true;
-        if (timer) clearTimeout(timer);
-        if (err) reject(err);
-        else resolve();
-      };
-
-      const cmd = ffmpeg(tmpIn);
-      if (seekSecs !== null) {
-        cmd.seekInput(seekSecs);
-      } else {
-        cmd.videoFilters('thumbnail');
-      }
-      cmd
-        .frames(1)
-        .output(tmpOut)
-        .on('end', () => settle())
-        .on('error', (err: Error) => settle(err));
-
-      timer = setTimeout(() => {
-        // SIGKILL — ffmpeg can ignore the default SIGTERM mid-decode
-        try {
-          cmd.kill('SIGKILL');
-        } catch {
-          // Process already gone
-        }
-        settle(new Error(`ffmpeg frame extraction timed out after ${this.ffmpegTimeoutMs}ms`));
-      }, this.ffmpegTimeoutMs);
-
-      cmd.run();
-    });
-  }
-
-  /**
-   * Reject unless `path` exists with size > 0 — ffmpeg can exit 0 without
-   * writing a frame (e.g. a seek past the end of the stream).
-   */
-  private async assertNonEmptyFile(path: string): Promise<void> {
-    const stats = await fs.stat(path);
-    if (stats.size === 0) {
-      throw new Error(`ffmpeg produced an empty output file: ${path}`);
     }
   }
 
