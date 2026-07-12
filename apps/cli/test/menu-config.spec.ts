@@ -84,18 +84,23 @@ describe('menu-config', () => {
       ]);
     });
 
-    it('within Tools when logged out, the offline Convert submenu and Organize leaf are visible', () => {
+    it('within Tools when logged out, the offline Convert submenu, Organize leaf, and Date Inference submenu are visible', () => {
       const tools = findSubmenu('tools')!;
       const nodes = visibleChildren(tools, false);
-      expect(labels(nodes)).toEqual(['Convert videos to MP4', 'Organize folder by date']);
+      expect(labels(nodes)).toEqual([
+        'Convert videos to MP4',
+        'Organize folder by date',
+        'Date Inference',
+      ]);
     });
 
-    it('within Tools when logged in, all five tools are visible in order', () => {
+    it('within Tools when logged in, all six tools are visible in order', () => {
       const tools = findSubmenu('tools')!;
       const nodes = visibleChildren(tools, true);
       expect(labels(nodes)).toEqual([
         'Convert videos to MP4',
         'Organize folder by date',
+        'Date Inference',
         'Job queue monitor',
         'Backup',
         'Worker Node',
