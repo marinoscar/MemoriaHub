@@ -161,8 +161,8 @@ export const JOB_TYPE_REQUIREMENTS: Record<NodeJobType, string[]> = {
   duplicate_detection: ['sharp'], // onnxruntime optional → dHash degraded mode
   metadata_extraction: ['sharp'],
   social_media_detection: ['ffprobe'], // tesseract optional → Tier-1-only mode
-  thumbnail_regen: ['sharp'],
-  thumbnail_repair: ['sharp'],
+  thumbnail_regen: ['sharp', 'ffmpeg'],
+  thumbnail_repair: ['sharp', 'ffmpeg'],
   auto_tagging: ['sharp'],
   geocode: [],
 };
