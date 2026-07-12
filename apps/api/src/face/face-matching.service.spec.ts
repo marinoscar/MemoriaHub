@@ -11,6 +11,7 @@ import {
   DEFAULT_FACE_MATCH_THRESHOLD,
   DEFAULT_FACE_CLUSTER_THRESHOLD,
   DEFAULT_FACE_CLUSTER_MIN_SIZE,
+  DEFAULT_FACE_ARCHIVE_MATCH_THRESHOLD,
 } from './face-matching.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
@@ -273,6 +274,167 @@ describe('FaceMatchingService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // matchFaceToArchived
+  // -------------------------------------------------------------------------
+
+  describe('matchFaceToArchived', () => {
+    it('returns the archived face when similarity >= archiveMatchThreshold', async () => {
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
+        { id: 'archived-1', embedding: [1, 0] },
+      ]);
+
+      const result = await service.matchFaceToArchived('circle-1', [1, 0]);
+
+      expect(result).toEqual({ faceId: 'archived-1', similarity: expect.any(Number) });
+      expect(result!.similarity).toBeCloseTo(1, 10);
+    });
+
+    it('returns null when best similarity is below archiveMatchThreshold', async () => {
+      // Orthogonal vectors -> similarity 0, well below the default 0.45 threshold.
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
+        { id: 'archived-1', embedding: [0, 1] },
+      ]);
+
+      const result = await service.matchFaceToArchived('circle-1', [1, 0]);
+
+      expect(result).toBeNull();
+    });
+
+    it('returns null immediately for an empty embedding without querying prisma', async () => {
+      const result = await service.matchFaceToArchived('circle-1', []);
+
+      expect(result).toBeNull();
+      expect(mockPrisma.face.findMany).not.toHaveBeenCalled();
+    });
+
+    it('returns null when the queried archived candidate set is empty', async () => {
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
+
+      const result = await service.matchFaceToArchived('circle-1', [1, 0]);
+
+      expect(result).toBeNull();
+    });
+
+    it('honors opts.candidates and never calls prisma', async () => {
+      const result = await service.matchFaceToArchived('circle-1', [1, 0], {
+        candidates: [{ id: 'supplied-1', embedding: [1, 0] }],
+      });
+
+      expect(result).toEqual({ faceId: 'supplied-1', similarity: expect.any(Number) });
+      expect(result!.similarity).toBeCloseTo(1, 10);
+      expect(mockPrisma.face.findMany).not.toHaveBeenCalled();
+    });
+
+    it('returns null when opts.candidates is an empty array, without querying prisma', async () => {
+      const result = await service.matchFaceToArchived('circle-1', [1, 0], {
+        candidates: [],
+      });
+
+      expect(result).toBeNull();
+      expect(mockPrisma.face.findMany).not.toHaveBeenCalled();
+    });
+
+    it('honors a custom opts.threshold that rejects an otherwise-passing match', async () => {
+      // similarity([1,0],[0.6,0.8]) = 0.6, which clears the default 0.45
+      // threshold but not a custom 0.9 threshold.
+      const result = await service.matchFaceToArchived('circle-1', [1, 0], {
+        candidates: [{ id: 'supplied-1', embedding: [0.6, 0.8] }],
+        threshold: 0.9,
+      });
+
+      expect(result).toBeNull();
+    });
+
+    it('honors a custom opts.threshold that accepts an otherwise-rejected match', async () => {
+      // similarity([1,0],[0.6,0.8]) = 0.6, below default archiveMatchThreshold
+      // only if default were > 0.6; use a low custom threshold to force accept.
+      const result = await service.matchFaceToArchived('circle-1', [1, 0], {
+        candidates: [{ id: 'supplied-1', embedding: [0.6, 0.8] }],
+        threshold: 0.1,
+      });
+
+      expect(result).toEqual({ faceId: 'supplied-1', similarity: expect.any(Number) });
+      expect(result!.similarity).toBeCloseTo(0.6, 5);
+    });
+
+    it('queries archived unassigned faces with the expected filter, ordering, and take cap', async () => {
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
+
+      await service.matchFaceToArchived('circle-xyz', [1, 0]);
+
+      expect(mockPrisma.face.findMany).toHaveBeenCalledWith({
+        where: {
+          circleId: 'circle-xyz',
+          personId: null,
+          hiddenAt: { not: null },
+          embedding: { isEmpty: false },
+        },
+        select: { id: true, embedding: true },
+        orderBy: { hiddenAt: 'desc' },
+        take: service.archiveMaxCandidates,
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // findLiveMatchesAgainstArchived
+  // -------------------------------------------------------------------------
+
+  describe('findLiveMatchesAgainstArchived', () => {
+    it('returns ids of live faces that match the archived reference set', async () => {
+      (mockPrisma.face.findMany as jest.Mock)
+        .mockResolvedValueOnce([{ id: 'archived-1', embedding: [1, 0] }]) // archived set
+        .mockResolvedValueOnce([
+          { id: 'live-1', embedding: [1, 0] }, // matches
+          { id: 'live-2', embedding: [0, 1] }, // does not match
+        ]);
+
+      const result = await service.findLiveMatchesAgainstArchived('circle-1');
+
+      expect(result).toEqual(['live-1']);
+    });
+
+    it('returns [] when the archived reference set is empty (no live query performed)', async () => {
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValueOnce([]);
+
+      const result = await service.findLiveMatchesAgainstArchived('circle-1');
+
+      expect(result).toEqual([]);
+      expect(mockPrisma.face.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips live faces with empty embeddings', async () => {
+      (mockPrisma.face.findMany as jest.Mock)
+        .mockResolvedValueOnce([{ id: 'archived-1', embedding: [1, 0] }])
+        .mockResolvedValueOnce([{ id: 'live-1', embedding: [] }]);
+
+      const result = await service.findLiveMatchesAgainstArchived('circle-1');
+
+      expect(result).toEqual([]);
+    });
+
+    it('honors supplied opts.archivedCandidates and opts.liveBatch without querying prisma', async () => {
+      const result = await service.findLiveMatchesAgainstArchived('circle-1', {
+        archivedCandidates: [{ id: 'archived-1', embedding: [1, 0] }],
+        liveBatch: [{ id: 'live-1', embedding: [1, 0] }],
+      });
+
+      expect(result).toEqual(['live-1']);
+      expect(mockPrisma.face.findMany).not.toHaveBeenCalled();
+    });
+
+    it('honors a custom opts.threshold', async () => {
+      const result = await service.findLiveMatchesAgainstArchived('circle-1', {
+        archivedCandidates: [{ id: 'archived-1', embedding: [0.6, 0.8] }],
+        liveBatch: [{ id: 'live-1', embedding: [1, 0] }],
+        threshold: 0.9, // similarity is 0.6, rejected at 0.9
+      });
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Threshold configuration
   // -------------------------------------------------------------------------
 
@@ -302,6 +464,44 @@ describe('FaceMatchingService', () => {
 
     it('uses DEFAULT_FACE_CLUSTER_MIN_SIZE when env var is not set', () => {
       expect(service.clusterMinSize).toBe(DEFAULT_FACE_CLUSTER_MIN_SIZE);
+    });
+
+    it('uses DEFAULT_FACE_ARCHIVE_MATCH_THRESHOLD when env var is not set', () => {
+      expect(service.archiveMatchThreshold).toBe(DEFAULT_FACE_ARCHIVE_MATCH_THRESHOLD);
+    });
+
+    it('reads FACE_ARCHIVE_MATCH_THRESHOLD from ConfigService when set', async () => {
+      const customConfig = makeConfigService({ FACE_ARCHIVE_MATCH_THRESHOLD: '0.6' });
+      const module = await Test.createTestingModule({
+        providers: [
+          FaceMatchingService,
+          { provide: PrismaService, useValue: mockPrisma },
+          { provide: ConfigService, useValue: customConfig },
+        ],
+      }).compile();
+
+      const customService = module.get<FaceMatchingService>(FaceMatchingService);
+
+      expect(customService.archiveMatchThreshold).toBe(0.6);
+    });
+
+    it('uses a default archiveMaxCandidates of 5000 when env var is not set', () => {
+      expect(service.archiveMaxCandidates).toBe(5000);
+    });
+
+    it('reads FACE_ARCHIVE_MAX_CANDIDATES from ConfigService when set', async () => {
+      const customConfig = makeConfigService({ FACE_ARCHIVE_MAX_CANDIDATES: '250' });
+      const module = await Test.createTestingModule({
+        providers: [
+          FaceMatchingService,
+          { provide: PrismaService, useValue: mockPrisma },
+          { provide: ConfigService, useValue: customConfig },
+        ],
+      }).compile();
+
+      const customService = module.get<FaceMatchingService>(FaceMatchingService);
+
+      expect(customService.archiveMaxCandidates).toBe(250);
     });
   });
 });
