@@ -115,6 +115,27 @@ export interface EngineSnapshot {
 /** Ring-buffer capacity for the completed-job history. */
 const HISTORY_LIMIT = 50;
 
+/**
+ * Job types whose compute module reads the downloaded input file (via
+ * `fs.readFile(inputPath)` / `sharp(buffer)`). For these, a falsy `inputUrl`
+ * from the claim means the server could not presign the source object, so we
+ * must NOT invoke compute with an empty path — that surfaces as the opaque
+ * `ENOENT: no such file or directory, open ''`. Instead we fail the job with a
+ * descriptive error and let the server requeue it (a transient not-ready object
+ * will presign on a later claim). Types NOT listed here are input-less
+ * (`geocode` reads stored lat/lng; the global `thumbnail_repair` sweep has no
+ * media item) and legitimately run with an empty input path.
+ */
+const INPUT_REQUIRED_TYPES = new Set<string>([
+  'face_detection',
+  'video_face_detection',
+  'duplicate_detection',
+  'metadata_extraction',
+  'social_media_detection',
+  'thumbnail_regen',
+  'auto_tagging',
+]);
+
 type Resolved = Required<Pick<NodeEngineDeps, 'downloadFn' | 'detectFn' | 'tmpDir'>>;
 
 export class NodeEngine extends NodeTypedEmitter {
@@ -331,6 +352,13 @@ export class NodeEngine extends NodeTypedEmitter {
       if (inputUrl) {
         await this.resolved.downloadFn(inputUrl, tmpPath);
         downloaded = true;
+      } else if (INPUT_REQUIRED_TYPES.has(type)) {
+        // Server returned no presigned URL for a job whose compute reads the
+        // input file. Fail cleanly instead of calling compute with '' (which
+        // would throw the opaque `ENOENT ... open ''`); the server requeues.
+        throw new Error(
+          `input bytes unavailable for job ${jobId} (${type}): server returned no download URL`,
+        );
       }
 
       const result = await this.dispatcher.compute(type, downloaded ? tmpPath : '', params ?? {}, {
