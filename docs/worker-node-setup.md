@@ -13,10 +13,11 @@
 1. [Overview](#1-overview)
 2. [System Prerequisites](#2-system-prerequisites)
 3. [Native Compute Dependencies](#3-native-compute-dependencies)
-4. [Model Manifest & Downloads](#4-model-manifest--downloads)
-5. [Registering and Running](#5-registering-and-running)
-6. [Reading `node doctor` Output](#6-reading-node-doctor-output)
-7. [Troubleshooting](#7-troubleshooting)
+4. [Matching the Server's Face-Detection Provider (CompreFace)](#4-matching-the-servers-face-detection-provider-compreface)
+5. [Model Manifest & Downloads](#5-model-manifest--downloads)
+6. [Registering and Running](#6-registering-and-running)
+7. [Reading `node doctor` Output](#7-reading-node-doctor-output)
+8. [Troubleshooting](#8-troubleshooting)
 
 This is a practical setup/troubleshooting companion to the [Distributed Nodes spec](specs/distributed-nodes.md), which covers the feature's architecture, security model, and API contract in full. This document does not repeat that content — it exists to answer "what do I install, and what do I do when `node doctor` says something is wrong."
 
@@ -24,7 +25,7 @@ This is a practical setup/troubleshooting companion to the [Distributed Nodes sp
 
 ## 1. Overview
 
-A worker node (`apps/cli`'s `memoriahub node start`) needs four things before it is fully operational: the native compute libraries (`sharp`, `onnxruntime-node`, `@vladmandic/human` + its TensorFlow.js backends, `tesseract.js`), the `ffmpeg`/`ffprobe` system binaries, the model files those libraries load at runtime, and — optionally, for a household running a node unattended — a persistent daemon or systemd service. `memoriahub node doctor` (a CLI command, and identically a full-screen TUI screen under Tools ▸ Worker Node ▸ Node doctor) is the single command that tells you exactly which of these four things is missing and where, distinguishing a library that merely **resolves** (installed) from one that has been proven to **actually work** (operational) — see §6 for why that distinction matters and is the most common source of confusion.
+A worker node (`apps/cli`'s `memoriahub node start`) needs four things before it is fully operational: the native compute libraries (`sharp`, `onnxruntime-node`, `@vladmandic/human` + its TensorFlow.js backends, `tesseract.js`), the `ffmpeg`/`ffprobe` system binaries, the model files those libraries load at runtime, and — optionally, for a household running a node unattended — a persistent daemon or systemd service. `memoriahub node doctor` (a CLI command, and identically a full-screen TUI screen under Tools ▸ Worker Node ▸ Node doctor) is the single command that tells you exactly which of these four things is missing and where, distinguishing a library that merely **resolves** (installed) from one that has been proven to **actually work** (operational) — see §7 for why that distinction matters and is the most common source of confusion.
 
 ---
 
@@ -63,14 +64,72 @@ These install automatically as part of a normal `memoriahub` install (curl insta
 `node doctor`'s step 2 (`detectCapabilities()`) only proves a library **resolves** (`require.resolve`, no side effects). Step 3 (`runOperationalSelfTests()` in `apps/cli/src/node/self-test.ts`) proves it actually **works** by attempting a real minimal operation. Here is what "installed but not yet operational" means for each, and how to fix it:
 
 - **`sharp` not operational.** `testSharp()` decodes a tiny synthetic raw pixel buffer and re-encodes it as JPEG. A failure here almost always means a wrong/incompatible prebuilt native binary for the current platform/Node version (the same class of problem `apps/cli/README.md`'s install-size section documents for `better-sqlite3`). Remediation: rebuild from source with `npm_config_build_from_source=true bash install.sh` (see `apps/cli/README.md`, "Install size and native dependencies"), after installing a C compiler toolchain if one is not already present (`sudo apt install build-essential python3` on Debian/Ubuntu, `xcode-select --install` on macOS).
-- **`onnxruntime` (CLIP) not operational.** `testClip()` first checks whether the model file `clip-vit-b32-vision-quantized.onnx` exists locally; if it doesn't, the result is reported `available: false` with detail "CLIP model not downloaded yet" — this is expected on a node that has never run `node start`/`node doctor` with a working API connection, since models are fetched lazily (§4). Remediation: run `node doctor` or `node start` once against a reachable API server so `ensureModels()` fetches it, or place the file manually per §4's air-gapped path. If the model file IS present and the self-test still fails, that's a genuine broken install (corrupt download, wrong platform build of `onnxruntime-node`) rather than a missing-model case — re-download the model or reinstall the CLI.
-- **`human` (face detector) not operational.** `testHuman()` checks whether the Human model directory (`~/.memoriahub/models/human/`, or `FACE_HUMAN_MODEL_PATH` if overridden) exists; if not, it reports "Human model files not present" — same lazy-download category as CLIP above, same remediation (run `node start`/`node doctor` once against the API, or manually place the four files listed in §4).
-- **`tesseract` not operational — the case this guide exists for.** `testTesseract()` (`apps/cli/src/node/self-test.ts`) checks whether the configured language(s)' trained-data file(s) — `<lang>.traineddata` or `<lang>.traineddata.gz` — exist under `~/.memoriahub/models/tesseract/` (English, `eng`, by default). Unlike CLIP/Human, tesseract's language data is **not** part of the sha256-pinned model manifest (§4) — it is downloaded/cached by `tesseract.js` itself the first time OCR actually runs on real data, not proactively by `ensureModels()`. "Language data not present" therefore means: this node has the `tesseract.js` package installed and resolvable, but has never yet successfully completed a real OCR pass to populate `~/.memoriahub/models/tesseract/`. Fix: ensure the node has outbound network access and write permission to `~/.memoriahub/models/tesseract/`, then let a real `social_media_detection` job run through Tier 2 once (or wait for the OCR engine's own first-use download) — after that, the language data is cached on disk and `node doctor` will report `tesseract` as operational on every subsequent run. Until then, `social_media_detection` still works in Tier-1-only (metadata/filename) mode; it is degraded, not broken.
+- **`onnxruntime` (CLIP) not operational.** `testClip()` first checks whether the model file `clip-vit-b32-vision-quantized.onnx` exists locally; if it doesn't, the result is reported `available: false` with detail "CLIP model not downloaded yet" — this is expected on a node that has never run `node start`/`node doctor` with a working API connection, since models are fetched lazily (§5). Remediation: run `node doctor` or `node start` once against a reachable API server so `ensureModels()` fetches it, or place the file manually per §5's air-gapped path. If the model file IS present and the self-test still fails, that's a genuine broken install (corrupt download, wrong platform build of `onnxruntime-node`) rather than a missing-model case — re-download the model or reinstall the CLI.
+- **`human` (face detector) not operational.** `testHuman()` checks whether the Human model directory (`~/.memoriahub/models/human/`, or `FACE_HUMAN_MODEL_PATH` if overridden) exists; if not, it reports "Human model files not present" — same lazy-download category as CLIP above, same remediation (run `node start`/`node doctor` once against the API, or manually place the four files listed in §5).
+- **`tesseract` not operational — the case this guide exists for.** `testTesseract()` (`apps/cli/src/node/self-test.ts`) checks whether the configured language(s)' trained-data file(s) — `<lang>.traineddata` or `<lang>.traineddata.gz` — exist under `~/.memoriahub/models/tesseract/` (English, `eng`, by default). Unlike CLIP/Human, tesseract's language data is **not** part of the sha256-pinned model manifest (§5) — it is downloaded/cached by `tesseract.js` itself the first time OCR actually runs on real data, not proactively by `ensureModels()`. "Language data not present" therefore means: this node has the `tesseract.js` package installed and resolvable, but has never yet successfully completed a real OCR pass to populate `~/.memoriahub/models/tesseract/`. Fix: ensure the node has outbound network access and write permission to `~/.memoriahub/models/tesseract/`, then let a real `social_media_detection` job run through Tier 2 once (or wait for the OCR engine's own first-use download) — after that, the language data is cached on disk and `node doctor` will report `tesseract` as operational on every subsequent run. Until then, `social_media_detection` still works in Tier-1-only (metadata/filename) mode; it is degraded, not broken.
 - **ffmpeg/ffprobe not installed at all.** These are left as the existing binary-execution presence probe rather than an operational self-test (see the `self-test.ts` module docstring: generating a synthetic media asset to decode would add real complexity for a check that already executes the real binary). If `node doctor` reports either as unavailable, see §2's per-OS install commands.
 
 ---
 
-## 4. Model Manifest & Downloads
+## 4. Matching the Server's Face-Detection Provider (CompreFace)
+
+By default, a worker node performs face detection with the keyless Human provider (`@vladmandic/human`, 1024-dimensional embeddings), regardless of which face-detection provider the server itself is actively configured to use (`PUT /api/face/features/detection` — `human`, `compreface`, or `rekognition`). If the server's active provider is `compreface` (128-d ArcFace MobileFaceNet embeddings) rather than `human`, a node still defaulting to Human will keep working, but its face rows land in a different embedding space than the rest of the circle's faces — person-matching cosine similarity assumes one consistent embedding space per circle, so cross-provider faces can silently fail to match, or worse, produce spurious matches. The API's `FaceDetectionService.warnOnProviderMismatch` logs a warning when it detects this (never blocking) — see the [Distributed Nodes spec](specs/distributed-nodes.md) for the full embedding-space rationale. This section does not re-derive that explanation; it covers the practical fix.
+
+If your server runs with `compreface` as the active face provider, configure your worker nodes to match it exactly by opting into CompreFace as the node's own local face-detection provider.
+
+### 4.1 Prerequisite: run your own local CompreFace sidecar
+
+A node opting into CompreFace runs its OWN local `compreface-core` container — the same image the server itself runs (see `infra/compose/base.compose.yml`'s `compreface-core` service block). The node's compute calls this container directly at `http://localhost:<port>`, NOT proxied through the server: the server's own sidecar has no port exposed externally by design, and routing a node's face-detection calls through the server would defeat the whole point of a distributed worker.
+
+Start it once per node machine:
+
+```bash
+docker run -d --name compreface-core -p 3000:3000 \
+  -e UWSGI_PROCESSES=1 -e UWSGI_THREADS=1 \
+  exadel/compreface-core:1.2.0-mobilenet
+```
+
+Confirm it's reachable:
+
+```bash
+curl http://localhost:3000/status
+```
+
+A healthy response reports `"status": "OK"`.
+
+### 4.2 CLI usage
+
+Two new flags on `node register` and `node start`:
+
+| Flag | Values | Default | Description |
+|------|--------|---------|-------------|
+| `--face-provider <human\|compreface>` | `human`, `compreface` | `human` | Which face-detection provider this node uses for `face_detection`/`video_face_detection` jobs |
+| `--compreface-url <url>` | any URL | `http://localhost:3000` | Base URL of the node's local `compreface-core` sidecar; only consulted when `--face-provider compreface` |
+
+```bash
+memoriahub node register --face-provider compreface --compreface-url http://localhost:3000
+memoriahub node start --face-provider compreface
+```
+
+Both settings are stored in local node config only (`faceProvider`, `comprefaceUrl`) — never sent to the server, which learns only the resulting `eligibleTypes` the node ends up advertising. Omitting both flags is a no-op change: the default (`human`, zero config) preserves today's behavior exactly.
+
+The equivalent TUI path is Tools ▸ Worker Node ▸ Register node / Node config — both screens gain a face-provider toggle alongside the existing concurrency and job-type fields.
+
+### 4.3 Hard-fail behavior — no silent fallback to Human
+
+If a node is configured `faceProvider: 'compreface'` but its local sidecar is unreachable, `node doctor` reports the `compreface` capability unavailable, and `face_detection`/`video_face_detection` are **NOT READY** on that node — it simply stops advertising those job types as eligible, rather than silently falling back to Human. This is deliberate: a silent fallback would reintroduce the exact embedding-space mismatch this feature exists to prevent (see the overview above). See §8 (Troubleshooting) below for the exact symptom and fix.
+
+### 4.4 `node doctor` coverage
+
+`node doctor` (CLI and TUI) gains one new capability row, `compreface`, reported using the exact same installed-vs-operational model described in §7 for every other capability: **installed** means the configured `comprefaceUrl` responds at all to a `GET /status` call; **operational** means that response actually reports `status: 'OK'`. Like every other capability, a clean, fully-healthy node collapses this row into the one-line summary count; only a real problem expands it with detail.
+
+### 4.5 How this differs from the CLIP/Human model-file pattern
+
+Unlike the CLIP ONNX model or the Human face-detector files documented in §5 below, CompreFace isn't a downloadable model file `ensureModels()` fetches into `~/.memoriahub/models/`. It's a separate, long-running local service — a Docker container — that the operator starts and keeps running themselves. There is nothing for `node start`/`node doctor` to download or sha256-verify here; the capability check is a live HTTP reachability probe against whatever `comprefaceUrl` is configured, not a file-presence check.
+
+---
+
+## 5. Model Manifest & Downloads
 
 `GET /api/nodes/models/manifest` (`jobs:read` permission) returns a bare array of model entries the node should have locally to serve its `eligibleTypes` — each with a real, computed `sha256` and `bytes` value (`apps/api/src/nodes/nodes.service.ts`'s `getModelManifest()`). As of this writing the manifest lists five files: the CLIP ONNX vision model (`clip-vit-b32-vision-quantized.onnx`) and four Human face-detector files (`blazeface-back.json`, `blazeface-back.bin`, `faceres.json`, `faceres.bin`).
 
@@ -82,7 +141,7 @@ These install automatically as part of a normal `memoriahub` install (curl insta
 
 ---
 
-## 5. Registering and Running
+## 6. Registering and Running
 
 Dependency setup (this document) is only half the picture — once `node doctor` reports the capabilities you need as operational, register and start the node:
 
@@ -97,7 +156,7 @@ Equivalent TUI menu items: Tools ▸ Worker Node ▸ Register node / Start worke
 
 ---
 
-## 6. Reading `node doctor` Output
+## 7. Reading `node doctor` Output
 
 The single most important concept in this whole guide: **installed** and **operational** are different claims, and `node doctor` reports both.
 
@@ -110,10 +169,11 @@ Both the CLI command (`memoriahub node doctor`) and the TUI screen (Tools ▸ Wo
 
 ---
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
+| `compreface` capability shows unavailable / `face_detection` not ready when faceProvider is set to compreface | local `compreface-core` container isn't running or isn't reachable at the configured URL | start/check the container (`docker ps`, `curl http://localhost:3000/status`), or fix `comprefaceUrl` if it's using a non-default port |
 | `tesseract: installed / not yet operational — language data not present` | `tesseract.js`'s trained-data file(s) for the configured language(s) haven't been downloaded/cached yet at `~/.memoriahub/models/tesseract/` — this only happens on real first-use, not proactively | Ensure network access and write permission to `~/.memoriahub/models/tesseract/`, then let a real OCR pass run once (a `social_media_detection` job reaching Tier 2). Until then, `social_media_detection` runs Tier-1-only (degraded, not broken). See §3. |
 | A capability shows `no` (not installed) at all | The corresponding `optionalDependencies` entry failed to build/download for this platform — most commonly a missing native compile toolchain | Install the toolchain: `sudo apt install build-essential python3` (Debian/Ubuntu) or `xcode-select --install` (macOS) — the same guidance `apps/cli/README.md` documents for `better-sqlite3` — then reinstall/rebuild (`npm_config_build_from_source=true bash install.sh` if a prebuilt binary genuinely isn't available for this platform/Node version). |
 | `API error 404: Cannot GET /api/nodes/models/manifest` (or any `/api/nodes/*` 404) | Most likely explanation: the connected API server predates the Distributed Nodes feature, or a reverse-proxy path rewrite is stripping/misrouting the `/api` prefix. This is not typically a CLI bug. | Confirm the API server has been updated/redeployed to a version that includes the `/api/nodes/*` routes, and double-check the `serverUrl` in `~/.memoriahub/config.json` points at the correct `/api`-prefixed base. |

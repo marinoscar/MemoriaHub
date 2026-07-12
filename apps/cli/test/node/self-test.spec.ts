@@ -13,6 +13,9 @@
  *     tesseract.js) actually being installed in CI — only the "is a model
  *     file present on disk" branch and the "does the compute call
  *     succeed/fail" branch are under test here.
+ *   - `testCompreface` mocks `@memoriahub/enrichment-compute/face-compreface`'s
+ *     `testComprefaceStatus` the same way — no model file gate (CompreFace is
+ *     a network sidecar, not a local model), just the ok/error branches.
  *   - `MODELS_DIR` is pointed at a per-test temp directory so no real
  *     ~/.memoriahub/models is touched and model-file presence is fully
  *     controlled by each test.
@@ -45,9 +48,19 @@ jest.unstable_mockModule('@memoriahub/enrichment-compute/ocr', () => ({
   createOcrEngine: mockCreateOcrEngine,
 }));
 
-const { testSharp, testClip, testHuman, testTesseract, runOperationalSelfTests } = await import(
-  '../../src/node/self-test.js'
-);
+const mockTestComprefaceStatus = jest.fn();
+jest.unstable_mockModule('@memoriahub/enrichment-compute/face-compreface', () => ({
+  testComprefaceStatus: mockTestComprefaceStatus,
+}));
+
+const {
+  testSharp,
+  testClip,
+  testHuman,
+  testTesseract,
+  testCompreface,
+  runOperationalSelfTests,
+} = await import('../../src/node/self-test.js');
 type CapabilityStatus = { available: boolean; detail?: string };
 
 // ---------------------------------------------------------------------------
@@ -66,6 +79,7 @@ beforeEach(() => {
   mockEmbedImageWithSession.mockReset();
   mockCreateFaceDetector.mockReset();
   mockCreateOcrEngine.mockReset();
+  mockTestComprefaceStatus.mockReset();
 });
 
 afterEach(() => {
@@ -233,6 +247,39 @@ describe('testTesseract', () => {
 });
 
 // ---------------------------------------------------------------------------
+// testCompreface
+// ---------------------------------------------------------------------------
+
+describe('testCompreface', () => {
+  it('is operational when the sidecar reports ok:true', async () => {
+    mockTestComprefaceStatus.mockResolvedValue({ ok: true });
+
+    const result = await testCompreface('http://localhost:3000');
+    expect(result.available).toBe(true);
+    expect(result.detail).toMatch(/CompreFace core ok/);
+    expect(mockTestComprefaceStatus).toHaveBeenCalledWith('http://localhost:3000');
+  });
+
+  it('downgrades to unavailable when the sidecar reports ok:false', async () => {
+    mockTestComprefaceStatus.mockResolvedValue({ ok: false, error: 'HTTP 503' });
+
+    const result = await testCompreface('http://localhost:3000');
+    expect(result.available).toBe(false);
+    expect(result.detail).toMatch(/compreface self-test failed/);
+    expect(result.detail).toMatch(/HTTP 503/);
+  });
+
+  it('downgrades to unavailable (never throws) when the client call rejects', async () => {
+    mockTestComprefaceStatus.mockRejectedValue(new Error('ECONNREFUSED'));
+
+    const result = await testCompreface('http://localhost:3000');
+    expect(result.available).toBe(false);
+    expect(result.detail).toMatch(/compreface self-test failed/);
+    expect(result.detail).toMatch(/ECONNREFUSED/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // runOperationalSelfTests — orchestration
 // ---------------------------------------------------------------------------
 
@@ -245,6 +292,7 @@ describe('runOperationalSelfTests', () => {
       tesseract: { available: false, detail: 'tesseract.js not installed' },
       ffmpeg: { available: true, detail: 'ffmpeg on PATH' },
       ffprobe: { available: false, detail: 'ffprobe not found on PATH' },
+      compreface: { available: false, detail: 'compreface-core not reachable at http://localhost:3000' },
     };
 
     const result = await runOperationalSelfTests(caps);
@@ -260,9 +308,36 @@ describe('runOperationalSelfTests', () => {
     expect(result['tesseract']).toEqual(caps['tesseract']);
     expect(result['ffmpeg']).toEqual(caps['ffmpeg']);
     expect(result['ffprobe']).toEqual(caps['ffprobe']);
+    expect(result['compreface']).toEqual(caps['compreface']);
     expect(mockCreateClipSession).not.toHaveBeenCalled();
     expect(mockCreateFaceDetector).not.toHaveBeenCalled();
     expect(mockCreateOcrEngine).not.toHaveBeenCalled();
+    expect(mockTestComprefaceStatus).not.toHaveBeenCalled();
+  });
+
+  it('exercises compreface when present, using the default URL when opts are omitted', async () => {
+    mockTestComprefaceStatus.mockResolvedValue({ ok: true });
+
+    const caps: Record<string, CapabilityStatus> = {
+      compreface: { available: true, detail: 'compreface-core reachable at http://localhost:3000' },
+    };
+
+    const result = await runOperationalSelfTests(caps);
+
+    expect(result['compreface']?.available).toBe(true);
+    expect(mockTestComprefaceStatus).toHaveBeenCalledWith('http://localhost:3000');
+  });
+
+  it('threads opts.comprefaceUrl through to the compreface self-test', async () => {
+    mockTestComprefaceStatus.mockResolvedValue({ ok: true });
+
+    const caps: Record<string, CapabilityStatus> = {
+      compreface: { available: true, detail: 'reachable' },
+    };
+
+    await runOperationalSelfTests(caps, { comprefaceUrl: 'http://localhost:9999' });
+
+    expect(mockTestComprefaceStatus).toHaveBeenCalledWith('http://localhost:9999');
   });
 
   it('exercises every present capability and downgrades ones that fail their self-test', async () => {

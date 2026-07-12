@@ -260,8 +260,8 @@ The CLI validates any token (device-issued or manually supplied) by calling `GET
 | `reports show <id>` | `--json` | Run one report (`overview`, `runs`, `storage`, `duplicates`) and print a table (or JSON with `--json`) | Reports ▸ |
 | `jobs` (alias `queue`) | `--interval <sec>` / `--once` / `--json` / `--window <days>` | Live job queue dashboard (server load, ETA); requires an Admin PAT with `jobs:read` | Tools ▸ Job queue monitor |
 | `backup` | `--circle <id>` / `--all` / `--dest <path>` | Pull media blobs from the server to a local directory; requires an Admin PAT | Tools ▸ Backup |
-| `node register` | `--name <name>` / `--concurrency <n>` / `--types <csv>` | Register this machine as a worker node (one-time, PAT-based) | — |
-| `node start` | `--concurrency <n>` / `--types <csv>` / `--poll <ms>` / `--daemon` | Run the claim → compute → submit loop; `--daemon` detaches into the background | Tools ▸ Worker Node ▸ Node dashboard (`[s]` start) |
+| `node register` | `--name <name>` / `--concurrency <n>` / `--types <csv>` / `--face-provider <human\|compreface>` / `--compreface-url <url>` | Register this machine as a worker node (one-time, PAT-based) | — |
+| `node start` | `--concurrency <n>` / `--types <csv>` / `--poll <ms>` / `--daemon` / `--face-provider <human\|compreface>` / `--compreface-url <url>` | Run the claim → compute → submit loop; `--daemon` detaches into the background | Tools ▸ Worker Node ▸ Node dashboard (`[s]` start) |
 | `node stop` | (none) | Stop a running node: IPC (graceful drain + deregister) → `SIGTERM` via pidfile → server-side deregister | Tools ▸ Worker Node ▸ Node dashboard (`[d]` drain / `[x]` stop daemon) |
 | `node status` | (none) | Live snapshot via IPC when a daemon is running, else a local config + capability summary | Tools ▸ Worker Node ▸ Node dashboard |
 | `node list` | (none) | List worker nodes registered under the caller's PAT | — |
@@ -870,9 +870,12 @@ A shared compute package (`packages/enrichment-compute`) is imported identically
 memoriahub node register
 memoriahub node register --name office-mbp --concurrency 4
 memoriahub node register --types face_detection,duplicate_detection,metadata_extraction
+memoriahub node register --face-provider compreface --compreface-url http://localhost:3000
 ```
 
 Registration is one-time per machine and authenticates with the same Personal Access Token used everywhere else in the CLI — there is no separate node credential to create or manage. It records the node's hostname, platform, CLI version, and detected/selected eligible job types with the server, and saves the returned node ID locally.
+
+By default, a node's `face_detection`/`video_face_detection` compute uses the keyless Human provider — regardless of which face provider the server itself is actively configured to use. `--face-provider compreface` (paired with `--compreface-url`, default `http://localhost:3000`) opts a node into running its own local `compreface-core` sidecar instead, so its embeddings match a server configured for the `compreface` provider. Both flags are stored in local node config only, never sent to the server. See [Worker Node Setup & Troubleshooting §4](../../docs/worker-node-setup.md#4-matching-the-servers-face-detection-provider-compreface) for the full setup walkthrough (running the sidecar container, hard-fail behavior, troubleshooting).
 
 ### Start: `memoriahub node start`
 
@@ -885,6 +888,9 @@ memoriahub node start --concurrency 4
 
 # Background it: detaches, returns immediately
 memoriahub node start --daemon
+
+# Switch this node to the CompreFace face provider (see Register above)
+memoriahub node start --face-provider compreface --compreface-url http://localhost:3000
 ```
 
 `node start` runs the claim → compute → submit loop. Every run — foreground or `--daemon` — hosts a pidfile (`~/.memoriahub/node.pid`) and a Unix-domain-socket IPC channel (`~/.memoriahub/node.sock`) so a second CLI instance (`node stop`, `node status`, `node set-concurrency`, or the TUI dashboard in attach mode) can talk to it live. `--daemon` re-spawns the process detached and returns control of the terminal immediately; without it, the loop runs in the foreground, useful the first time you bring a node online so you can watch it work directly. A stale pidfile left by a crashed process is cleaned up automatically on the next start; a genuinely live daemon refuses a second concurrent instance.

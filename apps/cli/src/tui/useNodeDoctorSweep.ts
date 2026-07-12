@@ -201,11 +201,15 @@ export async function runNodeDoctorSweep(
   if (!access.authOk) hasError = true;
   leaveStep('apiAccess', { apiAccess: access });
 
-  // 2. Capabilities (installed) — presence probe only, no side effects.
+  // 2. Capabilities (installed) — presence probe only, no side effects. When
+  //    the node is configured to use a CompreFace sidecar (faceProvider ===
+  //    'compreface'), thread its configured base URL through so the
+  //    'compreface' capability probes the operator's actual sidecar rather
+  //    than the hardcoded default.
   enterStep('capabilities');
   let caps: Record<string, CapabilityStatus>;
   try {
-    caps = await detectCapabilities();
+    caps = await detectCapabilities({ comprefaceUrl: cfg.node?.comprefaceUrl });
   } catch (err) {
     caps = { _error: { available: false, detail: `capability detection failed: ${errMsg(err)}` } };
   }
@@ -216,7 +220,7 @@ export async function runNodeDoctorSweep(
   enterStep('selfTest');
   let operationalCaps: Record<string, CapabilityStatus>;
   try {
-    operationalCaps = await runOperationalSelfTests(caps);
+    operationalCaps = await runOperationalSelfTests(caps, { comprefaceUrl: cfg.node?.comprefaceUrl });
   } catch (err) {
     // runOperationalSelfTests already isolates every individual self-test;
     // this catch only guards against something unexpected in its own control
@@ -236,13 +240,14 @@ export async function runNodeDoctorSweep(
   //    presence, so a node whose sharp binary resolves but crashes on first
   //    use (or whose models aren't downloaded yet) is correctly not-ready.
   enterStep('jobReadiness');
+  const faceProvider = cfg.node?.faceProvider ?? 'human';
   const configuredTypes = (cfg.node?.eligibleTypes ?? []).filter(isNodeJobType);
   const eligibleTypes: NodeJobType[] =
     configuredTypes.length > 0
       ? configuredTypes
-      : NODE_JOB_TYPES.filter((t) => missingRequirements(t, operationalCaps).length === 0);
+      : NODE_JOB_TYPES.filter((t) => missingRequirements(t, operationalCaps, faceProvider).length === 0);
   const jobReadiness: JobReadinessRow[] = eligibleTypes.map((t) => {
-    const missing = missingRequirements(t, operationalCaps);
+    const missing = missingRequirements(t, operationalCaps, faceProvider);
     if (missing.length > 0) hasError = true;
     return { type: t, ready: missing.length === 0, missing };
   });

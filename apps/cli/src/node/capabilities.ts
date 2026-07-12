@@ -99,6 +99,33 @@ function detectBinary(bin: string): Promise<{ available: boolean; version?: stri
   });
 }
 
+/** Default base URL of a locally-run compreface-core sidecar a node calls into. */
+export const DEFAULT_COMPREFACE_URL = 'http://localhost:3000';
+
+/** Bounded HTTP GET {baseUrl}/status probe — presence-only, never throws. */
+async function probeCompreface(baseUrl: string): Promise<CapabilityStatus> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3000);
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/status`, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      return {
+        available: false,
+        detail: `compreface-core not reachable at ${baseUrl}: HTTP ${res.status}`,
+      };
+    }
+    return { available: true, detail: `compreface-core reachable at ${baseUrl}` };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { available: false, detail: `compreface-core not reachable at ${baseUrl}: ${message}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Node-eligible job types
 // ---------------------------------------------------------------------------
@@ -151,10 +178,17 @@ export interface CapabilityStatus {
 
 /**
  * Runtime-probe every capability: each native library (presence only, no
- * side-effects) plus the ffmpeg/ffprobe binaries. Never throws — an
- * unavailable capability is reported with `available: false`.
+ * side-effects) plus the ffmpeg/ffprobe binaries plus a bounded reachability
+ * probe of a CompreFace core sidecar. Never throws — an unavailable
+ * capability is reported with `available: false`.
+ *
+ * `opts.comprefaceUrl` overrides the probed URL; a node NOT using CompreFace
+ * still runs this probe by default every time capabilities are detected, so
+ * it is bounded (~3s) and never hangs the sweep.
  */
-export async function detectCapabilities(): Promise<Record<string, CapabilityStatus>> {
+export async function detectCapabilities(opts?: {
+  comprefaceUrl?: string;
+}): Promise<Record<string, CapabilityStatus>> {
   const result: Record<string, CapabilityStatus> = {};
 
   for (const [key, moduleSpecifier] of Object.entries(NATIVE_MODULES)) {
@@ -164,9 +198,10 @@ export async function detectCapabilities(): Promise<Record<string, CapabilitySta
       : { available: false, detail: `${moduleSpecifier} not installed` };
   }
 
-  const [ffmpeg, ffprobe] = await Promise.all([
+  const [ffmpeg, ffprobe, compreface] = await Promise.all([
     detectFfmpeg().catch(() => ({ available: false as const })),
     detectBinary('ffprobe'),
+    probeCompreface(opts?.comprefaceUrl ?? DEFAULT_COMPREFACE_URL),
   ]);
 
   result['ffmpeg'] = ffmpeg.available
@@ -175,19 +210,42 @@ export async function detectCapabilities(): Promise<Record<string, CapabilitySta
   result['ffprobe'] = ffprobe.available
     ? { available: true, detail: 'ffprobe on PATH' }
     : { available: false, detail: 'ffprobe not found on PATH' };
+  result['compreface'] = compreface;
 
   return result;
 }
 
 /**
+ * Derive the effective capability requirements for a job type given the
+ * node's configured face-detection provider. Identical to
+ * `JOB_TYPE_REQUIREMENTS[jobType]` for every job type except
+ * `face_detection`/`video_face_detection`, where the literal `'human'`
+ * requirement is substituted for the configured provider. Pure derivation —
+ * `JOB_TYPE_REQUIREMENTS` itself is never mutated and remains the source of
+ * truth for the default (Human) case.
+ */
+export function effectiveRequirements(
+  jobType: NodeJobType,
+  faceProvider: 'human' | 'compreface' = 'human',
+): string[] {
+  const required = JOB_TYPE_REQUIREMENTS[jobType] ?? [];
+  if (faceProvider === 'human') return required;
+  if (jobType !== 'face_detection' && jobType !== 'video_face_detection') return required;
+  return required.map((cap) => (cap === 'human' ? faceProvider : cap));
+}
+
+/**
  * Given a capability snapshot, return the required capability keys that are
- * missing for a job type. Empty array = fully supported.
+ * missing for a job type. Empty array = fully supported. `faceProvider`
+ * defaults to `'human'` so every existing 2-argument call site keeps
+ * compiling and behaves identically to today.
  */
 export function missingRequirements(
   jobType: NodeJobType,
   caps: Record<string, CapabilityStatus>,
+  faceProvider: 'human' | 'compreface' = 'human',
 ): string[] {
-  const required = JOB_TYPE_REQUIREMENTS[jobType] ?? [];
+  const required = effectiveRequirements(jobType, faceProvider);
   return required.filter((cap) => !caps[cap]?.available);
 }
 
