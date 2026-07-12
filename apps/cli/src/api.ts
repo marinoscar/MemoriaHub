@@ -218,8 +218,12 @@ export interface JobUploadUrlResult {
  */
 export interface AutoTaggingJobCredentials {
   type: 'auto_tagging';
-  /** Configured tagging provider key, e.g. 'anthropic'. */
-  provider: string;
+  /**
+   * Configured tagging provider key. Must be kept in sync with the server's
+   * registered provider keys — see AiProviderRegistry
+   * (apps/api/src/ai/providers/ai-provider.registry.ts).
+   */
+  provider: 'anthropic' | 'openai';
   model: string;
   apiKey: string;
   baseUrl?: string;
