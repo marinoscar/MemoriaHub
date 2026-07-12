@@ -260,6 +260,7 @@ The CLI validates any token (device-issued or manually supplied) by calling `GET
 | `reports show <id>` | `--json` | Run one report (`overview`, `runs`, `storage`, `duplicates`) and print a table (or JSON with `--json`) | Reports ▸ |
 | `jobs` (alias `queue`) | `--interval <sec>` / `--once` / `--json` / `--window <days>` | Live job queue dashboard (server load, ETA); requires an Admin PAT with `jobs:read` | Tools ▸ Job queue monitor |
 | `backup` | `--circle <id>` / `--all` / `--dest <path>` | Pull media blobs from the server to a local directory; requires an Admin PAT | Tools ▸ Backup |
+| `node install-deps` | `--dry-run` / `--skip-compreface` / `--compreface-port <port>` | Linux-only one-command installer for everything a machine needs to become a worker node (ffmpeg/ffprobe, npm native compute libs, tesseract OCR language data, model files, Docker + compreface-core) | — |
 | `node register` | `--name <name>` / `--concurrency <n>` / `--types <csv>` / `--face-provider <human\|compreface>` / `--compreface-url <url>` | Register this machine as a worker node (one-time, PAT-based) | — |
 | `node start` | `--concurrency <n>` / `--types <csv>` / `--poll <ms>` / `--daemon` / `--face-provider <human\|compreface>` / `--compreface-url <url>` | Run the claim → compute → submit loop; `--daemon` detaches into the background | Tools ▸ Worker Node ▸ Node dashboard (`[s]` start) |
 | `node stop` | (none) | Stop a running node: IPC (graceful drain + deregister) → `SIGTERM` via pidfile → server-side deregister | Tools ▸ Worker Node ▸ Node dashboard (`[d]` drain / `[x]` stop daemon) |
@@ -864,6 +865,24 @@ A shared compute package (`packages/enrichment-compute`) is imported identically
 
 `video_face_detection` and `thumbnail_repair` are listed for interface parity but are not yet fully distributable in practice — see the [Distributed Nodes spec](../../docs/specs/distributed-nodes.md#8-node-eligible-job-types) for the full status table and known gaps.
 
+### Install dependencies: `memoriahub node install-deps`
+
+```bash
+# Install everything (ffmpeg, native compute libs, tesseract data, models, Docker + CompreFace)
+memoriahub node install-deps
+
+# Preview what would happen without changing anything
+memoriahub node install-deps --dry-run
+
+# Skip Docker/CompreFace — only set up Human-provider dependencies
+memoriahub node install-deps --skip-compreface
+
+# Bind the local compreface-core container to a non-default port
+memoriahub node install-deps --compreface-port 3100
+```
+
+A Linux-only, one-command installer for everything a machine needs to become a fully-operational worker node before you run `node register`/`node start`. It checks what's already present and skips it, installs/configures whatever is missing (using `sudo` where required, always announcing the exact command before running it), and ends with a fresh `node doctor`-style pass/fail report. It does not install Node.js or the CLI itself (those are prerequisites), and it does not change which face provider your node advertises — even after it sets up CompreFace, you still opt in with `--face-provider compreface` on `node register`/`node start` below. There is no TUI equivalent; it streams live install output, so run it from a real terminal. See [Worker Node Setup & Troubleshooting §2](../../docs/worker-node-setup.md#2-automated-setup-memoriahub-node-install-deps) for the full walkthrough, including the equivalent standalone `install_worker_dependencies.sh` entrypoint at the repo root.
+
 ### Register: `memoriahub node register`
 
 ```bash
@@ -875,7 +894,7 @@ memoriahub node register --face-provider compreface --compreface-url http://loca
 
 Registration is one-time per machine and authenticates with the same Personal Access Token used everywhere else in the CLI — there is no separate node credential to create or manage. It records the node's hostname, platform, CLI version, and detected/selected eligible job types with the server, and saves the returned node ID locally.
 
-By default, a node's `face_detection`/`video_face_detection` compute uses the keyless Human provider — regardless of which face provider the server itself is actively configured to use. `--face-provider compreface` (paired with `--compreface-url`, default `http://localhost:3000`) opts a node into running its own local `compreface-core` sidecar instead, so its embeddings match a server configured for the `compreface` provider. Both flags are stored in local node config only, never sent to the server. See [Worker Node Setup & Troubleshooting §4](../../docs/worker-node-setup.md#4-matching-the-servers-face-detection-provider-compreface) for the full setup walkthrough (running the sidecar container, hard-fail behavior, troubleshooting).
+By default, a node's `face_detection`/`video_face_detection` compute uses the keyless Human provider — regardless of which face provider the server itself is actively configured to use. `--face-provider compreface` (paired with `--compreface-url`, default `http://localhost:3000`) opts a node into running its own local `compreface-core` sidecar instead, so its embeddings match a server configured for the `compreface` provider. Both flags are stored in local node config only, never sent to the server. See [Worker Node Setup & Troubleshooting §5](../../docs/worker-node-setup.md#5-matching-the-servers-face-detection-provider-compreface) for the full setup walkthrough (running the sidecar container, hard-fail behavior, troubleshooting).
 
 ### Start: `memoriahub node start`
 
