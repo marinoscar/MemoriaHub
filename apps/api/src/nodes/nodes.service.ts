@@ -199,7 +199,7 @@ export class NodesService {
     const jobs = await Promise.all(
       claimed.map(async (job) => ({
         job,
-        inputUrl: await this.resolveInputUrl(job, userId, /* userPermissions */ []),
+        inputUrl: await this.resolveInputUrl(job),
         params: await this.resolveJobParams(job),
       })),
     );
@@ -241,19 +241,21 @@ export class NodesService {
   /**
    * Best-effort presigned download URL for a claimed job's source object.
    *
-   * KNOWN LIMITATION: ObjectsService.getDownloadUrl performs a per-user
-   * ownership/circle-membership auth check keyed to the node owner. A node
-   * owner's PAT may not have access to every job's media (e.g. system/global
-   * jobs, or media in circles the owner isn't a member of), in which case the
-   * presign throws. We swallow any error and return null so a single
-   * inaccessible object never fails the whole claim. A trusted node executor
-   * should ideally bypass per-user auth here — deferred.
+   * A worker node is a TRUSTED INTERNAL EXECUTOR, so this uses
+   * ObjectsService.getInternalDownloadUrl — which deliberately skips both the
+   * `status === 'ready'` gate and the per-user ownership/circle-membership auth
+   * check, mirroring how the in-process enrichment worker reads the raw
+   * uploaded bytes directly (`provider.download(storageKey)`). This matters
+   * during bulk imports: a freshly-uploaded object sits at `status='processing'`
+   * for a few seconds while its enrichment jobs are already claimable, so the
+   * old user-facing getDownloadUrl path threw (not-ready) and swallowed to
+   * null, producing an empty input path on the node and permanently failing
+   * otherwise-good jobs. A still-`processing` object now yields a valid URL.
+   *
+   * We keep the try/catch returning null on genuine errors so a single
+   * inaccessible object never fails the whole claim.
    */
-  private async resolveInputUrl(
-    job: EnrichmentJob,
-    userId: string,
-    userPermissions: string[],
-  ): Promise<string | null> {
+  private async resolveInputUrl(job: EnrichmentJob): Promise<string | null> {
     // Global/system jobs have no media item — nothing to presign.
     if (!job.mediaItemId) {
       return null;
@@ -267,15 +269,11 @@ export class NodesService {
       if (!mediaItem?.storageObjectId) {
         return null;
       }
-      const result = await this.objectsService.getDownloadUrl(
+      return await this.objectsService.getInternalDownloadUrl(
         mediaItem.storageObjectId,
-        userId,
-        undefined,
-        userPermissions,
       );
-      return result.url;
     } catch {
-      // Inaccessible / not-ready object — continue without an input URL.
+      // Genuine error resolving the object — continue without an input URL.
       return null;
     }
   }
