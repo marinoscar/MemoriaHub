@@ -1,6 +1,6 @@
 {
   "name": "@memoriahub/cli",
-  "version": "1.1.38",
+  "version": "1.1.39",
   "description": "CLI importer for MemoriaHub — import and sync photo/video folders",
   "type": "module",
   "bin": {
@@ -38,6 +38,7 @@
     "@tensorflow/tfjs": "4.22.0",
     "@tensorflow/tfjs-backend-wasm": "4.22.0",
     "@vladmandic/human": "3.3.6",
+    "exiftool-vendored": "35.21.0",
     "onnxruntime-node": "1.27.0",
     "sharp": "0.35.1",
     "tesseract.js": "7.0.0"

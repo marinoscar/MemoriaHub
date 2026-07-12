@@ -32,6 +32,7 @@ import { DateRangeFilter } from './DateRangeFilter.js';
 import { SyncDashboard } from './SyncDashboard.js';
 import { ScanScreen } from './ScanScreen.js';
 import { OrganizeScreen } from './OrganizeScreen.js';
+import { DateInferenceScreen } from './DateInferenceScreen.js';
 import { ConvertScreen } from './ConvertScreen.js';
 import { ConvertFileInput } from './ConvertFileInput.js';
 import { ReportView } from './ReportView.js';
@@ -65,11 +66,12 @@ type Screen =
   | { kind: 'login' }
   | { kind: 'folders' }
   | { kind: 'circles' }
-  | { kind: 'pickFolders'; purpose?: 'sync' | 'scan' | 'organize' | 'convert' }
+  | { kind: 'pickFolders'; purpose?: 'sync' | 'scan' | 'organize' | 'convert' | 'dateInferDiagnose' | 'dateInferApply' }
   | { kind: 'dateRange'; all?: boolean; folderIds?: number[] }
   | { kind: 'dashboard'; all?: boolean; folderIds?: number[]; retryFailedOnly?: boolean; fromMs?: number; toMs?: number }
   | { kind: 'scan'; all?: boolean; folderIds?: number[] }
   | { kind: 'organize'; all?: boolean; folderIds?: number[] }
+  | { kind: 'dateInference'; mode: 'diagnose' | 'apply'; all?: boolean; folderIds?: number[] }
   | { kind: 'convert'; all?: boolean; folderIds?: number[]; files?: string[] }
   | { kind: 'convertFileInput' }
   | { kind: 'scanReport' }
@@ -244,6 +246,12 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
         break;
       case 'organize':
         push({ kind: 'screen', screen: { kind: 'pickFolders', purpose: 'organize' } });
+        break;
+      case 'date-infer-diagnose':
+        push({ kind: 'screen', screen: { kind: 'pickFolders', purpose: 'dateInferDiagnose' } });
+        break;
+      case 'date-infer-apply':
+        push({ kind: 'screen', screen: { kind: 'pickFolders', purpose: 'dateInferApply' } });
         break;
       case 'convert-file':
         push({ kind: 'screen', screen: { kind: 'convertFileInput' } });
@@ -441,7 +449,9 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
             ? 'Organize Folders by Date'
             : purpose === 'convert'
               ? 'Convert Videos to MP4'
-              : undefined;
+              : purpose === 'dateInferDiagnose' || purpose === 'dateInferApply'
+                ? 'Date Inference — Select Folders'
+                : undefined;
       return (
         <PickFolders
           db={db}
@@ -458,7 +468,11 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
                       ? { kind: 'organize', folderIds }
                       : purpose === 'convert'
                         ? { kind: 'convert', folderIds }
-                        : { kind: 'dateRange', folderIds },
+                        : purpose === 'dateInferDiagnose'
+                          ? { kind: 'dateInference', mode: 'diagnose', folderIds }
+                          : purpose === 'dateInferApply'
+                            ? { kind: 'dateInference', mode: 'apply', folderIds }
+                            : { kind: 'dateRange', folderIds },
               },
             ])
           }
@@ -501,6 +515,18 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
       return (
         <OrganizeScreen
           db={db}
+          all={screen.all}
+          folderIds={screen.folderIds}
+          onHome={resetToRoot}
+          onBack={pop}
+        />
+      );
+
+    case 'dateInference':
+      return (
+        <DateInferenceScreen
+          db={db}
+          mode={screen.mode}
           all={screen.all}
           folderIds={screen.folderIds}
           onHome={resetToRoot}

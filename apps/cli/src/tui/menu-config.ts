@@ -21,6 +21,8 @@ export type MenuActionId =
   | 'scan-select'
   | 'scan-report'
   | 'organize'
+  | 'date-infer-diagnose'
+  | 'date-infer-apply'
   | 'convert-file'
   | 'convert-select'
   | 'convert-all'
@@ -138,6 +140,17 @@ export const MENU_TREE: MenuSubmenu = {
           ],
         },
         { kind: 'action', label: 'Organize folder by date', action: 'organize', loggedOut: true },
+        {
+          // Date Inference is a fully offline local file operation — visible when logged out.
+          kind: 'submenu',
+          id: 'date-infer',
+          label: 'Date Inference',
+          loggedOut: true,
+          children: [
+            { kind: 'action', label: 'Diagnose (report only)', action: 'date-infer-diagnose', loggedOut: true },
+            { kind: 'action', label: 'Infer & write dates', action: 'date-infer-apply', loggedOut: true },
+          ],
+        },
         { kind: 'action', label: 'Job queue monitor', action: 'jobs' },
         { kind: 'action', label: 'Backup', action: 'backup' },
         {
