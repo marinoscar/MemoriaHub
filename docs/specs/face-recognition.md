@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 3.5 |
+| **Version** | 3.6 |
 | **Last Updated** | July 2026 |
 | **Status** | All phases implemented |
 
@@ -17,7 +17,7 @@
 5. [Detection Pipeline Step by Step](#5-detection-pipeline-step-by-step)
 6. [Video Face Detection](#6-video-face-detection)
 7. [Recognition: Embeddings, Matching, and Clustering](#7-recognition-embeddings-matching-and-clustering)
-8. [People, Labeling, and Merge](#8-people-labeling-and-merge) (includes Manual People Association, Hide, Purge, and Individual Face Archive)
+8. [People, Labeling, and Merge](#8-people-labeling-and-merge) (includes Manual People Association, Hide, Purge, Individual Face Archive, and Auto-Archive on Match)
 9. [Image Quality and Resolution](#9-image-quality-and-resolution)
 10. [EXIF Orientation](#10-exif-orientation)
 11. [Global Feature Toggle and Biometric Privacy](#11-global-feature-toggle-and-biometric-privacy)
@@ -616,6 +616,77 @@ Hard-deletes the listed `Face` rows. Unlike person purge, there is no associated
 | `POST` | `/api/people/faces/bulk/purge` | `media:delete` | collaborator | Permanently hard-delete 1–500 unassigned `Face` rows; reclaims `embedding` storage; re-enqueues `auto_tagging` for affected media; body `{ circleId, ids[] }`; returns `{ deleted: number }` |
 | `GET` | `/api/people/unassigned?archived=` | `media:read` | viewer | `archived=true` lists only archived faces; default excludes them |
 
+### Auto-Archive on Match
+
+A face a user has archived once (via the flow above) is usually not a one-off — a stray background stranger, a pet misdetected as human, or a false-positive crop tends to recur across many photos. Auto-archive closes that loop: once `features.faceAutoArchive` is enabled, any **newly-detected unassigned** face (no person match, non-empty embedding) that closely resembles an already-archived face is archived automatically, so it never lands in the Unassigned Faces review queue in the first place.
+
+Disabled by default (`features.faceAutoArchive = false`). Enable at `/admin/settings/face`.
+
+#### Two Thresholds, Two Purposes
+
+Auto-archive introduces a third cosine-similarity threshold alongside the two already used by recognition and clustering:
+
+| Threshold | Constant | Default | Compares | Purpose |
+|-----------|----------|---------|----------|---------|
+| Recognition | `FACE_MATCH_THRESHOLD` | `0.38` | face embedding → `Person` centroid (mean of many faces) | Assign a face to a known, already-labeled person |
+| Clustering | `FACE_CLUSTER_THRESHOLD` | `0.45` | face embedding → face embedding (pairwise) | Group unlabeled faces into a provisional `Person` |
+| Archive-match | `FACE_ARCHIVE_MATCH_THRESHOLD` | `0.45` | face embedding → face embedding (pairwise, vs. the archived pool) | Auto-hide a new detection that resembles something already dismissed |
+
+Archive-match reuses the clustering value (`0.45`), not the looser recognition value (`0.38`), because it has the same geometry as clustering — face-to-face, not face-to-centroid — and because auto-archive is a **silent** action: the face disappears from the review queue with no per-item confirmation. A false positive here is a worse outcome than a false negative (a resemblant face staying in the queue one extra time costs nothing; wrongly hiding a face the user actually wanted to review is a quiet correctness bug). The stricter, cluster-grade threshold biases toward precision over recall. Both constants are defined once in `packages/enrichment-compute/src/face-video/index.ts` (`DEFAULT_FACE_CLUSTER_THRESHOLD`, `DEFAULT_FACE_ARCHIVE_MATCH_THRESHOLD`) and re-exported from `FaceMatchingService` so the shared parity package and the server-side threshold can never drift apart.
+
+The runtime value is `face.autoArchive.matchThreshold` (system setting, 0.30–0.90, default `0.45`), seeded at env-var level by `FACE_ARCHIVE_MATCH_THRESHOLD`.
+
+#### The Archived Reference Pool
+
+"Archived" here means the same `Face.hiddenAt IS NOT NULL` state used by the manual per-face archive above — specifically the subset with `personId IS NULL` (unassigned). This pool is the reference set every incoming or existing face is compared against. It is loaded via `FaceMatchingService.matchFaceToArchived` (one embedding vs. the pool) and `FaceMatchingService.findLiveMatchesAgainstArchived` (the inverse: the whole live unassigned pool vs. the reference set), both in `apps/api/src/face/face-matching.service.ts`. The pool is capped at `FACE_ARCHIVE_MAX_CANDIDATES` (default `5000`) per circle, ordered most-recently-hidden first, so a truncated scan favors the freshest archive decisions. Both methods are read-only and accept a pre-loaded `candidates`/`archivedCandidates` array so callers that already queried the pool once per job don't pay for it twice.
+
+**Memory bound:** holding the full candidate set in memory costs `candidates × embeddingDim × 8 bytes` (float64 JS numbers) — at the default cap of 5000 and the largest supported embedding (Human, 1024-d), that's `5000 × 1024 × 8 ≈ 41 MB` per job, comfortably inside a worker's heap even on a constrained VPS. Lower `FACE_ARCHIVE_MAX_CANDIDATES` on memory-constrained deployments with very large archived pools.
+
+pgvector seam: like `matchFaceToPerson`, both methods currently fall through to in-app cosine regardless of `FACE_VECTOR_BACKEND`; a native `<=>` KNN query is a future optimization.
+
+#### Three Trigger Paths
+
+Auto-archive can hide a face through three independent code paths, all gated on the same `features.faceAutoArchive` system setting (checked fresh on every call, never cached) and the `FACE_AUTO_ARCHIVE` env kill-switch:
+
+1. **Detection-time (new faces).** `FaceDetectionCore.persistAndMatchFaces` (`apps/api/src/face/face-detection-core.service.ts`, shared by both the photo `face_detection` handler and the video handler) reads the gate once per job. For each newly-created face that finds no person match and has a non-empty embedding, it lazily loads the archived reference pool (once per job, only if needed) and calls `matchFaceToArchived`. Matches are collected and batch-archived (`updateMany`) after the person-matching loop completes, rather than one `UPDATE` per face. A settings-read failure or matching error is logged and swallowed — it must never abort face detection itself.
+2. **Archive-time retroactive sweep (existing live faces).** `PeopleService.hideFaces` (`PATCH /api/people/faces/bulk/hide`) performs the user's requested manual archive first, then — best-effort, never failing the request — takes the just-archived face(s) as a small reference set and calls `findLiveMatchesAgainstArchived` to sweep the *rest* of the live unassigned pool for anything that now resembles them. Matches are archived in the same call, and the response's `hidden` count is the combined total (manual + swept); the audit event records the swept count separately under `meta.autoHidden`. This is what makes archiving a face immediately clear out its look-alikes instead of waiting for them to be re-detected later.
+3. **Admin backfill (whole existing backlog).** `POST /api/admin/face/auto-archive/backfill` enqueues one server-only `face_auto_archive_sweep` enrichment job per circle that already has at least one archived unassigned face (`FaceBackfillService.autoArchiveBackfillAllCircles`). Unlike paths 1–2, which only ever look forward from a specific event, the sweep job (`FaceAutoArchiveSweepHandler`, type `face_auto_archive_sweep`) walks the circle's *entire* live unassigned pool in cursor-paginated batches (500 per page — offset pagination is unsafe here because hiding matches removes rows from the `hiddenAt: null` set mid-sweep) against the archived reference set loaded once up front. Use this after enabling `features.faceAutoArchive` on a circle that already has both an archived backlog and an unassigned-faces backlog predating the toggle.
+
+All three paths funnel through the same `FaceMatchingService` methods and write the same provenance (`hiddenAt` + `hiddenReason='auto_archive_match'`), so behavior is identical regardless of which path triggered the hide.
+
+#### `hiddenReason` Provenance
+
+`Face.hiddenReason` (String?, migration `20260712000000_add_face_hidden_reason`) distinguishes *why* a face was archived:
+
+| Value | Meaning |
+|-------|---------|
+| `null` | Manual archive — the user explicitly selected this face and called `PATCH /api/people/faces/bulk/hide` |
+| `'auto_archive_match'` | Any of the three trigger paths above archived this face because it matched the circle's archived reference pool |
+
+The column is additive and nullable — no backfill was needed for faces archived before this feature existed; they simply read as `null` (manual), which is the correct historical interpretation since auto-archive did not exist yet. Nothing currently reads `hiddenReason` back out through the API (it is not yet surfaced in `GET /api/people/unassigned?archived=true`), but it gives operators and future UI work an audit trail to distinguish "the user chose to hide this" from "the system inferred this should be hidden," which matters for building trust in a feature that acts silently.
+
+#### Server-Only and Node Parity
+
+`face_auto_archive_sweep` implements only the in-process `process()` half of the `EnrichmentHandler` interface — it has no `nodeResultSchema` or `persistNodeResult`, and is deliberately absent from the CLI's `NODE_JOB_TYPES` list, so it is never claimable by a distributed worker node (mirrors the `thumbnail_repair` and `location_inference`-sweep precedent — see the [Distributed Nodes spec](distributed-nodes.md)). This only affects the **backfill sweep job**, which always runs on the server.
+
+The per-upload and per-archive trigger paths (1 and 2 above) are unaffected by node deployments: both run inside server-side code (`FaceDetectionCore.persistAndMatchFaces` and `PeopleService.hideFaces`), and for the node-detection path specifically, `persistAndMatchFaces` is invoked during **node-result ingestion** (`persistNodeResult`, on the API server, after a node submits its computed face-detection result) — not on the node itself. So a node never needs the archived-face embedding pool and never sees biometric reference data; auto-archive matching always happens server-side, and the feature works identically whether detection ran in-process or on a distributed node.
+
+#### Settings and Environment Variables
+
+| Key | Type | Default | Description |
+|-----|------|---------|--------------|
+| `features.faceAutoArchive` | System setting (boolean) | `false` | Global on/off for the entire feature (all three trigger paths) |
+| `face.autoArchive.matchThreshold` | System setting (number, 0.30–0.90) | `0.45` | Cosine-similarity threshold for an archive match; shared by all three trigger paths |
+| `FACE_AUTO_ARCHIVE` | Env var | `true` | Kill-switch; `false` disables the feature regardless of the system setting (CI/test override) |
+| `FACE_ARCHIVE_MATCH_THRESHOLD` | Env var | `0.45` | Seeds `face.autoArchive.matchThreshold`'s default until an explicit value is saved via the admin UI |
+| `FACE_ARCHIVE_MAX_CANDIDATES` | Env var | `5000` | Max archived faces loaded per circle as the reference set; bounds memory (`cap × embeddingDim × 8 bytes`) |
+
+#### Endpoints
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `POST` | `/api/admin/face/auto-archive/backfill` | `face_settings:write` | Enqueue one `face_auto_archive_sweep` job per circle with at least one archived unassigned face; 400 if `features.faceAutoArchive` is disabled; returns `{ data: { enqueued, circles } }` |
+
 ---
 
 ## 9. Image Quality and Resolution
@@ -737,6 +808,7 @@ One row per detected face in a media item.
 | `videoTimestamps` | Int[] | All sampled frame timestamps (ms) where this identity cluster was observed; empty array for photos. Feeds video-scrubber markers in the UI. |
 | `frameThumbnailKey` | Text? | Storage key of the saved representative-frame JPEG under `video-faces/{mediaItemId}/{uuid}.jpg`; null for photos. Signed on `GET /api/media/:id/faces` and returned as `faceThumbnailUrl`. |
 | `hiddenAt` | DateTime? | Archive timestamp for **unassigned** (`personId=null`) faces only, mirroring `Person.hiddenAt`. Non-null = archived (excluded from the unassigned-faces list and from clustering); null = live. Set/cleared via `PATCH /api/people/faces/bulk/hide` / `/unhide`. Added in migration `20260704000000_add_face_hidden_at`. See [Individual Face Archive and Purge](#individual-face-archive-and-purge-unassigned-faces). |
+| `hiddenReason` | String? | Provenance of a hide: `null` = manual archive via `PATCH /api/people/faces/bulk/hide`; `'auto_archive_match'` = one of the auto-archive trigger paths hid this face because it matched the circle's archived reference pool. Added in migration `20260712000000_add_face_hidden_reason`. See [Auto-Archive on Match](#auto-archive-on-match). |
 | `createdAt` | DateTime | |
 
 Indices: `circleId`, `mediaItemId`, `personId`, `externalFaceId`, `(circleId, hiddenAt)` (added alongside `people(circleId, hiddenAt)` in migration `20260704000000_add_face_hidden_at`).
@@ -840,6 +912,7 @@ The per-circle `faceRecognitionEnabled` column was dropped from the `circles` ta
 | `GET` | `/api/face/models` | `face_settings:read` | — | List models for a provider |
 | `PUT` | `/api/face/features/detection` | `face_settings:write` | — | Set active detection provider/model |
 | `POST` | `/api/admin/face/backfill` | `face_settings:write` | — | Bulk-enqueue face detection across all circles (photos → `face_detection`; videos → `video_face_detection`); requires global feature enabled; body `{ from?, to?, force? }`; returns `{ enqueued, circles }` |
+| `POST` | `/api/admin/face/auto-archive/backfill` | `face_settings:write` | — | Enqueue one server-only `face_auto_archive_sweep` job per circle with an existing archived-faces backlog; requires `features.faceAutoArchive` enabled; returns `{ data: { enqueued, circles } }`; see [Auto-Archive on Match](#auto-archive-on-match) |
 | `DELETE` | `/api/face/biometrics` | `face_settings:write` | `circle_admin` | Permanently erase all biometric data for a circle |
 
 ### Face Detection (media:read / media:write)
@@ -907,6 +980,9 @@ The `noFaces` filter is also available in `POST /api/search` (as the `noFaces: t
 | `FACE_CLUSTER_MIN_SIZE` | `2` | Minimum faces in a cluster to create a provisional Person. Singletons remain unknown. |
 | `FACE_VECTOR_BACKEND` | `'app'` | `'app'` = Float[] column + in-process cosine. `'pgvector'` = future native index (currently falls through to in-app cosine). |
 | `FACE_HUMAN_MODEL_PATH` | `'/app/models/human'` | Directory containing `blazeface-back.json` and `faceres.json` model files for the Human provider. |
+| `FACE_AUTO_ARCHIVE` | `'true'` | Kill-switch for the auto-archive-on-match feature (see [Auto-Archive on Match](#auto-archive-on-match)). `'false'` disables it regardless of `features.faceAutoArchive`. |
+| `FACE_ARCHIVE_MATCH_THRESHOLD` | `0.45` | Cosine-similarity threshold for auto-archiving a face against the archived (hidden, unassigned) pool. Seeds `face.autoArchive.matchThreshold`'s default. |
+| `FACE_ARCHIVE_MAX_CANDIDATES` | `5000` | Max archived faces loaded per circle as the reference set for archive matching; bounds memory to `cap × embeddingDim × 8 bytes`. |
 | `ENRICHMENT_WORKER_ENABLED` | `'true'` | Set to `'false'` to disable the enrichment worker. Takes precedence over `FACE_WORKER_ENABLED`. |
 | `FACE_WORKER_ENABLED` | `'true'` | Legacy alias. Either this or `ENRICHMENT_WORKER_ENABLED` set to `'false'` disables the worker. |
 | `ENRICHMENT_JOB_POLL_MS` | `'5000'` | Worker poll interval in milliseconds. |
@@ -1011,3 +1087,4 @@ A job stuck in `running` status indicates the worker crashed or the container re
 | 3.3 | June 2026 | AI Assistant | Added §6 Video Face Detection: `video_face_detection` job type, `VideoFrameExtractionService` frame-sampling algorithm, cross-frame dedup, `face.video.*` settings, enqueue routing table, new `Face` columns (`videoTimestampMs`, `videoTimestamps`, `frameThumbnailKey`), `faceThumbnailUrl` in faces API, and known signing limitation on multi-provider setups |
 | 3.4 | June 2026 | AI Assistant | Added Hide/Purge subsection in §8: `Person.hiddenAt` column (migration `20260628000000_person_hidden_at`), bulk hide/unhide/purge endpoints, search-inclusion asymmetry, audit events, and frontend People/Hidden tab integration |
 | 3.5 | July 2026 | AI Assistant | Added Individual Face Archive and Purge subsection in §8: `Face.hiddenAt` column and `(circleId, hiddenAt)` indexes on both `faces` and `people` (migration `20260704000000_add_face_hidden_at`), `PATCH /api/people/faces/bulk/hide`/`unhide` and `POST /api/people/faces/bulk/purge` endpoints scoped to unassigned (`personId=null`) faces, `archived` param on `GET /api/people/unassigned`, clustering-exclusion behavior, and archive-first permanent-delete UX |
+| 3.6 | July 2026 | AI Assistant | Added Auto-Archive on Match subsection in §8: `features.faceAutoArchive` + `face.autoArchive.matchThreshold` settings, `Face.hiddenReason` provenance column (migration `20260712000000_add_face_hidden_reason`), `FACE_ARCHIVE_MATCH_THRESHOLD`/`FACE_ARCHIVE_MAX_CANDIDATES`/`FACE_AUTO_ARCHIVE` env vars, the three trigger paths (detection-time, archive-time retroactive sweep, admin backfill), the server-only `face_auto_archive_sweep` job type and node-parity note, and `POST /api/admin/face/auto-archive/backfill` |
