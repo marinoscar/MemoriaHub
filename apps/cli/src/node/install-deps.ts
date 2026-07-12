@@ -209,9 +209,22 @@ export async function runWithSudoAnnounced(
   opts?: { dryRun?: boolean },
 ): Promise<{ ok: boolean; stdout: string; stderr: string }> {
   const root = isRoot();
+  const announced = root ? `${cmd} ${args.join(' ')}`.trim() : `sudo ${cmd} ${args.join(' ')}`.trim();
+
+  // Dry run short-circuits BEFORE any process is spawned — including the
+  // sudo-presence probe below — so `--dry-run` never touches the system at
+  // all, only ever announcing what it would have done.
+  if (opts?.dryRun) {
+    if (!root) {
+      ui.warn(`Running with sudo (you may be prompted for your password): ${announced}`);
+    } else {
+      ui.dim(`Running as root: ${announced}`);
+    }
+    return { ok: true, stdout: '(dry run — not executed)', stderr: '' };
+  }
+
   let execCmd = cmd;
   let execArgs = args;
-
   if (!root) {
     const sudoAvailable = await commandExists('sudo');
     if (!sudoAvailable) {
@@ -225,15 +238,10 @@ export async function runWithSudoAnnounced(
     execArgs = [cmd, ...args];
   }
 
-  const announced = root ? `${cmd} ${args.join(' ')}`.trim() : `sudo ${cmd} ${args.join(' ')}`.trim();
   if (!root) {
     ui.warn(`Running with sudo (you may be prompted for your password): ${announced}`);
   } else {
     ui.dim(`Running as root: ${announced}`);
-  }
-
-  if (opts?.dryRun) {
-    return { ok: true, stdout: '(dry run — not executed)', stderr: '' };
   }
 
   const res = await runProcess(execCmd, execArgs);
