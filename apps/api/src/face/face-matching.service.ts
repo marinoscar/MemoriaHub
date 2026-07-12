@@ -20,7 +20,11 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DEFAULT_FACE_CLUSTER_THRESHOLD } from '@memoriahub/enrichment-compute/face-video';
+import {
+  DEFAULT_FACE_CLUSTER_THRESHOLD,
+  DEFAULT_FACE_ARCHIVE_MATCH_THRESHOLD,
+  bestMatchAgainstSet,
+} from '@memoriahub/enrichment-compute/face-video';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Recognition threshold (match incoming face → existing Person centroid). */
@@ -38,6 +42,18 @@ export const DEFAULT_FACE_MATCH_THRESHOLD = 0.38;
  * keep working unchanged.
  */
 export { DEFAULT_FACE_CLUSTER_THRESHOLD };
+
+/**
+ * Recognition threshold for matching a face against the archived
+ * (hidden, unassigned) face pool.
+ *
+ * Canonical definition lives in @memoriahub/enrichment-compute/face-video
+ * (imported above and re-exported here) so the shared archive-matching helper
+ * and this server-side threshold can never drift apart; re-exported under its
+ * original name so importers can reference it without reaching into the
+ * shared package directly, mirroring DEFAULT_FACE_CLUSTER_THRESHOLD above.
+ */
+export { DEFAULT_FACE_ARCHIVE_MATCH_THRESHOLD };
 
 /**
  * Minimum cluster size to justify creating a provisional Person.
@@ -58,6 +74,12 @@ export class FaceMatchingService {
   /** Minimum cluster size to create a provisional Person. */
   readonly clusterMinSize: number;
 
+  /** Cosine similarity threshold for matching a face against the archived pool. */
+  readonly archiveMatchThreshold: number;
+
+  /** Max archived faces to load per archive-match query (bounds memory/scan). */
+  readonly archiveMaxCandidates: number;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
@@ -73,6 +95,14 @@ export class FaceMatchingService {
     this.clusterMinSize = parseInt(
       this.config.get<string>('FACE_CLUSTER_MIN_SIZE') ??
         String(DEFAULT_FACE_CLUSTER_MIN_SIZE),
+      10,
+    );
+    this.archiveMatchThreshold = parseFloat(
+      this.config.get<string>('FACE_ARCHIVE_MATCH_THRESHOLD') ??
+        String(DEFAULT_FACE_ARCHIVE_MATCH_THRESHOLD),
+    );
+    this.archiveMaxCandidates = parseInt(
+      this.config.get<string>('FACE_ARCHIVE_MAX_CANDIDATES') ?? '5000',
       10,
     );
   }
@@ -235,6 +265,146 @@ export class FaceMatchingService {
 
     if (!face?.personId) return null;
     return { personId: face.personId };
+  }
+
+  // ---------------------------------------------------------------------------
+  // matchFaceToArchived
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Compare an embedding against the circle's archived (hidden, unassigned)
+   * face pool and return the best match if similarity >= threshold.
+   *
+   * Archived unassigned face: personId IS NULL AND hiddenAt IS NOT NULL.
+   * These are faces a user deliberately hid from the unassigned-faces review
+   * queue; a fresh detection that closely matches one is a signal the user
+   * would likely want it archived too.
+   *
+   * Read-only — this method performs no writes. Candidates may be supplied by
+   * the caller (opts.candidates) to avoid a redundant DB round-trip when a
+   * reference set has already been loaded; otherwise the archived set is
+   * queried here, capped at archiveMaxCandidates and ordered most-recently-
+   * hidden first so the freshest archive decisions dominate a truncated scan.
+   *
+   * pgvector seam: when FACE_VECTOR_BACKEND=pgvector, a single KNN SQL query
+   * using the <=> operator would be more efficient. For now we fall through to
+   * the in-app cosine path (via bestMatchAgainstSet) regardless of the setting.
+   */
+  async matchFaceToArchived(
+    circleId: string,
+    embedding: number[],
+    opts?: {
+      threshold?: number;
+      candidates?: Array<{ id: string; embedding: number[] }>;
+    },
+  ): Promise<{ faceId: string; similarity: number } | null> {
+    if (!embedding || embedding.length === 0) return null;
+
+    const vectorBackend = this.config.get<string>('FACE_VECTOR_BACKEND') ?? 'app';
+    if (vectorBackend === 'pgvector') {
+      // TODO(pgvector): Replace with a single KNN SQL query using <=> operator
+      // when FACE_VECTOR_BACKEND=pgvector. For now, fall through to in-app cosine.
+      this.logger.debug(
+        'FACE_VECTOR_BACKEND=pgvector requested; falling through to in-app cosine',
+      );
+    }
+
+    const candidates =
+      opts?.candidates ??
+      (await this.prisma.face.findMany({
+        where: {
+          circleId,
+          personId: null,
+          hiddenAt: { not: null },
+          // isEmpty is a supported FloatNullableListFilter key in this Prisma
+          // version (7.x), so we filter out empty-embedding rows in the query
+          // rather than post-fetch in JS.
+          embedding: { isEmpty: false },
+        },
+        select: { id: true, embedding: true },
+        orderBy: { hiddenAt: 'desc' },
+        take: this.archiveMaxCandidates,
+      }));
+
+    if (candidates.length === 0) return null;
+
+    const threshold = opts?.threshold ?? this.archiveMatchThreshold;
+    const best = bestMatchAgainstSet(embedding, candidates);
+    if (best && best.similarity >= threshold) {
+      return { faceId: best.id, similarity: best.similarity };
+    }
+
+    return null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // findLiveMatchesAgainstArchived
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Given the circle's archived (hidden, unassigned) face pool as a reference
+   * set, return the ids of LIVE unassigned faces that match any archived
+   * reference at/above threshold.
+   *
+   * This is the inverse direction of matchFaceToArchived: instead of testing a
+   * single incoming embedding against the archive, it scans the live unassigned
+   * pool for faces resembling something the user already chose to archive —
+   * candidates for auto-archiving. Read-only; performs no writes.
+   *
+   * Both sides may be supplied by the caller (opts.archivedCandidates /
+   * opts.liveBatch) to reuse already-loaded sets and control batching; otherwise
+   * each side is queried here. Only id + embedding are selected to keep memory
+   * bounded, and empty-embedding rows are excluded via the same isEmpty filter.
+   */
+  async findLiveMatchesAgainstArchived(
+    circleId: string,
+    opts?: {
+      threshold?: number;
+      archivedCandidates?: Array<{ id: string; embedding: number[] }>;
+      liveBatch?: Array<{ id: string; embedding: number[] }>;
+      maxCandidates?: number;
+    },
+  ): Promise<string[]> {
+    const archivedSet =
+      opts?.archivedCandidates ??
+      (await this.prisma.face.findMany({
+        where: {
+          circleId,
+          personId: null,
+          hiddenAt: { not: null },
+          embedding: { isEmpty: false },
+        },
+        select: { id: true, embedding: true },
+        orderBy: { hiddenAt: 'desc' },
+        take: opts?.maxCandidates ?? this.archiveMaxCandidates,
+      }));
+
+    if (archivedSet.length === 0) return [];
+
+    const liveTargets =
+      opts?.liveBatch ??
+      (await this.prisma.face.findMany({
+        where: {
+          circleId,
+          personId: null,
+          hiddenAt: null,
+          embedding: { isEmpty: false },
+        },
+        select: { id: true, embedding: true },
+      }));
+
+    const threshold = opts?.threshold ?? this.archiveMatchThreshold;
+    const matchedIds: string[] = [];
+
+    for (const live of liveTargets) {
+      if (!live.embedding || live.embedding.length === 0) continue;
+      const best = bestMatchAgainstSet(live.embedding, archivedSet);
+      if (best && best.similarity >= threshold) {
+        matchedIds.push(live.id);
+      }
+    }
+
+    return matchedIds;
   }
 }
 
