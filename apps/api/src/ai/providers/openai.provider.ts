@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { callOpenAiVision } from '@memoriahub/enrichment-compute/ai';
 import type {
   AiProvider,
   AiProviderCredentials,
@@ -16,8 +17,10 @@ import type {
 // GPT-5.x reasoning models consume tokens on hidden reasoning before producing
 // visible output, so we cap reasoning effort and give extra headroom to ensure
 // the JSON/text response always fits.
+// (analyzeImage's own token budget, ANALYZE_IMAGE_MAX_COMPLETION_TOKENS, now
+// lives in packages/enrichment-compute/src/ai/index.ts — analyzeImage
+// delegates to callOpenAiVision there.)
 const TEST_MODEL_MAX_COMPLETION_TOKENS = 1024;
-const ANALYZE_IMAGE_MAX_COMPLETION_TOKENS = 4096;
 //
 // 'low' is the lowest reasoning tier supported by every GPT-5.x model the
 // picker allows (gpt-5.4 supports minimal/low/medium/high; gpt-5.5 supports
@@ -255,46 +258,20 @@ export class OpenAiProvider implements AiProvider {
     creds: AiProviderCredentials,
     req: AnalyzeImageRequest,
   ): Promise<string> {
-    const client = new OpenAI({
-      apiKey: creds.apiKey,
-      ...(creds.baseUrl && { baseURL: creds.baseUrl }),
-    });
-
-    const messages: OpenAI.ChatCompletionMessageParam[] = [];
-
-    if (req.system) {
-      messages.push({ role: 'system', content: req.system });
-    }
-
-    messages.push({
-      role: 'user',
-      content: [
-        {
-          type: 'text',
-          text: req.prompt,
-        },
-        {
-          type: 'image_url',
-          image_url: {
-            url: `data:${req.mimeType};base64,${req.imageBase64}`,
-          },
-        },
-      ],
-    });
-
-    // Tagging is a short structured-classification task. reasoning_effort:'low'
-    // keeps GPT-5.x reasoning models from spending the full token budget on
-    // hidden reasoning, so the JSON output reliably fits in the response — and
-    // it's faster/cheaper. 'low' is accepted by all allowed GPT-5.x models;
-    // override via OPENAI_REASONING_EFFORT env var if needed.
-    const response = await client.chat.completions.create({
-      model: req.model,
-      reasoning_effort: OPENAI_REASONING_EFFORT as any,
-      max_completion_tokens: ANALYZE_IMAGE_MAX_COMPLETION_TOKENS,
-      messages,
-    });
-
-    return response.choices[0]?.message?.content ?? '';
+    // Delegates to the shared parity package so the server and distributed
+    // worker nodes (which call callOpenAiVision directly with a
+    // transiently-fetched API key — see NodesService.getJobCredentials) send
+    // byte-identical requests. See @memoriahub/enrichment-compute/ai.
+    return callOpenAiVision(
+      { apiKey: creds.apiKey, baseUrl: creds.baseUrl },
+      {
+        model: req.model,
+        system: req.system,
+        prompt: req.prompt,
+        imageBase64: req.imageBase64,
+        mimeType: req.mimeType,
+      },
+    );
   }
 
   async embedText(

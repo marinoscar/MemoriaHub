@@ -22,6 +22,15 @@ module.exports = {
   roots: ['<rootDir>/src/', '<rootDir>/test/'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
+    // packages/enrichment-compute exact-pins 'openai' (see its package.json),
+    // which diverges from this app's caret range and forces npm to nest a
+    // second, undeduped copy under packages/enrichment-compute/node_modules.
+    // Without this mapping, jest.mock('openai') in a spec file only mocks
+    // the hoisted copy apps/api resolves — the shared package's delegated
+    // calls (e.g. callOpenAiVision) would resolve their own nested copy and
+    // make a real network call. Force every 'openai' import to the single
+    // copy this app resolves so one mock covers both call sites.
+    '^openai$': require.resolve('openai'),
   },
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],
   globalTeardown: '<rootDir>/test/teardown.ts',
