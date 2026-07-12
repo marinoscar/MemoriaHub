@@ -957,6 +957,8 @@ export class PeopleService {
       'collaborator' as CircleRole,
     );
 
+    // Manual hide: leave hiddenReason unset (null) so manual archives stay
+    // distinguishable from auto-archive-match hides below.
     const { count } = await this.prisma.face.updateMany({
       where: {
         id: { in: ids },
@@ -967,21 +969,76 @@ export class PeopleService {
       data: { hiddenAt: new Date() },
     });
 
+    // Best-effort auto-archive sweep: retroactively hide the currently-visible
+    // unassigned faces that match the just-archived person(s), so the queue is
+    // cleared without waiting for re-detection. Never fail the archive because
+    // of the sweep — the manual hide above has already succeeded.
+    let autoHidden = 0;
+    try {
+      const settings = await this.systemSettings.getSettings();
+      const autoArchiveOn =
+        settings.features?.faceAutoArchive === true &&
+        (process.env.FACE_AUTO_ARCHIVE ?? 'true') !== 'false';
+
+      if (autoArchiveOn) {
+        // Reference set: embeddings of the faces the user just archived.
+        const justArchived = await this.prisma.face.findMany({
+          where: {
+            id: { in: ids },
+            circleId,
+            personId: null,
+            hiddenAt: { not: null },
+            embedding: { isEmpty: false },
+          },
+          select: { id: true, embedding: true },
+        });
+
+        if (justArchived.length > 0) {
+          const threshold = settings.face?.autoArchive?.matchThreshold;
+          const liveMatchIds =
+            await this.matchingService.findLiveMatchesAgainstArchived(circleId, {
+              archivedCandidates: justArchived,
+              threshold,
+            });
+          const sweepIds = liveMatchIds.filter((id) => !ids.includes(id));
+
+          if (sweepIds.length > 0) {
+            const { count: swept } = await this.prisma.face.updateMany({
+              where: {
+                id: { in: sweepIds },
+                circleId,
+                personId: null,
+                hiddenAt: null,
+              },
+              data: { hiddenAt: new Date(), hiddenReason: 'auto_archive_match' },
+            });
+            autoHidden = swept;
+          }
+        }
+      }
+    } catch (err) {
+      this.logger.warn(
+        `hideFaces: auto-archive sweep failed in circle ${circleId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+
     await this.prisma.auditEvent.create({
       data: {
         actorUserId: userId,
         action: 'face:hide',
         targetType: 'face',
         targetId: ids[0],
-        meta: { circleId, ids, count } as any,
+        meta: { circleId, ids, count, autoHidden } as any,
       },
     });
 
     this.logger.log(
-      `hideFaces: ${count} face(s) archived in circle ${circleId} by user ${userId}`,
+      `hideFaces: ${count} face(s) archived (+${autoHidden} auto-archive match) in circle ${circleId} by user ${userId}`,
     );
 
-    return { hidden: count };
+    return { hidden: count + autoHidden };
   }
 
   // ---------------------------------------------------------------------------

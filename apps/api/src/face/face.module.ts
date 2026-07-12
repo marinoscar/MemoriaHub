@@ -19,6 +19,7 @@ import { FaceDetectionCore } from './face-detection-core.service';
 import { VideoFrameExtractionService } from './video-frame-extraction.service';
 import { VideoFaceDetectionService } from './video-face-detection.service';
 import { VideoFaceDetectionHandler } from './video-face-detection.handler';
+import { FaceAutoArchiveSweepHandler } from './face-auto-archive-sweep.handler';
 import { MediaModule } from '../media/media.module';
 
 @Module({
@@ -37,6 +38,7 @@ import { MediaModule } from '../media/media.module';
     VideoFrameExtractionService,
     VideoFaceDetectionService,
     VideoFaceDetectionHandler,
+    FaceAutoArchiveSweepHandler,
   ],
   exports: [FaceSettingsService, FaceProviderRegistry, FaceMatchingService, FaceClusteringService, VideoFrameExtractionService],
 })

@@ -28,7 +28,7 @@ import {
 import { usePermissions } from '../../hooks/usePermissions';
 import { useFaceSettings } from '../../hooks/useFaceSettings';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
-import { runGlobalFaceBackfill } from '../../services/adminBackfill';
+import { runGlobalFaceBackfill, runGlobalFaceAutoArchiveBackfill } from '../../services/adminBackfill';
 
 function FaceSettingsContent() {
   const {
@@ -80,6 +80,11 @@ function FaceSettingsContent() {
   const [videoMaxFrames, setVideoMaxFrames] = useState<number>(60);
   const [videoSettingsSaving, setVideoSettingsSaving] = useState(false);
 
+  // Auto-archive matching faces settings
+  const [autoArchiveThreshold, setAutoArchiveThreshold] = useState<number>(0.45);
+  const [autoArchiveSaving, setAutoArchiveSaving] = useState(false);
+  const [autoArchiveBackfillLoading, setAutoArchiveBackfillLoading] = useState(false);
+
   useEffect(() => {
     void fetchSettings();
   }, [fetchSettings]);
@@ -124,6 +129,7 @@ function FaceSettingsContent() {
     setVideoEnabled(v?.enabled ?? false);
     setVideoSampleInterval(v?.sampleIntervalSeconds ?? 5);
     setVideoMaxFrames(v?.maxFramesPerVideo ?? 60);
+    setAutoArchiveThreshold(sysSettings.face?.autoArchive?.matchThreshold ?? 0.45);
   }, [sysSettings]);
 
   // Load models when detection provider changes
@@ -225,6 +231,24 @@ function FaceSettingsContent() {
       setLocalError(err instanceof Error ? err.message : 'Failed to save video settings');
     } finally {
       setVideoSettingsSaving(false);
+    }
+  };
+
+  const handleSaveAutoArchiveSettings = async () => {
+    setAutoArchiveSaving(true);
+    try {
+      await updateSysSettings({
+        face: {
+          autoArchive: {
+            matchThreshold: autoArchiveThreshold,
+          },
+        },
+      });
+      setSuccessMessage('Auto-archive settings saved');
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to save auto-archive settings');
+    } finally {
+      setAutoArchiveSaving(false);
     }
   };
 
@@ -772,6 +796,98 @@ function FaceSettingsContent() {
             startIcon={videoSettingsSaving ? <CircularProgress size={16} /> : undefined}
           >
             Save
+          </Button>
+        </Paper>
+
+        {/* Auto-Archive Matching Faces settings */}
+        <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>
+            Auto-Archive Matching Faces
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Keep faces you have already archived out of the unassigned-faces review queue. Requires
+            face recognition to be enabled.
+          </Typography>
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={sysSettings?.features?.faceAutoArchive ?? false}
+                onChange={(e) => {
+                  void updateSysSettings({
+                    features: { ...(sysSettings?.features ?? {}), faceAutoArchive: e.target.checked },
+                  });
+                }}
+                disabled={sysSaving || !sysSettings || !(sysSettings?.features?.faceRecognition)}
+              />
+            }
+            label="Auto-archive matching faces"
+            sx={{ mb: 0.5, display: 'block' }}
+          />
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+            When a newly detected face matches one you&apos;ve archived, hide it automatically so it
+            never returns to the unassigned queue.
+          </Typography>
+
+          <TextField
+            label="Match threshold"
+            type="number"
+            size="small"
+            value={autoArchiveThreshold}
+            onChange={(e) => {
+              const v = parseFloat(e.target.value);
+              if (!isNaN(v) && v >= 0.3 && v <= 0.9) setAutoArchiveThreshold(v);
+            }}
+            slotProps={{ htmlInput: { min: 0.3, max: 0.9, step: 0.01 } }}
+            helperText="0.30–0.90. Higher = stricter matching, so fewer faces are auto-archived."
+            sx={{ mb: 2, maxWidth: 320 }}
+            disabled={!(sysSettings?.features?.faceAutoArchive) || autoArchiveSaving}
+          />
+
+          <Box sx={{ mb: 3 }}>
+            <Button
+              variant="contained"
+              onClick={() => void handleSaveAutoArchiveSettings()}
+              disabled={
+                !sysSettings ||
+                sysSaving ||
+                autoArchiveSaving ||
+                !(sysSettings?.features?.faceAutoArchive)
+              }
+              startIcon={autoArchiveSaving ? <CircularProgress size={16} /> : undefined}
+            >
+              Save
+            </Button>
+          </Box>
+
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            Sweep Existing Backlog
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Scan existing unassigned faces across all circles and auto-archive any that match a face
+            you have already archived.
+          </Typography>
+          <Button
+            variant="outlined"
+            disabled={autoArchiveBackfillLoading || !(sysSettings?.features?.faceAutoArchive)}
+            startIcon={autoArchiveBackfillLoading ? <CircularProgress size={16} /> : undefined}
+            onClick={() => {
+              setAutoArchiveBackfillLoading(true);
+              runGlobalFaceAutoArchiveBackfill()
+                .then((result) =>
+                  setSuccessMessage(
+                    `Enqueued ${result.enqueued} sweep job(s) across ${result.circles} circle(s).`,
+                  ),
+                )
+                .catch((err: unknown) =>
+                  setLocalError(
+                    err instanceof Error ? err.message : 'Auto-archive sweep failed',
+                  ),
+                )
+                .finally(() => setAutoArchiveBackfillLoading(false));
+            }}
+          >
+            Sweep existing backlog
           </Button>
         </Paper>
 

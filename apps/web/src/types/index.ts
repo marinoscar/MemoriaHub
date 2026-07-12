@@ -77,6 +77,9 @@ export interface SystemSettings {
       sampleIntervalSeconds?: number;
       maxFramesPerVideo?: number;
     };
+    autoArchive?: {
+      matchThreshold?: number;
+    };
   };
   socialMedia?: {
     ocrEnabled?: boolean;

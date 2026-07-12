@@ -48,6 +48,61 @@ export interface FaceCluster<T = unknown> {
  */
 export const DEFAULT_FACE_CLUSTER_THRESHOLD = 0.45;
 
+/**
+ * Face-to-face pairwise cosine-similarity threshold for auto-archiving a newly
+ * detected unassigned face that matches a previously-archived unassigned face.
+ *
+ * Uses the SAME geometry as clustering (face-to-face embedding cosine, 0.45) —
+ * NOT the looser 0.38 face-to-centroid recognition threshold — and is
+ * deliberately biased toward precision: auto-archive is a silent action, so a
+ * false positive quietly hides a face the user never chose to archive. Keeping
+ * it at the cluster threshold (rather than the recognition threshold) makes a
+ * match require the two faces be as similar as two frames of the same identity
+ * in a burst, minimizing that risk.
+ */
+export const DEFAULT_FACE_ARCHIVE_MATCH_THRESHOLD = 0.45;
+
+/**
+ * Return the element of `set` whose embedding has the highest cosine similarity
+ * to `embedding`, or `null` when there is no comparable candidate.
+ *
+ * Pure and threshold-free: it reports the single best match and its similarity;
+ * the caller decides whether that similarity clears an archive/match threshold.
+ * Uses the same `cosineSimilarity` (dot product of L2-normalized vectors) as
+ * clustering, so scores are directly comparable to
+ * DEFAULT_FACE_ARCHIVE_MATCH_THRESHOLD / DEFAULT_FACE_CLUSTER_THRESHOLD.
+ *
+ * Returns `null` when:
+ *   - `embedding` is empty (nothing to compare), or
+ *   - `set` is empty, or
+ *   - no set entry has a non-empty embedding of the same length as `embedding`
+ *     (mismatched-dimension / empty entries are skipped, never compared).
+ */
+export function bestMatchAgainstSet(
+  embedding: number[],
+  set: Array<{ id: string; embedding: number[] }>,
+): { id: string; similarity: number } | null {
+  if (embedding.length === 0 || set.length === 0) return null;
+
+  let bestId: string | null = null;
+  let bestSim = -Infinity;
+
+  for (const entry of set) {
+    const emb = entry.embedding;
+    // Skip entries that cannot be compared (empty or different dimension).
+    if (emb.length === 0 || emb.length !== embedding.length) continue;
+
+    const sim = cosineSimilarity(embedding, emb);
+    if (sim > bestSim) {
+      bestSim = sim;
+      bestId = entry.id;
+    }
+  }
+
+  if (bestId === null) return null;
+  return { id: bestId, similarity: bestSim };
+}
+
 // ---------------------------------------------------------------------------
 // clusterFaceDetections
 // ---------------------------------------------------------------------------

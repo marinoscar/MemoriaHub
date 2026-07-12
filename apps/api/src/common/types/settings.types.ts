@@ -32,6 +32,7 @@ export interface SystemSettingsValue {
    *   - duplicateDetection: near-duplicate photo (visual/hash similarity) detection
    *   - locationInference: interpolate/extrapolate missing GPS coords from timeline anchors
    *   - socialMediaDetection: social-media video detection (OCR-based)
+   *   - faceAutoArchive: auto-archive faces matching a previously-archived face
    */
   features: {
     [key: string]: boolean;
@@ -63,6 +64,10 @@ export interface SystemSettingsValue {
       enabled: boolean;
       sampleIntervalSeconds: number;
       maxFramesPerVideo: number;
+    };
+    autoArchive?: {
+      /** Cosine-similarity threshold for auto-archiving a face that matches a previously-archived face. */
+      matchThreshold: number;
     };
   };
   storage?: {
@@ -144,6 +149,7 @@ export const FEATURE_KEYS = {
   DUPLICATE_DETECTION: 'duplicateDetection',
   LOCATION_INFERENCE: 'locationInference',
   SOCIAL_MEDIA_DETECTION: 'socialMediaDetection',
+  FACE_AUTO_ARCHIVE: 'faceAutoArchive',
 } as const;
 
 /**
@@ -173,6 +179,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     [FEATURE_KEYS.DUPLICATE_DETECTION]: false,
     [FEATURE_KEYS.LOCATION_INFERENCE]: false,
     [FEATURE_KEYS.SOCIAL_MEDIA_DETECTION]: false,
+    [FEATURE_KEYS.FACE_AUTO_ARCHIVE]: false,
   },
   ai: {
     features: {
@@ -186,6 +193,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
       detection: { provider: null, model: null },
     },
     video: { enabled: true, sampleIntervalSeconds: 5, maxFramesPerVideo: 60 },
+    autoArchive: { matchThreshold: 0.45 },
   },
   storage: {
     activeProvider: process.env['STORAGE_PROVIDER'] ?? 's3',

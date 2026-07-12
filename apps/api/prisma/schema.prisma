@@ -772,6 +772,7 @@ model Face {
   frameThumbnailKey String?   @map("frame_thumbnail_key")
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
   hiddenAt          DateTime? @map("hidden_at") @db.Timestamptz
+  hiddenReason      String?   @map("hidden_reason")
 
   // Relations
   mediaItem      MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)

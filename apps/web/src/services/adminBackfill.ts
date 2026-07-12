@@ -36,3 +36,7 @@ export async function runGlobalFaceBackfill(body?: {
 }): Promise<GlobalBackfillResult> {
   return api.post<GlobalBackfillResult>('/admin/face/backfill', body ?? {});
 }
+
+export async function runGlobalFaceAutoArchiveBackfill(): Promise<GlobalBackfillResult> {
+  return api.post<GlobalBackfillResult>('/admin/face/auto-archive/backfill', {});
+}

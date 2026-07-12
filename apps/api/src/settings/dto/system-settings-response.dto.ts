@@ -19,6 +19,11 @@ export const systemSettingsResponseSchema = z.object({
           model: z.string().nullable(),
         }),
       }),
+      autoArchive: z
+        .object({
+          matchThreshold: z.number(),
+        })
+        .optional(),
     })
     .optional(),
   updatedAt: isoDateTime,

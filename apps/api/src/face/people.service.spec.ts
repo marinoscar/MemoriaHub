@@ -67,9 +67,12 @@ describe('PeopleService', () => {
   let mockPrisma: MockPrismaService;
   let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
   let mockClusteringService: { clusterUnknownFaces: jest.Mock };
-  let mockMatchingService: { computePersonCentroid: jest.Mock };
+  let mockMatchingService: {
+    computePersonCentroid: jest.Mock;
+    findLiveMatchesAgainstArchived: jest.Mock;
+  };
   let mockEnrichmentJobService: { enqueue: jest.Mock };
-  let mockSystemSettings: { isFeatureEnabled: jest.Mock };
+  let mockSystemSettings: { isFeatureEnabled: jest.Mock; getSettings: jest.Mock };
   let mockMediaThumbnailService: { signThumb: jest.Mock };
 
   beforeEach(async () => {
@@ -82,12 +85,19 @@ describe('PeopleService', () => {
     };
     mockMatchingService = {
       computePersonCentroid: jest.fn().mockResolvedValue(undefined),
+      findLiveMatchesAgainstArchived: jest.fn().mockResolvedValue([]),
     };
     mockEnrichmentJobService = {
       enqueue: jest.fn().mockResolvedValue({ id: 'job-1' }),
     };
     mockSystemSettings = {
       isFeatureEnabled: jest.fn().mockResolvedValue(true),
+      // Default: auto-archive feature off. Individual tests override this
+      // to exercise the hideFaces auto-archive sweep.
+      getSettings: jest.fn().mockResolvedValue({
+        features: {},
+        face: { autoArchive: { matchThreshold: 0.45 } },
+      }),
     };
     mockMediaThumbnailService = {
       signThumb: jest.fn().mockResolvedValue(null),
@@ -2681,6 +2691,149 @@ describe('PeopleService', () => {
           }),
         }),
       );
+    });
+
+    it('manual hide never sets hiddenReason on the manual updateMany call', async () => {
+      (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+      await service.hideFaces(dto, USER_ID, PERMS);
+
+      const manualCall = (mockPrisma.face.updateMany as jest.Mock).mock.calls[0][0];
+      expect(manualCall.data).toEqual({ hiddenAt: expect.any(Date) });
+      expect(manualCall.data.hiddenReason).toBeUndefined();
+    });
+
+    // -----------------------------------------------------------------------
+    // Auto-archive sweep (features.faceAutoArchive)
+    // -----------------------------------------------------------------------
+
+    describe('auto-archive sweep', () => {
+      it('when faceAutoArchive is on, also hides live faces matching the just-archived embeddings and returns the combined count', async () => {
+        mockSystemSettings.getSettings.mockResolvedValue({
+          features: { faceAutoArchive: true },
+          face: { autoArchive: { matchThreshold: 0.5 } },
+        });
+
+        // First updateMany call = manual hide; second = the sweep's batch hide.
+        (mockPrisma.face.updateMany as jest.Mock)
+          .mockResolvedValueOnce({ count: 1 })
+          .mockResolvedValueOnce({ count: 2 });
+
+        // Reference set: the embedding(s) of the face(s) just archived.
+        (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
+          { id: FACE_ID, embedding: [1, 0] },
+        ]);
+
+        mockMatchingService.findLiveMatchesAgainstArchived.mockResolvedValue([
+          'live-face-1',
+          'live-face-2',
+        ]);
+
+        const result = await service.hideFaces(dto, USER_ID, PERMS);
+
+        expect(mockMatchingService.findLiveMatchesAgainstArchived).toHaveBeenCalledWith(
+          CIRCLE_ID,
+          {
+            archivedCandidates: [{ id: FACE_ID, embedding: [1, 0] }],
+            threshold: 0.5,
+          },
+        );
+
+        // Sweep updateMany call
+        const sweepCall = (mockPrisma.face.updateMany as jest.Mock).mock.calls[1][0];
+        expect(sweepCall.where).toMatchObject({
+          id: { in: ['live-face-1', 'live-face-2'] },
+          circleId: CIRCLE_ID,
+          personId: null,
+          hiddenAt: null,
+        });
+        expect(sweepCall.data).toEqual({
+          hiddenAt: expect.any(Date),
+          hiddenReason: 'auto_archive_match',
+        });
+
+        expect(result).toEqual({ hidden: 1 + 2 });
+      });
+
+      it('records autoHidden in the audit event meta', async () => {
+        mockSystemSettings.getSettings.mockResolvedValue({
+          features: { faceAutoArchive: true },
+          face: { autoArchive: { matchThreshold: 0.5 } },
+        });
+        (mockPrisma.face.updateMany as jest.Mock)
+          .mockResolvedValueOnce({ count: 1 })
+          .mockResolvedValueOnce({ count: 2 });
+        (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
+          { id: FACE_ID, embedding: [1, 0] },
+        ]);
+        mockMatchingService.findLiveMatchesAgainstArchived.mockResolvedValue([
+          'live-face-1',
+          'live-face-2',
+        ]);
+
+        await service.hideFaces(dto, USER_ID, PERMS);
+
+        expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              meta: expect.objectContaining({ autoHidden: 2 }),
+            }),
+          }),
+        );
+      });
+
+      it('excludes ids already in the manually-hidden set from the sweep update (no double-count)', async () => {
+        mockSystemSettings.getSettings.mockResolvedValue({
+          features: { faceAutoArchive: true },
+          face: { autoArchive: { matchThreshold: 0.5 } },
+        });
+        (mockPrisma.face.updateMany as jest.Mock)
+          .mockResolvedValueOnce({ count: 1 })
+          .mockResolvedValueOnce({ count: 1 });
+        (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
+          { id: FACE_ID, embedding: [1, 0] },
+        ]);
+        // findLiveMatchesAgainstArchived returns the manually-hidden id too —
+        // the service must filter it out before the sweep updateMany.
+        mockMatchingService.findLiveMatchesAgainstArchived.mockResolvedValue([
+          FACE_ID,
+          'live-face-1',
+        ]);
+
+        await service.hideFaces(dto, USER_ID, PERMS);
+
+        const sweepCall = (mockPrisma.face.updateMany as jest.Mock).mock.calls[1][0];
+        expect(sweepCall.where.id).toEqual({ in: ['live-face-1'] });
+      });
+
+      it('with faceAutoArchive off, only the manual count is returned and the sweep is never invoked', async () => {
+        mockSystemSettings.getSettings.mockResolvedValue({
+          features: { faceAutoArchive: false },
+          face: { autoArchive: { matchThreshold: 0.45 } },
+        });
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+        const result = await service.hideFaces(dto, USER_ID, PERMS);
+
+        expect(mockMatchingService.findLiveMatchesAgainstArchived).not.toHaveBeenCalled();
+        expect(mockPrisma.face.updateMany).toHaveBeenCalledTimes(1);
+        expect(result).toEqual({ hidden: 1 });
+      });
+
+      it('does not run the sweep when no just-archived face has a usable embedding', async () => {
+        mockSystemSettings.getSettings.mockResolvedValue({
+          features: { faceAutoArchive: true },
+          face: { autoArchive: { matchThreshold: 0.45 } },
+        });
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+        // No rows returned for the just-archived reference-embedding lookup.
+        (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
+
+        const result = await service.hideFaces(dto, USER_ID, PERMS);
+
+        expect(mockMatchingService.findLiveMatchesAgainstArchived).not.toHaveBeenCalled();
+        expect(result).toEqual({ hidden: 1 });
+      });
     });
   });
 

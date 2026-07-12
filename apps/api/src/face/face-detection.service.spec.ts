@@ -52,6 +52,7 @@ import { StorageProviderResolver } from '../storage/providers/storage-provider.r
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { EnrichmentJob, JobReason, JobStatus, MediaFaceStatusType } from '@prisma/client';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -124,6 +125,7 @@ describe('FaceDetectionService', () => {
     matchFaceByExternalId: jest.Mock;
   };
   let mockEnrichmentJobService: { recordModel: jest.Mock };
+  let mockSystemSettings: { getSettings: jest.Mock };
 
   beforeEach(async () => {
     // Reset sharp mock call counts between tests (implementations set in the factory are retained)
@@ -144,6 +146,16 @@ describe('FaceDetectionService', () => {
       matchFaceByExternalId: jest.fn().mockResolvedValue(null),
     };
     mockEnrichmentJobService = { recordModel: jest.fn().mockResolvedValue(undefined) };
+    // FaceDetectionCore reads auto-archive gating via SystemSettingsService;
+    // default to the feature OFF so pre-existing matching-behavior tests are
+    // unaffected (faceAutoArchive auto-archive branch is covered separately
+    // in face-detection-core.service.spec.ts).
+    mockSystemSettings = {
+      getSettings: jest.fn().mockResolvedValue({
+        features: {},
+        face: { autoArchive: { matchThreshold: 0.45 } },
+      }),
+    };
 
     // Default system settings: face detection configured
     (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue({
@@ -185,6 +197,7 @@ describe('FaceDetectionService', () => {
         { provide: StorageProviderResolver, useValue: mockResolver },
         { provide: FaceMatchingService, useValue: mockMatchingService },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
+        { provide: SystemSettingsService, useValue: mockSystemSettings },
       ],
     }).compile();
 

@@ -25,6 +25,7 @@ import {
 } from './providers/face-provider.interface';
 import { FaceMatchingService } from './face-matching.service';
 import { RateLimitError } from '../enrichment/rate-limit.error';
+import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,6 +79,7 @@ export class FaceDetectionCore {
     private readonly faceSettingsService: FaceSettingsService,
     private readonly registry: FaceProviderRegistry,
     private readonly matchingService: FaceMatchingService,
+    private readonly systemSettings: SystemSettingsService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -218,6 +220,25 @@ export class FaceDetectionCore {
 
     if (faces.length === 0) return 0;
 
+    // Read auto-archive gating once per job. A settings-read failure must never
+    // abort detection — default the feature to off in that case.
+    let autoArchiveOn = false;
+    let archiveThreshold: number | undefined;
+    try {
+      const settings = await this.systemSettings.getSettings();
+      autoArchiveOn =
+        settings.features?.faceAutoArchive === true &&
+        (process.env['FACE_AUTO_ARCHIVE'] ?? 'true') !== 'false';
+      archiveThreshold = settings.face?.autoArchive?.matchThreshold;
+    } catch (settingsErr) {
+      const msg =
+        settingsErr instanceof Error ? settingsErr.message : String(settingsErr);
+      this.logger.warn(
+        `Failed to read auto-archive settings; disabling auto-archive for this job: ${msg}`,
+      );
+      autoArchiveOn = false;
+    }
+
     const provider = this.registry.get(providerKey);
 
     const createdFaces: Array<{
@@ -256,6 +277,13 @@ export class FaceDetectionCore {
       createdFaces.push(created);
     }
 
+    // Lazily-loaded archived-face candidate pool (populated at most once per
+    // job, only when the first unmatched face needs it) and the batch of newly
+    // created faces to auto-archive after the loop completes.
+    let archivedCandidates: Array<{ id: string; embedding: number[] }> | null =
+      null;
+    const toArchive: string[] = [];
+
     // Person-matching loop
     for (const face of createdFaces) {
       try {
@@ -281,11 +309,62 @@ export class FaceDetectionCore {
           this.logger.debug(
             `Face ${face.id} matched to person ${matchResult.personId}`,
           );
+        } else if (autoArchiveOn && face.embedding.length > 0) {
+          // No person match: check whether this face matches a previously
+          // archived unassigned face and, if so, auto-archive it.
+          if (archivedCandidates === null) {
+            archivedCandidates = await this.prisma.face.findMany({
+              where: {
+                circleId,
+                personId: null,
+                hiddenAt: { not: null },
+                embedding: { isEmpty: false },
+              },
+              select: { id: true, embedding: true },
+              orderBy: { hiddenAt: 'desc' },
+              take: this.matchingService.archiveMaxCandidates,
+            });
+          }
+
+          if (archivedCandidates.length > 0) {
+            const archMatch = await this.matchingService.matchFaceToArchived(
+              circleId,
+              face.embedding,
+              { threshold: archiveThreshold, candidates: archivedCandidates },
+            );
+            if (archMatch) {
+              toArchive.push(face.id);
+              this.logger.debug(
+                `Face ${face.id} auto-archived (matched archived ${archMatch.faceId}, sim=${archMatch.similarity})`,
+              );
+            }
+          }
         }
       } catch (err) {
         // Non-fatal: matching failure should not abort the detection job
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Face matching failed for face ${face.id}: ${msg}`);
+      }
+    }
+
+    // Batch-archive matched faces. The personId/hiddenAt guards keep this
+    // idempotent and race-safe; a failure here is non-fatal.
+    if (toArchive.length > 0) {
+      try {
+        await this.prisma.face.updateMany({
+          where: {
+            id: { in: toArchive },
+            circleId,
+            personId: null,
+            hiddenAt: null,
+          },
+          data: { hiddenAt: new Date(), hiddenReason: 'auto_archive_match' },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Auto-archive batch update failed for ${toArchive.length} face(s): ${msg}`,
+        );
       }
     }
 
