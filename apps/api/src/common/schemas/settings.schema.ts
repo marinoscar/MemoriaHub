@@ -46,6 +46,7 @@ export const systemSettingsSchema = z.object({
   //   - duplicateDetection: near-duplicate photo (visual/hash similarity) detection
   //   - locationInference: interpolate/extrapolate missing GPS coords from timeline anchors
   //   - socialMediaDetection: social-media video detection (OCR-based)
+  //   - faceAutoArchive: auto-archive faces matching a previously-archived face
   features: z.record(z.string(), z.boolean()),
   ai: z.object({
     features: z.object({
@@ -75,7 +76,10 @@ export const systemSettingsSchema = z.object({
       sampleIntervalSeconds: z.number().int().min(1).max(60).default(5),
       maxFramesPerVideo: z.number().int().min(1).max(300).default(60),
     }).optional().default({ enabled: true, sampleIntervalSeconds: 5, maxFramesPerVideo: 60 }),
-  }).optional().default({ features: { detection: { provider: null, model: null } }, video: { enabled: true, sampleIntervalSeconds: 5, maxFramesPerVideo: 60 } }),
+    autoArchive: z.object({
+      matchThreshold: z.number().min(0.30).max(0.90).default(0.45),
+    }).optional().default({ matchThreshold: 0.45 }),
+  }).optional().default({ features: { detection: { provider: null, model: null } }, video: { enabled: true, sampleIntervalSeconds: 5, maxFramesPerVideo: 60 }, autoArchive: { matchThreshold: 0.45 } }),
   storage: z.object({
     activeProvider: z.string().default('s3'),
     insights: z.object({
@@ -175,6 +179,9 @@ export const systemSettingsPatchSchema = z.object({
       enabled: z.boolean().optional(),
       sampleIntervalSeconds: z.number().int().min(1).max(60).optional(),
       maxFramesPerVideo: z.number().int().min(1).max(300).optional(),
+    }).optional(),
+    autoArchive: z.object({
+      matchThreshold: z.number().min(0.30).max(0.90).optional(),
     }).optional(),
   }).optional(),
   storage: z.object({

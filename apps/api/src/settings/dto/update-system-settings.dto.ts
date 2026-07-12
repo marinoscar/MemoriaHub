@@ -22,6 +22,11 @@ export const updateSystemSettingsSchema = z.object({
         model: z.string().nullable(),
       }),
     }),
+    autoArchive: z
+      .object({
+        matchThreshold: z.number().min(0.30).max(0.90),
+      })
+      .optional(),
   }).optional(),
 });
 
@@ -68,6 +73,11 @@ export const patchSystemSettingsSchema = z.object({
           enabled: z.boolean().optional(),
           sampleIntervalSeconds: z.number().int().min(1).max(60).optional(),
           maxFramesPerVideo: z.number().int().min(1).max(300).optional(),
+        })
+        .optional(),
+      autoArchive: z
+        .object({
+          matchThreshold: z.number().min(0.30).max(0.90).optional(),
         })
         .optional(),
     })
