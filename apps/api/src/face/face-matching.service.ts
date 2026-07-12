@@ -20,6 +20,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { DEFAULT_FACE_CLUSTER_THRESHOLD } from '@memoriahub/enrichment-compute/face-video';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Recognition threshold (match incoming face → existing Person centroid). */
@@ -29,8 +30,14 @@ export const DEFAULT_FACE_MATCH_THRESHOLD = 0.38;
  * Clustering threshold for unknown faces.
  * Stricter than FACE_MATCH_THRESHOLD to reduce false merges when grouping
  * faces that have not yet been identified.
+ *
+ * Canonical definition now lives in @memoriahub/enrichment-compute/face-video
+ * (imported above and re-exported here) so the shared clustering algorithm
+ * and this server-side threshold can never drift apart; re-exported under
+ * its original name so existing importers (e.g. video-face-dedup.spec.ts)
+ * keep working unchanged.
  */
-export const DEFAULT_FACE_CLUSTER_THRESHOLD = 0.45;
+export { DEFAULT_FACE_CLUSTER_THRESHOLD };
 
 /**
  * Minimum cluster size to justify creating a provisional Person.
