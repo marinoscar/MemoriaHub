@@ -29,6 +29,7 @@ import { AddAlbumItemsByFilterDto } from './dto/add-album-items-by-filter.dto';
 import { ExportQueryDto } from './dto/export-query.dto';
 import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
 import { MediaLocationsAggregateQueryDto } from './dto/media-locations-aggregate-query.dto';
+import { MediaLocationsExtentQueryDto } from './dto/media-locations-extent-query.dto';
 import { MediaThumbnailsQueryDto } from './dto/media-thumbnails-query.dto';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
@@ -617,6 +618,73 @@ export class MediaService {
       count: row.n,
       sampleId: row.sample_id,
     }));
+  }
+
+  /**
+   * GET /api/media/locations/extent
+   *
+   * Computes the true geographic bounding box (min/max lat/lng) across ALL of
+   * the circle's geotagged, non-deleted/non-archived media items — not scoped
+   * to a viewport. Used by the frontend to frame the map's initial camera
+   * position on exactly the area the circle's photos cover, instead of
+   * deriving it from whatever an arbitrary default-viewport cluster fetch
+   * happens to return.
+   *
+   * Known limitation: plain MIN/MAX does not special-case a photo set that
+   * spans the antimeridian (e.g. Alaska + Fiji in the same circle) — that
+   * would require an antimeridian-aware bounding algorithm. This is
+   * deliberately out of scope for the primary use case (regional bounding: a
+   * city, a state, a country, a continent).
+   */
+  async getLocationsExtent(
+    query: MediaLocationsExtentQueryDto,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{ minLat: number; minLng: number; maxLat: number; maxLng: number; count: number } | null> {
+    const { circleId, capturedAtFrom, capturedAtTo, type } = query;
+
+    await this.circleMembershipService.assertCircleAccess(
+      userId,
+      circleId,
+      userPermissions,
+      'viewer' as CircleRole,
+    );
+
+    const where: Prisma.MediaItemWhereInput = {
+      circleId,
+      takenLat: { not: null },
+      takenLng: { not: null },
+      deletedAt: null,
+      archivedAt: null,
+      ...(type && { type }),
+      ...(capturedAtFrom || capturedAtTo
+        ? {
+            capturedAt: {
+              ...(capturedAtFrom && { gte: capturedAtFrom }),
+              ...(capturedAtTo && { lte: capturedAtTo }),
+            },
+          }
+        : {}),
+    };
+
+    const agg = await this.prisma.mediaItem.aggregate({
+      where,
+      _min: { takenLat: true, takenLng: true },
+      _max: { takenLat: true, takenLng: true },
+      _count: true,
+    });
+
+    if (agg._count === 0 || agg._min.takenLat == null || agg._min.takenLng == null) {
+      return null;
+    }
+
+    return {
+      minLat: agg._min.takenLat,
+      minLng: agg._min.takenLng,
+      maxLat: agg._max.takenLat as number,
+      maxLng: agg._max.takenLng as number,
+      count: agg._count,
+    };
   }
 
   /**
