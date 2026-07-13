@@ -979,6 +979,10 @@ model BurstGroup {
   capturedAt          DateTime?        @map("captured_at") @db.Timestamptz
   resolvedById        String?          @map("resolved_by_id") @db.Uuid
   resolvedAt          DateTime?        @map("resolved_at") @db.Timestamptz
+  resolutionAction    String?          @map("resolution_action")
+  keptCount           Int?             @map("kept_count")
+  removedCount        Int?             @map("removed_count")
+  confidence          Float?
   createdAt           DateTime         @default(now()) @map("created_at") @db.Timestamptz
   updatedAt           DateTime         @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -990,6 +994,7 @@ model BurstGroup {
 
   @@index([circleId, status])
   @@index([capturedAt])
+  @@index([circleId, status, resolutionAction])
   @@map("burst_groups")
 }
 
@@ -1012,6 +1017,9 @@ model DuplicateGroup {
   capturedAt          DateTime?            @map("captured_at") @db.Timestamptz
   resolvedById        String?              @map("resolved_by_id") @db.Uuid
   resolvedAt          DateTime?            @map("resolved_at") @db.Timestamptz
+  resolutionAction    String?              @map("resolution_action")
+  keptCount           Int?                 @map("kept_count")
+  removedCount        Int?                 @map("removed_count")
   createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz
   updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -1022,6 +1030,7 @@ model DuplicateGroup {
   items             MediaItem[] @relation("DuplicateGroupItems")
 
   @@index([circleId, status])
+  @@index([circleId, status, resolutionAction])
   @@map("duplicate_groups")
 }
 

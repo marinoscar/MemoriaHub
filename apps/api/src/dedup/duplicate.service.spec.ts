@@ -31,6 +31,7 @@ import { createMockPrismaService, MockPrismaService } from '../../test/mocks/pri
 import { CircleRole, DuplicateGroupStatus, JobReason, JobStatus, MediaType } from '@prisma/client';
 import { DuplicateQueryDto } from './dto/duplicate-query.dto';
 import { ResolveDuplicateDto } from './dto/resolve-duplicate.dto';
+import { BulkResolveDuplicateDto } from './dto/bulk-resolve-duplicate.dto';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -56,6 +57,14 @@ function makeQueryDto(overrides: Partial<DuplicateQueryDto> = {}): DuplicateQuer
 
 function makeResolveDto(keepIds: string[], action: 'archive' | 'trash' = 'archive'): ResolveDuplicateDto {
   return { keepIds, action } as ResolveDuplicateDto;
+}
+
+function makeBulkResolveDto(
+  ids: string[],
+  action: 'archive' | 'trash' = 'archive',
+  circleId: string = CIRCLE_ID,
+): BulkResolveDuplicateDto {
+  return { circleId, ids, action } as BulkResolveDuplicateDto;
 }
 
 function makeMember(overrides: Partial<{
@@ -215,6 +224,26 @@ describe('DuplicateService', () => {
         'https://cdn.example.com/signed-url',
         'https://cdn.example.com/signed-url',
       ]);
+    });
+
+    it('sets confidence to the computed maxSim on each list item', async () => {
+      const group = makeGroupRow();
+      (mockPrisma.duplicateGroup.findMany as jest.Mock).mockResolvedValue([group]);
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ sim: 0.91 }]);
+
+      const result = await service.listDuplicateGroups(makeQueryDto(), USER_ID, PERMS_MEDIA_READ);
+
+      expect(result.items[0].confidence).toBe(0.91);
+    });
+
+    it('falls back confidence to 0 (not null) when no embedding similarity rows exist', async () => {
+      const group = makeGroupRow();
+      (mockPrisma.duplicateGroup.findMany as jest.Mock).mockResolvedValue([group]);
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([]);
+
+      const result = await service.listDuplicateGroups(makeQueryDto(), USER_ID, PERMS_MEDIA_READ);
+
+      expect(result.items[0].confidence).toBe(0);
     });
 
     it('applies the kind filter AFTER computing kind classification per group', async () => {
@@ -745,6 +774,272 @@ describe('DuplicateService', () => {
 
       expect(result.data.removed).toBe(0);
       expect(result.data.kept).toBe(3);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // bulkResolveDuplicateGroups
+  // -------------------------------------------------------------------------
+
+  describe('bulkResolveDuplicateGroups', () => {
+    function makeBulkGroup(overrides: Partial<{
+      id: string;
+      circleId: string;
+      status: DuplicateGroupStatus;
+      suggestedBestItemId: string | null;
+      items: Array<{ id: string }>;
+    }> = {}) {
+      return {
+        id: 'group-1',
+        circleId: CIRCLE_ID,
+        status: DuplicateGroupStatus.pending,
+        suggestedBestItemId: 'media-1',
+        items: [{ id: 'media-1' }, { id: 'media-2' }, { id: 'media-3' }],
+        ...overrides,
+      };
+    }
+
+    function setupGroups(groups: ReturnType<typeof makeBulkGroup>[]) {
+      (mockPrisma.duplicateGroup.findMany as jest.Mock).mockResolvedValue(groups);
+      (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+      (mockPrisma.duplicateGroup.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+    }
+
+    it('calls assertCircleAccess with collaborator role', async () => {
+      const group = makeBulkGroup();
+      setupGroups([group]);
+
+      await service.bulkResolveDuplicateGroups(
+        makeBulkResolveDto([group.id]),
+        USER_ID,
+        PERMS_MEDIA_WRITE_DELETE,
+      );
+
+      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+        USER_ID,
+        CIRCLE_ID,
+        PERMS_MEDIA_WRITE_DELETE,
+        CircleRole.collaborator,
+      );
+    });
+
+    it('happy path: resolves all pending groups keeping only suggestedBest, with correct counts', async () => {
+      const groupA = makeBulkGroup({
+        id: 'group-a',
+        suggestedBestItemId: 'media-1',
+        items: [{ id: 'media-1' }, { id: 'media-2' }, { id: 'media-3' }],
+      });
+      const groupB = makeBulkGroup({
+        id: 'group-b',
+        suggestedBestItemId: 'media-10',
+        items: [{ id: 'media-10' }, { id: 'media-11' }],
+      });
+      setupGroups([groupA, groupB]);
+
+      const result = await service.bulkResolveDuplicateGroups(
+        makeBulkResolveDto(['group-a', 'group-b'], 'archive'),
+        USER_ID,
+        PERMS_MEDIA_WRITE_DELETE,
+      );
+
+      expect(result.data).toMatchObject({
+        resolvedGroups: 2,
+        keptCount: 2,
+        removedCount: 3,
+        action: 'archive',
+        skipped: 0,
+        errors: 0,
+      });
+
+      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: expect.arrayContaining(['media-2', 'media-3']) } },
+          data: { archivedAt: expect.any(Date) },
+        }),
+      );
+      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: ['media-11'] } },
+          data: { archivedAt: expect.any(Date) },
+        }),
+      );
+    });
+
+    it('action=trash sets deletedAt (not archivedAt) on non-kept members', async () => {
+      const group = makeBulkGroup();
+      setupGroups([group]);
+
+      await service.bulkResolveDuplicateGroups(
+        makeBulkResolveDto([group.id], 'trash'),
+        USER_ID,
+        PERMS_MEDIA_WRITE_DELETE,
+      );
+
+      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: expect.arrayContaining(['media-2', 'media-3']) } },
+          data: { deletedAt: expect.any(Date) },
+        }),
+      );
+    });
+
+    it('skips groups that are not pending', async () => {
+      const pendingGroup = makeBulkGroup({ id: 'group-pending' });
+      const resolvedGroup = makeBulkGroup({
+        id: 'group-resolved',
+        status: DuplicateGroupStatus.resolved,
+      });
+      setupGroups([pendingGroup, resolvedGroup]);
+
+      const result = await service.bulkResolveDuplicateGroups(
+        makeBulkResolveDto(['group-pending', 'group-resolved']),
+        USER_ID,
+        PERMS_MEDIA_WRITE_DELETE,
+      );
+
+      expect(result.data.resolvedGroups).toBe(1);
+      expect(result.data.skipped).toBe(1);
+      expect(result.data.errors).toBe(0);
+    });
+
+    it('skips groups with a null suggestedBestItemId', async () => {
+      const group = makeBulkGroup({ suggestedBestItemId: null });
+      setupGroups([group]);
+
+      const result = await service.bulkResolveDuplicateGroups(
+        makeBulkResolveDto([group.id]),
+        USER_ID,
+        PERMS_MEDIA_WRITE_DELETE,
+      );
+
+      expect(result.data.resolvedGroups).toBe(0);
+      expect(result.data.skipped).toBe(1);
+      expect(mockPrisma.mediaItem.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('skips groups whose suggestedBestItemId is no longer a live member', async () => {
+      const group = makeBulkGroup({
+        suggestedBestItemId: 'media-gone',
+        items: [{ id: 'media-1' }, { id: 'media-2' }],
+      });
+      setupGroups([group]);
+
+      const result = await service.bulkResolveDuplicateGroups(
+        makeBulkResolveDto([group.id]),
+        USER_ID,
+        PERMS_MEDIA_WRITE_DELETE,
+      );
+
+      expect(result.data.resolvedGroups).toBe(0);
+      expect(result.data.skipped).toBe(1);
+    });
+
+    it('throws BadRequestException when a requested id is missing (not found)', async () => {
+      (mockPrisma.duplicateGroup.findMany as jest.Mock).mockResolvedValue([
+        makeBulkGroup({ id: 'group-a' }),
+      ]);
+
+      await expect(
+        service.bulkResolveDuplicateGroups(
+          makeBulkResolveDto(['group-a', 'group-does-not-exist']),
+          USER_ID,
+          PERMS_MEDIA_WRITE_DELETE,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when a requested id belongs to a different circle', async () => {
+      const group = makeBulkGroup({ id: 'group-a', circleId: 'other-circle' });
+      (mockPrisma.duplicateGroup.findMany as jest.Mock).mockResolvedValue([group]);
+
+      await expect(
+        service.bulkResolveDuplicateGroups(
+          makeBulkResolveDto(['group-a']),
+          USER_ID,
+          PERMS_MEDIA_WRITE_DELETE,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when action is "trash" but perms lack media:delete', async () => {
+      const group = makeBulkGroup();
+      setupGroups([group]);
+
+      await expect(
+        service.bulkResolveDuplicateGroups(
+          makeBulkResolveDto([group.id], 'trash'),
+          USER_ID,
+          PERMS_MEDIA_WRITE, // no media:delete
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockPrisma.mediaItem.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('allows action "archive" with only media:write perms (media:delete not required)', async () => {
+      const group = makeBulkGroup();
+      setupGroups([group]);
+
+      const result = await service.bulkResolveDuplicateGroups(
+        makeBulkResolveDto([group.id], 'archive'),
+        USER_ID,
+        PERMS_MEDIA_WRITE,
+      );
+
+      expect(result.data.resolvedGroups).toBe(1);
+      expect(result.data.action).toBe('archive');
+    });
+
+    it('increments errors and continues processing when one group fails mid-loop', async () => {
+      const groupA = makeBulkGroup({
+        id: 'group-a',
+        suggestedBestItemId: 'media-1',
+        items: [{ id: 'media-1' }, { id: 'media-2' }],
+      });
+      const groupB = makeBulkGroup({
+        id: 'group-b',
+        suggestedBestItemId: 'media-10',
+        items: [{ id: 'media-10' }, { id: 'media-11' }],
+      });
+      const groupC = makeBulkGroup({
+        id: 'group-c',
+        suggestedBestItemId: 'media-20',
+        items: [{ id: 'media-20' }, { id: 'media-21' }],
+      });
+      setupGroups([groupA, groupB, groupC]);
+
+      (mockPrisma.mediaItem.updateMany as jest.Mock)
+        .mockResolvedValueOnce({ count: 1 }) // group-a
+        .mockRejectedValueOnce(new Error('db boom')) // group-b
+        .mockResolvedValueOnce({ count: 1 }); // group-c
+
+      const result = await service.bulkResolveDuplicateGroups(
+        makeBulkResolveDto(['group-a', 'group-b', 'group-c'], 'archive'),
+        USER_ID,
+        PERMS_MEDIA_WRITE_DELETE,
+      );
+
+      expect(result.data.resolvedGroups).toBe(2);
+      expect(result.data.errors).toBe(1);
+      expect(result.data.skipped).toBe(0);
+      expect(mockPrisma.duplicateGroup.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'group-c' } }),
+      );
+    });
+
+    it('deduplicates repeated ids in the request before looking up groups', async () => {
+      const group = makeBulkGroup();
+      setupGroups([group]);
+
+      await service.bulkResolveDuplicateGroups(
+        makeBulkResolveDto([group.id, group.id]),
+        USER_ID,
+        PERMS_MEDIA_WRITE_DELETE,
+      );
+
+      const findManyCall = (mockPrisma.duplicateGroup.findMany as jest.Mock).mock.calls[0][0];
+      expect(findManyCall.where.id.in).toEqual([group.id]);
     });
   });
 

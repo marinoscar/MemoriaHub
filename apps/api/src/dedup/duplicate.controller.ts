@@ -24,6 +24,7 @@ import { PERMISSIONS } from '../common/constants/roles.constants';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { DuplicateQueryDto } from './dto/duplicate-query.dto';
 import { ResolveDuplicateDto } from './dto/resolve-duplicate.dto';
+import { BulkResolveDuplicateDto } from './dto/bulk-resolve-duplicate.dto';
 
 @ApiTags('Duplicates')
 @ApiBearerAuth()
@@ -49,6 +50,39 @@ export class DuplicateController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.duplicateService.listDuplicateGroups(query, user.id, user.permissions);
+  }
+
+  /**
+   * POST /api/media/duplicates/bulk/resolve
+   * Bulk-resolve multiple duplicate groups, auto-keeping each group's
+   * suggested-best item and applying the chosen action to the rest.
+   *
+   * IMPORTANT: declared BEFORE `duplicates/:id` routes so the static `bulk`
+   * segment is not captured by the `:id` param.
+   */
+  @Post('duplicates/bulk/resolve')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Bulk-resolve duplicate groups (auto-keep suggested best, archive/trash rest)',
+    description:
+      'Resolves 1–100 duplicate groups at once. For each pending group, keeps its ' +
+      'suggested-best item and applies the chosen `action` to the remaining live ' +
+      'members: `archive` sets archivedAt, `trash` soft-deletes (sets deletedAt). ' +
+      'Groups that are not pending or have no valid suggested-best item are skipped. ' +
+      'Requires media:write; `action: "trash"` additionally requires media:delete.',
+  })
+  @ApiResponse({ status: 200, description: 'Bulk resolve completed' })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid body, missing media:delete for trash, or IDs not found / cross-circle',
+  })
+  @ApiResponse({ status: 404, description: 'Circle not found or access denied' })
+  async bulkResolveDuplicateGroups(
+    @Body() dto: BulkResolveDuplicateDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.duplicateService.bulkResolveDuplicateGroups(dto, user.id, user.permissions);
   }
 
   /**

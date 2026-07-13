@@ -17,12 +17,14 @@ import {
   DialogActions,
   LinearProgress,
   Tooltip,
+  ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material';
 import { ArrowBack as BackIcon, BurstMode as BurstModeIcon } from '@mui/icons-material';
 import { useBurstGroupDetail } from '../../hooks/useBursts';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useCircle } from '../../hooks/useCircle';
-import type { BurstGroupMember } from '../../services/bursts';
+import type { BurstGroupMember, GroupResolveAction } from '../../services/bursts';
 
 interface MemberCardProps {
   member: BurstGroupMember;
@@ -164,13 +166,14 @@ export default function BurstGroupPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { activeCircleRole } = useCircle();
-  const { isAdmin } = usePermissions();
+  const { isAdmin, hasPermission } = usePermissions();
 
   const groupId = id ?? '';
   const { group, isLoading, error, fetchGroup, resolve, dismiss, resolving, dismissing } =
     useBurstGroupDetail(groupId);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [action, setAction] = useState<GroupResolveAction>('archive');
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [dismissConfirmOpen, setDismissConfirmOpen] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -178,6 +181,7 @@ export default function BurstGroupPage() {
 
   const canAct =
     isAdmin || activeCircleRole === 'collaborator' || activeCircleRole === 'circle_admin';
+  const canTrash = hasPermission('media:delete');
 
   useEffect(() => {
     if (!groupId) return;
@@ -211,8 +215,11 @@ export default function BurstGroupPage() {
     setActionError(null);
     try {
       const keepIds = Array.from(selectedIds);
-      const result = await resolve(keepIds);
-      setSuccessMsg(`Kept ${result.kept} photo${result.kept !== 1 ? 's' : ''}, deleted ${result.deleted}.`);
+      const result = await resolve(keepIds, action);
+      const verb = action === 'trash' ? 'moved to Trash' : 'archived';
+      setSuccessMsg(
+        `Kept ${result.kept} photo${result.kept !== 1 ? 's' : ''}; ${result.removed} ${verb}.`,
+      );
       setTimeout(() => navigate('/bursts'), 1500);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to resolve burst group');
@@ -283,8 +290,9 @@ export default function BurstGroupPage() {
 
       {/* Instructions */}
       <Alert severity="info" sx={{ mb: 3 }}>
-        Select the photos you want to <strong>keep</strong>. Unselected photos will be deleted
-        when you confirm. The suggested best photo is pre-selected.
+        Select the photos you want to <strong>keep</strong>. Unselected photos will be archived or
+        moved to Trash — your choice below — when you confirm. The suggested best photo is
+        pre-selected.
       </Alert>
 
       {/* Photo grid */}
@@ -309,6 +317,22 @@ export default function BurstGroupPage() {
       {/* Action bar */}
       {canAct && (
         <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+          <ToggleButtonGroup
+            value={action}
+            exclusive
+            size="small"
+            onChange={(_, value: GroupResolveAction | null) => {
+              if (value) setAction(value);
+            }}
+          >
+            <ToggleButton value="archive">Archive</ToggleButton>
+            <ToggleButton value="trash" disabled={!canTrash}>
+              <Tooltip title={canTrash ? '' : 'Requires media:delete permission'}>
+                <span>Trash</span>
+              </Tooltip>
+            </ToggleButton>
+          </ToggleButtonGroup>
+
           <Button
             variant="contained"
             color="primary"
@@ -320,7 +344,7 @@ export default function BurstGroupPage() {
               ? 'Saving…'
               : keepCount === 0
               ? 'Select photos to keep'
-              : `Keep ${keepCount}, delete ${deleteCount} other${deleteCount !== 1 ? 's' : ''}`}
+              : `Keep ${keepCount}, ${action} ${deleteCount} other${deleteCount !== 1 ? 's' : ''}`}
           </Button>
 
           <Button
@@ -337,22 +361,32 @@ export default function BurstGroupPage() {
 
       {/* Resolve confirm dialog */}
       <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Confirm deletion</DialogTitle>
+        <DialogTitle>Confirm {action === 'trash' ? 'trash' : 'archive'}</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            You are about to keep <strong>{keepCount}</strong> photo{keepCount !== 1 ? 's' : ''} and
-            permanently delete <strong>{deleteCount}</strong> other
-            {deleteCount !== 1 ? 's' : ''}. This cannot be undone.
+            You are about to keep <strong>{keepCount}</strong> photo{keepCount !== 1 ? 's' : ''} and{' '}
+            {action === 'trash' ? (
+              <>
+                move <strong>{deleteCount}</strong> other{deleteCount !== 1 ? 's' : ''} to{' '}
+                <strong>Trash</strong>. Trashed items can be restored within the retention window.
+              </>
+            ) : (
+              <>
+                <strong>archive</strong> <strong>{deleteCount}</strong> other
+                {deleteCount !== 1 ? 's' : ''}. Archived items can be unarchived later.
+              </>
+            )}
           </DialogContentText>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
           <Button
             variant="contained"
-            color="error"
+            color={action === 'trash' ? 'error' : 'primary'}
             onClick={() => void handleResolveConfirm()}
           >
-            Delete {deleteCount} photo{deleteCount !== 1 ? 's' : ''}
+            {action === 'trash' ? 'Move to Trash' : 'Archive'} {deleteCount} photo
+            {deleteCount !== 1 ? 's' : ''}
           </Button>
         </DialogActions>
       </Dialog>

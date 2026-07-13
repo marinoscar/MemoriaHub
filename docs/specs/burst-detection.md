@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.4 |
+| **Version** | 1.5 |
 | **Last Updated** | July 2026 |
 | **Status** | Specification |
 
@@ -132,6 +132,23 @@ Weights are implementation constants (`w_sharp = 0.6`, `w_face = 0.3`, `w_res = 
 
 `suggestedBestItemId` and all member `burstScore` values are recomputed each time a new member joins the group, so the suggestion stays current as the group grows.
 
+### 3.5 Confidence Score (Visual Cohesion)
+
+Alongside per-member `burstScore`, each group is scored once for overall visual cohesion and stored as `BurstGroup.confidence` (Float, `[0, 1]`) at detection time. Unlike `burstScore`, which ranks individual frames within a group, `confidence` describes how tightly the group's members agree with each other — surfaced to the reviewer in the burst list/detail response as a quick "how sure are we this is really a burst" signal.
+
+```
+confidence = mean(hashCohesion, timeCohesion)
+
+hashCohesion = clamp(1 - maxPairwiseHamming / burst.hashDistance, 0, 1)
+timeCohesion = clamp(1 - avgAdjacentGapSeconds / burst.timeGapSeconds, 0, 1)
+```
+
+- `maxPairwiseHamming` — the largest dHash Hamming distance between any two members of the group (the group's "worst" visual match).
+- `avgAdjacentGapSeconds` — the mean capture-time gap between consecutive members when sorted by `capturedAt`.
+- Each sub-score is clamped to `[0, 1]` before averaging: a group where every pairwise hash distance and every adjacent gap sits comfortably under its configured threshold (`burst.hashDistance`, `burst.timeGapSeconds`) scores close to `1.0`; a group whose hash distance or time gap approaches its threshold scores lower.
+- `confidence` is written in the same recomputation pass that sets `suggestedBestItemId`/`burstScore` (§2.4's Step 6), so it stays current as the group grows. Groups formed purely via the BurstUUID hard-prior (§2.1) are scored the same way — the formula does not special-case that signal.
+- Groups created before this field existed have `confidence = null` until the group's membership is next recomputed (e.g. a new member joins, or a backfill re-run touches the group).
+
 ---
 
 ## 4. Data Model
@@ -150,8 +167,14 @@ One row per detected burst group.
 | `capturedAt` | DateTime? | Capture timestamp of the earliest member; used for chronological sorting of the review queue |
 | `resolvedById` | UUID? | FK → `users` (SetNull on delete); who resolved or dismissed the group |
 | `resolvedAt` | DateTime? | When the group was resolved or dismissed |
+| `resolutionAction` | String? (`'archive'`\|`'trash'`) | Which outcome a resolve applied to the non-kept members; null until resolved |
+| `keptCount` | Int? | Number of members kept by a resolve; null until resolved |
+| `removedCount` | Int? | Number of members archived/trashed by a resolve; null until resolved |
+| `confidence` | Float? | `[0, 1]` visual-cohesion score set at detection time; see §3.5. Null for legacy groups until next recomputation |
 | `createdAt` | DateTime | |
 | `updatedAt` | DateTime | |
+
+`resolutionAction`, `keptCount`, `removedCount`, and `confidence` were added by migration `20260713120000_add_burst_dup_resolution_tracking`, along with a new index `(circleId, status, resolutionAction)` to support filtering the review queue and admin reporting by resolution outcome.
 
 **`BurstGroupStatus` enum:**
 
@@ -241,7 +264,7 @@ Before enqueueing, the listener checks:
 3. `BURST_DETECTION_ENABLED` environment variable is not `'false'` (environment kill-switch).
 4. `features.burstDetection` is `true` in system settings (global feature toggle; previously a per-circle flag).
 
-If all checks pass, the listener calls `EnrichmentJobService.enqueue` with `type='burst_detection'`, `reason=upload`, `priority=10`. The idempotency check in `EnrichmentJobService.enqueue` prevents duplicate jobs if the event fires more than once.
+If all checks pass, the listener calls `EnrichmentJobService.enqueue` with `type='burst_detection'`, `reason=upload`, `priority=5`. The idempotency check in `EnrichmentJobService.enqueue` prevents duplicate jobs if the event fires more than once.
 
 ### 5.5 BurstDetectionHandler
 
@@ -282,7 +305,7 @@ Order by `capturedAt DESC` to find the most recent preceding neighbors first.
 - Set `BurstGroup.suggestedBestItemId` to the highest-scoring member.
 - Set `BurstGroup.mediaCount` to the current member count.
 
-**Step 6a. Burst wins over duplicate detection.** After scores are recomputed, the handler loads every current member of the target burst group and calls `DuplicateDetectionService.evictFromDuplicateGroups(memberIds)` to clear `duplicateGroupId` on any of them that had already been linked into a `DuplicateGroup` — closing the upload-time ordering race where `duplicate_detection` processes an item before `burst_detection` does (both are enqueued together on upload, so either order can occur). This is **best-effort**: wrapped in try/catch, a failure is logged as a warning and never fails the burst job. See [duplicate-detection.md §3.2](duplicate-detection.md#32-burst-overlap-exclusion-rules) for the full rationale and the one-time `evictExistingBurstOverlaps` remediation used by the admin backfill.
+**Step 6a. Burst wins over duplicate detection.** After scores are recomputed, the handler loads every current member of the target burst group and calls `DuplicateDetectionService.evictFromDuplicateGroups(memberIds)` to clear `duplicateGroupId` on any of them that had already been linked into a `DuplicateGroup` — closing the upload-time ordering race where `duplicate_detection` processes an item before `burst_detection` does (both are enqueued together on upload, so either order can occur). This is **best-effort**: wrapped in try/catch, a failure is logged as a warning and never fails the burst job. `DuplicateDetectionService` now also refuses to write a burst member into a duplicate group at write time — it re-checks `burstGroupId` under a `SELECT ... FOR UPDATE` row lock immediately before writing `duplicateGroupId`, inside the same `processMediaItem` transaction — so this eviction step is now best-effort cleanup for the case where dedup already committed, not the sole mechanism; burst's own upload-enqueue priority is also 5 (vs. `duplicate_detection`'s 10, see §5.4), narrowing the window before eviction is even needed. See [duplicate-detection.md §3.2](duplicate-detection.md#32-burst-overlap-exclusion-rules) for the full write-time mechanism, rationale, and the one-time `evictExistingBurstOverlaps` remediation used by the admin backfill.
 
 **Step 7.** If the item was not linked to any neighbor, no group is created or modified. The item's `burstGroupId` remains null.
 
@@ -394,21 +417,21 @@ Get full detail for a single burst group: all members in capture order, each wit
 
 #### `POST /api/media/bursts/:id/resolve`
 
-Mark a burst group resolved. Soft-deletes all members whose IDs are not in `keepIds`, then records `resolvedById` and `resolvedAt`.
+Mark a burst group resolved. Applies either **archive** or **trash** to all members whose IDs are not in `keepIds`, then records `resolvedById`, `resolvedAt`, `resolutionAction`, `keptCount`, and `removedCount`.
 
-The deletion step reuses the bulk soft-delete logic (`POST /api/media/bulk/delete` semantics: sets `deletedAt` on each item). The operation runs in a single database transaction: either all deletions and the group status update succeed together, or the whole operation rolls back.
+Archive sets `archivedAt` on the non-kept members (reversible, hides them from browse surfaces). Trash sets `deletedAt` (reuses the existing Trash lifecycle — see [Archive & Trash Bin](archive-trash.md) — recoverable for `storage.trash.retentionDays` days before automatic purge). The operation runs in a single database transaction: either all member updates and the group status update succeed together, or the whole operation rolls back. A successful resolve writes an `AuditEvent` (`burst_group:resolved`) recording the actor, `keepIds`, and `action`.
 
-- **Auth:** `media:delete` + per-circle `collaborator` role
+- **Auth:** `media:write` + per-circle `collaborator` role. `action: 'trash'` additionally requires `media:delete` — a collaborator without delete rights can archive a group but not trash it.
 - **Request body:**
   ```json
-  { "keepIds": ["uuid", "uuid"] }
+  { "keepIds": ["uuid", "uuid"], "action": "archive" }
   ```
-  `keepIds` must be a non-empty array. All IDs must belong to this group. The caller may keep all members (zero deletions) if they decide the entire group is worth keeping.
+  `keepIds` must be a non-empty array; all IDs must belong to this group. `action` is `'archive'` or `'trash'`. The caller may keep all members (zero removed) if they decide the entire group is worth keeping.
 - **Response `200`:**
   ```json
-  { "data": { "deleted": 6, "kept": 1, "groupStatus": "resolved" } }
+  { "data": { "removed": 6, "kept": 1, "action": "archive", "groupStatus": "resolved" } }
   ```
-- **Response `400`:** `keepIds` is empty, contains IDs not belonging to this group, or the group is not in `pending` status.
+- **Response `400`:** `keepIds` is empty, contains IDs not belonging to this group, the group is not in `pending` status, or `action: 'trash'` was requested without `media:delete`.
 - **Response `404`:** Group not found.
 
 #### `POST /api/media/bursts/:id/dismiss`
@@ -422,6 +445,38 @@ Mark a burst group dismissed, indicating the reviewer considers these items to n
   ```
 - **Response `400`:** Group is not in `pending` status (cannot dismiss an already-resolved or already-dismissed group).
 - **Response `404`:** Group not found.
+
+#### `POST /api/media/bursts/bulk/resolve`
+
+Resolve multiple pending burst groups in a single call, always keeping each group's `suggestedBestItemId` and archiving/trashing the rest — the bulk equivalent of accepting the system's suggestion across many groups at once rather than reviewing each one individually.
+
+- **Auth:** `media:write` + per-circle `collaborator` role. `action: 'trash'` additionally requires `media:delete`, same as the single-group resolve endpoint.
+- **Request body:**
+  ```json
+  { "circleId": "uuid", "ids": ["uuid", "uuid"], "action": "archive" }
+  ```
+  `ids` is 1–100 burst group UUIDs. Every ID must belong to `circleId`; if any ID is missing or belongs to a different circle, the whole request is rejected before any group is touched.
+- **Behavior:** each group is resolved independently inside its own database transaction (so one group's failure does not roll back another's success). For each group:
+  - A group not currently in `pending` status is skipped (counted in `skipped`), not treated as an error.
+  - A group with no `suggestedBestItemId` (no scored member to keep) is also skipped (counted in `skipped`).
+  - A group that is eligible but fails during its own transaction is counted in `errors` and does not block the remaining groups.
+  - An eligible group keeps only its `suggestedBestItemId` and archives/trashes every other member, exactly as if `POST /api/media/bursts/:id/resolve` had been called with `keepIds: [suggestedBestItemId]`.
+- **Response `200`:**
+  ```json
+  {
+    "data": {
+      "resolvedGroups": 18,
+      "keptCount": 18,
+      "removedCount": 94,
+      "action": "archive",
+      "skipped": 2,
+      "errors": 0
+    }
+  }
+  ```
+- **Response `400`:** `ids` is empty or exceeds 100, or an ID does not belong to `circleId`.
+
+This endpoint powers the review queue's bulk "Resolve & Archive" / "Resolve & Delete" toolbar action, which appears once the reviewer multi-selects group cards (see §8.1).
 
 ### 7.3 Global Backfill (Admin)
 
@@ -459,13 +514,41 @@ After enqueueing runs across all circles, the endpoint also runs a one-time app-
 
 `GET /api/media/dashboard?circleId=` returns a `pendingBurstGroups` field. This is the count of burst groups for the circle with `status = pending` and `mediaCount >= burst.minGroupSize`. The count feeds into the existing review-queue section of the dashboard UI. The field is populated whenever `features.burstDetection` is enabled globally.
 
+### 7.5 Review Insights
+
+#### `GET /api/media/review-insights?circleId=`
+
+An on-demand, per-circle aggregate of burst (and duplicate — see [duplicate-detection.md §9](duplicate-detection.md#9-api-endpoints)) review-queue activity, computed live on every call with no snapshot table and no cron. It answers "how much has burst review actually cleaned up in this circle" beyond the raw pending count.
+
+- **Auth:** `media:read` + per-circle `viewer` role
+- **Response `200`:**
+  ```json
+  {
+    "bursts": {
+      "identified": 42,
+      "pending": 5,
+      "resolved": 30,
+      "dismissed": 7,
+      "archivedGroups": 18,
+      "trashedGroups": 12,
+      "itemsKept": 30,
+      "itemsArchived": 140,
+      "itemsDeleted": 95
+    },
+    "duplicates": { "...": "same shape" }
+  }
+  ```
+  `identified` is the total groups ever created for the circle (`pending + resolved + dismissed`); `archivedGroups`/`trashedGroups` split `resolved` groups by `resolutionAction`; `itemsKept`/`itemsArchived`/`itemsDeleted` sum `keptCount`/`removedCount` across resolved groups, split by the resolution's outcome. All fields are numbers.
+
+This is the data source for the "Review Insights" page (`/review-insights`), a per-circle sidebar entry (not admin-only) that shows identified/resolved/dismissed counts and an archived-vs-deleted breakdown for both burst and duplicate review.
+
 ---
 
 ## 8. UI
 
 ### 8.1 Review Queue Surface
 
-A "Review bursts" page (or tab within the existing review area) lists pending burst groups for the active circle. Each group is displayed as a visual stack of thumbnails — typically three to four frames overlapping — with a badge showing the total frame count.
+A "Review bursts" page (or tab within the existing review area) lists pending burst groups for the active circle, with a true total count and pagination rather than a single unbounded page. Each group is displayed as a visual stack of thumbnails — typically three to four frames overlapping — with a badge showing the total frame count and a confidence meter reflecting `BurstGroup.confidence` (§3.5). Group cards carry a multi-select checkbox; a bulk toolbar appears once one or more groups are selected, offering "Resolve & Archive" and "Resolve & Delete" (the latter, and any selection over 25 groups, prompts a confirmation before firing `POST /api/media/bursts/bulk/resolve`).
 
 Opening a group shows a side-by-side or grid view of all members in capture order, each displaying:
 - The thumbnail at a generous size (to allow sharpness differences to be visible).
@@ -473,7 +556,7 @@ Opening a group shows a side-by-side or grid view of all members in capture orde
 - A "Best pick" highlight on the `suggestedBestItemId` member.
 - Capture timestamp and resolution.
 
-The reviewer selects which frames to keep (checkboxes, with the suggested best pre-selected). A single "Keep selected, delete rest" action fires `POST /api/media/bursts/:id/resolve`. A "Dismiss — not a burst" action fires `POST /api/media/bursts/:id/dismiss`.
+The reviewer selects which frames to keep (checkboxes, with the suggested best pre-selected) and picks an archive-vs-trash toggle for the removed frames. A single "Keep selected" action fires `POST /api/media/bursts/:id/resolve` with the chosen `action`. A "Dismiss — not a burst" action fires `POST /api/media/bursts/:id/dismiss`.
 
 ### 8.2 Dashboard Integration
 
@@ -503,7 +586,7 @@ BurstUUID extraction reads from EXIF metadata already present in the uploaded fi
 
 ### Non-Destructive by Design
 
-The system stores suggestions and scores in the database. No deletion occurs without an authenticated, authorized API call to `POST /api/media/bursts/:id/resolve` with an explicit `keepIds` list. Soft-deletion is used (sets `deletedAt`); records remain recoverable by an admin until a hard-delete sweep is run separately.
+The system stores suggestions and scores in the database. No archiving or deletion occurs without an authenticated, authorized API call to `POST /api/media/bursts/:id/resolve` (or its bulk counterpart) with an explicit `keepIds`/`ids` list and an `action`. Archive sets `archivedAt` (reversible, no retention clock); trash sets `deletedAt` and follows the existing Trash lifecycle — recoverable for `storage.trash.retentionDays` days before automatic purge (see [Archive & Trash Bin](archive-trash.md)).
 
 ### Global Feature Toggle
 
@@ -581,3 +664,5 @@ The following extensions are left for future iterations. None of them require ch
 | 1.2 | June 2026 | AI Assistant | Change `perceptualHash` column type from `BigInt` to `String` (TEXT, unsigned decimal) to fix signed-overflow and JSON-serialization bugs; add storage rationale and lessons-learned note in §4.2 |
 | 1.3 | June 2026 | AI Assistant | Per-circle opt-in removed — burst detection is now a global system setting (`features.burstDetection`); per-circle backfill replaced by global admin endpoint (`POST /api/admin/bursts/backfill`); per-circle settings endpoints removed; Admin Settings UI updated |
 | 1.4 | July 2026 | AI Assistant | Document burst-wins duplicate-group eviction: `BurstDetectionService.processMediaItem` now evicts its group's members from any duplicate group after grouping (Step 6a); `POST /api/admin/bursts/backfill` gained a post-step remediation and `evictedDuplicateOverlaps` response field; see [duplicate-detection.md §3.2](duplicate-detection.md#32-burst-overlap-exclusion-rules) for full detail |
+| 1.5 | July 2026 | AI Assistant | `POST /api/media/bursts/:id/resolve` gained an `action: 'archive'\|'trash'` option (replacing unconditional soft-delete) and now writes a `burst_group:resolved` audit event; added `POST /api/media/bursts/bulk/resolve` for bulk keep-suggested-best resolution; added the detection-time `confidence` visual-cohesion score (§3.5) and its `resolutionAction`/`keptCount`/`removedCount`/`confidence` columns on `burst_groups` (migration `20260713120000_add_burst_dup_resolution_tracking`); added `GET /api/media/review-insights` (§7.5); documented the review-queue's multi-select bulk toolbar, confidence meter, and pagination (§8.1) |
+| 1.6 | July 2026 | AI Assistant | Lowered `burst_detection`'s upload-time enqueue priority from 10 to 5 (§5.4, Step 6a) so it is claimed before `duplicate_detection` (priority 10, unchanged) in the common case; documented the dedup-side write-time `SELECT ... FOR UPDATE` re-check that closes the residual TOCTOU race the reactive eviction alone didn't fully close — see [duplicate-detection.md §3.2](duplicate-detection.md#32-burst-overlap-exclusion-rules) for the full mechanism |

@@ -1,8 +1,9 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import {
   listDuplicateGroups,
   getDuplicateGroup,
   resolveDuplicateGroup,
+  bulkResolveDuplicateGroups,
   dismissDuplicateGroup,
 } from '../services/duplicates';
 import type {
@@ -15,18 +16,22 @@ import type {
   DuplicateResolveResult,
   DuplicateDismissResult,
 } from '../services/duplicates';
+import type { GroupBulkResolveResult } from '../services/bursts';
+
+interface FetchDuplicateGroupsParams {
+  circleId: string;
+  status?: DuplicateGroupStatus;
+  kind?: DuplicateGroupKind;
+  page?: number;
+}
 
 interface UseDuplicateGroupsResult {
   items: DuplicateGroupSummary[];
   meta: DuplicateListMeta | null;
   isLoading: boolean;
   error: string | null;
-  fetchGroups: (params: {
-    circleId: string;
-    status?: DuplicateGroupStatus;
-    kind?: DuplicateGroupKind;
-    page?: number;
-  }) => Promise<void>;
+  fetchGroups: (params: FetchDuplicateGroupsParams) => Promise<void>;
+  bulkResolve: (ids: string[], action: DuplicateResolveAction) => Promise<GroupBulkResolveResult>;
 }
 
 export function useDuplicateGroups(): UseDuplicateGroupsResult {
@@ -35,29 +40,40 @@ export function useDuplicateGroups(): UseDuplicateGroupsResult {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchGroups = useCallback(
-    async (params: {
-      circleId: string;
-      status?: DuplicateGroupStatus;
-      kind?: DuplicateGroupKind;
-      page?: number;
-    }) => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const result = await listDuplicateGroups(params);
-        setItems(result.items);
-        setMeta(result.meta);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load duplicate groups');
-      } finally {
-        setIsLoading(false);
+  // Remember the last fetch params so bulkResolve can refresh the same view.
+  const lastParamsRef = useRef<FetchDuplicateGroupsParams | null>(null);
+
+  const fetchGroups = useCallback(async (params: FetchDuplicateGroupsParams) => {
+    lastParamsRef.current = params;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await listDuplicateGroups(params);
+      setItems(result.items);
+      setMeta(result.meta);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load duplicate groups');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const bulkResolve = useCallback(
+    async (ids: string[], action: DuplicateResolveAction) => {
+      const circleId = lastParamsRef.current?.circleId;
+      if (!circleId) {
+        throw new Error('No active circle to resolve duplicate groups');
       }
+      const result = await bulkResolveDuplicateGroups({ circleId, ids, action });
+      if (lastParamsRef.current) {
+        await fetchGroups(lastParamsRef.current);
+      }
+      return result;
     },
-    [],
+    [fetchGroups],
   );
 
-  return { items, meta, isLoading, error, fetchGroups };
+  return { items, meta, isLoading, error, fetchGroups, bulkResolve };
 }
 
 interface UseDuplicateGroupDetailResult {

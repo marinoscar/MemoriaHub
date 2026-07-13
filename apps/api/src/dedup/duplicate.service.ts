@@ -18,6 +18,7 @@ import { hammingDistance } from '../burst/burst-detection.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { DuplicateQueryDto } from './dto/duplicate-query.dto';
 import { ResolveDuplicateDto } from './dto/resolve-duplicate.dto';
+import { BulkResolveDuplicateDto } from './dto/bulk-resolve-duplicate.dto';
 
 type DuplicateKind = 'exact_variant' | 'edited' | 'similar';
 
@@ -121,9 +122,11 @@ export class DuplicateService {
    *     (crop, filter, recompress) between otherwise-matching photos.
    *   - 'similar': anything else that met the matching threshold.
    */
-  private async computeGroupKind(members: GroupMemberRow[]): Promise<DuplicateKind> {
+  private async computeGroupKind(
+    members: GroupMemberRow[],
+  ): Promise<{ kind: DuplicateKind; maxSim: number | null; minHamming: number | null }> {
     const memberIds = members.map((m) => m.id);
-    if (memberIds.length < 2) return 'similar';
+    if (memberIds.length < 2) return { kind: 'similar', maxSim: null, minHamming: null };
 
     const pairwiseRows = await this.prisma.$queryRaw<{ sim: unknown }[]>`
       SELECT (1 - (a.embedding <=> b.embedding)) AS sim
@@ -143,7 +146,7 @@ export class DuplicateService {
     }
 
     if (maxSim !== null && maxSim >= 0.99 && minHamming !== null && minHamming <= 2) {
-      return 'exact_variant';
+      return { kind: 'exact_variant', maxSim, minHamming };
     }
 
     const uniqueDims = new Set(
@@ -151,10 +154,10 @@ export class DuplicateService {
     );
     const hashesDiverge = minHamming !== null && minHamming > 2;
     if (uniqueDims.size > 1 || hashesDiverge) {
-      return 'edited';
+      return { kind: 'edited', maxSim, minHamming };
     }
 
-    return 'similar';
+    return { kind: 'similar', maxSim, minHamming };
   }
 
   /**
@@ -243,7 +246,7 @@ export class DuplicateService {
 
     const enriched = await Promise.all(
       groups.map(async (group) => {
-        const kindClass = await this.computeGroupKind(group.items);
+        const { kind: kindClass, maxSim } = await this.computeGroupKind(group.items);
         const { bestId } = this.computeBestCopyScores(group.items);
 
         if (bestId && bestId !== group.suggestedBestItemId) {
@@ -255,6 +258,7 @@ export class DuplicateService {
         return {
           ...group,
           kind: kindClass,
+          confidence: maxSim ?? 0,
           suggestedBestItemId: bestId ?? group.suggestedBestItemId,
         };
       }),
@@ -275,6 +279,7 @@ export class DuplicateService {
           id: group.id,
           status: group.status,
           kind: group.kind,
+          confidence: group.confidence,
           mediaCount: group.mediaCount,
           suggestedBestItemId: group.suggestedBestItemId,
           capturedAt: group.capturedAt,
@@ -318,7 +323,7 @@ export class DuplicateService {
 
     await this.membership.assertCircleAccess(userId, group.circleId, perms, CircleRole.viewer);
 
-    const kind = await this.computeGroupKind(group.items);
+    const { kind, maxSim } = await this.computeGroupKind(group.items);
     const { scores, bestId } = this.computeBestCopyScores(group.items);
     const suggestedBestItemId = bestId ?? group.suggestedBestItemId;
 
@@ -367,6 +372,7 @@ export class DuplicateService {
         circleId: group.circleId,
         status: group.status,
         kind,
+        confidence: maxSim ?? 0,
         mediaCount: group.mediaCount,
         capturedAt: group.capturedAt,
         suggestedBestItemId,
@@ -421,30 +427,7 @@ export class DuplicateService {
 
     const removeIds = group.items.map((i) => i.id).filter((id) => !dto.keepIds.includes(id));
 
-    await this.prisma.$transaction([
-      this.prisma.mediaItem.updateMany({
-        where: { id: { in: removeIds } },
-        data: dto.action === 'trash' ? { deletedAt: new Date() } : { archivedAt: new Date() },
-      }),
-      this.prisma.duplicateGroup.update({
-        where: { id },
-        data: {
-          status: DuplicateGroupStatus.resolved,
-          resolvedById: userId,
-          resolvedAt: new Date(),
-        },
-      }),
-    ]);
-
-    await this.createAuditEvent(userId, 'duplicate_group:resolved', id, {
-      keepIds: dto.keepIds,
-      action: dto.action,
-      removedCount: removeIds.length,
-    });
-
-    this.logger.log(
-      `Duplicate group ${id} resolved by user ${userId}: kept=${dto.keepIds.length}, ${dto.action}=${removeIds.length}`,
-    );
+    await this.resolveOneDuplicateGroup(group, dto.keepIds, removeIds, dto.action, userId);
 
     return {
       data: {
@@ -452,6 +435,135 @@ export class DuplicateService {
         kept: dto.keepIds.length,
         action: dto.action,
         groupStatus: 'resolved',
+      },
+    };
+  }
+
+  /**
+   * Applies the side-effects of resolving a single duplicate group. Assumes all
+   * inputs are already validated (group is pending, keep/remove IDs belong to
+   * the group, trash-permission checked). Each call runs its own transaction so
+   * a later failure never rolls back earlier successes in a bulk operation.
+   * Unlike burst resolution, there is no dedup re-enqueue step.
+   */
+  private async resolveOneDuplicateGroup(
+    group: { id: string; circleId: string },
+    keepIds: string[],
+    removeIds: string[],
+    action: 'archive' | 'trash',
+    userId: string,
+  ): Promise<void> {
+    await this.prisma.$transaction([
+      this.prisma.mediaItem.updateMany({
+        where: { id: { in: removeIds } },
+        data: action === 'trash' ? { deletedAt: new Date() } : { archivedAt: new Date() },
+      }),
+      this.prisma.duplicateGroup.update({
+        where: { id: group.id },
+        data: {
+          status: DuplicateGroupStatus.resolved,
+          resolvedById: userId,
+          resolvedAt: new Date(),
+          resolutionAction: action,
+          keptCount: keepIds.length,
+          removedCount: removeIds.length,
+        },
+      }),
+    ]);
+
+    await this.createAuditEvent(userId, 'duplicate_group:resolved', group.id, {
+      keepIds,
+      action,
+      removedCount: removeIds.length,
+    });
+
+    this.logger.log(
+      `Duplicate group ${group.id} resolved by user ${userId}: kept=${keepIds.length}, ${action}=${removeIds.length}`,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bulk resolve duplicate groups (auto-keep suggestedBest)
+  // ---------------------------------------------------------------------------
+
+  async bulkResolveDuplicateGroups(dto: BulkResolveDuplicateDto, userId: string, perms: string[]) {
+    await this.membership.assertCircleAccess(userId, dto.circleId, perms, CircleRole.collaborator);
+
+    if (dto.action === 'trash' && !perms.includes(PERMISSIONS.MEDIA_DELETE)) {
+      throw new BadRequestException('media:delete permission is required to trash duplicate items');
+    }
+
+    const dedupedIds = [...new Set(dto.ids)];
+
+    const groups = await this.prisma.duplicateGroup.findMany({
+      where: { id: { in: dedupedIds } },
+      select: {
+        id: true,
+        circleId: true,
+        status: true,
+        suggestedBestItemId: true,
+        items: {
+          where: { deletedAt: null, archivedAt: null },
+          select: { id: true },
+        },
+      },
+    });
+
+    // Cross-circle protection: every requested ID must exist and belong to the
+    // caller's circle, or the whole request is rejected.
+    if (
+      groups.length !== dedupedIds.length ||
+      groups.some((g) => g.circleId !== dto.circleId)
+    ) {
+      throw new BadRequestException(
+        'One or more group IDs were not found or belong to a different circle',
+      );
+    }
+
+    let skipped = 0;
+    let errors = 0;
+    let resolvedGroups = 0;
+    let keptCount = 0;
+    let removedCount = 0;
+
+    for (const group of groups) {
+      const liveMemberIds = group.items.map((i) => i.id);
+
+      // A group is skipped when it is not pending, has no suggested-best item,
+      // or its suggested-best item is no longer a live member.
+      if (
+        group.status !== DuplicateGroupStatus.pending ||
+        !group.suggestedBestItemId ||
+        !liveMemberIds.includes(group.suggestedBestItemId)
+      ) {
+        skipped++;
+        continue;
+      }
+
+      const keepIds = [group.suggestedBestItemId];
+      const removeIds = liveMemberIds.filter((id) => id !== group.suggestedBestItemId);
+
+      try {
+        await this.resolveOneDuplicateGroup(group, keepIds, removeIds, dto.action, userId);
+        resolvedGroups++;
+        keptCount += keepIds.length;
+        removedCount += removeIds.length;
+      } catch (err) {
+        this.logger.warn(
+          `Failed to resolve duplicate group ${group.id} in bulk operation: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        errors++;
+      }
+    }
+
+    return {
+      data: {
+        resolvedGroups,
+        keptCount,
+        removedCount,
+        action: dto.action,
+        skipped,
+        errors,
       },
     };
   }

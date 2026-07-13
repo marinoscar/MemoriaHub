@@ -294,7 +294,7 @@ export class BurstDetectionService {
     }
 
     // Step 6: Recompute scores for all group members
-    await this.recomputeGroupScores(targetGroupId, item.circleId);
+    await this.recomputeGroupScores(targetGroupId, item.circleId, hashDistance, timeGapSeconds);
 
     // Step 7: Burst wins over duplicate detection. Any member that dedup
     // prematurely placed in a duplicate group (upload ordering race) must be
@@ -317,11 +317,23 @@ export class BurstDetectionService {
     }
   }
 
-  private async recomputeGroupScores(groupId: string, circleId: string): Promise<void> {
+  private async recomputeGroupScores(
+    groupId: string,
+    circleId: string,
+    hashDistanceThreshold: number,
+    timeGapThresholdSeconds: number,
+  ): Promise<void> {
     // Load all current group members
     const members = await this.prisma.mediaItem.findMany({
       where: { burstGroupId: groupId, deletedAt: null },
-      select: { id: true, sharpnessScore: true, width: true, height: true, capturedAt: true },
+      select: {
+        id: true,
+        sharpnessScore: true,
+        width: true,
+        height: true,
+        capturedAt: true,
+        perceptualHash: true,
+      },
     });
 
     if (members.length === 0) return;
@@ -377,6 +389,21 @@ export class BurstDetectionService {
       .filter((d): d is Date => d !== null)
       .reduce<Date | null>((min, d) => (!min || d < min ? d : min), null);
 
+    // Group cohesion confidence ∈ [0, 1] — how visually/temporally tight the
+    // burst group is. Blends two cheaply-available signals computed from data
+    // already loaded above (no extra queries):
+    //   hashCohesion = 1 - (maxPairwiseHamming / hashDistanceThreshold)
+    //     — tighter perceptual hashes ⇒ higher (members that are near-identical).
+    //   timeCohesion = 1 - (avgAdjacentGapSeconds / timeGapThresholdSeconds)
+    //     — smaller capture-time gaps between consecutive frames ⇒ higher.
+    // confidence = mean of whichever signals are available; both clamped to
+    // [0, 1]. Legacy groups (created before this field existed) keep null.
+    const confidence = this.computeGroupConfidence(
+      members,
+      hashDistanceThreshold,
+      timeGapThresholdSeconds,
+    );
+
     // Write burst scores to all members and update the group
     await this.prisma.$transaction([
       ...members.map((m, i) =>
@@ -391,6 +418,7 @@ export class BurstDetectionService {
           suggestedBestItemId,
           mediaCount: members.length,
           ...(earliestCapturedAt ? { capturedAt: earliestCapturedAt } : {}),
+          ...(confidence !== null ? { confidence } : {}),
         },
       }),
     ]);
@@ -398,6 +426,65 @@ export class BurstDetectionService {
     this.logger.debug(
       `Recomputed scores for burst group ${groupId}: ${members.length} members, best=${suggestedBestItemId}`,
     );
+  }
+
+  /**
+   * Visual + temporal cohesion score for a burst group, in [0, 1].
+   *
+   * Two independently-optional signals, each derived from member data already
+   * loaded by recomputeGroupScores (no extra DB work):
+   *   - hashCohesion: 1 - (maxPairwiseHamming / hashDistanceThreshold), using the
+   *     largest Hamming distance among all member perceptual-hash pairs. Requires
+   *     >= 2 members with a non-null perceptualHash.
+   *   - timeCohesion: 1 - (avgAdjacentGapSeconds / timeGapThresholdSeconds), using
+   *     the mean gap between chronologically-adjacent members. Requires >= 2
+   *     members with a non-null capturedAt.
+   * Both are clamped to [0, 1]; the result is the mean of whichever are
+   * available. Returns null when neither can be computed (e.g. a legacy group
+   * with <2 hashed members and no capture times) so the column stays null.
+   */
+  private computeGroupConfidence(
+    members: { perceptualHash: string | null; capturedAt: Date | null }[],
+    hashDistanceThreshold: number,
+    timeGapThresholdSeconds: number,
+  ): number | null {
+    const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
+
+    // Hash cohesion: worst (largest) pairwise Hamming distance among hashed members.
+    let hashCohesion: number | null = null;
+    const hashes = members
+      .map((m) => m.perceptualHash)
+      .filter((h): h is string => h !== null);
+    if (hashes.length >= 2 && hashDistanceThreshold > 0) {
+      let maxPairwiseHamming = 0;
+      for (let i = 0; i < hashes.length; i++) {
+        for (let j = i + 1; j < hashes.length; j++) {
+          const dist = hammingDistance(BigInt(hashes[i]), BigInt(hashes[j]));
+          if (dist > maxPairwiseHamming) maxPairwiseHamming = dist;
+        }
+      }
+      hashCohesion = clamp01(1 - maxPairwiseHamming / hashDistanceThreshold);
+    }
+
+    // Time cohesion: mean gap between chronologically-adjacent members.
+    let timeCohesion: number | null = null;
+    const times = members
+      .map((m) => m.capturedAt)
+      .filter((d): d is Date => d !== null)
+      .map((d) => d.getTime())
+      .sort((a, b) => a - b);
+    if (times.length >= 2 && timeGapThresholdSeconds > 0) {
+      let totalGapSeconds = 0;
+      for (let i = 1; i < times.length; i++) {
+        totalGapSeconds += (times[i] - times[i - 1]) / 1000;
+      }
+      const avgAdjacentGapSeconds = totalGapSeconds / (times.length - 1);
+      timeCohesion = clamp01(1 - avgAdjacentGapSeconds / timeGapThresholdSeconds);
+    }
+
+    const signals = [hashCohesion, timeCohesion].filter((s): s is number => s !== null);
+    if (signals.length === 0) return null;
+    return signals.reduce((sum, s) => sum + s, 0) / signals.length;
   }
 
   async processMediaItemRerun(mediaItemId: string): Promise<{ jobId: string; status: string }> {

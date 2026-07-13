@@ -97,6 +97,21 @@ describe('DuplicateDetectionService', () => {
     (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
     (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
 
+    // linkAndGroup wraps its group-membership writes in `this.prisma.$transaction(async
+    // (tx) => {...})`. jest-mock-extended's mockDeep does NOT invoke a callback passed to
+    // an unconfigured mocked function, so without this default the transaction body (and
+    // everything inside it: the FOR-UPDATE burst-precedence probe, duplicateGroup.create/
+    // update, mediaItem.update/updateMany, recomputeGroupMeta) never runs. Reusing
+    // `mockPrisma` itself as the `tx` client is safe (same interface shape) and keeps every
+    // existing `expect(mockPrisma.duplicateGroup.create).toHaveBeenCalledWith(...)`-style
+    // assertion working unchanged, since `tx.duplicateGroup.create === mockPrisma.duplicateGroup.create`.
+    (mockPrisma.$transaction as jest.Mock).mockImplementation(async (arg: any) => {
+      if (typeof arg === 'function') {
+        return arg(mockPrisma);
+      }
+      return arg;
+    });
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DuplicateDetectionService,
@@ -525,6 +540,108 @@ describe('DuplicateDetectionService', () => {
 
       expect(mockPrisma.duplicateGroup.delete).toHaveBeenCalledWith({ where: { id: existingGroupId } });
       expect(mockPrisma.duplicateGroup.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Write-time burst precedence (TOCTOU guard)
+  //
+  // linkAndGroup wraps its group-membership writes in a transaction that
+  // re-reads the subject's live burst state under `SELECT ... FOR UPDATE`
+  // immediately before writing — closing the race where burst detection
+  // assigns the item to a PENDING burst group AFTER loadEligibleItem's
+  // eligibility check ran but BEFORE the duplicate-group write commits.
+  //
+  // In every case here the subject is matched against 'media-a' via the KNN
+  // tier (mirrors the "creates a new group" union-find fixture); the two
+  // `$queryRaw` calls inside `linkAndGroup` are, in order: (1) the Tier-1 KNN
+  // candidate query, (2) the FOR-UPDATE burst-precedence probe — so the
+  // second `mockResolvedValueOnce` queued below always targets the probe.
+  // -------------------------------------------------------------------------
+
+  describe('write-time burst precedence (TOCTOU guard)', () => {
+    function setupMatchedCandidateBase() {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeSubjectItem());
+      (mockPrisma.mediaItem.findMany as jest.Mock)
+        .mockResolvedValueOnce([]) // hash candidates
+        .mockResolvedValueOnce([
+          { id: 'media-a', duplicateGroupId: null, capturedAt: new Date('2026-06-15T10:00:00Z') },
+        ]) // linkedCandidates
+        .mockResolvedValueOnce([
+          { id: SUBJECT_ID, capturedAt: new Date('2026-06-15T14:32:00Z') },
+          { id: 'media-a', capturedAt: new Date('2026-06-15T10:00:00Z') },
+        ]); // recomputeGroupMeta (only reached when the write proceeds)
+      (mockPrisma.duplicateGroup.create as jest.Mock).mockResolvedValue({ id: 'group-new' });
+      (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+      (mockPrisma.duplicateGroup.update as jest.Mock).mockResolvedValue({});
+    }
+
+    it('skips the duplicate-group write when the FOR-UPDATE probe finds the item became a PENDING burst member during the job', async () => {
+      setupMatchedCandidateBase();
+      (mockPrisma.$queryRaw as jest.Mock)
+        .mockResolvedValueOnce([{ id: 'media-a', sim: 0.99 }]) // Tier-1 KNN match
+        .mockResolvedValueOnce([{ burst_group_id: 'burst-1', burst_status: 'pending' }]); // FOR-UPDATE probe
+
+      await expect(service.processMediaItem(SUBJECT_ID)).resolves.toBeUndefined();
+
+      expect(mockPrisma.duplicateGroup.create).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaItem.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.duplicateGroup.update).not.toHaveBeenCalled();
+    });
+
+    it('proceeds with the write when the probe finds a RESOLVED (non-pending) burst group', async () => {
+      setupMatchedCandidateBase();
+      (mockPrisma.$queryRaw as jest.Mock)
+        .mockResolvedValueOnce([{ id: 'media-a', sim: 0.99 }]) // Tier-1 KNN match
+        .mockResolvedValueOnce([{ burst_group_id: 'burst-1', burst_status: 'resolved' }]); // FOR-UPDATE probe
+
+      await service.processMediaItem(SUBJECT_ID);
+
+      expect(mockPrisma.duplicateGroup.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ mediaCount: 2 }) }),
+      );
+    });
+
+    it('proceeds with the write when the probe finds a DISMISSED (non-pending) burst group', async () => {
+      setupMatchedCandidateBase();
+      (mockPrisma.$queryRaw as jest.Mock)
+        .mockResolvedValueOnce([{ id: 'media-a', sim: 0.99 }]) // Tier-1 KNN match
+        .mockResolvedValueOnce([{ burst_group_id: 'burst-1', burst_status: 'dismissed' }]); // FOR-UPDATE probe
+
+      await service.processMediaItem(SUBJECT_ID);
+
+      expect(mockPrisma.duplicateGroup.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ mediaCount: 2 }) }),
+      );
+    });
+
+    it('proceeds with the write when the probe finds no burst membership at all (burstGroupId null) — the ordinary no-conflict path', async () => {
+      setupMatchedCandidateBase();
+      // Only the KNN result is queued; the probe naturally falls through to
+      // the base `.mockResolvedValue([])` default set in the outer
+      // `beforeEach`, so `lockRows[0]` is `undefined` — the same "no
+      // conflict" shape as a genuinely non-burst-member subject.
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ id: 'media-a', sim: 0.99 }]);
+
+      await service.processMediaItem(SUBJECT_ID);
+
+      expect(mockPrisma.duplicateGroup.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ circleId: CIRCLE_ID, mediaCount: 2 }),
+        }),
+      );
+      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: expect.arrayContaining([SUBJECT_ID, 'media-a']) } },
+          data: { duplicateGroupId: 'group-new' },
+        }),
+      );
+      expect(mockPrisma.duplicateGroup.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'group-new' },
+          data: expect.objectContaining({ mediaCount: 2 }),
+        }),
+      );
     });
   });
 

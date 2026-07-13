@@ -371,6 +371,16 @@ export default function DuplicateGroupPage() {
               Duplicate Group
             </Typography>
             <Chip label={KIND_LABELS[group.kind]} size="small" color={KIND_COLORS[group.kind]} />
+            {group.confidence != null && (
+              <Chip
+                label={`${Math.round(group.confidence * 100)}% match`}
+                size="small"
+                variant="outlined"
+                color={
+                  group.confidence >= 0.7 ? 'success' : group.confidence >= 0.4 ? 'warning' : 'error'
+                }
+              />
+            )}
           </Box>
           {capturedDate && (
             <Typography variant="body2" color="text.secondary">

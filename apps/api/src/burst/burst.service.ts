@@ -16,9 +16,11 @@ import {
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { FEATURE_KEYS } from '../common/types/settings.types';
+import { PERMISSIONS } from '../common/constants/roles.constants';
 import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
 import { BurstQueryDto } from './dto/burst-query.dto';
 import { ResolveBurstDto } from './dto/resolve-burst.dto';
+import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';
 
 @Injectable()
 export class BurstService {
@@ -137,6 +139,7 @@ export class BurstService {
           status: true,
           mediaCount: true,
           capturedAt: true,
+          confidence: true,
           suggestedBestItemId: true,
           createdAt: true,
           suggestedBestItem: {
@@ -169,6 +172,7 @@ export class BurstService {
           status: group.status,
           mediaCount: group.mediaCount,
           capturedAt: group.capturedAt,
+          confidence: group.confidence,
           suggestedBestItemId: group.suggestedBestItemId,
           suggestedBestThumbnailUrl,
           coverThumbnailUrls: coverThumbnailUrls.filter((url): url is string => url !== null),
@@ -196,6 +200,7 @@ export class BurstService {
         status: true,
         mediaCount: true,
         capturedAt: true,
+        confidence: true,
         suggestedBestItemId: true,
         resolvedById: true,
         resolvedAt: true,
@@ -242,6 +247,7 @@ export class BurstService {
         status: group.status,
         mediaCount: group.mediaCount,
         capturedAt: group.capturedAt,
+        confidence: group.confidence,
         suggestedBestItemId: group.suggestedBestItemId,
         resolvedById: group.resolvedById,
         resolvedAt: group.resolvedAt,
@@ -274,6 +280,10 @@ export class BurstService {
 
     await this.membership.assertCircleAccess(userId, group.circleId, perms, CircleRole.collaborator);
 
+    if (dto.action === 'trash' && !perms.includes(PERMISSIONS.MEDIA_DELETE)) {
+      throw new BadRequestException('media:delete permission is required to trash burst items');
+    }
+
     if (group.status !== BurstGroupStatus.pending) {
       throw new BadRequestException(
         `Burst group ${id} is not in pending status (current: ${group.status})`,
@@ -290,37 +300,150 @@ export class BurstService {
 
     const deleteIds = group.items.map((i) => i.id).filter((id) => !dto.keepIds.includes(id));
 
+    await this.resolveOneBurstGroup(group, dto.keepIds, deleteIds, dto.action, userId);
+
+    return {
+      data: {
+        removed: deleteIds.length,
+        kept: dto.keepIds.length,
+        action: dto.action,
+        groupStatus: 'resolved',
+      },
+    };
+  }
+
+  /**
+   * Applies the side-effects of resolving a single burst group. Assumes all
+   * inputs are already validated (group is pending, keep/remove IDs belong to
+   * the group, trash-permission checked). Each call runs its own transaction so
+   * a later failure never rolls back earlier successes in a bulk operation.
+   */
+  private async resolveOneBurstGroup(
+    group: { id: string; circleId: string },
+    keepIds: string[],
+    removeIds: string[],
+    action: 'archive' | 'trash',
+    userId: string,
+  ): Promise<void> {
     await this.prisma.$transaction([
-      // Soft-delete all non-kept members
+      // Apply the chosen action to all non-kept members: trash (soft-delete via
+      // deletedAt) or archive (archivedAt).
       this.prisma.mediaItem.updateMany({
-        where: { id: { in: deleteIds } },
-        data: { deletedAt: new Date() },
+        where: { id: { in: removeIds } },
+        data: action === 'trash' ? { deletedAt: new Date() } : { archivedAt: new Date() },
       }),
-      // Mark group resolved
+      // Mark group resolved and record the resolution outcome
       this.prisma.burstGroup.update({
-        where: { id },
+        where: { id: group.id },
         data: {
           status: BurstGroupStatus.resolved,
           resolvedById: userId,
           resolvedAt: new Date(),
+          resolutionAction: action,
+          keptCount: keepIds.length,
+          removedCount: removeIds.length,
         },
       }),
     ]);
 
+    await this.createAuditEvent(userId, 'burst_group:resolved', group.id, {
+      keepIds,
+      action,
+      removedCount: removeIds.length,
+    });
+
     this.logger.log(
-      `Burst group ${id} resolved by user ${userId}: kept=${dto.keepIds.length}, deleted=${deleteIds.length}`,
+      `Burst group ${group.id} resolved by user ${userId}: kept=${keepIds.length}, ${action}=${removeIds.length}`,
     );
 
     // Surviving (kept) items were excluded from dedup matching while this
     // burst group was pending — now that it's resolved, let them compete for
     // duplicate matches again.
-    await this.reenqueueDuplicateDetection(group.circleId, dto.keepIds);
+    await this.reenqueueDuplicateDetection(group.circleId, keepIds);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bulk resolve burst groups (auto-keep suggestedBest)
+  // ---------------------------------------------------------------------------
+
+  async bulkResolveBurstGroups(dto: BulkResolveBurstDto, userId: string, perms: string[]) {
+    await this.membership.assertCircleAccess(userId, dto.circleId, perms, CircleRole.collaborator);
+
+    if (dto.action === 'trash' && !perms.includes(PERMISSIONS.MEDIA_DELETE)) {
+      throw new BadRequestException('media:delete permission is required to trash burst items');
+    }
+
+    const dedupedIds = [...new Set(dto.ids)];
+
+    const groups = await this.prisma.burstGroup.findMany({
+      where: { id: { in: dedupedIds } },
+      select: {
+        id: true,
+        circleId: true,
+        status: true,
+        suggestedBestItemId: true,
+        items: {
+          where: { deletedAt: null },
+          select: { id: true },
+        },
+      },
+    });
+
+    // Cross-circle protection: every requested ID must exist and belong to the
+    // caller's circle, or the whole request is rejected.
+    if (
+      groups.length !== dedupedIds.length ||
+      groups.some((g) => g.circleId !== dto.circleId)
+    ) {
+      throw new BadRequestException(
+        'One or more group IDs were not found or belong to a different circle',
+      );
+    }
+
+    let skipped = 0;
+    let errors = 0;
+    let resolvedGroups = 0;
+    let keptCount = 0;
+    let removedCount = 0;
+
+    for (const group of groups) {
+      const liveMemberIds = group.items.map((i) => i.id);
+
+      // A group is skipped when it is not pending, has no suggested-best item,
+      // or its suggested-best item is no longer a live member.
+      if (
+        group.status !== BurstGroupStatus.pending ||
+        !group.suggestedBestItemId ||
+        !liveMemberIds.includes(group.suggestedBestItemId)
+      ) {
+        skipped++;
+        continue;
+      }
+
+      const keepIds = [group.suggestedBestItemId];
+      const removeIds = liveMemberIds.filter((id) => id !== group.suggestedBestItemId);
+
+      try {
+        await this.resolveOneBurstGroup(group, keepIds, removeIds, dto.action, userId);
+        resolvedGroups++;
+        keptCount += keepIds.length;
+        removedCount += removeIds.length;
+      } catch (err) {
+        this.logger.warn(
+          `Failed to resolve burst group ${group.id} in bulk operation: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        errors++;
+      }
+    }
 
     return {
       data: {
-        deleted: deleteIds.length,
-        kept: dto.keepIds.length,
-        groupStatus: 'resolved',
+        resolvedGroups,
+        keptCount,
+        removedCount,
+        action: dto.action,
+        skipped,
+        errors,
       },
     };
   }
@@ -519,5 +642,26 @@ export class BurstService {
     );
 
     return { enqueued: totalEnqueued, circles: circleCount, evictedDuplicateOverlaps };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Audit
+  // ---------------------------------------------------------------------------
+
+  private async createAuditEvent(
+    actorUserId: string,
+    action: string,
+    targetId: string,
+    meta: Record<string, unknown>,
+  ): Promise<void> {
+    await this.prisma.auditEvent.create({
+      data: {
+        actorUserId,
+        action,
+        targetType: 'burst_group',
+        targetId,
+        meta: meta as Prisma.InputJsonValue,
+      },
+    });
   }
 }

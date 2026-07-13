@@ -192,7 +192,10 @@ export class MediaEnrichmentService {
           mediaItemId: item.id,
           circleId: item.circleId,
           reason: JobReason.upload,
-          priority: 10,
+          // burst must run before dedup so it can claim items first (burst
+          // precedence). Claim order is (priority ASC, created_at ASC), so a
+          // lower number is claimed earlier — keep this below duplicate_detection.
+          priority: 5,
         });
 
         enqueued.push(`burst_detection(job=${job.id})`);
