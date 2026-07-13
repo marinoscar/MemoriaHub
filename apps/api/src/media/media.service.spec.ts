@@ -20,6 +20,7 @@ import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
+import { mediaThumbnailsQuerySchema } from './dto/media-thumbnails-query.dto';
 
 // ---------------------------------------------------------------------------
 // AND-composition query helpers
@@ -1811,7 +1812,6 @@ describe('MediaService', () => {
         takenLng: -84.0907,
         capturedAt: new Date('2024-06-15'),
         geoLocality: 'La Fortuna',
-        metadata: { thumbnailStorageKey: 'thumbs/abc.jpg' },
         ...overrides,
       };
     }
@@ -1833,6 +1833,21 @@ describe('MediaService', () => {
       await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
       expect(call[0].where).toMatchObject({ takenLng: { not: null } });
+    });
+
+    it('takenLat/takenLng are exactly {not:null} when no bbox is supplied', async () => {
+      await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where.takenLat).toEqual({ not: null });
+      expect(call[0].where.takenLng).toEqual({ not: null });
+    });
+
+    it('merges bbox range constraints into takenLat/takenLng when bbox is supplied', async () => {
+      const bbox = { minLat: 9, minLng: -85, maxLat: 10, maxLng: -84 };
+      await service.listLocations({ circleId: CIRCLE_ID, bbox } as any, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where.takenLat).toEqual({ not: null, gte: 9, lte: 10 });
+      expect(call[0].where.takenLng).toEqual({ not: null, gte: -85, lte: -84 });
     });
 
     it('always includes deletedAt:null in the where clause', async () => {
@@ -1947,7 +1962,7 @@ describe('MediaService', () => {
 
     // ----- Select: minimal fields -----
 
-    it('selects only the 6 required fields (id, takenLat, takenLng, capturedAt, geoLocality, metadata)', async () => {
+    it('selects only the 5 required fields (id, takenLat, takenLng, capturedAt, geoLocality) — no metadata', async () => {
       await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
       expect(call[0].select).toEqual({
@@ -1956,16 +1971,14 @@ describe('MediaService', () => {
         takenLng: true,
         capturedAt: true,
         geoLocality: true,
-        metadata: true,
       });
     });
 
-    // ----- Return shape and thumbnail signing -----
+    // ----- Return shape: lightweight, no signing -----
 
-    it('returns the 6-field MediaLocation shape with a signed thumbnailUrl', async () => {
+    it('returns the 5-field MediaLocation shape (no thumbnailUrl)', async () => {
       const item = makeGeoItem();
       mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
-      mockStorageProvider.getSignedDownloadUrl.mockResolvedValue('https://cdn.example.com/thumb.jpg');
 
       const results = await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
 
@@ -1976,47 +1989,17 @@ describe('MediaService', () => {
         takenLng: item.takenLng,
         capturedAt: item.capturedAt,
         geoLocality: item.geoLocality,
-        thumbnailUrl: 'https://cdn.example.com/thumb.jpg',
       });
     });
 
-    it('does NOT include metadata in the returned objects', async () => {
+    it('does NOT call getSignedDownloadUrl (no per-row signing)', async () => {
       const item = makeGeoItem();
-      mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
-
-      const results = await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
-
-      expect(results[0]).not.toHaveProperty('metadata');
-    });
-
-    it('calls getSignedDownloadUrl with the thumbnailStorageKey from metadata', async () => {
-      const item = makeGeoItem({ metadata: { thumbnailStorageKey: 'thumbs/xyz.jpg' } });
       mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
 
       await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
 
-      expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledWith('thumbs/xyz.jpg');
-    });
-
-    it('returns thumbnailUrl: null when metadata has no thumbnailStorageKey', async () => {
-      const item = makeGeoItem({ metadata: null });
-      mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
-
-      const results = await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
-
-      expect(results[0].thumbnailUrl).toBeNull();
       expect(mockStorageProvider.getSignedDownloadUrl).not.toHaveBeenCalled();
-    });
-
-    it('returns thumbnailUrl: null when getSignedDownloadUrl throws (signing failure)', async () => {
-      const item = makeGeoItem({ metadata: { thumbnailStorageKey: 'thumbs/broken.jpg' } });
-      mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
-      mockStorageProvider.getSignedDownloadUrl.mockRejectedValue(new Error('S3 error'));
-
-      const results = await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
-
-      // Signing failure is swallowed; thumbnailUrl falls back to null.
-      expect(results[0].thumbnailUrl).toBeNull();
+      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
     });
 
     it('returns an empty array when no geotagged items exist', async () => {
@@ -2024,20 +2007,379 @@ describe('MediaService', () => {
       const results = await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
       expect(results).toEqual([]);
     });
+  });
 
-    it('signs multiple thumbnails in parallel (all items get a URL)', async () => {
-      const items = [
-        makeGeoItem({ id: 'a', metadata: { thumbnailStorageKey: 'thumbs/a.jpg' } }),
-        makeGeoItem({ id: 'b', metadata: { thumbnailStorageKey: 'thumbs/b.jpg' } }),
-        makeGeoItem({ id: 'c', metadata: { thumbnailStorageKey: 'thumbs/c.jpg' } }),
-      ];
-      mockPrisma.mediaItem.findMany.mockResolvedValue(items as any);
-      mockStorageProvider.getSignedDownloadUrl.mockResolvedValue('https://cdn.example.com/signed');
+  // -------------------------------------------------------------------------
+  // aggregateLocations
+  // -------------------------------------------------------------------------
 
-      const results = await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
+  describe('aggregateLocations', () => {
+    const baseQuery = { circleId: CIRCLE_ID, precision: 3 } as any;
 
-      expect(results).toHaveLength(3);
-      expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledTimes(3);
+    function mockRawRow(overrides: Partial<any> = {}) {
+      return {
+        gy: 9,
+        gx: -84,
+        n: 3,
+        lat: '9.928',
+        lng: '-84.09',
+        sample_id: randomUUID(),
+        ...overrides,
+      };
+    }
+
+    beforeEach(() => {
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+    });
+
+    it('calls assertCircleAccess with (userId, circleId, userPermissions, "viewer") before querying', async () => {
+      await service.aggregateLocations(baseQuery, 'user-1', ownPerms);
+      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+        'user-1',
+        CIRCLE_ID,
+        ownPerms,
+        'viewer',
+      );
+    });
+
+    it('calls $queryRaw exactly once', async () => {
+      await service.aggregateLocations(baseQuery, 'user-1', ownPerms);
+      expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it('maps a raw row into { lat, lng, count, sampleId } with lat/lng coerced to JS numbers', async () => {
+      const row = mockRawRow();
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([row]);
+
+      const results = await service.aggregateLocations(baseQuery, 'user-1', ownPerms);
+
+      expect(results).toEqual([{ lat: 9.928, lng: -84.09, count: 3, sampleId: row.sample_id }]);
+      expect(typeof results[0].lat).toBe('number');
+      expect(typeof results[0].lng).toBe('number');
+    });
+
+    it('returns [] when the raw query returns []', async () => {
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+      const results = await service.aggregateLocations(baseQuery, 'user-1', ownPerms);
+      expect(results).toEqual([]);
+    });
+
+    it('does NOT include optional filter fragments when no filters are given', async () => {
+      await service.aggregateLocations(baseQuery, 'user-1', ownPerms);
+      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+
+      expect(sqlObj.text).not.toContain('AND captured_at >=');
+      expect(sqlObj.text).not.toContain('AND captured_at <=');
+      expect(sqlObj.text).not.toContain('AND type::text =');
+      expect(sqlObj.text).not.toContain('AND taken_lat BETWEEN');
+      // Only circleId is interpolated when no optional filter is supplied.
+      expect(sqlObj.values).toEqual([CIRCLE_ID]);
+    });
+
+    it('interpolates capturedAtFrom into the query when supplied', async () => {
+      const from = new Date('2024-01-01');
+      await service.aggregateLocations({ ...baseQuery, capturedAtFrom: from }, 'user-1', ownPerms);
+      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+
+      expect(sqlObj.text).toContain('AND captured_at >=');
+      expect(sqlObj.values).toContain(from);
+    });
+
+    it('interpolates capturedAtTo into the query when supplied', async () => {
+      const to = new Date('2024-12-31');
+      await service.aggregateLocations({ ...baseQuery, capturedAtTo: to }, 'user-1', ownPerms);
+      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+
+      expect(sqlObj.text).toContain('AND captured_at <=');
+      expect(sqlObj.values).toContain(to);
+    });
+
+    it('interpolates type into the query when supplied', async () => {
+      await service.aggregateLocations({ ...baseQuery, type: 'video' }, 'user-1', ownPerms);
+      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+
+      expect(sqlObj.text).toContain('AND type::text =');
+      expect(sqlObj.values).toContain('video');
+    });
+
+    it('interpolates all four bbox bounds into the query when supplied', async () => {
+      const bbox = { minLat: 9, minLng: -85, maxLat: 10, maxLng: -84 };
+      await service.aggregateLocations({ ...baseQuery, bbox }, 'user-1', ownPerms);
+      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+
+      expect(sqlObj.text).toContain('AND taken_lat BETWEEN');
+      expect(sqlObj.values).toEqual(
+        expect.arrayContaining([bbox.minLat, bbox.maxLat, bbox.minLng, bbox.maxLng]),
+      );
+    });
+
+    it('embeds precision as a raw numeric literal, never as a bound parameter', async () => {
+      await service.aggregateLocations({ ...baseQuery, precision: 3 }, 'user-1', ownPerms);
+      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+
+      expect(sqlObj.text).toContain('round(taken_lat::numeric, 3)');
+      expect(sqlObj.values).not.toContain(3);
+    });
+
+    it('does not sign thumbnails or issue any additional query (single $queryRaw round-trip)', async () => {
+      await service.aggregateLocations(baseQuery, 'user-1', ownPerms);
+
+      expect(mockStorageProvider.getSignedDownloadUrl).not.toHaveBeenCalled();
+      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaItem.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.storageObject.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getThumbnails
+  // -------------------------------------------------------------------------
+
+  describe('getThumbnails', () => {
+    const baseQuery = (ids: string[]) => ({ circleId: CIRCLE_ID, ids } as any);
+
+    beforeEach(() => {
+      mockPrisma.mediaItem.findMany.mockResolvedValue([]);
+      (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([]);
+    });
+
+    it('calls assertCircleAccess with (userId, circleId, userPermissions, "viewer")', async () => {
+      const id = randomUUID();
+      await service.getThumbnails(baseQuery([id]), 'user-1', ownPerms);
+      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+        'user-1',
+        CIRCLE_ID,
+        ownPerms,
+        'viewer',
+      );
+    });
+
+    it('calls mediaItem.findMany exactly once with the expected where/select', async () => {
+      const ids = [randomUUID(), randomUUID()];
+      await service.getThumbnails(baseQuery(ids), 'user-1', ownPerms);
+
+      expect(mockPrisma.mediaItem.findMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.mediaItem.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ids }, circleId: CIRCLE_ID },
+        select: { id: true, metadata: true },
+      });
+    });
+
+    it('signs a single thumbnail via the resolved provider, calling storageObject.findMany once', async () => {
+      const id = randomUUID();
+      const key = 'thumbs/a.jpg';
+      mockPrisma.mediaItem.findMany.mockResolvedValue([
+        { id, metadata: { thumbnailStorageKey: key } },
+      ] as any);
+      (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([
+        { storageKey: key, storageProvider: 's3', bucket: 'bucket-a' },
+      ]);
+      const signedUrl = jest.fn().mockResolvedValue('https://cdn.example.com/a-signed.jpg');
+      mockResolver.getProviderFor.mockResolvedValue({ getSignedDownloadUrl: signedUrl });
+
+      const results = await service.getThumbnails(baseQuery([id]), 'user-1', ownPerms);
+
+      expect(mockPrisma.storageObject.findMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.storageObject.findMany).toHaveBeenCalledWith({
+        where: { storageKey: { in: [key] } },
+        select: { storageKey: true, storageProvider: true, bucket: true },
+      });
+      expect(mockResolver.getProviderFor).toHaveBeenCalledWith('s3', 'bucket-a');
+      expect(signedUrl).toHaveBeenCalledWith(key);
+      expect(results).toEqual([{ id, thumbnailUrl: 'https://cdn.example.com/a-signed.jpg' }]);
+    });
+
+    it('omits ids with no matching MediaItem row from the result', async () => {
+      const foundId = randomUUID();
+      const missingId = randomUUID();
+      mockPrisma.mediaItem.findMany.mockResolvedValue([
+        { id: foundId, metadata: null },
+      ] as any);
+
+      const results = await service.getThumbnails(baseQuery([foundId, missingId]), 'user-1', ownPerms);
+
+      expect(results).toHaveLength(1);
+      expect(results.map((r) => r.id)).toEqual([foundId]);
+    });
+
+    it('returns thumbnailUrl: null and does not attempt signing when metadata has no thumbnailStorageKey', async () => {
+      const idNullMeta = randomUUID();
+      const idNoKey = randomUUID();
+      const idNonObject = randomUUID();
+      mockPrisma.mediaItem.findMany.mockResolvedValue([
+        { id: idNullMeta, metadata: null },
+        { id: idNoKey, metadata: { someOtherField: 'x' } },
+        { id: idNonObject, metadata: 'not-an-object' },
+      ] as any);
+
+      const results = await service.getThumbnails(
+        baseQuery([idNullMeta, idNoKey, idNonObject]),
+        'user-1',
+        ownPerms,
+      );
+
+      expect(results).toEqual([
+        { id: idNullMeta, thumbnailUrl: null },
+        { id: idNoKey, thumbnailUrl: null },
+        { id: idNonObject, thumbnailUrl: null },
+      ]);
+      expect(mockPrisma.storageObject.findMany).not.toHaveBeenCalled();
+      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockStorageProvider.getSignedDownloadUrl).not.toHaveBeenCalled();
+    });
+
+    it('dedups two items sharing the same key: one storageObject query, one getProviderFor call, both items signed', async () => {
+      const idA = randomUUID();
+      const idB = randomUUID();
+      const key = 'thumbs/shared.jpg';
+      mockPrisma.mediaItem.findMany.mockResolvedValue([
+        { id: idA, metadata: { thumbnailStorageKey: key } },
+        { id: idB, metadata: { thumbnailStorageKey: key } },
+      ] as any);
+      (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([
+        { storageKey: key, storageProvider: 's3', bucket: 'bucket-a' },
+      ]);
+      const signedUrl = jest.fn().mockResolvedValue('https://cdn.example.com/shared-signed.jpg');
+      mockResolver.getProviderFor.mockResolvedValue({ getSignedDownloadUrl: signedUrl });
+
+      const results = await service.getThumbnails(baseQuery([idA, idB]), 'user-1', ownPerms);
+
+      expect(mockPrisma.storageObject.findMany).toHaveBeenCalledTimes(1);
+      expect(mockResolver.getProviderFor).toHaveBeenCalledTimes(1);
+      expect(results).toEqual([
+        { id: idA, thumbnailUrl: 'https://cdn.example.com/shared-signed.jpg' },
+        { id: idB, thumbnailUrl: 'https://cdn.example.com/shared-signed.jpg' },
+      ]);
+    });
+
+    it('falls back to the legacy static storage provider when a key has no matching storageObject row', async () => {
+      const id = randomUUID();
+      const key = 'thumbs/orphan.jpg';
+      mockPrisma.mediaItem.findMany.mockResolvedValue([
+        { id, metadata: { thumbnailStorageKey: key } },
+      ] as any);
+      (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([]); // no matching row
+      mockStorageProvider.getSignedDownloadUrl.mockResolvedValue(
+        'https://cdn.example.com/orphan-signed.jpg',
+      );
+
+      const results = await service.getThumbnails(baseQuery([id]), 'user-1', ownPerms);
+
+      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledWith(key);
+      expect(results).toEqual([{ id, thumbnailUrl: 'https://cdn.example.com/orphan-signed.jpg' }]);
+    });
+
+    it('swallows a signing error from the resolved provider and returns thumbnailUrl: null', async () => {
+      const id = randomUUID();
+      const key = 'thumbs/broken.jpg';
+      mockPrisma.mediaItem.findMany.mockResolvedValue([
+        { id, metadata: { thumbnailStorageKey: key } },
+      ] as any);
+      (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([
+        { storageKey: key, storageProvider: 's3', bucket: 'bucket-a' },
+      ]);
+      const signedUrl = jest.fn().mockRejectedValue(new Error('S3 error'));
+      mockResolver.getProviderFor.mockResolvedValue({ getSignedDownloadUrl: signedUrl });
+
+      const results = await service.getThumbnails(baseQuery([id]), 'user-1', ownPerms);
+
+      expect(results).toEqual([{ id, thumbnailUrl: null }]);
+    });
+
+    it('swallows a signing error from the legacy fallback provider and returns thumbnailUrl: null', async () => {
+      const id = randomUUID();
+      const key = 'thumbs/orphan-broken.jpg';
+      mockPrisma.mediaItem.findMany.mockResolvedValue([
+        { id, metadata: { thumbnailStorageKey: key } },
+      ] as any);
+      (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([]);
+      mockStorageProvider.getSignedDownloadUrl.mockRejectedValue(new Error('S3 error'));
+
+      const results = await service.getThumbnails(baseQuery([id]), 'user-1', ownPerms);
+
+      expect(results).toEqual([{ id, thumbnailUrl: null }]);
+    });
+
+    it('resolves distinct provider/bucket pairs independently for two different keys', async () => {
+      const idA = randomUUID();
+      const idB = randomUUID();
+      const keyA = 'thumbs/a.jpg';
+      const keyB = 'thumbs/b.jpg';
+      mockPrisma.mediaItem.findMany.mockResolvedValue([
+        { id: idA, metadata: { thumbnailStorageKey: keyA } },
+        { id: idB, metadata: { thumbnailStorageKey: keyB } },
+      ] as any);
+      (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([
+        { storageKey: keyA, storageProvider: 's3', bucket: 'bucket-a' },
+        { storageKey: keyB, storageProvider: 'r2', bucket: 'bucket-b' },
+      ]);
+
+      const signA = jest.fn().mockResolvedValue('https://cdn.example.com/a-signed.jpg');
+      const signB = jest.fn().mockResolvedValue('https://cdn.example.com/b-signed.jpg');
+      mockResolver.getProviderFor.mockImplementation(async (provider: string) => {
+        if (provider === 's3') return { getSignedDownloadUrl: signA };
+        if (provider === 'r2') return { getSignedDownloadUrl: signB };
+        throw new Error(`unexpected provider ${provider}`);
+      });
+
+      const results = await service.getThumbnails(baseQuery([idA, idB]), 'user-1', ownPerms);
+
+      expect(mockResolver.getProviderFor).toHaveBeenCalledTimes(2);
+      expect(mockResolver.getProviderFor).toHaveBeenCalledWith('s3', 'bucket-a');
+      expect(mockResolver.getProviderFor).toHaveBeenCalledWith('r2', 'bucket-b');
+      expect(results).toEqual([
+        { id: idA, thumbnailUrl: 'https://cdn.example.com/a-signed.jpg' },
+        { id: idB, thumbnailUrl: 'https://cdn.example.com/b-signed.jpg' },
+      ]);
+      expect(signA).toHaveBeenCalledWith(keyA);
+      expect(signB).toHaveBeenCalledWith(keyB);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // mediaThumbnailsQuerySchema (DTO-level validation)
+  // -------------------------------------------------------------------------
+
+  describe('mediaThumbnailsQuerySchema', () => {
+    // circleId must itself be a valid uuid per the schema — CIRCLE_ID (the
+    // mock constant used elsewhere in this file) is not, so use a real one.
+    const validCircleId = randomUUID();
+
+    it('parses a valid comma-separated ids string into a string array', () => {
+      const idA = randomUUID();
+      const idB = randomUUID();
+      const result = mediaThumbnailsQuerySchema.safeParse({
+        circleId: validCircleId,
+        ids: `${idA},${idB}`,
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.ids).toEqual([idA, idB]);
+      }
+    });
+
+    it('fails when more than 200 ids are supplied', () => {
+      const ids = Array.from({ length: 201 }, () => randomUUID()).join(',');
+      const result = mediaThumbnailsQuerySchema.safeParse({ circleId: validCircleId, ids });
+      expect(result.success).toBe(false);
+    });
+
+    it('fails when the id list reduces to 0 entries after trim/filter', () => {
+      const result = mediaThumbnailsQuerySchema.safeParse({
+        circleId: validCircleId,
+        ids: '  ,  ,',
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('fails when an entry is not a valid uuid', () => {
+      const result = mediaThumbnailsQuerySchema.safeParse({
+        circleId: validCircleId,
+        ids: `${randomUUID()},not-a-uuid`,
+      });
+      expect(result.success).toBe(false);
     });
   });
 

@@ -8,7 +8,25 @@ export interface MediaLocation {
   takenLng: number;
   capturedAt: string | null;
   geoLocality: string | null;
-  thumbnailUrl: string | null;
+  /**
+   * Signed thumbnail URL. Optional because the lightweight
+   * GET /api/media/locations endpoint no longer returns it — thumbnails are
+   * fetched lazily in a second batch via GET /api/media/thumbnails.
+   */
+  thumbnailUrl?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// MapCluster — server-side grid-clustered aggregate returned by
+// GET /api/media/locations/aggregate (hot path; no thumbnails)
+// ---------------------------------------------------------------------------
+
+export interface MapCluster {
+  lat: number;
+  lng: number;
+  count: number;
+  /** A representative media item id for the cell (used for count === 1). */
+  sampleId: string;
 }
 
 // ---------------------------------------------------------------------------

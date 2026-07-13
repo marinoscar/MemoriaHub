@@ -14,8 +14,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
-import { listMediaLocations, listTags } from '../../services/media';
-import type { MediaLocation, TagItem } from '../../types/media';
+import {
+  listMediaLocations,
+  listTags,
+  aggregateLocations,
+  getThumbnails,
+} from '../../services/media';
+import type { MediaLocation, MapCluster, TagItem } from '../../types/media';
+import type { ThumbnailRef } from '../../services/media';
 
 // ---------------------------------------------------------------------------
 // Test data
@@ -117,6 +123,16 @@ describe('listMediaLocations', () => {
     );
   });
 
+  it('should include bbox in the query string when provided', async () => {
+    await listMediaLocations({ bbox: '-85,9,-84,10' });
+    expect(capturedUrl!.searchParams.get('bbox')).toBe('-85,9,-84,10');
+  });
+
+  it('should omit bbox from the query string when not provided', async () => {
+    await listMediaLocations({ type: 'photo' });
+    expect(capturedUrl!.searchParams.has('bbox')).toBe(false);
+  });
+
   it('should include all filters simultaneously', async () => {
     await listMediaLocations({
       type: 'video',
@@ -127,6 +143,9 @@ describe('listMediaLocations', () => {
       location: 'volcano',
       capturedAtFrom: '2024-01-01T00:00:00.000Z',
       capturedAtTo: '2024-12-31T23:59:59.999Z',
+      circleId: 'circle-1',
+      albumId: 'album-1',
+      bbox: '-85,9,-84,10',
     });
 
     const params = capturedUrl!.searchParams;
@@ -138,6 +157,33 @@ describe('listMediaLocations', () => {
     expect(params.get('location')).toBe('volcano');
     expect(params.get('capturedAtFrom')).toBe('2024-01-01T00:00:00.000Z');
     expect(params.get('capturedAtTo')).toBe('2024-12-31T23:59:59.999Z');
+    expect(params.get('circleId')).toBe('circle-1');
+    expect(params.get('albumId')).toBe('album-1');
+    expect(params.get('bbox')).toBe('-85,9,-84,10');
+  });
+
+  it('should round-trip a response with thumbnailUrl omitted (optional field)', async () => {
+    server.use(
+      http.get('*/api/media/locations', () => {
+        return HttpResponse.json({
+          data: [
+            {
+              id: 'loc-3',
+              takenLat: 1,
+              takenLng: 2,
+              capturedAt: null,
+              geoLocality: null,
+            },
+          ],
+        });
+      }),
+    );
+
+    const result = await listMediaLocations();
+    expect(result).toEqual([
+      { id: 'loc-3', takenLat: 1, takenLng: 2, capturedAt: null, geoLocality: null },
+    ]);
+    expect(result[0].thumbnailUrl).toBeUndefined();
   });
 
   it('should omit undefined filter fields from the query string', async () => {
@@ -159,6 +205,162 @@ describe('listMediaLocations', () => {
   it('should include circleId in the query string when provided', async () => {
     await listMediaLocations({ circleId: 'circle-1' });
     expect(capturedUrl!.searchParams.get('circleId')).toBe('circle-1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// aggregateLocations
+// ---------------------------------------------------------------------------
+
+describe('aggregateLocations', () => {
+  let capturedUrl: URL | null = null;
+
+  const mockClusters: MapCluster[] = [
+    { lat: 9.9281, lng: -84.0907, count: 1, sampleId: 'loc-1' },
+    { lat: 48.8566, lng: 2.3522, count: 12, sampleId: 'loc-2' },
+  ];
+
+  beforeEach(() => {
+    capturedUrl = null;
+
+    server.use(
+      http.get('*/api/media/locations/aggregate', ({ request }) => {
+        capturedUrl = new URL(request.url);
+        return HttpResponse.json({ data: mockClusters });
+      }),
+    );
+  });
+
+  it('should call GET /media/locations/aggregate with no query params when called with no args', async () => {
+    await aggregateLocations();
+    expect(capturedUrl).not.toBeNull();
+    expect(capturedUrl!.search).toBe('');
+  });
+
+  it('should return the array of MapCluster objects from the server', async () => {
+    const result = await aggregateLocations();
+    expect(result).toEqual(mockClusters);
+  });
+
+  it('should include circleId in the query string when provided', async () => {
+    await aggregateLocations({ circleId: 'circle-1' });
+    expect(capturedUrl!.searchParams.get('circleId')).toBe('circle-1');
+  });
+
+  it('should include precision in the query string when provided', async () => {
+    await aggregateLocations({ precision: 3 });
+    expect(capturedUrl!.searchParams.get('precision')).toBe('3');
+  });
+
+  it('should include precision=0 in the query string (falsy value must not be dropped)', async () => {
+    await aggregateLocations({ precision: 0 });
+    expect(capturedUrl!.searchParams.has('precision')).toBe(true);
+    expect(capturedUrl!.searchParams.get('precision')).toBe('0');
+  });
+
+  it('should omit precision from the query string when not provided', async () => {
+    await aggregateLocations({ circleId: 'circle-1' });
+    expect(capturedUrl!.searchParams.has('precision')).toBe(false);
+  });
+
+  it('should include bbox in the query string when provided', async () => {
+    await aggregateLocations({ bbox: '-85,9,-84,10' });
+    expect(capturedUrl!.searchParams.get('bbox')).toBe('-85,9,-84,10');
+  });
+
+  it('should include type in the query string when provided', async () => {
+    await aggregateLocations({ type: 'video' });
+    expect(capturedUrl!.searchParams.get('type')).toBe('video');
+  });
+
+  it('should include capturedAtFrom in the query string when provided', async () => {
+    await aggregateLocations({ capturedAtFrom: '2024-01-01T00:00:00.000Z' });
+    expect(capturedUrl!.searchParams.get('capturedAtFrom')).toBe(
+      '2024-01-01T00:00:00.000Z',
+    );
+  });
+
+  it('should include capturedAtTo in the query string when provided', async () => {
+    await aggregateLocations({ capturedAtTo: '2024-12-31T23:59:59.999Z' });
+    expect(capturedUrl!.searchParams.get('capturedAtTo')).toBe(
+      '2024-12-31T23:59:59.999Z',
+    );
+  });
+
+  it('should include all filters simultaneously', async () => {
+    await aggregateLocations({
+      circleId: 'circle-1',
+      precision: 2,
+      bbox: '-85,9,-84,10',
+      type: 'photo',
+      capturedAtFrom: '2024-01-01T00:00:00.000Z',
+      capturedAtTo: '2024-12-31T23:59:59.999Z',
+    });
+
+    const params = capturedUrl!.searchParams;
+    expect(params.get('circleId')).toBe('circle-1');
+    expect(params.get('precision')).toBe('2');
+    expect(params.get('bbox')).toBe('-85,9,-84,10');
+    expect(params.get('type')).toBe('photo');
+    expect(params.get('capturedAtFrom')).toBe('2024-01-01T00:00:00.000Z');
+    expect(params.get('capturedAtTo')).toBe('2024-12-31T23:59:59.999Z');
+  });
+
+  it('should return an empty array when the server returns no clusters', async () => {
+    server.use(
+      http.get('*/api/media/locations/aggregate', () => {
+        return HttpResponse.json({ data: [] });
+      }),
+    );
+
+    const result = await aggregateLocations();
+    expect(result).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getThumbnails
+// ---------------------------------------------------------------------------
+
+describe('getThumbnails', () => {
+  let capturedUrl: URL | null = null;
+  let requestCount = 0;
+
+  const mockThumbnails: ThumbnailRef[] = [
+    { id: 'item-1', thumbnailUrl: 'https://cdn.example.com/thumb1.jpg' },
+    { id: 'item-2', thumbnailUrl: null },
+  ];
+
+  beforeEach(() => {
+    capturedUrl = null;
+    requestCount = 0;
+
+    server.use(
+      http.get('*/api/media/thumbnails', ({ request }) => {
+        requestCount += 1;
+        capturedUrl = new URL(request.url);
+        return HttpResponse.json({ data: mockThumbnails });
+      }),
+    );
+  });
+
+  it('should include circleId and comma-joined ids in the query string', async () => {
+    await getThumbnails('circle-1', ['item-1', 'item-2', 'item-3']);
+    expect(capturedUrl).not.toBeNull();
+    expect(capturedUrl!.searchParams.get('circleId')).toBe('circle-1');
+    expect(capturedUrl!.searchParams.get('ids')).toBe('item-1,item-2,item-3');
+  });
+
+  it('should return the array of ThumbnailRef objects from the server', async () => {
+    const result = await getThumbnails('circle-1', ['item-1', 'item-2']);
+    expect(result).toEqual(mockThumbnails);
+  });
+
+  it('should resolve to an empty array without making an HTTP request when ids is empty', async () => {
+    const result = await getThumbnails('circle-1', []);
+    expect(result).toEqual([]);
+    expect(requestCount).toBe(0);
+    expect(capturedUrl).toBeNull();
   });
 });
 

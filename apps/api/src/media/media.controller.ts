@@ -38,6 +38,8 @@ import { AddAlbumItemsDto } from './dto/add-album-items.dto';
 import { AddAlbumItemsByFilterDto } from './dto/add-album-items-by-filter.dto';
 import { ExportQueryDto } from './dto/export-query.dto';
 import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
+import { MediaLocationsAggregateQueryDto } from './dto/media-locations-aggregate-query.dto';
+import { MediaThumbnailsQueryDto } from './dto/media-thumbnails-query.dto';
 import { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
 import { BulkTagsDto } from './dto/bulk-tags.dto';
 import { BulkDeleteDto } from './dto/bulk-delete.dto';
@@ -366,12 +368,68 @@ export class MediaController {
   @ApiQuery({ name: 'place', required: false, type: String, description: 'Substring match on geoPlaceName, case-insensitive' })
   @ApiQuery({ name: 'location', required: false, type: String, description: 'Free-text search across all geo tiers' })
   @ApiQuery({ name: 'albumId', required: false, type: String, format: 'uuid', description: 'Scope the map to members of a single album' })
+  @ApiQuery({ name: 'bbox', required: false, type: String, description: 'Viewport bounding box "minLng,minLat,maxLng,maxLat" — restrict to items within these bounds' })
   @ApiResponse({ status: 200, description: 'Array of geotagged media location objects' })
   async listLocations(
     @Query() query: MediaLocationsQueryDto,
     @CurrentUser() user: RequestUser,
   ) {
     return this.mediaService.listLocations(query, user.id, user.permissions);
+  }
+
+  /**
+   * GET /api/media/locations/aggregate
+   *
+   * Server-side spatial clustering for the map view. Groups geotagged,
+   * non-deleted / non-archived items into a grid (cell size controlled by
+   * `precision`) and returns one cluster per occupied cell.
+   * Declared before @Get(':id') so it is never shadowed.
+   */
+  @Get('locations/aggregate')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({
+    summary: 'Server-side spatial clustering of geotagged media for the map view',
+    description:
+      'Groups geotagged non-deleted / non-archived items in the circle into a grid ' +
+      'whose cell size is controlled by `precision` (decimal places of lat/lng rounding). ' +
+      'Returns one cluster per occupied cell: { lat, lng, count, sampleId }.',
+  })
+  @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid', description: 'Circle to aggregate' })
+  @ApiQuery({ name: 'precision', required: false, type: Number, description: 'Grid precision (decimal places, 0–5; default 3)' })
+  @ApiQuery({ name: 'bbox', required: false, type: String, description: 'Viewport bounding box "minLng,minLat,maxLng,maxLat"' })
+  @ApiQuery({ name: 'capturedAtFrom', required: false, type: String, description: 'ISO 8601 datetime — filter capturedAt >= from' })
+  @ApiQuery({ name: 'capturedAtTo', required: false, type: String, description: 'ISO 8601 datetime — filter capturedAt <= to' })
+  @ApiQuery({ name: 'type', required: false, enum: ['photo', 'video'], description: 'Filter by media type' })
+  @ApiResponse({ status: 200, description: 'Array of location clusters { lat, lng, count, sampleId }' })
+  async aggregateLocations(
+    @Query() query: MediaLocationsAggregateQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.aggregateLocations(query, user.id, user.permissions);
+  }
+
+  /**
+   * GET /api/media/thumbnails
+   *
+   * Batched thumbnail signing — returns a signed thumbnail URL per requested id.
+   * Declared before @Get(':id') so it is never shadowed.
+   */
+  @Get('thumbnails')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({
+    summary: 'Batch-sign thumbnail URLs for a set of media items',
+    description:
+      'Given a comma-separated set of media item ids (1–200) in a circle, returns a signed ' +
+      'thumbnail URL per requested id (null when the item has no thumbnail).',
+  })
+  @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid', description: 'Circle the items belong to' })
+  @ApiQuery({ name: 'ids', required: true, type: String, description: 'Comma-separated media item UUIDs (1–200)' })
+  @ApiResponse({ status: 200, description: 'Array of { id, thumbnailUrl }' })
+  async getThumbnails(
+    @Query() query: MediaThumbnailsQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.getThumbnails(query, user.id, user.permissions);
   }
 
   /**

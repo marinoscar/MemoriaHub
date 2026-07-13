@@ -92,7 +92,6 @@ function AppRoutes() {
                 <Route path="/" element={<HomePage />} />
                 <Route path="/settings" element={<UserSettingsPage />} />
                 <Route path="/media" element={<MediaLibraryPage />} />
-                <Route path="/map" element={<MediaMapPage />} />
                 <Route path="/circles" element={<CircleListPage />} />
                 <Route path="/circles/:id" element={<CircleDetailPage />} />
                 {/* Settings Hub */}
@@ -143,6 +142,11 @@ function AppRoutes() {
                 <Route path="/location-suggestions" element={<LocationSuggestionsPage />} />
                 <Route path="/archive" element={<ArchivePage />} />
                 <Route path="/trash" element={<TrashPage />} />
+              </Route>
+
+              {/* Full-bleed layout — map owns the entire content area (no padding) */}
+              <Route element={<Layout fullBleed />}>
+                <Route path="/map" element={<MediaMapPage />} />
               </Route>
             </Route>
 

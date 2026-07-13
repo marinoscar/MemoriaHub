@@ -28,6 +28,8 @@ import { AddAlbumItemsDto } from './dto/add-album-items.dto';
 import { AddAlbumItemsByFilterDto } from './dto/add-album-items-by-filter.dto';
 import { ExportQueryDto } from './dto/export-query.dto';
 import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
+import { MediaLocationsAggregateQueryDto } from './dto/media-locations-aggregate-query.dto';
+import { MediaThumbnailsQueryDto } from './dto/media-thumbnails-query.dto';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { buildMediaWhere, wherePeople } from '../search/media-where.builder';
@@ -54,7 +56,6 @@ export interface MediaLocation {
   takenLng: number;
   capturedAt: Date | null;
   geoLocality: string | null;
-  thumbnailUrl: string | null;
 }
 
 @Injectable()
@@ -440,15 +441,21 @@ export class MediaService {
       place,
       location,
       albumId,
+      bbox,
     } = query;
 
     await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
 
     const where: Prisma.MediaItemWhereInput = {
       circleId,
-      // Must have coordinates
-      takenLat: { not: null },
-      takenLng: { not: null },
+      // Must have coordinates; when a viewport bbox is supplied, merge the
+      // range constraints with the existing not-null guards.
+      takenLat: bbox
+        ? { not: null, gte: bbox.minLat, lte: bbox.maxLat }
+        : { not: null },
+      takenLng: bbox
+        ? { not: null, gte: bbox.minLng, lte: bbox.maxLng }
+        : { not: null },
       // Exclude soft-deleted and archived items
       deletedAt: null,
       archivedAt: null,
@@ -528,23 +535,195 @@ export class MediaService {
         takenLng: true,
         capturedAt: true,
         geoLocality: true,
-        metadata: true,
       },
       orderBy: { capturedAt: 'desc' },
     });
 
-    // Sign all thumbnails in parallel; metadata is used only as signThumb input
-    // and is NOT included in the returned objects.
-    return Promise.all(
-      rows.map(async (row) => ({
-        id: row.id,
-        takenLat: row.takenLat as number,
-        takenLng: row.takenLng as number,
-        capturedAt: row.capturedAt,
-        geoLocality: row.geoLocality,
-        thumbnailUrl: await this.signThumb(row.metadata),
-      })),
+    // Lightweight map-pin payload — no per-row thumbnail signing. Thumbnails
+    // are fetched on demand in batches via getThumbnails().
+    return rows.map((row) => ({
+      id: row.id,
+      takenLat: row.takenLat as number,
+      takenLng: row.takenLng as number,
+      capturedAt: row.capturedAt,
+      geoLocality: row.geoLocality,
+    }));
+  }
+
+  /**
+   * GET /api/media/locations/aggregate
+   *
+   * Server-side spatial clustering for the map view. Groups geotagged,
+   * non-deleted / non-archived items in the circle into a grid whose cell size
+   * is controlled by `precision` (decimal places of lat/lng rounding), returning
+   * one cluster per occupied cell with a representative sample id.
+   *
+   * Optional filters (date range, type, viewport bbox) narrow the set before
+   * grouping. All user input is parameterized; `precision` is a validated
+   * integer (0–5) and is the only value embedded as a numeric literal.
+   */
+  async aggregateLocations(
+    query: MediaLocationsAggregateQueryDto,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<Array<{ lat: number; lng: number; count: number; sampleId: string }>> {
+    const { circleId, precision, bbox, capturedAtFrom, capturedAtTo, type } = query;
+
+    await this.circleMembershipService.assertCircleAccess(
+      userId,
+      circleId,
+      userPermissions,
+      'viewer' as CircleRole,
     );
+
+    // Build optional WHERE fragments; user input is always parameterized.
+    const fragments: Prisma.Sql[] = [
+      capturedAtFrom ? Prisma.sql`AND captured_at >= ${capturedAtFrom}` : Prisma.empty,
+      capturedAtTo ? Prisma.sql`AND captured_at <= ${capturedAtTo}` : Prisma.empty,
+      type ? Prisma.sql`AND type::text = ${type}` : Prisma.empty,
+      bbox
+        ? Prisma.sql`AND taken_lat BETWEEN ${bbox.minLat} AND ${bbox.maxLat} AND taken_lng BETWEEN ${bbox.minLng} AND ${bbox.maxLng}`
+        : Prisma.empty,
+    ];
+
+    // `precision` is a validated integer 0–5 — safe to embed as a numeric literal.
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        gy: string | number;
+        gx: string | number;
+        n: number;
+        lat: string | number;
+        lng: string | number;
+        sample_id: string;
+      }>
+    >(Prisma.sql`
+      SELECT round(taken_lat::numeric, ${Prisma.raw(String(precision))}) AS gy,
+             round(taken_lng::numeric, ${Prisma.raw(String(precision))}) AS gx,
+             count(*)::int AS n,
+             avg(taken_lat) AS lat,
+             avg(taken_lng) AS lng,
+             min(id::text) AS sample_id
+      FROM media_items
+      WHERE circle_id = ${circleId}::uuid
+        AND deleted_at IS NULL AND archived_at IS NULL
+        AND taken_lat IS NOT NULL AND taken_lng IS NOT NULL
+        ${Prisma.join(fragments, ' ')}
+      GROUP BY gy, gx
+    `);
+
+    return rows.map((row) => ({
+      lat: Number(row.lat),
+      lng: Number(row.lng),
+      count: row.n,
+      sampleId: row.sample_id,
+    }));
+  }
+
+  /**
+   * GET /api/media/thumbnails
+   *
+   * Batched thumbnail signing for the map view (and any surface that needs many
+   * thumbnails at once). Given a set of media item ids in a circle, returns a
+   * signed thumbnail URL per requested id (null when the item has no thumbnail
+   * or the storage object row is missing).
+   *
+   * Storage-object rows are looked up in a single query, and providers are
+   * resolved once per (provider|bucket) group to avoid redundant resolver calls.
+   */
+  async getThumbnails(
+    query: MediaThumbnailsQueryDto,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<Array<{ id: string; thumbnailUrl: string | null }>> {
+    const { circleId, ids } = query;
+
+    await this.circleMembershipService.assertCircleAccess(
+      userId,
+      circleId,
+      userPermissions,
+      'viewer' as CircleRole,
+    );
+
+    const items = await this.prisma.mediaItem.findMany({
+      where: { id: { in: ids }, circleId },
+      select: { id: true, metadata: true },
+    });
+
+    // Extract thumbnail storage key per item (same extraction as signThumb).
+    const extractKey = (metadata: Prisma.JsonValue | null): string | null => {
+      if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+        return null;
+      }
+      const key = (metadata as Record<string, unknown>)['thumbnailStorageKey'];
+      return typeof key === 'string' && key ? key : null;
+    };
+
+    const idToKey = new Map<string, string | null>();
+    const distinctKeys = new Set<string>();
+    for (const item of items) {
+      const key = extractKey(item.metadata);
+      idToKey.set(item.id, key);
+      if (key) distinctKeys.add(key);
+    }
+
+    // One query to resolve all storage-object rows for the keys.
+    const keyToObject = new Map<
+      string,
+      { storageProvider: string; bucket: string | null }
+    >();
+    if (distinctKeys.size > 0) {
+      const objects = await this.prisma.storageObject.findMany({
+        where: { storageKey: { in: Array.from(distinctKeys) } },
+        select: { storageKey: true, storageProvider: true, bucket: true },
+      });
+      for (const obj of objects) {
+        keyToObject.set(obj.storageKey, {
+          storageProvider: obj.storageProvider,
+          bucket: obj.bucket,
+        });
+      }
+    }
+
+    // Cache resolved providers by (provider|bucket) so we resolve each once.
+    const providerCache = new Map<
+      string,
+      Awaited<ReturnType<StorageProviderResolver['getProviderFor']>>
+    >();
+
+    // Sign each distinct key once, reusing signThumb's resolution + fallback.
+    const keyToUrl = new Map<string, string | null>();
+    for (const key of distinctKeys) {
+      try {
+        const obj = keyToObject.get(key);
+        if (obj) {
+          const cacheKey = `${obj.storageProvider}|${obj.bucket ?? ''}`;
+          let provider = providerCache.get(cacheKey);
+          if (!provider) {
+            provider = await this.resolver.getProviderFor(
+              obj.storageProvider,
+              obj.bucket,
+            );
+            providerCache.set(cacheKey, provider);
+          }
+          keyToUrl.set(key, await provider.getSignedDownloadUrl(key));
+        } else {
+          // Row not yet created — fall back to the legacy static provider.
+          keyToUrl.set(key, await this.storageProvider.getSignedDownloadUrl(key));
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Failed to sign thumbnail URL for key ${key}: ${msg}`);
+        keyToUrl.set(key, null);
+      }
+    }
+
+    return items.map((item) => {
+      const key = idToKey.get(item.id) ?? null;
+      return {
+        id: item.id,
+        thumbnailUrl: key ? keyToUrl.get(key) ?? null : null,
+      };
+    });
   }
 
   /**
