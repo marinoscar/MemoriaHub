@@ -42,6 +42,8 @@ import { useInfiniteMedia } from '../../hooks/useInfiniteMedia';
 import type { InfiniteMediaFetcher } from '../../hooks/useInfiniteMedia';
 import { useIntersectionObserver } from '../../hooks/useIntersectionObserver';
 import { useMediaRefresh } from '../../contexts/MediaRefreshContext';
+import { useMediaPreview } from '../../contexts/MediaPreviewContext';
+import { usePendingThumbnails } from '../../hooks/usePendingThumbnails';
 import { groupByDay } from '../../utils/groupByDay';
 import { isThumbnailStuck } from '../../utils/thumbnailTimeout';
 import { MediaDetailDrawer } from './MediaDetailDrawer';
@@ -90,6 +92,13 @@ const GalleryTile = memo(function GalleryTile({
   const theme = useTheme();
   const isMobileDevice = useMediaQuery(theme.breakpoints.down('sm'));
   const [imgError, setImgError] = useState(false);
+  const { getPreview } = useMediaPreview();
+
+  // Instant local upload preview (object URL) shown while the server thumbnail
+  // is still being generated. Only consulted when there is no server thumbnail
+  // yet and the image hasn't errored.
+  const preview =
+    !item.thumbnailUrl && !imgError ? getPreview(item.id) : undefined;
 
   return (
     <ImageListItem
@@ -147,6 +156,16 @@ const GalleryTile = memo(function GalleryTile({
             </Box>
           )}
         </Box>
+      ) : preview ? (
+        /* Instant local upload preview (object URL) while the server
+           thumbnail is generated; swapped out by the reconcile hook. */
+        <Box
+          component="img"
+          src={preview}
+          alt={item.originalFilename}
+          decoding="async"
+          sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+        />
       ) : (item.type === 'photo' || item.type === 'video') && !imgError && !isThumbnailStuck(item.createdAt) ? (
         /* Awaiting thumbnail enrichment */
         <Box
@@ -418,6 +437,32 @@ export function MediaGallery({
       ),
     [baseItems, localPatches],
   );
+
+  // -------------------------------------------------------------------------
+  // Pending-thumbnail reconcile: poll for the optimized server thumbnail of
+  // freshly-uploaded items (shown via an instant local preview) and, once
+  // ready, patch the tile and free the local blob.
+  // -------------------------------------------------------------------------
+
+  const { removePreview } = useMediaPreview();
+
+  const applyThumbnails = useCallback(
+    (updates: Array<{ id: string; thumbnailUrl: string }>) => {
+      setLocalPatches((prev) => {
+        const next = { ...prev };
+        for (const { id, thumbnailUrl } of updates) {
+          next[id] = { ...next[id], thumbnailUrl };
+        }
+        return next;
+      });
+      for (const { id } of updates) {
+        removePreview(id);
+      }
+    },
+    [removePreview],
+  );
+
+  usePendingThumbnails(mergedItems, circleId, applyThumbnails);
 
   const grouped = useMemo(() => groupByDay(mergedItems), [mergedItems]);
 

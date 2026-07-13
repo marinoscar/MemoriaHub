@@ -292,6 +292,10 @@ describe('MediaService', () => {
       // Fresh create: result is the created item spread with deduplicated: false
       expect(result).toMatchObject({ ...createdItem, deduplicated: false });
       expect(result.deduplicated).toBe(false);
+      // mediaItemId must be present and equal the created item's id (issue #89:
+      // the register response must carry mediaItemId so the client can
+      // reconcile the local preview it already rendered)
+      expect(result.mediaItemId).toBe(createdItem.id);
       expect(mockPrisma.storageObject.findUnique).toHaveBeenCalledWith({
         where: { id: dto.storageObjectId },
       });
@@ -475,6 +479,8 @@ describe('MediaService', () => {
 
       expect(result.deduplicated).toBe(true);
       expect(result.id).toBe(existingItem.id);
+      // mediaItemId must equal the existing (winning) item's id on the dedup path
+      expect(result.mediaItemId).toBe(existingItem.id);
       // A new MediaItem must NOT have been created
       expect(mockPrisma.mediaItem.create).not.toHaveBeenCalled();
       // Redundant blob should be cleaned up (best-effort)
@@ -513,6 +519,8 @@ describe('MediaService', () => {
 
       expect(result.deduplicated).toBe(true);
       expect(result.id).toBe(winnerItem.id);
+      // mediaItemId must equal the winner's id on the P2002 race dedup path
+      expect(result.mediaItemId).toBe(winnerItem.id);
       // Redundant blob should be cleaned up
       expect(mockStorageProvider.delete).toHaveBeenCalledWith(storageObject.storageKey);
     });

@@ -33,6 +33,7 @@ import {
   listMedia,
 } from '../../services/media';
 import { sha256File } from '../../utils/sha256';
+import { useMediaPreview } from '../../contexts/MediaPreviewContext';
 import type { UploadPart, MediaType } from '../../types/media';
 
 // ---------------------------------------------------------------------------
@@ -86,7 +87,7 @@ async function uploadFileWithRetry(
   contentHash: string | null,
   onProgress: (pct: number) => void,
   circleId?: string,
-): Promise<{ deduplicated: boolean }> {
+): Promise<{ deduplicated: boolean; mediaItemId: string }> {
   // 1. Init upload
   const { objectId, partSize, totalParts, presignedUrls } = await initUpload({
     name: file.name,
@@ -149,7 +150,10 @@ async function uploadFileWithRetry(
 
   onProgress(100);
 
-  return { deduplicated: response.deduplicated === true };
+  return {
+    deduplicated: response.deduplicated === true,
+    mediaItemId: response.mediaItemId,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +162,7 @@ async function uploadFileWithRetry(
 
 export function MediaUploadDialog({ open, onClose, onSuccess, circleId }: MediaUploadDialogProps) {
   const theme = useTheme();
+  const { addPreview } = useMediaPreview();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [fileStates, setFileStates] = useState<FileState[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -242,8 +247,9 @@ export function MediaUploadDialog({ open, onClose, onSuccess, circleId }: MediaU
         }
 
         // --- Upload + register
-        const { deduplicated } = await uploadFileWithRetry(
-          fileStates[i].file,
+        const file = fileStates[i].file;
+        const { deduplicated, mediaItemId } = await uploadFileWithRetry(
+          file,
           contentHash,
           (pct) => {
             updateFileState(i, { progress: pct });
@@ -255,6 +261,13 @@ export function MediaUploadDialog({ open, onClose, onSuccess, circleId }: MediaU
         if (deduplicated) {
           updateFileState(i, { status: 'duplicate', progress: 100 });
         } else {
+          // Capture an instant local preview from the uploaded bytes so the new
+          // gallery tile renders immediately instead of a "Processing…" spinner
+          // while the server thumbnail is generated. Photos only — videos can't
+          // be cheaply previewed from a File and are handled by the reconcile.
+          if (mediaItemId && file.type.startsWith('image/')) {
+            addPreview(mediaItemId, file);
+          }
           updateFileState(i, { status: 'success', progress: 100 });
         }
       } catch (err) {
@@ -275,7 +288,7 @@ export function MediaUploadDialog({ open, onClose, onSuccess, circleId }: MediaU
       }
       return current;
     });
-  }, [fileStates, onSuccess, updateFileState]);
+  }, [fileStates, onSuccess, updateFileState, addPreview]);
 
   const handleRetry = useCallback(
     async (index: number) => {

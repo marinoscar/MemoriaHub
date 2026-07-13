@@ -188,6 +188,11 @@ export interface RegisterMediaDto {
  */
 export interface RegisterMediaResponse extends MediaItem {
   deduplicated?: boolean;
+  /**
+   * Id of the created (or existing deduplicated) MediaItem. Always present so
+   * the client can attach an instant local upload preview to the right item.
+   */
+  mediaItemId: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -58,11 +58,15 @@ vi.mock('../../album/AddToAlbumDialog', () => ({
   AddToAlbumDialog: vi.fn(() => null),
 }));
 
-// Mock patchMedia so favourite toggles don't hit the network.
+// Mock patchMedia so favourite toggles don't hit the network. getThumbnails
+// is stubbed too since usePendingThumbnails (invoked internally by
+// MediaGallery) resolves from this same module — see the "instant upload
+// preview" describe block below.
 vi.mock('../../../services/media', () => ({
   patchMedia: vi.fn().mockResolvedValue({}),
   removeAlbumItem: vi.fn().mockResolvedValue(undefined),
   listMedia: vi.fn(),
+  getThumbnails: vi.fn().mockResolvedValue([]),
 }));
 
 // Mock useIntersectionObserver so the infinite-scroll sentinel never triggers.
@@ -70,13 +74,22 @@ vi.mock('../../../hooks/useIntersectionObserver', () => ({
   useIntersectionObserver: vi.fn(),
 }));
 
+// Mock MediaPreviewContext so GalleryTile's instant-preview lookup is
+// controllable per test (issue #89: upload tile stuck on "Processing…").
+// Default (set in beforeEach) has no stored preview for any id.
+vi.mock('../../../contexts/MediaPreviewContext', () => ({
+  useMediaPreview: vi.fn(),
+}));
+
 // ---------------------------------------------------------------------------
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
 import { listMedia } from '../../../services/media';
+import { useMediaPreview } from '../../../contexts/MediaPreviewContext';
 
 const mockListMedia = vi.mocked(listMedia);
+const mockUseMediaPreview = vi.mocked(useMediaPreview);
 
 // ---------------------------------------------------------------------------
 // Factories
@@ -135,6 +148,13 @@ describe('MediaGallery', () => {
     mockListMedia.mockResolvedValue({
       items: [],
       meta: { page: 1, pageSize: 50, totalItems: 0, totalPages: 1 },
+    });
+    // Default MediaPreviewContext: no stored preview for any id, no-op writers.
+    mockUseMediaPreview.mockReturnValue({
+      addPreview: vi.fn(),
+      getPreview: vi.fn(() => undefined),
+      removePreview: vi.fn(),
+      version: 0,
     });
   });
 
@@ -269,6 +289,82 @@ describe('MediaGallery', () => {
 
       expect(screen.getByAltText('old-ready.jpg')).toBeInTheDocument();
       expect(screen.queryByLabelText('Thumbnail unavailable')).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // (a.2) Instant upload preview (issue #89) — local object-URL preview
+  // renders while there is no server thumbnail, and is superseded once the
+  // real thumbnailUrl arrives.
+  // -------------------------------------------------------------------------
+  describe('instant upload preview (issue #89)', () => {
+    it('renders the local object-URL preview when there is no server thumbnailUrl yet', () => {
+      mockUseMediaPreview.mockReturnValue({
+        addPreview: vi.fn(),
+        getPreview: vi.fn((id: string) => (id === 'uploading-1' ? 'blob:mock-preview-url' : undefined)),
+        removePreview: vi.fn(),
+        version: 0,
+      });
+
+      const items = [
+        makeItem('uploading-1', {
+          thumbnailUrl: null,
+          originalFilename: 'just-uploaded.jpg',
+          createdAt: new Date().toISOString(),
+        }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      const img = screen.getByAltText('just-uploaded.jpg') as HTMLImageElement;
+      expect(img.src).toBe('blob:mock-preview-url');
+      // The "awaiting thumbnail" spinner must not render — the preview takes
+      // precedence while it is available.
+      expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    });
+
+    it('falls back to the processing spinner when there is no thumbnailUrl and no stored preview', () => {
+      // Default mock (set in beforeEach) returns undefined for every id.
+      const items = [
+        makeItem('no-preview', {
+          thumbnailUrl: null,
+          originalFilename: 'no-preview.jpg',
+          createdAt: new Date().toISOString(),
+        }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      expect(screen.queryByAltText('no-preview.jpg')).not.toBeInTheDocument();
+      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+    });
+
+    it('prefers the real server thumbnailUrl over a stored local preview once it is set', () => {
+      mockUseMediaPreview.mockReturnValue({
+        addPreview: vi.fn(),
+        getPreview: vi.fn((id: string) => (id === 'resolved-1' ? 'blob:mock-stale-preview' : undefined)),
+        removePreview: vi.fn(),
+        version: 0,
+      });
+
+      const items = [
+        makeItem('resolved-1', {
+          thumbnailUrl: 'https://cdn.example.com/resolved-1.jpg',
+          originalFilename: 'resolved.jpg',
+        }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      const img = screen.getByAltText('resolved.jpg') as HTMLImageElement;
+      expect(img.src).toBe('https://cdn.example.com/resolved-1.jpg');
+      expect(img.src).not.toBe('blob:mock-stale-preview');
     });
   });
 
