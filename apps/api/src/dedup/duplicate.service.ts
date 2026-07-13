@@ -121,9 +121,11 @@ export class DuplicateService {
    *     (crop, filter, recompress) between otherwise-matching photos.
    *   - 'similar': anything else that met the matching threshold.
    */
-  private async computeGroupKind(members: GroupMemberRow[]): Promise<DuplicateKind> {
+  private async computeGroupKind(
+    members: GroupMemberRow[],
+  ): Promise<{ kind: DuplicateKind; maxSim: number | null; minHamming: number | null }> {
     const memberIds = members.map((m) => m.id);
-    if (memberIds.length < 2) return 'similar';
+    if (memberIds.length < 2) return { kind: 'similar', maxSim: null, minHamming: null };
 
     const pairwiseRows = await this.prisma.$queryRaw<{ sim: unknown }[]>`
       SELECT (1 - (a.embedding <=> b.embedding)) AS sim
@@ -143,7 +145,7 @@ export class DuplicateService {
     }
 
     if (maxSim !== null && maxSim >= 0.99 && minHamming !== null && minHamming <= 2) {
-      return 'exact_variant';
+      return { kind: 'exact_variant', maxSim, minHamming };
     }
 
     const uniqueDims = new Set(
@@ -151,10 +153,10 @@ export class DuplicateService {
     );
     const hashesDiverge = minHamming !== null && minHamming > 2;
     if (uniqueDims.size > 1 || hashesDiverge) {
-      return 'edited';
+      return { kind: 'edited', maxSim, minHamming };
     }
 
-    return 'similar';
+    return { kind: 'similar', maxSim, minHamming };
   }
 
   /**
@@ -243,7 +245,7 @@ export class DuplicateService {
 
     const enriched = await Promise.all(
       groups.map(async (group) => {
-        const kindClass = await this.computeGroupKind(group.items);
+        const { kind: kindClass, maxSim } = await this.computeGroupKind(group.items);
         const { bestId } = this.computeBestCopyScores(group.items);
 
         if (bestId && bestId !== group.suggestedBestItemId) {
@@ -255,6 +257,7 @@ export class DuplicateService {
         return {
           ...group,
           kind: kindClass,
+          confidence: maxSim ?? 0,
           suggestedBestItemId: bestId ?? group.suggestedBestItemId,
         };
       }),
@@ -275,6 +278,7 @@ export class DuplicateService {
           id: group.id,
           status: group.status,
           kind: group.kind,
+          confidence: group.confidence,
           mediaCount: group.mediaCount,
           suggestedBestItemId: group.suggestedBestItemId,
           capturedAt: group.capturedAt,
@@ -318,7 +322,7 @@ export class DuplicateService {
 
     await this.membership.assertCircleAccess(userId, group.circleId, perms, CircleRole.viewer);
 
-    const kind = await this.computeGroupKind(group.items);
+    const { kind, maxSim } = await this.computeGroupKind(group.items);
     const { scores, bestId } = this.computeBestCopyScores(group.items);
     const suggestedBestItemId = bestId ?? group.suggestedBestItemId;
 
@@ -367,6 +371,7 @@ export class DuplicateService {
         circleId: group.circleId,
         status: group.status,
         kind,
+        confidence: maxSim ?? 0,
         mediaCount: group.mediaCount,
         capturedAt: group.capturedAt,
         suggestedBestItemId,
