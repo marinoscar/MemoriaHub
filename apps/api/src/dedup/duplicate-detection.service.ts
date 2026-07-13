@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { BurstGroupStatus, DuplicateGroupStatus, EnrichmentJob, MediaType } from '@prisma/client';
+import { BurstGroupStatus, DuplicateGroupStatus, EnrichmentJob, MediaType, Prisma } from '@prisma/client';
 import { computeVisualHash, hammingDistance } from '@memoriahub/enrichment-compute/dhash';
 import { VISUAL_EMBEDDING_MODEL_TAG } from '@memoriahub/enrichment-compute/clip';
 import { PrismaService } from '../prisma/prisma.service';
@@ -401,71 +401,111 @@ export class DuplicateDetectionService {
       ),
     ];
 
-    let targetGroupId: string;
+    // -----------------------------------------------------------------
+    // Write-time burst precedence re-check (TOCTOU guard).
+    //
+    // The eligibility guard in loadEligibleItem ran at the START of this
+    // job. Burst detection may have assigned this same item to a (pending)
+    // burst group AFTER that guard but BEFORE we reach this write. To close
+    // that race we take a row lock on the subject inside a transaction and
+    // re-read its live burst state immediately before writing membership:
+    //   - burst committed its pending burstGroupId first → we see it here
+    //     and abort the dedup write (item stays out of the dup queue);
+    //   - dedup commits the dup-group write first → burst's own Step-7
+    //     evictFromDuplicateGroups now finds the item genuinely in a dup
+    //     group and evicts it.
+    // Either interleaving leaves the item in at most one queue. Only the
+    // re-check + membership write live inside the transaction — the heavy
+    // compute (download/CLIP/KNN/hash scan) stayed outside to keep the lock
+    // hold-time minimal.
+    // -----------------------------------------------------------------
+    await this.prisma.$transaction(async (tx) => {
+      const lockRows = await tx.$queryRaw<
+        { burst_group_id: string | null; burst_status: string | null }[]
+      >`
+        SELECT m.burst_group_id AS burst_group_id, bg.status AS burst_status
+        FROM media_items m
+        LEFT JOIN burst_groups bg ON bg.id = m.burst_group_id
+        WHERE m.id = ${mediaItemId}::uuid
+        FOR UPDATE OF m
+      `;
 
-    if (existingGroupIds.length === 0) {
-      const earliestCapturedAt = [item.capturedAt, ...linkedCandidates.map((c) => c.capturedAt)]
-        .filter((d): d is Date => d !== null)
-        .reduce<Date | null>((min, d) => (!min || d < min ? d : min), null);
+      const lock = lockRows[0];
+      if (lock?.burst_group_id && lock.burst_status === BurstGroupStatus.pending) {
+        this.logger.debug(
+          `skipping dedup write for ${mediaItemId}: became burst member during job`,
+        );
+        // Mirror the "no duplicates / processed" early-return path: write
+        // nothing that links the subject and commit an empty transaction.
+        return;
+      }
 
-      const newGroup = await this.prisma.duplicateGroup.create({
-        data: {
-          circleId,
-          status: DuplicateGroupStatus.pending,
-          capturedAt: earliestCapturedAt,
-          mediaCount: linkedCandidates.length + 1,
-        },
-        select: { id: true },
-      });
-      targetGroupId = newGroup.id;
+      let targetGroupId: string;
 
-      await this.prisma.mediaItem.updateMany({
-        where: { id: { in: [item.id, ...linkedCandidates.map((c) => c.id)] } },
-        data: { duplicateGroupId: targetGroupId },
-      });
+      if (existingGroupIds.length === 0) {
+        const earliestCapturedAt = [item.capturedAt, ...linkedCandidates.map((c) => c.capturedAt)]
+          .filter((d): d is Date => d !== null)
+          .reduce<Date | null>((min, d) => (!min || d < min ? d : min), null);
 
-      this.logger.log(
-        `Created duplicate group ${targetGroupId} with ${linkedCandidates.length + 1} members (circleId=${circleId})`,
-      );
-    } else if (existingGroupIds.length === 1) {
-      targetGroupId = existingGroupIds[0];
+        const newGroup = await tx.duplicateGroup.create({
+          data: {
+            circleId,
+            status: DuplicateGroupStatus.pending,
+            capturedAt: earliestCapturedAt,
+            mediaCount: linkedCandidates.length + 1,
+          },
+          select: { id: true },
+        });
+        targetGroupId = newGroup.id;
 
-      await this.prisma.mediaItem.update({
-        where: { id: item.id },
-        data: { duplicateGroupId: targetGroupId },
-      });
+        await tx.mediaItem.updateMany({
+          where: { id: { in: [item.id, ...linkedCandidates.map((c) => c.id)] } },
+          data: { duplicateGroupId: targetGroupId },
+        });
 
-      this.logger.log(`Assigned MediaItem ${mediaItemId} to existing duplicate group ${targetGroupId}`);
-    } else {
-      const groups = await this.prisma.duplicateGroup.findMany({
-        where: { id: { in: existingGroupIds } },
-        select: { id: true, createdAt: true },
-        orderBy: { createdAt: 'asc' },
-      });
+        this.logger.log(
+          `Created duplicate group ${targetGroupId} with ${linkedCandidates.length + 1} members (circleId=${circleId})`,
+        );
+      } else if (existingGroupIds.length === 1) {
+        targetGroupId = existingGroupIds[0];
 
-      targetGroupId = groups[0].id;
-      const groupsToMerge = groups.slice(1).map((g) => g.id);
+        await tx.mediaItem.update({
+          where: { id: item.id },
+          data: { duplicateGroupId: targetGroupId },
+        });
 
-      await this.prisma.mediaItem.updateMany({
-        where: { duplicateGroupId: { in: groupsToMerge } },
-        data: { duplicateGroupId: targetGroupId },
-      });
+        this.logger.log(`Assigned MediaItem ${mediaItemId} to existing duplicate group ${targetGroupId}`);
+      } else {
+        const groups = await tx.duplicateGroup.findMany({
+          where: { id: { in: existingGroupIds } },
+          select: { id: true, createdAt: true },
+          orderBy: { createdAt: 'asc' },
+        });
 
-      await this.prisma.mediaItem.update({
-        where: { id: item.id },
-        data: { duplicateGroupId: targetGroupId },
-      });
+        targetGroupId = groups[0].id;
+        const groupsToMerge = groups.slice(1).map((g) => g.id);
 
-      await this.prisma.duplicateGroup.deleteMany({
-        where: { id: { in: groupsToMerge } },
-      });
+        await tx.mediaItem.updateMany({
+          where: { duplicateGroupId: { in: groupsToMerge } },
+          data: { duplicateGroupId: targetGroupId },
+        });
 
-      this.logger.log(
-        `Merged ${groupsToMerge.length} duplicate group(s) into ${targetGroupId} for MediaItem ${mediaItemId}`,
-      );
-    }
+        await tx.mediaItem.update({
+          where: { id: item.id },
+          data: { duplicateGroupId: targetGroupId },
+        });
 
-    await this.recomputeGroupMeta(targetGroupId);
+        await tx.duplicateGroup.deleteMany({
+          where: { id: { in: groupsToMerge } },
+        });
+
+        this.logger.log(
+          `Merged ${groupsToMerge.length} duplicate group(s) into ${targetGroupId} for MediaItem ${mediaItemId}`,
+        );
+      }
+
+      await this.recomputeGroupMeta(targetGroupId, tx);
+    });
   }
 
   /**
@@ -477,25 +517,28 @@ export class DuplicateDetectionService {
    * meaningless). Defensive — membership can shrink via trash/archive
    * actions or burst eviction elsewhere.
    */
-  private async recomputeGroupMeta(groupId: string): Promise<void> {
-    const members = await this.prisma.mediaItem.findMany({
+  private async recomputeGroupMeta(
+    groupId: string,
+    db: Prisma.TransactionClient = this.prisma,
+  ): Promise<void> {
+    const members = await db.mediaItem.findMany({
       where: { duplicateGroupId: groupId, deletedAt: null, archivedAt: null },
       select: { id: true, capturedAt: true },
     });
 
     if (members.length === 0) {
-      await this.prisma.duplicateGroup.delete({ where: { id: groupId } }).catch(() => undefined);
+      await db.duplicateGroup.delete({ where: { id: groupId } }).catch(() => undefined);
       return;
     }
 
     if (members.length === 1) {
       // A duplicate group is invariant `mediaCount >= 2`; a lone survivor is
       // no longer a duplicate — clear its membership and delete the group.
-      await this.prisma.mediaItem.updateMany({
+      await db.mediaItem.updateMany({
         where: { id: members[0].id },
         data: { duplicateGroupId: null },
       });
-      await this.prisma.duplicateGroup.delete({ where: { id: groupId } }).catch(() => undefined);
+      await db.duplicateGroup.delete({ where: { id: groupId } }).catch(() => undefined);
       return;
     }
 
@@ -504,7 +547,7 @@ export class DuplicateDetectionService {
       .filter((d): d is Date => d !== null)
       .reduce<Date | null>((min, d) => (!min || d < min ? d : min), null);
 
-    await this.prisma.duplicateGroup.update({
+    await db.duplicateGroup.update({
       where: { id: groupId },
       data: {
         mediaCount: members.length,
