@@ -50,8 +50,11 @@ function makeQueryDto(overrides: Partial<BurstQueryDto> = {}): BurstQueryDto {
   } as BurstQueryDto;
 }
 
-function makeResolveDto(keepIds: string[]): ResolveBurstDto {
-  return { keepIds } as ResolveBurstDto;
+function makeResolveDto(
+  keepIds: string[],
+  action: 'archive' | 'trash' = 'trash',
+): ResolveBurstDto {
+  return { keepIds, action } as ResolveBurstDto;
 }
 
 function makeBurstGroupRow(overrides: Partial<{
@@ -186,6 +189,9 @@ describe('BurstService', () => {
       storageProvider: 's3',
       bucket: 'test-bucket',
     });
+
+    // resolveBurstGroup/dismissBurstGroup write an audit event after the transaction.
+    (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -397,12 +403,38 @@ describe('BurstService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('soft-deletes non-kept members (sets deletedAt)', async () => {
+    it('throws BadRequestException when action is "trash" but perms lack media:delete', async () => {
+      setupGroup();
+
+      await expect(
+        service.resolveBurstGroup(
+          GROUP_ID,
+          makeResolveDto(['media-1'], 'trash'),
+          USER_ID,
+          PERMS_MEDIA_WRITE, // media:write only — no media:delete
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('allows action "archive" with only media:write perms (media:delete not required)', async () => {
+      setupGroup();
+
+      const result = await service.resolveBurstGroup(
+        GROUP_ID,
+        makeResolveDto(['media-1'], 'archive'),
+        USER_ID,
+        PERMS_MEDIA_WRITE,
+      );
+
+      expect(result.data.action).toBe('archive');
+    });
+
+    it('trashes non-kept members (sets deletedAt) when action is "trash"', async () => {
       setupGroup();
 
       await service.resolveBurstGroup(
         GROUP_ID,
-        makeResolveDto(['media-1']), // keep only media-1
+        makeResolveDto(['media-1'], 'trash'), // keep only media-1
         USER_ID,
         PERMS_MEDIA_DELETE,
       );
@@ -416,12 +448,31 @@ describe('BurstService', () => {
       );
     });
 
-    it('marks the group as resolved with resolvedById and resolvedAt', async () => {
+    it('archives non-kept members (sets archivedAt) when action is "archive"', async () => {
       setupGroup();
 
       await service.resolveBurstGroup(
         GROUP_ID,
-        makeResolveDto(['media-1']),
+        makeResolveDto(['media-1'], 'archive'), // keep only media-1
+        USER_ID,
+        PERMS_MEDIA_WRITE,
+      );
+
+      // media-2 and media-3 should be archived, not trashed
+      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: expect.arrayContaining(['media-2', 'media-3']) } },
+          data: { archivedAt: expect.any(Date) },
+        }),
+      );
+    });
+
+    it('marks the group as resolved with resolvedById, resolvedAt, and resolution outcome fields', async () => {
+      setupGroup();
+
+      await service.resolveBurstGroup(
+        GROUP_ID,
+        makeResolveDto(['media-1'], 'trash'),
         USER_ID,
         PERMS_MEDIA_DELETE,
       );
@@ -433,24 +484,50 @@ describe('BurstService', () => {
             status: BurstGroupStatus.resolved,
             resolvedById: USER_ID,
             resolvedAt: expect.any(Date),
+            resolutionAction: 'trash',
+            keptCount: 1,
+            removedCount: 2,
           }),
         }),
       );
     });
 
-    it('returns { data: { deleted, kept, groupStatus: "resolved" } }', async () => {
+    it('writes an audit event for the resolution', async () => {
+      setupGroup();
+
+      await service.resolveBurstGroup(
+        GROUP_ID,
+        makeResolveDto(['media-1'], 'trash'),
+        USER_ID,
+        PERMS_MEDIA_DELETE,
+      );
+
+      expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            actorUserId: USER_ID,
+            action: 'burst_group:resolved',
+            targetType: 'burst_group',
+            targetId: GROUP_ID,
+          }),
+        }),
+      );
+    });
+
+    it('returns { data: { removed, kept, action, groupStatus: "resolved" } }', async () => {
       setupGroup();
 
       const result = await service.resolveBurstGroup(
         GROUP_ID,
-        makeResolveDto(['media-1']),
+        makeResolveDto(['media-1'], 'trash'),
         USER_ID,
         PERMS_MEDIA_DELETE,
       );
 
       expect(result.data).toMatchObject({
-        deleted: 2,
+        removed: 2,
         kept: 1,
+        action: 'trash',
         groupStatus: 'resolved',
       });
     });
@@ -465,7 +542,7 @@ describe('BurstService', () => {
         PERMS_MEDIA_DELETE,
       );
 
-      expect(result.data.deleted).toBe(0);
+      expect(result.data.removed).toBe(0);
       expect(result.data.kept).toBe(3);
     });
   });
