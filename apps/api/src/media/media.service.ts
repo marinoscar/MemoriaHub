@@ -147,7 +147,7 @@ export class MediaService {
             `cleaning up redundant StorageObject ${dto.storageObjectId}`,
         );
         await this.cleanupRedundantStorageObject(dto.storageObjectId, storageObject.storageKey);
-        return { ...duplicate, deduplicated: true as const };
+        return { ...duplicate, deduplicated: true as const, mediaItemId: duplicate.id };
       }
     }
 
@@ -202,7 +202,7 @@ export class MediaService {
         }
 
         await this.cleanupRedundantStorageObject(dto.storageObjectId, storageObject.storageKey);
-        return { ...winner, deduplicated: true as const };
+        return { ...winner, deduplicated: true as const, mediaItemId: winner.id };
       }
 
       throw err;
@@ -274,7 +274,7 @@ export class MediaService {
       deletedAt: mediaItem.deletedAt,
     });
 
-    return { ...mediaItem, deduplicated: false as const };
+    return { ...mediaItem, deduplicated: false as const, mediaItemId: mediaItem.id };
   }
 
   /**

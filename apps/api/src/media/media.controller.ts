@@ -863,8 +863,12 @@ export class MediaController {
    *   If `contentHash` is supplied in the request body the server checks whether
    *   the caller already owns an active MediaItem with the same hash.  If so,
    *   the redundant StorageObject is cleaned up and the EXISTING MediaItem is
-   *   returned with HTTP 200 and `{ deduplicated: true }`.  A fresh create
-   *   returns HTTP 201 with `{ deduplicated: false }`.
+   *   returned with HTTP 200 and `{ deduplicated: true, mediaItemId }`.  A fresh
+   *   create returns HTTP 201 with `{ deduplicated: false, mediaItemId }`.
+   *
+   *   In both cases the response includes `mediaItemId` — the id of the created
+   *   (or existing deduplicated) MediaItem — so clients can attach an instant
+   *   local upload preview to the correct item.
    *
    *   The same dedup logic fires at the DB level via a partial unique index on
    *   (owner_id, content_hash) as a server-side backstop, even when the client
@@ -877,16 +881,21 @@ export class MediaController {
     description:
       'The referenced StorageObject must be owned by the caller. ' +
       'Returns the created (or existing deduplicated) MediaItem record. ' +
+      'The response always includes `mediaItemId` — the id of the created or ' +
+      'existing MediaItem — alongside the `deduplicated` flag. ' +
       'When `contentHash` is provided the server deduplicates by (ownerId, contentHash): ' +
       'if an active item with that hash already exists the existing item is returned ' +
       'with HTTP 200 and `deduplicated: true`. A fresh create returns HTTP 201 with ' +
       '`deduplicated: false`. The redundant StorageObject blob is cleaned up best-effort.',
   })
-  @ApiResponse({ status: 201, description: 'MediaItem created (fresh)' })
+  @ApiResponse({
+    status: 201,
+    description: 'MediaItem created (fresh) — body includes `deduplicated: false` and `mediaItemId`',
+  })
   @ApiResponse({
     status: 200,
     description:
-      'Duplicate detected — existing MediaItem returned (deduplicated: true). ' +
+      'Duplicate detected — existing MediaItem returned (`deduplicated: true`, `mediaItemId`). ' +
       'The redundant StorageObject has been cleaned up best-effort.',
   })
   @ApiResponse({ status: 400, description: 'StorageObject already linked' })
