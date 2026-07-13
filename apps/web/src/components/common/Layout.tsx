@@ -2,12 +2,20 @@ import { Box, useTheme } from '@mui/material';
 import { Outlet } from 'react-router-dom';
 import { useState, useCallback } from 'react';
 import { AppBar } from '../navigation/AppBar';
-import { Sidebar, DRAWER_WIDTH } from '../navigation/Sidebar';
+import { Sidebar } from '../navigation/Sidebar';
 import { BottomNav } from '../navigation/BottomNav';
 import { MediaRefreshProvider } from '../../contexts/MediaRefreshContext';
 import { SearchProvider } from '../../contexts/SearchContext';
 
-export function Layout() {
+interface LayoutProps {
+  /**
+   * When true, `<main>` drops its padding and becomes a flex container so a
+   * child (e.g. the Map page) can own the full available area edge-to-edge.
+   */
+  fullBleed?: boolean;
+}
+
+export function Layout({ fullBleed = false }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const theme = useTheme();
 
@@ -35,12 +43,20 @@ export function Layout() {
             <Sidebar open={sidebarOpen} onClose={handleSidebarClose} />
             <Box
               component="main"
-              sx={{
-                flexGrow: 1,
-                p: 3,
-                pb: { xs: 10, md: 3 },
-                ml: { md: `${DRAWER_WIDTH}px` },
-              }}
+              sx={
+                fullBleed
+                  ? {
+                      flexGrow: 1,
+                      display: 'flex',
+                      minHeight: 0,
+                      p: 0,
+                    }
+                  : {
+                      flexGrow: 1,
+                      p: 3,
+                      pb: { xs: 10, md: 3 },
+                    }
+              }
             >
               <Outlet />
             </Box>

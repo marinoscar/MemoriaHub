@@ -34,8 +34,16 @@ import type { MediaLocation, MediaItem } from '../../types/media';
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Height of the MUI AppBar — keeps the map below it. */
-const APPBAR_HEIGHT = 64;
+/**
+ * MUI default toolbar (AppBar) heights: 56px below the sm breakpoint, 64px at
+ * sm and up. The map fills the remaining viewport height below it. `100dvh`
+ * (dynamic viewport height) accounts for mobile browser chrome that `100vh`
+ * ignores.
+ */
+const MAP_HEIGHT = {
+  xs: 'calc(100dvh - 56px)',
+  sm: 'calc(100dvh - 64px)',
+} as const;
 
 /** Default map view used before locations load (world overview). */
 const DEFAULT_CENTER: L.LatLngExpression = [20, 0];
@@ -258,7 +266,7 @@ export default function MediaMapPage() {
     <Box
       sx={{
         position: 'relative',
-        height: `calc(100vh - ${APPBAR_HEIGHT}px)`,
+        height: MAP_HEIGHT,
         width: '100%',
         overflow: 'hidden',
       }}
