@@ -1,4 +1,5 @@
 import { api } from './api';
+import type { GroupBulkResolveResult } from './bursts';
 
 export type DuplicateGroupStatus = 'pending' | 'resolved' | 'dismissed';
 export type DuplicateGroupKind = 'exact_variant' | 'edited' | 'similar';
@@ -10,6 +11,7 @@ export interface DuplicateGroupSummary {
   kind: DuplicateGroupKind;
   mediaCount: number;
   capturedAt: string | null;
+  confidence: number;
   suggestedBestItemId: string | null;
   coverThumbnailUrls: string[];
 }
@@ -50,6 +52,7 @@ export interface DuplicateGroupDetail {
   kind: DuplicateGroupKind;
   mediaCount: number;
   capturedAt: string | null;
+  confidence: number;
   suggestedBestItemId: string | null;
   resolvedById: string | null;
   resolvedAt: string | null;
@@ -99,6 +102,14 @@ export async function resolveDuplicateGroup(
   action: DuplicateResolveAction,
 ): Promise<DuplicateResolveResult> {
   return api.post<DuplicateResolveResult>(`/media/duplicates/${id}/resolve`, { keepIds, action });
+}
+
+export async function bulkResolveDuplicateGroups(params: {
+  circleId: string;
+  ids: string[];
+  action: DuplicateResolveAction;
+}): Promise<GroupBulkResolveResult> {
+  return api.post<GroupBulkResolveResult>('/media/duplicates/bulk/resolve', params);
 }
 
 export async function dismissDuplicateGroup(id: string): Promise<DuplicateDismissResult> {

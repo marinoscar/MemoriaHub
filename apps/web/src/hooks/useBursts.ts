@@ -1,8 +1,9 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import {
   listBurstGroups,
   getBurstGroup,
   resolveBurstGroup,
+  bulkResolveBurstGroups,
   dismissBurstGroup,
 } from '../services/bursts';
 import type {
@@ -10,14 +11,24 @@ import type {
   BurstGroupSummary,
   BurstGroupDetail,
   BurstListMeta,
+  BurstResolveResult,
+  GroupResolveAction,
+  GroupBulkResolveResult,
 } from '../services/bursts';
+
+interface FetchBurstGroupsParams {
+  circleId: string;
+  status?: BurstGroupStatus;
+  page?: number;
+}
 
 interface UseBurstGroupsResult {
   items: BurstGroupSummary[];
   meta: BurstListMeta | null;
   isLoading: boolean;
   error: string | null;
-  fetchGroups: (params: { circleId: string; status?: BurstGroupStatus; page?: number }) => Promise<void>;
+  fetchGroups: (params: FetchBurstGroupsParams) => Promise<void>;
+  bulkResolve: (ids: string[], action: GroupResolveAction) => Promise<GroupBulkResolveResult>;
 }
 
 export function useBurstGroups(): UseBurstGroupsResult {
@@ -26,7 +37,11 @@ export function useBurstGroups(): UseBurstGroupsResult {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchGroups = useCallback(async (params: { circleId: string; status?: BurstGroupStatus; page?: number }) => {
+  // Remember the last fetch params so bulkResolve can refresh the same view.
+  const lastParamsRef = useRef<FetchBurstGroupsParams | null>(null);
+
+  const fetchGroups = useCallback(async (params: FetchBurstGroupsParams) => {
+    lastParamsRef.current = params;
     setIsLoading(true);
     setError(null);
     try {
@@ -40,7 +55,22 @@ export function useBurstGroups(): UseBurstGroupsResult {
     }
   }, []);
 
-  return { items, meta, isLoading, error, fetchGroups };
+  const bulkResolve = useCallback(
+    async (ids: string[], action: GroupResolveAction) => {
+      const circleId = lastParamsRef.current?.circleId;
+      if (!circleId) {
+        throw new Error('No active circle to resolve burst groups');
+      }
+      const result = await bulkResolveBurstGroups({ circleId, ids, action });
+      if (lastParamsRef.current) {
+        await fetchGroups(lastParamsRef.current);
+      }
+      return result;
+    },
+    [fetchGroups],
+  );
+
+  return { items, meta, isLoading, error, fetchGroups, bulkResolve };
 }
 
 interface UseBurstGroupDetailResult {
@@ -48,7 +78,7 @@ interface UseBurstGroupDetailResult {
   isLoading: boolean;
   error: string | null;
   fetchGroup: (id: string) => Promise<void>;
-  resolve: (keepIds: string[]) => Promise<{ deleted: number; kept: number }>;
+  resolve: (keepIds: string[], action: GroupResolveAction) => Promise<BurstResolveResult>;
   dismiss: () => Promise<void>;
   resolving: boolean;
   dismissing: boolean;
@@ -74,15 +104,17 @@ export function useBurstGroupDetail(groupId: string): UseBurstGroupDetailResult 
     }
   }, []);
 
-  const resolve = useCallback(async (keepIds: string[]) => {
-    setResolving(true);
-    try {
-      const result = await resolveBurstGroup(groupId, keepIds);
-      return { deleted: result.deleted, kept: result.kept };
-    } finally {
-      setResolving(false);
-    }
-  }, [groupId]);
+  const resolve = useCallback(
+    async (keepIds: string[], action: GroupResolveAction) => {
+      setResolving(true);
+      try {
+        return await resolveBurstGroup(groupId, keepIds, action);
+      } finally {
+        setResolving(false);
+      }
+    },
+    [groupId],
+  );
 
   const dismiss = useCallback(async () => {
     setDismissing(true);

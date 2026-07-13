@@ -2,12 +2,16 @@ import { api } from './api';
 
 export type BurstGroupStatus = 'pending' | 'resolved' | 'dismissed';
 
+/** Archive-or-trash action shared by burst and duplicate group resolution. */
+export type GroupResolveAction = 'archive' | 'trash';
+
 export interface BurstGroupSummary {
   id: string;
   circleId: string;
   status: BurstGroupStatus;
   mediaCount: number;
   capturedAt: string | null;
+  confidence: number | null;
   suggestedBestItemId: string | null;
   suggestedBestThumbnailUrl: string | null;
   coverThumbnailUrls: string[];
@@ -42,6 +46,7 @@ export interface BurstGroupDetail {
   status: BurstGroupStatus;
   mediaCount: number;
   capturedAt: string | null;
+  confidence: number | null;
   suggestedBestItemId: string | null;
   resolvedById: string | null;
   resolvedAt: string | null;
@@ -49,14 +54,25 @@ export interface BurstGroupDetail {
 }
 
 export interface BurstResolveResult {
-  deleted: number;
+  removed: number;
   kept: number;
+  action: GroupResolveAction;
   groupStatus: BurstGroupStatus;
 }
 
 export interface BurstDismissResult {
   groupStatus: BurstGroupStatus;
   ungrouped: number;
+}
+
+/** Result of a bulk resolve across many groups (shared shape with duplicates). */
+export interface GroupBulkResolveResult {
+  resolvedGroups: number;
+  keptCount: number;
+  removedCount: number;
+  action: GroupResolveAction;
+  skipped: number;
+  errors: string[];
 }
 
 export async function listBurstGroups(params: {
@@ -77,8 +93,20 @@ export async function getBurstGroup(id: string): Promise<BurstGroupDetail> {
   return api.get<BurstGroupDetail>(`/media/bursts/${id}`);
 }
 
-export async function resolveBurstGroup(id: string, keepIds: string[]): Promise<BurstResolveResult> {
-  return api.post<BurstResolveResult>(`/media/bursts/${id}/resolve`, { keepIds });
+export async function resolveBurstGroup(
+  id: string,
+  keepIds: string[],
+  action: GroupResolveAction,
+): Promise<BurstResolveResult> {
+  return api.post<BurstResolveResult>(`/media/bursts/${id}/resolve`, { keepIds, action });
+}
+
+export async function bulkResolveBurstGroups(params: {
+  circleId: string;
+  ids: string[];
+  action: GroupResolveAction;
+}): Promise<GroupBulkResolveResult> {
+  return api.post<GroupBulkResolveResult>('/media/bursts/bulk/resolve', params);
 }
 
 export async function dismissBurstGroup(id: string): Promise<BurstDismissResult> {
