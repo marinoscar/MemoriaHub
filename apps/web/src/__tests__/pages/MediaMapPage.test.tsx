@@ -26,7 +26,10 @@
  *   - react-leaflet: MapContainer/TileLayer/Marker replaced with lightweight
  *     stubs; useMap/useMapEvents replaced with a shared fake map object so
  *     the page's internal ViewportWatcher/FitToExtent/ClusterLayer helper
- *     components run their real logic against fake Leaflet primitives.
+ *     components run their real logic against fake Leaflet primitives. The
+ *     TileLayer stub also mirrors the `url` prop onto a `data-url` attribute
+ *     so the "theme-aware basemap" tests below can assert which CARTO tile
+ *     URL (dark_all vs light_all) the page selected for the active theme.
  *   - leaflet: stubs for L.latLngBounds / L.divIcon / L.Icon.Default.
  *   - ../../lib/leaflet-setup: replaced (avoids inline-SVG icon + CSS import).
  *   - services/media: aggregateLocations / listMediaLocations / getThumbnails
@@ -51,8 +54,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { ThemeProvider } from '@mui/material/styles';
 import { render } from '../utils/test-utils';
 import L from 'leaflet';
+import { lightTheme, darkTheme } from '../../theme';
 import type { MapCluster, MediaItem, MediaLocation, LocationExtent } from '../../types/media';
 
 // ---------------------------------------------------------------------------
@@ -112,7 +117,7 @@ vi.mock('react-leaflet', () => {
   const MapContainer = ({ children }: any) => (
     <div data-testid="map-container">{children}</div>
   );
-  const TileLayer = () => <div data-testid="tile-layer" />;
+  const TileLayer = (props: any) => <div data-testid="tile-layer" data-url={props.url} />;
   const Marker = (props: any) => (
     <button
       type="button"
@@ -553,6 +558,51 @@ describe('MediaMapPage', () => {
         expect(screen.getByText(/no geotagged media here/i)).toBeInTheDocument();
       });
       expect(mockGetCurrentPosition).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Theme-aware basemap tile URL
+  //
+  // MediaMapPage picks the tile URL from `useTheme().palette.mode` (a MUI
+  // `<ThemeProvider>` value), which is distinct from this suite's
+  // `ThemeContextProvider` wrapper (a plain React context that the real app
+  // only turns into an MUI theme in App.tsx's `AppRoutes`, outside this test
+  // harness). So these two tests wrap the page directly in a real MUI
+  // `<ThemeProvider>` using the app's actual `lightTheme`/`darkTheme`
+  // objects, which — being the innermost/nearest ThemeProvider in the tree —
+  // is what `useTheme()` inside the page resolves to.
+  // -------------------------------------------------------------------------
+
+  describe('theme-aware basemap', () => {
+    it('renders the CARTO dark_all tile URL under a dark theme', async () => {
+      render(
+        <ThemeProvider theme={darkTheme}>
+          <MediaMapPage />
+        </ThemeProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('tile-layer')).toHaveAttribute(
+          'data-url',
+          'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+        );
+      });
+    });
+
+    it('renders the CARTO light_all tile URL under a light theme', async () => {
+      render(
+        <ThemeProvider theme={lightTheme}>
+          <MediaMapPage />
+        </ThemeProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('tile-layer')).toHaveAttribute(
+          'data-url',
+          'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+        );
+      });
     });
   });
 });
