@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 
 /** Per-domain review stats returned for both bursts and duplicates. */
-interface ReviewDomainStats {
+export interface ReviewDomainStats {
   identified: number;
   pending: number;
   resolved: number;
