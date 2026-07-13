@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.1 |
+| **Version** | 1.2 |
 | **Last Updated** | July 2026 |
-| **Status** | Specification (backend complete; UI not yet implemented) |
+| **Status** | Specification |
 
 ---
 
@@ -168,6 +168,18 @@ Also computed at read time (never persisted), `DuplicateService.computeGroupKind
 
 This classification, along with the `similarityToBest` value returned per member in the group-detail response (cosine similarity of each member's embedding against the suggested-best member's), was informed directly by user feedback on **immich Discussion #25831** — the most-requested improvements to immich's own duplicate-detection UX were (a) not mixing exact recompressed copies together with loosely-related "similar" photos in one undifferentiated list, and (b) showing *why* a group was linked instead of hiding the similarity score from the reviewer. `kind` badges (queryable via `GET /api/media/duplicates?kind=`) and the exposed `similarityToBest` field address both points directly.
 
+### 3.5 Confidence Score (Read-Time)
+
+Unlike `burst_groups.confidence` (persisted at detection time — see [burst-detection.md §3.5](burst-detection.md#35-confidence-score-visual-cohesion)), duplicate-group confidence has no dedicated column. It is computed at read time by `DuplicateService`, alongside `kind` classification (§3.4) and best-copy scoring (§3.3), and returned as `confidence` on both the list (`GET /api/media/duplicates`) and detail (`GET /api/media/duplicates/:id`) responses:
+
+```
+confidence = maxSim = max pairwise CLIP cosine similarity across all members of the group
+```
+
+`maxSim` is the same tightest-pair similarity value used by `computeGroupKind` (§3.4) to decide the `exact_variant` threshold — it is not recomputed separately, just surfaced directly as the group's headline confidence number so a reviewer scanning the list doesn't have to open a group to gauge how tight the match is. Because it depends only on already-stored `media_visual_embedding` rows, it costs no additional storage and stays perfectly in sync with the group's current membership on every read — there is no staleness window the way a persisted score would have.
+
+If the CLIP model is degraded (§4.3) and a group was linked purely via Tier 2 (dHash), no embeddings exist to compare and `confidence` is `null`.
+
 ---
 
 ## 4. Visual Embedding Model Lifecycle
@@ -202,7 +214,7 @@ Any failure while downloading, verifying, or loading the model (network failure,
 - A warning is logged exactly **once** (`degradedWarned` guard) rather than spamming logs on every subsequent call.
 - Enrichment jobs **never fail** because of a missing/broken model — `DuplicateDetectionService.processMediaItem` treats an `'unavailable'` embedding result as "no Tier 1 candidates" and proceeds with Tier 2 (dHash) matching only.
 
-Admins can check current model health via `GET /api/admin/duplicates/status` (§9.7), which surfaces `modelAvailable`, `degraded`, `modelPath`, and the model tag (`clip-vit-b32-q8`) — useful both for confirming a successful first download and for diagnosing why a deployment is silently running hash-only.
+Admins can check current model health via `GET /api/admin/duplicates/status` (§9.8), which surfaces `modelAvailable`, `degraded`, `modelPath`, and the model tag (`clip-vit-b32-q8`) — useful both for confirming a successful first download and for diagnosing why a deployment is silently running hash-only.
 
 ### 4.4 Preprocessing
 
@@ -226,9 +238,14 @@ One row per detected near-duplicate cluster, circle-scoped, mirroring `burst_gro
 | `capturedAt` | DateTime? | Earliest active member's `capturedAt`; added in a follow-up migration (`20260702010000_duplicate_groups_captured_at`) for chronological queue ordering, same pattern as `burst_groups.capturedAt` |
 | `resolvedById` | UUID? | FK → `users` (SetNull on delete) |
 | `resolvedAt` | DateTime? | |
+| `resolutionAction` | String? (`'archive'`\|`'trash'`) | Which outcome a resolve applied to the non-kept members; null until resolved |
+| `keptCount` | Int? | Number of members kept by a resolve; null until resolved |
+| `removedCount` | Int? | Number of members archived/trashed by a resolve; null until resolved |
 | `createdAt` / `updatedAt` | DateTime | |
 
-Index: `@@index([circleId, status])`.
+`resolutionAction`, `keptCount`, and `removedCount` were added by migration `20260713120000_add_burst_dup_resolution_tracking` (the same migration that added the equivalent columns to `burst_groups`), along with a new index `(circleId, status, resolutionAction)`. Unlike `burst_groups`, there is no persisted `confidence` column here — duplicate-group confidence is computed at read time (§3.5).
+
+Indexes: `@@index([circleId, status])`, `@@index([circleId, status, resolutionAction])`.
 
 **`DuplicateGroupStatus` enum:** `pending` (awaiting review), `resolved` (reviewer picked a keep set; non-kept members archived or trashed), `dismissed` (reviewer indicated this is not actually a duplicate set; members ungrouped).
 
@@ -395,20 +412,21 @@ List duplicate groups for a circle.
         "mediaCount": 3,
         "capturedAt": "2026-06-15T14:32:01.234Z",
         "suggestedBestItemId": "uuid",
+        "confidence": 0.98,
         "coverThumbnailUrls": ["https://...", "https://..."]
       }
     ],
     "meta": { "total": 8, "page": 1, "pageSize": 20 }
   }
   ```
-  Ordered by `capturedAt ASC, createdAt ASC` (chronological — see §3.4's discussion of immich Discussion #25831). `coverThumbnailUrls` contains up to 4 signed thumbnail URLs for the first 4 active members. `kind` filtering is applied in application code after read-time classification (§3.4), so `meta.total` reflects the post-filter count.
+  Ordered by `capturedAt ASC, createdAt ASC` (chronological — see §3.4's discussion of immich Discussion #25831). `coverThumbnailUrls` contains up to 4 signed thumbnail URLs for the first 4 active members. `kind` filtering is applied in application code after read-time classification (§3.4), so `meta.total` reflects the post-filter count. `confidence` is the read-time tightest-pair CLIP cosine similarity (`maxSim`, §3.5), or `null` if the group was linked hash-only.
 
 ### 9.2 `GET /api/media/duplicates/:id`
 
 Full detail for a single group.
 
 - **Auth:** `media:read` + per-circle `viewer` role.
-- **Response `200`:** `{ "data": { id, circleId, status, kind, mediaCount, capturedAt, suggestedBestItemId, resolvedById, resolvedAt, members: [...] } }`. Each member: `{ id, thumbnailUrl, previewUrl, width, height, fileSize, capturedAt, cameraMake, cameraModel, hasGps, contentHash (first 12 chars), sharpnessScore, qualityScore, similarityToBest, isSuggestedBest }`. `previewUrl` is a signed URL to the full original (not just the thumbnail) so the reviewer can compare at full resolution. `similarityToBest` is the member's CLIP cosine similarity against `suggestedBestItemId`'s embedding, or `null` if either side lacks an embedding (degraded mode / hash-only match).
+- **Response `200`:** `{ "data": { id, circleId, status, kind, mediaCount, capturedAt, suggestedBestItemId, confidence, resolvedById, resolvedAt, members: [...] } }`. Each member: `{ id, thumbnailUrl, previewUrl, width, height, fileSize, capturedAt, cameraMake, cameraModel, hasGps, contentHash (first 12 chars), sharpnessScore, qualityScore, similarityToBest, isSuggestedBest }`. `previewUrl` is a signed URL to the full original (not just the thumbnail) so the reviewer can compare at full resolution. `similarityToBest` is the member's CLIP cosine similarity against `suggestedBestItemId`'s embedding, or `null` if either side lacks an embedding (degraded mode / hash-only match). `confidence` at the group level is the same read-time `maxSim` value returned in the list response (§3.5).
 - **Response `404`:** group not found.
 
 ### 9.3 `POST /api/media/duplicates/:id/resolve`
@@ -420,9 +438,19 @@ Keep selected members; archive or trash the rest.
 - **Response `200`:** `{ "data": { "removed": 2, "kept": 1, "action": "trash", "groupStatus": "resolved" } }`.
 - **Response `400`:** empty/invalid `keepIds`, missing `media:delete` for a trash action, or the group is not currently `pending`.
 - **Response `404`:** group not found.
-- Runs in a single `$transaction`: bulk `archivedAt`/`deletedAt` update on the removed members plus the group's `status = resolved` update succeed or fail together. Writes an `audit_events` row (`duplicate_group:resolved`).
+- Runs in a single `$transaction`: bulk `archivedAt`/`deletedAt` update on the removed members plus the group's `status = resolved` update (recording `resolutionAction`, `keptCount`, `removedCount` — see §5.1) succeed or fail together. Writes an `audit_events` row (`duplicate_group:resolved`).
 
-### 9.4 `POST /api/media/duplicates/:id/dismiss`
+### 9.4 `POST /api/media/duplicates/bulk/resolve`
+
+Resolve multiple pending duplicate groups in a single call, always keeping each group's `suggestedBestItemId` and archiving/trashing the rest — the exact same shape and semantics as [burst detection's bulk resolve](burst-detection.md#72-group-actions) (`POST /api/media/bursts/bulk/resolve`), applied to `DuplicateGroup` rows instead.
+
+- **Auth:** `media:write` + per-circle `collaborator` role. `action: 'trash'` additionally requires `media:delete`, same as the single-group resolve endpoint above.
+- **Request body:** `{ "circleId": "uuid", "ids": ["uuid", ...], "action": "archive" | "trash" }`. `ids` is 1–100 duplicate group UUIDs; every ID must belong to `circleId` or the whole request is rejected before any group is touched.
+- **Behavior:** each group is resolved independently in its own transaction. A group not currently `pending`, or with no `suggestedBestItemId`, is skipped (counted in `skipped`) rather than treated as an error; a group that fails during its own transaction is counted in `errors` without blocking the rest.
+- **Response `200`:** `{ "data": { "resolvedGroups": 6, "keptCount": 6, "removedCount": 14, "action": "archive", "skipped": 1, "errors": 0 } }`.
+- **Response `400`:** `ids` is empty or exceeds 100, or an ID does not belong to `circleId`.
+
+### 9.5 `POST /api/media/duplicates/:id/dismiss`
 
 Mark a group as not actually duplicates; ungroups all members (`duplicateGroupId = null`) without deleting anything.
 
@@ -431,7 +459,7 @@ Mark a group as not actually duplicates; ungroups all members (`duplicateGroupId
 - **Response `400`:** group is not currently `pending`.
 - Writes an `audit_events` row (`duplicate_group:dismissed`).
 
-### 9.5 `POST /api/media/:id/duplicates/rerun`
+### 9.6 `POST /api/media/:id/duplicates/rerun`
 
 Re-enqueue duplicate detection for a single media item at priority 0 (highest).
 
@@ -440,7 +468,7 @@ Re-enqueue duplicate detection for a single media item at priority 0 (highest).
 - **Response `400`:** item is not a photo.
 - **Response `404`:** item not found or soft-deleted.
 
-### 9.6 `POST /api/admin/duplicates/backfill`
+### 9.7 `POST /api/admin/duplicates/backfill`
 
 Bulk-enqueue `duplicate_detection_batch` jobs across **all circles**.
 
@@ -449,16 +477,20 @@ Bulk-enqueue `duplicate_detection_batch` jobs across **all circles**.
 - **Request body:** `{ "from": "ISO-8601"?, "to": "ISO-8601"?, "force": false }`. `from`/`to` bound `capturedAt` (both inclusive, independent). `force: true` re-embeds every eligible photo regardless of existing embedding.
 - **Response `201`:** `{ "data": { "enqueued": 87, "circles": 4, "estimatedItems": 8412 } }` — `enqueued` is the number of `duplicate_detection_batch` job rows created (matches the admin jobs dashboard's `byType` count exactly), `estimatedItems` is the number of individual photos those jobs cover.
 
-### 9.7 `GET /api/admin/duplicates/status`
+### 9.8 `GET /api/admin/duplicates/status`
 
 Visual-embedding model availability.
 
 - **Auth:** Admin role + `system_settings:read`.
 - **Response `200`:** `{ "data": { "modelAvailable": true, "modelPath": "./data/models/clip-vit-b32-vision-quantized.onnx", "degraded": false, "model": "clip-vit-b32-q8" } }`. When `degraded: true`, the deployment is running Tier 2 (dHash) matching only (§4.3).
 
-### 9.8 Circle Dashboard
+### 9.9 Circle Dashboard
 
 `GET /api/media/dashboard?circleId=` returns a `pendingDuplicateGroups` count (`DuplicateGroupStatus.pending`, circle-scoped). Unlike `pendingBurstGroups`, there is **no minimum-size filter applied** — every `pending` duplicate group qualifies, since a group is never created below `mediaCount = 2` in the first place (§5.1).
+
+### 9.10 Review Insights
+
+`GET /api/media/review-insights?circleId=` returns a per-circle, on-demand aggregate of both burst and duplicate review-queue activity — identified/pending/resolved/dismissed counts plus an archived-vs-trashed breakdown of resolved groups, computed live with no snapshot table. It is documented in full at [burst-detection.md §7.5](burst-detection.md#75-review-insights) since it covers both features in one response; the `duplicates` half of that response is sourced from `duplicate_groups.status`/`resolutionAction`/`keptCount`/`removedCount` (§5.1).
 
 ---
 
@@ -469,10 +501,12 @@ Visual-embedding model availability.
 | `GET /api/media/duplicates` | `media:read` | `viewer` | |
 | `GET /api/media/duplicates/:id` | `media:read` | `viewer` | |
 | `POST /api/media/duplicates/:id/resolve` | `media:write` (+ `media:delete` if `action: 'trash'`) | `collaborator` | |
+| `POST /api/media/duplicates/bulk/resolve` | `media:write` (+ `media:delete` if `action: 'trash'`) | `collaborator` | 1–100 group IDs |
 | `POST /api/media/duplicates/:id/dismiss` | `media:write` | `collaborator` | |
 | `POST /api/media/:id/duplicates/rerun` | `media:write` | `collaborator` | |
 | `POST /api/admin/duplicates/backfill` | `system_settings:write` | — (Admin, app-wide) | 400 if feature disabled |
 | `GET /api/admin/duplicates/status` | `system_settings:read` | — (Admin) | |
+| `GET /api/media/review-insights` | `media:read` | `viewer` | Covers both bursts and duplicates; see §9.10 |
 
 No new permission scopes were introduced. All endpoints reuse `media:read`/`media:write`/`media:delete`/`system_settings:read`/`system_settings:write`, consistent with burst detection and the metadata/geocode rerun endpoints.
 
@@ -480,7 +514,7 @@ No new permission scopes were introduced. All endpoints reuse `media:read`/`medi
 
 ## 11. UI
 
-**Not yet implemented as of this specification's version.** The backend (matching engine, both enrichment handlers, chunked backfill service, review API, admin status endpoint, settings, dashboard count) is complete and independently usable via the API documented above. A frontend review-queue page (`/duplicates`, `/duplicates/:id`), an admin settings sub-page (`/admin/settings/duplicates` with the global toggle, threshold sliders, and a backfill panel mirroring `TaggingSettingsPage`), and a `pendingDuplicateGroups` dashboard banner are planned as the immediate next phase of this feature and will follow the same `services/<domain>.ts` + `hooks/use<Domain>.ts` pattern used by `pages/Bursts/*`.
+The frontend review-queue page (`/duplicates`, `/duplicates/:id`) now exists, following the same `services/<domain>.ts` + `hooks/use<Domain>.ts` pattern used by `pages/Bursts/*`. Like the burst review queue, group cards carry a multi-select checkbox and a confidence meter (§3.5); a bulk toolbar appears once one or more groups are selected, offering "Resolve & Archive" and "Resolve & Delete" (the latter, and any selection over 25 groups, prompts a confirmation before firing `POST /api/media/duplicates/bulk/resolve`, §9.4). A per-circle "Review Insights" page (`/review-insights`, §9.10) shows identified/resolved/dismissed and archived-vs-trashed breakdowns for both burst and duplicate review in one place.
 
 ---
 
@@ -492,7 +526,7 @@ The CLIP inference session runs entirely in-process via `onnxruntime-node`. No p
 
 ### Non-Destructive by Design
 
-No deletion or archival happens without an authenticated, authorized call to `POST /api/media/duplicates/:id/resolve` with an explicit `keepIds` list. Both `archive` and `trash` outcomes are reversible (unarchive; restore from Trash within the retention window).
+No deletion or archival happens without an authenticated, authorized call to `POST /api/media/duplicates/:id/resolve` (or its bulk counterpart, `POST /api/media/duplicates/bulk/resolve`, §9.4) with an explicit `keepIds`/`ids` list. Both `archive` and `trash` outcomes are reversible (unarchive; restore from Trash within the retention window).
 
 ### Global Feature Toggle
 
@@ -544,7 +578,7 @@ The scenarios below describe the full coverage this module should have; items al
 - Verify a `viewer` can call the two `GET` endpoints but receives `403` on resolve/dismiss.
 - Verify a `collaborator` without `media:delete` can resolve with `action: 'archive'` but receives `400` (not `403`) attempting `action: 'trash'`.
 - Verify `POST /api/admin/duplicates/backfill` and `GET /api/admin/duplicates/status` return `403` for a non-admin.
-- The per-circle collaborator check on the rerun endpoint (§9.5) is now covered: `apps/api/src/dedup/duplicate.service.spec.ts`'s `rerunDuplicateDetection` describe block asserts `assertCircleAccess` is called with the correct arguments, and that a rejection from the membership check propagates without enqueueing a job.
+- The per-circle collaborator check on the rerun endpoint (§9.6) is now covered: `apps/api/src/dedup/duplicate.service.spec.ts`'s `rerunDuplicateDetection` describe block asserts `assertCircleAccess` is called with the correct arguments, and that a rejection from the membership check propagates without enqueueing a job.
 
 ---
 
@@ -553,7 +587,7 @@ The scenarios below describe the full coverage this module should have; items al
 | Capability | Notes |
 |------------|-------|
 | Remaining test coverage | See §13 — `DuplicateDetectionService` has unit coverage; `VisualEmbeddingService`, `DuplicateService`, `DuplicateBackfillService`, the batch handler, and the controllers do not yet |
-| Frontend review queue and admin settings page | See §11 |
+| Admin settings page | `/admin/settings/duplicates` (global toggle, threshold sliders, backfill panel mirroring `TaggingSettingsPage`) — the review-queue frontend itself now exists, see §11 |
 | `halfvec(512)` migration | Escape hatch for libraries beyond ~200 000 photos (§7.1); not needed at current scale |
 | Configurable scoring weights | Expose the `0.35/0.30/0.20/0.15` best-copy weights as admin-editable settings rather than code constants, mirroring the equivalent Future Work item in `docs/specs/burst-detection.md` |
 | Cross-circle detection | Explicitly out of scope today; would require rethinking the circle-scoped HNSW index and RBAC model |
@@ -567,3 +601,4 @@ The scenarios below describe the full coverage this module should have; items al
 |---------|------|--------|---------|
 | 1.0 | July 2026 | AI Assistant | Initial specification, documenting the Phase 1 (backend) implementation: CLIP ViT-B/32 + dHash two-tier matching engine, union-find grouping with burst-overlap exclusion rules, read-time best-copy scoring and kind classification, model lifecycle and degraded mode, chunked backfill architecture, and the full review/admin API surface |
 | 1.1 | July 2026 | AI Assistant | Document §3.2 eviction ("burst wins") fix closing the upload-time ordering race: `DuplicateDetectionService.evictFromDuplicateGroups`, the `recomputeGroupMeta` shrink-below-2 cleanup, `evictExistingBurstOverlaps` one-time remediation, and the `evictedDuplicateOverlaps` field on `POST /api/admin/bursts/backfill` |
+| 1.2 | July 2026 | AI Assistant | Added the read-time `confidence` score (§3.5, `maxSim`); added `POST /api/media/duplicates/bulk/resolve` (§9.4); added `resolutionAction`/`keptCount`/`removedCount` columns on `duplicate_groups` (migration `20260713120000_add_burst_dup_resolution_tracking`, §5.1); added `GET /api/media/review-insights` (§9.10, full detail in `burst-detection.md` §7.5); documented the now-implemented duplicate review-queue frontend, its multi-select bulk toolbar, and confidence meter (§11) |
