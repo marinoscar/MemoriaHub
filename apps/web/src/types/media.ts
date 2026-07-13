@@ -30,6 +30,19 @@ export interface MapCluster {
 }
 
 // ---------------------------------------------------------------------------
+// LocationExtent — true bounding box across all a circle's geotagged items,
+// returned by GET /api/media/locations/extent (used for initial map framing)
+// ---------------------------------------------------------------------------
+
+export interface LocationExtent {
+  minLat: number;
+  minLng: number;
+  maxLat: number;
+  maxLng: number;
+  count: number;
+}
+
+// ---------------------------------------------------------------------------
 // MediaItem types (mirrors the Prisma model + thumbnail enrichment)
 // ---------------------------------------------------------------------------
 

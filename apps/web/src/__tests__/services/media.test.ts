@@ -19,8 +19,9 @@ import {
   listTags,
   aggregateLocations,
   getThumbnails,
+  getLocationExtent,
 } from '../../services/media';
-import type { MediaLocation, MapCluster, TagItem } from '../../types/media';
+import type { MediaLocation, MapCluster, TagItem, LocationExtent } from '../../types/media';
 import type { ThumbnailRef } from '../../services/media';
 
 // ---------------------------------------------------------------------------
@@ -361,6 +362,116 @@ describe('getThumbnails', () => {
     expect(result).toEqual([]);
     expect(requestCount).toBe(0);
     expect(capturedUrl).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getLocationExtent
+// ---------------------------------------------------------------------------
+
+describe('getLocationExtent', () => {
+  let capturedUrl: URL | null = null;
+
+  const mockExtent: LocationExtent = {
+    minLat: 9.5,
+    minLng: -85.0,
+    maxLat: 10.5,
+    maxLng: -84.0,
+    count: 42,
+  };
+
+  beforeEach(() => {
+    capturedUrl = null;
+
+    server.use(
+      http.get('*/api/media/locations/extent', ({ request }) => {
+        capturedUrl = new URL(request.url);
+        return HttpResponse.json({ data: mockExtent });
+      }),
+    );
+  });
+
+  it('should call GET /media/locations/extent with no query params when called with no args', async () => {
+    await getLocationExtent();
+    expect(capturedUrl).not.toBeNull();
+    expect(capturedUrl!.search).toBe('');
+  });
+
+  it('should return the LocationExtent object from the server', async () => {
+    const result = await getLocationExtent();
+    expect(result).toEqual(mockExtent);
+  });
+
+  it('should include circleId in the query string when provided', async () => {
+    await getLocationExtent({ circleId: 'circle-1' });
+    expect(capturedUrl!.searchParams.get('circleId')).toBe('circle-1');
+  });
+
+  it('should include type in the query string when provided', async () => {
+    await getLocationExtent({ type: 'video' });
+    expect(capturedUrl!.searchParams.get('type')).toBe('video');
+  });
+
+  it('should include capturedAtFrom in the query string when provided', async () => {
+    await getLocationExtent({ capturedAtFrom: '2024-01-01T00:00:00.000Z' });
+    expect(capturedUrl!.searchParams.get('capturedAtFrom')).toBe(
+      '2024-01-01T00:00:00.000Z',
+    );
+  });
+
+  it('should include capturedAtTo in the query string when provided', async () => {
+    await getLocationExtent({ capturedAtTo: '2024-12-31T23:59:59.999Z' });
+    expect(capturedUrl!.searchParams.get('capturedAtTo')).toBe(
+      '2024-12-31T23:59:59.999Z',
+    );
+  });
+
+  it('should include all filters simultaneously', async () => {
+    await getLocationExtent({
+      circleId: 'circle-1',
+      type: 'photo',
+      capturedAtFrom: '2024-01-01T00:00:00.000Z',
+      capturedAtTo: '2024-12-31T23:59:59.999Z',
+    });
+
+    const params = capturedUrl!.searchParams;
+    expect(params.get('circleId')).toBe('circle-1');
+    expect(params.get('type')).toBe('photo');
+    expect(params.get('capturedAtFrom')).toBe('2024-01-01T00:00:00.000Z');
+    expect(params.get('capturedAtTo')).toBe('2024-12-31T23:59:59.999Z');
+  });
+
+  // KNOWN DEFECT (pre-existing in `services/api.ts`, not introduced by the
+  // map-extent-fix branch): `ApiService`'s response unwrapping —
+  // `return data.data ?? data;` — only substitutes the envelope when
+  // `data.data` is `undefined`. When the server legitimately responds with
+  // `{ data: null }` (as `TransformInterceptor` produces for this endpoint
+  // when a circle has zero geotagged items — see media.service.ts
+  // `getLocationsExtent`), `null ?? data` evaluates to `data`, so the raw
+  // envelope object round-trips instead of `null`. `getLocationExtent()`
+  // therefore currently returns a truthy `{ data: null }` object rather
+  // than `null` for the "no geotagged items" case documented in this
+  // endpoint's contract. Downstream, `MediaMapPage`'s `FitToExtent` only
+  // guards with `if (!extent) return;`, so this truthy envelope slips past
+  // that guard and destructures to `{ minLat: undefined, ... }`, then
+  // (since `undefined === undefined`) calls
+  // `map.setView([undefined, undefined], 13)` instead of leaving the map
+  // unframed. This test asserts the CURRENT (buggy) behavior so the suite
+  // documents the gap rather than silently passing over it — see the
+  // component-level tests in MediaMapPage.test.tsx, which mock
+  // `services/media` directly and so do not exercise this envelope bug.
+  // Fix: change the unwrap to something like
+  // `'data' in data ? data.data : data` (or equivalent `in`/hasOwnProperty
+  // check) in `apps/web/src/services/api.ts`, via frontend-dev.
+  it('KNOWN DEFECT: currently returns the raw { data: null } envelope, not null, when the server response has a legitimately-null data field', async () => {
+    server.use(
+      http.get('*/api/media/locations/extent', () => {
+        return HttpResponse.json({ data: null });
+      }),
+    );
+
+    const result = await getLocationExtent();
+    expect(result).toEqual({ data: null });
   });
 });
 

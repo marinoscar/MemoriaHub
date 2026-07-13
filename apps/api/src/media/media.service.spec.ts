@@ -2132,6 +2132,158 @@ describe('MediaService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // getLocationsExtent
+  // -------------------------------------------------------------------------
+
+  describe('getLocationsExtent', () => {
+    const baseQuery = { circleId: CIRCLE_ID } as any;
+
+    function mockAggregateResult(overrides: Partial<any> = {}) {
+      return {
+        _min: { takenLat: 9.9, takenLng: -85.1 },
+        _max: { takenLat: 10.5, takenLng: -84.0 },
+        _count: 3,
+        ...overrides,
+      };
+    }
+
+    beforeEach(() => {
+      (mockPrisma.mediaItem.aggregate as jest.Mock).mockResolvedValue(
+        mockAggregateResult(),
+      );
+    });
+
+    it('calls assertCircleAccess with (userId, circleId, userPermissions, "viewer") before querying', async () => {
+      await service.getLocationsExtent(baseQuery, 'user-1', ownPerms);
+      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+        'user-1',
+        CIRCLE_ID,
+        ownPerms,
+        'viewer',
+      );
+    });
+
+    it('calls mediaItem.aggregate exactly once with the base where clause and _min/_max/_count selectors', async () => {
+      await service.getLocationsExtent(baseQuery, 'user-1', ownPerms);
+
+      expect(mockPrisma.mediaItem.aggregate).toHaveBeenCalledTimes(1);
+      const arg = (mockPrisma.mediaItem.aggregate as jest.Mock).mock.calls[0][0];
+
+      expect(arg.where).toEqual({
+        circleId: CIRCLE_ID,
+        takenLat: { not: null },
+        takenLng: { not: null },
+        deletedAt: null,
+        archivedAt: null,
+      });
+      expect(arg._min).toEqual({ takenLat: true, takenLng: true });
+      expect(arg._max).toEqual({ takenLat: true, takenLng: true });
+      expect(arg._count).toBe(true);
+    });
+
+    it('applies capturedAtFrom to the where clause when supplied', async () => {
+      const from = new Date('2024-01-01');
+      await service.getLocationsExtent(
+        { ...baseQuery, capturedAtFrom: from },
+        'user-1',
+        ownPerms,
+      );
+      const arg = (mockPrisma.mediaItem.aggregate as jest.Mock).mock.calls[0][0];
+      expect(arg.where.capturedAt).toEqual({ gte: from });
+    });
+
+    it('applies capturedAtTo to the where clause when supplied', async () => {
+      const to = new Date('2024-12-31');
+      await service.getLocationsExtent(
+        { ...baseQuery, capturedAtTo: to },
+        'user-1',
+        ownPerms,
+      );
+      const arg = (mockPrisma.mediaItem.aggregate as jest.Mock).mock.calls[0][0];
+      expect(arg.where.capturedAt).toEqual({ lte: to });
+    });
+
+    it('applies both capturedAtFrom and capturedAtTo together when supplied', async () => {
+      const from = new Date('2024-01-01');
+      const to = new Date('2024-12-31');
+      await service.getLocationsExtent(
+        { ...baseQuery, capturedAtFrom: from, capturedAtTo: to },
+        'user-1',
+        ownPerms,
+      );
+      const arg = (mockPrisma.mediaItem.aggregate as jest.Mock).mock.calls[0][0];
+      expect(arg.where.capturedAt).toEqual({ gte: from, lte: to });
+    });
+
+    it('does not include a capturedAt filter when no date range is supplied', async () => {
+      await service.getLocationsExtent(baseQuery, 'user-1', ownPerms);
+      const arg = (mockPrisma.mediaItem.aggregate as jest.Mock).mock.calls[0][0];
+      expect(arg.where.capturedAt).toBeUndefined();
+    });
+
+    it('applies the type filter to the where clause when supplied', async () => {
+      await service.getLocationsExtent(
+        { ...baseQuery, type: 'video' },
+        'user-1',
+        ownPerms,
+      );
+      const arg = (mockPrisma.mediaItem.aggregate as jest.Mock).mock.calls[0][0];
+      expect(arg.where.type).toBe('video');
+    });
+
+    it('does not include a type filter when not supplied', async () => {
+      await service.getLocationsExtent(baseQuery, 'user-1', ownPerms);
+      const arg = (mockPrisma.mediaItem.aggregate as jest.Mock).mock.calls[0][0];
+      expect(arg.where.type).toBeUndefined();
+    });
+
+    it('returns { minLat, minLng, maxLat, maxLng, count } mapped from a non-null aggregate result', async () => {
+      (mockPrisma.mediaItem.aggregate as jest.Mock).mockResolvedValue(
+        mockAggregateResult({
+          _min: { takenLat: 9.9, takenLng: -85.1 },
+          _max: { takenLat: 10.5, takenLng: -84.0 },
+          _count: 7,
+        }),
+      );
+
+      const result = await service.getLocationsExtent(baseQuery, 'user-1', ownPerms);
+
+      expect(result).toEqual({
+        minLat: 9.9,
+        minLng: -85.1,
+        maxLat: 10.5,
+        maxLng: -84.0,
+        count: 7,
+      });
+    });
+
+    it('returns null when _count is 0 (no geotagged items)', async () => {
+      (mockPrisma.mediaItem.aggregate as jest.Mock).mockResolvedValue(
+        mockAggregateResult({
+          _min: { takenLat: null, takenLng: null },
+          _max: { takenLat: null, takenLng: null },
+          _count: 0,
+        }),
+      );
+
+      const result = await service.getLocationsExtent(baseQuery, 'user-1', ownPerms);
+      expect(result).toBeNull();
+    });
+
+    it('returns null when _min.takenLat is null even if _count is non-zero (defensive)', async () => {
+      (mockPrisma.mediaItem.aggregate as jest.Mock).mockResolvedValue(
+        mockAggregateResult({
+          _min: { takenLat: null, takenLng: -85.1 },
+          _count: 1,
+        }),
+      );
+
+      const result = await service.getLocationsExtent(baseQuery, 'user-1', ownPerms);
+      expect(result).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // getThumbnails
   // -------------------------------------------------------------------------
 

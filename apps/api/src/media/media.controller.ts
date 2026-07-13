@@ -39,6 +39,7 @@ import { AddAlbumItemsByFilterDto } from './dto/add-album-items-by-filter.dto';
 import { ExportQueryDto } from './dto/export-query.dto';
 import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
 import { MediaLocationsAggregateQueryDto } from './dto/media-locations-aggregate-query.dto';
+import { MediaLocationsExtentQueryDto } from './dto/media-locations-extent-query.dto';
 import { MediaThumbnailsQueryDto } from './dto/media-thumbnails-query.dto';
 import { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
 import { BulkTagsDto } from './dto/bulk-tags.dto';
@@ -406,6 +407,38 @@ export class MediaController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.mediaService.aggregateLocations(query, user.id, user.permissions);
+  }
+
+  /**
+   * GET /api/media/locations/extent
+   *
+   * Computes the true geographic bounding box (min/max lat/lng) and count of
+   * ALL the circle's geotagged, non-deleted/non-archived media items — NOT
+   * scoped to the current map viewport. Used by the frontend to frame the
+   * map's initial camera position so it shows exactly the area the user's
+   * photos cover (e.g. just Texas, or the whole US, or all the Americas),
+   * instead of guessing from an arbitrary default viewport.
+   * Declared before @Get(':id') so it is never shadowed.
+   */
+  @Get('locations/extent')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({
+    summary: "Geographic bounding box of all the circle's geotagged media (for initial map framing)",
+    description:
+      'Returns { minLat, minLng, maxLat, maxLng, count } across ALL geotagged non-deleted/non-archived ' +
+      'items in the circle (optionally filtered by date range/type) — not scoped to a viewport. ' +
+      'Returns null when the circle has no geotagged items.',
+  })
+  @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid', description: 'Circle to compute the extent for' })
+  @ApiQuery({ name: 'capturedAtFrom', required: false, type: String, description: 'ISO 8601 datetime — filter capturedAt >= from' })
+  @ApiQuery({ name: 'capturedAtTo', required: false, type: String, description: 'ISO 8601 datetime — filter capturedAt <= to' })
+  @ApiQuery({ name: 'type', required: false, enum: ['photo', 'video'], description: 'Filter by media type' })
+  @ApiResponse({ status: 200, description: 'Bounding box { minLat, minLng, maxLat, maxLng, count } or null when no geotagged items' })
+  async getLocationsExtent(
+    @Query() query: MediaLocationsExtentQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.getLocationsExtent(query, user.id, user.permissions);
   }
 
   /**

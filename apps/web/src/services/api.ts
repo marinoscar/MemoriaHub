@@ -73,7 +73,7 @@ class ApiService {
         }
 
         const data = await retryResponse.json();
-        return data.data ?? data;
+        return (data && typeof data === 'object' && 'data' in data) ? data.data : data;
       }
       throw new ApiError('Unauthorized', 401);
     }
@@ -94,7 +94,7 @@ class ApiService {
     }
 
     const data = await response.json();
-    return data.data ?? data;
+    return (data && typeof data === 'object' && 'data' in data) ? data.data : data;
   }
 
   async refreshToken(): Promise<boolean> {

@@ -34,12 +34,14 @@ import {
   listMediaLocations,
   getThumbnails,
   getMedia,
+  getLocationExtent,
 } from '../../services/media';
 import { useCircle } from '../../hooks/useCircle';
 import { useAuth } from '../../contexts/AuthContext';
 import { MediaDetailDrawer } from '../../components/media/MediaDetailDrawer';
 import { MapTimeFilter, type MapTimeRange } from '../../components/map/MapTimeFilter';
-import type { MapCluster, MediaItem, MediaLocation } from '../../types/media';
+import { MapControls } from '../../components/map/MapControls';
+import type { MapCluster, MediaItem, MediaLocation, LocationExtent } from '../../types/media';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -171,55 +173,47 @@ function ViewportWatcher({ onChange }: ViewportWatcherProps) {
 }
 
 // ---------------------------------------------------------------------------
-// FitToClusters — fits the map to the cluster extent on the FIRST load only.
-// After the user pans/zooms, the map is never auto-refit.
+// FitToExtent — frames the map to the TRUE bounding box of the circle's
+// geotagged photos (from GET /media/locations/extent), not the arbitrary
+// default viewport. Re-fits whenever a fresh extent arrives (initial load,
+// or after the time-range filter changes) — never during ordinary pan/zoom.
 // ---------------------------------------------------------------------------
 
-function FitToClusters({ clusters }: { clusters: MapCluster[] }) {
+function FitToExtent({ extent }: { extent: LocationExtent | null }) {
   const map = useMap();
-  const fittedRef = useRef(false);
 
   useEffect(() => {
-    if (fittedRef.current) return;
-    if (clusters.length === 0) return;
-    fittedRef.current = true;
-
-    if (clusters.length === 1) {
-      map.setView([clusters[0].lat, clusters[0].lng], 13);
+    if (!extent) return;
+    const { minLat, minLng, maxLat, maxLng } = extent;
+    if (minLat === maxLat && minLng === maxLng) {
+      map.setView([minLat, minLng], 13);
       return;
     }
-    const bounds = L.latLngBounds(
-      clusters.map((c) => [c.lat, c.lng] as L.LatLngTuple),
+    map.fitBounds(
+      L.latLngBounds([
+        [minLat, minLng],
+        [maxLat, maxLng],
+      ]),
+      { padding: [40, 40] },
     );
-    map.fitBounds(bounds, { padding: [40, 40] });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clusters]);
+  }, [extent]);
 
   return null;
 }
 
 // ---------------------------------------------------------------------------
-// GeoLocationCenter — centers the map to the user's geolocation when empty.
+// CaptureMap — lifts the Leaflet map instance out of <MapContainer> so
+// page-level overlays (MapControls) can drive it imperatively. useMap() only
+// works inside <MapContainer>, so we capture it once on mount.
 // ---------------------------------------------------------------------------
 
-function GeoLocationCenter() {
+function CaptureMap({ onReady }: { onReady: (map: L.Map) => void }) {
   const map = useMap();
-  const requestedRef = useRef(false);
 
   useEffect(() => {
-    if (requestedRef.current) return;
-    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) return;
-    requestedRef.current = true;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        map.setView([pos.coords.latitude, pos.coords.longitude], 10);
-      },
-      () => {
-        // denied or timeout — keep world overview
-      },
-      { timeout: 8000 },
-    );
-  }, [map]);
+    onReady(map);
+  }, [map, onReady]);
 
   return null;
 }
@@ -332,11 +326,18 @@ export default function MediaMapPage() {
   const { activeCircle } = useCircle();
   const { isLoading: authIsLoading } = useAuth();
 
+  // Leaflet map instance, captured from inside <MapContainer> so page-level
+  // overlays (MapControls) can drive it imperatively.
+  const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
+  const handleMapReady = useCallback((map: L.Map) => setMapInstance(map), []);
+
   // ----- Viewport-driven cluster data -----
   const [clusters, setClusters] = useState<MapCluster[]>([]);
   const [viewport, setViewport] = useState<{ bbox: string; zoom: number } | null>(null);
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [extent, setExtent] = useState<LocationExtent | null>(null);
+  const [extentResolved, setExtentResolved] = useState(false);
 
   const handleViewport = useCallback((bbox: string, zoom: number) => {
     setViewport({ bbox, zoom });
@@ -378,6 +379,35 @@ export default function MediaMapPage() {
       cancelled = true;
     };
   }, [activeCircle, authIsLoading, viewport, timeRange]);
+
+  // Fetch the TRUE bounding-box extent for initial map framing. Deliberately
+  // independent of the viewport-driven aggregate fetch above — runs once per
+  // circle/time-range change, never on pan/zoom.
+  useEffect(() => {
+    if (!activeCircle || authIsLoading) return;
+    let cancelled = false;
+    setExtentResolved(false);
+
+    getLocationExtent({
+      circleId: activeCircle.id,
+      capturedAtFrom: timeRange.from ?? undefined,
+      capturedAtTo: timeRange.to ?? undefined,
+    })
+      .then((data) => {
+        if (cancelled) return;
+        setExtent(data);
+        setExtentResolved(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setExtent(null);
+        setExtentResolved(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCircle, authIsLoading, timeRange]);
 
   // ----- "Photos here" cluster drawer (lazy points + thumbnails) -----
   // null = closed; [] = open + loading; populated array = loaded.
@@ -472,7 +502,7 @@ export default function MediaMapPage() {
     );
   }
 
-  const loadingFirst = !initialLoaded && !error;
+  const loadingFirst = (!initialLoaded || !extentResolved) && !error;
   const showEmpty = initialLoaded && !error && clusters.length === 0;
 
   return (
@@ -546,14 +576,14 @@ export default function MediaMapPage() {
         </Box>
       )}
 
-      {/* Time-range filter overlay — floats above the Leaflet pane, clearing
-          the top-left zoom control. */}
+      {/* Time-range filter overlay — floats above the Leaflet pane, top-right
+          so it never overlaps the top-left MapControls stack. */}
       <Paper
         elevation={3}
         sx={{
           position: 'absolute',
           top: 8,
-          left: 56,
+          right: 8,
           zIndex: 1000,
           p: 0.5,
           borderRadius: 1,
@@ -566,24 +596,41 @@ export default function MediaMapPage() {
         <MapTimeFilter onChange={handleTimeChange} />
       </Paper>
 
+      {/* Custom map control stack (top-left): zoom, recenter, locate */}
+      <MapControls map={mapInstance} extent={extent} />
+
       {/* Map — always rendered so Leaflet initialises correctly */}
       <MapContainer
         center={DEFAULT_CENTER}
         zoom={DEFAULT_ZOOM}
         style={{ height: '100%', width: '100%' }}
+        // Default zoom control replaced by the custom MapControls stack.
+        zoomControl={false}
         // Disable scroll-wheel zoom while the cluster drawer is open.
         scrollWheelZoom={albumPoints === null}
       >
+        {/* Theme-aware basemap: CARTO dark tiles in dark mode, light otherwise.
+            The `key` forces react-leaflet to swap the layer cleanly on theme
+            change. CARTO serves via subdomains a–d. */}
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          key={theme.palette.mode}
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+          url={
+            theme.palette.mode === 'dark'
+              ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+              : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+          }
+          subdomains="abcd"
         />
+
+        {/* Capture the map instance for the page-level MapControls overlay */}
+        <CaptureMap onReady={handleMapReady} />
 
         {/* Report viewport changes so the parent can refetch aggregates */}
         <ViewportWatcher onChange={handleViewport} />
 
-        {/* Fit to the cluster extent once, on the first load */}
-        <FitToClusters clusters={clusters} />
+        {/* Fit to the circle's true photo extent */}
+        <FitToExtent extent={extent} />
 
         {/* Cluster markers */}
         <ClusterLayer
@@ -591,9 +638,6 @@ export default function MediaMapPage() {
           onOpenItem={handleMarkerOpen}
           onOpenCluster={handleOpenCluster}
         />
-
-        {/* Center on the user's geolocation when nothing is visible */}
-        {showEmpty && <GeoLocationCenter />}
       </MapContainer>
 
       {/* Fetching-item spinner — briefly shown while getMedia is in flight */}

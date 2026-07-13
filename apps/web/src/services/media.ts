@@ -5,6 +5,7 @@ import type {
   MediaQueryParams,
   MediaLocation,
   MapCluster,
+  LocationExtent,
   PatchMediaDto,
   RegisterMediaDto,
   RegisterMediaResponse,
@@ -144,6 +145,30 @@ export async function aggregateLocations(
   if (filters?.capturedAtTo) searchParams.set('capturedAtTo', filters.capturedAtTo);
   const qs = searchParams.toString();
   return api.get<MapCluster[]>(`/media/locations/aggregate${qs ? `?${qs}` : ''}`);
+}
+
+// ---------------------------------------------------------------------------
+// True bounding-box extent across all a circle's geotagged items (initial
+// map framing — decoupled from the viewport-driven aggregate fetch above)
+// ---------------------------------------------------------------------------
+
+export interface LocationExtentFilters {
+  circleId?: string;
+  type?: 'photo' | 'video';
+  capturedAtFrom?: string;
+  capturedAtTo?: string;
+}
+
+export async function getLocationExtent(
+  filters?: LocationExtentFilters,
+): Promise<LocationExtent | null> {
+  const searchParams = new URLSearchParams();
+  if (filters?.circleId) searchParams.set('circleId', filters.circleId);
+  if (filters?.type) searchParams.set('type', filters.type);
+  if (filters?.capturedAtFrom) searchParams.set('capturedAtFrom', filters.capturedAtFrom);
+  if (filters?.capturedAtTo) searchParams.set('capturedAtTo', filters.capturedAtTo);
+  const qs = searchParams.toString();
+  return api.get<LocationExtent | null>(`/media/locations/extent${qs ? `?${qs}` : ''}`);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,21 +1,39 @@
 /**
  * MediaMapPage component tests.
  *
- * MediaMapPage is now viewport-driven: it fetches server-side grid clusters
- * from `aggregateLocations()` for the current map bbox/zoom (debounced on
- * pan/zoom), renders one Leaflet marker per cluster, and only fetches
- * per-item points (`listMediaLocations` + `getThumbnails`) lazily when a
- * small multi-item cluster is opened in the "Photos here" drawer.
+ * MediaMapPage is viewport-driven for its cluster markers: it fetches
+ * server-side grid clusters from `aggregateLocations()` for the current map
+ * bbox/zoom (debounced on pan/zoom), renders one Leaflet marker per cluster,
+ * and only fetches per-item points (`listMediaLocations` + `getThumbnails`)
+ * lazily when a small multi-item cluster is opened in the "Photos here"
+ * drawer.
+ *
+ * The INITIAL camera position, however, is independent of the viewport
+ * fetch above: it comes from `getLocationExtent()` (GET
+ * /media/locations/extent), which returns the TRUE bounding box of the
+ * circle's geotagged photos. The page's `FitToExtent` helper component
+ * `fitBounds`/`setView`s the map from that extent whenever a fresh one
+ * arrives (initial load, or when the time-range filter changes) — never
+ * during ordinary pan/zoom. This replaced an earlier `GeoLocationCenter`
+ * component that fell back to the browser's real GPS position
+ * (`navigator.geolocation`) when the first viewport-based aggregate fetch
+ * came back empty — a bug, since that recenters on the user's current
+ * location rather than where their photos actually are. `navigator.geolocation`
+ * is stubbed in this suite and asserted as never called, as a regression
+ * test for that bug.
  *
  * Heavy dependencies are mocked:
  *   - react-leaflet: MapContainer/TileLayer/Marker replaced with lightweight
  *     stubs; useMap/useMapEvents replaced with a shared fake map object so
- *     the page's internal ViewportWatcher/FitToClusters/ClusterLayer helper
- *     components run their real logic against fake Leaflet primitives.
+ *     the page's internal ViewportWatcher/FitToExtent/ClusterLayer helper
+ *     components run their real logic against fake Leaflet primitives. The
+ *     TileLayer stub also mirrors the `url` prop onto a `data-url` attribute
+ *     so the "theme-aware basemap" tests below can assert which CARTO tile
+ *     URL (dark_all vs light_all) the page selected for the active theme.
  *   - leaflet: stubs for L.latLngBounds / L.divIcon / L.Icon.Default.
  *   - ../../lib/leaflet-setup: replaced (avoids inline-SVG icon + CSS import).
  *   - services/media: aggregateLocations / listMediaLocations / getThumbnails
- *     / getMedia are all mocked.
+ *     / getMedia / getLocationExtent are all mocked.
  *   - MediaDetailDrawer: replaced with a stub that renders the selected
  *     item id for assertion.
  *
@@ -24,18 +42,23 @@
  * MapTimeFilter is also left unmocked (pure MUI, no leaflet dependency).
  *
  * Tests cover the fetch lifecycle (no-circle guard, loading, empty, error,
- * data) and the two cluster-click flows (single-item → detail drawer,
- * small multi-item → "Photos here" drawer data fetch). The large-cluster
- * drill-down (`map.flyTo`) is not asserted — it requires no additional
- * network calls and is the lowest-value path to cover through the mocked
- * leaflet layer.
+ * data), the two cluster-click flows (single-item → detail drawer,
+ * small multi-item → "Photos here" drawer data fetch), and the
+ * extent-driven initial framing (fitBounds/setView call, null-extent and
+ * rejected-fetch handling, and the GPS-fallback regression check above).
+ * The large-cluster drill-down (`map.flyTo`) is not asserted — it requires
+ * no additional network calls and is the lowest-value path to cover
+ * through the mocked leaflet layer.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { ThemeProvider } from '@mui/material/styles';
 import { render } from '../utils/test-utils';
-import type { MapCluster, MediaItem, MediaLocation } from '../../types/media';
+import L from 'leaflet';
+import { lightTheme, darkTheme } from '../../theme';
+import type { MapCluster, MediaItem, MediaLocation, LocationExtent } from '../../types/media';
 
 // ---------------------------------------------------------------------------
 // Hoisted mock state — referenced from inside vi.mock factories below, which
@@ -94,7 +117,7 @@ vi.mock('react-leaflet', () => {
   const MapContainer = ({ children }: any) => (
     <div data-testid="map-container">{children}</div>
   );
-  const TileLayer = () => <div data-testid="tile-layer" />;
+  const TileLayer = (props: any) => <div data-testid="tile-layer" data-url={props.url} />;
   const Marker = (props: any) => (
     <button
       type="button"
@@ -127,6 +150,7 @@ vi.mock('../../services/media', () => ({
   listMediaLocations: vi.fn(),
   getThumbnails: vi.fn(),
   getMedia: vi.fn(),
+  getLocationExtent: vi.fn(),
 }));
 
 import {
@@ -134,12 +158,14 @@ import {
   listMediaLocations,
   getThumbnails,
   getMedia,
+  getLocationExtent,
 } from '../../services/media';
 
 const mockAggregateLocations = vi.mocked(aggregateLocations);
 const mockListMediaLocations = vi.mocked(listMediaLocations);
 const mockGetThumbnails = vi.mocked(getThumbnails);
 const mockGetMedia = vi.mocked(getMedia);
+const mockGetLocationExtent = vi.mocked(getLocationExtent);
 
 // ---------------------------------------------------------------------------
 // Now import the component under test (after all mocks are registered)
@@ -216,17 +242,42 @@ function makeFullItem(id: string, overrides: Partial<MediaItem> = {}): MediaItem
   };
 }
 
+function makeExtent(overrides: Partial<LocationExtent> = {}): LocationExtent {
+  return {
+    minLat: 9.5,
+    minLng: -85.0,
+    maxLat: 10.5,
+    maxLng: -84.0,
+    count: 12,
+    ...overrides,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe('MediaMapPage', () => {
+  // Regression guard for the GPS-fallback bug: the old `GeoLocationCenter`
+  // component called `navigator.geolocation.getCurrentPosition` to recenter
+  // the map when the viewport aggregate fetch came back empty. That call is
+  // asserted as never invoked below — initial framing must come exclusively
+  // from `getLocationExtent()` now.
+  const mockGetCurrentPosition = vi.fn();
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockAggregateLocations.mockResolvedValue([]);
     mockListMediaLocations.mockResolvedValue([]);
     mockGetThumbnails.mockResolvedValue([]);
     mockGetMedia.mockResolvedValue(makeFullItem('item-1'));
+    mockGetLocationExtent.mockResolvedValue(null);
+
+    mockGetCurrentPosition.mockReset();
+    Object.defineProperty(window.navigator, 'geolocation', {
+      value: { getCurrentPosition: mockGetCurrentPosition, watchPosition: vi.fn() },
+      configurable: true,
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -406,6 +457,151 @@ describe('MediaMapPage', () => {
       // The "Photos here" drawer heading reflects the loaded point count.
       await waitFor(() => {
         expect(screen.getByText(/photos here \(2\)/i)).toBeInTheDocument();
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Extent-driven initial framing (FitToExtent) — regression coverage for
+  // the GPS-fallback bug this feature replaces.
+  // -------------------------------------------------------------------------
+
+  describe('extent-driven initial framing', () => {
+    it('calls getLocationExtent scoped to the active circle', async () => {
+      render(<MediaMapPage />);
+
+      await waitFor(() => {
+        expect(mockGetLocationExtent).toHaveBeenCalled();
+      });
+      expect(mockGetLocationExtent).toHaveBeenCalledWith(
+        expect.objectContaining({ circleId: 'circle-1' }),
+      );
+    });
+
+    it('fits the map to the bounding box returned by getLocationExtent', async () => {
+      const extent = makeExtent({ minLat: 9.5, minLng: -85, maxLat: 10.5, maxLng: -84 });
+      mockGetLocationExtent.mockResolvedValue(extent);
+
+      render(<MediaMapPage />);
+
+      await waitFor(() => {
+        expect(mockMapMethods.fitBounds).toHaveBeenCalled();
+      });
+      // L.latLngBounds is mocked (see the `leaflet` mock above) to a jest.fn
+      // returning a sentinel object, so we assert the [[minLat, minLng],
+      // [maxLat, maxLng]] pair it was constructed with, and separately that
+      // fitBounds was invoked with its (mocked) return value + padding opts.
+      expect(L.latLngBounds).toHaveBeenCalledWith([
+        [extent.minLat, extent.minLng],
+        [extent.maxLat, extent.maxLng],
+      ]);
+      expect(mockMapMethods.fitBounds).toHaveBeenCalledWith(
+        (L.latLngBounds as ReturnType<typeof vi.fn>).mock.results[0].value,
+        expect.objectContaining({ padding: expect.any(Array) }),
+      );
+    });
+
+    it('uses setView instead of fitBounds for a single-point extent (min === max)', async () => {
+      const extent = makeExtent({ minLat: 9.9281, minLng: -84.0907, maxLat: 9.9281, maxLng: -84.0907 });
+      mockGetLocationExtent.mockResolvedValue(extent);
+
+      render(<MediaMapPage />);
+
+      await waitFor(() => {
+        expect(mockMapMethods.setView).toHaveBeenCalledWith(
+          [extent.minLat, extent.minLng],
+          expect.any(Number),
+        );
+      });
+      expect(mockMapMethods.fitBounds).not.toHaveBeenCalled();
+    });
+
+    it('does not call fitBounds/setView when getLocationExtent resolves null (no geotagged items), and the empty state still renders', async () => {
+      mockGetLocationExtent.mockResolvedValue(null);
+      mockAggregateLocations.mockResolvedValue([]);
+
+      render(<MediaMapPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/no geotagged media here/i)).toBeInTheDocument();
+      });
+      expect(mockMapMethods.fitBounds).not.toHaveBeenCalled();
+      expect(mockMapMethods.setView).not.toHaveBeenCalled();
+    });
+
+    it('does not crash and still resolves the loading state when getLocationExtent rejects', async () => {
+      mockGetLocationExtent.mockRejectedValue(new Error('network error'));
+      mockAggregateLocations.mockResolvedValue([makeCluster()]);
+
+      render(<MediaMapPage />);
+
+      // The loading spinner must not hang forever — extentResolved flips
+      // even on failure, gating `loadingFirst` alongside the cluster fetch.
+      await waitFor(() => {
+        expect(screen.queryByLabelText(/loading map data/i)).not.toBeInTheDocument();
+      });
+      expect(screen.getByTestId('map-container')).toBeInTheDocument();
+      expect(mockMapMethods.fitBounds).not.toHaveBeenCalled();
+      expect(mockMapMethods.setView).not.toHaveBeenCalled();
+    });
+
+    it('never calls navigator.geolocation.getCurrentPosition — regression guard for the removed GPS-fallback behavior', async () => {
+      // Exercise every framing branch (empty extent, populated extent, and
+      // an empty cluster/aggregate result) in one pass to prove the browser
+      // geolocation API is never consulted anywhere on this page.
+      mockGetLocationExtent.mockResolvedValue(makeExtent());
+      mockAggregateLocations.mockResolvedValue([]);
+
+      render(<MediaMapPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/no geotagged media here/i)).toBeInTheDocument();
+      });
+      expect(mockGetCurrentPosition).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Theme-aware basemap tile URL
+  //
+  // MediaMapPage picks the tile URL from `useTheme().palette.mode` (a MUI
+  // `<ThemeProvider>` value), which is distinct from this suite's
+  // `ThemeContextProvider` wrapper (a plain React context that the real app
+  // only turns into an MUI theme in App.tsx's `AppRoutes`, outside this test
+  // harness). So these two tests wrap the page directly in a real MUI
+  // `<ThemeProvider>` using the app's actual `lightTheme`/`darkTheme`
+  // objects, which — being the innermost/nearest ThemeProvider in the tree —
+  // is what `useTheme()` inside the page resolves to.
+  // -------------------------------------------------------------------------
+
+  describe('theme-aware basemap', () => {
+    it('renders the CARTO dark_all tile URL under a dark theme', async () => {
+      render(
+        <ThemeProvider theme={darkTheme}>
+          <MediaMapPage />
+        </ThemeProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('tile-layer')).toHaveAttribute(
+          'data-url',
+          'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+        );
+      });
+    });
+
+    it('renders the CARTO light_all tile URL under a light theme', async () => {
+      render(
+        <ThemeProvider theme={lightTheme}>
+          <MediaMapPage />
+        </ThemeProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('tile-layer')).toHaveAttribute(
+          'data-url',
+          'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+        );
       });
     });
   });
