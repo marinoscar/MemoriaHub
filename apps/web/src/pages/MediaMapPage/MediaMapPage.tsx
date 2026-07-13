@@ -582,9 +582,18 @@ export default function MediaMapPage() {
         // Disable scroll-wheel zoom while the cluster drawer is open.
         scrollWheelZoom={albumPoints === null}
       >
+        {/* Theme-aware basemap: CARTO dark tiles in dark mode, light otherwise.
+            The `key` forces react-leaflet to swap the layer cleanly on theme
+            change. CARTO serves via subdomains a–d. */}
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          key={theme.palette.mode}
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+          url={
+            theme.palette.mode === 'dark'
+              ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+              : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+          }
+          subdomains="abcd"
         />
 
         {/* Report viewport changes so the parent can refetch aggregates */}
