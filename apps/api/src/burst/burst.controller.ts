@@ -72,9 +72,15 @@ export class BurstController {
    * Resolve a burst group, soft-deleting all non-kept members.
    */
   @Post('bursts/:id/resolve')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Resolve a burst group (keep selected, delete rest)' })
+  @ApiOperation({
+    summary: 'Resolve a burst group (keep selected, archive or trash the rest)',
+    description:
+      'Keeps the selected members and applies the chosen `action` to the rest: ' +
+      '`archive` sets archivedAt, `trash` soft-deletes (sets deletedAt). ' +
+      'Requires media:write; `action: "trash"` additionally requires media:delete.',
+  })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Burst group resolved' })
   @ApiResponse({ status: 400, description: 'Invalid keepIds or group not pending' })

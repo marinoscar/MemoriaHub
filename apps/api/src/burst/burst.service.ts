@@ -16,6 +16,7 @@ import {
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { FEATURE_KEYS } from '../common/types/settings.types';
+import { PERMISSIONS } from '../common/constants/roles.constants';
 import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
 import { BurstQueryDto } from './dto/burst-query.dto';
 import { ResolveBurstDto } from './dto/resolve-burst.dto';
@@ -274,6 +275,10 @@ export class BurstService {
 
     await this.membership.assertCircleAccess(userId, group.circleId, perms, CircleRole.collaborator);
 
+    if (dto.action === 'trash' && !perms.includes(PERMISSIONS.MEDIA_DELETE)) {
+      throw new BadRequestException('media:delete permission is required to trash burst items');
+    }
+
     if (group.status !== BurstGroupStatus.pending) {
       throw new BadRequestException(
         `Burst group ${id} is not in pending status (current: ${group.status})`,
@@ -291,24 +296,34 @@ export class BurstService {
     const deleteIds = group.items.map((i) => i.id).filter((id) => !dto.keepIds.includes(id));
 
     await this.prisma.$transaction([
-      // Soft-delete all non-kept members
+      // Apply the chosen action to all non-kept members: trash (soft-delete via
+      // deletedAt) or archive (archivedAt).
       this.prisma.mediaItem.updateMany({
         where: { id: { in: deleteIds } },
-        data: { deletedAt: new Date() },
+        data: dto.action === 'trash' ? { deletedAt: new Date() } : { archivedAt: new Date() },
       }),
-      // Mark group resolved
+      // Mark group resolved and record the resolution outcome
       this.prisma.burstGroup.update({
         where: { id },
         data: {
           status: BurstGroupStatus.resolved,
           resolvedById: userId,
           resolvedAt: new Date(),
+          resolutionAction: dto.action,
+          keptCount: dto.keepIds.length,
+          removedCount: deleteIds.length,
         },
       }),
     ]);
 
+    await this.createAuditEvent(userId, 'burst_group:resolved', id, {
+      keepIds: dto.keepIds,
+      action: dto.action,
+      removedCount: deleteIds.length,
+    });
+
     this.logger.log(
-      `Burst group ${id} resolved by user ${userId}: kept=${dto.keepIds.length}, deleted=${deleteIds.length}`,
+      `Burst group ${id} resolved by user ${userId}: kept=${dto.keepIds.length}, ${dto.action}=${deleteIds.length}`,
     );
 
     // Surviving (kept) items were excluded from dedup matching while this
@@ -318,8 +333,9 @@ export class BurstService {
 
     return {
       data: {
-        deleted: deleteIds.length,
+        removed: deleteIds.length,
         kept: dto.keepIds.length,
+        action: dto.action,
         groupStatus: 'resolved',
       },
     };
@@ -519,5 +535,26 @@ export class BurstService {
     );
 
     return { enqueued: totalEnqueued, circles: circleCount, evictedDuplicateOverlaps };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Audit
+  // ---------------------------------------------------------------------------
+
+  private async createAuditEvent(
+    actorUserId: string,
+    action: string,
+    targetId: string,
+    meta: Record<string, unknown>,
+  ): Promise<void> {
+    await this.prisma.auditEvent.create({
+      data: {
+        actorUserId,
+        action,
+        targetType: 'burst_group',
+        targetId,
+        meta: meta as Prisma.InputJsonValue,
+      },
+    });
   }
 }
