@@ -1,34 +1,28 @@
 /**
- * MediaMapPage — clustered map view of all geotagged media.
+ * MediaMapPage — viewport-driven clustered map view of all geotagged media.
  *
- * - Loads all geotagged items from GET /api/media/locations.
- * - Renders a Leaflet map with marker clustering.
- * - Clicking a cluster opens an album panel (Drawer) with thumbnails.
- * - Clicking a thumbnail or a single marker opens MediaDetailDrawer for that item.
- * - The drawer receives a fully-fetched MediaItem (via getMedia) so the video
- *   player has a downloadUrl and no extra fetch is needed inside the drawer.
+ * - Fetches server-side grid clusters from GET /api/media/locations/aggregate
+ *   for the CURRENT viewport (bbox + zoom-derived precision), debounced on
+ *   pan/zoom. This keeps payloads bounded regardless of library size.
+ * - Renders each cluster as a Leaflet marker: a count badge for multi-item
+ *   cells, a normal pin for single-item cells.
+ * - Clicking a multi-item cluster flies in one drill-down level; the moveend
+ *   handler refetches at finer precision.
+ * - Clicking a single-item marker opens MediaDetailDrawer for that item.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { MapContainer, TileLayer, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
-import {
-  Box,
-  CircularProgress,
-  Alert,
-  Typography,
-  Drawer,
-  IconButton,
-  Grid,
-  Skeleton,
-  useTheme,
-} from '@mui/material';
-import { Close as CloseIcon, Map as MapIcon } from '@mui/icons-material';
-import { listMediaLocations, getMedia } from '../../services/media';
+import { Box, CircularProgress, Alert, Typography, useTheme } from '@mui/material';
+import { Map as MapIcon } from '@mui/icons-material';
+import '../../lib/leaflet-setup';
+import { defaultIcon } from '../../lib/leaflet-setup';
+import { aggregateLocations, getMedia } from '../../services/media';
 import { useCircle } from '../../hooks/useCircle';
-import { MarkerClusterGroup } from '../../components/map/MarkerClusterGroup';
+import { useAuth } from '../../contexts/AuthContext';
 import { MediaDetailDrawer } from '../../components/media/MediaDetailDrawer';
-import type { MediaLocation, MediaItem } from '../../types/media';
+import type { MapCluster, MediaItem } from '../../types/media';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -49,37 +43,140 @@ const MAP_HEIGHT = {
 const DEFAULT_CENTER: L.LatLngExpression = [20, 0];
 const DEFAULT_ZOOM = 2;
 
+/** Debounce (ms) applied to viewport change events before refetching. */
+const VIEWPORT_DEBOUNCE_MS = 250;
+
+/** How many zoom levels a cluster drill-down flies in. */
+const DRILL_ZOOM_STEP = 3;
+
 // ---------------------------------------------------------------------------
-// FitBounds — child component that fits the map to loaded points via useMap()
+// Zoom → grid precision. Coarser cells at low zoom keep bucket counts bounded.
 // ---------------------------------------------------------------------------
 
-interface FitBoundsProps {
-  points: MediaLocation[];
+function precisionForZoom(zoom: number): number {
+  if (zoom <= 3) return 0;
+  if (zoom <= 5) return 1;
+  if (zoom <= 8) return 2;
+  if (zoom <= 11) return 3;
+  if (zoom <= 14) return 4;
+  return 5;
 }
 
-function FitBounds({ points }: FitBoundsProps) {
+// ---------------------------------------------------------------------------
+// Cluster count-badge divIcon (styled like leaflet.markercluster defaults).
+// ---------------------------------------------------------------------------
+
+(function injectClusterIconStyles() {
+  if (typeof document === 'undefined') return; // SSR guard
+  const id = 'mh-cluster-icon-styles';
+  if (document.getElementById(id)) return;
+  const style = document.createElement('style');
+  style.id = id;
+  style.textContent = [
+    '.mh-cluster-icon { background: transparent !important; border: none !important; }',
+    '.mh-cluster-icon > div {',
+    '  width: 100%; height: 100%; border-radius: 50%;',
+    '  display: flex; align-items: center; justify-content: center;',
+    '  font: 600 12px/1 system-ui, sans-serif; color: #fff;',
+    '  background: rgba(25, 118, 210, 0.85);',
+    '  box-shadow: 0 0 0 4px rgba(25, 118, 210, 0.35);',
+    '}',
+  ].join('\n');
+  document.head.appendChild(style);
+})();
+
+function clusterLabel(count: number): string {
+  if (count < 1000) return String(count);
+  if (count < 10000) return `${Math.floor(count / 100) / 10}k`;
+  return `${Math.floor(count / 1000)}k`;
+}
+
+function clusterIcon(count: number): L.DivIcon {
+  const size = count < 10 ? 34 : count < 100 ? 40 : count < 1000 ? 48 : 56;
+  return L.divIcon({
+    className: 'mh-cluster-icon',
+    html: `<div>${clusterLabel(count)}</div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+}
+
+// ---------------------------------------------------------------------------
+// ViewportWatcher — reports the current bbox + zoom on mount and (debounced)
+// after every pan/zoom, via useMap() + useMapEvents().
+// ---------------------------------------------------------------------------
+
+interface ViewportWatcherProps {
+  onChange: (bbox: string, zoom: number) => void;
+}
+
+function ViewportWatcher({ onChange }: ViewportWatcherProps) {
   const map = useMap();
+  const timerRef = useRef<number | null>(null);
 
+  const emit = useCallback(() => {
+    const b = map.getBounds();
+    const bbox = `${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
+    onChange(bbox, map.getZoom());
+  }, [map, onChange]);
+
+  // Initial emit once the map is ready (MapContainer does not fire moveend for
+  // the initial view).
   useEffect(() => {
-    if (points.length === 0) return;
-
-    if (points.length === 1) {
-      map.setView([points[0].takenLat, points[0].takenLng], 13);
-      return;
-    }
-
-    const bounds = L.latLngBounds(
-      points.map((p) => [p.takenLat, p.takenLng] as L.LatLngTuple),
-    );
-    map.fitBounds(bounds, { padding: [40, 40] });
+    emit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [points]);
+  }, []);
+
+  const debouncedEmit = useCallback(() => {
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(emit, VIEWPORT_DEBOUNCE_MS);
+  }, [emit]);
+
+  useMapEvents({
+    moveend: debouncedEmit,
+    zoomend: debouncedEmit,
+  });
+
+  useEffect(
+    () => () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    },
+    [],
+  );
 
   return null;
 }
 
 // ---------------------------------------------------------------------------
-// GeoLocationCenter — centers the map to user's geolocation when there are no points
+// FitToClusters — fits the map to the cluster extent on the FIRST load only.
+// After the user pans/zooms, the map is never auto-refit.
+// ---------------------------------------------------------------------------
+
+function FitToClusters({ clusters }: { clusters: MapCluster[] }) {
+  const map = useMap();
+  const fittedRef = useRef(false);
+
+  useEffect(() => {
+    if (fittedRef.current) return;
+    if (clusters.length === 0) return;
+    fittedRef.current = true;
+
+    if (clusters.length === 1) {
+      map.setView([clusters[0].lat, clusters[0].lng], 13);
+      return;
+    }
+    const bounds = L.latLngBounds(
+      clusters.map((c) => [c.lat, c.lng] as L.LatLngTuple),
+    );
+    map.fitBounds(bounds, { padding: [40, 40] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clusters]);
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// GeoLocationCenter — centers the map to the user's geolocation when empty.
 // ---------------------------------------------------------------------------
 
 function GeoLocationCenter() {
@@ -105,52 +202,41 @@ function GeoLocationCenter() {
 }
 
 // ---------------------------------------------------------------------------
-// AlbumTile — thumbnail inside the cluster album drawer
+// ClusterLayer — renders one Leaflet marker per aggregate cluster and handles
+// clicks (drill-down for multi-item cells, open drawer for single-item cells).
 // ---------------------------------------------------------------------------
 
-interface AlbumTileProps {
-  point: MediaLocation;
-  onClick: () => void;
+interface ClusterLayerProps {
+  clusters: MapCluster[];
+  onOpenItem: (id: string) => void;
 }
 
-function AlbumTile({ point, onClick }: AlbumTileProps) {
-  const theme = useTheme();
-  const [imgError, setImgError] = useState(false);
+function ClusterLayer({ clusters, onOpenItem }: ClusterLayerProps) {
+  const map = useMap();
+
+  const handleClick = useCallback(
+    (cluster: MapCluster) => {
+      if (cluster.count === 1) {
+        onOpenItem(cluster.sampleId);
+        return;
+      }
+      const target = Math.min(map.getZoom() + DRILL_ZOOM_STEP, map.getMaxZoom());
+      map.flyTo([cluster.lat, cluster.lng], target);
+    },
+    [map, onOpenItem],
+  );
 
   return (
-    <Box
-      onClick={onClick}
-      role="button"
-      tabIndex={0}
-      aria-label={point.geoLocality ?? `Photo taken at ${point.takenLat.toFixed(4)}, ${point.takenLng.toFixed(4)}`}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') onClick();
-      }}
-      sx={{
-        aspectRatio: '1',
-        cursor: 'pointer',
-        borderRadius: 1,
-        overflow: 'hidden',
-        border: `1px solid ${theme.palette.divider}`,
-        '&:hover': { opacity: 0.85 },
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: theme.palette.grey[900],
-      }}
-    >
-      {point.thumbnailUrl && !imgError ? (
-        <Box
-          component="img"
-          src={point.thumbnailUrl}
-          alt={point.geoLocality ?? 'Photo'}
-          onError={() => setImgError(true)}
-          sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+    <>
+      {clusters.map((cluster) => (
+        <Marker
+          key={cluster.sampleId}
+          position={[cluster.lat, cluster.lng]}
+          icon={cluster.count > 1 ? clusterIcon(cluster.count) : defaultIcon}
+          eventHandlers={{ click: () => handleClick(cluster) }}
         />
-      ) : (
-        <Skeleton variant="rectangular" width="100%" height="100%" />
-      )}
-    </Box>
+      ))}
+    </>
   );
 }
 
@@ -161,55 +247,46 @@ function AlbumTile({ point, onClick }: AlbumTileProps) {
 export default function MediaMapPage() {
   const theme = useTheme();
   const { activeCircle } = useCircle();
+  const { isLoading: authIsLoading } = useAuth();
 
-  // ----- Location data -----
-  const [points, setPoints] = useState<MediaLocation[]>([]);
-  const [loading, setLoading] = useState(true);
+  // ----- Viewport-driven cluster data -----
+  const [clusters, setClusters] = useState<MapCluster[]>([]);
+  const [viewport, setViewport] = useState<{ bbox: string; zoom: number } | null>(null);
+  const [initialLoaded, setInitialLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const handleViewport = useCallback((bbox: string, zoom: number) => {
+    setViewport({ bbox, zoom });
+  }, []);
+
+  // Fetch aggregate clusters for the current viewport. Gated on auth bootstrap
+  // completing so a cold reload doesn't fire a 401 before the token is ready.
   useEffect(() => {
-    if (!activeCircle) {
-      setLoading(false);
-      return;
-    }
+    if (!activeCircle || authIsLoading || !viewport) return;
 
     let cancelled = false;
-    setLoading(true);
     setError(null);
 
-    listMediaLocations({ circleId: activeCircle.id })
+    aggregateLocations({
+      circleId: activeCircle.id,
+      precision: precisionForZoom(viewport.zoom),
+      bbox: viewport.bbox,
+    })
       .then((data) => {
-        if (!cancelled) {
-          setPoints(data);
-          setLoading(false);
-        }
+        if (cancelled) return;
+        setClusters(data);
+        setInitialLoaded(true);
       })
       .catch((err: unknown) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load map data');
-          setLoading(false);
-        }
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Failed to load map data');
+        setInitialLoaded(true);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [activeCircle]);
-
-  // ----- Album panel (cluster click) -----
-  const [albumIds, setAlbumIds] = useState<string[] | null>(null);
-  const albumPoints =
-    albumIds !== null
-      ? points.filter((p) => albumIds.includes(p.id))
-      : [];
-
-  const handleClusterClick = useCallback((ids: string[]) => {
-    setAlbumIds(ids);
-  }, []);
-
-  const handleCloseAlbum = useCallback(() => {
-    setAlbumIds(null);
-  }, []);
+  }, [activeCircle, authIsLoading, viewport]);
 
   // ----- MediaDetailDrawer (single item) -----
   const [selectedItem, setSelectedItem] = useState<MediaItem | null>(null);
@@ -229,14 +306,7 @@ export default function MediaMapPage() {
     }
   }, []);
 
-  const handleMarkerClick = useCallback(
-    (id: string) => {
-      void openDrawerForId(id);
-    },
-    [openDrawerForId],
-  );
-
-  const handleAlbumTileClick = useCallback(
+  const handleMarkerOpen = useCallback(
     (id: string) => {
       void openDrawerForId(id);
     },
@@ -262,6 +332,9 @@ export default function MediaMapPage() {
     );
   }
 
+  const loadingFirst = !initialLoaded && !error;
+  const showEmpty = initialLoaded && !error && clusters.length === 0;
+
   return (
     <Box
       sx={{
@@ -271,8 +344,8 @@ export default function MediaMapPage() {
         overflow: 'hidden',
       }}
     >
-      {/* Loading overlay */}
-      {loading && (
+      {/* Initial loading overlay */}
+      {loadingFirst && (
         <Box
           sx={{
             position: 'absolute',
@@ -289,7 +362,7 @@ export default function MediaMapPage() {
       )}
 
       {/* Error state */}
-      {error && !loading && (
+      {error && (
         <Box
           sx={{
             position: 'absolute',
@@ -299,6 +372,7 @@ export default function MediaMapPage() {
             alignItems: 'center',
             justifyContent: 'center',
             p: 3,
+            pointerEvents: 'none',
           }}
         >
           <Alert severity="error" sx={{ maxWidth: 480 }}>
@@ -307,8 +381,8 @@ export default function MediaMapPage() {
         </Box>
       )}
 
-      {/* Empty state — shown after load when there are no geotagged items */}
-      {!loading && !error && points.length === 0 && (
+      {/* Empty state — shown when the viewport has no geotagged items */}
+      {showEmpty && (
         <Box
           sx={{
             position: 'absolute',
@@ -319,14 +393,15 @@ export default function MediaMapPage() {
             alignItems: 'center',
             justifyContent: 'center',
             gap: 2,
+            pointerEvents: 'none',
           }}
         >
           <MapIcon sx={{ fontSize: 64, color: 'text.disabled' }} />
           <Typography variant="h6" color="text.secondary">
-            No geotagged media yet
+            No geotagged media here
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', maxWidth: 360 }}>
-            Add photos with GPS data to see them here.
+            Add photos with GPS data, or pan the map to a region with photos.
           </Typography>
         </Box>
       )}
@@ -336,28 +411,23 @@ export default function MediaMapPage() {
         center={DEFAULT_CENTER}
         zoom={DEFAULT_ZOOM}
         style={{ height: '100%', width: '100%' }}
-        // Disable scroll-wheel zoom when album drawer is open to avoid conflicts
-        scrollWheelZoom={albumIds === null}
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
-        {/* Fit bounds once locations are loaded */}
-        {!loading && points.length > 0 && <FitBounds points={points} />}
+        {/* Report viewport changes so the parent can refetch aggregates */}
+        <ViewportWatcher onChange={handleViewport} />
 
-        {/* Clustered markers */}
-        {!loading && points.length > 0 && (
-          <MarkerClusterGroup
-            points={points}
-            onClusterClick={handleClusterClick}
-            onMarkerClick={handleMarkerClick}
-          />
-        )}
+        {/* Fit to the cluster extent once, on the first load */}
+        <FitToClusters clusters={clusters} />
 
-        {/* Center on user's geolocation when no points are loaded */}
-        {!loading && points.length === 0 && <GeoLocationCenter />}
+        {/* Cluster markers */}
+        <ClusterLayer clusters={clusters} onOpenItem={handleMarkerOpen} />
+
+        {/* Center on the user's geolocation when nothing is visible */}
+        {showEmpty && <GeoLocationCenter />}
       </MapContainer>
 
       {/* Fetching-item spinner — briefly shown while getMedia is in flight */}
@@ -378,54 +448,6 @@ export default function MediaMapPage() {
           <CircularProgress size={28} aria-label="Loading item" />
         </Box>
       )}
-
-      {/* Album panel — slides in from the right when a cluster is clicked */}
-      <Drawer
-        anchor="right"
-        open={albumIds !== null}
-        onClose={handleCloseAlbum}
-        variant="temporary"
-        ModalProps={{ keepMounted: false }}
-        sx={{
-          '& .MuiDrawer-paper': {
-            width: { xs: '100vw', sm: 400 },
-            maxWidth: '100vw',
-          },
-        }}
-      >
-        {/* Header */}
-        <Box
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            px: 2,
-            py: 1.5,
-            borderBottom: `1px solid ${theme.palette.divider}`,
-            gap: 1,
-          }}
-        >
-          <IconButton onClick={handleCloseAlbum} size="small" aria-label="Close album panel">
-            <CloseIcon />
-          </IconButton>
-          <Typography variant="h6">
-            Photos here ({albumPoints.length})
-          </Typography>
-        </Box>
-
-        {/* Thumbnail grid */}
-        <Box sx={{ p: 2, overflowY: 'auto', flex: 1 }}>
-          <Grid container spacing={1}>
-            {albumPoints.map((point) => (
-              <Grid key={point.id} size={{ xs: 4 }}>
-                <AlbumTile
-                  point={point}
-                  onClick={() => handleAlbumTileClick(point.id)}
-                />
-              </Grid>
-            ))}
-          </Grid>
-        </Box>
-      </Drawer>
 
       {/* Full media detail drawer */}
       <MediaDetailDrawer

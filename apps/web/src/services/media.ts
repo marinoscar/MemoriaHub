@@ -4,6 +4,7 @@ import type {
   MediaListResponse,
   MediaQueryParams,
   MediaLocation,
+  MapCluster,
   PatchMediaDto,
   RegisterMediaDto,
   RegisterMediaResponse,
@@ -93,6 +94,8 @@ export interface MediaLocationFilters {
   circleId?: string;
   /** Scope the location index to a single album. */
   albumId?: string;
+  /** Viewport bounding box: `minLng,minLat,maxLng,maxLat`. */
+  bbox?: string;
 }
 
 export async function listMediaLocations(
@@ -109,8 +112,58 @@ export async function listMediaLocations(
   if (filters?.capturedAtTo) searchParams.set('capturedAtTo', filters.capturedAtTo);
   if (filters?.circleId) searchParams.set('circleId', filters.circleId);
   if (filters?.albumId) searchParams.set('albumId', filters.albumId);
+  if (filters?.bbox) searchParams.set('bbox', filters.bbox);
   const qs = searchParams.toString();
   return api.get<MediaLocation[]>(`/media/locations${qs ? `?${qs}` : ''}`);
+}
+
+// ---------------------------------------------------------------------------
+// Viewport-driven server-side grid clustering (map hot path — no thumbnails)
+// ---------------------------------------------------------------------------
+
+export interface MapAggregateFilters {
+  circleId?: string;
+  /** Grid precision (0–5); coarser at low zoom, finer at high zoom. */
+  precision?: number;
+  /** Viewport bounding box: `minLng,minLat,maxLng,maxLat`. */
+  bbox?: string;
+  type?: 'photo' | 'video';
+  capturedAtFrom?: string;
+  capturedAtTo?: string;
+}
+
+export async function aggregateLocations(
+  filters?: MapAggregateFilters,
+): Promise<MapCluster[]> {
+  const searchParams = new URLSearchParams();
+  if (filters?.circleId) searchParams.set('circleId', filters.circleId);
+  if (filters?.precision !== undefined) searchParams.set('precision', String(filters.precision));
+  if (filters?.bbox) searchParams.set('bbox', filters.bbox);
+  if (filters?.type) searchParams.set('type', filters.type);
+  if (filters?.capturedAtFrom) searchParams.set('capturedAtFrom', filters.capturedAtFrom);
+  if (filters?.capturedAtTo) searchParams.set('capturedAtTo', filters.capturedAtTo);
+  const qs = searchParams.toString();
+  return api.get<MapCluster[]>(`/media/locations/aggregate${qs ? `?${qs}` : ''}`);
+}
+
+// ---------------------------------------------------------------------------
+// Batched lazy thumbnail signing (for cluster drawers)
+// ---------------------------------------------------------------------------
+
+export interface ThumbnailRef {
+  id: string;
+  thumbnailUrl: string | null;
+}
+
+export async function getThumbnails(
+  circleId: string,
+  ids: string[],
+): Promise<ThumbnailRef[]> {
+  if (ids.length === 0) return [];
+  const searchParams = new URLSearchParams();
+  searchParams.set('circleId', circleId);
+  searchParams.set('ids', ids.join(','));
+  return api.get<ThumbnailRef[]>(`/media/thumbnails?${searchParams.toString()}`);
 }
 
 /**
