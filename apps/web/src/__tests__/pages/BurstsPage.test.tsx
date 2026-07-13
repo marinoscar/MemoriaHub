@@ -351,12 +351,8 @@ describe('BurstsPage', () => {
 
       render(<BurstsPage />);
 
-      // Note: the group-selection Checkbox uses the legacy MUI `inputProps`
-      // prop for its aria-label, which this MUI version no longer forwards to
-      // the native <input> (see the reported product bug in the test report).
-      // Select by role instead of accessible name until that's fixed.
-      const checkboxes = await screen.findAllByRole('checkbox');
-      await user.click(checkboxes[0]);
+      const checkbox = await screen.findByRole('checkbox', { name: 'Select burst group' });
+      await user.click(checkbox);
 
       await waitFor(() => {
         expect(screen.getByText('1 selected')).toBeInTheDocument();
