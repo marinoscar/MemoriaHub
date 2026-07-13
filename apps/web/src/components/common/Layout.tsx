@@ -5,6 +5,7 @@ import { AppBar } from '../navigation/AppBar';
 import { Sidebar } from '../navigation/Sidebar';
 import { BottomNav } from '../navigation/BottomNav';
 import { MediaRefreshProvider } from '../../contexts/MediaRefreshContext';
+import { MediaPreviewProvider } from '../../contexts/MediaPreviewContext';
 import { SearchProvider } from '../../contexts/SearchContext';
 
 interface LayoutProps {
@@ -29,6 +30,7 @@ export function Layout({ fullBleed = false }: LayoutProps) {
 
   return (
     <MediaRefreshProvider>
+      <MediaPreviewProvider>
       <SearchProvider>
         <Box
           sx={{
@@ -64,6 +66,7 @@ export function Layout({ fullBleed = false }: LayoutProps) {
           <BottomNav onMore={() => setSidebarOpen(true)} />
         </Box>
       </SearchProvider>
+      </MediaPreviewProvider>
     </MediaRefreshProvider>
   );
 }
