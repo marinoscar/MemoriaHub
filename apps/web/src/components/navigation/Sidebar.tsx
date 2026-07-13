@@ -77,6 +77,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const utilitiesItems: NavItemDef[] = [
     { label: 'Review Bursts', icon: <BurstModeIcon />, path: '/bursts' },
     { label: 'Review Duplicates', icon: <ContentCopyIcon />, path: '/duplicates' },
+    { label: 'Review Insights', icon: <InsightsIcon />, path: '/review-insights' },
     { label: 'Location Suggestions', icon: <MyLocationIcon />, path: '/location-suggestions' },
   ];
 
