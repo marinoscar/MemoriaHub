@@ -29,6 +29,7 @@ import { AddAlbumItemsByFilterDto } from './dto/add-album-items-by-filter.dto';
 import { ExportQueryDto } from './dto/export-query.dto';
 import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
 import { MediaLocationsAggregateQueryDto } from './dto/media-locations-aggregate-query.dto';
+import { MediaThumbnailsQueryDto } from './dto/media-thumbnails-query.dto';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { buildMediaWhere, wherePeople } from '../search/media-where.builder';
@@ -616,6 +617,113 @@ export class MediaService {
       count: row.n,
       sampleId: row.sample_id,
     }));
+  }
+
+  /**
+   * GET /api/media/thumbnails
+   *
+   * Batched thumbnail signing for the map view (and any surface that needs many
+   * thumbnails at once). Given a set of media item ids in a circle, returns a
+   * signed thumbnail URL per requested id (null when the item has no thumbnail
+   * or the storage object row is missing).
+   *
+   * Storage-object rows are looked up in a single query, and providers are
+   * resolved once per (provider|bucket) group to avoid redundant resolver calls.
+   */
+  async getThumbnails(
+    query: MediaThumbnailsQueryDto,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<Array<{ id: string; thumbnailUrl: string | null }>> {
+    const { circleId, ids } = query;
+
+    await this.circleMembershipService.assertCircleAccess(
+      userId,
+      circleId,
+      userPermissions,
+      'viewer' as CircleRole,
+    );
+
+    const items = await this.prisma.mediaItem.findMany({
+      where: { id: { in: ids }, circleId },
+      select: { id: true, metadata: true },
+    });
+
+    // Extract thumbnail storage key per item (same extraction as signThumb).
+    const extractKey = (metadata: Prisma.JsonValue | null): string | null => {
+      if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+        return null;
+      }
+      const key = (metadata as Record<string, unknown>)['thumbnailStorageKey'];
+      return typeof key === 'string' && key ? key : null;
+    };
+
+    const idToKey = new Map<string, string | null>();
+    const distinctKeys = new Set<string>();
+    for (const item of items) {
+      const key = extractKey(item.metadata);
+      idToKey.set(item.id, key);
+      if (key) distinctKeys.add(key);
+    }
+
+    // One query to resolve all storage-object rows for the keys.
+    const keyToObject = new Map<
+      string,
+      { storageProvider: string; bucket: string | null }
+    >();
+    if (distinctKeys.size > 0) {
+      const objects = await this.prisma.storageObject.findMany({
+        where: { storageKey: { in: Array.from(distinctKeys) } },
+        select: { storageKey: true, storageProvider: true, bucket: true },
+      });
+      for (const obj of objects) {
+        keyToObject.set(obj.storageKey, {
+          storageProvider: obj.storageProvider,
+          bucket: obj.bucket,
+        });
+      }
+    }
+
+    // Cache resolved providers by (provider|bucket) so we resolve each once.
+    const providerCache = new Map<
+      string,
+      Awaited<ReturnType<StorageProviderResolver['getProviderFor']>>
+    >();
+
+    // Sign each distinct key once, reusing signThumb's resolution + fallback.
+    const keyToUrl = new Map<string, string | null>();
+    for (const key of distinctKeys) {
+      try {
+        const obj = keyToObject.get(key);
+        if (obj) {
+          const cacheKey = `${obj.storageProvider}|${obj.bucket ?? ''}`;
+          let provider = providerCache.get(cacheKey);
+          if (!provider) {
+            provider = await this.resolver.getProviderFor(
+              obj.storageProvider,
+              obj.bucket,
+            );
+            providerCache.set(cacheKey, provider);
+          }
+          keyToUrl.set(key, await provider.getSignedDownloadUrl(key));
+        } else {
+          // Row not yet created — fall back to the legacy static provider.
+          keyToUrl.set(key, await this.storageProvider.getSignedDownloadUrl(key));
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Failed to sign thumbnail URL for key ${key}: ${msg}`);
+        keyToUrl.set(key, null);
+      }
+    }
+
+    return items.map((item) => {
+      const key = idToKey.get(item.id) ?? null;
+      return {
+        id: item.id,
+        thumbnailUrl: key ? keyToUrl.get(key) ?? null : null,
+      };
+    });
   }
 
   /**

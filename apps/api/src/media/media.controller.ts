@@ -39,6 +39,7 @@ import { AddAlbumItemsByFilterDto } from './dto/add-album-items-by-filter.dto';
 import { ExportQueryDto } from './dto/export-query.dto';
 import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
 import { MediaLocationsAggregateQueryDto } from './dto/media-locations-aggregate-query.dto';
+import { MediaThumbnailsQueryDto } from './dto/media-thumbnails-query.dto';
 import { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
 import { BulkTagsDto } from './dto/bulk-tags.dto';
 import { BulkDeleteDto } from './dto/bulk-delete.dto';
@@ -405,6 +406,30 @@ export class MediaController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.mediaService.aggregateLocations(query, user.id, user.permissions);
+  }
+
+  /**
+   * GET /api/media/thumbnails
+   *
+   * Batched thumbnail signing — returns a signed thumbnail URL per requested id.
+   * Declared before @Get(':id') so it is never shadowed.
+   */
+  @Get('thumbnails')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({
+    summary: 'Batch-sign thumbnail URLs for a set of media items',
+    description:
+      'Given a comma-separated set of media item ids (1–200) in a circle, returns a signed ' +
+      'thumbnail URL per requested id (null when the item has no thumbnail).',
+  })
+  @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid', description: 'Circle the items belong to' })
+  @ApiQuery({ name: 'ids', required: true, type: String, description: 'Comma-separated media item UUIDs (1–200)' })
+  @ApiResponse({ status: 200, description: 'Array of { id, thumbnailUrl }' })
+  async getThumbnails(
+    @Query() query: MediaThumbnailsQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.getThumbnails(query, user.id, user.permissions);
   }
 
   /**
