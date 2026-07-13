@@ -55,7 +55,6 @@ export interface MediaLocation {
   takenLng: number;
   capturedAt: Date | null;
   geoLocality: string | null;
-  thumbnailUrl: string | null;
 }
 
 @Injectable()
@@ -441,15 +440,21 @@ export class MediaService {
       place,
       location,
       albumId,
+      bbox,
     } = query;
 
     await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
 
     const where: Prisma.MediaItemWhereInput = {
       circleId,
-      // Must have coordinates
-      takenLat: { not: null },
-      takenLng: { not: null },
+      // Must have coordinates; when a viewport bbox is supplied, merge the
+      // range constraints with the existing not-null guards.
+      takenLat: bbox
+        ? { not: null, gte: bbox.minLat, lte: bbox.maxLat }
+        : { not: null },
+      takenLng: bbox
+        ? { not: null, gte: bbox.minLng, lte: bbox.maxLng }
+        : { not: null },
       // Exclude soft-deleted and archived items
       deletedAt: null,
       archivedAt: null,
@@ -529,23 +534,19 @@ export class MediaService {
         takenLng: true,
         capturedAt: true,
         geoLocality: true,
-        metadata: true,
       },
       orderBy: { capturedAt: 'desc' },
     });
 
-    // Sign all thumbnails in parallel; metadata is used only as signThumb input
-    // and is NOT included in the returned objects.
-    return Promise.all(
-      rows.map(async (row) => ({
-        id: row.id,
-        takenLat: row.takenLat as number,
-        takenLng: row.takenLng as number,
-        capturedAt: row.capturedAt,
-        geoLocality: row.geoLocality,
-        thumbnailUrl: await this.signThumb(row.metadata),
-      })),
-    );
+    // Lightweight map-pin payload — no per-row thumbnail signing. Thumbnails
+    // are fetched on demand in batches via getThumbnails().
+    return rows.map((row) => ({
+      id: row.id,
+      takenLat: row.takenLat as number,
+      takenLng: row.takenLng as number,
+      capturedAt: row.capturedAt,
+      geoLocality: row.geoLocality,
+    }));
   }
 
   /**

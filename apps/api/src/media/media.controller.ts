@@ -367,6 +367,7 @@ export class MediaController {
   @ApiQuery({ name: 'place', required: false, type: String, description: 'Substring match on geoPlaceName, case-insensitive' })
   @ApiQuery({ name: 'location', required: false, type: String, description: 'Free-text search across all geo tiers' })
   @ApiQuery({ name: 'albumId', required: false, type: String, format: 'uuid', description: 'Scope the map to members of a single album' })
+  @ApiQuery({ name: 'bbox', required: false, type: String, description: 'Viewport bounding box "minLng,minLat,maxLng,maxLat" — restrict to items within these bounds' })
   @ApiResponse({ status: 200, description: 'Array of geotagged media location objects' })
   async listLocations(
     @Query() query: MediaLocationsQueryDto,
