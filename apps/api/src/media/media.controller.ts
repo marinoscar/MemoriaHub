@@ -38,6 +38,7 @@ import { AddAlbumItemsDto } from './dto/add-album-items.dto';
 import { AddAlbumItemsByFilterDto } from './dto/add-album-items-by-filter.dto';
 import { ExportQueryDto } from './dto/export-query.dto';
 import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
+import { MediaLocationsAggregateQueryDto } from './dto/media-locations-aggregate-query.dto';
 import { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
 import { BulkTagsDto } from './dto/bulk-tags.dto';
 import { BulkDeleteDto } from './dto/bulk-delete.dto';
@@ -372,6 +373,37 @@ export class MediaController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.mediaService.listLocations(query, user.id, user.permissions);
+  }
+
+  /**
+   * GET /api/media/locations/aggregate
+   *
+   * Server-side spatial clustering for the map view. Groups geotagged,
+   * non-deleted / non-archived items into a grid (cell size controlled by
+   * `precision`) and returns one cluster per occupied cell.
+   * Declared before @Get(':id') so it is never shadowed.
+   */
+  @Get('locations/aggregate')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({
+    summary: 'Server-side spatial clustering of geotagged media for the map view',
+    description:
+      'Groups geotagged non-deleted / non-archived items in the circle into a grid ' +
+      'whose cell size is controlled by `precision` (decimal places of lat/lng rounding). ' +
+      'Returns one cluster per occupied cell: { lat, lng, count, sampleId }.',
+  })
+  @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid', description: 'Circle to aggregate' })
+  @ApiQuery({ name: 'precision', required: false, type: Number, description: 'Grid precision (decimal places, 0–5; default 3)' })
+  @ApiQuery({ name: 'bbox', required: false, type: String, description: 'Viewport bounding box "minLng,minLat,maxLng,maxLat"' })
+  @ApiQuery({ name: 'capturedAtFrom', required: false, type: String, description: 'ISO 8601 datetime — filter capturedAt >= from' })
+  @ApiQuery({ name: 'capturedAtTo', required: false, type: String, description: 'ISO 8601 datetime — filter capturedAt <= to' })
+  @ApiQuery({ name: 'type', required: false, enum: ['photo', 'video'], description: 'Filter by media type' })
+  @ApiResponse({ status: 200, description: 'Array of location clusters { lat, lng, count, sampleId }' })
+  async aggregateLocations(
+    @Query() query: MediaLocationsAggregateQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.aggregateLocations(query, user.id, user.permissions);
   }
 
   /**

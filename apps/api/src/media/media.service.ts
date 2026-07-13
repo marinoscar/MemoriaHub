@@ -28,6 +28,7 @@ import { AddAlbumItemsDto } from './dto/add-album-items.dto';
 import { AddAlbumItemsByFilterDto } from './dto/add-album-items-by-filter.dto';
 import { ExportQueryDto } from './dto/export-query.dto';
 import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
+import { MediaLocationsAggregateQueryDto } from './dto/media-locations-aggregate-query.dto';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { buildMediaWhere, wherePeople } from '../search/media-where.builder';
@@ -545,6 +546,75 @@ export class MediaService {
         thumbnailUrl: await this.signThumb(row.metadata),
       })),
     );
+  }
+
+  /**
+   * GET /api/media/locations/aggregate
+   *
+   * Server-side spatial clustering for the map view. Groups geotagged,
+   * non-deleted / non-archived items in the circle into a grid whose cell size
+   * is controlled by `precision` (decimal places of lat/lng rounding), returning
+   * one cluster per occupied cell with a representative sample id.
+   *
+   * Optional filters (date range, type, viewport bbox) narrow the set before
+   * grouping. All user input is parameterized; `precision` is a validated
+   * integer (0–5) and is the only value embedded as a numeric literal.
+   */
+  async aggregateLocations(
+    query: MediaLocationsAggregateQueryDto,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<Array<{ lat: number; lng: number; count: number; sampleId: string }>> {
+    const { circleId, precision, bbox, capturedAtFrom, capturedAtTo, type } = query;
+
+    await this.circleMembershipService.assertCircleAccess(
+      userId,
+      circleId,
+      userPermissions,
+      'viewer' as CircleRole,
+    );
+
+    // Build optional WHERE fragments; user input is always parameterized.
+    const fragments: Prisma.Sql[] = [
+      capturedAtFrom ? Prisma.sql`AND captured_at >= ${capturedAtFrom}` : Prisma.empty,
+      capturedAtTo ? Prisma.sql`AND captured_at <= ${capturedAtTo}` : Prisma.empty,
+      type ? Prisma.sql`AND type::text = ${type}` : Prisma.empty,
+      bbox
+        ? Prisma.sql`AND taken_lat BETWEEN ${bbox.minLat} AND ${bbox.maxLat} AND taken_lng BETWEEN ${bbox.minLng} AND ${bbox.maxLng}`
+        : Prisma.empty,
+    ];
+
+    // `precision` is a validated integer 0–5 — safe to embed as a numeric literal.
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        gy: string | number;
+        gx: string | number;
+        n: number;
+        lat: string | number;
+        lng: string | number;
+        sample_id: string;
+      }>
+    >(Prisma.sql`
+      SELECT round(taken_lat::numeric, ${Prisma.raw(String(precision))}) AS gy,
+             round(taken_lng::numeric, ${Prisma.raw(String(precision))}) AS gx,
+             count(*)::int AS n,
+             avg(taken_lat) AS lat,
+             avg(taken_lng) AS lng,
+             min(id::text) AS sample_id
+      FROM media_items
+      WHERE circle_id = ${circleId}::uuid
+        AND deleted_at IS NULL AND archived_at IS NULL
+        AND taken_lat IS NOT NULL AND taken_lng IS NOT NULL
+        ${Prisma.join(fragments, ' ')}
+      GROUP BY gy, gx
+    `);
+
+    return rows.map((row) => ({
+      lat: Number(row.lat),
+      lng: Number(row.lng),
+      count: row.n,
+      sampleId: row.sample_id,
+    }));
   }
 
   /**
