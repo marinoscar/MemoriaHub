@@ -12,10 +12,12 @@ import { DuplicateDetectionHandler } from './duplicate-detection.handler';
 import { DuplicateDetectionBatchHandler } from './duplicate-detection-batch.handler';
 import { DuplicateBackfillService } from './duplicate-backfill.service';
 import { VisualEmbeddingService } from './visual-embedding.service';
+import { ReviewInsightsController } from './review-insights.controller';
+import { ReviewInsightsService } from './review-insights.service';
 
 @Module({
   imports: [EnrichmentModule, StorageProvidersModule, PrismaModule, CirclesModule, SettingsModule],
-  controllers: [DuplicateController, AdminDuplicateController],
+  controllers: [DuplicateController, AdminDuplicateController, ReviewInsightsController],
   providers: [
     DuplicateService,
     DuplicateDetectionService,
@@ -23,6 +25,7 @@ import { VisualEmbeddingService } from './visual-embedding.service';
     DuplicateDetectionBatchHandler,
     DuplicateBackfillService,
     VisualEmbeddingService,
+    ReviewInsightsService,
   ],
   exports: [VisualEmbeddingService, DuplicateDetectionService],
 })
