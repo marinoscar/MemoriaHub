@@ -7,16 +7,21 @@ import {
   Card,
   CardActionArea,
   CardContent,
+  Checkbox,
   Chip,
   Badge,
+  Snackbar,
   Stack,
   Pagination,
 } from '@mui/material';
 import { ContentCopy as ContentCopyIcon } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
+import { usePermissions } from '../../hooks/usePermissions';
 import { useDuplicateGroups } from '../../hooks/useDuplicates';
-import type { DuplicateGroupKind, DuplicateGroupSummary } from '../../services/duplicates';
+import { GroupBulkResolveToolbar } from '../../components/review/GroupBulkResolveToolbar';
+import { ConfidenceMeter } from '../../components/review/ConfidenceMeter';
+import type { DuplicateGroupKind, DuplicateGroupSummary, DuplicateResolveAction } from '../../services/duplicates';
 
 const KIND_LABELS: Record<DuplicateGroupKind, string> = {
   exact_variant: 'Exact copy',
@@ -70,7 +75,13 @@ function CoverStack({ coverUrls, mediaCount }: { coverUrls: string[]; mediaCount
   );
 }
 
-function DuplicateGroupCard({ group }: { group: DuplicateGroupSummary }) {
+interface DuplicateGroupCardProps {
+  group: DuplicateGroupSummary;
+  selected: boolean;
+  onToggle: (id: string) => void;
+}
+
+function DuplicateGroupCard({ group, selected, onToggle }: DuplicateGroupCardProps) {
   const navigate = useNavigate();
 
   const capturedDate = group.capturedAt
@@ -81,7 +92,27 @@ function DuplicateGroupCard({ group }: { group: DuplicateGroupSummary }) {
     : null;
 
   return (
-    <Card variant="outlined">
+    <Card variant="outlined" sx={{ position: 'relative' }}>
+      {/* Selection checkbox overlay — sibling of the action area to avoid nested buttons */}
+      <Box
+        sx={{
+          position: 'absolute',
+          top: 8,
+          left: 8,
+          zIndex: 2,
+          bgcolor: 'rgba(0,0,0,0.45)',
+          borderRadius: '50%',
+        }}
+      >
+        <Checkbox
+          checked={selected}
+          onChange={() => onToggle(group.id)}
+          onClick={(e) => e.stopPropagation()}
+          size="small"
+          sx={{ color: 'common.white', p: 0.5, '&.Mui-checked': { color: 'common.white' } }}
+          inputProps={{ 'aria-label': 'Select duplicate group' }}
+        />
+      </Box>
       <CardActionArea
         onClick={() => navigate(`/duplicates/${group.id}`)}
         sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 2, justifyContent: 'flex-start' }}
@@ -100,10 +131,11 @@ function DuplicateGroupCard({ group }: { group: DuplicateGroupSummary }) {
             />
           </Box>
           {capturedDate && (
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               {capturedDate}
             </Typography>
           )}
+          <ConfidenceMeter confidence={group.confidence} label="Match" />
         </CardContent>
       </CardActionArea>
     </Card>
@@ -112,9 +144,15 @@ function DuplicateGroupCard({ group }: { group: DuplicateGroupSummary }) {
 
 export default function DuplicatesPage() {
   const { activeCircle, activeCircleId } = useCircle();
-  const { items, meta, isLoading, error, fetchGroups } = useDuplicateGroups();
+  const { hasPermission } = usePermissions();
+  const { items, meta, isLoading, error, fetchGroups, bulkResolve } = useDuplicateGroups();
   const [kindFilter, setKindFilter] = useState<DuplicateGroupKind | null>(null);
   const [page, setPage] = useState(1);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const canTrash = hasPermission('media:delete');
 
   useEffect(() => {
     if (!activeCircleId) return;
@@ -129,6 +167,38 @@ export default function DuplicatesPage() {
   useEffect(() => {
     setPage(1);
   }, [kindFilter, activeCircleId]);
+
+  // Clear selection whenever the visible set changes (filter, page, or circle).
+  useEffect(() => {
+    setSelected(new Set());
+  }, [kindFilter, page, activeCircleId]);
+
+  const handleToggle = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    setSelected(new Set(items.map((g) => g.id)));
+  };
+
+  const handleResolve = async (action: DuplicateResolveAction) => {
+    setActionError(null);
+    try {
+      const result = await bulkResolve(Array.from(selected), action);
+      setSelected(new Set());
+      const verb = action === 'trash' ? 'moved to Trash' : 'archived';
+      setSuccessMsg(
+        `Resolved ${result.resolvedGroups} group${result.resolvedGroups !== 1 ? 's' : ''}; ${result.removedCount} photo${result.removedCount !== 1 ? 's' : ''} ${verb}.`,
+      );
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to resolve duplicate groups');
+    }
+  };
 
   if (!activeCircle) {
     return (
@@ -150,6 +220,15 @@ export default function DuplicatesPage() {
         </Typography>
       </Box>
 
+      {/* Bulk resolve toolbar (only when a selection exists) */}
+      <GroupBulkResolveToolbar
+        selectedIds={selected}
+        onClear={() => setSelected(new Set())}
+        onSelectAll={handleSelectAll}
+        onResolve={handleResolve}
+        canTrash={canTrash}
+      />
+
       {/* Kind filter chips */}
       <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: 'wrap', rowGap: 1 }}>
         {KIND_FILTERS.map((f) => (
@@ -167,6 +246,12 @@ export default function DuplicatesPage() {
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
+        </Alert>
+      )}
+
+      {actionError && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setActionError(null)}>
+          {actionError}
         </Alert>
       )}
 
@@ -194,7 +279,12 @@ export default function DuplicatesPage() {
             {meta?.total ?? items.length} duplicate group{(meta?.total ?? items.length) !== 1 ? 's' : ''} pending review
           </Typography>
           {items.map((group) => (
-            <DuplicateGroupCard key={group.id} group={group} />
+            <DuplicateGroupCard
+              key={group.id}
+              group={group}
+              selected={selected.has(group.id)}
+              onToggle={handleToggle}
+            />
           ))}
           {pageCount > 1 && (
             <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
@@ -203,6 +293,17 @@ export default function DuplicatesPage() {
           )}
         </Box>
       )}
+
+      <Snackbar
+        open={Boolean(successMsg)}
+        autoHideDuration={3000}
+        onClose={() => setSuccessMsg(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={() => setSuccessMsg(null)} severity="success" sx={{ width: '100%' }}>
+          {successMsg}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }
