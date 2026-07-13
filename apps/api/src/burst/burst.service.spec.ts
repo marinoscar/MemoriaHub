@@ -27,6 +27,7 @@ import { createMockPrismaService, MockPrismaService } from '../../test/mocks/pri
 import { BurstGroupStatus, CircleRole, MediaType } from '@prisma/client';
 import { BurstQueryDto } from './dto/burst-query.dto';
 import { ResolveBurstDto } from './dto/resolve-burst.dto';
+import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -57,12 +58,21 @@ function makeResolveDto(
   return { keepIds, action } as ResolveBurstDto;
 }
 
+function makeBulkResolveDto(
+  ids: string[],
+  action: 'archive' | 'trash' = 'archive',
+  circleId: string = CIRCLE_ID,
+): BulkResolveBurstDto {
+  return { circleId, ids, action } as BulkResolveBurstDto;
+}
+
 function makeBurstGroupRow(overrides: Partial<{
   id: string;
   circleId: string;
   status: BurstGroupStatus;
   mediaCount: number;
   capturedAt: Date | null;
+  confidence: number | null;
   suggestedBestItemId: string | null;
   resolvedById: string | null;
   resolvedAt: Date | null;
@@ -76,6 +86,7 @@ function makeBurstGroupRow(overrides: Partial<{
     status: BurstGroupStatus.pending,
     mediaCount: 5,
     capturedAt: new Date('2026-06-15T14:32:00Z'),
+    confidence: 0.82,
     suggestedBestItemId: 'media-1',
     resolvedById: null,
     resolvedAt: null,
@@ -259,6 +270,26 @@ describe('BurstService', () => {
 
       expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalled();
       expect(result.items[0].suggestedBestThumbnailUrl).toBe('https://cdn.example.com/signed-url');
+    });
+
+    it('passes through the persisted confidence value on each list item', async () => {
+      const group = makeBurstGroupRow({ confidence: 0.73 });
+      (mockPrisma.burstGroup.findMany as jest.Mock).mockResolvedValue([group]);
+      (mockPrisma.burstGroup.count as jest.Mock).mockResolvedValue(1);
+
+      const result = await service.listBurstGroups(makeQueryDto(), USER_ID, PERMS_MEDIA_READ);
+
+      expect(result.items[0].confidence).toBe(0.73);
+    });
+
+    it('passes through a null confidence (not coerced to a number)', async () => {
+      const group = makeBurstGroupRow({ confidence: null });
+      (mockPrisma.burstGroup.findMany as jest.Mock).mockResolvedValue([group]);
+      (mockPrisma.burstGroup.count as jest.Mock).mockResolvedValue(1);
+
+      const result = await service.listBurstGroups(makeQueryDto(), USER_ID, PERMS_MEDIA_READ);
+
+      expect(result.items[0].confidence).toBeNull();
     });
 
     it('response items do NOT contain perceptualHash field', async () => {
@@ -544,6 +575,242 @@ describe('BurstService', () => {
 
       expect(result.data.removed).toBe(0);
       expect(result.data.kept).toBe(3);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // bulkResolveBurstGroups
+  // -------------------------------------------------------------------------
+
+  describe('bulkResolveBurstGroups', () => {
+    function makeBulkGroup(overrides: Partial<{
+      id: string;
+      circleId: string;
+      status: BurstGroupStatus;
+      suggestedBestItemId: string | null;
+      items: Array<{ id: string }>;
+    }> = {}) {
+      return {
+        id: 'group-1',
+        circleId: CIRCLE_ID,
+        status: BurstGroupStatus.pending,
+        suggestedBestItemId: 'media-1',
+        items: [{ id: 'media-1' }, { id: 'media-2' }, { id: 'media-3' }],
+        ...overrides,
+      };
+    }
+
+    function setupGroups(groups: ReturnType<typeof makeBulkGroup>[]) {
+      (mockPrisma.burstGroup.findMany as jest.Mock).mockResolvedValue(groups);
+      (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+      (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+    }
+
+    it('calls assertCircleAccess with collaborator role', async () => {
+      const group = makeBulkGroup();
+      setupGroups([group]);
+
+      await service.bulkResolveBurstGroups(
+        makeBulkResolveDto([group.id]),
+        USER_ID,
+        PERMS_MEDIA_DELETE,
+      );
+
+      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+        USER_ID,
+        CIRCLE_ID,
+        PERMS_MEDIA_DELETE,
+        CircleRole.collaborator,
+      );
+    });
+
+    it('happy path: resolves all pending groups keeping only suggestedBest, with correct counts', async () => {
+      const groupA = makeBulkGroup({
+        id: 'group-a',
+        suggestedBestItemId: 'media-1',
+        items: [{ id: 'media-1' }, { id: 'media-2' }, { id: 'media-3' }],
+      });
+      const groupB = makeBulkGroup({
+        id: 'group-b',
+        suggestedBestItemId: 'media-10',
+        items: [{ id: 'media-10' }, { id: 'media-11' }],
+      });
+      setupGroups([groupA, groupB]);
+
+      const result = await service.bulkResolveBurstGroups(
+        makeBulkResolveDto(['group-a', 'group-b'], 'archive'),
+        USER_ID,
+        PERMS_MEDIA_DELETE,
+      );
+
+      expect(result.data).toMatchObject({
+        resolvedGroups: 2,
+        keptCount: 2, // 1 kept per group
+        removedCount: 3, // 2 removed from group-a + 1 removed from group-b
+        action: 'archive',
+        skipped: 0,
+        errors: 0,
+      });
+
+      // group-a: keeps media-1, archives media-2 + media-3
+      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: expect.arrayContaining(['media-2', 'media-3']) } },
+          data: { archivedAt: expect.any(Date) },
+        }),
+      );
+      // group-b: keeps media-10, archives media-11
+      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: ['media-11'] } },
+          data: { archivedAt: expect.any(Date) },
+        }),
+      );
+    });
+
+    it('skips groups that are not pending', async () => {
+      const pendingGroup = makeBulkGroup({ id: 'group-pending' });
+      const resolvedGroup = makeBulkGroup({ id: 'group-resolved', status: BurstGroupStatus.resolved });
+      setupGroups([pendingGroup, resolvedGroup]);
+
+      const result = await service.bulkResolveBurstGroups(
+        makeBulkResolveDto(['group-pending', 'group-resolved']),
+        USER_ID,
+        PERMS_MEDIA_DELETE,
+      );
+
+      expect(result.data.resolvedGroups).toBe(1);
+      expect(result.data.skipped).toBe(1);
+      expect(result.data.errors).toBe(0);
+    });
+
+    it('skips groups with a null suggestedBestItemId', async () => {
+      const group = makeBulkGroup({ suggestedBestItemId: null });
+      setupGroups([group]);
+
+      const result = await service.bulkResolveBurstGroups(
+        makeBulkResolveDto([group.id]),
+        USER_ID,
+        PERMS_MEDIA_DELETE,
+      );
+
+      expect(result.data.resolvedGroups).toBe(0);
+      expect(result.data.skipped).toBe(1);
+      expect(mockPrisma.mediaItem.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('skips groups whose suggestedBestItemId is no longer a live member', async () => {
+      const group = makeBulkGroup({
+        suggestedBestItemId: 'media-gone',
+        items: [{ id: 'media-1' }, { id: 'media-2' }],
+      });
+      setupGroups([group]);
+
+      const result = await service.bulkResolveBurstGroups(
+        makeBulkResolveDto([group.id]),
+        USER_ID,
+        PERMS_MEDIA_DELETE,
+      );
+
+      expect(result.data.resolvedGroups).toBe(0);
+      expect(result.data.skipped).toBe(1);
+    });
+
+    it('throws BadRequestException when a requested id is missing (not found)', async () => {
+      (mockPrisma.burstGroup.findMany as jest.Mock).mockResolvedValue([makeBulkGroup({ id: 'group-a' })]);
+
+      await expect(
+        service.bulkResolveBurstGroups(
+          makeBulkResolveDto(['group-a', 'group-does-not-exist']),
+          USER_ID,
+          PERMS_MEDIA_DELETE,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when a requested id belongs to a different circle', async () => {
+      const group = makeBulkGroup({ id: 'group-a', circleId: 'other-circle' });
+      (mockPrisma.burstGroup.findMany as jest.Mock).mockResolvedValue([group]);
+
+      await expect(
+        service.bulkResolveBurstGroups(
+          makeBulkResolveDto(['group-a']),
+          USER_ID,
+          PERMS_MEDIA_DELETE,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when action is "trash" but perms lack media:delete', async () => {
+      const group = makeBulkGroup();
+      setupGroups([group]);
+
+      await expect(
+        service.bulkResolveBurstGroups(
+          makeBulkResolveDto([group.id], 'trash'),
+          USER_ID,
+          PERMS_MEDIA_WRITE, // no media:delete
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      // Permission check should short-circuit before any group lookup/mutation
+      expect(mockPrisma.mediaItem.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('allows action "archive" with only media:write perms (media:delete not required)', async () => {
+      const group = makeBulkGroup();
+      setupGroups([group]);
+
+      const result = await service.bulkResolveBurstGroups(
+        makeBulkResolveDto([group.id], 'archive'),
+        USER_ID,
+        PERMS_MEDIA_WRITE,
+      );
+
+      expect(result.data.resolvedGroups).toBe(1);
+      expect(result.data.action).toBe('archive');
+    });
+
+    it('increments errors and continues processing when one group fails mid-loop', async () => {
+      const groupA = makeBulkGroup({ id: 'group-a', suggestedBestItemId: 'media-1', items: [{ id: 'media-1' }, { id: 'media-2' }] });
+      const groupB = makeBulkGroup({ id: 'group-b', suggestedBestItemId: 'media-10', items: [{ id: 'media-10' }, { id: 'media-11' }] });
+      const groupC = makeBulkGroup({ id: 'group-c', suggestedBestItemId: 'media-20', items: [{ id: 'media-20' }, { id: 'media-21' }] });
+      setupGroups([groupA, groupB, groupC]);
+
+      // group-a succeeds, group-b's mediaItem.updateMany rejects, group-c succeeds
+      (mockPrisma.mediaItem.updateMany as jest.Mock)
+        .mockResolvedValueOnce({ count: 1 }) // group-a
+        .mockRejectedValueOnce(new Error('db boom')) // group-b
+        .mockResolvedValueOnce({ count: 1 }); // group-c
+
+      const result = await service.bulkResolveBurstGroups(
+        makeBulkResolveDto(['group-a', 'group-b', 'group-c'], 'archive'),
+        USER_ID,
+        PERMS_MEDIA_DELETE,
+      );
+
+      expect(result.data.resolvedGroups).toBe(2);
+      expect(result.data.errors).toBe(1);
+      expect(result.data.skipped).toBe(0);
+      // The loop must still process group-c after group-b's failure
+      expect(mockPrisma.burstGroup.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'group-c' } }),
+      );
+    });
+
+    it('deduplicates repeated ids in the request before looking up groups', async () => {
+      const group = makeBulkGroup();
+      setupGroups([group]);
+
+      await service.bulkResolveBurstGroups(
+        makeBulkResolveDto([group.id, group.id]),
+        USER_ID,
+        PERMS_MEDIA_DELETE,
+      );
+
+      const findManyCall = (mockPrisma.burstGroup.findMany as jest.Mock).mock.calls[0][0];
+      expect(findManyCall.where.id.in).toEqual([group.id]);
     });
   });
 
