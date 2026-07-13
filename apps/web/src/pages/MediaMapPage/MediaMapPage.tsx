@@ -14,15 +14,30 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
-import { Box, CircularProgress, Alert, Typography, useTheme } from '@mui/material';
-import { Map as MapIcon } from '@mui/icons-material';
+import {
+  Box,
+  CircularProgress,
+  Alert,
+  Typography,
+  Drawer,
+  IconButton,
+  Grid,
+  Skeleton,
+  useTheme,
+} from '@mui/material';
+import { Close as CloseIcon, Map as MapIcon } from '@mui/icons-material';
 import '../../lib/leaflet-setup';
 import { defaultIcon } from '../../lib/leaflet-setup';
-import { aggregateLocations, getMedia } from '../../services/media';
+import {
+  aggregateLocations,
+  listMediaLocations,
+  getThumbnails,
+  getMedia,
+} from '../../services/media';
 import { useCircle } from '../../hooks/useCircle';
 import { useAuth } from '../../contexts/AuthContext';
 import { MediaDetailDrawer } from '../../components/media/MediaDetailDrawer';
-import type { MapCluster, MediaItem } from '../../types/media';
+import type { MapCluster, MediaItem, MediaLocation } from '../../types/media';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -48,6 +63,12 @@ const VIEWPORT_DEBOUNCE_MS = 250;
 
 /** How many zoom levels a cluster drill-down flies in. */
 const DRILL_ZOOM_STEP = 3;
+
+/**
+ * Clusters at or below this member count open the "Photos here" drawer
+ * (fetch + show thumbnails) instead of flying in to drill down further.
+ */
+const CLUSTER_DRAWER_MAX = 60;
 
 // ---------------------------------------------------------------------------
 // Zoom → grid precision. Coarser cells at low zoom keep bucket counts bounded.
@@ -202,16 +223,72 @@ function GeoLocationCenter() {
 }
 
 // ---------------------------------------------------------------------------
+// AlbumTile — thumbnail inside the "Photos here" cluster drawer. Shows a
+// Skeleton until its (lazily-fetched) thumbnail URL resolves.
+// ---------------------------------------------------------------------------
+
+interface AlbumTileProps {
+  point: MediaLocation;
+  onClick: () => void;
+}
+
+function AlbumTile({ point, onClick }: AlbumTileProps) {
+  const theme = useTheme();
+  const [imgError, setImgError] = useState(false);
+
+  return (
+    <Box
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      aria-label={
+        point.geoLocality ??
+        `Photo taken at ${point.takenLat.toFixed(4)}, ${point.takenLng.toFixed(4)}`
+      }
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') onClick();
+      }}
+      sx={{
+        aspectRatio: '1',
+        cursor: 'pointer',
+        borderRadius: 1,
+        overflow: 'hidden',
+        border: `1px solid ${theme.palette.divider}`,
+        '&:hover': { opacity: 0.85 },
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: theme.palette.grey[900],
+      }}
+    >
+      {point.thumbnailUrl && !imgError ? (
+        <Box
+          component="img"
+          src={point.thumbnailUrl}
+          alt={point.geoLocality ?? 'Photo'}
+          onError={() => setImgError(true)}
+          sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+        />
+      ) : (
+        <Skeleton variant="rectangular" width="100%" height="100%" />
+      )}
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // ClusterLayer — renders one Leaflet marker per aggregate cluster and handles
-// clicks (drill-down for multi-item cells, open drawer for single-item cells).
+// clicks: single-item cells open the media drawer, small clusters open the
+// "Photos here" drawer, larger clusters fly in one drill-down level.
 // ---------------------------------------------------------------------------
 
 interface ClusterLayerProps {
   clusters: MapCluster[];
   onOpenItem: (id: string) => void;
+  onOpenCluster: (cluster: MapCluster, precision: number) => void;
 }
 
-function ClusterLayer({ clusters, onOpenItem }: ClusterLayerProps) {
+function ClusterLayer({ clusters, onOpenItem, onOpenCluster }: ClusterLayerProps) {
   const map = useMap();
 
   const handleClick = useCallback(
@@ -220,10 +297,14 @@ function ClusterLayer({ clusters, onOpenItem }: ClusterLayerProps) {
         onOpenItem(cluster.sampleId);
         return;
       }
+      if (cluster.count <= CLUSTER_DRAWER_MAX) {
+        onOpenCluster(cluster, precisionForZoom(map.getZoom()));
+        return;
+      }
       const target = Math.min(map.getZoom() + DRILL_ZOOM_STEP, map.getMaxZoom());
       map.flyTo([cluster.lat, cluster.lng], target);
     },
-    [map, onOpenItem],
+    [map, onOpenItem, onOpenCluster],
   );
 
   return (
@@ -287,6 +368,50 @@ export default function MediaMapPage() {
       cancelled = true;
     };
   }, [activeCircle, authIsLoading, viewport]);
+
+  // ----- "Photos here" cluster drawer (lazy points + thumbnails) -----
+  // null = closed; [] = open + loading; populated array = loaded.
+  const [albumPoints, setAlbumPoints] = useState<MediaLocation[] | null>(null);
+  const albumReqRef = useRef(0);
+
+  const handleOpenCluster = useCallback(
+    (cluster: MapCluster, precision: number) => {
+      if (!activeCircle) return;
+      const reqId = ++albumReqRef.current;
+      const circleId = activeCircle.id;
+      setAlbumPoints([]); // open in loading state
+
+      // Cell bounds: half a grid cell each way around the cluster centroid.
+      const half = 0.5 * Math.pow(10, -precision);
+      const bbox = `${cluster.lng - half},${cluster.lat - half},${cluster.lng + half},${cluster.lat + half}`;
+
+      void (async () => {
+        try {
+          const pts = await listMediaLocations({ circleId, bbox });
+          if (albumReqRef.current !== reqId) return;
+          setAlbumPoints(pts);
+
+          const thumbs = await getThumbnails(
+            circleId,
+            pts.map((p) => p.id),
+          );
+          if (albumReqRef.current !== reqId) return;
+          const byId = new Map(thumbs.map((t) => [t.id, t.thumbnailUrl]));
+          setAlbumPoints(
+            pts.map((p) => ({ ...p, thumbnailUrl: byId.get(p.id) ?? null })),
+          );
+        } catch {
+          if (albumReqRef.current === reqId) setAlbumPoints([]);
+        }
+      })();
+    },
+    [activeCircle],
+  );
+
+  const handleCloseCluster = useCallback(() => {
+    albumReqRef.current++; // invalidate any in-flight request
+    setAlbumPoints(null);
+  }, []);
 
   // ----- MediaDetailDrawer (single item) -----
   const [selectedItem, setSelectedItem] = useState<MediaItem | null>(null);
@@ -411,6 +536,8 @@ export default function MediaMapPage() {
         center={DEFAULT_CENTER}
         zoom={DEFAULT_ZOOM}
         style={{ height: '100%', width: '100%' }}
+        // Disable scroll-wheel zoom while the cluster drawer is open.
+        scrollWheelZoom={albumPoints === null}
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -424,7 +551,11 @@ export default function MediaMapPage() {
         <FitToClusters clusters={clusters} />
 
         {/* Cluster markers */}
-        <ClusterLayer clusters={clusters} onOpenItem={handleMarkerOpen} />
+        <ClusterLayer
+          clusters={clusters}
+          onOpenItem={handleMarkerOpen}
+          onOpenCluster={handleOpenCluster}
+        />
 
         {/* Center on the user's geolocation when nothing is visible */}
         {showEmpty && <GeoLocationCenter />}
@@ -448,6 +579,47 @@ export default function MediaMapPage() {
           <CircularProgress size={28} aria-label="Loading item" />
         </Box>
       )}
+
+      {/* "Photos here" cluster drawer — lazy points + batched thumbnails */}
+      <Drawer
+        anchor="right"
+        open={albumPoints !== null}
+        onClose={handleCloseCluster}
+        variant="temporary"
+        ModalProps={{ keepMounted: false }}
+        sx={{
+          '& .MuiDrawer-paper': {
+            width: { xs: '100vw', sm: 400 },
+            maxWidth: '100vw',
+          },
+        }}
+      >
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            px: 2,
+            py: 1.5,
+            borderBottom: `1px solid ${theme.palette.divider}`,
+            gap: 1,
+          }}
+        >
+          <IconButton onClick={handleCloseCluster} size="small" aria-label="Close photos panel">
+            <CloseIcon />
+          </IconButton>
+          <Typography variant="h6">Photos here ({albumPoints?.length ?? 0})</Typography>
+        </Box>
+
+        <Box sx={{ p: 2, overflowY: 'auto', flex: 1 }}>
+          <Grid container spacing={1}>
+            {(albumPoints ?? []).map((point) => (
+              <Grid key={point.id} size={{ xs: 4 }}>
+                <AlbumTile point={point} onClick={() => handleMarkerOpen(point.id)} />
+              </Grid>
+            ))}
+          </Grid>
+        </Box>
+      </Drawer>
 
       {/* Full media detail drawer */}
       <MediaDetailDrawer
