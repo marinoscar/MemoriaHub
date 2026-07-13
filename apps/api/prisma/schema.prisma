@@ -568,6 +568,15 @@ model MediaItem {
   @@index([burstGroupId])
   @@index([duplicateGroupId])
   @@index([circleId, perceptualHash])
+  // NOTE: a hand-authored partial composite index "media_items_map_locations_idx"
+  // ON (circle_id, captured_at DESC, taken_lat, taken_lng) WHERE deleted_at IS NULL
+  // AND archived_at IS NULL AND taken_lat IS NOT NULL AND taken_lng IS NOT NULL
+  // also exists, added via raw SQL in migration 20260713130000_media_locations_index
+  // to serve the Map View's location-aggregation query. Prisma's schema DSL cannot
+  // express partial indexes (no WHERE clause support on @@index()), so it is not
+  // representable here as a real directive — see that migration's header comment
+  // for the full rationale (same hand-authored precedent as the "On This Day"
+  // functional index in migration 20260615000000_media_oncethisday_index).
   @@map("media_items")
 }
 
