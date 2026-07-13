@@ -40,6 +40,7 @@ import { useCircle } from '../../hooks/useCircle';
 import { useAuth } from '../../contexts/AuthContext';
 import { MediaDetailDrawer } from '../../components/media/MediaDetailDrawer';
 import { MapTimeFilter, type MapTimeRange } from '../../components/map/MapTimeFilter';
+import { MapControls } from '../../components/map/MapControls';
 import type { MapCluster, MediaItem, MediaLocation, LocationExtent } from '../../types/media';
 
 // ---------------------------------------------------------------------------
@@ -202,6 +203,22 @@ function FitToExtent({ extent }: { extent: LocationExtent | null }) {
 }
 
 // ---------------------------------------------------------------------------
+// CaptureMap — lifts the Leaflet map instance out of <MapContainer> so
+// page-level overlays (MapControls) can drive it imperatively. useMap() only
+// works inside <MapContainer>, so we capture it once on mount.
+// ---------------------------------------------------------------------------
+
+function CaptureMap({ onReady }: { onReady: (map: L.Map) => void }) {
+  const map = useMap();
+
+  useEffect(() => {
+    onReady(map);
+  }, [map, onReady]);
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // AlbumTile — thumbnail inside the "Photos here" cluster drawer. Shows a
 // Skeleton until its (lazily-fetched) thumbnail URL resolves.
 // ---------------------------------------------------------------------------
@@ -308,6 +325,11 @@ export default function MediaMapPage() {
   const theme = useTheme();
   const { activeCircle } = useCircle();
   const { isLoading: authIsLoading } = useAuth();
+
+  // Leaflet map instance, captured from inside <MapContainer> so page-level
+  // overlays (MapControls) can drive it imperatively.
+  const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
+  const handleMapReady = useCallback((map: L.Map) => setMapInstance(map), []);
 
   // ----- Viewport-driven cluster data -----
   const [clusters, setClusters] = useState<MapCluster[]>([]);
@@ -554,14 +576,14 @@ export default function MediaMapPage() {
         </Box>
       )}
 
-      {/* Time-range filter overlay — floats above the Leaflet pane, clearing
-          the top-left zoom control. */}
+      {/* Time-range filter overlay — floats above the Leaflet pane, top-right
+          so it never overlaps the top-left MapControls stack. */}
       <Paper
         elevation={3}
         sx={{
           position: 'absolute',
           top: 8,
-          left: 56,
+          right: 8,
           zIndex: 1000,
           p: 0.5,
           borderRadius: 1,
@@ -574,11 +596,16 @@ export default function MediaMapPage() {
         <MapTimeFilter onChange={handleTimeChange} />
       </Paper>
 
+      {/* Custom map control stack (top-left): zoom, recenter, locate */}
+      <MapControls map={mapInstance} extent={extent} />
+
       {/* Map — always rendered so Leaflet initialises correctly */}
       <MapContainer
         center={DEFAULT_CENTER}
         zoom={DEFAULT_ZOOM}
         style={{ height: '100%', width: '100%' }}
+        // Default zoom control replaced by the custom MapControls stack.
+        zoomControl={false}
         // Disable scroll-wheel zoom while the cluster drawer is open.
         scrollWheelZoom={albumPoints === null}
       >
@@ -595,6 +622,9 @@ export default function MediaMapPage() {
           }
           subdomains="abcd"
         />
+
+        {/* Capture the map instance for the page-level MapControls overlay */}
+        <CaptureMap onReady={handleMapReady} />
 
         {/* Report viewport changes so the parent can refetch aggregates */}
         <ViewportWatcher onChange={handleViewport} />
