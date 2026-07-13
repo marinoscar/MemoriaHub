@@ -90,7 +90,7 @@ function BurstGroupCard({ group, selected, onToggle }: BurstGroupCardProps) {
           onClick={(e) => e.stopPropagation()}
           size="small"
           sx={{ color: 'common.white', p: 0.5, '&.Mui-checked': { color: 'common.white' } }}
-          inputProps={{ 'aria-label': 'Select burst group' }}
+          slotProps={{ input: { 'aria-label': 'Select burst group' } }}
         />
       </Box>
       <CardActionArea
