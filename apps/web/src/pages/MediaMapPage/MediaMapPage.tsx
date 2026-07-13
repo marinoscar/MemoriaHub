@@ -23,6 +23,7 @@ import {
   IconButton,
   Grid,
   Skeleton,
+  Paper,
   useTheme,
 } from '@mui/material';
 import { Close as CloseIcon, Map as MapIcon } from '@mui/icons-material';
@@ -37,6 +38,7 @@ import {
 import { useCircle } from '../../hooks/useCircle';
 import { useAuth } from '../../contexts/AuthContext';
 import { MediaDetailDrawer } from '../../components/media/MediaDetailDrawer';
+import { MapTimeFilter, type MapTimeRange } from '../../components/map/MapTimeFilter';
 import type { MapCluster, MediaItem, MediaLocation } from '../../types/media';
 
 // ---------------------------------------------------------------------------
@@ -340,6 +342,12 @@ export default function MediaMapPage() {
     setViewport({ bbox, zoom });
   }, []);
 
+  // ----- Time-range filter -----
+  const [timeRange, setTimeRange] = useState<MapTimeRange>({ from: null, to: null });
+  const handleTimeChange = useCallback((range: MapTimeRange) => {
+    setTimeRange(range);
+  }, []);
+
   // Fetch aggregate clusters for the current viewport. Gated on auth bootstrap
   // completing so a cold reload doesn't fire a 401 before the token is ready.
   useEffect(() => {
@@ -352,6 +360,8 @@ export default function MediaMapPage() {
       circleId: activeCircle.id,
       precision: precisionForZoom(viewport.zoom),
       bbox: viewport.bbox,
+      capturedAtFrom: timeRange.from ?? undefined,
+      capturedAtTo: timeRange.to ?? undefined,
     })
       .then((data) => {
         if (cancelled) return;
@@ -367,7 +377,7 @@ export default function MediaMapPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeCircle, authIsLoading, viewport]);
+  }, [activeCircle, authIsLoading, viewport, timeRange]);
 
   // ----- "Photos here" cluster drawer (lazy points + thumbnails) -----
   // null = closed; [] = open + loading; populated array = loaded.
@@ -387,7 +397,12 @@ export default function MediaMapPage() {
 
       void (async () => {
         try {
-          const pts = await listMediaLocations({ circleId, bbox });
+          const pts = await listMediaLocations({
+            circleId,
+            bbox,
+            capturedAtFrom: timeRange.from ?? undefined,
+            capturedAtTo: timeRange.to ?? undefined,
+          });
           if (albumReqRef.current !== reqId) return;
           setAlbumPoints(pts);
 
@@ -405,7 +420,7 @@ export default function MediaMapPage() {
         }
       })();
     },
-    [activeCircle],
+    [activeCircle, timeRange],
   );
 
   const handleCloseCluster = useCallback(() => {
@@ -530,6 +545,26 @@ export default function MediaMapPage() {
           </Typography>
         </Box>
       )}
+
+      {/* Time-range filter overlay — floats above the Leaflet pane, clearing
+          the top-left zoom control. */}
+      <Paper
+        elevation={3}
+        sx={{
+          position: 'absolute',
+          top: 8,
+          left: 56,
+          zIndex: 1000,
+          p: 0.5,
+          borderRadius: 1,
+          backgroundColor: (t) =>
+            t.palette.mode === 'dark'
+              ? 'rgba(30,30,30,0.9)'
+              : 'rgba(255,255,255,0.9)',
+        }}
+      >
+        <MapTimeFilter onChange={handleTimeChange} />
+      </Paper>
 
       {/* Map — always rendered so Leaflet initialises correctly */}
       <MapContainer
