@@ -33,6 +33,7 @@ function DuplicatesSettingsContent() {
   const [similarityThreshold, setSimilarityThreshold] = useState(0.96);
   const [hashMaxDistance, setHashMaxDistance] = useState(6);
   const [knnCandidates, setKnnCandidates] = useState(20);
+  const [autoResolveThreshold, setAutoResolveThreshold] = useState(60);
   const [paramSaving, setParamSaving] = useState(false);
 
   // Backfill state
@@ -61,6 +62,7 @@ function DuplicatesSettingsContent() {
     setSimilarityThreshold(settings.dedup?.similarityThreshold ?? 0.96);
     setHashMaxDistance(settings.dedup?.hashMaxDistance ?? 6);
     setKnnCandidates(settings.dedup?.knnCandidates ?? 20);
+    setAutoResolveThreshold(settings.dedup?.autoResolveThreshold ?? 60);
   }, [settings]);
 
   const handleGlobalToggle = (checked: boolean) => {
@@ -78,6 +80,7 @@ function DuplicatesSettingsContent() {
         similarityThreshold,
         hashMaxDistance,
         knnCandidates,
+        autoResolveThreshold,
       },
     })
       .then(() => setSuccessMessage('Duplicate detection parameters saved'))
@@ -237,6 +240,25 @@ function DuplicatesSettingsContent() {
               />
               <Typography variant="caption" color="text.secondary">
                 Number of nearest-neighbor candidates fetched per item from the pgvector index (5–50).
+              </Typography>
+            </Box>
+
+            <Box>
+              <Typography gutterBottom>
+                Auto-resolve threshold: <strong>{autoResolveThreshold}</strong>
+              </Typography>
+              <Slider
+                value={autoResolveThreshold}
+                onChange={(_, value) => setAutoResolveThreshold(value as number)}
+                min={0}
+                max={100}
+                step={1}
+                valueLabelDisplay="auto"
+              />
+              <Typography variant="caption" color="text.secondary">
+                Score 0–100 (default 60). Drives the "Archive/Delete above N" buttons on the
+                Duplicates review page — pending groups at or above this match score keep only the
+                suggested best photo.
               </Typography>
             </Box>
           </Stack>

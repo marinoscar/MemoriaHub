@@ -28,6 +28,7 @@ function BurstsSettingsContent() {
   const [timeGapSeconds, setTimeGapSeconds] = useState('');
   const [hashDistance, setHashDistance] = useState('');
   const [minGroupSize, setMinGroupSize] = useState('');
+  const [autoResolveThreshold, setAutoResolveThreshold] = useState('');
   const [paramSaving, setParamSaving] = useState(false);
 
   // Backfill state
@@ -48,6 +49,7 @@ function BurstsSettingsContent() {
     setTimeGapSeconds(String(settings.burst?.timeGapSeconds ?? 10));
     setHashDistance(String(settings.burst?.hashDistance ?? 10));
     setMinGroupSize(String(settings.burst?.minGroupSize ?? 3));
+    setAutoResolveThreshold(String(settings.burst?.autoResolveThreshold ?? 60));
   }, [settings]);
 
   const handleGlobalToggle = (checked: boolean) => {
@@ -65,6 +67,7 @@ function BurstsSettingsContent() {
         timeGapSeconds: Number(timeGapSeconds),
         hashDistance: Number(hashDistance),
         minGroupSize: Number(minGroupSize),
+        autoResolveThreshold: Number(autoResolveThreshold),
       },
     })
       .then(() => setSuccessMessage('Burst detection parameters saved'))
@@ -188,6 +191,16 @@ function BurstsSettingsContent() {
               onChange={(e) => setMinGroupSize(e.target.value)}
               helperText="Minimum photos to surface in review queue. 2-20."
               slotProps={{ htmlInput: { min: 2, max: 20 } }}
+              sx={{ flex: 1 }}
+            />
+            <TextField
+              label="Auto-resolve threshold"
+              type="number"
+              size="small"
+              value={autoResolveThreshold}
+              onChange={(e) => setAutoResolveThreshold(e.target.value)}
+              helperText="Score 0–100 (default 60). Drives the 'resolve above N' buttons on the review page."
+              slotProps={{ htmlInput: { min: 0, max: 100 } }}
               sx={{ flex: 1 }}
             />
           </Stack>
