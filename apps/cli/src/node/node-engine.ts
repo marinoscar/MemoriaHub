@@ -16,9 +16,15 @@
  * Observability: getSnapshot() returns a point-in-time EngineSnapshot (active
  * jobs, last-50 history ring, counters, heartbeat age) consumed by `node
  * status` and the daemon IPC socket. setConcurrency() adjusts the cap live,
- * applying from the next claim batch.
+ * taking effect on the next loop iteration.
  *
- * Per-job flow (bounded by `concurrency` via runPool):
+ * Claim model: the loop is a continuous top-up pool, NOT a batch-drain barrier.
+ * It keeps up to `concurrency` jobs in flight at all times — each iteration
+ * claims only as many jobs as there are free slots and dispatches them without
+ * waiting for the batch to finish, so a fast job never idles a slot behind a
+ * slow one (e.g. a 2s face_detection behind a 40s video_face_detection).
+ *
+ * Per-job flow:
  *   download inputUrl → start lease-renew ticker → dispatcher.compute →
  *   submit result (or report failure) → cleanup temp file.
  *
@@ -39,7 +45,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { NodeTypedEmitter, NODE_EV } from './node-events.js';
-import { runPool } from '../sync/worker-pool.js';
 import { downloadToFile } from './download.js';
 import {
   ComputeDispatcher,
@@ -154,9 +159,11 @@ export class NodeEngine extends NodeTypedEmitter {
   private loopPromise: Promise<void> | null = null;
 
   /**
-   * Live-adjustable concurrency cap. Read at every loop iteration for both
-   * the claim size and the per-batch pool cap, so setConcurrency() takes
-   * effect from the NEXT claim batch (in-flight batches keep their cap).
+   * Live-adjustable concurrency cap. Re-read at every loop iteration to size
+   * the top-up: the loop claims only `cap - inFlight.size` jobs per pass, so
+   * setConcurrency() takes effect on the next iteration. Lowering it does not
+   * cancel already-running jobs — the pool just stops topping up until enough
+   * finish to fall back under the new cap.
    */
   private concurrencyCap: number;
   /** ISO timestamp of start() — the uptime anchor for snapshots. */
@@ -182,11 +189,18 @@ export class NodeEngine extends NodeTypedEmitter {
   }
 
   /**
-   * Adjust the concurrency cap of a running engine. Applies from the next
-   * claim batch — the current batch (if any) finishes under the old cap.
+   * Adjust the concurrency cap of a running engine. Takes effect on the next
+   * loop iteration — already-running jobs are never cancelled; the top-up pool
+   * simply claims up to the new cap from then on. The new value is also
+   * propagated to the server immediately via a best-effort heartbeat (rather
+   * than waiting for the next ~20s tick) so the claim endpoint stops capping
+   * at the stale registration value within ~1s.
    */
   setConcurrency(n: number): void {
     this.concurrencyCap = Math.max(1, Math.floor(n));
+    // beat() is try/catch-guarded and emits HEARTBEAT_FAIL on error, so this is
+    // safe even before the engine has started (heartbeatNode may reject).
+    void this.beat();
   }
 
   /**
@@ -269,41 +283,75 @@ export class NodeEngine extends NodeTypedEmitter {
   // Internals
   // -------------------------------------------------------------------------
 
+  /**
+   * Continuous top-up claim loop. Keeps up to `concurrencyCap` jobs in flight
+   * at all times: each pass claims only as many jobs as there are free slots
+   * and dispatches them immediately, never blocking on a whole batch to finish.
+   * This keeps fast jobs flowing past slow ones (the batch-drain barrier this
+   * replaced collapsed effective concurrency to ~1 on mixed workloads).
+   */
   private async loop(): Promise<void> {
-    while (!this.draining) {
-      // Read the mutable cap each iteration so setConcurrency() applies from
-      // the next claim batch.
-      const cap = this.concurrencyCap;
-      const maxClaim = this.opts.maxClaim ?? cap;
+    // Tracks the in-flight processJob() promises; each removes itself on finish.
+    const inFlight = new Set<Promise<void>>();
 
+    while (!this.draining) {
+      // Re-read the mutable cap each iteration so setConcurrency() applies live.
+      const cap = this.concurrencyCap;
+      const free = cap - inFlight.size;
+
+      if (free <= 0) {
+        // All slots busy — wait for any one to free, then re-evaluate.
+        await Promise.race(inFlight);
+        continue;
+      }
+
+      // Claim only up to the number of open slots so the server never
+      // over-delivers work this node has no slot to run.
       let claimed: ClaimedNodeJob[] = [];
       try {
         const res = await this.api.claimNodeJobs(this.nodeId, {
-          max: maxClaim,
+          max: free,
           types: this.opts.eligibleTypes,
         });
         claimed = res?.jobs ?? [];
       } catch (err) {
-        // Claim failure is transient — surface via heartbeat:fail and idle.
+        // Claim failure is transient — surface via heartbeat:fail.
         this.emit(NODE_EV.HEARTBEAT_FAIL, {
           error: `claim failed: ${err instanceof Error ? err.message : String(err)}`,
         });
         claimed = [];
       }
 
-      if (claimed.length === 0) {
-        this.emit(NODE_EV.IDLE, { pollIntervalMs: this.opts.pollIntervalMs });
-        await this.sleep(this.opts.pollIntervalMs);
+      if (claimed.length > 0) {
+        this.counters.claimed += claimed.length;
+        this.emit(NODE_EV.CLAIMED, { count: claimed.length });
+        for (const claim of claimed) {
+          const p = this.processJob(claim).finally(() => {
+            inFlight.delete(p);
+          });
+          inFlight.add(p);
+        }
+        // Loop immediately to fill any remaining free slots.
         continue;
       }
 
-      this.counters.claimed += claimed.length;
-      this.emit(NODE_EV.CLAIMED, { count: claimed.length });
+      // Claim returned empty.
+      if (inFlight.size > 0) {
+        // Jobs still running: do NOT emit IDLE (the IDLE contract requires an
+        // empty in-flight set). Wait for a slot to free OR a short poll delay
+        // (so a freed slot re-polls for newly-queued work), then re-evaluate.
+        await Promise.race([...inFlight, this.sleep(this.opts.pollIntervalMs)]);
+        continue;
+      }
 
-      await runPool(claimed, cap, async (claim) => {
-        await this.processJob(claim);
-      });
+      // Truly idle: no work and nothing in flight.
+      this.emit(NODE_EV.IDLE, { pollIntervalMs: this.opts.pollIntervalMs });
+      await this.sleep(this.opts.pollIntervalMs);
     }
+
+    // Drain: the loop exited because draining was set — finish in-flight jobs
+    // before returning so stop() (which awaits loopPromise) waits for them.
+    await Promise.allSettled([...inFlight]);
   }
 
   /** Append to the completed-job ring buffer, evicting the oldest past the cap. */
@@ -446,6 +494,7 @@ export class NodeEngine extends NodeTypedEmitter {
       await this.api.heartbeatNode(this.nodeId, {
         status: this.draining ? 'draining' : 'online',
         capabilities,
+        concurrency: this.concurrencyCap,
       });
       this.lastHeartbeatAt = new Date().toISOString();
       this.emit(NODE_EV.HEARTBEAT_OK, { at: this.lastHeartbeatAt });

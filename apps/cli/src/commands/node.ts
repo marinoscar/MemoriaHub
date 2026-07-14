@@ -568,7 +568,12 @@ function renderSnapshot(snap: EngineSnapshot): void {
   ui.line(`  Node ID       : ${snap.nodeId}`);
   ui.line(`  Uptime        : ${uptime}`);
   ui.line(`  State         : ${snap.draining ? chalk.yellow('draining') : chalk.green('online')}`);
-  ui.line(`  Concurrency   : ${snap.concurrency}`);
+  const inFlight = snap.activeJobs.length;
+  const idle = Math.max(0, snap.concurrency - inFlight);
+  ui.line(
+    `  Concurrency   : ${snap.concurrency} configured cap, ` +
+      `${inFlight} in-flight, ${idle} idle`,
+  );
   ui.line(`  Eligible types: ${snap.eligibleTypes.join(', ') || '(none)'}`);
   ui.line(`  Last heartbeat: ${hbAge}`);
   ui.line(
@@ -610,7 +615,32 @@ function statusCmd(): Command {
           client.send({ cmd: 'status' });
           const msg = await client.waitFor((m) => m.kind === 'status', 5000);
           client.close();
-          renderSnapshot(msg as unknown as EngineSnapshot);
+          const snap = msg as unknown as EngineSnapshot;
+          renderSnapshot(snap);
+          // Best-effort: surface the server's registered concurrency alongside
+          // the live configured cap so a stale-cap mismatch is visible. Never
+          // let a failed server call crash `node status`.
+          try {
+            const cfg = requireConfig();
+            if (cfg.nodeId) {
+              const api = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
+              const server = await api.get<{ concurrency?: number }>(
+                `/api/nodes/${encodeURIComponent(cfg.nodeId)}`,
+              );
+              const registered = server?.concurrency;
+              if (typeof registered === 'number') {
+                const hint =
+                  registered !== snap.concurrency
+                    ? chalk.yellow(' (stale — restart or wait for next heartbeat)')
+                    : '';
+                ui.line(`  Registered cap: ${registered}${hint}`);
+              } else {
+                ui.line(`  Registered cap: ${chalk.dim('(unavailable)')}`);
+              }
+            }
+          } catch {
+            ui.line(`  Registered cap: ${chalk.dim('(unavailable)')}`);
+          }
           return;
         } catch (err) {
           ui.warn(`Could not query running node over IPC: ${(err as Error).message}`);
