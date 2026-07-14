@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.5 |
+| **Version** | 1.7 |
 | **Last Updated** | July 2026 |
 | **Status** | Specification |
 
@@ -326,6 +326,7 @@ Burst detection parameters are stored in the `system_settings` JSONB column unde
 | `burst.timeGapSeconds` | integer | 1–300 | 10 | Maximum capture-time gap (seconds) between consecutive items from the same device for temporal proximity to apply |
 | `burst.hashDistance` | integer | 0–32 | 10 | Maximum Hamming distance (bits, out of 64) for two items to be considered visual near-duplicates |
 | `burst.minGroupSize` | integer | 2–20 | 3 | Minimum number of items required for a group to be surfaced in the review queue |
+| `burst.autoResolveThreshold` | integer | 0–100 | 60 | Default percentage pre-filled into the review queue's "Archive above N" / "Delete above N" buttons, which call `POST /api/media/bursts/bulk/resolve-by-threshold` (§7.2) |
 
 The upper bound of `hashDistance` is capped at 32 (half the 64-bit hash width) by the Zod schema. Values above 32 would cause false positives by matching images that are more different than similar.
 
@@ -478,6 +479,37 @@ Resolve multiple pending burst groups in a single call, always keeping each grou
 
 This endpoint powers the review queue's bulk "Resolve & Archive" / "Resolve & Delete" toolbar action, which appears once the reviewer multi-selects group cards (see §8.1).
 
+#### `POST /api/media/bursts/bulk/resolve-by-threshold`
+
+Resolve every **pending** burst group whose detection-time `confidence` (§3.5) meets or exceeds a caller-supplied score threshold, without requiring the reviewer to select groups individually. This is the endpoint behind the review queue's "Archive above N" / "Delete above N" buttons (see §8.1) — a manual, on-demand trigger fired by clicking a button, not an automatic background sweep. There is no cron; nothing resolves a group unless this endpoint (or the per-group/bulk-by-id endpoints above) is called.
+
+- **Auth:** `media:write` + per-circle `collaborator` role. `action: 'trash'` additionally requires `media:delete`, same as the other resolve endpoints.
+- **Request body:**
+  ```json
+  { "circleId": "uuid", "threshold": 75, "action": "archive" }
+  ```
+  `threshold` is an integer `0`–`100`, expressed as a percentage; it is compared against the persisted `BurstGroup.confidence` (a `[0, 1]` float) as `confidence >= threshold / 100`.
+- **Behavior:** loads pending groups for the circle, capped at 500 per call (`MAX_THRESHOLD_RESOLVE`), and resolves every group meeting the threshold using the same keep-`suggestedBestItemId`-archive/trash-the-rest semantics as `POST /api/media/bursts/bulk/resolve`, each in its own transaction.
+  - Groups with `confidence = null` — legacy groups created before the confidence column existed, or otherwise not yet scored — are **excluded** from threshold matching regardless of the threshold value; they are never auto-resolved by this endpoint and must be resolved individually via `POST /api/media/bursts/:id/resolve`.
+  - A group below the threshold, or lacking a `suggestedBestItemId`, is skipped (counted in `skipped`).
+  - A group that is eligible but fails during its own transaction is counted in `errors` and does not block the remaining groups.
+- **Response `200`:**
+  ```json
+  {
+    "data": {
+      "resolvedGroups": 9,
+      "keptCount": 9,
+      "removedCount": 41,
+      "action": "archive",
+      "skipped": 3,
+      "errors": 0
+    }
+  }
+  ```
+- **Response `400`:** `threshold` is out of range, or more than 500 pending groups exist in the circle (narrow the scope by resolving in batches, or use the by-id bulk endpoint above).
+
+`burst.autoResolveThreshold` (§6.1) is the system-setting default that pre-fills the "Archive above N" / "Delete above N" buttons' threshold value on the review queue page; it does not gate or auto-fire this endpoint on its own.
+
 ### 7.3 Global Backfill (Admin)
 
 #### `POST /api/admin/bursts/backfill`
@@ -548,7 +580,9 @@ This is the data source for the "Review Insights" page (`/review-insights`), a p
 
 ### 8.1 Review Queue Surface
 
-A "Review bursts" page (or tab within the existing review area) lists pending burst groups for the active circle, with a true total count and pagination rather than a single unbounded page. Each group is displayed as a visual stack of thumbnails — typically three to four frames overlapping — with a badge showing the total frame count and a confidence meter reflecting `BurstGroup.confidence` (§3.5). Group cards carry a multi-select checkbox; a bulk toolbar appears once one or more groups are selected, offering "Resolve & Archive" and "Resolve & Delete" (the latter, and any selection over 25 groups, prompts a confirmation before firing `POST /api/media/bursts/bulk/resolve`).
+A "Review bursts" page (or tab within the existing review area) lists pending burst groups for the active circle, with a true total count and pagination rather than a single unbounded page. Each group is displayed as a visual stack of thumbnails — typically three to four frames overlapping — with a badge showing the total frame count and a confidence meter reflecting `BurstGroup.confidence` (§3.5). Group cards carry a multi-select checkbox (enlarged for mobile touch targets); a bulk toolbar appears once one or more groups are selected, offering "Resolve & Archive" and "Resolve & Delete" (the latter, and any selection over 25 groups, prompts a confirmation before firing `POST /api/media/bursts/bulk/resolve`).
+
+Alongside the multi-select toolbar, the page offers "Archive above N" and "Delete above N" score-threshold buttons, pre-filled with `burst.autoResolveThreshold` (§6.1) and adjustable before firing, which call `POST /api/media/bursts/bulk/resolve-by-threshold` (§7.2) to resolve every qualifying pending group without requiring the reviewer to select cards individually. For Admins, the page header also carries a gear icon linking directly to `/admin/settings/bursts` (§8.3) to adjust detection parameters and the auto-resolve threshold.
 
 Opening a group shows a side-by-side or grid view of all members in capture order, each displaying:
 - The thumbnail at a generous size (to allow sharpness differences to be visible).
@@ -556,7 +590,7 @@ Opening a group shows a side-by-side or grid view of all members in capture orde
 - A "Best pick" highlight on the `suggestedBestItemId` member.
 - Capture timestamp and resolution.
 
-The reviewer selects which frames to keep (checkboxes, with the suggested best pre-selected) and picks an archive-vs-trash toggle for the removed frames. A single "Keep selected" action fires `POST /api/media/bursts/:id/resolve` with the chosen `action`. A "Dismiss — not a burst" action fires `POST /api/media/bursts/:id/dismiss`.
+The reviewer selects which frames to keep (checkboxes, with the suggested best pre-selected). Rather than an archive-vs-trash toggle, the detail page presents two distinctly-colored actions — "Archive" and "Delete" — either of which fires `POST /api/media/bursts/:id/resolve` with the corresponding `action`. A "Dismiss — not a burst" action fires `POST /api/media/bursts/:id/dismiss`.
 
 ### 8.2 Dashboard Integration
 
@@ -564,7 +598,7 @@ The circle dashboard's existing review queue section gains a "Burst groups" entr
 
 ### 8.3 Global Feature Toggle and Scan Panel
 
-The Admin Settings page at `/admin/settings/bursts` provides a "Burst detection" toggle that writes `features.burstDetection` to system settings. The per-circle toggle cards that previously appeared on the circle detail page have been removed.
+The Admin Settings page at `/admin/settings/bursts` provides a "Burst detection" toggle that writes `features.burstDetection` to system settings, along with the `burst.autoResolveThreshold` control that seeds the review queue's "Archive above N" / "Delete above N" buttons (§8.1). The per-circle toggle cards that previously appeared on the circle detail page have been removed.
 
 A "Scan for bursts" panel is visible on the Admin Settings page when burst detection is globally enabled. It exposes:
 
@@ -666,3 +700,4 @@ The following extensions are left for future iterations. None of them require ch
 | 1.4 | July 2026 | AI Assistant | Document burst-wins duplicate-group eviction: `BurstDetectionService.processMediaItem` now evicts its group's members from any duplicate group after grouping (Step 6a); `POST /api/admin/bursts/backfill` gained a post-step remediation and `evictedDuplicateOverlaps` response field; see [duplicate-detection.md §3.2](duplicate-detection.md#32-burst-overlap-exclusion-rules) for full detail |
 | 1.5 | July 2026 | AI Assistant | `POST /api/media/bursts/:id/resolve` gained an `action: 'archive'\|'trash'` option (replacing unconditional soft-delete) and now writes a `burst_group:resolved` audit event; added `POST /api/media/bursts/bulk/resolve` for bulk keep-suggested-best resolution; added the detection-time `confidence` visual-cohesion score (§3.5) and its `resolutionAction`/`keptCount`/`removedCount`/`confidence` columns on `burst_groups` (migration `20260713120000_add_burst_dup_resolution_tracking`); added `GET /api/media/review-insights` (§7.5); documented the review-queue's multi-select bulk toolbar, confidence meter, and pagination (§8.1) |
 | 1.6 | July 2026 | AI Assistant | Lowered `burst_detection`'s upload-time enqueue priority from 10 to 5 (§5.4, Step 6a) so it is claimed before `duplicate_detection` (priority 10, unchanged) in the common case; documented the dedup-side write-time `SELECT ... FOR UPDATE` re-check that closes the residual TOCTOU race the reactive eviction alone didn't fully close — see [duplicate-detection.md §3.2](duplicate-detection.md#32-burst-overlap-exclusion-rules) for the full mechanism |
+| 1.7 | July 2026 | AI Assistant | Added `POST /api/media/bursts/bulk/resolve-by-threshold` (§7.2) and the `burst.autoResolveThreshold` system setting (§6.1) powering the review queue's "Archive above N" / "Delete above N" buttons; null-confidence legacy groups are never auto-resolved by the threshold path; documented the review queue's admin-only settings gear icon and the group detail page's Archive/Delete button pair replacing the archive-vs-trash toggle (§8.1, §8.3) |
