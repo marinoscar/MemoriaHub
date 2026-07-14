@@ -28,6 +28,7 @@ import {
   MonitorHeart as MonitorHeartIcon,
   Movie as MovieIcon,
   Hub as HubIcon,
+  Email as EmailIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 
@@ -77,6 +78,13 @@ export default function SettingsHubPage() {
           description: 'Manage the Trash retention period and review how archiving and deletion work.',
           icon: <ArchiveIcon sx={{ fontSize: 40 }} color="primary" />,
           path: '/admin/settings/archiving',
+          permission: 'system_settings:read',
+        },
+        {
+          title: 'Email',
+          description: 'Configure the outbound email provider (AWS SES or SMTP) and test delivery.',
+          icon: <EmailIcon sx={{ fontSize: 40 }} color="primary" />,
+          path: '/admin/settings/email',
           permission: 'system_settings:read',
         },
       ],
