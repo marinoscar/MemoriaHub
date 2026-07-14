@@ -17,6 +17,10 @@
  *     PUT URL
  *  6. getNode — owner-scoped single-node detail; shares deriveNodeHealth /
  *     getJobCountsForNodes with listNodes; 404/403 mirror assertJobHeldByNode
+ *  7. heartbeat — persists `concurrency` onto the WorkerNode row when the node
+ *     reports it (issue #105 concurrency-sync fix); leaves it untouched when
+ *     omitted; ownership still enforced; claim() reads the persisted value
+ *     fresh on its next call (simulated round-trip — no test DB available)
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -359,6 +363,98 @@ describe('NodesService — result/failure ingestion', () => {
         service.reportJobFailure(USER_ID, NODE_ID, JOB_ID, { error: 'late report' }),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(mockTerminal.completeFailed).not.toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // heartbeat — concurrency persistence (issue #105 fix)
+  //
+  // The claim endpoint bounds every claim at `node.concurrency`
+  // (`Math.min(max ?? node.concurrency, node.concurrency)`, see the `claim`
+  // block below), which used to be written once at registration and never
+  // updated — so a runtime `set-concurrency` (CLI) left the server capping
+  // claims at the stale value forever. The fix has the CLI report its live
+  // concurrency cap on every heartbeat; this persists it the same way
+  // status/capabilities are already conditionally persisted.
+  // =========================================================================
+
+  describe('heartbeat', () => {
+    it('persists concurrency onto the WorkerNode row when the node reports it', async () => {
+      const res = await service.heartbeat(USER_ID, NODE_ID, { concurrency: 8 });
+
+      expect(res).toEqual({ ok: true });
+      expect(mockPrisma.workerNode.update).toHaveBeenCalledWith({
+        where: { id: NODE_ID },
+        data: expect.objectContaining({ concurrency: 8 }),
+      });
+    });
+
+    it('leaves concurrency untouched when the heartbeat omits it', async () => {
+      await service.heartbeat(USER_ID, NODE_ID, {});
+
+      const call = (mockPrisma.workerNode.update as jest.Mock).mock.calls[0][0];
+      expect(call.data).not.toHaveProperty('concurrency');
+    });
+
+    it('persists concurrency alongside status and capabilities when all three are reported', async () => {
+      await service.heartbeat(USER_ID, NODE_ID, {
+        status: 'draining' as never,
+        capabilities: { ffmpeg: true },
+        concurrency: 12,
+      });
+
+      expect(mockPrisma.workerNode.update).toHaveBeenCalledWith({
+        where: { id: NODE_ID },
+        data: expect.objectContaining({
+          status: 'draining',
+          capabilities: { ffmpeg: true },
+          concurrency: 12,
+        }),
+      });
+    });
+
+    it('rejects with ForbiddenException when the node belongs to another user (ownership still enforced)', async () => {
+      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(
+        makeNode({ createdById: 'someone-else' }),
+      );
+
+      await expect(
+        service.heartbeat(USER_ID, NODE_ID, { concurrency: 5 }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockPrisma.workerNode.update).not.toHaveBeenCalled();
+    });
+
+    // NOTE ON THE CLAIM-BOUND SIDE EFFECT: proving that a *subsequent live
+    // claim* is bounded by the newly-persisted value end-to-end would require
+    // a real database round-trip (assertOwnership re-reads the row via
+    // `workerNode.findUnique`, which this unit test stubs rather than backs
+    // with Postgres) — no test DB is available in this offline environment
+    // (see the repo's "Local DB & migrations" note). The next test simulates
+    // the wiring instead: it persists a new concurrency via heartbeat, then
+    // points the findUnique stub at a row reflecting that persisted value (as
+    // a real DB read would after the update commits) and asserts `claim()`
+    // reads `node.concurrency` fresh and bounds the claim limit to it.
+    it('claim() bounds its limit to a concurrency value newly persisted by heartbeat (simulated DB round-trip)', async () => {
+      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValueOnce(
+        makeNode({ concurrency: 2 }),
+      );
+      await service.heartbeat(USER_ID, NODE_ID, { concurrency: 10 });
+      expect(mockPrisma.workerNode.update).toHaveBeenCalledWith({
+        where: { id: NODE_ID },
+        data: expect.objectContaining({ concurrency: 10 }),
+      });
+
+      // Simulate the row now reflecting the persisted value on the next read.
+      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(
+        makeNode({ concurrency: 10 }),
+      );
+      mockClaimService.claim.mockResolvedValue([]);
+
+      await service.claim(USER_ID, NODE_ID, 999, ['duplicate_detection']);
+
+      expect(mockClaimService.claim).toHaveBeenCalledWith(
+        expect.objectContaining({ limit: 10 }),
+      );
     });
   });
 
