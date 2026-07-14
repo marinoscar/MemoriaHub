@@ -131,6 +131,7 @@ describe('SystemSettingsService', () => {
         socialMedia: DEFAULT_SYSTEM_SETTINGS.socialMedia,
         geo: DEFAULT_SYSTEM_SETTINGS.geo,
         jobs: DEFAULT_SYSTEM_SETTINGS.jobs,
+        email: DEFAULT_SYSTEM_SETTINGS.email,
       };
 
       mockPrisma.systemSettings.upsert.mockResolvedValue({
@@ -227,6 +228,7 @@ describe('SystemSettingsService', () => {
         socialMedia: DEFAULT_SYSTEM_SETTINGS.socialMedia,
         geo: DEFAULT_SYSTEM_SETTINGS.geo,
         jobs: DEFAULT_SYSTEM_SETTINGS.jobs,
+        email: DEFAULT_SYSTEM_SETTINGS.email,
       };
 
       mockPrisma.systemSettings.upsert.mockResolvedValue({
