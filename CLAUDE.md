@@ -1062,6 +1062,7 @@ See also: [Worker Node Setup & Troubleshooting](docs/worker-node-setup.md) — a
 
 Post-implementation audit records live under `docs/audits/`:
 - [Search Overhaul](docs/audits/search-audit.md) — root causes and fixes for filter-collision bugs, missing thumbnail signing, geocode data gaps, and person-name search; documents the `near` map-radius filter and `facets/locations` endpoint added in this sprint
+- [Mobile Top Bar](docs/audits/mobile-topbar-audit.md) — root cause and fix for GitHub issue #95 (collapsed phone search button missing `flexGrow: 1`, leaving the AppBar's icons packed to the left with unused space on the right)
 
 ## Specialized Subagents (MANDATORY)
 
