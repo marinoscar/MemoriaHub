@@ -26,6 +26,14 @@ vi.mock('../../hooks/useCircle', () => ({
   useCircle: vi.fn(),
 }));
 
+vi.mock('../../hooks/usePermissions', () => ({
+  usePermissions: vi.fn(),
+}));
+
+vi.mock('../../hooks/useSystemSettings', () => ({
+  useSystemSettings: vi.fn(),
+}));
+
 vi.mock('../../hooks/useDuplicates', () => ({
   useDuplicateGroups: vi.fn(),
 }));
@@ -46,10 +54,14 @@ vi.mock('react-router-dom', async () => {
 
 import DuplicatesPage from '../../pages/Duplicates/DuplicatesPage';
 import { useCircle } from '../../hooks/useCircle';
+import { usePermissions } from '../../hooks/usePermissions';
+import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { useDuplicateGroups } from '../../hooks/useDuplicates';
 import type { DuplicateGroupSummary } from '../../services/duplicates';
 
 const mockUseCircle = vi.mocked(useCircle);
+const mockUsePermissions = vi.mocked(usePermissions);
+const mockUseSystemSettings = vi.mocked(useSystemSettings);
 const mockUseDuplicateGroups = vi.mocked(useDuplicateGroups);
 
 // ---------------------------------------------------------------------------
@@ -92,7 +104,60 @@ function makeDuplicateGroupsHook(
     isLoading: false,
     error: null,
     fetchGroups: vi.fn().mockResolvedValue(undefined),
+    bulkResolve: vi.fn().mockResolvedValue({
+      resolvedGroups: 1,
+      keptCount: 1,
+      removedCount: 2,
+      action: 'archive',
+      skipped: 0,
+      errors: 0,
+    }),
+    bulkResolveByThreshold: vi.fn().mockResolvedValue({
+      resolvedGroups: 1,
+      keptCount: 1,
+      removedCount: 2,
+      action: 'archive',
+      skipped: 0,
+      errors: 0,
+    }),
     ...overrides,
+  };
+}
+
+function makePermissions(isAdmin = false, canTrash = true) {
+  return {
+    permissions: new Set<string>(['media:read', 'media:write', ...(canTrash ? ['media:delete'] : [])]),
+    roles: new Set<string>(isAdmin ? ['admin'] : ['viewer']),
+    hasPermission: vi.fn((perm: string) => (perm === 'media:delete' ? canTrash : true)),
+    hasAnyPermission: vi.fn().mockReturnValue(true),
+    hasAllPermissions: vi.fn().mockReturnValue(true),
+    hasRole: vi.fn().mockReturnValue(isAdmin),
+    hasAnyRole: vi.fn().mockReturnValue(isAdmin),
+    isAdmin,
+  } as unknown as ReturnType<typeof usePermissions>;
+}
+
+function makeSystemSettingsHook(autoResolveThreshold = 60): ReturnType<typeof useSystemSettings> {
+  return {
+    settings: {
+      ui: { allowUserThemeOverride: true },
+      features: {},
+      dedup: {
+        similarityThreshold: 0.96,
+        hashMaxDistance: 6,
+        knnCandidates: 20,
+        autoResolveThreshold,
+      },
+      updatedAt: new Date().toISOString(),
+      updatedBy: null,
+      version: 1,
+    } as any,
+    isLoading: false,
+    isSaving: false,
+    error: null,
+    updateSettings: vi.fn().mockResolvedValue(undefined),
+    replaceSettings: vi.fn().mockResolvedValue(undefined),
+    refresh: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -119,6 +184,8 @@ describe('DuplicatesPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseCircle.mockReturnValue(makeCircleContext());
+    mockUsePermissions.mockReturnValue(makePermissions(false));
+    mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook());
     mockUseDuplicateGroups.mockReturnValue(makeDuplicateGroupsHook());
   });
 
@@ -322,6 +389,153 @@ describe('DuplicatesPage', () => {
       const cards = screen.getAllByText(/2 photos/i).map((el) => el.closest('.MuiCard-root'));
       expect(cards[0]).not.toBeNull();
       expect(cards[1]).not.toBeNull();
+    });
+  });
+
+  describe('selection checkbox (regression: SelectionCheckboxOverlay refactor)', () => {
+    it('the selection checkbox is findable by its accessible name', async () => {
+      mockUseDuplicateGroups.mockReturnValue(
+        makeDuplicateGroupsHook({ items: [makeSummary('g-1')] }),
+      );
+
+      render(<DuplicatesPage />);
+
+      expect(
+        await screen.findByRole('checkbox', { name: 'Select duplicate group' }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe('admin settings gear icon', () => {
+    it('renders the gear icon linking to /admin/settings/duplicates for an admin', async () => {
+      mockUsePermissions.mockReturnValue(makePermissions(true));
+      mockUseDuplicateGroups.mockReturnValue(makeDuplicateGroupsHook({ items: [makeSummary('g-1')] }));
+
+      render(<DuplicatesPage />);
+
+      const gear = await screen.findByRole('link', { name: /duplicate detection settings/i });
+      expect(gear).toBeInTheDocument();
+      expect(gear).toHaveAttribute('href', '/admin/settings/duplicates');
+    });
+
+    it('does not render the gear icon for a non-admin', async () => {
+      mockUsePermissions.mockReturnValue(makePermissions(false));
+      mockUseDuplicateGroups.mockReturnValue(makeDuplicateGroupsHook({ items: [makeSummary('g-1')] }));
+
+      render(<DuplicatesPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/review duplicates/i)).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('link', { name: /duplicate detection settings/i })).toBeNull();
+    });
+  });
+
+  describe('resolve-above-threshold actions', () => {
+    it('renders "Archive above N" using the threshold from system settings', async () => {
+      mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(80));
+      mockUseDuplicateGroups.mockReturnValue(makeDuplicateGroupsHook({ items: [makeSummary('g-1')] }));
+
+      render(<DuplicatesPage />);
+
+      expect(await screen.findByRole('button', { name: 'Archive above 80' })).toBeInTheDocument();
+    });
+
+    it('falls back to a threshold of 60 when system settings has no dedup.autoResolveThreshold', async () => {
+      mockUseSystemSettings.mockReturnValue({
+        settings: { ui: { allowUserThemeOverride: true }, features: {} } as any,
+        isLoading: false,
+        isSaving: false,
+        error: null,
+        updateSettings: vi.fn(),
+        replaceSettings: vi.fn(),
+        refresh: vi.fn(),
+      });
+      mockUseDuplicateGroups.mockReturnValue(makeDuplicateGroupsHook({ items: [makeSummary('g-1')] }));
+
+      render(<DuplicatesPage />);
+
+      expect(await screen.findByRole('button', { name: 'Archive above 60' })).toBeInTheDocument();
+    });
+
+    it('does not render the "Delete above N" button when the caller lacks media:delete', async () => {
+      mockUsePermissions.mockReturnValue(makePermissions(false, false));
+      mockUseDuplicateGroups.mockReturnValue(makeDuplicateGroupsHook({ items: [makeSummary('g-1')] }));
+
+      render(<DuplicatesPage />);
+
+      expect(await screen.findByRole('button', { name: /archive above/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /delete above/i })).toBeNull();
+    });
+
+    it('renders the "Delete above N" button when the caller has media:delete', async () => {
+      mockUseDuplicateGroups.mockReturnValue(makeDuplicateGroupsHook({ items: [makeSummary('g-1')] }));
+
+      render(<DuplicatesPage />);
+
+      expect(await screen.findByRole('button', { name: 'Delete above 60' })).toBeInTheDocument();
+    });
+
+    it('clicking "Archive above N" opens a confirm dialog and calls bulkResolveByThreshold(threshold, "archive") on confirm', async () => {
+      const user = userEvent.setup();
+      const bulkResolveByThreshold = vi.fn().mockResolvedValue({
+        resolvedGroups: 3,
+        keptCount: 3,
+        removedCount: 5,
+        action: 'archive',
+        skipped: 0,
+        errors: 0,
+      });
+      mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(60));
+      mockUseDuplicateGroups.mockReturnValue(
+        makeDuplicateGroupsHook({ items: [makeSummary('g-1')], bulkResolveByThreshold }),
+      );
+
+      render(<DuplicatesPage />);
+
+      await user.click(await screen.findByRole('button', { name: 'Archive above 60' }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+      });
+      expect(bulkResolveByThreshold).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole('button', { name: /^archive$/i }));
+
+      await waitFor(() => {
+        expect(bulkResolveByThreshold).toHaveBeenCalledWith(60, 'archive');
+      });
+    });
+
+    it('clicking "Delete above N" opens a confirm dialog and calls bulkResolveByThreshold(threshold, "trash") on confirm', async () => {
+      const user = userEvent.setup();
+      const bulkResolveByThreshold = vi.fn().mockResolvedValue({
+        resolvedGroups: 2,
+        keptCount: 2,
+        removedCount: 4,
+        action: 'trash',
+        skipped: 0,
+        errors: 0,
+      });
+      mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(60));
+      mockUseDuplicateGroups.mockReturnValue(
+        makeDuplicateGroupsHook({ items: [makeSummary('g-1')], bulkResolveByThreshold }),
+      );
+
+      render(<DuplicatesPage />);
+
+      await user.click(await screen.findByRole('button', { name: 'Delete above 60' }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+      });
+      expect(bulkResolveByThreshold).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole('button', { name: /move to trash/i }));
+
+      await waitFor(() => {
+        expect(bulkResolveByThreshold).toHaveBeenCalledWith(60, 'trash');
+      });
     });
   });
 });

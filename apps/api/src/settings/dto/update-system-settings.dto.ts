@@ -113,6 +113,7 @@ export const patchSystemSettingsSchema = z.object({
       timeGapSeconds: z.number().int().min(1).max(300).optional(),
       hashDistance: z.number().int().min(0).max(32).optional(),
       minGroupSize: z.number().int().min(2).max(20).optional(),
+      autoResolveThreshold: z.number().int().min(0).max(100).optional(),
     })
     .optional(),
   dedup: z
@@ -120,6 +121,7 @@ export const patchSystemSettingsSchema = z.object({
       similarityThreshold: z.number().min(0.8).max(0.995).optional(),
       hashMaxDistance: z.number().int().min(0).max(16).optional(),
       knnCandidates: z.number().int().min(5).max(50).optional(),
+      autoResolveThreshold: z.number().int().min(0).max(100).optional(),
     })
     .optional(),
   locationInference: z

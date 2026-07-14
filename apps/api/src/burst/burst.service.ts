@@ -21,6 +21,10 @@ import { DuplicateDetectionService } from '../dedup/duplicate-detection.service'
 import { BurstQueryDto } from './dto/burst-query.dto';
 import { ResolveBurstDto } from './dto/resolve-burst.dto';
 import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';
+import { BulkResolveBurstThresholdDto } from './dto/bulk-resolve-burst-threshold.dto';
+
+/** Hard cap on the number of groups a single threshold-based bulk resolve touches. */
+const MAX_THRESHOLD_RESOLVE = 500;
 
 @Injectable()
 export class BurstService {
@@ -431,6 +435,97 @@ export class BurstService {
       } catch (err) {
         this.logger.warn(
           `Failed to resolve burst group ${group.id} in bulk operation: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        errors++;
+      }
+    }
+
+    return {
+      data: {
+        resolvedGroups,
+        keptCount,
+        removedCount,
+        action: dto.action,
+        skipped,
+        errors,
+      },
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bulk resolve burst groups by confidence threshold
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Bulk-resolve every pending burst group in a circle whose persisted
+   * `confidence` (0–1) is at/above `threshold / 100`. For each eligible group,
+   * keeps its suggested-best item and applies the chosen action to the rest.
+   *
+   * Confidence is a persisted Float? column, so the eligibility filter runs in
+   * SQL. The `gte` naturally excludes null-confidence legacy groups — intended.
+   * Bounded to MAX_THRESHOLD_RESOLVE groups per call.
+   */
+  async bulkResolveBurstGroupsByThreshold(
+    dto: BulkResolveBurstThresholdDto,
+    userId: string,
+    perms: string[],
+  ) {
+    await this.membership.assertCircleAccess(userId, dto.circleId, perms, CircleRole.collaborator);
+
+    if (dto.action === 'trash' && !perms.includes(PERMISSIONS.MEDIA_DELETE)) {
+      throw new BadRequestException('media:delete permission is required to trash burst items');
+    }
+
+    const groups = await this.prisma.burstGroup.findMany({
+      where: {
+        circleId: dto.circleId,
+        status: BurstGroupStatus.pending,
+        confidence: { gte: dto.threshold / 100 },
+      },
+      take: MAX_THRESHOLD_RESOLVE,
+      select: {
+        id: true,
+        circleId: true,
+        status: true,
+        suggestedBestItemId: true,
+        items: {
+          where: { deletedAt: null },
+          select: { id: true },
+        },
+      },
+    });
+
+    let skipped = 0;
+    let errors = 0;
+    let resolvedGroups = 0;
+    let keptCount = 0;
+    let removedCount = 0;
+
+    for (const group of groups) {
+      const liveMemberIds = group.items.map((i) => i.id);
+
+      // A group is skipped when it is not pending, has no suggested-best item,
+      // or its suggested-best item is no longer a live member.
+      if (
+        group.status !== BurstGroupStatus.pending ||
+        !group.suggestedBestItemId ||
+        !liveMemberIds.includes(group.suggestedBestItemId)
+      ) {
+        skipped++;
+        continue;
+      }
+
+      const keepIds = [group.suggestedBestItemId];
+      const removeIds = liveMemberIds.filter((id) => id !== group.suggestedBestItemId);
+
+      try {
+        await this.resolveOneBurstGroup(group, keepIds, removeIds, dto.action, userId);
+        resolvedGroups++;
+        keptCount += keepIds.length;
+        removedCount += removeIds.length;
+      } catch (err) {
+        this.logger.warn(
+          `Failed to resolve burst group ${group.id} in threshold bulk operation: ${err instanceof Error ? err.message : String(err)}`,
         );
         errors++;
       }

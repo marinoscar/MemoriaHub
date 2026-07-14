@@ -11,14 +11,20 @@
  *   - Bulk-resolve toolbar: selecting groups surfaces the toolbar, "Resolve &
  *     Archive" calls bulkResolve(ids, 'archive') directly, "Resolve & Delete"
  *     confirms before calling bulkResolve(ids, 'trash')
+ *   - Admin-only settings gear icon (links to /admin/settings/bursts)
+ *   - "Archive above N" / "Delete above N" threshold buttons: N comes from
+ *     useSystemSettings' burst.autoResolveThreshold (default 60 when unset),
+ *     Delete is hidden without media:delete, clicking opens a confirm dialog
+ *     that calls bulkResolveByThreshold(threshold, action)
  *
  *  BurstGroupPage:
  *   - Shows loading spinner while fetching
  *   - Renders error state when fetch fails
  *   - Renders all group members
  *   - Pre-selects the suggested best member
- *   - Default action is "archive"; the archive/trash ToggleButtonGroup drives
- *     which action resolve() is called with
+ *   - Default action is "archive"; two standing buttons (Archive, Delete) each
+ *     open the confirm dialog directly with their own action — there is no
+ *     toggle to switch between them. Delete is gated by media:delete.
  *   - "Not a burst — dismiss" button calls dismiss
  *
  * Note: The "Scan for bursts" per-circle backfill button was removed in the
@@ -41,6 +47,10 @@ vi.mock('../../hooks/usePermissions', () => ({
 
 vi.mock('../../hooks/useCircle', () => ({
   useCircle: vi.fn(),
+}));
+
+vi.mock('../../hooks/useSystemSettings', () => ({
+  useSystemSettings: vi.fn(),
 }));
 
 vi.mock('../../hooks/useBursts', () => ({
@@ -74,11 +84,13 @@ import BurstsPage from '../../pages/Bursts/BurstsPage';
 import BurstGroupPage from '../../pages/Bursts/BurstGroupPage';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useCircle } from '../../hooks/useCircle';
+import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { useBurstGroups, useBurstGroupDetail } from '../../hooks/useBursts';
 import type { BurstGroupSummary, BurstGroupDetail } from '../../services/bursts';
 
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseCircle = vi.mocked(useCircle);
+const mockUseSystemSettings = vi.mocked(useSystemSettings);
 const mockUseBurstGroups = vi.mocked(useBurstGroups);
 const mockUseBurstGroupDetail = vi.mocked(useBurstGroupDetail);
 
@@ -141,7 +153,41 @@ function makeBurstGroupsHook(overrides: Partial<ReturnType<typeof useBurstGroups
       skipped: 0,
       errors: [],
     }),
+    bulkResolveByThreshold: vi.fn().mockResolvedValue({
+      resolvedGroups: 1,
+      keptCount: 1,
+      removedCount: 2,
+      action: 'archive',
+      skipped: 0,
+      errors: [],
+    }),
     ...overrides,
+  };
+}
+
+function makeSystemSettingsHook(
+  autoResolveThreshold = 60,
+): ReturnType<typeof useSystemSettings> {
+  return {
+    settings: {
+      ui: { allowUserThemeOverride: true },
+      features: {},
+      burst: {
+        timeGapSeconds: 10,
+        hashDistance: 10,
+        minGroupSize: 3,
+        autoResolveThreshold,
+      },
+      updatedAt: new Date().toISOString(),
+      updatedBy: null,
+      version: 1,
+    } as any,
+    isLoading: false,
+    isSaving: false,
+    error: null,
+    updateSettings: vi.fn().mockResolvedValue(undefined),
+    replaceSettings: vi.fn().mockResolvedValue(undefined),
+    refresh: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -215,6 +261,7 @@ describe('BurstsPage', () => {
     vi.clearAllMocks();
     mockUsePermissions.mockReturnValue(makePermissions(false));
     mockUseCircle.mockReturnValue(makeCircleContext());
+    mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook());
     mockUseBurstGroups.mockReturnValue(makeBurstGroupsHook());
   });
 
@@ -345,8 +392,11 @@ describe('BurstsPage', () => {
   describe('bulk-resolve toolbar', () => {
     it('shows the toolbar with a selection count once a group is selected', async () => {
       const user = userEvent.setup();
+      // A single item so the "Select burst group" accessible name is
+      // unambiguous (regression check for the SelectionCheckboxOverlay
+      // refactor — the checkbox must still be findable by accessible name).
       mockUseBurstGroups.mockReturnValue(
-        makeBurstGroupsHook({ items: [makeSummary('g-1'), makeSummary('g-2')] }),
+        makeBurstGroupsHook({ items: [makeSummary('g-1')] }),
       );
 
       render(<BurstsPage />);
@@ -438,6 +488,165 @@ describe('BurstsPage', () => {
       expect(screen.getByRole('button', { name: /resolve.*archive/i })).toBeInTheDocument();
     });
   });
+
+  describe('admin settings gear icon', () => {
+    it('renders the gear icon linking to /admin/settings/bursts for an admin', async () => {
+      mockUsePermissions.mockReturnValue(makePermissions(true));
+      mockUseBurstGroups.mockReturnValue(makeBurstGroupsHook({ items: [makeSummary('g-1')] }));
+
+      render(<BurstsPage />);
+
+      const gear = await screen.findByRole('link', { name: /burst detection settings/i });
+      expect(gear).toBeInTheDocument();
+      expect(gear).toHaveAttribute('href', '/admin/settings/bursts');
+    });
+
+    it('does not render the gear icon for a non-admin', async () => {
+      mockUsePermissions.mockReturnValue(makePermissions(false));
+      mockUseBurstGroups.mockReturnValue(makeBurstGroupsHook({ items: [makeSummary('g-1')] }));
+
+      render(<BurstsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/review bursts/i)).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('link', { name: /burst detection settings/i })).toBeNull();
+    });
+  });
+
+  describe('resolve-above-threshold actions', () => {
+    it('renders "Archive above N" using the threshold from system settings', async () => {
+      mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(75));
+      mockUseBurstGroups.mockReturnValue(makeBurstGroupsHook({ items: [makeSummary('g-1')] }));
+
+      render(<BurstsPage />);
+
+      expect(await screen.findByRole('button', { name: 'Archive above 75' })).toBeInTheDocument();
+    });
+
+    it('falls back to a threshold of 60 when system settings has no burst.autoResolveThreshold', async () => {
+      mockUseSystemSettings.mockReturnValue({
+        settings: { ui: { allowUserThemeOverride: true }, features: {} } as any,
+        isLoading: false,
+        isSaving: false,
+        error: null,
+        updateSettings: vi.fn(),
+        replaceSettings: vi.fn(),
+        refresh: vi.fn(),
+      });
+      mockUseBurstGroups.mockReturnValue(makeBurstGroupsHook({ items: [makeSummary('g-1')] }));
+
+      render(<BurstsPage />);
+
+      expect(await screen.findByRole('button', { name: 'Archive above 60' })).toBeInTheDocument();
+    });
+
+    it('does not render the "Delete above N" button when the caller lacks media:delete', async () => {
+      const perms = makePermissions(false, 'collaborator');
+      perms.hasPermission = vi.fn().mockReturnValue(false);
+      mockUsePermissions.mockReturnValue(perms);
+      mockUseBurstGroups.mockReturnValue(makeBurstGroupsHook({ items: [makeSummary('g-1')] }));
+
+      render(<BurstsPage />);
+
+      expect(await screen.findByRole('button', { name: /archive above/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /delete above/i })).toBeNull();
+    });
+
+    it('renders the "Delete above N" button when the caller has media:delete', async () => {
+      mockUseBurstGroups.mockReturnValue(makeBurstGroupsHook({ items: [makeSummary('g-1')] }));
+
+      render(<BurstsPage />);
+
+      expect(await screen.findByRole('button', { name: 'Delete above 60' })).toBeInTheDocument();
+    });
+
+    it('clicking "Archive above N" opens a confirm dialog and calls bulkResolveByThreshold(threshold, "archive") on confirm', async () => {
+      const user = userEvent.setup();
+      const bulkResolveByThreshold = vi.fn().mockResolvedValue({
+        resolvedGroups: 3,
+        keptCount: 3,
+        removedCount: 5,
+        action: 'archive',
+        skipped: 0,
+        errors: 0,
+      });
+      mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(60));
+      mockUseBurstGroups.mockReturnValue(
+        makeBurstGroupsHook({ items: [makeSummary('g-1')], bulkResolveByThreshold }),
+      );
+
+      render(<BurstsPage />);
+
+      await user.click(await screen.findByRole('button', { name: 'Archive above 60' }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+      });
+      expect(bulkResolveByThreshold).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole('button', { name: /^archive$/i }));
+
+      await waitFor(() => {
+        expect(bulkResolveByThreshold).toHaveBeenCalledWith(60, 'archive');
+      });
+    });
+
+    it('clicking "Delete above N" opens a confirm dialog and calls bulkResolveByThreshold(threshold, "trash") on confirm', async () => {
+      const user = userEvent.setup();
+      const bulkResolveByThreshold = vi.fn().mockResolvedValue({
+        resolvedGroups: 2,
+        keptCount: 2,
+        removedCount: 4,
+        action: 'trash',
+        skipped: 0,
+        errors: 0,
+      });
+      mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(60));
+      mockUseBurstGroups.mockReturnValue(
+        makeBurstGroupsHook({ items: [makeSummary('g-1')], bulkResolveByThreshold }),
+      );
+
+      render(<BurstsPage />);
+
+      await user.click(await screen.findByRole('button', { name: 'Delete above 60' }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+      });
+      expect(bulkResolveByThreshold).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole('button', { name: /move to trash/i }));
+
+      await waitFor(() => {
+        expect(bulkResolveByThreshold).toHaveBeenCalledWith(60, 'trash');
+      });
+    });
+
+    it('shows a success message including the skipped count after a threshold resolve', async () => {
+      const user = userEvent.setup();
+      const bulkResolveByThreshold = vi.fn().mockResolvedValue({
+        resolvedGroups: 2,
+        keptCount: 2,
+        removedCount: 3,
+        action: 'archive',
+        skipped: 1,
+        errors: 0,
+      });
+      mockUseBurstGroups.mockReturnValue(
+        makeBurstGroupsHook({ items: [makeSummary('g-1')], bulkResolveByThreshold }),
+      );
+
+      render(<BurstsPage />);
+
+      await user.click(await screen.findByRole('button', { name: 'Archive above 60' }));
+      await user.click(await screen.findByRole('button', { name: /^archive$/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/resolved 2 groups; 3 photos archived \(1 skipped\)\./i)).toBeInTheDocument();
+      });
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -508,9 +717,8 @@ describe('BurstGroupPage', () => {
   describe('pre-selection of suggested best', () => {
     it('pre-selects the suggested best member checkbox', async () => {
       // media-1 is the suggested best; we verify the "Keep N, <action> M" button
-      // reflects that exactly 1 item is pre-selected. The default action is
-      // "archive" (the ToggleButtonGroup default), so the label reads
-      // "Keep 1, archive 2 others".
+      // reflects that exactly 1 item is pre-selected. The Archive button
+      // (primary) always renders, so the label reads "Keep 1, archive 2 others".
       render(<BurstGroupPage />);
 
       await waitFor(() => {
@@ -519,14 +727,41 @@ describe('BurstGroupPage', () => {
     });
   });
 
+  // BurstGroupPage now renders two standalone decision buttons — Archive
+  // (primary, always available) and Delete (error color, gated on
+  // media:delete) — instead of an Archive/Trash ToggleButtonGroup.
+  describe('action gating — Archive/Delete buttons', () => {
+    it('renders both Archive and Delete buttons when the caller has media:delete', async () => {
+      render(<BurstGroupPage />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /keep 1.*archive 2/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /keep 1.*delete 2/i })).toBeInTheDocument();
+      });
+    });
+
+    it('hides the Delete button when the caller lacks media:delete', async () => {
+      const perms = makePermissions(false);
+      perms.hasPermission = vi.fn().mockReturnValue(false);
+      mockUsePermissions.mockReturnValue(perms);
+
+      render(<BurstGroupPage />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /keep 1.*archive 2/i })).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('button', { name: /keep 1.*delete 2/i })).toBeNull();
+    });
+  });
+
   describe('resolve action', () => {
-    it('opens confirm dialog when Keep button is clicked (default action: archive)', async () => {
+    it('opens confirm dialog when the Archive button is clicked', async () => {
       const user = userEvent.setup();
 
       render(<BurstGroupPage />);
 
-      const keepBtn = await screen.findByRole('button', { name: /keep 1.*archive 2/i });
-      await user.click(keepBtn);
+      const archiveBtn = await screen.findByRole('button', { name: /keep 1.*archive 2/i });
+      await user.click(archiveBtn);
 
       await waitFor(() => {
         expect(screen.getByRole('dialog')).toBeInTheDocument();
@@ -534,7 +769,7 @@ describe('BurstGroupPage', () => {
       });
     });
 
-    it('calls resolve with keepIds and action="archive" after confirming the default action', async () => {
+    it('calls resolve with keepIds and action="archive" after confirming via the Archive button', async () => {
       const user = userEvent.setup();
       const mockResolve = vi.fn().mockResolvedValue({
         removed: 2,
@@ -548,19 +783,18 @@ describe('BurstGroupPage', () => {
 
       render(<BurstGroupPage />);
 
-      const keepBtn = await screen.findByRole('button', { name: /keep 1.*archive 2/i });
-      await user.click(keepBtn);
-
-      // Confirm in dialog — default action is archive
-      const archiveBtn = await screen.findByRole('button', { name: /^archive 2 photo/i });
+      const archiveBtn = await screen.findByRole('button', { name: /keep 1.*archive 2/i });
       await user.click(archiveBtn);
+
+      const confirmBtn = await screen.findByRole('button', { name: /^archive 2 photo/i });
+      await user.click(confirmBtn);
 
       await waitFor(() => {
         expect(mockResolve).toHaveBeenCalledWith(expect.arrayContaining(['media-1']), 'archive');
       });
     });
 
-    it('switching the toggle to "Trash" changes the button label and calls resolve with action="trash"', async () => {
+    it('clicking the Delete button opens a confirm dialog and calls resolve with action="trash"', async () => {
       const user = userEvent.setup();
       const mockResolve = vi.fn().mockResolvedValue({
         removed: 2,
@@ -574,13 +808,16 @@ describe('BurstGroupPage', () => {
 
       render(<BurstGroupPage />);
 
-      await user.click(await screen.findByRole('button', { name: /^trash$/i }));
+      const deleteBtn = await screen.findByRole('button', { name: /keep 1.*delete 2/i });
+      await user.click(deleteBtn);
 
-      const keepBtn = await screen.findByRole('button', { name: /keep 1.*trash 2/i });
-      await user.click(keepBtn);
+      await waitFor(() => {
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+        expect(screen.getByText(/confirm trash/i)).toBeInTheDocument();
+      });
 
-      const trashBtn = await screen.findByRole('button', { name: /move to trash 2 photo/i });
-      await user.click(trashBtn);
+      const confirmBtn = await screen.findByRole('button', { name: /move to trash 2 photo/i });
+      await user.click(confirmBtn);
 
       await waitFor(() => {
         expect(mockResolve).toHaveBeenCalledWith(expect.arrayContaining(['media-1']), 'trash');

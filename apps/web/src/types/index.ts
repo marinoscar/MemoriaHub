@@ -53,11 +53,13 @@ export interface SystemSettings {
     timeGapSeconds?: number;
     hashDistance?: number;
     minGroupSize?: number;
+    autoResolveThreshold?: number;
   };
   dedup?: {
     similarityThreshold?: number;
     hashMaxDistance?: number;
     knnCandidates?: number;
+    autoResolveThreshold?: number;
   };
   locationInference?: {
     maxGapMinutes?: number;

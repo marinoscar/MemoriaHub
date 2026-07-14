@@ -109,6 +109,14 @@ export async function bulkResolveBurstGroups(params: {
   return api.post<GroupBulkResolveResult>('/media/bursts/bulk/resolve', params);
 }
 
+export async function bulkResolveBurstGroupsByThreshold(params: {
+  circleId: string;
+  threshold: number;
+  action: GroupResolveAction;
+}): Promise<GroupBulkResolveResult> {
+  return api.post<GroupBulkResolveResult>('/media/bursts/bulk/resolve-by-threshold', params);
+}
+
 export async function dismissBurstGroup(id: string): Promise<BurstDismissResult> {
   return api.post<BurstDismissResult>(`/media/bursts/${id}/dismiss`);
 }

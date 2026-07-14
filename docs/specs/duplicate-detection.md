@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.2 |
+| **Version** | 1.4 |
 | **Last Updated** | July 2026 |
 | **Status** | Specification |
 
@@ -181,6 +181,8 @@ confidence = maxSim = max pairwise CLIP cosine similarity across all members of 
 `maxSim` is the same tightest-pair similarity value used by `computeGroupKind` (§3.4) to decide the `exact_variant` threshold — it is not recomputed separately, just surfaced directly as the group's headline confidence number so a reviewer scanning the list doesn't have to open a group to gauge how tight the match is. Because it depends only on already-stored `media_visual_embedding` rows, it costs no additional storage and stays perfectly in sync with the group's current membership on every read — there is no staleness window the way a persisted score would have.
 
 If the CLIP model is degraded (§4.3) and a group was linked purely via Tier 2 (dHash), no embeddings exist to compare and `confidence` is `null`.
+
+Because `confidence` is never persisted, it cannot be filtered on directly in SQL the way `burst_groups.confidence` can. This is the key architectural constraint behind the threshold bulk-resolve endpoint documented in §9.4a: it must load candidate pending groups first, then compute and filter on `maxSim` per group in application code, rather than pushing the threshold down into the query.
 
 ---
 
@@ -381,6 +383,7 @@ One `media_visual_embedding` row costs **512 × 4 bytes ≈ 2.1 KB** for the vec
 | `dedup.similarityThreshold` | number | 0.80–0.995 | `0.96` | Minimum CLIP cosine similarity (Tier 1) for two photos to be linked |
 | `dedup.hashMaxDistance` | integer | 0–16 | `6` | Maximum dHash Hamming distance (Tier 2, out of 64 bits) for two photos to be linked |
 | `dedup.knnCandidates` | integer | 5–50 | `20` | Number of nearest-neighbor candidates fetched per item from the pgvector HNSW index before threshold filtering |
+| `dedup.autoResolveThreshold` | integer | 0–100 | `60` | Default percentage pre-filled into the duplicate review page's "Archive above N" / "Delete above N" buttons, which call `POST /api/media/duplicates/bulk/resolve-by-threshold` (§9.4a) |
 
 All three `dedup.*` values are validated by the same Zod schema used for every other system-settings write path (`apps/api/src/settings/dto/update-system-settings.dto.ts`), round-tripped through `PATCH /api/system-settings` / `PUT /api/system-settings` like every other setting group.
 
@@ -454,6 +457,23 @@ Resolve multiple pending duplicate groups in a single call, always keeping each 
 - **Response `200`:** `{ "data": { "resolvedGroups": 6, "keptCount": 6, "removedCount": 14, "action": "archive", "skipped": 1, "errors": 0 } }`.
 - **Response `400`:** `ids` is empty or exceeds 100, or an ID does not belong to `circleId`.
 
+### 9.4a `POST /api/media/duplicates/bulk/resolve-by-threshold`
+
+Resolve every **pending** duplicate group whose read-time confidence (`maxSim`, §3.5) meets or exceeds a caller-supplied score threshold — the endpoint behind the duplicate review page's "Archive above N" / "Delete above N" buttons (see §11). Manual trigger only: clicking the button fires this call; there is no cron and nothing resolves automatically in the background.
+
+Unlike the equivalent [burst-detection endpoint](burst-detection.md#72-group-actions) (`POST /api/media/bursts/bulk/resolve-by-threshold`), which filters directly in SQL against a persisted `confidence` column, duplicate confidence is **not persisted** (§3.5). This endpoint therefore has to work in two phases: load candidate pending groups for the circle (capped at 500, same `MAX_THRESHOLD_RESOLVE` cap as the burst endpoint), then, for each group, compute its tightest-pair CLIP similarity via `computeGroupKind`'s `maxSim` (§3.4) and filter against the threshold in application code — there is no way to push the comparison into the database query the way burst detection can.
+
+- **Auth:** `media:write` + per-circle `collaborator` role. `action: 'trash'` additionally requires `media:delete`, same as the other resolve endpoints.
+- **Request body:** `{ "circleId": "uuid", "threshold": 80, "action": "archive" | "trash" }`. `threshold` is an integer `0`–`100`, compared against the computed `maxSim` (a `[0, 1]` value) as `maxSim >= threshold / 100`.
+- **Behavior:** for each loaded pending group, keeps `suggestedBestItemId` and archives/trashes the rest, exactly as `POST /api/media/duplicates/bulk/resolve` does, but only for groups meeting the threshold.
+  - A group whose `maxSim` cannot be computed — fewer than two members carry a `media_visual_embedding` row, or the embedding lookup fails — is **excluded from matching** and counted in `skipped`, the same bucket as a group that computed a similarity below the threshold. There is no separate "unscoreable" counter; both cases are indistinguishable from the caller's point of view.
+  - A group below the threshold, or lacking a `suggestedBestItemId`, is also skipped (counted in `skipped`).
+  - A group that is eligible but fails during its own transaction is counted in `errors` without blocking the rest.
+- **Response `200`:** `{ "data": { "resolvedGroups": 11, "keptCount": 11, "removedCount": 37, "action": "archive", "skipped": 4, "errors": 0 } }`.
+- **Response `400`:** `threshold` is out of range, or more than 500 pending groups exist in the circle.
+
+`dedup.autoResolveThreshold` (§8.1) is the system-setting default that pre-fills the duplicate review page's "Archive above N" / "Delete above N" buttons; it does not gate or auto-fire this endpoint on its own.
+
 ### 9.5 `POST /api/media/duplicates/:id/dismiss`
 
 Mark a group as not actually duplicates; ungroups all members (`duplicateGroupId = null`) without deleting anything.
@@ -506,6 +526,7 @@ Visual-embedding model availability.
 | `GET /api/media/duplicates/:id` | `media:read` | `viewer` | |
 | `POST /api/media/duplicates/:id/resolve` | `media:write` (+ `media:delete` if `action: 'trash'`) | `collaborator` | |
 | `POST /api/media/duplicates/bulk/resolve` | `media:write` (+ `media:delete` if `action: 'trash'`) | `collaborator` | 1–100 group IDs |
+| `POST /api/media/duplicates/bulk/resolve-by-threshold` | `media:write` (+ `media:delete` if `action: 'trash'`) | `collaborator` | score threshold 0–100, capped at 500 pending groups |
 | `POST /api/media/duplicates/:id/dismiss` | `media:write` | `collaborator` | |
 | `POST /api/media/:id/duplicates/rerun` | `media:write` | `collaborator` | |
 | `POST /api/admin/duplicates/backfill` | `system_settings:write` | — (Admin, app-wide) | 400 if feature disabled |
@@ -518,7 +539,11 @@ No new permission scopes were introduced. All endpoints reuse `media:read`/`medi
 
 ## 11. UI
 
-The frontend review-queue page (`/duplicates`, `/duplicates/:id`) now exists, following the same `services/<domain>.ts` + `hooks/use<Domain>.ts` pattern used by `pages/Bursts/*`. Like the burst review queue, group cards carry a multi-select checkbox and a confidence meter (§3.5); a bulk toolbar appears once one or more groups are selected, offering "Resolve & Archive" and "Resolve & Delete" (the latter, and any selection over 25 groups, prompts a confirmation before firing `POST /api/media/duplicates/bulk/resolve`, §9.4). A per-circle "Review Insights" page (`/review-insights`, §9.10) shows identified/resolved/dismissed and archived-vs-trashed breakdowns for both burst and duplicate review in one place.
+The frontend review-queue page (`/duplicates`, `/duplicates/:id`) now exists, following the same `services/<domain>.ts` + `hooks/use<Domain>.ts` pattern used by `pages/Bursts/*`. Like the burst review queue, group cards carry a multi-select checkbox (enlarged for mobile touch targets) and a confidence meter (§3.5); a bulk toolbar appears once one or more groups are selected, offering "Resolve & Archive" and "Resolve & Delete" (the latter, and any selection over 25 groups, prompts a confirmation before firing `POST /api/media/duplicates/bulk/resolve`, §9.4).
+
+Alongside the multi-select toolbar, the page offers "Archive above N" and "Delete above N" score-threshold buttons, pre-filled with `dedup.autoResolveThreshold` (§8.1) and adjustable before firing, which call `POST /api/media/duplicates/bulk/resolve-by-threshold` (§9.4a). The group detail page (`/duplicates/:id`) presents two distinctly-colored actions — "Archive" and "Delete" — in place of an archive-vs-trash toggle, each firing `POST /api/media/duplicates/:id/resolve` with the corresponding `action`. For Admins, the page header also carries a gear icon linking directly to `/admin/settings/duplicates`, which now also exposes the auto-resolve threshold alongside the existing global toggle, threshold sliders, backfill panel, and CLIP model status.
+
+A per-circle "Review Insights" page (`/review-insights`, §9.10) shows identified/resolved/dismissed and archived-vs-trashed breakdowns for both burst and duplicate review in one place.
 
 ---
 
@@ -607,3 +632,4 @@ The scenarios below describe the full coverage this module should have; items al
 | 1.1 | July 2026 | AI Assistant | Document §3.2 eviction ("burst wins") fix closing the upload-time ordering race: `DuplicateDetectionService.evictFromDuplicateGroups`, the `recomputeGroupMeta` shrink-below-2 cleanup, `evictExistingBurstOverlaps` one-time remediation, and the `evictedDuplicateOverlaps` field on `POST /api/admin/bursts/backfill` |
 | 1.2 | July 2026 | AI Assistant | Added the read-time `confidence` score (§3.5, `maxSim`); added `POST /api/media/duplicates/bulk/resolve` (§9.4); added `resolutionAction`/`keptCount`/`removedCount` columns on `duplicate_groups` (migration `20260713120000_add_burst_dup_resolution_tracking`, §5.1); added `GET /api/media/review-insights` (§9.10, full detail in `burst-detection.md` §7.5); documented the now-implemented duplicate review-queue frontend, its multi-select bulk toolbar, and confidence meter (§11) |
 | 1.3 | July 2026 | AI Assistant | Closed the residual upload-time TOCTOU race between burst and duplicate detection (§3.2): `DuplicateDetectionService.processMediaItem` now re-checks `burstGroupId` under a `SELECT ... FOR UPDATE` row lock immediately before writing `duplicateGroupId`, inside the same transaction, skipping the write if the item is now in a pending burst group; also lowered `burst_detection`'s upload-time enqueue priority from 10 to 5 (`duplicate_detection` unchanged at 10) so burst is claimed first in the common case (§6.1) |
+| 1.4 | July 2026 | AI Assistant | Added `POST /api/media/duplicates/bulk/resolve-by-threshold` (§9.4a) and the `dedup.autoResolveThreshold` system setting (§8.1) powering the duplicate review page's "Archive above N" / "Delete above N" buttons; unlike the equivalent burst endpoint, confidence is computed at read time so the threshold filter runs in application code over a capped set of loaded pending groups (§3.5, §9.4a); groups with no computable `maxSim` are counted in `skipped`, same as below-threshold groups; documented the review page's admin-only settings gear icon and the group detail page's Archive/Delete button pair (§11) |

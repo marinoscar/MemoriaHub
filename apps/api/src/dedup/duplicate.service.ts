@@ -19,6 +19,10 @@ import { PERMISSIONS } from '../common/constants/roles.constants';
 import { DuplicateQueryDto } from './dto/duplicate-query.dto';
 import { ResolveDuplicateDto } from './dto/resolve-duplicate.dto';
 import { BulkResolveDuplicateDto } from './dto/bulk-resolve-duplicate.dto';
+import { BulkResolveDuplicateThresholdDto } from './dto/bulk-resolve-duplicate-threshold.dto';
+
+/** Hard cap on the number of groups a single threshold-based bulk resolve touches. */
+const MAX_THRESHOLD_RESOLVE = 500;
 
 type DuplicateKind = 'exact_variant' | 'edited' | 'similar';
 
@@ -551,6 +555,104 @@ export class DuplicateService {
       } catch (err) {
         this.logger.warn(
           `Failed to resolve duplicate group ${group.id} in bulk operation: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        errors++;
+      }
+    }
+
+    return {
+      data: {
+        resolvedGroups,
+        keptCount,
+        removedCount,
+        action: dto.action,
+        skipped,
+        errors,
+      },
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bulk resolve duplicate groups by confidence threshold
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Bulk-resolve every pending duplicate group in a circle whose read-time
+   * confidence (tightest-pair CLIP similarity from computeGroupKind) is at/above
+   * `threshold / 100`. For each eligible group, keeps its suggested-best item
+   * and applies the chosen action to the rest.
+   *
+   * Unlike burst confidence, duplicate confidence is NOT a persisted column —
+   * it is computed at read time via computeGroupKind(members). The candidate set
+   * is therefore CAPPED to MAX_THRESHOLD_RESOLVE groups first; the per-group
+   * computeGroupKind cost (one pairwise SQL query each) is bounded by that cap.
+   */
+  async bulkResolveDuplicateGroupsByThreshold(
+    dto: BulkResolveDuplicateThresholdDto,
+    userId: string,
+    perms: string[],
+  ) {
+    await this.membership.assertCircleAccess(userId, dto.circleId, perms, CircleRole.collaborator);
+
+    if (dto.action === 'trash' && !perms.includes(PERMISSIONS.MEDIA_DELETE)) {
+      throw new BadRequestException('media:delete permission is required to trash duplicate items');
+    }
+
+    const groups = await this.prisma.duplicateGroup.findMany({
+      where: { circleId: dto.circleId, status: DuplicateGroupStatus.pending },
+      take: MAX_THRESHOLD_RESOLVE,
+      select: {
+        id: true,
+        circleId: true,
+        status: true,
+        suggestedBestItemId: true,
+        items: {
+          where: { deletedAt: null, archivedAt: null },
+          select: this.MEMBER_SELECT,
+        },
+      },
+    });
+
+    const minSim = dto.threshold / 100;
+
+    let skipped = 0;
+    let errors = 0;
+    let resolvedGroups = 0;
+    let keptCount = 0;
+    let removedCount = 0;
+
+    for (const group of groups) {
+      // Read-time confidence gate: skip groups below the threshold (and legacy
+      // groups whose maxSim cannot be computed).
+      const { maxSim } = await this.computeGroupKind(group.items);
+      if (maxSim == null || maxSim < minSim) {
+        skipped++;
+        continue;
+      }
+
+      const liveMemberIds = group.items.map((i) => i.id);
+
+      // Mirror the id-based bulk skip conditions.
+      if (
+        group.status !== DuplicateGroupStatus.pending ||
+        !group.suggestedBestItemId ||
+        !liveMemberIds.includes(group.suggestedBestItemId)
+      ) {
+        skipped++;
+        continue;
+      }
+
+      const keepIds = [group.suggestedBestItemId];
+      const removeIds = liveMemberIds.filter((id) => id !== group.suggestedBestItemId);
+
+      try {
+        await this.resolveOneDuplicateGroup(group, keepIds, removeIds, dto.action, userId);
+        resolvedGroups++;
+        keptCount += keepIds.length;
+        removedCount += removeIds.length;
+      } catch (err) {
+        this.logger.warn(
+          `Failed to resolve duplicate group ${group.id} in threshold bulk operation: ${err instanceof Error ? err.message : String(err)}`,
         );
         errors++;
       }

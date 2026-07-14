@@ -6,7 +6,6 @@ import {
   Button,
   CircularProgress,
   Alert,
-  Checkbox,
   Chip,
   Snackbar,
   IconButton,
@@ -17,13 +16,17 @@ import {
   DialogActions,
   LinearProgress,
   Tooltip,
-  ToggleButton,
-  ToggleButtonGroup,
 } from '@mui/material';
-import { ArrowBack as BackIcon, BurstMode as BurstModeIcon } from '@mui/icons-material';
+import {
+  ArrowBack as BackIcon,
+  BurstMode as BurstModeIcon,
+  Archive as ArchiveIcon,
+  Delete as DeleteIcon,
+} from '@mui/icons-material';
 import { useBurstGroupDetail } from '../../hooks/useBursts';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useCircle } from '../../hooks/useCircle';
+import { SelectionCheckboxOverlay } from '../../components/review/SelectionCheckboxOverlay';
 import type { BurstGroupMember, GroupResolveAction } from '../../services/bursts';
 
 interface MemberCardProps {
@@ -96,26 +99,11 @@ function MemberCard({ member, selected, onToggle }: MemberCardProps) {
         )}
 
         {/* Checkbox overlay */}
-        <Box
-          sx={{
-            position: 'absolute',
-            top: 4,
-            left: 4,
-            bgcolor: 'rgba(0,0,0,0.4)',
-            borderRadius: '50%',
-          }}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggle(member.id);
-          }}
-        >
-          <Checkbox
-            checked={selected}
-            size="small"
-            sx={{ color: 'white', p: 0.5, '&.Mui-checked': { color: 'white' } }}
-            tabIndex={-1}
-          />
-        </Box>
+        <SelectionCheckboxOverlay
+          checked={selected}
+          onToggle={() => onToggle(member.id)}
+          ariaLabel="Select photo"
+        />
 
         {/* Best pick chip */}
         {member.isSuggestedBest && (
@@ -317,35 +305,37 @@ export default function BurstGroupPage() {
       {/* Action bar */}
       {canAct && (
         <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-          <ToggleButtonGroup
-            value={action}
-            exclusive
-            size="small"
-            onChange={(_, value: GroupResolveAction | null) => {
-              if (value) setAction(value);
-            }}
-          >
-            <ToggleButton value="archive">Archive</ToggleButton>
-            <ToggleButton value="trash" disabled={!canTrash}>
-              <Tooltip title={canTrash ? '' : 'Requires media:delete permission'}>
-                <span>Trash</span>
-              </Tooltip>
-            </ToggleButton>
-          </ToggleButtonGroup>
-
           <Button
             variant="contained"
             color="primary"
             disabled={keepCount === 0 || resolving || dismissing}
-            onClick={() => setConfirmOpen(true)}
-            startIcon={resolving ? <CircularProgress size={16} /> : undefined}
+            onClick={() => {
+              setAction('archive');
+              setConfirmOpen(true);
+            }}
+            startIcon={resolving ? <CircularProgress size={16} /> : <ArchiveIcon />}
           >
-            {resolving
-              ? 'Saving…'
-              : keepCount === 0
+            {keepCount === 0
               ? 'Select photos to keep'
-              : `Keep ${keepCount}, ${action} ${deleteCount} other${deleteCount !== 1 ? 's' : ''}`}
+              : `Keep ${keepCount}, archive ${deleteCount} other${deleteCount !== 1 ? 's' : ''}`}
           </Button>
+
+          {canTrash && (
+            <Button
+              variant="contained"
+              color="error"
+              disabled={keepCount === 0 || resolving || dismissing}
+              onClick={() => {
+                setAction('trash');
+                setConfirmOpen(true);
+              }}
+              startIcon={resolving ? <CircularProgress size={16} /> : <DeleteIcon />}
+            >
+              {keepCount === 0
+                ? 'Select photos to keep'
+                : `Keep ${keepCount}, delete ${deleteCount} other${deleteCount !== 1 ? 's' : ''}`}
+            </Button>
+          )}
 
           <Button
             variant="outlined"

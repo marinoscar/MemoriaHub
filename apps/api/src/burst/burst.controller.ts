@@ -25,6 +25,7 @@ import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { BurstQueryDto } from './dto/burst-query.dto';
 import { ResolveBurstDto } from './dto/resolve-burst.dto';
 import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';
+import { BulkResolveBurstThresholdDto } from './dto/bulk-resolve-burst-threshold.dto';
 
 @ApiTags('Bursts')
 @ApiBearerAuth()
@@ -82,6 +83,40 @@ export class BurstController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.burstService.bulkResolveBurstGroups(dto, user.id, user.permissions);
+  }
+
+  /**
+   * POST /api/media/bursts/bulk/resolve-by-threshold
+   * Bulk-resolve every pending burst group whose confidence is at/above the
+   * given threshold (0–100), auto-keeping each group's suggested-best item.
+   *
+   * IMPORTANT: declared BEFORE `bursts/:id` routes so the static `bulk` segment
+   * is not captured by the `:id` param.
+   */
+  @Post('bursts/bulk/resolve-by-threshold')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Bulk-resolve burst groups at/above a confidence threshold',
+    description:
+      'Resolves every pending burst group in the circle whose `confidence` (0–1) ' +
+      'is at/above `threshold / 100`, up to a hard cap of 500 groups. For each ' +
+      'eligible group, keeps its suggested-best item and applies the chosen ' +
+      '`action` to the remaining live members: `archive` sets archivedAt, `trash` ' +
+      'soft-deletes (sets deletedAt). Legacy groups with null confidence are ' +
+      'excluded. Requires media:write; `action: "trash"` additionally requires media:delete.',
+  })
+  @ApiResponse({ status: 200, description: 'Bulk threshold resolve completed' })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid body or missing media:delete for trash',
+  })
+  @ApiResponse({ status: 404, description: 'Circle not found or access denied' })
+  async bulkResolveBurstGroupsByThreshold(
+    @Body() dto: BulkResolveBurstThresholdDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.burstService.bulkResolveBurstGroupsByThreshold(dto, user.id, user.permissions);
   }
 
   /**

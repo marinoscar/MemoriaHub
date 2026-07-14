@@ -112,6 +112,14 @@ export async function bulkResolveDuplicateGroups(params: {
   return api.post<GroupBulkResolveResult>('/media/duplicates/bulk/resolve', params);
 }
 
+export async function bulkResolveDuplicateGroupsByThreshold(params: {
+  circleId: string;
+  threshold: number;
+  action: DuplicateResolveAction;
+}): Promise<GroupBulkResolveResult> {
+  return api.post<GroupBulkResolveResult>('/media/duplicates/bulk/resolve-by-threshold', params);
+}
+
 export async function dismissDuplicateGroup(id: string): Promise<DuplicateDismissResult> {
   return api.post<DuplicateDismissResult>(`/media/duplicates/${id}/dismiss`);
 }

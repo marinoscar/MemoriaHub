@@ -25,6 +25,7 @@ import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { DuplicateQueryDto } from './dto/duplicate-query.dto';
 import { ResolveDuplicateDto } from './dto/resolve-duplicate.dto';
 import { BulkResolveDuplicateDto } from './dto/bulk-resolve-duplicate.dto';
+import { BulkResolveDuplicateThresholdDto } from './dto/bulk-resolve-duplicate-threshold.dto';
 
 @ApiTags('Duplicates')
 @ApiBearerAuth()
@@ -83,6 +84,40 @@ export class DuplicateController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.duplicateService.bulkResolveDuplicateGroups(dto, user.id, user.permissions);
+  }
+
+  /**
+   * POST /api/media/duplicates/bulk/resolve-by-threshold
+   * Bulk-resolve every pending duplicate group whose read-time confidence is
+   * at/above the given threshold (0–100), auto-keeping the suggested-best item.
+   *
+   * IMPORTANT: declared BEFORE `duplicates/:id` routes so the static `bulk`
+   * segment is not captured by the `:id` param.
+   */
+  @Post('duplicates/bulk/resolve-by-threshold')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Bulk-resolve duplicate groups at/above a confidence threshold',
+    description:
+      'Resolves every pending duplicate group in the circle whose read-time ' +
+      'confidence (tightest-pair CLIP similarity, 0–1) is at/above `threshold / 100`, ' +
+      'up to a hard cap of 500 groups. For each eligible group, keeps its ' +
+      'suggested-best item and applies the chosen `action` to the remaining live ' +
+      'members: `archive` sets archivedAt, `trash` soft-deletes (sets deletedAt). ' +
+      'Requires media:write; `action: "trash"` additionally requires media:delete.',
+  })
+  @ApiResponse({ status: 200, description: 'Bulk threshold resolve completed' })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid body or missing media:delete for trash',
+  })
+  @ApiResponse({ status: 404, description: 'Circle not found or access denied' })
+  async bulkResolveDuplicateGroupsByThreshold(
+    @Body() dto: BulkResolveDuplicateThresholdDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.duplicateService.bulkResolveDuplicateGroupsByThreshold(dto, user.id, user.permissions);
   }
 
   /**
