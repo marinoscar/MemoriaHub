@@ -150,15 +150,20 @@ export function TopbarSearch() {
   if (isPhone) {
     return (
       <>
-        {/* Collapsed state: single icon button */}
+        {/* Collapsed state: single icon button. Wrapped in a flex-growing Box so
+            it claims the Toolbar's remaining width on phone, matching the
+            desktop pill's own flexGrow wrapper below — otherwise every phone
+            toolbar icon packs to the left with dead space on the right. */}
         {!phoneExpanded && (
-          <IconButton
-            color="inherit"
-            aria-label="Open search"
-            onClick={() => setPhoneExpanded(true)}
-          >
-            <SearchIcon />
-          </IconButton>
+          <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'flex-end' }}>
+            <IconButton
+              color="inherit"
+              aria-label="Open search"
+              onClick={() => setPhoneExpanded(true)}
+            >
+              <SearchIcon />
+            </IconButton>
+          </Box>
         )}
 
         {/* Expanded overlay: covers the full toolbar row */}
