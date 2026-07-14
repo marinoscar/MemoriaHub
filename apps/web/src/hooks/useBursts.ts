@@ -4,6 +4,7 @@ import {
   getBurstGroup,
   resolveBurstGroup,
   bulkResolveBurstGroups,
+  bulkResolveBurstGroupsByThreshold,
   dismissBurstGroup,
 } from '../services/bursts';
 import type {
@@ -29,6 +30,10 @@ interface UseBurstGroupsResult {
   error: string | null;
   fetchGroups: (params: FetchBurstGroupsParams) => Promise<void>;
   bulkResolve: (ids: string[], action: GroupResolveAction) => Promise<GroupBulkResolveResult>;
+  bulkResolveByThreshold: (
+    threshold: number,
+    action: GroupResolveAction,
+  ) => Promise<GroupBulkResolveResult>;
 }
 
 export function useBurstGroups(): UseBurstGroupsResult {
@@ -70,7 +75,22 @@ export function useBurstGroups(): UseBurstGroupsResult {
     [fetchGroups],
   );
 
-  return { items, meta, isLoading, error, fetchGroups, bulkResolve };
+  const bulkResolveByThreshold = useCallback(
+    async (threshold: number, action: GroupResolveAction) => {
+      const circleId = lastParamsRef.current?.circleId;
+      if (!circleId) {
+        throw new Error('No active circle to resolve burst groups');
+      }
+      const result = await bulkResolveBurstGroupsByThreshold({ circleId, threshold, action });
+      if (lastParamsRef.current) {
+        await fetchGroups(lastParamsRef.current);
+      }
+      return result;
+    },
+    [fetchGroups],
+  );
+
+  return { items, meta, isLoading, error, fetchGroups, bulkResolve, bulkResolveByThreshold };
 }
 
 interface UseBurstGroupDetailResult {

@@ -4,6 +4,7 @@ import {
   getDuplicateGroup,
   resolveDuplicateGroup,
   bulkResolveDuplicateGroups,
+  bulkResolveDuplicateGroupsByThreshold,
   dismissDuplicateGroup,
 } from '../services/duplicates';
 import type {
@@ -32,6 +33,10 @@ interface UseDuplicateGroupsResult {
   error: string | null;
   fetchGroups: (params: FetchDuplicateGroupsParams) => Promise<void>;
   bulkResolve: (ids: string[], action: DuplicateResolveAction) => Promise<GroupBulkResolveResult>;
+  bulkResolveByThreshold: (
+    threshold: number,
+    action: DuplicateResolveAction,
+  ) => Promise<GroupBulkResolveResult>;
 }
 
 export function useDuplicateGroups(): UseDuplicateGroupsResult {
@@ -73,7 +78,22 @@ export function useDuplicateGroups(): UseDuplicateGroupsResult {
     [fetchGroups],
   );
 
-  return { items, meta, isLoading, error, fetchGroups, bulkResolve };
+  const bulkResolveByThreshold = useCallback(
+    async (threshold: number, action: DuplicateResolveAction) => {
+      const circleId = lastParamsRef.current?.circleId;
+      if (!circleId) {
+        throw new Error('No active circle to resolve duplicate groups');
+      }
+      const result = await bulkResolveDuplicateGroupsByThreshold({ circleId, threshold, action });
+      if (lastParamsRef.current) {
+        await fetchGroups(lastParamsRef.current);
+      }
+      return result;
+    },
+    [fetchGroups],
+  );
+
+  return { items, meta, isLoading, error, fetchGroups, bulkResolve, bulkResolveByThreshold };
 }
 
 interface UseDuplicateGroupDetailResult {
