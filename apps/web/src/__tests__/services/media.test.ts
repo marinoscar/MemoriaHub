@@ -441,29 +441,24 @@ describe('getLocationExtent', () => {
     expect(params.get('capturedAtTo')).toBe('2024-12-31T23:59:59.999Z');
   });
 
-  // KNOWN DEFECT (pre-existing in `services/api.ts`, not introduced by the
-  // map-extent-fix branch): `ApiService`'s response unwrapping —
-  // `return data.data ?? data;` — only substitutes the envelope when
-  // `data.data` is `undefined`. When the server legitimately responds with
+  // Regression coverage for the fix in commit `e041dab` ("fix(web): correctly
+  // unwrap a legitimate null data payload from the API envelope").
+  // `ApiService`'s response unwrapping previously did
+  // `return data.data ?? data;`, which only substituted the envelope when
+  // `data.data` was `undefined`. When the server legitimately responds with
   // `{ data: null }` (as `TransformInterceptor` produces for this endpoint
   // when a circle has zero geotagged items — see media.service.ts
-  // `getLocationsExtent`), `null ?? data` evaluates to `data`, so the raw
-  // envelope object round-trips instead of `null`. `getLocationExtent()`
-  // therefore currently returns a truthy `{ data: null }` object rather
-  // than `null` for the "no geotagged items" case documented in this
-  // endpoint's contract. Downstream, `MediaMapPage`'s `FitToExtent` only
-  // guards with `if (!extent) return;`, so this truthy envelope slips past
-  // that guard and destructures to `{ minLat: undefined, ... }`, then
-  // (since `undefined === undefined`) calls
-  // `map.setView([undefined, undefined], 13)` instead of leaving the map
-  // unframed. This test asserts the CURRENT (buggy) behavior so the suite
-  // documents the gap rather than silently passing over it — see the
-  // component-level tests in MediaMapPage.test.tsx, which mock
-  // `services/media` directly and so do not exercise this envelope bug.
-  // Fix: change the unwrap to something like
-  // `'data' in data ? data.data : data` (or equivalent `in`/hasOwnProperty
-  // check) in `apps/web/src/services/api.ts`, via frontend-dev.
-  it('KNOWN DEFECT: currently returns the raw { data: null } envelope, not null, when the server response has a legitimately-null data field', async () => {
+  // `getLocationsExtent`), `null ?? data` evaluated to `data`, so the raw
+  // envelope object round-tripped instead of `null`. That bug has been fixed
+  // by explicitly checking `'data' in data` before unwrapping, so
+  // `getLocationExtent()` now correctly returns `null` for the "no geotagged
+  // items" case documented in this endpoint's contract. Downstream,
+  // `MediaMapPage`'s `FitToExtent` guards with `if (!extent) return;`, so a
+  // `null` result correctly leaves the map unframed instead of calling
+  // `map.setView([undefined, undefined], 13)`. See also the component-level
+  // tests in MediaMapPage.test.tsx, which mock `services/media` directly and
+  // so do not exercise this envelope-unwrapping behavior.
+  it('returns null, not the raw envelope, when the server response has a legitimately-null data field', async () => {
     server.use(
       http.get('*/api/media/locations/extent', () => {
         return HttpResponse.json({ data: null });
@@ -471,7 +466,7 @@ describe('getLocationExtent', () => {
     );
 
     const result = await getLocationExtent();
-    expect(result).toEqual({ data: null });
+    expect(result).toBeNull();
   });
 });
 
