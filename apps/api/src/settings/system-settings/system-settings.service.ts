@@ -11,6 +11,7 @@ import {
   DEFAULT_SYSTEM_SETTINGS,
   SystemSettingsValue,
   defaultStuckThresholdMinutes,
+  defaultEmailSettings,
 } from '../../common/types/settings.types';
 import { systemSettingsSchema } from '../../common/schemas/settings.schema';
 
@@ -31,6 +32,7 @@ export interface ResolvedSettings {
   locationInference: SystemSettingsValue['locationInference'];
   socialMedia: SystemSettingsValue['socialMedia'];
   geo: SystemSettingsValue['geo'];
+  email: SystemSettingsValue['email'];
   jobs: SystemSettingsValue['jobs'];
   updatedAt: Date;
   updatedBy: { id: string; email: string } | null;
@@ -109,6 +111,7 @@ export class SystemSettingsService {
       locationInference: value.locationInference,
       socialMedia: value.socialMedia,
       geo: value.geo,
+      email: value.email,
       jobs: value.jobs,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
@@ -170,6 +173,8 @@ export class SystemSettingsService {
       locationInference: value.locationInference,
       socialMedia: value.socialMedia,
       geo: value.geo,
+      email: value.email,
+      jobs: value.jobs,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -186,6 +191,9 @@ export class SystemSettingsService {
   ) {
     // Get current settings
     const current = await this.getSettings();
+
+    // Env-seeded defaults for the email block (used only to backfill absent keys).
+    const emailDefaults = defaultEmailSettings();
 
     // Optimistic concurrency check
     if (expectedVersion !== undefined && current.version !== expectedVersion) {
@@ -354,6 +362,49 @@ export class SystemSettingsService {
           (current as any).geo?.forwardSearchEnabled ??
           (process.env['GEO_FORWARD_SEARCH_ENABLED'] === 'true'),
       },
+      email: {
+        provider:
+          (dto as any).email?.provider !== undefined
+            ? (dto as any).email?.provider
+            : ((current as any).email?.provider ?? emailDefaults.provider),
+        enabled:
+          (dto as any).email?.enabled ??
+          (current as any).email?.enabled ??
+          emailDefaults.enabled,
+        sesRegion:
+          (dto as any).email?.sesRegion !== undefined
+            ? (dto as any).email?.sesRegion
+            : ((current as any).email?.sesRegion ?? emailDefaults.sesRegion),
+        smtpHost:
+          (dto as any).email?.smtpHost !== undefined
+            ? (dto as any).email?.smtpHost
+            : ((current as any).email?.smtpHost ?? emailDefaults.smtpHost),
+        smtpPort:
+          (dto as any).email?.smtpPort ??
+          (current as any).email?.smtpPort ??
+          emailDefaults.smtpPort,
+        smtpUseTls:
+          (dto as any).email?.smtpUseTls ??
+          (current as any).email?.smtpUseTls ??
+          emailDefaults.smtpUseTls,
+        smtpUsername:
+          (dto as any).email?.smtpUsername !== undefined
+            ? (dto as any).email?.smtpUsername
+            : ((current as any).email?.smtpUsername ?? emailDefaults.smtpUsername),
+        // Preserve the stored ciphertext when the caller omits smtpPassword.
+        smtpPassword:
+          (dto as any).email?.smtpPassword ??
+          (current as any).email?.smtpPassword ??
+          emailDefaults.smtpPassword,
+        fromAddress:
+          (dto as any).email?.fromAddress !== undefined
+            ? (dto as any).email?.fromAddress
+            : ((current as any).email?.fromAddress ?? emailDefaults.fromAddress),
+        fromName:
+          (dto as any).email?.fromName !== undefined
+            ? (dto as any).email?.fromName
+            : ((current as any).email?.fromName ?? emailDefaults.fromName),
+      },
       jobs: {
         history: {
           retentionDays:
@@ -413,6 +464,7 @@ export class SystemSettingsService {
       locationInference: value.locationInference,
       socialMedia: value.socialMedia,
       geo: value.geo,
+      email: value.email,
       jobs: value.jobs,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,

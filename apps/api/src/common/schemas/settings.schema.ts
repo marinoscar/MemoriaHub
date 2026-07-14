@@ -137,6 +137,32 @@ export const systemSettingsSchema = z.object({
     reverseProvider: z.enum(['offline', 'nominatim', 'google']).default('offline'),
     forwardSearchEnabled: z.boolean().default(false),
   }).optional().default({ reverseProvider: 'offline', forwardSearchEnabled: false }),
+  // Transactional email (SES / SMTP). smtpPassword holds the AES-256-GCM
+  // ENCRYPTED ciphertext — it is stripped from the generic system-settings
+  // response and only ever returned masked (last-4) by the email-settings API.
+  email: z.object({
+    provider: z.enum(['ses', 'smtp']).nullable().default(null),
+    enabled: z.boolean().default(false),
+    sesRegion: z.string().nullable().default(null),
+    smtpHost: z.string().nullable().default(null),
+    smtpPort: z.number().int().min(1).max(65535).default(587),
+    smtpUseTls: z.boolean().default(true),
+    smtpUsername: z.string().nullable().default(null),
+    smtpPassword: z.string().nullable().default(null),
+    fromAddress: z.string().nullable().default(null),
+    fromName: z.string().nullable().default(null),
+  }).optional().default({
+    provider: null,
+    enabled: false,
+    sesRegion: null,
+    smtpHost: null,
+    smtpPort: 587,
+    smtpUseTls: true,
+    smtpUsername: null,
+    smtpPassword: null,
+    fromAddress: null,
+    fromName: null,
+  }),
   jobs: z.object({
     history: z.object({
       retentionDays: z.number().int().min(1).max(365).default(30),
@@ -227,6 +253,18 @@ export const systemSettingsPatchSchema = z.object({
   geo: z.object({
     reverseProvider: z.enum(['offline', 'nominatim', 'google']).optional(),
     forwardSearchEnabled: z.boolean().optional(),
+  }).optional(),
+  email: z.object({
+    provider: z.enum(['ses', 'smtp']).nullable().optional(),
+    enabled: z.boolean().optional(),
+    sesRegion: z.string().nullable().optional(),
+    smtpHost: z.string().nullable().optional(),
+    smtpPort: z.number().int().min(1).max(65535).optional(),
+    smtpUseTls: z.boolean().optional(),
+    smtpUsername: z.string().nullable().optional(),
+    smtpPassword: z.string().nullable().optional(),
+    fromAddress: z.string().nullable().optional(),
+    fromName: z.string().nullable().optional(),
   }).optional(),
   jobs: z.object({
     history: z.object({

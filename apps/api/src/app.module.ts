@@ -29,6 +29,7 @@ import { DedupModule } from './dedup/dedup.module';
 import { LocationInferenceModule } from './location-inference/location-inference.module';
 import { MetadataModule } from './metadata/metadata.module';
 import { GeoModule } from './geo/geo.module';
+import { EmailModule } from './email/email.module';
 import { StorageSettingsModule } from './storage-settings/storage-settings.module';
 import { ShareModule } from './share/share.module';
 import { SocialMediaModule } from './social-media/social-media.module';
@@ -89,6 +90,7 @@ import configuration from './config/configuration';
     LocationInferenceModule,
     MetadataModule,
     GeoModule,
+    EmailModule,
     StorageSettingsModule,
     ShareModule,
     SocialMediaModule,

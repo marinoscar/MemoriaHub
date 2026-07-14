@@ -2,6 +2,8 @@
 // Settings Type Definitions
 // =============================================================================
 
+import { encryptSecret } from '../crypto/secret-cipher';
+
 /**
  * User settings schema - stored in user_settings.value JSONB
  */
@@ -116,6 +118,24 @@ export interface SystemSettingsValue {
     reverseProvider: 'offline' | 'nominatim' | 'google';
     forwardSearchEnabled: boolean;
   };
+  /**
+   * Transactional email configuration.
+   * `smtpPassword` holds AES-256-GCM ENCRYPTED ciphertext (never plaintext) and
+   * is stripped from the generic system-settings HTTP response.
+   */
+  email?: {
+    provider: 'ses' | 'smtp' | null;
+    enabled: boolean;
+    sesRegion: string | null;
+    smtpHost: string | null;
+    smtpPort: number;
+    smtpUseTls: boolean;
+    smtpUsername: string | null;
+    /** AES-256-GCM ciphertext of the SMTP password, or null. */
+    smtpPassword: string | null;
+    fromAddress: string | null;
+    fromName: string | null;
+  };
   jobs?: {
     history: {
       retentionDays: number;
@@ -141,6 +161,38 @@ export function defaultStuckThresholdMinutes(): number {
     if (!isNaN(parsed) && parsed > 0) return Math.min(parsed, 120);
   }
   return 3;
+}
+
+/**
+ * Build the default `email.*` settings block from environment variables.
+ * `SMTP_PASSWORD`, if present, is encrypted at rest before being stored.
+ */
+export function defaultEmailSettings(): NonNullable<SystemSettingsValue['email']> {
+  const envProvider = process.env['EMAIL_PROVIDER'];
+  const provider: 'ses' | 'smtp' | null =
+    envProvider === 'ses' || envProvider === 'smtp' ? envProvider : null;
+
+  const smtpPortRaw = process.env['SMTP_PORT'];
+  const smtpPort = smtpPortRaw && !isNaN(parseInt(smtpPortRaw, 10))
+    ? parseInt(smtpPortRaw, 10)
+    : 587;
+
+  const smtpUseTlsRaw = process.env['SMTP_USE_TLS'];
+
+  return {
+    provider,
+    enabled: false,
+    sesRegion: process.env['AWS_SES_REGION'] ?? null,
+    smtpHost: process.env['SMTP_HOST'] ?? null,
+    smtpPort,
+    smtpUseTls: smtpUseTlsRaw ? smtpUseTlsRaw !== 'false' : true,
+    smtpUsername: process.env['SMTP_USERNAME'] ?? null,
+    smtpPassword: process.env['SMTP_PASSWORD']
+      ? encryptSecret(process.env['SMTP_PASSWORD'])
+      : null,
+    fromAddress: process.env['EMAIL_FROM_ADDRESS'] ?? null,
+    fromName: process.env['EMAIL_FROM_NAME'] ?? null,
+  };
 }
 
 /**
@@ -241,6 +293,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     reverseProvider: process.env['GEO_PROVIDER'] === 'nominatim' ? 'nominatim' : 'offline',
     forwardSearchEnabled: process.env['GEO_FORWARD_SEARCH_ENABLED'] === 'true',
   },
+  email: defaultEmailSettings(),
   jobs: {
     history: {
       retentionDays: 30,
