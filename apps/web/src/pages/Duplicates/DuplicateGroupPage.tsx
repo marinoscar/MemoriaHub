@@ -6,7 +6,6 @@ import {
   Button,
   CircularProgress,
   Alert,
-  Checkbox,
   Chip,
   Snackbar,
   IconButton,
@@ -17,8 +16,6 @@ import {
   DialogActions,
   LinearProgress,
   Tooltip,
-  ToggleButton,
-  ToggleButtonGroup,
   Table,
   TableBody,
   TableCell,
@@ -33,10 +30,13 @@ import {
   Star as StarIcon,
   CheckCircle as CheckCircleIcon,
   Cancel as CancelIcon,
+  Archive as ArchiveIcon,
+  Delete as DeleteIcon,
 } from '@mui/icons-material';
 import { useDuplicateGroupDetail } from '../../hooks/useDuplicates';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useCircle } from '../../hooks/useCircle';
+import { SelectionCheckboxOverlay } from '../../components/review/SelectionCheckboxOverlay';
 import { formatBytes } from '../../utils/formatBytes';
 import type { DuplicateGroupKind, DuplicateGroupMember, DuplicateResolveAction } from '../../services/duplicates';
 
@@ -96,20 +96,11 @@ function FilmstripItem({ member, selected, isLeft, isRight, onToggleKeep, onAssi
         )}
 
         {/* Keep checkbox overlay */}
-        <Box
-          sx={{ position: 'absolute', top: 4, left: 4, bgcolor: 'rgba(0,0,0,0.4)', borderRadius: '50%' }}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleKeep(member.id);
-          }}
-        >
-          <Checkbox
-            checked={selected}
-            size="small"
-            sx={{ color: 'white', p: 0.5, '&.Mui-checked': { color: 'white' } }}
-            tabIndex={-1}
-          />
-        </Box>
+        <SelectionCheckboxOverlay
+          checked={selected}
+          onToggle={() => onToggleKeep(member.id)}
+          ariaLabel="Keep photo"
+        />
 
         {member.isSuggestedBest && (
           <Box sx={{ position: 'absolute', top: 4, right: 4 }}>
@@ -511,35 +502,37 @@ export default function DuplicateGroupPage() {
       {/* Action bar */}
       {canAct && (
         <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-          <ToggleButtonGroup
-            value={action}
-            exclusive
-            size="small"
-            onChange={(_, value: DuplicateResolveAction | null) => {
-              if (value) setAction(value);
-            }}
-          >
-            <ToggleButton value="archive">Archive</ToggleButton>
-            <ToggleButton value="trash" disabled={!canTrash}>
-              <Tooltip title={canTrash ? '' : 'Requires media:delete permission'}>
-                <span>Trash</span>
-              </Tooltip>
-            </ToggleButton>
-          </ToggleButtonGroup>
-
           <Button
             variant="contained"
             color="primary"
             disabled={keepCount === 0 || resolving || dismissing}
-            onClick={() => setConfirmOpen(true)}
-            startIcon={resolving ? <CircularProgress size={16} /> : undefined}
+            onClick={() => {
+              setAction('archive');
+              setConfirmOpen(true);
+            }}
+            startIcon={resolving ? <CircularProgress size={16} /> : <ArchiveIcon />}
           >
-            {resolving
-              ? 'Saving…'
-              : keepCount === 0
+            {keepCount === 0
               ? 'Select photos to keep'
-              : `Keep ${keepCount}, ${action} ${removeCount} other${removeCount !== 1 ? 's' : ''}`}
+              : `Keep ${keepCount}, archive ${removeCount} other${removeCount !== 1 ? 's' : ''}`}
           </Button>
+
+          {canTrash && (
+            <Button
+              variant="contained"
+              color="error"
+              disabled={keepCount === 0 || resolving || dismissing}
+              onClick={() => {
+                setAction('trash');
+                setConfirmOpen(true);
+              }}
+              startIcon={resolving ? <CircularProgress size={16} /> : <DeleteIcon />}
+            >
+              {keepCount === 0
+                ? 'Select photos to keep'
+                : `Keep ${keepCount}, delete ${removeCount} other${removeCount !== 1 ? 's' : ''}`}
+            </Button>
+          )}
 
           <Button
             variant="outlined"

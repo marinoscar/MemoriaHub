@@ -7,19 +7,33 @@ import {
   Card,
   CardActionArea,
   CardContent,
-  Checkbox,
   Chip,
   Badge,
   Snackbar,
   Stack,
   Pagination,
+  Button,
+  IconButton,
+  Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
 } from '@mui/material';
-import { ContentCopy as ContentCopyIcon } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
+import {
+  ContentCopy as ContentCopyIcon,
+  Settings as SettingsIcon,
+  Archive as ArchiveIcon,
+  Delete as DeleteIcon,
+} from '@mui/icons-material';
+import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { usePermissions } from '../../hooks/usePermissions';
+import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { useDuplicateGroups } from '../../hooks/useDuplicates';
 import { GroupBulkResolveToolbar } from '../../components/review/GroupBulkResolveToolbar';
+import { SelectionCheckboxOverlay } from '../../components/review/SelectionCheckboxOverlay';
 import { ConfidenceMeter } from '../../components/review/ConfidenceMeter';
 import type { DuplicateGroupKind, DuplicateGroupSummary, DuplicateResolveAction } from '../../services/duplicates';
 
@@ -94,25 +108,11 @@ function DuplicateGroupCard({ group, selected, onToggle }: DuplicateGroupCardPro
   return (
     <Card variant="outlined" sx={{ position: 'relative' }}>
       {/* Selection checkbox overlay — sibling of the action area to avoid nested buttons */}
-      <Box
-        sx={{
-          position: 'absolute',
-          top: 8,
-          left: 8,
-          zIndex: 2,
-          bgcolor: 'rgba(0,0,0,0.45)',
-          borderRadius: '50%',
-        }}
-      >
-        <Checkbox
-          checked={selected}
-          onChange={() => onToggle(group.id)}
-          onClick={(e) => e.stopPropagation()}
-          size="small"
-          sx={{ color: 'common.white', p: 0.5, '&.Mui-checked': { color: 'common.white' } }}
-          slotProps={{ input: { 'aria-label': 'Select duplicate group' } }}
-        />
-      </Box>
+      <SelectionCheckboxOverlay
+        checked={selected}
+        onToggle={() => onToggle(group.id)}
+        ariaLabel="Select duplicate group"
+      />
       <CardActionArea
         onClick={() => navigate(`/duplicates/${group.id}`)}
         sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 2, justifyContent: 'flex-start' }}
@@ -144,15 +144,20 @@ function DuplicateGroupCard({ group, selected, onToggle }: DuplicateGroupCardPro
 
 export default function DuplicatesPage() {
   const { activeCircle, activeCircleId } = useCircle();
-  const { hasPermission } = usePermissions();
-  const { items, meta, isLoading, error, fetchGroups, bulkResolve } = useDuplicateGroups();
+  const { hasPermission, isAdmin } = usePermissions();
+  const { settings } = useSystemSettings();
+  const { items, meta, isLoading, error, fetchGroups, bulkResolve, bulkResolveByThreshold } =
+    useDuplicateGroups();
   const [kindFilter, setKindFilter] = useState<DuplicateGroupKind | null>(null);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [thresholdAction, setThresholdAction] = useState<DuplicateResolveAction | null>(null);
+  const [thresholdLoading, setThresholdLoading] = useState(false);
 
   const canTrash = hasPermission('media:delete');
+  const threshold = settings?.dedup?.autoResolveThreshold ?? 60;
 
   useEffect(() => {
     if (!activeCircleId) return;
@@ -200,6 +205,27 @@ export default function DuplicatesPage() {
     }
   };
 
+  const handleThresholdConfirm = async () => {
+    const action = thresholdAction;
+    setThresholdAction(null);
+    if (!action || !activeCircleId) return;
+    setActionError(null);
+    setThresholdLoading(true);
+    try {
+      const result = await bulkResolveByThreshold(threshold, action);
+      setSelected(new Set());
+      const verb = action === 'trash' ? 'moved to Trash' : 'archived';
+      const skippedNote = result.skipped > 0 ? ` (${result.skipped} skipped)` : '';
+      setSuccessMsg(
+        `Resolved ${result.resolvedGroups} group${result.resolvedGroups !== 1 ? 's' : ''}; ${result.removedCount} photo${result.removedCount !== 1 ? 's' : ''} ${verb}${skippedNote}.`,
+      );
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to resolve duplicate groups');
+    } finally {
+      setThresholdLoading(false);
+    }
+  };
+
   if (!activeCircle) {
     return (
       <Box sx={{ p: { xs: 2, md: 3 } }}>
@@ -218,7 +244,45 @@ export default function DuplicatesPage() {
         <Typography variant="h5" component="h1">
           Review Duplicates
         </Typography>
+        <Box sx={{ flexGrow: 1 }} />
+        {isAdmin && (
+          <Tooltip title="Duplicate detection settings">
+            <IconButton
+              component={RouterLink}
+              to="/admin/settings/duplicates"
+              aria-label="Duplicate detection settings"
+            >
+              <SettingsIcon />
+            </IconButton>
+          </Tooltip>
+        )}
       </Box>
+
+      {/* Resolve-above-threshold actions */}
+      {items.length > 0 && (
+        <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', mb: 2 }}>
+          <Button
+            variant="outlined"
+            color="primary"
+            startIcon={<ArchiveIcon />}
+            disabled={thresholdLoading || !activeCircleId}
+            onClick={() => setThresholdAction('archive')}
+          >
+            Archive above {threshold}
+          </Button>
+          {canTrash && (
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<DeleteIcon />}
+              disabled={thresholdLoading || !activeCircleId}
+              onClick={() => setThresholdAction('trash')}
+            >
+              Delete above {threshold}
+            </Button>
+          )}
+        </Box>
+      )}
 
       {/* Bulk resolve toolbar (only when a selection exists) */}
       <GroupBulkResolveToolbar
@@ -293,6 +357,46 @@ export default function DuplicatesPage() {
           )}
         </Box>
       )}
+
+      {/* Resolve-above-threshold confirm dialog */}
+      <Dialog
+        open={Boolean(thresholdAction)}
+        onClose={() => setThresholdAction(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>
+          {thresholdAction === 'trash'
+            ? `Delete non-best photos above ${threshold}?`
+            : `Archive non-best photos above ${threshold}?`}
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Every pending duplicate group with a match score at or above <strong>{threshold}</strong>{' '}
+            will keep only its suggested best photo; every other photo is{' '}
+            {thresholdAction === 'trash' ? (
+              <>
+                moved to <strong>Trash</strong>. Trashed items can be restored within the retention
+                window.
+              </>
+            ) : (
+              <>
+                <strong>archived</strong>. Archived items can be unarchived later.
+              </>
+            )}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setThresholdAction(null)}>Cancel</Button>
+          <Button
+            variant="contained"
+            color={thresholdAction === 'trash' ? 'error' : 'primary'}
+            onClick={() => void handleThresholdConfirm()}
+          >
+            {thresholdAction === 'trash' ? 'Move to Trash' : 'Archive'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={Boolean(successMsg)}
