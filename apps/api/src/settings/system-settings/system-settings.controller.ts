@@ -23,6 +23,20 @@ import {
 } from '../dto/update-system-settings.dto';
 import { SystemSettingsResponseDto } from '../dto/system-settings-response.dto';
 
+/**
+ * Strip the encrypted SMTP password ciphertext from a settings result before
+ * it leaves over HTTP. The generic system-settings endpoints must never expose
+ * `email.smtpPassword`; the masked value is surfaced only via /api/email-settings.
+ * (No global ZodSerializerInterceptor is registered, so this must happen here.)
+ */
+function redactEmailSecret<T extends { email?: any }>(settings: T): T {
+  if (settings && settings.email) {
+    const { smtpPassword, ...rest } = settings.email as Record<string, unknown>;
+    return { ...settings, email: rest } as T;
+  }
+  return settings;
+}
+
 @ApiTags('System Settings')
 @Controller('system-settings')
 export class SystemSettingsController {
@@ -37,7 +51,7 @@ export class SystemSettingsController {
     type: SystemSettingsResponseDto,
   })
   async getSettings() {
-    return this.systemSettingsService.getSettings();
+    return redactEmailSecret(await this.systemSettingsService.getSettings());
   }
 
   @Put()
@@ -53,7 +67,9 @@ export class SystemSettingsController {
     @Body() dto: UpdateSystemSettingsDto,
     @CurrentUser('id') userId: string,
   ) {
-    return this.systemSettingsService.replaceSettings(dto, userId);
+    return redactEmailSecret(
+      await this.systemSettingsService.replaceSettings(dto, userId),
+    );
   }
 
   @Patch()
@@ -77,6 +93,8 @@ export class SystemSettingsController {
     @Headers('if-match') ifMatch?: string,
   ) {
     const expectedVersion = ifMatch ? parseInt(ifMatch, 10) : undefined;
-    return this.systemSettingsService.patchSettings(dto, userId, expectedVersion);
+    return redactEmailSecret(
+      await this.systemSettingsService.patchSettings(dto, userId, expectedVersion),
+    );
   }
 }

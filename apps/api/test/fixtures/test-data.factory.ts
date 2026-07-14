@@ -118,6 +118,17 @@ export const mockPermissions = {
     name: 'shares:manage_any',
     description: 'Admin: manage any user\'s shares',
   },
+  // Email settings permissions
+  emailSettingsRead: {
+    id: randomUUID(),
+    name: 'email_settings:read',
+    description: 'View email provider configuration and test connectivity',
+  },
+  emailSettingsWrite: {
+    id: randomUUID(),
+    name: 'email_settings:write',
+    description: 'Configure email provider credentials, set active provider, and send test emails',
+  },
 };
 
 export const mockRoles = {
@@ -420,6 +431,8 @@ export const rolePermissionsMap = {
     mockPermissions.mediaDeleteAny,
     mockPermissions.sharesManage,
     mockPermissions.sharesManageAny,
+    mockPermissions.emailSettingsRead,
+    mockPermissions.emailSettingsWrite,
   ],
   contributor: [
     mockPermissions.userSettingsRead,

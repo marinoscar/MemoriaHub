@@ -18,6 +18,7 @@ import { JwtPayload } from './strategies/jwt.strategy';
 import { AuthenticatedUser } from './interfaces/authenticated-user.interface';
 import { TokenResponseDto } from './dto/auth-user.dto';
 import { AuthProviderDto } from './dto/auth-provider.dto';
+import { EmailService } from '../email/email.service';
 
 export interface FullTokenResponse {
   accessToken: string;
@@ -35,6 +36,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly adminBootstrapService: AdminBootstrapService,
     private readonly allowlistService: AllowlistService,
+    private readonly email: EmailService,
   ) {}
 
   /**
@@ -667,12 +669,13 @@ export class AuthService {
     };
 
     for (const invite of pendingInvites) {
-      await this.prisma.$transaction(async (tx) => {
+      const joinedOrUpgraded = await this.prisma.$transaction(async (tx) => {
         // Check if already a member
         const existing = await tx.circleMember.findUnique({
           where: { circleId_userId: { circleId: invite.circleId, userId } },
         });
 
+        let membershipChanged = false;
         if (existing) {
           // Only upgrade role, never downgrade
           const existingRank = ROLE_RANK[existing.role] ?? 0;
@@ -682,11 +685,13 @@ export class AuthService {
               where: { circleId_userId: { circleId: invite.circleId, userId } },
               data: { role: invite.role },
             });
+            membershipChanged = true;
           }
         } else {
           await tx.circleMember.create({
             data: { circleId: invite.circleId, userId, role: invite.role },
           });
+          membershipChanged = true;
         }
 
         // Mark invite as claimed
@@ -694,9 +699,48 @@ export class AuthService {
           where: { id: invite.id },
           data: { claimedById: userId, claimedAt: new Date() },
         });
+
+        return membershipChanged;
       });
 
       this.logger.log(`Circle invite ${invite.id} claimed by user ${userId} for circle ${invite.circleId}`);
+
+      // Membership-confirmation email for each newly-created/upgraded membership.
+      if (joinedOrUpgraded) {
+        await this.sendMembershipConfirmation(invite.circleId, email, invite.role);
+      }
+    }
+  }
+
+  /**
+   * Best-effort membership-confirmation email sent when a pending invite is
+   * claimed on first login. Never throws.
+   */
+  private async sendMembershipConfirmation(
+    circleId: string,
+    recipientEmail: string,
+    role: string,
+  ): Promise<void> {
+    try {
+      const circle = await this.prisma.circle.findUnique({
+        where: { id: circleId },
+        select: { name: true, description: true },
+      });
+      if (!circle) return;
+
+      const appUrl = process.env['APP_URL'] || 'http://localhost:3535';
+      this.email.sendEmailAsync(recipientEmail, 'membership-confirmation', {
+        circleName: circle.name,
+        circleDescription: circle.description ?? undefined,
+        role,
+        viewUrl: `${appUrl}/circles/${circleId}`,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to enqueue membership-confirmation email on invite claim: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
     }
   }
 

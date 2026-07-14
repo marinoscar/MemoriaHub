@@ -91,6 +91,10 @@ const PERMISSIONS = [
   // Sharing (Admin + Contributor; manage_any = Admin only)
   { name: 'shares:manage', description: 'Create, list, update, and revoke own shares' },
   { name: 'shares:manage_any', description: 'Admin: manage any user\'s shares' },
+
+  // Email Provider Settings (Admin only)
+  { name: 'email_settings:read', description: 'View email provider configuration and test connectivity' },
+  { name: 'email_settings:write', description: 'Configure email provider credentials, set active provider, and send test emails' },
 ] as const;
 
 // Role to permissions mapping
@@ -141,6 +145,9 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     // Sharing: admin can manage any share
     'shares:manage',
     'shares:manage_any',
+    // Email Provider Settings: admin-only
+    'email_settings:read',
+    'email_settings:write',
   ],
   contributor: [
     'user_settings:read',

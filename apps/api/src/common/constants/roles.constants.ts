@@ -79,6 +79,10 @@ export const PERMISSIONS = {
   GEO_SETTINGS_READ: 'geo_settings:read',
   GEO_SETTINGS_WRITE: 'geo_settings:write',
 
+  // Email Provider Settings (Admin only)
+  EMAIL_SETTINGS_READ: 'email_settings:read',
+  EMAIL_SETTINGS_WRITE: 'email_settings:write',
+
   // Sharing (Admin + Contributor; manage_any = Admin only)
   SHARES_MANAGE: 'shares:manage',
   SHARES_MANAGE_ANY: 'shares:manage_any',

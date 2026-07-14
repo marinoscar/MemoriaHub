@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from './circle-membership.service';
 import { AllowlistService } from '../allowlist/allowlist.service';
+import { EmailService } from '../email/email.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { CircleRole } from '@prisma/client';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
@@ -32,7 +33,13 @@ export class CirclesService {
     private readonly prisma: PrismaService,
     private readonly membership: CircleMembershipService,
     private readonly allowlist: AllowlistService,
+    private readonly email: EmailService,
   ) {}
+
+  /** Base URL for building absolute links in emails. */
+  private appUrl(): string {
+    return process.env['APP_URL'] || 'http://localhost:3535';
+  }
 
   // ----- Circles -----
 
@@ -157,7 +164,7 @@ export class CirclesService {
     });
     if (!targetUser) throw new NotFoundException(`User ${dto.userId} not found`);
 
-    return this.prisma.circleMember.upsert({
+    const member = await this.prisma.circleMember.upsert({
       where: { circleId_userId: { circleId, userId: dto.userId } },
       update: { role: dto.role },
       create: { circleId, userId: dto.userId, role: dto.role },
@@ -167,6 +174,43 @@ export class CirclesService {
         },
       },
     });
+
+    // Membership-confirmation email (best-effort, fire-and-forget).
+    if (member.user?.email) {
+      await this.sendMembershipEmail(circleId, member.user.email, dto.role);
+    }
+
+    return member;
+  }
+
+  /**
+   * Best-effort membership-confirmation email. Never blocks or fails the request.
+   */
+  private async sendMembershipEmail(
+    circleId: string,
+    recipientEmail: string,
+    role: string,
+  ): Promise<void> {
+    try {
+      const circle = await this.prisma.circle.findUnique({
+        where: { id: circleId },
+        select: { name: true, description: true },
+      });
+      if (!circle) return;
+
+      this.email.sendEmailAsync(recipientEmail, 'membership-confirmation', {
+        circleName: circle.name,
+        circleDescription: circle.description ?? undefined,
+        role,
+        viewUrl: `${this.appUrl()}/circles/${circleId}`,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to enqueue membership-confirmation email: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 
   async updateMemberRole(
@@ -269,13 +313,18 @@ export class CirclesService {
         throw new ConflictException('Invite already claimed by this user');
       }
       // Update role on pending invite
-      return this.prisma.circleInvite.update({
+      const updated = await this.prisma.circleInvite.update({
         where: { circleId_email: { circleId, email } },
         data: { role: dto.role, notes: dto.notes },
       });
+      // Only re-send on a GENUINE role change, not an idempotent repeat call.
+      if (existing.role !== dto.role) {
+        await this.sendInvitationEmail(circleId, email, user.id);
+      }
+      return updated;
     }
 
-    return this.prisma.circleInvite.create({
+    const created = await this.prisma.circleInvite.create({
       data: {
         circleId,
         email,
@@ -284,6 +333,53 @@ export class CirclesService {
         addedById: user.id,
       },
     });
+
+    // New invite — send the invitation email (fire-and-forget).
+    await this.sendInvitationEmail(circleId, email, user.id);
+
+    return created;
+  }
+
+  /**
+   * Best-effort circle-invitation email. Never blocks or fails the request path.
+   */
+  private async sendInvitationEmail(
+    circleId: string,
+    recipientEmail: string,
+    inviterUserId: string,
+  ): Promise<void> {
+    try {
+      const [circle, inviter] = await Promise.all([
+        this.prisma.circle.findUnique({
+          where: { id: circleId },
+          select: { name: true },
+        }),
+        this.prisma.user.findUnique({
+          where: { id: inviterUserId },
+          select: { displayName: true, providerDisplayName: true },
+        }),
+      ]);
+      if (!circle) return;
+
+      const inviterName =
+        inviter?.displayName ?? inviter?.providerDisplayName ?? undefined;
+      const acceptUrl = `${this.appUrl()}/activate?returnTo=${encodeURIComponent(
+        `/circles/${circleId}`,
+      )}`;
+
+      this.email.sendEmailAsync(recipientEmail, 'circle-invitation', {
+        circleName: circle.name,
+        inviterName,
+        acceptUrl,
+        recipientEmail,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to enqueue circle-invitation email: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 
   async revokeInvite(user: RequestUser, circleId: string, inviteId: string) {

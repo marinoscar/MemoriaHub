@@ -16,6 +16,8 @@ import {
   DEFAULT_SYSTEM_SETTINGS,
   SystemSettingsValue,
 } from '../../src/common/types/settings.types';
+import { SystemSettingsService } from '../../src/settings/system-settings/system-settings.service';
+import { encryptSecret } from '../../src/common/crypto/secret-cipher';
 
 describe('System Settings Integration', () => {
   let context: TestContext;
@@ -65,11 +67,66 @@ describe('System Settings Integration', () => {
       expect(response.body.data.updatedAt).toBeDefined();
     });
 
+    it('should never include email.smtpPassword even when a value is configured', async () => {
+      const admin = await createMockAdminUser(context);
+
+      const originalKey = process.env['SECRETS_ENCRYPTION_KEY'];
+      process.env['SECRETS_ENCRYPTION_KEY'] = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=';
+      const ciphertext = encryptSecret('super-secret-smtp-password');
+      if (originalKey === undefined) {
+        delete process.env['SECRETS_ENCRYPTION_KEY'];
+      } else {
+        process.env['SECRETS_ENCRYPTION_KEY'] = originalKey;
+      }
+
+      context.prismaMock.systemSettings.findUnique.mockResolvedValue({
+        id: 'settings-1',
+        key: 'global',
+        value: {
+          ...DEFAULT_SYSTEM_SETTINGS,
+          email: {
+            provider: 'smtp',
+            enabled: true,
+            fromAddress: 'noreply@example.com',
+            smtpHost: 'smtp.example.com',
+            smtpPassword: ciphertext,
+          },
+        },
+        version: 1,
+        updatedAt: new Date(),
+        updatedByUserId: null,
+        updatedByUser: null,
+      } as any);
+
+      // Force a fresh read past the 5s in-process settings cache.
+      const settingsService = context.module.get(SystemSettingsService);
+      (settingsService as any).settingsCache = null;
+
+      const response = await request(context.app.getHttpServer())
+        .get('/api/system-settings')
+        .set(authHeader(admin.accessToken))
+        .expect(200);
+
+      const bodyStr = JSON.stringify(response.body);
+      expect(bodyStr).not.toContain('smtpPassword');
+      expect(bodyStr).not.toContain(ciphertext);
+      expect(bodyStr).not.toContain('super-secret-smtp-password');
+
+      if (response.body.data.email) {
+        expect(response.body.data.email).not.toHaveProperty('smtpPassword');
+      }
+    });
+
     // Note: ETag header not currently implemented in controller
   });
 
   describe.skip('PUT /api/system-settings', () => {
+    // Pre-existing type gap (unrelated to the email feature): SystemSettingsValue
+    // has since grown several required top-level sections (ai, face, storage, ...).
+    // Spread the defaults so this fixture still satisfies the type without
+    // hand-maintaining every section here; this block is skipped at runtime.
     const newSettings: SystemSettingsValue = {
+      ...DEFAULT_SYSTEM_SETTINGS,
       ui: { allowUserThemeOverride: false },
       features: { newFeature: true },
     };

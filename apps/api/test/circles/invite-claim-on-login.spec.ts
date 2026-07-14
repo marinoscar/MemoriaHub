@@ -8,6 +8,7 @@ import { AuthService } from '../../src/auth/auth.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { AdminBootstrapService } from '../../src/common/services/admin-bootstrap.service';
 import { AllowlistService } from '../../src/allowlist/allowlist.service';
+import { EmailService } from '../../src/email/email.service';
 import { createMockPrismaService, MockPrismaService } from '../mocks/prisma.mock';
 import { randomUUID } from 'crypto';
 
@@ -74,6 +75,7 @@ describe('Invite Claim on Login (AuthService.handleGoogleLogin)', () => {
   let mockConfigService: jest.Mocked<ConfigService>;
   let mockAdminBootstrapService: { shouldGrantAdminRole: jest.Mock };
   let mockAllowlistService: { isEmailAllowed: jest.Mock; markEmailClaimed: jest.Mock };
+  let mockEmailService: { sendEmail: jest.Mock; sendEmailAsync: jest.Mock };
 
   // Shared constants
   const CIRCLE_ID = 'circle-001';
@@ -105,6 +107,11 @@ describe('Invite Claim on Login (AuthService.handleGoogleLogin)', () => {
       markEmailClaimed: jest.fn().mockResolvedValue(undefined),
     };
 
+    mockEmailService = {
+      sendEmail: jest.fn().mockResolvedValue({ success: true, messageId: 'mock-message-id' }),
+      sendEmailAsync: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
@@ -113,6 +120,7 @@ describe('Invite Claim on Login (AuthService.handleGoogleLogin)', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: AdminBootstrapService, useValue: mockAdminBootstrapService },
         { provide: AllowlistService, useValue: mockAllowlistService },
+        { provide: EmailService, useValue: mockEmailService },
       ],
     }).compile();
 
@@ -406,6 +414,57 @@ describe('Invite Claim on Login (AuthService.handleGoogleLogin)', () => {
       // Two transactions should have run (one per invite)
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(2);
       expect(mockPrisma.circleMember.create).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // =========================================================================
+  // Email graceful degradation
+  // =========================================================================
+
+  describe('Email failures never block invite claim on login', () => {
+    it('still claims the invite and completes login when EmailService.sendEmailAsync throws', async () => {
+      const user = makeUser({ id: EXISTING_USER_ID });
+      setupExistingUserIdentity(user);
+
+      const invite = makeCircleInvite({
+        email: 'alice@example.com',
+        circleId: CIRCLE_ID,
+        role: 'collaborator' as CircleRole,
+      });
+      mockPrisma.circleInvite.findMany.mockResolvedValue([invite] as any);
+      setupTransactionToExecuteCallback();
+
+      mockPrisma.circleMember.findUnique.mockResolvedValue(null);
+      mockPrisma.circleMember.create.mockResolvedValue({
+        circleId: CIRCLE_ID,
+        userId: EXISTING_USER_ID,
+        role: 'collaborator',
+      } as any);
+      mockPrisma.circleInvite.update.mockResolvedValue({
+        ...invite,
+        claimedById: EXISTING_USER_ID,
+        claimedAt: new Date(),
+      } as any);
+
+      // The membership-confirmation email lookup succeeds, but the send itself throws.
+      mockPrisma.circle.findUnique.mockResolvedValue({
+        name: 'Test Circle',
+        description: null,
+      } as any);
+      mockEmailService.sendEmailAsync.mockImplementation(() => {
+        throw new Error('email provider exploded');
+      });
+
+      const tokens = await service.handleGoogleLogin(makeGoogleProfile());
+
+      expect(tokens.accessToken).toBe('mock-access-token');
+      expect(mockPrisma.circleInvite.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: invite.id },
+          data: expect.objectContaining({ claimedById: EXISTING_USER_ID }),
+        }),
+      );
+      expect(mockEmailService.sendEmailAsync).toHaveBeenCalled();
     });
   });
 });

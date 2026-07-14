@@ -424,6 +424,14 @@ The active reverse-geocoding provider is chosen in the Admin Geo Settings page a
 App-wide geocode backfill across all circles (not circle-scoped). Processes items where `takenLat` and `takenLng` are non-null.
 - `POST /api/admin/geocode/backfill` body `{ from?, to?, force? }` - Bulk-enqueue `geocode` enrichment jobs for all media items with GPS across every circle; `from`/`to` (optional ISO-8601) bound `capturedAt`; when `force` is false (default) only items whose `media_geocode_status` is absent or not `processed` are enqueued; returns `{ enqueued }` (geo_settings:write)
 
+### Email Settings (Admin only — email_settings:read / email_settings:write)
+Admin-configurable transactional email with two provider routes: AWS SES (reuses the AWS keys already stored for the S3 storage provider in `storage_provider_credentials` — no separate credential) and SMTP (nodemailer; Gmail/M365/SendGrid/Mailgun/WorkMail/Custom presets). Two transactional emails are sent: circle invitation (on `POST /api/circles/:id/invites`) and circle membership confirmation (on member-add / invite-claim). Sends are fire-and-forget — a failed send never blocks or fails the user action — with graceful degradation when unconfigured.
+- `GET /api/email-settings` (email_settings:read) - Get masked email provider configuration: `{ provider: 'ses'|'smtp'|null, enabled, fromAddress, fromName, sesRegion, sesCredentialAvailable, smtp: { host, port, useTls, username, passwordConfigured, passwordLast4 }, credentialSource: 'ses:reuses-s3'|'smtp:inline'|null }`; never returns the SMTP password ciphertext/plaintext
+- `PUT /api/email-settings` (email_settings:write) - Update email provider configuration; `smtpPassword` is encrypted at rest — omitting or blanking it preserves the stored password
+- `POST /api/email-settings/test` body `{ recipient }` (email_settings:write) - Send a test email through the active provider; returns `{ ok, messageId?, error? }`, surfacing the raw SES/SMTP error on failure
+
+When `provider='ses'`, AWS credentials are read from `storage_provider_credentials` (provider='s3') — single source of truth, no duplicate credential storage. The AWS IAM user (the same one used for S3 storage) must additionally have `ses:SendEmail` and `ses:SendRawEmail`. SES reuse assumes REAL AWS keys — if the s3 provider points at a non-AWS/custom endpoint (MinIO/R2), `sesCredentialAvailable` is false and SES won't authenticate. Unverified SES (sandbox) accounts can only send to/from verified identities.
+
 ### Media — Geo Services
 - `GET /api/media/geo/reverse?lat=&lng=` - On-demand reverse geocoding; provider resolved per-call from system setting `geo.reverseProvider` (`offline`|`nominatim`|`google`), selected in Admin Settings → Geo (fallback: `GEO_PROVIDER` env var; default `offline`)
 - `GET /api/media/geo/search?q=&limit=` - Forward geocoding via Nominatim; requires system setting `geo.forwardSearchEnabled=true` (fallback: `GEO_FORWARD_SEARCH_ENABLED=true`)
@@ -611,6 +619,7 @@ Sub-pages:
 - `/admin/settings/location-inference` — global location inference toggle (`features.locationInference`), all six `locationInference.*` parameters, global backfill
 - `/admin/settings/social-media` — global social-media video detection toggle (`features.socialMediaDetection`), OCR/threshold tuning (`socialMedia.*`), global backfill
 - `/admin/settings/geo` — geo provider settings (`geo.provider`, `geo.forwardSearchEnabled`)
+- `/admin/settings/email` — email provider configuration (SES vs SMTP toggle, provider presets, test-connection, masked credentials, enable/disable)
 - `/admin/settings/storage/providers` — storage provider configuration (replaces `/admin/storage-providers`)
 - `/admin/settings/storage/insights` — storage insights dashboard
 - `/admin/settings/jobs` — enrichment job queue (replaces `/admin/jobs`)
@@ -696,6 +705,8 @@ Agentic search is **stateless** — no conversation rows are stored server-side.
 - `face_settings:write` - Configure face provider credentials and set active detection provider/model (Admin only)
 - `geo_settings:read` - View geo provider config, test provider connectivity (Admin only)
 - `geo_settings:write` - Configure geo provider credentials, set active reverse provider, run app-wide geocode backfill (Admin only)
+- `email_settings:read` - View email provider configuration and test connectivity (Admin only)
+- `email_settings:write` - Configure email provider credentials, set active provider, and send test emails (Admin only)
 - `jobs:read` - View enrichment job queue stats and list jobs (Admin only)
 - `jobs:write` - Retry, reset, and delete enrichment jobs (Admin only)
 - `shares:manage` - Create, list, update expiration, and revoke own public shares (Contributor + Admin)
@@ -720,7 +731,7 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 - `user_identities` - OAuth provider identities (provider + subject)
 - `roles` / `permissions` / `role_permissions` - RBAC
 - `user_roles` - User-to-role assignments
-- `system_settings` - Global app settings (JSONB)
+- `system_settings` - Global app settings (JSONB); `email.smtpPassword` is AES-256-GCM encrypted at rest via `SECRETS_ENCRYPTION_KEY` and redacted from the generic `GET /api/system-settings` response — surfaced only masked (last-4) via `GET /api/email-settings`
 - `user_settings` - Per-user settings (JSONB); includes `activeCircleId` (UX convenience, never trusted for authz)
 - `audit_events` - Action audit log
 - `refresh_tokens` - JWT refresh tokens (hashed)
@@ -845,6 +856,15 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 - `GEO_FORWARD_SEARCH_ENABLED` - Enable `GET /api/media/geo/search` forward geocoding (default: `false`; only typed query leaves server, never GPS). Also configurable at runtime via system setting `geo.forwardSearchEnabled`.
 - `GEO_FORWARD_PROVIDER` - Forward geocoding provider: `nominatim` (default, OSM) or `google`; Google option requires `GOOGLE_MAPS_API_KEY`
 - `GOOGLE_MAPS_API_KEY` - Google Maps API key for forward geocoding via `GEO_FORWARD_PROVIDER=google`; server-side only, never exposed to clients. For **reverse** geocoding the Google API key is stored encrypted in the `geo_provider_credentials` table and configured via the Admin UI — this env var does not affect reverse geocoding.
+
+**Email:**
+- `EMAIL_PROVIDER` - Bootstrap default for `email.provider`: `ses` or `smtp`; only seeds the system setting's default before an explicit value is saved via the admin UI (`/admin/settings/email`)
+- `AWS_SES_REGION` - Bootstrap default for `email.sesRegion`; AWS credentials for SES are NOT set via env vars here — they are reused from the S3 storage provider's `storage_provider_credentials` row (see Storage Provider Configuration above)
+- `SMTP_HOST` / `SMTP_PORT` / `SMTP_USE_TLS` / `SMTP_USERNAME` - Bootstrap defaults for the corresponding `email.smtp*` settings
+- `SMTP_PASSWORD` - Bootstrap default for `email.smtpPassword`; encrypted into the setting via `SECRETS_ENCRYPTION_KEY` on first boot, then managed exclusively through the admin UI thereafter
+- `EMAIL_FROM_ADDRESS` / `EMAIL_FROM_NAME` - Bootstrap defaults for `email.fromAddress` / `email.fromName`
+
+**AWS SES IAM note:** the AWS IAM user used for S3 storage must additionally have `ses:SendEmail` and `ses:SendRawEmail` permissions for the `ses` provider to work. SES reuse assumes real AWS keys — if the S3 provider points at a non-AWS/custom endpoint (MinIO/R2), `sesCredentialAvailable` is false and SES cannot authenticate. Unverified SES (sandbox) accounts can only send to/from verified identities.
 
 **Face Recognition:**
 - `FACE_COMPREFACE_URL` - Base URL of the CompreFace core sidecar (default: `http://compreface-core:3000`); used as the default `baseUrl` for the CompreFace provider. The provider is keyless — no API key is required.
@@ -994,6 +1014,18 @@ Requires `features.faceAutoArchive=true` to have any effect. Editable in Admin S
 The geo provider is now configurable at runtime in addition to the env vars (env vars remain as fallback defaults):
 - `geo.provider` — string `'offline'` | `'nominatim'`, default resolved from `GEO_PROVIDER` env var; editable in `/admin/settings/geo`
 - `geo.forwardSearchEnabled` — boolean, default resolved from `GEO_FORWARD_SEARCH_ENABLED` env var; editable in `/admin/settings/geo`
+
+**Email Settings (System Settings):**
+
+Stored under the `email.*` namespace in `system_settings` JSONB; editable in Admin Settings → Email (`/admin/settings/email`).
+- `email.provider` — `'ses'` | `'smtp'` | `null`, default `null`; selects the active transactional email provider
+- `email.enabled` — boolean, default false; global on/off for sending circle-invitation and membership-confirmation emails
+- `email.sesRegion` — string, nullable; AWS region used for SES sends. AWS credentials themselves are NOT stored here — when `provider='ses'`, credentials are read from `storage_provider_credentials` (provider='s3'), reusing the S3 storage provider's AWS keys rather than duplicating a credential
+- `email.smtpHost`, `email.smtpPort` (default 587), `email.smtpUseTls` (default true), `email.smtpUsername` — SMTP connection settings for the `smtp` provider (nodemailer; Gmail/M365/SendGrid/Mailgun/WorkMail/Custom presets)
+- `email.smtpPassword` — **AES-256-GCM encrypted at rest via `SECRETS_ENCRYPTION_KEY`** (the same key used for AI/Face/Storage/Geo provider credentials); redacted from the generic `GET /api/system-settings` response; surfaced only masked (last-4) via `GET /api/email-settings` as `smtp.passwordLast4`
+- `email.fromAddress`, `email.fromName` — sender identity used on outgoing mail
+
+Two transactional emails are driven by this configuration: circle invitation (on `POST /api/circles/:id/invites`) and circle membership confirmation (on member-add / invite-claim). Both are fire-and-forget — a failed send never blocks or fails the triggering user action — and gracefully no-op when `email.enabled` is false or `email.provider` is unset.
 
 **Storage Insights:**
 
