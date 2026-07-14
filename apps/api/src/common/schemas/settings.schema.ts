@@ -93,12 +93,14 @@ export const systemSettingsSchema = z.object({
     timeGapSeconds: z.number().int().min(1).max(300).default(10),
     hashDistance: z.number().int().min(0).max(32).default(10),
     minGroupSize: z.number().int().min(2).max(20).default(3),
-  }).optional().default({ timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3 }),
+    autoResolveThreshold: z.number().int().min(0).max(100).default(60),
+  }).optional().default({ timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3, autoResolveThreshold: 60 }),
   dedup: z.object({
     similarityThreshold: z.number().min(0.80).max(0.995).default(0.96),
     hashMaxDistance: z.number().int().min(0).max(16).default(6),
     knnCandidates: z.number().int().min(5).max(50).default(20),
-  }).optional().default({ similarityThreshold: 0.96, hashMaxDistance: 6, knnCandidates: 20 }),
+    autoResolveThreshold: z.number().int().min(0).max(100).default(60),
+  }).optional().default({ similarityThreshold: 0.96, hashMaxDistance: 6, knnCandidates: 20, autoResolveThreshold: 60 }),
   locationInference: z.object({
     maxGapMinutes: z.number().int().min(1).max(1440).default(30),
     maxExtrapolationGapMinutes: z.number().int().min(1).max(240).default(10),
@@ -197,11 +199,13 @@ export const systemSettingsPatchSchema = z.object({
     timeGapSeconds: z.number().int().min(1).max(300).optional(),
     hashDistance: z.number().int().min(0).max(32).optional(),
     minGroupSize: z.number().int().min(2).max(20).optional(),
+    autoResolveThreshold: z.number().int().min(0).max(100).optional(),
   }).optional(),
   dedup: z.object({
     similarityThreshold: z.number().min(0.80).max(0.995).optional(),
     hashMaxDistance: z.number().int().min(0).max(16).optional(),
     knnCandidates: z.number().int().min(5).max(50).optional(),
+    autoResolveThreshold: z.number().int().min(0).max(100).optional(),
   }).optional(),
   locationInference: z.object({
     maxGapMinutes: z.number().int().min(1).max(1440).optional(),

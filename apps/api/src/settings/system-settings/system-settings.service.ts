@@ -265,6 +265,10 @@ export class SystemSettingsService {
           (dto as any).burst?.minGroupSize ??
           (current as any).burst?.minGroupSize ??
           3,
+        autoResolveThreshold:
+          (dto as any).burst?.autoResolveThreshold ??
+          (current as any).burst?.autoResolveThreshold ??
+          60,
       },
       dedup: {
         similarityThreshold:
@@ -279,6 +283,10 @@ export class SystemSettingsService {
           (dto as any).dedup?.knnCandidates ??
           (current as any).dedup?.knnCandidates ??
           20,
+        autoResolveThreshold:
+          (dto as any).dedup?.autoResolveThreshold ??
+          (current as any).dedup?.autoResolveThreshold ??
+          60,
       },
       locationInference: {
         maxGapMinutes:

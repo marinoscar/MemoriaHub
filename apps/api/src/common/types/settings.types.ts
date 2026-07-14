@@ -83,11 +83,15 @@ export interface SystemSettingsValue {
     timeGapSeconds: number;
     hashDistance: number;
     minGroupSize: number;
+    /** Confidence percentage (0–100) at/above which a pending burst group is eligible for bulk auto-resolve. */
+    autoResolveThreshold: number;
   };
   dedup?: {
     similarityThreshold: number;
     hashMaxDistance: number;
     knnCandidates: number;
+    /** Confidence percentage (0–100) at/above which a pending duplicate group is eligible for bulk auto-resolve. */
+    autoResolveThreshold: number;
   };
   locationInference?: {
     maxGapMinutes: number;
@@ -208,11 +212,13 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     timeGapSeconds: 10,
     hashDistance: 10,
     minGroupSize: 3,
+    autoResolveThreshold: 60,
   },
   dedup: {
     similarityThreshold: 0.96,
     hashMaxDistance: 6,
     knnCandidates: 20,
+    autoResolveThreshold: 60,
   },
   locationInference: {
     maxGapMinutes: 30,
