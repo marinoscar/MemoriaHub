@@ -105,7 +105,7 @@ describe('MediaEnrichmentService', () => {
         });
       });
 
-      it('enqueues burst_detection with priority 10', async () => {
+      it('enqueues burst_detection with priority 5', async () => {
         await service.enqueueUploadEnrichment(photoItem);
 
         expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith({
@@ -113,7 +113,7 @@ describe('MediaEnrichmentService', () => {
           mediaItemId: photoItem.id,
           circleId: photoItem.circleId,
           reason: JobReason.upload,
-          priority: 10,
+          priority: 5,
         });
       });
 

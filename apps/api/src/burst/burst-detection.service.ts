@@ -454,7 +454,7 @@ export class BurstDetectionService {
     let hashCohesion: number | null = null;
     const hashes = members
       .map((m) => m.perceptualHash)
-      .filter((h): h is string => h !== null);
+      .filter((h): h is string => h !== null && h !== undefined);
     if (hashes.length >= 2 && hashDistanceThreshold > 0) {
       let maxPairwiseHamming = 0;
       for (let i = 0; i < hashes.length; i++) {

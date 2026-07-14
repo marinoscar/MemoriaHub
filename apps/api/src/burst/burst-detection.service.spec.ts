@@ -759,9 +759,9 @@ describe('BurstDetectionService', () => {
     it('includes face term when face rows exist', async () => {
       const members = [
         // media-1 has lower sharpness but many high-confidence faces
-        { id: 'media-1', sharpnessScore: 50, width: 4032, height: 3024, capturedAt: BASE_TIME },
+        { id: 'media-1', sharpnessScore: 50, width: 4032, height: 3024, capturedAt: BASE_TIME, perceptualHash: '123' },
         // media-2 has higher sharpness but zero faces
-        { id: 'media-2', sharpnessScore: 200, width: 4032, height: 3024, capturedAt: BASE_TIME },
+        { id: 'media-2', sharpnessScore: 200, width: 4032, height: 3024, capturedAt: BASE_TIME, perceptualHash: '456' },
       ];
       const faceData = [
         {
@@ -780,8 +780,8 @@ describe('BurstDetectionService', () => {
 
     it('updates mediaCount on the BurstGroup in recomputeGroupScores', async () => {
       const members = [
-        { id: 'media-1', sharpnessScore: 100, width: 4032, height: 3024, capturedAt: BASE_TIME },
-        { id: 'media-neighbor-1', sharpnessScore: 80, width: 3000, height: 2000, capturedAt: BASE_TIME },
+        { id: 'media-1', sharpnessScore: 100, width: 4032, height: 3024, capturedAt: BASE_TIME, perceptualHash: '789' },
+        { id: 'media-neighbor-1', sharpnessScore: 80, width: 3000, height: 2000, capturedAt: BASE_TIME, perceptualHash: '101' },
       ];
       setupForScoring(members);
 
@@ -804,8 +804,8 @@ describe('BurstDetectionService', () => {
         .mockResolvedValueOnce([makeNeighbor()])
         // Step 6 (recomputeGroupScores): group members
         .mockResolvedValueOnce([
-          { id: 'media-1', sharpnessScore: 100, width: 4032, height: 3024, capturedAt: BASE_TIME },
-          { id: 'media-neighbor-1', sharpnessScore: 80, width: 3024, height: 4032, capturedAt: BASE_TIME },
+          { id: 'media-1', sharpnessScore: 100, width: 4032, height: 3024, capturedAt: BASE_TIME, perceptualHash: '111' },
+          { id: 'media-neighbor-1', sharpnessScore: 80, width: 3024, height: 4032, capturedAt: BASE_TIME, perceptualHash: '222' },
         ])
         // Step 7: group members for eviction
         .mockResolvedValueOnce([{ id: 'media-1' }, { id: 'media-neighbor-1' }]);
