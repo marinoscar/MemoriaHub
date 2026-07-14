@@ -446,6 +446,54 @@ describe('PatchSystemSettingsDto (PATCH)', () => {
 
         expect(result.burst).toEqual({});
       });
+
+      it('should preserve burst.autoResolveThreshold when valid', () => {
+        const result = patchSystemSettingsSchema.parse({
+          burst: { autoResolveThreshold: 75 },
+        });
+
+        expect(result.burst?.autoResolveThreshold).toBe(75);
+      });
+
+      it('should accept the minimum valid burst.autoResolveThreshold of 0', () => {
+        const result = patchSystemSettingsSchema.parse({
+          burst: { autoResolveThreshold: 0 },
+        });
+
+        expect(result.burst?.autoResolveThreshold).toBe(0);
+      });
+
+      it('should accept the maximum valid burst.autoResolveThreshold of 100', () => {
+        const result = patchSystemSettingsSchema.parse({
+          burst: { autoResolveThreshold: 100 },
+        });
+
+        expect(result.burst?.autoResolveThreshold).toBe(100);
+      });
+
+      it('should throw when burst.autoResolveThreshold is above the max (101)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            burst: { autoResolveThreshold: 101 },
+          }),
+        ).toThrow();
+      });
+
+      it('should throw when burst.autoResolveThreshold is below the min (-1)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            burst: { autoResolveThreshold: -1 },
+          }),
+        ).toThrow();
+      });
+
+      it('should throw when burst.autoResolveThreshold is a non-integer', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            burst: { autoResolveThreshold: 1.5 },
+          }),
+        ).toThrow();
+      });
     });
 
     describe('storage branch', () => {
@@ -575,6 +623,54 @@ describe('PatchSystemSettingsDto (PATCH)', () => {
         const result = patchSystemSettingsSchema.parse({ dedup: {} });
 
         expect(result.dedup).toEqual({});
+      });
+
+      it('should preserve dedup.autoResolveThreshold when valid', () => {
+        const result = patchSystemSettingsSchema.parse({
+          dedup: { autoResolveThreshold: 80 },
+        });
+
+        expect(result.dedup?.autoResolveThreshold).toBe(80);
+      });
+
+      it('should accept the minimum valid dedup.autoResolveThreshold of 0', () => {
+        const result = patchSystemSettingsSchema.parse({
+          dedup: { autoResolveThreshold: 0 },
+        });
+
+        expect(result.dedup?.autoResolveThreshold).toBe(0);
+      });
+
+      it('should accept the maximum valid dedup.autoResolveThreshold of 100', () => {
+        const result = patchSystemSettingsSchema.parse({
+          dedup: { autoResolveThreshold: 100 },
+        });
+
+        expect(result.dedup?.autoResolveThreshold).toBe(100);
+      });
+
+      it('should throw when dedup.autoResolveThreshold is above the max (101)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            dedup: { autoResolveThreshold: 101 },
+          }),
+        ).toThrow();
+      });
+
+      it('should throw when dedup.autoResolveThreshold is below the min (-1)', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            dedup: { autoResolveThreshold: -1 },
+          }),
+        ).toThrow();
+      });
+
+      it('should throw when dedup.autoResolveThreshold is a non-integer', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({
+            dedup: { autoResolveThreshold: 1.5 },
+          }),
+        ).toThrow();
       });
     });
 

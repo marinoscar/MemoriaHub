@@ -6,12 +6,15 @@
  *  - Rendering all group members and the metadata diff table
  *  - Keep-selection behavior: suggested best item is preselected in the keep
  *    Set; toggling a filmstrip member's checkbox adds/removes it from the
- *    keep set, reflected in the resolve button's enabled state and label.
- *  - Action gating: the Trash toggle option is disabled when the user lacks
- *    media:delete; Archive is always available and is the default action.
- *  - Resolve confirm flow: clicking the resolve button opens a confirm
- *    Dialog; confirming calls resolve() with the correct (keepIds, action)
- *    args and shows a success Snackbar.
+ *    keep set, reflected in the resolve buttons' enabled state and label.
+ *  - Action gating: DuplicateGroupPage renders two standalone decision
+ *    buttons — Archive (primary, always available) and Delete (error color,
+ *    gated on media:delete) — instead of an Archive/Trash ToggleButtonGroup.
+ *    Delete is hidden entirely when the caller lacks media:delete; Archive is
+ *    always available regardless of permission.
+ *  - Resolve confirm flow: clicking the Archive or Delete button opens a
+ *    confirm Dialog; confirming calls resolve() with the correct
+ *    (keepIds, action) args and shows a success Snackbar.
  *  - Dismiss flow: clicking dismiss opens a confirm Dialog; confirming calls
  *    dismiss().
  */
@@ -269,11 +272,11 @@ describe('DuplicateGroupPage', () => {
       await user.click(checkboxes[0]); // media-1, pre-selected -> uncheck
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: /select photos to keep/i })).toBeInTheDocument();
+        expect(screen.getAllByRole('button', { name: /select photos to keep/i }).length).toBeGreaterThan(0);
       });
     });
 
-    it('disables the resolve button when the keep set is empty', async () => {
+    it('disables the resolve buttons when the keep set is empty', async () => {
       const user = userEvent.setup();
       render(<DuplicateGroupPage />);
 
@@ -283,56 +286,48 @@ describe('DuplicateGroupPage', () => {
       await user.click(checkboxes[0]); // uncheck the only pre-selected item
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: /select photos to keep/i })).toBeDisabled();
+        const buttons = screen.getAllByRole('button', { name: /select photos to keep/i });
+        expect(buttons.length).toBeGreaterThan(0);
+        buttons.forEach((btn) => expect(btn).toBeDisabled());
       });
     });
   });
 
-  describe('action gating — Archive/Trash toggle', () => {
-    // The Trash ToggleButton wraps its label in a Tooltip; when disabled the
-    // Tooltip clones an aria-label ("Requires media:delete permission") onto
-    // the inner span, which overrides the button's accessible name. So we
-    // locate the button by its `value` attribute within the toggle group
-    // rather than by accessible name, which is reliable in both states.
-    function getTrashToggleButton() {
-      const group = screen.getByRole('group');
-      const button = within(group)
-        .getAllByRole('button')
-        .find((el) => el.getAttribute('value') === 'trash');
-      if (!button) throw new Error('Trash toggle button not found');
-      return button;
-    }
-
-    it('Trash option is disabled when the user lacks media:delete', async () => {
+  // DuplicateGroupPage renders two standalone decision buttons — Archive
+  // (primary, always available) and Delete (error color, gated on
+  // media:delete) — instead of an Archive/Trash ToggleButtonGroup.
+  describe('action gating — Archive/Delete buttons', () => {
+    it('Delete button is absent when the user lacks media:delete', async () => {
       mockUsePermissions.mockReturnValue(makePermissions({ canTrash: false }));
 
       render(<DuplicateGroupPage />);
 
       await waitFor(() => expect(screen.getByText('Duplicate Group')).toBeInTheDocument());
 
-      expect(getTrashToggleButton()).toBeDisabled();
+      expect(screen.getByRole('button', { name: /keep 1, archive 2 others/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /keep 1, delete 2 others/i })).toBeNull();
     });
 
-    it('Trash option is enabled when the user has media:delete', async () => {
+    it('Delete button is present and enabled when the user has media:delete', async () => {
       mockUsePermissions.mockReturnValue(makePermissions({ canTrash: true }));
 
       render(<DuplicateGroupPage />);
 
       await waitFor(() => expect(screen.getByText('Duplicate Group')).toBeInTheDocument());
 
-      expect(getTrashToggleButton()).not.toBeDisabled();
+      const deleteButton = screen.getByRole('button', { name: /keep 1, delete 2 others/i });
+      expect(deleteButton).not.toBeDisabled();
     });
 
-    it('Archive is available and selected by default regardless of permission', async () => {
+    it('Archive is available regardless of permission', async () => {
       mockUsePermissions.mockReturnValue(makePermissions({ canTrash: false }));
 
       render(<DuplicateGroupPage />);
 
       await waitFor(() => expect(screen.getByText('Duplicate Group')).toBeInTheDocument());
 
-      const archiveButton = screen.getByRole('button', { name: /^archive$/i });
+      const archiveButton = screen.getByRole('button', { name: /keep 1, archive 2 others/i });
       expect(archiveButton).not.toBeDisabled();
-      expect(archiveButton).toHaveAttribute('aria-pressed', 'true');
     });
   });
 
@@ -371,7 +366,7 @@ describe('DuplicateGroupPage', () => {
       });
     });
 
-    it('sends action="trash" when the Trash toggle was selected', async () => {
+    it('sends action="trash" when the Delete button is clicked and confirmed', async () => {
       const user = userEvent.setup();
       const mockResolve = vi
         .fn()
@@ -380,14 +375,11 @@ describe('DuplicateGroupPage', () => {
 
       render(<DuplicateGroupPage />);
 
-      await waitFor(() => expect(screen.getByText('Duplicate Group')).toBeInTheDocument());
-
-      await user.click(screen.getByRole('button', { name: /^trash$/i }));
-
-      const resolveBtn = await screen.findByRole('button', { name: /keep 1, trash 2 others/i });
-      await user.click(resolveBtn);
+      const deleteBtn = await screen.findByRole('button', { name: /keep 1, delete 2 others/i });
+      await user.click(deleteBtn);
 
       const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText(/confirm trash/i)).toBeInTheDocument();
       const confirmBtn = within(dialog).getByRole('button', { name: /move to trash/i });
       await user.click(confirmBtn);
 

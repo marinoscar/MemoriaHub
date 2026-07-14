@@ -28,6 +28,7 @@ import { BurstGroupStatus, CircleRole, MediaType } from '@prisma/client';
 import { BurstQueryDto } from './dto/burst-query.dto';
 import { ResolveBurstDto } from './dto/resolve-burst.dto';
 import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';
+import { BulkResolveBurstThresholdDto } from './dto/bulk-resolve-burst-threshold.dto';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -64,6 +65,14 @@ function makeBulkResolveDto(
   circleId: string = CIRCLE_ID,
 ): BulkResolveBurstDto {
   return { circleId, ids, action } as BulkResolveBurstDto;
+}
+
+function makeBulkResolveThresholdDto(
+  threshold: number,
+  action: 'archive' | 'trash' = 'archive',
+  circleId: string = CIRCLE_ID,
+): BulkResolveBurstThresholdDto {
+  return { circleId, threshold, action } as BulkResolveBurstThresholdDto;
 }
 
 function makeBurstGroupRow(overrides: Partial<{
@@ -811,6 +820,222 @@ describe('BurstService', () => {
 
       const findManyCall = (mockPrisma.burstGroup.findMany as jest.Mock).mock.calls[0][0];
       expect(findManyCall.where.id.in).toEqual([group.id]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // bulkResolveBurstGroupsByThreshold
+  // -------------------------------------------------------------------------
+
+  describe('bulkResolveBurstGroupsByThreshold', () => {
+    function makeThresholdGroup(overrides: Partial<{
+      id: string;
+      circleId: string;
+      status: BurstGroupStatus;
+      suggestedBestItemId: string | null;
+      items: Array<{ id: string }>;
+    }> = {}) {
+      return {
+        id: 'group-1',
+        circleId: CIRCLE_ID,
+        status: BurstGroupStatus.pending,
+        suggestedBestItemId: 'media-1',
+        items: [{ id: 'media-1' }, { id: 'media-2' }, { id: 'media-3' }],
+        ...overrides,
+      };
+    }
+
+    function setupThresholdGroups(groups: ReturnType<typeof makeThresholdGroup>[]) {
+      (mockPrisma.burstGroup.findMany as jest.Mock).mockResolvedValue(groups);
+      (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+      (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+    }
+
+    it('calls assertCircleAccess with collaborator role', async () => {
+      const group = makeThresholdGroup();
+      setupThresholdGroups([group]);
+
+      await service.bulkResolveBurstGroupsByThreshold(
+        makeBulkResolveThresholdDto(70),
+        USER_ID,
+        PERMS_MEDIA_DELETE,
+      );
+
+      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+        USER_ID,
+        CIRCLE_ID,
+        PERMS_MEDIA_DELETE,
+        CircleRole.collaborator,
+      );
+    });
+
+    it('queries only pending groups in the circle with confidence >= threshold/100, capped at 500', async () => {
+      setupThresholdGroups([]);
+
+      await service.bulkResolveBurstGroupsByThreshold(
+        makeBulkResolveThresholdDto(70),
+        USER_ID,
+        PERMS_MEDIA_DELETE,
+      );
+
+      const findManyCall = (mockPrisma.burstGroup.findMany as jest.Mock).mock.calls[0][0];
+      expect(findManyCall.where).toMatchObject({
+        circleId: CIRCLE_ID,
+        status: BurstGroupStatus.pending,
+        confidence: { gte: 0.7 },
+      });
+      expect(findManyCall.take).toBe(500);
+    });
+
+    it('happy path: resolves all groups returned by the query, keeping only suggestedBest', async () => {
+      // The confidence >= threshold filter is applied in SQL, so by the time
+      // groups reach the service every returned row is already eligible.
+      const groupA = makeThresholdGroup({
+        id: 'group-a',
+        suggestedBestItemId: 'media-1',
+        items: [{ id: 'media-1' }, { id: 'media-2' }, { id: 'media-3' }],
+      });
+      const groupB = makeThresholdGroup({
+        id: 'group-b',
+        suggestedBestItemId: 'media-10',
+        items: [{ id: 'media-10' }, { id: 'media-11' }],
+      });
+      setupThresholdGroups([groupA, groupB]);
+
+      const result = await service.bulkResolveBurstGroupsByThreshold(
+        makeBulkResolveThresholdDto(70, 'archive'),
+        USER_ID,
+        PERMS_MEDIA_DELETE,
+      );
+
+      expect(result.data).toMatchObject({
+        resolvedGroups: 2,
+        keptCount: 2,
+        removedCount: 3,
+        action: 'archive',
+        skipped: 0,
+        errors: 0,
+      });
+      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: expect.arrayContaining(['media-2', 'media-3']) } },
+          data: { archivedAt: expect.any(Date) },
+        }),
+      );
+      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: ['media-11'] } },
+          data: { archivedAt: expect.any(Date) },
+        }),
+      );
+    });
+
+    it('action=trash sets deletedAt (not archivedAt) on non-kept members', async () => {
+      const group = makeThresholdGroup();
+      setupThresholdGroups([group]);
+
+      await service.bulkResolveBurstGroupsByThreshold(
+        makeBulkResolveThresholdDto(70, 'trash'),
+        USER_ID,
+        PERMS_MEDIA_DELETE,
+      );
+
+      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: expect.arrayContaining(['media-2', 'media-3']) } },
+          data: { deletedAt: expect.any(Date) },
+        }),
+      );
+    });
+
+    it('throws BadRequestException when action is "trash" but perms lack media:delete', async () => {
+      const group = makeThresholdGroup();
+      setupThresholdGroups([group]);
+
+      await expect(
+        service.bulkResolveBurstGroupsByThreshold(
+          makeBulkResolveThresholdDto(70, 'trash'),
+          USER_ID,
+          PERMS_MEDIA_WRITE, // no media:delete
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      // Permission check should short-circuit before any group lookup/mutation
+      expect(mockPrisma.burstGroup.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaItem.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('allows action "archive" with only media:write perms (media:delete not required)', async () => {
+      const group = makeThresholdGroup();
+      setupThresholdGroups([group]);
+
+      const result = await service.bulkResolveBurstGroupsByThreshold(
+        makeBulkResolveThresholdDto(70, 'archive'),
+        USER_ID,
+        PERMS_MEDIA_WRITE,
+      );
+
+      expect(result.data.resolvedGroups).toBe(1);
+      expect(result.data.action).toBe('archive');
+    });
+
+    it('skips groups whose suggestedBestItemId is no longer a live member (counted in skipped)', async () => {
+      const group = makeThresholdGroup({
+        suggestedBestItemId: 'media-gone',
+        items: [{ id: 'media-1' }, { id: 'media-2' }],
+      });
+      setupThresholdGroups([group]);
+
+      const result = await service.bulkResolveBurstGroupsByThreshold(
+        makeBulkResolveThresholdDto(70),
+        USER_ID,
+        PERMS_MEDIA_DELETE,
+      );
+
+      expect(result.data.resolvedGroups).toBe(0);
+      expect(result.data.skipped).toBe(1);
+      expect(mockPrisma.mediaItem.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('skips groups with a null suggestedBestItemId (counted in skipped)', async () => {
+      const group = makeThresholdGroup({ suggestedBestItemId: null });
+      setupThresholdGroups([group]);
+
+      const result = await service.bulkResolveBurstGroupsByThreshold(
+        makeBulkResolveThresholdDto(70),
+        USER_ID,
+        PERMS_MEDIA_DELETE,
+      );
+
+      expect(result.data.resolvedGroups).toBe(0);
+      expect(result.data.skipped).toBe(1);
+      expect(mockPrisma.mediaItem.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('increments errors and continues processing when one group fails mid-loop', async () => {
+      const groupA = makeThresholdGroup({ id: 'group-a', suggestedBestItemId: 'media-1', items: [{ id: 'media-1' }, { id: 'media-2' }] });
+      const groupB = makeThresholdGroup({ id: 'group-b', suggestedBestItemId: 'media-10', items: [{ id: 'media-10' }, { id: 'media-11' }] });
+      const groupC = makeThresholdGroup({ id: 'group-c', suggestedBestItemId: 'media-20', items: [{ id: 'media-20' }, { id: 'media-21' }] });
+      setupThresholdGroups([groupA, groupB, groupC]);
+
+      (mockPrisma.mediaItem.updateMany as jest.Mock)
+        .mockResolvedValueOnce({ count: 1 }) // group-a
+        .mockRejectedValueOnce(new Error('db boom')) // group-b
+        .mockResolvedValueOnce({ count: 1 }); // group-c
+
+      const result = await service.bulkResolveBurstGroupsByThreshold(
+        makeBulkResolveThresholdDto(70, 'archive'),
+        USER_ID,
+        PERMS_MEDIA_DELETE,
+      );
+
+      expect(result.data.resolvedGroups).toBe(2);
+      expect(result.data.errors).toBe(1);
+      expect(result.data.skipped).toBe(0);
+      expect(mockPrisma.burstGroup.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'group-c' } }),
+      );
     });
   });
 

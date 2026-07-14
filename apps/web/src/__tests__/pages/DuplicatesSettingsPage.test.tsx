@@ -88,12 +88,12 @@ function nonAdminPermissions() {
   };
 }
 
-function makeSystemSettingsMock(duplicateDetection = false) {
+function makeSystemSettingsMock(duplicateDetection = false, autoResolveThreshold = 60) {
   const updateSettings = vi.fn().mockResolvedValue(undefined);
   return {
     settings: {
       features: { autoTagging: false, faceRecognition: false, burstDetection: false, duplicateDetection },
-      dedup: { similarityThreshold: 0.96, hashMaxDistance: 6, knnCandidates: 20 },
+      dedup: { similarityThreshold: 0.96, hashMaxDistance: 6, knnCandidates: 20, autoResolveThreshold },
       ui: { allowUserThemeOverride: true },
       updatedAt: new Date().toISOString(),
       updatedBy: null,
@@ -262,8 +262,39 @@ describe('DuplicatesSettingsPage', () => {
       expect(screen.getByRole('button', { name: /save parameters/i })).toBeInTheDocument();
     });
 
-    it('calls updateSettings with dedup params when Save Parameters is clicked', async () => {
-      const mock = makeSystemSettingsMock(true);
+    it('renders the auto-resolve threshold slider with the value from settings', () => {
+      mockUseSystemSettings.mockReturnValue(makeSystemSettingsMock(false, 80) as any);
+
+      render(<DuplicatesSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByText(/auto-resolve threshold/i)).toBeInTheDocument();
+      const sliders = screen.getAllByRole('slider');
+      const thresholdSlider = sliders.find((s) => s.getAttribute('aria-valuenow') === '80');
+      expect(thresholdSlider).toBeTruthy();
+    });
+
+    it('defaults the auto-resolve threshold slider to 60 when unset', () => {
+      mockUseSystemSettings.mockReturnValue({
+        ...makeSystemSettingsMock(false),
+        settings: {
+          features: { autoTagging: false, faceRecognition: false, burstDetection: false, duplicateDetection: false },
+          dedup: { similarityThreshold: 0.96, hashMaxDistance: 6, knnCandidates: 20 },
+          ui: { allowUserThemeOverride: true },
+          updatedAt: new Date().toISOString(),
+          updatedBy: null,
+          version: 1,
+        },
+      } as any);
+
+      render(<DuplicatesSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const sliders = screen.getAllByRole('slider');
+      const thresholdSlider = sliders.find((s) => s.getAttribute('aria-valuenow') === '60');
+      expect(thresholdSlider).toBeTruthy();
+    });
+
+    it('calls updateSettings with dedup params (including autoResolveThreshold) when Save Parameters is clicked', async () => {
+      const mock = makeSystemSettingsMock(true, 80);
       mockUseSystemSettings.mockReturnValue(mock as any);
 
       const user = userEvent.setup();
@@ -278,6 +309,7 @@ describe('DuplicatesSettingsPage', () => {
               similarityThreshold: expect.any(Number),
               hashMaxDistance: expect.any(Number),
               knnCandidates: expect.any(Number),
+              autoResolveThreshold: 80,
             },
           }),
         );

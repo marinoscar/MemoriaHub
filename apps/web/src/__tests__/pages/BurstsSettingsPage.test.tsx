@@ -76,12 +76,12 @@ function nonAdminPermissions() {
   };
 }
 
-function makeSystemSettingsMock(burstDetection = false) {
+function makeSystemSettingsMock(burstDetection = false, autoResolveThreshold = 60) {
   const updateSettings = vi.fn().mockResolvedValue(undefined);
   return {
     settings: {
       features: { autoTagging: false, faceRecognition: false, burstDetection },
-      burst: { timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3 },
+      burst: { timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3, autoResolveThreshold },
       ui: { allowUserThemeOverride: true },
       updatedAt: new Date().toISOString(),
       updatedBy: null,
@@ -233,8 +233,36 @@ describe('BurstsSettingsPage', () => {
       expect(screen.getByRole('button', { name: /save parameters/i })).toBeInTheDocument();
     });
 
-    it('calls updateSettings with burst params when Save Parameters is clicked', async () => {
-      const mock = makeSystemSettingsMock(true);
+    it('renders the Auto-resolve threshold field pre-filled from settings', () => {
+      mockUseSystemSettings.mockReturnValue(makeSystemSettingsMock(false, 75) as any);
+
+      render(<BurstsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const thresholdInput = screen.getByLabelText(/auto-resolve threshold/i) as HTMLInputElement;
+      expect(thresholdInput.value).toBe('75');
+    });
+
+    it('defaults the Auto-resolve threshold field to 60 when unset', () => {
+      mockUseSystemSettings.mockReturnValue({
+        ...makeSystemSettingsMock(false),
+        settings: {
+          features: { autoTagging: false, faceRecognition: false, burstDetection: false },
+          burst: { timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3 },
+          ui: { allowUserThemeOverride: true },
+          updatedAt: new Date().toISOString(),
+          updatedBy: null,
+          version: 1,
+        },
+      } as any);
+
+      render(<BurstsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const thresholdInput = screen.getByLabelText(/auto-resolve threshold/i) as HTMLInputElement;
+      expect(thresholdInput.value).toBe('60');
+    });
+
+    it('calls updateSettings with burst params (including autoResolveThreshold) when Save Parameters is clicked', async () => {
+      const mock = makeSystemSettingsMock(true, 80);
       mockUseSystemSettings.mockReturnValue(mock as any);
 
       const user = userEvent.setup();
@@ -249,7 +277,30 @@ describe('BurstsSettingsPage', () => {
               timeGapSeconds: expect.any(Number),
               hashDistance: expect.any(Number),
               minGroupSize: expect.any(Number),
+              autoResolveThreshold: 80,
             }),
+          }),
+        );
+      });
+    });
+
+    it('saves an edited Auto-resolve threshold value', async () => {
+      const mock = makeSystemSettingsMock(true, 60);
+      mockUseSystemSettings.mockReturnValue(mock as any);
+
+      const user = userEvent.setup();
+      render(<BurstsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const thresholdInput = screen.getByLabelText(/auto-resolve threshold/i);
+      await user.clear(thresholdInput);
+      await user.type(thresholdInput, '85');
+
+      await user.click(screen.getByRole('button', { name: /save parameters/i }));
+
+      await waitFor(() => {
+        expect(mock.updateSettings).toHaveBeenCalledWith(
+          expect.objectContaining({
+            burst: expect.objectContaining({ autoResolveThreshold: 85 }),
           }),
         );
       });

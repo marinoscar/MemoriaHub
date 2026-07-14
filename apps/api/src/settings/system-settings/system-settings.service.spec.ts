@@ -926,6 +926,174 @@ describe('SystemSettingsService', () => {
         });
       });
     });
+
+    describe('burst.autoResolveThreshold and dedup.autoResolveThreshold handling', () => {
+      it('defaults burst.autoResolveThreshold to 60 when it has never been set', async () => {
+        const existingValue = {
+          ...DEFAULT_SYSTEM_SETTINGS,
+          burst: { timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3 } as any,
+        };
+        mockPrisma.systemSettings.findUnique.mockResolvedValue({
+          ...mockSystemSettings,
+          value: existingValue as any,
+        } as any);
+
+        mockPrisma.systemSettings.update.mockResolvedValue({
+          ...mockSystemSettings,
+          value: {
+            ...existingValue,
+            burst: { ...existingValue.burst, autoResolveThreshold: 60 },
+          } as any,
+          version: 2,
+        } as any);
+        mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+        const result = await service.patchSettings(
+          { ui: { allowUserThemeOverride: true } },
+          mockUserId,
+        );
+
+        const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+        expect((updateCall.data.value as any).burst.autoResolveThreshold).toBe(60);
+        expect((result as any).burst.autoResolveThreshold).toBe(60);
+      });
+
+      it('defaults dedup.autoResolveThreshold to 60 when it has never been set', async () => {
+        const existingValue = {
+          ...DEFAULT_SYSTEM_SETTINGS,
+          dedup: { similarityThreshold: 0.96, hashMaxDistance: 6, knnCandidates: 20 } as any,
+        };
+        mockPrisma.systemSettings.findUnique.mockResolvedValue({
+          ...mockSystemSettings,
+          value: existingValue as any,
+        } as any);
+
+        mockPrisma.systemSettings.update.mockResolvedValue({
+          ...mockSystemSettings,
+          value: {
+            ...existingValue,
+            dedup: { ...existingValue.dedup, autoResolveThreshold: 60 },
+          } as any,
+          version: 2,
+        } as any);
+        mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+        const result = await service.patchSettings(
+          { ui: { allowUserThemeOverride: true } },
+          mockUserId,
+        );
+
+        const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+        expect((updateCall.data.value as any).dedup.autoResolveThreshold).toBe(60);
+        expect((result as any).dedup.autoResolveThreshold).toBe(60);
+      });
+
+      it('preserves a non-default burst.autoResolveThreshold value when patching an unrelated field', async () => {
+        const existingValue = {
+          ...DEFAULT_SYSTEM_SETTINGS,
+          burst: { timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3, autoResolveThreshold: 85 },
+        };
+        mockPrisma.systemSettings.findUnique.mockResolvedValue({
+          ...mockSystemSettings,
+          value: existingValue as any,
+        } as any);
+
+        mockPrisma.systemSettings.update.mockResolvedValue({
+          ...mockSystemSettings,
+          value: {
+            ...existingValue,
+            ui: { allowUserThemeOverride: false },
+          } as any,
+          version: 2,
+        } as any);
+        mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+        const result = await service.patchSettings(
+          { ui: { allowUserThemeOverride: false } },
+          mockUserId,
+        );
+
+        const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+        expect((updateCall.data.value as any).burst).toMatchObject({ autoResolveThreshold: 85 });
+        expect((result as any).burst.autoResolveThreshold).toBe(85);
+      });
+
+      it('updates burst.autoResolveThreshold when explicitly included in the PATCH dto', async () => {
+        mockPrisma.systemSettings.update.mockResolvedValue({
+          ...mockSystemSettings,
+          value: {
+            ...DEFAULT_SYSTEM_SETTINGS,
+            burst: { ...DEFAULT_SYSTEM_SETTINGS.burst, autoResolveThreshold: 90 },
+          } as any,
+          version: 2,
+        } as any);
+        mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+        await service.patchSettings(
+          { burst: { autoResolveThreshold: 90 } } as any,
+          mockUserId,
+        );
+
+        const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+        expect(updateCall.data.value).toMatchObject({
+          burst: expect.objectContaining({ autoResolveThreshold: 90 }),
+        });
+      });
+
+      it('updates dedup.autoResolveThreshold when explicitly included in the PATCH dto', async () => {
+        mockPrisma.systemSettings.update.mockResolvedValue({
+          ...mockSystemSettings,
+          value: {
+            ...DEFAULT_SYSTEM_SETTINGS,
+            dedup: { ...DEFAULT_SYSTEM_SETTINGS.dedup, autoResolveThreshold: 40 },
+          } as any,
+          version: 2,
+        } as any);
+        mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+
+        await service.patchSettings(
+          { dedup: { autoResolveThreshold: 40 } } as any,
+          mockUserId,
+        );
+
+        const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+        expect(updateCall.data.value).toMatchObject({
+          dedup: expect.objectContaining({ autoResolveThreshold: 40 }),
+        });
+      });
+
+      it('rejects an out-of-range burst.autoResolveThreshold via schema validation on the merged result', async () => {
+        await expect(
+          service.patchSettings(
+            { burst: { autoResolveThreshold: 101 } } as any,
+            mockUserId,
+          ),
+        ).rejects.toThrow();
+
+        await expect(
+          service.patchSettings(
+            { burst: { autoResolveThreshold: -1 } } as any,
+            mockUserId,
+          ),
+        ).rejects.toThrow();
+      });
+
+      it('rejects an out-of-range dedup.autoResolveThreshold via schema validation on the merged result', async () => {
+        await expect(
+          service.patchSettings(
+            { dedup: { autoResolveThreshold: 101 } } as any,
+            mockUserId,
+          ),
+        ).rejects.toThrow();
+
+        await expect(
+          service.patchSettings(
+            { dedup: { autoResolveThreshold: -1 } } as any,
+            mockUserId,
+          ),
+        ).rejects.toThrow();
+      });
+    });
   });
 
   describe('getSettingValue', () => {
