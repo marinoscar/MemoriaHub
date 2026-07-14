@@ -49,6 +49,9 @@ const heartbeatSchema = z.object({
     .optional(),
   // Arbitrary `node doctor` capability summary JSON.
   capabilities: z.any().optional(),
+  // Live concurrency cap; persisted so the claim endpoint stops using the
+  // stale registration-time value after a runtime `set-concurrency` change.
+  concurrency: z.number().int().min(1).optional(),
   // Accepted for forward-compat (current in-flight job count); service ignores it.
   inFlight: z.number().int().min(0).optional(),
 });

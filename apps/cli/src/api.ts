@@ -154,6 +154,8 @@ export interface NodeRegisterResult {
 export interface NodeHeartbeatBody {
   status?: string;
   capabilities?: NodeCapabilities;
+  /** Live concurrency cap; propagated so the server re-syncs its stale value. */
+  concurrency?: number;
 }
 
 export interface NodeClaimBody {

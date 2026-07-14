@@ -48,6 +48,7 @@ export interface RegisterNodeInput {
 export interface HeartbeatInput {
   status?: NodeStatus;
   capabilities?: unknown;
+  concurrency?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,11 +152,12 @@ export class NodesService {
       where: { id: nodeId },
       data: {
         lastHeartbeatAt: new Date(),
-        // Only overwrite status/capabilities when the node actually reported them.
+        // Only overwrite status/capabilities/concurrency when the node reported them.
         ...(dto.status !== undefined ? { status: dto.status } : {}),
         ...(dto.capabilities !== undefined
           ? { capabilities: dto.capabilities as never }
           : {}),
+        ...(dto.concurrency !== undefined ? { concurrency: dto.concurrency } : {}),
       },
     });
     return { ok: true };

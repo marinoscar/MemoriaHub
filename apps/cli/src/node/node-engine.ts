@@ -191,10 +191,16 @@ export class NodeEngine extends NodeTypedEmitter {
   /**
    * Adjust the concurrency cap of a running engine. Takes effect on the next
    * loop iteration — already-running jobs are never cancelled; the top-up pool
-   * simply claims up to the new cap from then on.
+   * simply claims up to the new cap from then on. The new value is also
+   * propagated to the server immediately via a best-effort heartbeat (rather
+   * than waiting for the next ~20s tick) so the claim endpoint stops capping
+   * at the stale registration value within ~1s.
    */
   setConcurrency(n: number): void {
     this.concurrencyCap = Math.max(1, Math.floor(n));
+    // beat() is try/catch-guarded and emits HEARTBEAT_FAIL on error, so this is
+    // safe even before the engine has started (heartbeatNode may reject).
+    void this.beat();
   }
 
   /**
@@ -488,6 +494,7 @@ export class NodeEngine extends NodeTypedEmitter {
       await this.api.heartbeatNode(this.nodeId, {
         status: this.draining ? 'draining' : 'online',
         capabilities,
+        concurrency: this.concurrencyCap,
       });
       this.lastHeartbeatAt = new Date().toISOString();
       this.emit(NODE_EV.HEARTBEAT_OK, { at: this.lastHeartbeatAt });
