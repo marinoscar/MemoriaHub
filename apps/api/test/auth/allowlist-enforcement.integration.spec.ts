@@ -5,6 +5,7 @@ import { PrismaService } from '../../src/prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { AdminBootstrapService } from '../../src/common/services/admin-bootstrap.service';
+import { EmailService } from '../../src/email/email.service';
 import { ForbiddenException } from '@nestjs/common';
 import { resetPrismaMock, prismaMock } from '../mocks/prisma.mock';
 import { setupBaseMocks } from '../fixtures/mock-setup.helper';
@@ -47,6 +48,7 @@ describe('Auth Service - Allowlist Enforcement', () => {
         { provide: PrismaService, useValue: prismaMock },
         { provide: JwtService, useValue: { sign: jest.fn(() => 'mock-jwt-token'), signAsync: jest.fn(() => 'mock-jwt-token') } },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: EmailService, useValue: { sendEmail: jest.fn().mockResolvedValue({ success: true }), sendEmailAsync: jest.fn() } },
       ],
     }).compile();
 
@@ -63,6 +65,25 @@ describe('Auth Service - Allowlist Enforcement', () => {
       }
       return null;
     });
+
+    // Default mocks for circle-related calls: handleGoogleLogin creates a
+    // personal circle for new users and always checks for pending circle
+    // invites to claim (independent of the allowlist/email work under test
+    // in this file — without these, tests that reach createNewUser or
+    // claimPendingCircleInvites fail with unrelated TypeErrors).
+    prismaMock.circle.create.mockResolvedValue({
+      id: 'default-personal-circle',
+      name: "Test User's Library",
+      isPersonal: true,
+      ownerId: 'user-1',
+    } as any);
+    prismaMock.circleMember.create.mockResolvedValue({
+      id: 'default-cm-1',
+      circleId: 'default-personal-circle',
+      userId: 'user-1',
+      role: 'circle_admin',
+    } as any);
+    prismaMock.circleInvite.findMany.mockResolvedValue([]);
   });
 
   afterEach(() => {

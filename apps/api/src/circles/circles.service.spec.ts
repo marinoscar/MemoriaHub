@@ -10,6 +10,7 @@ import { CirclesService } from './circles.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from './circle-membership.service';
 import { AllowlistService } from '../allowlist/allowlist.service';
+import { EmailService } from '../email/email.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 describe('CirclesService', () => {
@@ -17,6 +18,7 @@ describe('CirclesService', () => {
   let mockPrisma: MockPrismaService;
   let mockMembership: jest.Mocked<CircleMembershipService>;
   let mockAllowlist: jest.Mocked<AllowlistService>;
+  let mockEmail: jest.Mocked<EmailService>;
 
   const mockUser = {
     id: 'user-1',
@@ -40,12 +42,18 @@ describe('CirclesService', () => {
       listAllowedEmails: jest.fn(),
     } as any;
 
+    mockEmail = {
+      sendEmail: jest.fn().mockResolvedValue({ success: true, messageId: 'mock-message-id' }),
+      sendEmailAsync: jest.fn(),
+    } as any;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CirclesService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CircleMembershipService, useValue: mockMembership },
         { provide: AllowlistService, useValue: mockAllowlist },
+        { provide: EmailService, useValue: mockEmail },
       ],
     }).compile();
 
@@ -444,6 +452,138 @@ describe('CirclesService', () => {
           role: CircleRole.viewer,
         }),
       ).rejects.toThrow('Invite already claimed by this user');
+    });
+
+    // ---- Email graceful degradation ----
+
+    it('should still create the invite even if EmailService.sendEmailAsync throws', async () => {
+      mockMembership.assertCircleAccess.mockResolvedValue({
+        role: CircleRole.circle_admin,
+        isSuperAdmin: false,
+      });
+      mockPrisma.allowedEmail.upsert.mockResolvedValue({} as any);
+      mockPrisma.circleInvite.findUnique.mockResolvedValue(null);
+      mockPrisma.circleInvite.create.mockResolvedValue({
+        id: 'invite-2',
+        circleId: 'c1',
+        email: 'fails@example.com',
+        role: CircleRole.viewer,
+        claimedAt: null,
+        addedById: 'user-1',
+      } as any);
+      // sendInvitationEmail only calls sendEmailAsync if the circle lookup succeeds.
+      mockPrisma.circle.findUnique.mockResolvedValue({ name: 'Test Circle' } as any);
+      mockPrisma.user.findUnique.mockResolvedValue({
+        displayName: 'Inviter',
+        providerDisplayName: null,
+      } as any);
+      mockEmail.sendEmailAsync.mockImplementation(() => {
+        throw new Error('email provider exploded');
+      });
+
+      const result = await service.createInvite(mockUser, 'c1', {
+        email: 'fails@example.com',
+        role: CircleRole.viewer,
+      });
+
+      expect(result).toEqual(
+        expect.objectContaining({ id: 'invite-2', email: 'fails@example.com' }),
+      );
+      expect(mockEmail.sendEmailAsync).toHaveBeenCalled();
+    });
+  });
+
+  // ---- addMember() ----
+
+  describe('addMember()', () => {
+    it('should upsert the circle member and trigger a membership-confirmation email', async () => {
+      mockMembership.assertCircleAccess.mockResolvedValue({
+        role: CircleRole.circle_admin,
+        isSuperAdmin: false,
+      });
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'target-user' } as any);
+      mockPrisma.circleMember.upsert.mockResolvedValue({
+        circleId: 'c1',
+        userId: 'target-user',
+        role: CircleRole.viewer,
+        user: {
+          id: 'target-user',
+          email: 'target@example.com',
+          displayName: null,
+          providerDisplayName: 'Target',
+        },
+      } as any);
+      mockPrisma.circle.findUnique.mockResolvedValue({
+        name: 'Test Circle',
+        description: 'A circle',
+      } as any);
+
+      const result = await service.addMember(mockUser, 'c1', {
+        userId: 'target-user',
+        role: CircleRole.viewer,
+      });
+
+      expect(mockPrisma.circleMember.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { circleId_userId: { circleId: 'c1', userId: 'target-user' } },
+        }),
+      );
+      expect(mockEmail.sendEmailAsync).toHaveBeenCalledWith(
+        'target@example.com',
+        'membership-confirmation',
+        expect.objectContaining({ role: CircleRole.viewer }),
+      );
+      expect(result).toEqual(
+        expect.objectContaining({ userId: 'target-user', role: CircleRole.viewer }),
+      );
+    });
+
+    it('should throw NotFoundException when the target user does not exist', async () => {
+      mockMembership.assertCircleAccess.mockResolvedValue({
+        role: CircleRole.circle_admin,
+        isSuperAdmin: false,
+      });
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.addMember(mockUser, 'c1', { userId: 'missing-user', role: CircleRole.viewer }),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.circleMember.upsert).not.toHaveBeenCalled();
+    });
+
+    it('should still add the member even if EmailService.sendEmailAsync throws', async () => {
+      mockMembership.assertCircleAccess.mockResolvedValue({
+        role: CircleRole.circle_admin,
+        isSuperAdmin: false,
+      });
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'target-user' } as any);
+      mockPrisma.circleMember.upsert.mockResolvedValue({
+        circleId: 'c1',
+        userId: 'target-user',
+        role: CircleRole.collaborator,
+        user: {
+          id: 'target-user',
+          email: 'target@example.com',
+          displayName: null,
+          providerDisplayName: 'Target',
+        },
+      } as any);
+      mockPrisma.circle.findUnique.mockResolvedValue({
+        name: 'Test Circle',
+        description: 'A circle',
+      } as any);
+      mockEmail.sendEmailAsync.mockImplementation(() => {
+        throw new Error('email provider exploded');
+      });
+
+      const result = await service.addMember(mockUser, 'c1', {
+        userId: 'target-user',
+        role: CircleRole.collaborator,
+      });
+
+      expect(result).toEqual(
+        expect.objectContaining({ userId: 'target-user', role: CircleRole.collaborator }),
+      );
     });
   });
 
