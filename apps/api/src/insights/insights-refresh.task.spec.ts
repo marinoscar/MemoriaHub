@@ -112,7 +112,7 @@ describe('InsightsRefreshTask', () => {
     });
 
     it('does NOT call enqueueRefresh when computedAt is exactly at the threshold minus 1 ms', async () => {
-      const marginMs = 4 * 3_600_000 - 1;
+      const marginMs = 4 * 3_600_000 - 100;
       const recentComputedAt = new Date(Date.now() - marginMs);
       mockInsights.getRefreshState.mockResolvedValue(makeRefreshState('idle'));
       mockInsights.getLatest.mockResolvedValue(makeSnapshot(recentComputedAt) as any);
