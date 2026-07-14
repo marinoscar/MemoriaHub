@@ -334,6 +334,26 @@ describe('TopbarSearch', () => {
       expect(screen.getByRole('button', { name: /open search/i })).toBeInTheDocument();
     });
 
+    // Regression test for #95 (mobile top bar not using full screen width): the
+    // "Open search" icon button must be wrapped in a flex-growing Box so it is
+    // pushed to the end of the Toolbar instead of leaving unused space beside it.
+    // jsdom does not run real flexbox layout, so `getComputedStyle` cannot verify
+    // that pixels actually shift; it only proves the emotion-generated CSS rule
+    // (flex-grow: 1) is matched against the wrapping element, which is why we
+    // also assert structurally that a distinct wrapping DIV exists around the button.
+    it('wraps the "Open search" button in a flex-growing container', () => {
+      simulatePhone = true;
+      render(<TopbarSearch />);
+
+      const button = screen.getByRole('button', { name: /open search/i });
+      const wrapper = button.parentElement;
+
+      expect(wrapper).not.toBeNull();
+      expect(wrapper?.tagName).toBe('DIV');
+      expect(wrapper).not.toBe(wrapper?.parentElement);
+      expect(getComputedStyle(wrapper as Element).flexGrow).toBe('1');
+    });
+
     it('expands the overlay when the phone search button is clicked', async () => {
       simulatePhone = true;
 
