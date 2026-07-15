@@ -122,6 +122,11 @@ export class DoctorService {
         label: 'Duplicate detection (CLIP)',
         fn: () => this.checkDuplicateDetection(settings),
       },
+      {
+        key: 'ai.pictureEnhancer',
+        label: 'AI picture enhancer',
+        fn: () => this.checkPictureEnhancer(settings),
+      },
       // Face
       { key: 'face.detection', label: 'Face detection provider', fn: () => this.checkFaceDetection(settings) },
       {
@@ -197,6 +202,7 @@ export class DoctorService {
           'ai.flagConsistency',
           'ai.socialMedia',
           'ai.duplicateDetection',
+          'ai.pictureEnhancer',
         ],
       },
       {
@@ -749,6 +755,53 @@ export class DoctorService {
       actionItem:
         'onnxruntime native runtime failed to load; verify the API image uses a glibc base ' +
         '(not Alpine/musl) and MODELS_DIR is writable/reachable.',
+    };
+  }
+
+  private async checkPictureEnhancer(settings: ResolvedSettings): Promise<CheckOutcome> {
+    if (settings.features?.['pictureEnhancement'] !== true) {
+      return { status: 'skipped', message: 'AI picture enhancer is disabled.' };
+    }
+
+    if (process.env['PICTURE_ENHANCEMENT_ENABLED'] === 'false') {
+      return {
+        status: 'warning',
+        message:
+          'Feature enabled in settings but PICTURE_ENHANCEMENT_ENABLED=false overrides it.',
+        actionItem: 'Remove or set PICTURE_ENHANCEMENT_ENABLED=true.',
+      };
+    }
+
+    const enhanceCfg = settings.ai?.features?.enhance;
+    const provider = enhanceCfg?.provider ?? null;
+    const model = enhanceCfg?.model ?? null;
+
+    // Credential presence for the configured (or default OpenAI) provider.
+    const credProvider = provider ?? 'openai';
+    const cred = await this.prisma.aiProviderCredential.findUnique({
+      where: { provider: credProvider },
+    });
+    const credentialConfigured = !!cred && cred.enabled;
+
+    if (!credentialConfigured) {
+      return {
+        status: 'error',
+        message: `No enabled ${credProvider} credential configured for enhancement.`,
+        actionItem: 'Enable an OpenAI credential in Admin Settings → AI.',
+      };
+    }
+
+    if (!provider || !model) {
+      return {
+        status: 'warning',
+        message: 'Enhancement feature is on but no enhancement model is selected.',
+        actionItem: 'Select an enhancement model in Admin Settings → AI Picture Enhancer.',
+      };
+    }
+
+    return {
+      status: 'ok',
+      message: `AI picture enhancer ready (${provider}/${model}).`,
     };
   }
 
