@@ -239,9 +239,16 @@ describe('DuplicateGroupPage', () => {
         expect(screen.getByText('Duplicate Group')).toBeInTheDocument();
       });
 
-      const checkboxes = screen.getAllByRole('checkbox');
+      // The keep checkbox overlay is a MediaSelectionCheckbox (IconButton,
+      // role="button", not a MUI Checkbox/role="checkbox") — see
+      // components/media/MediaSelectionCheckbox.tsx. Checked state is
+      // reflected by which icon (CheckBoxIcon vs CheckBoxOutlineBlankIcon)
+      // is rendered inside the button.
+      const checkboxes = screen.getAllByRole('button', { name: 'Keep photo' });
       // 3 members; the first (media-1, suggested best) should be checked
-      const checkedStates = checkboxes.map((cb) => (cb as HTMLInputElement).checked);
+      const checkedStates = checkboxes.map(
+        (cb) => within(cb).queryByTestId('CheckBoxIcon') !== null,
+      );
       expect(checkedStates.filter(Boolean)).toHaveLength(1);
     });
 
@@ -251,7 +258,7 @@ describe('DuplicateGroupPage', () => {
 
       await waitFor(() => expect(screen.getByText('Duplicate Group')).toBeInTheDocument());
 
-      const checkboxes = screen.getAllByRole('checkbox');
+      const checkboxes = screen.getAllByRole('button', { name: 'Keep photo' });
       // Click the second checkbox (media-2, not pre-selected)
       await user.click(checkboxes[1]);
 
@@ -268,7 +275,7 @@ describe('DuplicateGroupPage', () => {
 
       await waitFor(() => expect(screen.getByText('Duplicate Group')).toBeInTheDocument());
 
-      const checkboxes = screen.getAllByRole('checkbox');
+      const checkboxes = screen.getAllByRole('button', { name: 'Keep photo' });
       await user.click(checkboxes[0]); // media-1, pre-selected -> uncheck
 
       await waitFor(() => {
@@ -282,7 +289,7 @@ describe('DuplicateGroupPage', () => {
 
       await waitFor(() => expect(screen.getByText('Duplicate Group')).toBeInTheDocument());
 
-      const checkboxes = screen.getAllByRole('checkbox');
+      const checkboxes = screen.getAllByRole('button', { name: 'Keep photo' });
       await user.click(checkboxes[0]); // uncheck the only pre-selected item
 
       await waitFor(() => {
