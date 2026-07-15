@@ -404,6 +404,21 @@ export class AutoTaggingService {
       (item) => labelByLower.get(item.toLowerCase()) ?? item,
     );
 
+    // Resolve Tag rows OUTSIDE the transaction. Tag creation is an idempotent
+    // find-or-create keyed on (circleId, name) and does not need to be atomic
+    // with the mediaTag reconciliation below — keeping these upserts out of the
+    // critical section shrinks the interactive transaction (which under
+    // bulk-import load was blowing the tx timeout and starving the pool).
+    const tagIdByLabel = new Map<string, string>();
+    for (const labelName of normalizedLabels) {
+      const tag = await this.prisma.tag.upsert({
+        where: { circleId_name: { circleId: mediaItem.circleId, name: labelName } },
+        create: { addedById: mediaItem.addedById, circleId: mediaItem.circleId, name: labelName },
+        update: {},
+      });
+      tagIdByLabel.set(labelName, tag.id);
+    }
+
     // Reconcile AI tags: remove stale AI tags, upsert current labels with source=ai.
     // Also persist description when parseOk is true.
     await this.prisma.$transaction(async (tx) => {
@@ -415,16 +430,14 @@ export class AutoTaggingService {
           tag: { name: { notIn: normalizedLabels } },
         },
       });
-      // Upsert current labels as AI tags (never downgrade manual to ai)
+      // Upsert current labels as AI tags (never downgrade manual to ai),
+      // using the tagIds resolved before the transaction opened.
       for (const labelName of normalizedLabels) {
-        const tag = await tx.tag.upsert({
-          where: { circleId_name: { circleId: mediaItem.circleId, name: labelName } },
-          create: { addedById: mediaItem.addedById, circleId: mediaItem.circleId, name: labelName },
-          update: {},
-        });
+        const tagId = tagIdByLabel.get(labelName);
+        if (!tagId) continue;
         await tx.mediaTag.upsert({
-          where: { tagId_mediaItemId: { tagId: tag.id, mediaItemId: mediaItem.id } },
-          create: { tagId: tag.id, mediaItemId: mediaItem.id, source: MediaTagSource.ai },
+          where: { tagId_mediaItemId: { tagId, mediaItemId: mediaItem.id } },
+          create: { tagId, mediaItemId: mediaItem.id, source: MediaTagSource.ai },
           update: {}, // do NOT downgrade manual tag to ai
         });
       }
