@@ -319,8 +319,8 @@ export class MediaService {
   async listMedia(query: MediaQueryDto, userId: string, userPermissions: string[]) {
     const {
       circleId,
-      page,
       pageSize,
+      cursor,
       type,
       capturedAtFrom,
       capturedAtTo,
@@ -345,8 +345,6 @@ export class MediaService {
       personIds,
       peopleMatch,
     } = query;
-
-    const skip = (page - 1) * pageSize;
 
     await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
 
@@ -384,9 +382,38 @@ export class MediaService {
       ...(effectivePersonIds.length > 0 ? wherePeople(effectivePersonIds, effectiveMode) : {}),
     };
 
-    const orderBy: Prisma.MediaItemOrderByWithRelationInput = {
-      [sortBy]: sortOrder,
-    };
+    const dir = sortOrder;
+    const orderBy = [
+      { [sortBy]: dir },
+      { id: dir },
+    ] as Prisma.MediaItemOrderByWithRelationInput[];
+
+    // Keyset mode: page omitted → cursor-based pagination (no COUNT).
+    if (query.page === undefined) {
+      const rows = await this.prisma.mediaItem.findMany({
+        where,
+        orderBy,
+        take: pageSize + 1,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      const hasMore = rows.length > pageSize;
+      const items = hasMore ? rows.slice(0, pageSize) : rows;
+      const nextCursor = hasMore ? items[items.length - 1].id : null;
+
+      // Sign thumbnail URLs for all items with a single batched StorageObject
+      // query (thumbnailStorageKey is already embedded in item.metadata).
+      const itemsWithUrls =
+        await this.mediaThumbnailService.attachThumbnailUrls(items);
+
+      return {
+        items: itemsWithUrls,
+        meta: { pageSize, nextCursor, hasMore },
+      };
+    }
+
+    // Legacy offset mode: explicit page number → offset pagination with COUNT.
+    const page = query.page;
+    const skip = (page - 1) * pageSize;
 
     const [items, totalItems] = await Promise.all([
       this.prisma.mediaItem.findMany({
