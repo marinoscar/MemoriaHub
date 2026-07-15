@@ -260,9 +260,23 @@ describe('FaceSettingsPage — Video Face Detection card', () => {
       // empty-string states and the final value would still be the initial 5.
       fireEvent.change(intervalField, { target: { value: '15' } });
 
-      // Find and click save
+      // Find and click save, scoped to the Paper containing the video settings
+      // fields. The naive "last Save button on the page" approach is wrong here:
+      // the Auto-Archive card's Save button renders after this card's and is
+      // disabled (pointer-events: none) whenever faceAutoArchive is off, which
+      // throws when userEvent tries to click it.
       const saveButtons = screen.getAllByRole('button', { name: /save/i });
-      await user.click(saveButtons[saveButtons.length - 1]);
+      const paper = intervalField.closest('.MuiPaper-root') ?? intervalField.closest('div[class*="Paper"]');
+      const saveBtn = paper
+        ? Array.from(paper.querySelectorAll('button')).find((b) => b.textContent?.match(/^save$/i))
+        : saveButtons[saveButtons.length - 1];
+
+      if (saveBtn) {
+        await user.click(saveBtn);
+      } else {
+        // Fallback: click the last Save button
+        await user.click(saveButtons[saveButtons.length - 1]);
+      }
 
       await waitFor(() => {
         expect(updateSettings).toHaveBeenCalledWith(
