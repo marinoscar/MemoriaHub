@@ -262,6 +262,10 @@ If the provider recovers before the backoff window expires, accelerate recovery 
 
 For bulk-retry of all failed jobs: `POST /api/admin/jobs/retry-failed`, optionally scoped by `{ type: "auto_tagging" }`.
 
+### After a format-decode backlog (e.g. HEIC)
+
+A batch of image `StorageObject`s stuck at `status='failed'` because the format couldn't be decoded (the classic case: HEIC/HEIF photos uploaded before the ffmpeg-transcode decode fallback — see CLAUDE.md's "Writing an Image Enrichment Handler" section, issue #106) can be drained with `POST /api/admin/media/reprocess-failed` (optional body `{ limit? }`). It re-runs the full processing pipeline for each matching object — regenerating thumbnails and re-firing face/tag/duplicate enrichment — and is distinct from `POST /api/admin/media/reprocess-stuck`, which only targets objects orphaned at `status='processing'`.
+
 To reduce rate-limit pressure during a large backfill: lower `ENRICHMENT_WORKER_CONCURRENCY` to 1 and raise `ENRICHMENT_RATELIMIT_MAX_MS` so the queue patiently waits out longer quota windows.
 
 ### After a failed CLI run

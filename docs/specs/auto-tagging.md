@@ -272,7 +272,7 @@ This normalizes orientation, format, and dimensions before anything reaches the 
 The following are as-of-implementation provider constraints; verify against current provider documentation if exact numbers matter.
 
 **Anthropic (Claude):**
-- Supported formats: JPEG, PNG, GIF, WebP. HEIC and TIFF are not supported.
+- Supported formats: JPEG, PNG, GIF, WebP. HEIC and TIFF are not natively accepted by the provider — but see the HEIC decode note below: MemoriaHub now normalizes HEIC to JPEG before the provider ever sees it, so this constraint no longer bites in practice for HEIC. TIFF is still not decoded and still hits the fallback path.
 - Per-image data limit: approximately 5 MB.
 - Images with a long edge exceeding 1568 px are auto-downscaled server-side, so 1568 px is the effective sweet spot — sending larger images costs more tokens without improving quality.
 - Token cost scales roughly with pixel area (~(w × h) / 750 tokens).
@@ -288,8 +288,10 @@ The service implements three safeguards that produce a non-retryable `failed` st
 
 **Happy path:** `prepareImageForProcessing` succeeds (returns `width > 0`). The prepared JPEG buffer is sent as `image/jpeg`.
 
-**Fallback path (sharp could not decode):** `prepareImageForProcessing` returns `width: 0`, indicating a sharp failure (e.g. HEIC, corrupt file, unsupported format). The original bytes' MIME type is sniffed via `detectImageMime`, which checks magic bytes for JPEG, PNG, GIF, and WebP.
-- If the detected MIME is `null` (HEIC, TIFF, or unknown) → status is set to `failed` with a clear `lastError`; the job is **not** retried.
+**HEIC/HEIF now decodes successfully (issue #106):** `prepareImageForProcessing` (`packages/enrichment-compute/src/image/index.ts`) now falls back to an ffmpeg transcode when sharp's bundled libvips can't decode the input — this is the shared decode path auto-tagging already calls, so no change was needed in this handler or in `detectImageMime` (`apps/api/src/tagging/image-mime.util.ts`, unchanged). For a HEIC photo, `prepareImageForProcessing` internally transcodes to JPEG via ffmpeg and re-runs its normal pipeline, so it now returns `width > 0` on the happy path instead of `width: 0` — auto-tagging sees a normal prepared JPEG buffer and never falls into the MIME-sniffing branch below for HEIC specifically. See the HEIC/HEIF decode fallback note under "Writing an Image Enrichment Handler" in `CLAUDE.md` for the mechanism (ffmpeg-transcode, `FFMPEG_TIMEOUT_MS`-bounded, `memoriaHub-heic-*` temp files) and its cross-executor parity caveat vs. the containerized worker node's native libheif decode.
+
+**Fallback path (sharp could not decode, and the ffmpeg transcode also failed or wasn't applicable):** `prepareImageForProcessing` returns `width: 0`, indicating decode failed even after the ffmpeg fallback (e.g. a genuinely corrupt file, or an unsupported format the fallback can't help with). The original bytes' MIME type is sniffed via `detectImageMime`, which checks magic bytes for JPEG, PNG, GIF, and WebP.
+- If the detected MIME is `null` (TIFF, corrupt HEIC, or unknown) → status is set to `failed` with a clear `lastError`; the job is **not** retried.
 - If the detected MIME is a supported type → the original bytes are sent with the **detected** MIME type. This fixes a previous bug where the fallback always set `image/jpeg` regardless of actual content.
 
 **Byte-size cap:** After selecting the buffer (prepared or fallback), if `buffer.length > MAX_IMAGE_BYTES` (4,500,000 bytes — roughly 4.5 MB, giving headroom under Anthropic's ~5 MB limit) → status is set to `failed` with a size error; the job is **not** retried. `MAX_IMAGE_BYTES` is a code constant and is not configurable via environment variables.
@@ -520,7 +522,7 @@ The `auto_tagging` job type appears automatically in `/admin/jobs` queue stats u
 | No enabled tag labels | Status → `processed` with `tagCount=0`; job succeeds |
 | Provider API error (transient) | Status → `failed`; job rethrows; worker retries up to 3 attempts total |
 | All labels returned by model fail vocabulary validation | Status → `processed` with `tagCount=0`; no tags assigned |
-| Image preprocessing failed + MIME unrecognized (e.g. HEIC, TIFF, corrupt) | Status → `failed`; job succeeds (no retry) |
+| Image preprocessing failed + MIME unrecognized (e.g. TIFF, corrupt file — HEIC now decodes via the ffmpeg fallback, see above) | Status → `failed`; job succeeds (no retry) |
 | Image preprocessing failed + MIME recognized (JPEG/PNG/GIF/WebP) | Original bytes sent with detected MIME; processing continues |
 | Image buffer exceeds `MAX_IMAGE_BYTES` (4.5 MB) after preprocessing | Status → `failed`; job succeeds (no retry) |
 

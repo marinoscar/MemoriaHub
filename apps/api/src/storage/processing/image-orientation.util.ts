@@ -25,5 +25,6 @@ export {
   prepareImageForProcessing,
   applyOrientationTransform,
   getOrientedDimensions,
+  transcodeToDecodableJpeg,
 } from '@memoriahub/enrichment-compute/image';
 export type { OrientationOp } from '@memoriahub/enrichment-compute/image';
