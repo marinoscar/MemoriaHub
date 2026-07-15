@@ -14,6 +14,7 @@ import {
   SetSearchFeatureDto,
   SetTaggingFeatureDto,
   SetEmbeddingFeatureDto,
+  SetEnhanceFeatureDto,
   TestEmbeddingDto,
 } from './dto/ai-credentials.dto';
 
@@ -67,6 +68,7 @@ export class AiSettingsService {
         search: { provider: null, model: null },
         tagging: { provider: null, model: null },
         embedding: { provider: null, model: null },
+        enhance: null,
       },
     };
   }
@@ -171,6 +173,19 @@ export class AiSettingsService {
       return [];
     }
     return (provider as any).listEmbeddingModels() as string[];
+  }
+
+  /**
+   * List image-edit (enhancement) models for a provider.
+   * Returns an empty array for providers that do not support image editing.
+   */
+  async listImageModels(providerKey: string): Promise<string[]> {
+    // Validate the provider key — registry.get throws for unknown providers.
+    const provider = this.registry.get(providerKey);
+    if (typeof (provider as any).listImageModels !== 'function') {
+      return [];
+    }
+    return (provider as any).listImageModels() as string[];
   }
 
   /**
@@ -290,6 +305,27 @@ export class AiSettingsService {
       userId,
     );
     return { provider: dto.provider, model: dto.model };
+  }
+
+  /** Update enhancement feature settings in system settings */
+  async setEnhanceFeature(dto: SetEnhanceFeatureDto, userId: string) {
+    // Persist null when either field is cleared — mirrors the ai.features.enhance
+    // nullable-object shape (a partial provider/model pair is not a valid selection).
+    const value =
+      dto.provider && dto.model
+        ? { provider: dto.provider, model: dto.model }
+        : null;
+    await this.systemSettings.patchSettings(
+      {
+        ai: {
+          features: {
+            enhance: value,
+          },
+        },
+      } as any,
+      userId,
+    );
+    return value;
   }
 
   /**

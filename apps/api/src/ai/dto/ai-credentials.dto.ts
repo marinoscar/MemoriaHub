@@ -32,6 +32,12 @@ export const setEmbeddingFeatureSchema = z.object({
 });
 export class SetEmbeddingFeatureDto extends createZodDto(setEmbeddingFeatureSchema) {}
 
+export const setEnhanceFeatureSchema = z.object({
+  provider: z.string().min(1).nullable(),
+  model: z.string().min(1).nullable(),
+});
+export class SetEnhanceFeatureDto extends createZodDto(setEnhanceFeatureSchema) {}
+
 export const testEmbeddingSchema = z.object({
   provider: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
