@@ -91,7 +91,7 @@ export const DEFAULT_FACE_CLUSTER_MIN_SIZE = 2;
  * 'pgvector' delegates KNN candidate selection to the `faces.embedding_vec`
  * HNSW index; 'app' loads candidates and computes cosine similarity in-process.
  */
-export const DEFAULT_FACE_VECTOR_BACKEND = 'app';
+export const DEFAULT_FACE_VECTOR_BACKEND = 'pgvector';
 
 /**
  * Number of nearest-neighbour rows fetched from the pgvector index before the
