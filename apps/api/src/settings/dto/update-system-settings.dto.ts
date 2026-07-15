@@ -52,6 +52,25 @@ export const patchSystemSettingsSchema = z.object({
               model: z.string().nullable().optional(),
             })
             .optional(),
+          tagging: z
+            .object({
+              provider: z.string().nullable().optional(),
+              model: z.string().nullable().optional(),
+            })
+            .optional(),
+          embedding: z
+            .object({
+              provider: z.string().nullable().optional(),
+              model: z.string().nullable().optional(),
+            })
+            .optional(),
+          enhance: z
+            .object({
+              provider: z.string(),
+              model: z.string(),
+            })
+            .nullable()
+            .optional(),
         })
         .optional(),
     })
@@ -149,6 +168,17 @@ export const patchSystemSettingsSchema = z.object({
     .object({
       reverseProvider: z.enum(['offline', 'nominatim', 'google']).optional(),
       forwardSearchEnabled: z.boolean().optional(),
+    })
+    .optional(),
+  pictureEnhancement: z
+    .object({
+      defaultQuality: z.enum(['low', 'medium', 'high']).optional(),
+      defaultStrength: z.enum(['subtle', 'balanced', 'strong']).optional(),
+      stampExif: z.boolean().optional(),
+      allowReplace: z.boolean().optional(),
+      blockReplaceOnDownscale: z.boolean().optional(),
+      maxInputMegapixels: z.number().min(1).max(100).optional(),
+      retentionHours: z.number().int().min(1).max(720).optional(),
     })
     .optional(),
 });
