@@ -76,6 +76,7 @@ import {
   ensureComprefaceContainer,
   verifyCompreface,
   type InstallStepResult,
+  type ComprefaceContainerOptions,
 } from '../node/install-deps.js';
 
 const require = createRequire(import.meta.url);
@@ -377,6 +378,47 @@ function startCmd(): Command {
           parseInt(opts.poll ?? String(cfg.node?.pollIntervalMs ?? DEFAULT_POLL_MS), 10) ||
           DEFAULT_POLL_MS;
 
+        // Resolve the effective face provider (flag > persisted config > default)
+        // and, when it is CompreFace and this node claims face jobs, BLOCK until
+        // the sidecar's /status reports healthy before building the engine. This
+        // closes the warm-up race (issue #103): CompreFace takes ~15–30s to load
+        // its model, and claiming face jobs before then would run them on the
+        // wrong provider. We never silently fall back to Human — an unready
+        // sidecar is a hard start failure.
+        const resolvedFaceProvider: 'human' | 'compreface' =
+          validatedFaceProvider ?? cfg.node?.faceProvider ?? 'human';
+        const resolvedComprefaceUrl =
+          opts.comprefaceUrl ?? cfg.node?.comprefaceUrl ?? DEFAULT_COMPREFACE_URL;
+        const claimsFaceJobs =
+          eligibleTypes.includes('face_detection') ||
+          eligibleTypes.includes('video_face_detection');
+
+        if (resolvedFaceProvider === 'compreface' && claimsFaceJobs) {
+          ui.step(
+            `Face provider is 'compreface' — waiting for the sidecar at ${resolvedComprefaceUrl} ` +
+              'to become healthy before claiming face jobs…',
+          );
+          // ~40s budget (20 × 2s) to cover CompreFace's cold-start model load.
+          const health = await verifyCompreface(resolvedComprefaceUrl, {
+            retries: 20,
+            retryDelayMs: 2000,
+          });
+          if (health.status !== 'installed') {
+            ui.error(
+              `CompreFace at ${resolvedComprefaceUrl} did not become healthy: ${health.detail}\n` +
+                'Refusing to start rather than silently falling back to the Human provider. ' +
+                'Start/verify the sidecar (`memoriahub node install-deps`) and retry, ' +
+                'or start with `--face-provider human`.',
+            );
+            process.exit(1);
+          }
+          ui.success(`CompreFace healthy at ${resolvedComprefaceUrl}.`);
+        }
+        ui.info(
+          `Active face provider: ${resolvedFaceProvider}` +
+            (resolvedFaceProvider === 'compreface' ? ` (${resolvedComprefaceUrl})` : ''),
+        );
+
         // 1. Ensure models are present before processing.
         try {
           const manifest = await api.getModelManifest();
@@ -402,7 +444,15 @@ function startCmd(): Command {
         // 2. Build the engine with file logging and the IPC daemon host, so
         //    every run (foreground or daemonized) is attachable by a second
         //    CLI instance.
-        const options: NodeEngineOptions = { concurrency, eligibleTypes, pollIntervalMs };
+        const options: NodeEngineOptions = {
+          concurrency,
+          eligibleTypes,
+          pollIntervalMs,
+          faceProvider: resolvedFaceProvider,
+          ...(resolvedFaceProvider === 'compreface'
+            ? { comprefaceUrl: resolvedComprefaceUrl }
+            : {}),
+        };
         const engine = new NodeEngine({
           api,
           dispatcher: new ComputeDispatcher(),
@@ -575,6 +625,10 @@ function renderSnapshot(snap: EngineSnapshot): void {
       `${inFlight} in-flight, ${idle} idle`,
   );
   ui.line(`  Eligible types: ${snap.eligibleTypes.join(', ') || '(none)'}`);
+  ui.line(
+    `  Face provider : ${snap.faceProvider}` +
+      (snap.faceProvider === 'compreface' && snap.comprefaceUrl ? ` (${snap.comprefaceUrl})` : ''),
+  );
   ui.line(`  Last heartbeat: ${hbAge}`);
   ui.line(
     `  Jobs          : ${snap.counters.claimed} claimed, ` +
@@ -656,10 +710,20 @@ function statusCmd(): Command {
       ui.line(`  Concurrency   : ${cfg.node?.concurrency ?? DEFAULT_CONCURRENCY}`);
       ui.line(`  Poll interval : ${cfg.node?.pollIntervalMs ?? DEFAULT_POLL_MS}ms`);
       ui.line(`  Eligible types: ${cfg.node?.eligibleTypes?.join(', ') ?? chalk.dim('(all)')}`);
+      const cfgFaceProvider = cfg.node?.faceProvider ?? 'human';
+      const cfgComprefaceUrl = cfg.node?.comprefaceUrl ?? DEFAULT_COMPREFACE_URL;
+      ui.line(
+        `  Face provider : ${cfgFaceProvider}` +
+          (cfgFaceProvider === 'compreface' ? ` (${cfgComprefaceUrl})` : ''),
+      );
       ui.blank();
 
       ui.step('Detected capabilities');
-      const caps = await detectCapabilities();
+      // Probe the node's ACTUAL sidecar (not the localhost default) so the
+      // compreface capability row reflects the configured URL.
+      const caps = await detectCapabilities(
+        cfgFaceProvider === 'compreface' ? { comprefaceUrl: cfgComprefaceUrl } : undefined,
+      );
       printCapabilityTable(caps);
 
       // Best-effort: fetch last-known server-side status if the API exposes it.
@@ -1146,8 +1210,34 @@ function installDepsCmd(): Command {
       'Port to expose the compreface-core sidecar on',
       String(DEFAULT_COMPREFACE_PORT),
     )
+    .option(
+      '--compreface-processes <n>',
+      'UWSGI_PROCESSES for the compreface-core sidecar (parallel face inference workers); ' +
+        'defaults to a core-aware value (cores - 2, capped at 6)',
+    )
+    .option(
+      '--compreface-memory <size>',
+      'docker --memory cap for the compreface-core sidecar (e.g. 4g); omitted → no cap',
+    )
+    .option(
+      '--compreface-cpus <n>',
+      'docker --cpus cap for the compreface-core sidecar (e.g. 4); omitted → no cap',
+    )
+    .option(
+      '--compreface-recreate',
+      'Remove and recreate the compreface-core container even if it is already running, ' +
+        'so new process/restart/resource settings take effect',
+    )
     .action(
-      async (opts: { dryRun?: boolean; skipCompreface?: boolean; comprefacePort?: string }) => {
+      async (opts: {
+        dryRun?: boolean;
+        skipCompreface?: boolean;
+        comprefacePort?: string;
+        comprefaceProcesses?: string;
+        comprefaceMemory?: string;
+        comprefaceCpus?: string;
+        comprefaceRecreate?: boolean;
+      }) => {
         // 1. Platform gate — this command is Linux-only for now.
         if (process.platform !== 'linux') {
           ui.error(
@@ -1172,6 +1262,22 @@ function installDepsCmd(): Command {
           parseInt(opts.comprefacePort ?? String(DEFAULT_COMPREFACE_PORT), 10) ||
             DEFAULT_COMPREFACE_PORT,
         );
+
+        // CompreFace sidecar tunables — undefined values fall back to the
+        // core-aware / no-cap defaults inside ensureComprefaceContainer.
+        const parsedProcesses =
+          opts.comprefaceProcesses !== undefined
+            ? parseInt(opts.comprefaceProcesses, 10)
+            : undefined;
+        const comprefaceContainerOpts: ComprefaceContainerOptions = {
+          dryRun,
+          ...(parsedProcesses !== undefined && Number.isFinite(parsedProcesses)
+            ? { processes: Math.max(1, parsedProcesses) }
+            : {}),
+          ...(opts.comprefaceMemory ? { memory: opts.comprefaceMemory } : {}),
+          ...(opts.comprefaceCpus ? { cpus: opts.comprefaceCpus } : {}),
+          ...(opts.comprefaceRecreate ? { recreate: true } : {}),
+        };
 
         const cfg = loadConfig();
         const comprefaceUrl = cfg?.node?.comprefaceUrl ?? `http://localhost:${port}`;
@@ -1216,7 +1322,9 @@ function installDepsCmd(): Command {
           const dockerHealthy = dockerResult.status === 'installed' || dockerResult.status === 'skipped';
 
           if (dockerHealthy) {
-            const containerResult = report(await ensureComprefaceContainer(port, { dryRun }));
+            const containerResult = report(
+              await ensureComprefaceContainer(port, comprefaceContainerOpts),
+            );
             const containerHealthy =
               containerResult.status === 'installed' || containerResult.status === 'skipped';
             if (containerHealthy && !dryRun) {
