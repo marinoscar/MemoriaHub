@@ -115,7 +115,17 @@ WHERE array_length("embedding", 1) = 128;
 -- 6. Main HNSW index for general KNN face-similarity search (cosine distance),
 --    mirroring the m/ef_construction values used by the other HNSW indexes in
 --    this codebase (media_visual_embedding, media_item_embedding).
+--
+--    Force a serial (non-parallel) HNSW build first. pgvector's parallel index
+--    build allocates dynamic shared memory in /dev/shm; on the Docker default
+--    64MB shm this fails with "could not resize shared memory segment ... No
+--    space left on device" (SQLSTATE 53100) — which is exactly what took this
+--    migration (and the api) down on 2026-07-15. A serial build uses private
+--    maintenance_work_mem instead and is immune to a small /dev/shm. The setting
+--    is session-scoped, so it also covers the step-7 partial index below.
 -- -----------------------------------------------------------------------------
+SET max_parallel_maintenance_workers = 0;
+
 CREATE INDEX "faces_embedding_vec_hnsw_idx"
   ON "faces" USING hnsw ("embedding_vec" vector_cosine_ops) WITH (m = 16, ef_construction = 64);
 
