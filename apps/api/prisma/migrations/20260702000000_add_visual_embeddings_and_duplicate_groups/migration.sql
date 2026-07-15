@@ -85,5 +85,13 @@ CREATE TABLE "media_visual_embedding" (
 );
 
 CREATE INDEX "media_visual_embedding_circle_idx" ON "media_visual_embedding" ("circle_id");
+
+-- Force a serial (non-parallel) HNSW build. pgvector's parallel index build
+-- allocates dynamic shared memory in /dev/shm; on the Docker default 64MB shm
+-- this fails with "could not resize shared memory segment ... No space left on
+-- device" (SQLSTATE 53100). A serial build uses private maintenance_work_mem
+-- instead and is immune to a small /dev/shm. Session-scoped; resets on connect.
+SET max_parallel_maintenance_workers = 0;
+
 CREATE INDEX "media_visual_embedding_hnsw_idx"
   ON "media_visual_embedding" USING hnsw ("embedding" vector_cosine_ops) WITH (m = 16, ef_construction = 64);
