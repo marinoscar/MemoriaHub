@@ -397,7 +397,7 @@ Centroids are computed on demand inside `FaceMatchingService.computePersonCentro
 5. If that similarity is ≥ `FACE_MATCH_THRESHOLD` (default `0.38`): return that person.
 6. Otherwise: return `null` (face remains unassigned).
 
-When `FACE_VECTOR_BACKEND=pgvector`, the service currently logs a debug message and falls through to the same in-process cosine computation. Native pgvector `<=>` operator matching is a future TODO and is not yet active.
+`FACE_VECTOR_BACKEND=pgvector` is now the default backend; see [Face Matching Backend: pgvector KNN](#face-matching-backend-pgvector-knn) below for the indexed KNN candidate-selection path that replaces steps 1–3 above. The accept/reject decision (steps 4–6) is unchanged — pgvector only accelerates which persons are worth scoring, never the final match decision.
 
 ### Delegated Matching (Rekognition)
 
@@ -406,6 +406,34 @@ When the active provider is `rekognition`, embeddings are not stored in the appl
 - `provider.detect()` calls `DetectFacesCommand` for bounding boxes.
 - `provider.enroll()` calls `IndexFacesCommand` and returns an AWS FaceId stored as `Face.externalFaceId`.
 - `FaceMatchingService.matchFaceByExternalId(circleId, externalFaceId)` finds an existing `Face` row in the circle sharing that `externalFaceId` and returns the associated `Person`.
+
+### Face Matching Backend: pgvector KNN
+
+**Why:** the original in-app path was an O(N) full scan — load every active `Person`'s centroid (or every archived face) into the process and cosine-score in JS. On the production API this pinned a Prisma connection and a CPU core per lookup and caused brownouts under load: `face_detection` job lifetime was ~14s normally but climbed to ~90s under bulk-upload load, because per-face matching serialized behind the scan. `FACE_VECTOR_BACKEND=pgvector` (default `DEFAULT_FACE_VECTOR_BACKEND = 'pgvector'`) delegates candidate selection to a Postgres HNSW index instead of scanning in the application process.
+
+**The derived column.** `faces.embedding_vec` is a `vector(128)` column added by migration `20260715000000_add_face_embedding_vector`. **It is a derived column, automatically maintained by a database trigger, and application code — including Prisma — must never write it directly.** The trigger function `faces_sync_embedding_vec()` sets `NEW.embedding_vec := face_embedding_to_vector(NEW.embedding)`, where the SQL helper `face_embedding_to_vector(embedding float8[])` casts a 128-d float8 array to `vector` (via a `'[1,2,3]'::vector` text-literal cast) and returns `NULL` for any other length. Two triggers share that function, split because a trigger `WHEN` clause cannot reference `TG_OP`:
+- `faces_sync_embedding_vec_insert_trigger` — `BEFORE INSERT`, unconditional.
+- `faces_sync_embedding_vec_update_trigger` — `BEFORE UPDATE`, `WHEN (NEW.embedding IS DISTINCT FROM OLD.embedding)`, so the frequent person-assignment / hide-unhide updates that never touch `embedding` skip the recompute.
+
+`embedding_vec` is `NULL` for the `human` provider's 1024-d embeddings and for empty-array rows (e.g. manual `providerKey='manual'` associations). A one-shot backfill (`UPDATE faces SET embedding_vec = face_embedding_to_vector(embedding) WHERE array_length(embedding,1)=128`) populated existing rows before the indexes were built — index-after-backfill is deliberate, giving one clean index build instead of many incremental ones.
+
+**The two HNSW indexes** (cosine ops, `m=16, ef_construction=64`, matching the other HNSW indexes in the codebase):
+- `faces_embedding_vec_hnsw_idx` — full-table index, serves person-matching KNN.
+- `faces_embedding_vec_archive_hnsw_idx` — **partial** index, `WHERE person_id IS NULL AND hidden_at IS NOT NULL`, serves the selective archived/hidden-face KNN queries (smaller and faster than scanning the full-table index for that access pattern).
+
+**Person-match algorithm** (`FaceMatchingService.matchFaceToPerson` → private `matchFaceToPersonPgvector` when the probe is 128-d and the backend is `pgvector`): a KNN query against `faces_embedding_vec_hnsw_idx` (joined to `people`, filtering `deleted_at IS NULL AND merged_into_id IS NULL`) returns the `FACE_MATCH_KNN_CANDIDATES` (default `40`) nearest candidate faces; their distinct person ids, nearest-first, become the candidate set. For each candidate person, the code recomputes the unchanged float8 centroid via `computePersonCentroid()` and applies the exact same `cosineSimilarity()` vs. `FACE_MATCH_THRESHOLD` (`0.38`) accept/reject decision as the in-app path. This is deliberate parity: pgvector KNN only narrows which persons are worth scoring — it never decides a match on its own — so results are numerically identical to the in-app path for whichever persons make the K cut. `hnsw.ef_search` is raised via `SET LOCAL hnsw.ef_search = <n>` to `max(100, FACE_MATCH_KNN_CANDIDATES)` inside the same transaction as the KNN `SELECT` (issued together via `$transaction([...])`, since `SET LOCAL` is transaction-scoped) to protect recall against pgvector's low default `ef_search`.
+
+**Archive-match algorithm** (`matchFaceToArchived` → private `matchFaceToArchivedPgvector`): KNN against the partial archive index, single nearest archived face accepted if its cosine similarity meets `FACE_ARCHIVE_MATCH_THRESHOLD` (`0.45`). When the caller supplies a pre-loaded reference set (`opts.candidates` — the in-loop reuse case where `face-detection-core` probes many faces against one already-loaded archived set), the method **always** uses the in-app path regardless of `FACE_VECTOR_BACKEND`, since a per-probe KNN round-trip would be strictly worse there.
+
+**Dimension guard.** The pgvector path is taken only when the probe embedding is exactly 128-d (`PGVECTOR_EMBEDDING_DIM = 128`, the `compreface` mobilenet provider's dimensionality). A 1024-d `human`-provider probe, or an empty embedding, falls back to the in-app cosine path automatically — a `vector(128)` cast would otherwise raise a dimensionality error. This guard becomes moot once the sibling `human`-provider removal (issue #113) lands, since only 128-d embeddings will exist at that point.
+
+**Correctness note.** HNSW is an *approximate* nearest-neighbor index — a borderline match could in principle be missed if it falls just outside the K-nearest candidates returned. This is a soft, recoverable failure mode: worst case, a face that should match a person stays unassigned and gets another chance on a future detection or rerun. It is mitigated by the `ef_search` floor and a generous default K (`40`).
+
+**Scope note — `findLiveMatchesAgainstArchived`.** Used by the face-auto-archive backfill/sweep (`face_auto_archive_sweep`), not the hot per-upload path — it deliberately stays on the in-app cosine path even under `FACE_VECTOR_BACKEND=pgvector`. Its archived reference set is already bounded and loaded once; a pgvector rewrite would trade a bounded, non-latency-critical sweep for either N per-live-face KNN round-trips or a long-held interactive transaction. The hot single-probe paths above are where the index pays off; this bulk sweep path is not rewritten.
+
+**Rollback.** `FACE_VECTOR_BACKEND=app` restores the pre-issue-112 in-app cosine path — the one-release rollback option if the pgvector path misbehaves in production.
+
+**Doctor check.** `face.pgvector` (label "Face pgvector index") lives in the Face section alongside `face.detection` and `face.flagConsistency`. It is `skipped` when the backend is `app` ("FACE_VECTOR_BACKEND=app; face matching uses in-app cosine (pgvector column not required)."); otherwise it checks `information_schema.columns` for `embedding_vec` and `pg_indexes` for both HNSW index names — `warning` if the column or the main index (`faces_embedding_vec_hnsw_idx`) is missing (actionItem: run `npx prisma migrate deploy`, or set `FACE_VECTOR_BACKEND=app` to roll back); a separate `warning` if only the partial archive index (`faces_embedding_vec_archive_hnsw_idx`) is missing (face-auto-archive KNN falls back to the main index and is slower; actionItem: run migrations); `ok` when the column and both indexes are present; `error` on any exception querying the catalog.
 
 ### Clustering Unknown Faces
 
@@ -978,7 +1006,8 @@ The `noFaces` filter is also available in `POST /api/search` (as the `noFaces: t
 | `FACE_MATCH_THRESHOLD` | `0.38` | Cosine similarity threshold for assigning a detected face to a known person. |
 | `FACE_CLUSTER_THRESHOLD` | `0.45` | Cosine similarity threshold for grouping unknown faces during clustering (stricter than match threshold). |
 | `FACE_CLUSTER_MIN_SIZE` | `2` | Minimum faces in a cluster to create a provisional Person. Singletons remain unknown. |
-| `FACE_VECTOR_BACKEND` | `'app'` | `'app'` = Float[] column + in-process cosine. `'pgvector'` = future native index (currently falls through to in-app cosine). |
+| `FACE_VECTOR_BACKEND` | `'pgvector'` | `'pgvector'` (default) = indexed KNN candidate selection via `faces.embedding_vec` HNSW index, centroid parity accept/reject. `'app'` = Float[] column + in-process cosine (one-release rollback). |
+| `FACE_MATCH_KNN_CANDIDATES` | `40` | Number of nearest-neighbor candidate faces fetched from the pgvector HNSW index before centroid recompute / nearest-archive pick. `hnsw.ef_search` is raised to `max(100, this value)` per query to protect recall. |
 | `FACE_HUMAN_MODEL_PATH` | `'/app/models/human'` | Directory containing `blazeface-back.json` and `faceres.json` model files for the Human provider. |
 | `FACE_AUTO_ARCHIVE` | `'true'` | Kill-switch for the auto-archive-on-match feature (see [Auto-Archive on Match](#auto-archive-on-match)). `'false'` disables it regardless of `features.faceAutoArchive`. |
 | `FACE_ARCHIVE_MATCH_THRESHOLD` | `0.45` | Cosine-similarity threshold for auto-archiving a face against the archived (hidden, unassigned) pool. Seeds `face.autoArchive.matchThreshold`'s default. |
