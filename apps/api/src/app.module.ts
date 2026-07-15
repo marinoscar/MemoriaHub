@@ -33,6 +33,7 @@ import { EmailModule } from './email/email.module';
 import { StorageSettingsModule } from './storage-settings/storage-settings.module';
 import { ShareModule } from './share/share.module';
 import { SocialMediaModule } from './social-media/social-media.module';
+import { EnhancementModule } from './enhancement/enhancement.module';
 import { NodesModule } from './nodes/nodes.module';
 import { DoctorModule } from './doctor/doctor.module';
 import { LoggerModule } from './common/logger/logger.module';
@@ -94,6 +95,7 @@ import configuration from './config/configuration';
     StorageSettingsModule,
     ShareModule,
     SocialMediaModule,
+    EnhancementModule,
     NodesModule,
 
     // Test modules (non-production only)
