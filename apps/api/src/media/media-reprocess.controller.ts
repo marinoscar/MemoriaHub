@@ -26,6 +26,12 @@ const reprocessStuckBodySchema = z.object({
 
 export class ReprocessStuckBodyDto extends createZodDto(reprocessStuckBodySchema) {}
 
+const reprocessFailedBodySchema = z.object({
+  limit: z.number().int().positive().optional(),
+});
+
+export class ReprocessFailedBodyDto extends createZodDto(reprocessFailedBodySchema) {}
+
 @ApiTags('Admin - Media')
 @Controller('admin/media')
 export class MediaReprocessController {
@@ -70,6 +76,29 @@ export class MediaReprocessController {
   @ApiResponse({ status: 201, description: '{ claimed: number, reprocessed: number, exhausted: number, errors: number }' })
   async reprocessStuck(@Body() body: ReprocessStuckBodyDto): Promise<StorageProcessingRecoveryResult> {
     return this.recoveryService.recoverStuckObjects(body.olderThanMinutes);
+  }
+
+  @Post('reprocess-failed')
+  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.STORAGE_DELETE_ANY] })
+  @ApiOperation({
+    summary: 'Recover StorageObjects stuck at status=failed image objects (Admin)',
+    description:
+      'Finds all image StorageObjects at status=failed (most commonly HEIC/HEIF images that ' +
+      'failed to decode before the ffmpeg-transcode fallback existed — issue #106) and re-runs ' +
+      'the full processing pipeline for each: regenerates the thumbnail and, via ' +
+      'OBJECT_PROCESSED_EVENT, re-fires face/tag/duplicate enrichment automatically. Thumbnail ' +
+      "objects (under the 'thumbnails/' prefix) are excluded. Distinct from reprocess-stuck, " +
+      'which targets status=processing (objects orphaned mid-pipeline by a crash) and will not ' +
+      'pick these up. Optional limit bounds the batch size.',
+  })
+  @ApiResponse({
+    status: 201,
+    description: '{ claimed: number, reprocessed: number, exhausted: number, errors: number }',
+  })
+  async reprocessFailed(
+    @Body() body: ReprocessFailedBodyDto,
+  ): Promise<StorageProcessingRecoveryResult> {
+    return this.recoveryService.recoverFailedImageObjects({ limit: body.limit });
   }
 
   @Post('thumbnails/repair')
