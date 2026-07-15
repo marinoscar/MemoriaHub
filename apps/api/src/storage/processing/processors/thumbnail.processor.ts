@@ -6,6 +6,7 @@ import { join, extname } from 'path';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { extractPosterFrame } from '@memoriahub/enrichment-compute/video';
+import { transcodeToDecodableJpeg } from '../image-orientation.util';
 import { ObjectProcessor, ObjectProcessorResult } from '../object-processor.interface';
 import { STORAGE_PROVIDER, StorageProvider } from '../../providers/storage-provider.interface';
 import { StorageProviderResolver } from '../../providers/storage-provider.resolver';
@@ -124,16 +125,33 @@ export class ThumbnailProcessor implements ObjectProcessor {
 
       // Intentionally rotates inline like the shared prepareImageForProcessing utility — thumbnail processor predates the util.
       const sharp = (await import('sharp')).default;
-      const thumbBuffer = await sharp(buffer)
-        .rotate()
-        .resize({
-          width: this.maxDim,
-          height: this.maxDim,
-          fit: 'inside',
-          withoutEnlargement: true,
-        })
-        .jpeg({ quality: this.quality })
-        .toBuffer();
+
+      const resize = (input: Buffer): Promise<Buffer> =>
+        sharp(input)
+          .rotate()
+          .resize({
+            width: this.maxDim,
+            height: this.maxDim,
+            fit: 'inside',
+            withoutEnlargement: true,
+          })
+          .jpeg({ quality: this.quality })
+          .toBuffer();
+
+      let thumbBuffer: Buffer;
+      try {
+        thumbBuffer = await resize(buffer);
+      } catch (decodeError) {
+        // sharp's bundled libvips can't decode this format (e.g. HEIC — the
+        // HEVC decoder is omitted for licensing reasons). Transcode the input
+        // to a JPEG via ffmpeg, then run the same resize pipeline (ffmpeg has
+        // already baked in EXIF orientation, so the extra `.rotate()` is a
+        // harmless no-op). See issue #106.
+        const jpeg = await transcodeToDecodableJpeg(buffer, {
+          fileExtension: extname(object.name || ''),
+        });
+        thumbBuffer = await resize(jpeg);
+      }
 
       return await this.uploadThumbnail(object, thumbBuffer);
     } catch (error) {
