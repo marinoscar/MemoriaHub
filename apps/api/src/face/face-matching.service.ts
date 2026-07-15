@@ -2,8 +2,33 @@
 // FaceMatchingService
 // =============================================================================
 //
-// Provides in-app cosine similarity matching between a detected face embedding
-// and existing Person centroids in a circle.
+// Matches a detected face embedding against existing Person centroids and the
+// archived-face pool in a circle.
+//
+// Two matching backends, selected by FACE_VECTOR_BACKEND (default
+// DEFAULT_FACE_VECTOR_BACKEND, see below):
+//   - 'pgvector': candidate selection is delegated to Postgres via a KNN query
+//     on the `faces.embedding_vec` HNSW index (the `<=>` cosine-distance
+//     operator). embedding_vec is a DERIVED column of dimension vector(128),
+//     kept in sync with the float8 `embedding` array by the DB trigger
+//     `faces_sync_embedding_vec` — application code (including this service and
+//     Prisma) MUST NEVER write it directly; the trigger owns it. Because the
+//     column is vector(128), the pgvector path is only ever taken when the
+//     probe embedding is exactly 128-d (the `compreface` mobilenet provider);
+//     see the dimension guard in each method below. A 1024-d ('human' WASM)
+//     probe, or an empty embedding, would be dimensionally incompatible with
+//     `$1::vector(128)` and is routed to the in-app cosine path instead.
+//   - 'app': the original path — load candidates into the process and compute
+//     cosine similarity in JS.
+//
+// KNN-candidate → centroid parity design (matchFaceToPerson): the pgvector KNN
+// only SELECTS which persons are worth scoring (nearest float4 vectors); the
+// final accept/reject decision is still made by recomputing each candidate
+// person's float8 centroid via computePersonCentroid() and comparing against
+// matchThreshold with the exact same cosineSimilarity() used by the in-app
+// path. This keeps the pgvector path's accept/reject decision numerically
+// identical to the in-app path — the float4 mirror column only accelerates
+// candidate selection, it never decides a match on its own.
 //
 // Threshold conventions (ArcFace on LFW benchmark):
 //   - Same-person pairs typically score > 0.40 cosine similarity.
@@ -61,6 +86,32 @@ export { DEFAULT_FACE_ARCHIVE_MATCH_THRESHOLD };
  */
 export const DEFAULT_FACE_CLUSTER_MIN_SIZE = 2;
 
+/**
+ * Default vector matching backend when FACE_VECTOR_BACKEND is unset.
+ * 'pgvector' delegates KNN candidate selection to the `faces.embedding_vec`
+ * HNSW index; 'app' loads candidates and computes cosine similarity in-process.
+ */
+export const DEFAULT_FACE_VECTOR_BACKEND = 'pgvector';
+
+/**
+ * Number of nearest-neighbour rows fetched from the pgvector index before the
+ * bounded centroid recompute (matchFaceToPerson) or nearest-archive pick
+ * (matchFaceToArchived). Kept modest so the KNN LIMIT stays well under the
+ * per-query hnsw.ef_search recall budget set in the same transaction.
+ */
+export const DEFAULT_FACE_MATCH_KNN_CANDIDATES = 40;
+
+/**
+ * hnsw.ef_search floor applied (via `SET LOCAL`) around every KNN query so
+ * recall is not starved by pgvector's low default ef_search. Must be >= the
+ * KNN LIMIT; when a caller configures a larger FACE_MATCH_KNN_CANDIDATES the
+ * effective ef_search is raised to match (see the per-method Math.max).
+ */
+const HNSW_EF_SEARCH_FLOOR = 100;
+
+/** The one embedding dimensionality mirrored into the vector(128) column. */
+const PGVECTOR_EMBEDDING_DIM = 128;
+
 @Injectable()
 export class FaceMatchingService {
   private readonly logger = new Logger(FaceMatchingService.name);
@@ -79,6 +130,9 @@ export class FaceMatchingService {
 
   /** Max archived faces to load per archive-match query (bounds memory/scan). */
   readonly archiveMaxCandidates: number;
+
+  /** KNN candidate count fetched from the pgvector index before centroid recompute. */
+  readonly matchKnnCandidates: number;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -103,6 +157,11 @@ export class FaceMatchingService {
     );
     this.archiveMaxCandidates = parseInt(
       this.config.get<string>('FACE_ARCHIVE_MAX_CANDIDATES') ?? '5000',
+      10,
+    );
+    this.matchKnnCandidates = parseInt(
+      this.config.get<string>('FACE_MATCH_KNN_CANDIDATES') ??
+        String(DEFAULT_FACE_MATCH_KNN_CANDIDATES),
       10,
     );
   }
@@ -177,25 +236,37 @@ export class FaceMatchingService {
   // ---------------------------------------------------------------------------
 
   /**
-   * Compare an embedding against all active Person centroids in a circle and
+   * Compare an embedding against active Person centroids in a circle and
    * return the best match if similarity >= matchThreshold.
    *
    * Active persons: deletedAt IS NULL AND mergedIntoId IS NULL.
    *
-   * pgvector seam: when FACE_VECTOR_BACKEND=pgvector, a single SQL query using
-   * the <=> operator would be more efficient. For now we fall through to the
-   * in-app cosine path regardless of the setting.
+   * Backend selection (FACE_VECTOR_BACKEND, default DEFAULT_FACE_VECTOR_BACKEND):
+   *   - 'pgvector' (128-d probes only): a KNN query on `faces.embedding_vec`
+   *     (HNSW, `<=>` cosine distance), JOINed to active persons, selects the
+   *     nearest candidate faces; their distinct person ids (nearest-first) are
+   *     the only persons whose centroid is then recomputed. The accept/reject
+   *     decision remains on the exact float8 centroid — cosineSimilarity() vs.
+   *     matchThreshold — so the result is numerically identical to the in-app
+   *     path; the vector column only accelerates candidate selection. See the
+   *     KNN-candidate → centroid parity note in the class header.
+   *   - 'app', OR any non-128-d probe (1024-d 'human', empty): the full in-app
+   *     path below — score every active person's centroid in JS. The dimension
+   *     guard is mandatory because a 1024-d probe against a vector(128) column
+   *     would raise a dimensionality error.
+   *
+   * `embedding_vec` is a trigger-maintained (`faces_sync_embedding_vec`) derived
+   * column; this method never writes it.
    */
   async matchFaceToPerson(
     circleId: string,
     embedding: number[],
   ): Promise<{ personId: string; similarity: number } | null> {
-    const vectorBackend = this.config.get<string>('FACE_VECTOR_BACKEND') ?? 'app';
+    const vectorBackend =
+      this.config.get<string>('FACE_VECTOR_BACKEND') ?? DEFAULT_FACE_VECTOR_BACKEND;
 
-    if (vectorBackend === 'pgvector') {
-      // TODO(pgvector): Replace with a single SQL query using <=> operator when
-      // FACE_VECTOR_BACKEND=pgvector. For now, fall through to in-app cosine.
-      this.logger.debug('FACE_VECTOR_BACKEND=pgvector requested; falling through to in-app cosine');
+    if (vectorBackend === 'pgvector' && embedding.length === PGVECTOR_EMBEDDING_DIM) {
+      return this.matchFaceToPersonPgvector(circleId, embedding);
     }
 
     // Load all active (non-deleted, non-merged-away) persons for the circle
@@ -221,6 +292,80 @@ export class FaceMatchingService {
       if (similarity > bestSimilarity) {
         bestSimilarity = similarity;
         bestPersonId = person.id;
+      }
+    }
+
+    if (bestPersonId !== null && bestSimilarity >= this.matchThreshold) {
+      return { personId: bestPersonId, similarity: bestSimilarity };
+    }
+
+    return null;
+  }
+
+  /**
+   * pgvector implementation of matchFaceToPerson (option (b): KNN candidate
+   * selection → bounded centroid recompute for exact in-app parity).
+   *
+   * Only invoked for 128-d probes (guarded by the caller). The KNN JOINs to
+   * `people` so only active persons' faces are considered, and returns the
+   * nearest candidate faces ordered by cosine distance; we collect the distinct
+   * person ids in nearest-first order, recompute each candidate's float8
+   * centroid, and keep the accept/reject decision on that centroid — identical
+   * to the in-app path.
+   *
+   * `SET LOCAL hnsw.ef_search` only takes effect inside an explicit transaction,
+   * so the SET and the SELECT are issued together via `$transaction([...])`
+   * (they share one connection/transaction). The vector literal is numeric-only
+   * (`[n,n,...]`) so there is no injection risk; ef_search is a computed integer.
+   */
+  private async matchFaceToPersonPgvector(
+    circleId: string,
+    embedding: number[],
+  ): Promise<{ personId: string; similarity: number } | null> {
+    const vectorLiteral = `[${embedding.join(',')}]`;
+    const k = this.matchKnnCandidates;
+    const efSearch = Math.max(HNSW_EF_SEARCH_FLOOR, k);
+
+    const [, rows] = await this.prisma.$transaction([
+      this.prisma.$executeRawUnsafe(`SET LOCAL hnsw.ef_search = ${efSearch}`),
+      this.prisma.$queryRaw<{ person_id: string }[]>`
+        SELECT f.person_id AS person_id
+        FROM faces f
+        JOIN people p
+          ON p.id = f.person_id
+         AND p.deleted_at IS NULL
+         AND p.merged_into_id IS NULL
+        WHERE f.circle_id = ${circleId}::uuid
+          AND f.person_id IS NOT NULL
+          AND f.embedding_vec IS NOT NULL
+        ORDER BY f.embedding_vec <=> ${vectorLiteral}::vector
+        LIMIT ${k}
+      `,
+    ]);
+
+    // Distinct candidate person ids, preserving nearest-first ordering.
+    const candidatePersonIds: string[] = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+      if (row.person_id && !seen.has(row.person_id)) {
+        seen.add(row.person_id);
+        candidatePersonIds.push(row.person_id);
+      }
+    }
+
+    if (candidatePersonIds.length === 0) return null;
+
+    let bestPersonId: string | null = null;
+    let bestSimilarity = -Infinity;
+
+    for (const personId of candidatePersonIds) {
+      const centroid = await this.computePersonCentroid(personId);
+      if (centroid.length === 0) continue;
+
+      const similarity = this.cosineSimilarity(embedding, centroid);
+      if (similarity > bestSimilarity) {
+        bestSimilarity = similarity;
+        bestPersonId = personId;
       }
     }
 
@@ -280,15 +425,24 @@ export class FaceMatchingService {
    * queue; a fresh detection that closely matches one is a signal the user
    * would likely want it archived too.
    *
-   * Read-only — this method performs no writes. Candidates may be supplied by
-   * the caller (opts.candidates) to avoid a redundant DB round-trip when a
-   * reference set has already been loaded; otherwise the archived set is
-   * queried here, capped at archiveMaxCandidates and ordered most-recently-
-   * hidden first so the freshest archive decisions dominate a truncated scan.
+   * Read-only — this method performs no writes.
    *
-   * pgvector seam: when FACE_VECTOR_BACKEND=pgvector, a single KNN SQL query
-   * using the <=> operator would be more efficient. For now we fall through to
-   * the in-app cosine path (via bestMatchAgainstSet) regardless of the setting.
+   * Backend selection (FACE_VECTOR_BACKEND, default DEFAULT_FACE_VECTOR_BACKEND):
+   *   - opts.candidates supplied: ALWAYS the in-app path, regardless of backend.
+   *     This is the in-loop reuse case (face-detection-core loads the archived
+   *     reference set once and probes many faces against it), so a per-probe KNN
+   *     round-trip would be strictly worse.
+   *   - 'pgvector' (128-d probes only): a KNN query on the PARTIAL archive HNSW
+   *     index (`faces_embedding_vec_archive_hnsw_idx`, scoped to
+   *     person_id IS NULL AND hidden_at IS NOT NULL) returns the nearest archived
+   *     faces; the single nearest is accepted if its cosine similarity meets the
+   *     threshold. The dimension guard is mandatory (vector(128) column).
+   *   - 'app', OR a non-128-d probe: the in-app path below — load the archived
+   *     pool (capped at archiveMaxCandidates, most-recently-hidden first) and
+   *     scan in JS via bestMatchAgainstSet.
+   *
+   * `embedding_vec` is a trigger-maintained (`faces_sync_embedding_vec`) derived
+   * column; this method never writes it.
    */
   async matchFaceToArchived(
     circleId: string,
@@ -300,38 +454,85 @@ export class FaceMatchingService {
   ): Promise<{ faceId: string; similarity: number } | null> {
     if (!embedding || embedding.length === 0) return null;
 
-    const vectorBackend = this.config.get<string>('FACE_VECTOR_BACKEND') ?? 'app';
-    if (vectorBackend === 'pgvector') {
-      // TODO(pgvector): Replace with a single KNN SQL query using <=> operator
-      // when FACE_VECTOR_BACKEND=pgvector. For now, fall through to in-app cosine.
-      this.logger.debug(
-        'FACE_VECTOR_BACKEND=pgvector requested; falling through to in-app cosine',
-      );
+    const threshold = opts?.threshold ?? this.archiveMatchThreshold;
+
+    // Caller supplied a pre-loaded reference set: use it directly (in-loop reuse
+    // in face-detection-core) — no KNN, regardless of backend.
+    if (opts?.candidates) {
+      if (opts.candidates.length === 0) return null;
+      const best = bestMatchAgainstSet(embedding, opts.candidates);
+      return best && best.similarity >= threshold
+        ? { faceId: best.id, similarity: best.similarity }
+        : null;
     }
 
-    const candidates =
-      opts?.candidates ??
-      (await this.prisma.face.findMany({
-        where: {
-          circleId,
-          personId: null,
-          hiddenAt: { not: null },
-          // isEmpty is a supported FloatNullableListFilter key in this Prisma
-          // version (7.x), so we filter out empty-embedding rows in the query
-          // rather than post-fetch in JS.
-          embedding: { isEmpty: false },
-        },
-        select: { id: true, embedding: true },
-        orderBy: { hiddenAt: 'desc' },
-        take: this.archiveMaxCandidates,
-      }));
+    const vectorBackend =
+      this.config.get<string>('FACE_VECTOR_BACKEND') ?? DEFAULT_FACE_VECTOR_BACKEND;
+
+    if (vectorBackend === 'pgvector' && embedding.length === PGVECTOR_EMBEDDING_DIM) {
+      return this.matchFaceToArchivedPgvector(circleId, embedding, threshold);
+    }
+
+    // In-app fallback: query the archived pool and scan in JS.
+    const candidates = await this.prisma.face.findMany({
+      where: {
+        circleId,
+        personId: null,
+        hiddenAt: { not: null },
+        // isEmpty is a supported FloatNullableListFilter key in this Prisma
+        // version (7.x), so we filter out empty-embedding rows in the query
+        // rather than post-fetch in JS.
+        embedding: { isEmpty: false },
+      },
+      select: { id: true, embedding: true },
+      orderBy: { hiddenAt: 'desc' },
+      take: this.archiveMaxCandidates,
+    });
 
     if (candidates.length === 0) return null;
 
-    const threshold = opts?.threshold ?? this.archiveMatchThreshold;
     const best = bestMatchAgainstSet(embedding, candidates);
     if (best && best.similarity >= threshold) {
       return { faceId: best.id, similarity: best.similarity };
+    }
+
+    return null;
+  }
+
+  /**
+   * pgvector implementation of matchFaceToArchived. Only invoked for 128-d
+   * probes (guarded by the caller). Runs a KNN against the partial archive HNSW
+   * index and returns the single nearest archived face if it meets the
+   * threshold. `SET LOCAL hnsw.ef_search` is transaction-scoped, so the SET and
+   * the SELECT are issued together via `$transaction([...])`. The vector literal
+   * is numeric-only and ef_search is a computed integer — no injection risk.
+   */
+  private async matchFaceToArchivedPgvector(
+    circleId: string,
+    embedding: number[],
+    threshold: number,
+  ): Promise<{ faceId: string; similarity: number } | null> {
+    const vectorLiteral = `[${embedding.join(',')}]`;
+    const k = this.matchKnnCandidates;
+    const efSearch = Math.max(HNSW_EF_SEARCH_FLOOR, k);
+
+    const [, rows] = await this.prisma.$transaction([
+      this.prisma.$executeRawUnsafe(`SET LOCAL hnsw.ef_search = ${efSearch}`),
+      this.prisma.$queryRaw<{ id: string; similarity: number }[]>`
+        SELECT f.id AS id, 1 - (f.embedding_vec <=> ${vectorLiteral}::vector) AS similarity
+        FROM faces f
+        WHERE f.circle_id = ${circleId}::uuid
+          AND f.person_id IS NULL
+          AND f.hidden_at IS NOT NULL
+          AND f.embedding_vec IS NOT NULL
+        ORDER BY f.embedding_vec <=> ${vectorLiteral}::vector
+        LIMIT ${k}
+      `,
+    ]);
+
+    const nearest = rows[0];
+    if (nearest && Number(nearest.similarity) >= threshold) {
+      return { faceId: nearest.id, similarity: Number(nearest.similarity) };
     }
 
     return null;
@@ -355,6 +556,17 @@ export class FaceMatchingService {
    * opts.liveBatch) to reuse already-loaded sets and control batching; otherwise
    * each side is queried here. Only id + embedding are selected to keep memory
    * bounded, and empty-embedding rows are excluded via the same isEmpty filter.
+   *
+   * Backend note: this method deliberately stays on the in-app cosine path even
+   * when FACE_VECTOR_BACKEND='pgvector'. It is used by the face-auto-archive
+   * backfill/sweep (not the hot per-upload detection path), its archived
+   * reference set is already bounded (archiveMaxCandidates) and loaded once, and
+   * a pgvector rewrite would require either one KNN round-trip per live face or
+   * a long-held interactive transaction wrapping `SET LOCAL hnsw.ef_search` — a
+   * poor trade for a bounded, non-latency-critical sweep. The hot single-probe
+   * paths (matchFaceToPerson / matchFaceToArchived) are where the index pays
+   * off. (`embedding_vec` remains a trigger-maintained derived column either way;
+   * nothing here writes it.)
    */
   async findLiveMatchesAgainstArchived(
     circleId: string,

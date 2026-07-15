@@ -22,6 +22,7 @@ import { EnrichmentAdminService } from '../enrichment/enrichment-admin.service';
 import { isEnrichmentWorkerEnabled } from '../enrichment/enrichment-job.worker';
 import { SocialMediaOcrService } from '../social-media/social-media-ocr.service';
 import { VisualEmbeddingService } from '../dedup/visual-embedding.service';
+import { DEFAULT_FACE_VECTOR_BACKEND } from '../face/face-matching.service';
 import {
   DoctorCheck,
   DoctorCheckStatus,
@@ -128,6 +129,7 @@ export class DoctorService {
         label: 'Face flag consistency',
         fn: () => this.checkFaceFlagConsistency(settings),
       },
+      { key: 'face.pgvector', label: 'Face pgvector index', fn: () => this.checkFacePgvector() },
       // Geo
       { key: 'geo.reverseProvider', label: 'Reverse geocoding', fn: () => this.checkGeoReverseProvider(settings) },
       // Jobs
@@ -200,7 +202,7 @@ export class DoctorService {
       {
         key: 'face',
         label: 'Face Recognition',
-        checkKeys: ['face.detection', 'face.flagConsistency'],
+        checkKeys: ['face.detection', 'face.flagConsistency', 'face.pgvector'],
       },
       {
         key: 'geo',
@@ -374,6 +376,78 @@ export class DoctorService {
       }
 
       return { status: 'ok', message: 'pgvector extension and embedding table present.' };
+    } catch (err) {
+      return { status: 'error', message: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Face pgvector KNN readiness: when FACE_VECTOR_BACKEND resolves to 'pgvector'
+   * (the default), face person/archive matching relies on the trigger-maintained
+   * faces.embedding_vec column and its HNSW indexes. Verify the column and the
+   * main index exist (and note if the partial archive index is missing); when the
+   * backend is 'app' the column is not required, so the check is skipped.
+   */
+  private async checkFacePgvector(): Promise<CheckOutcome> {
+    const backend = process.env['FACE_VECTOR_BACKEND'] ?? DEFAULT_FACE_VECTOR_BACKEND;
+
+    if (backend === 'app') {
+      return {
+        status: 'skipped',
+        message:
+          'FACE_VECTOR_BACKEND=app; face matching uses in-app cosine (pgvector column not required).',
+      };
+    }
+
+    try {
+      const [colRows, idxRows] = await Promise.all([
+        this.prisma.$queryRaw<Array<{ ok: number }>>`
+          SELECT 1 AS ok FROM information_schema.columns
+          WHERE table_name = 'faces' AND column_name = 'embedding_vec'
+        `,
+        this.prisma.$queryRaw<Array<{ indexname: string }>>`
+          SELECT indexname FROM pg_indexes
+          WHERE tablename = 'faces'
+            AND indexname IN (
+              'faces_embedding_vec_hnsw_idx',
+              'faces_embedding_vec_archive_hnsw_idx'
+            )
+        `,
+      ]);
+
+      const columnPresent = colRows.length > 0;
+      const idxNames = new Set(idxRows.map((r) => r.indexname));
+      const mainIndexPresent = idxNames.has('faces_embedding_vec_hnsw_idx');
+      const archiveIndexPresent = idxNames.has('faces_embedding_vec_archive_hnsw_idx');
+
+      const rollbackHint =
+        'Run migrations (npx prisma migrate deploy) to add the face pgvector column/indexes, ' +
+        'or set FACE_VECTOR_BACKEND=app to roll back to in-app cosine matching.';
+
+      if (!columnPresent || !mainIndexPresent) {
+        return {
+          status: 'warning',
+          message: !columnPresent
+            ? 'FACE_VECTOR_BACKEND=pgvector but faces.embedding_vec column is missing.'
+            : 'FACE_VECTOR_BACKEND=pgvector but faces_embedding_vec_hnsw_idx index is missing.',
+          actionItem: rollbackHint,
+        };
+      }
+
+      if (!archiveIndexPresent) {
+        return {
+          status: 'warning',
+          message:
+            'faces_embedding_vec_archive_hnsw_idx (partial archive index) is missing; ' +
+            'face-auto-archive KNN falls back to the main index and is slower.',
+          actionItem: 'Run migrations (npx prisma migrate deploy) to add the partial archive index.',
+        };
+      }
+
+      return {
+        status: 'ok',
+        message: 'faces.embedding_vec column and both HNSW indexes present.',
+      };
     } catch (err) {
       return { status: 'error', message: err instanceof Error ? err.message : String(err) };
     }

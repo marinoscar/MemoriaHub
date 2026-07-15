@@ -276,7 +276,7 @@ describe('DoctorService', () => {
       }
     });
 
-    it('includes all 26 documented checks across the 8 sections', async () => {
+    it('includes all 27 documented checks across the 8 sections', async () => {
       const report = await service.runDiagnostics();
 
       const allKeys = report.sections.flatMap((s) => s.checks.map((c) => c.key));
@@ -299,6 +299,7 @@ describe('DoctorService', () => {
         'ai.duplicateDetection',
         'face.detection',
         'face.flagConsistency',
+        'face.pgvector',
         'geo.reverseProvider',
         'jobs.workerEnabled',
         'jobs.queueHealth',
@@ -350,7 +351,7 @@ describe('DoctorService', () => {
       // Unrelated checks are unaffected.
       expect(findCheck(report, 'core.database').status).toBe('ok');
       expect(findCheck(report, 'ai.search').status).toBe('ok');
-      expect(report.summary.total).toBe(26);
+      expect(report.summary.total).toBe(27);
     });
   });
 
@@ -390,7 +391,7 @@ describe('DoctorService', () => {
         // The rest of the report still completed normally.
         expect(findCheck(report, 'core.database').status).toBe('ok');
         expect(findCheck(report, 'ai.search').status).toBe('ok');
-        expect(report.summary.total).toBe(26);
+        expect(report.summary.total).toBe(27);
       } finally {
         jest.useRealTimers();
       }
@@ -794,6 +795,131 @@ describe('DoctorService', () => {
 
       const report = await service.runDiagnostics();
       expect(findCheck(report, 'core.pgvector').status).toBe('ok');
+    });
+  });
+
+  // =========================================================================
+  // 9. face.pgvector
+  // =========================================================================
+
+  describe('face.pgvector', () => {
+    // NOTE on handler ordering: mockQueryRawByText matches on SQL-text
+    // SUBSTRING and returns the first matching handler in array order. The
+    // real `information_schema.columns` query text literally begins with
+    // "SELECT 1 AS ok FROM information_schema.columns" (see
+    // doctor.service.ts's checkFacePgvector), so it also contains the
+    // substring "SELECT 1" used by healthyQueryRawHandlers()'s generic
+    // 'SELECT 1' handler (for the plain `SELECT 1` liveness check). If the
+    // more specific 'information_schema.columns' / 'pg_indexes' needles were
+    // appended AFTER the handlers from healthyQueryRawHandlers() (which is
+    // ordered ['_prisma_migrations','pg_extension','to_regclass','SELECT 1']),
+    // the broader 'SELECT 1' needle would win the substring match first and
+    // this check's `colRows` mock would silently be ignored. This helper
+    // therefore inserts the face.pgvector-specific needles BEFORE 'SELECT 1'.
+    function faceIndexQueryHandlers(
+      colRows: unknown,
+      idxRows: unknown,
+    ): Array<[string, unknown]> {
+      return [
+        ['_prisma_migrations', [{ n: 0 }]],
+        ['pg_extension', [{ ok: 1 }]],
+        ['to_regclass', [{ t: 'media_item_embedding' }]],
+        ['information_schema.columns', colRows],
+        ['pg_indexes', idxRows],
+        ['SELECT 1', [{ '?column?': 1 }]],
+      ];
+    }
+
+    const BOTH_INDEXES = [
+      { indexname: 'faces_embedding_vec_hnsw_idx' },
+      { indexname: 'faces_embedding_vec_archive_hnsw_idx' },
+    ];
+
+    beforeEach(() => {
+      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
+        provider: 's3',
+        enabled: true,
+      });
+      mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
+      mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
+      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
+      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
+      mockNoWorkerNodes(mockPrisma);
+    });
+
+    it('is status:skipped when FACE_VECTOR_BACKEND=app', async () => {
+      process.env = healthyEnv({ FACE_VECTOR_BACKEND: 'app' });
+      mockQueryRawByText(mockPrisma, healthyQueryRawHandlers());
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'face.pgvector');
+
+      expect(check.status).toBe('skipped');
+      expect(check.message).toContain('in-app cosine');
+    });
+
+    it('is status:ok when the backend defaults to pgvector (env unset) and both the column and both indexes are present', async () => {
+      process.env = healthyEnv();
+      mockQueryRawByText(mockPrisma, faceIndexQueryHandlers([{ ok: 1 }], BOTH_INDEXES));
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'face.pgvector');
+
+      expect(check.status).toBe('ok');
+      expect(check.message).toContain('both HNSW indexes present');
+    });
+
+    it('is status:ok when FACE_VECTOR_BACKEND=pgvector is set explicitly and both the column and both indexes are present', async () => {
+      process.env = healthyEnv({ FACE_VECTOR_BACKEND: 'pgvector' });
+      mockQueryRawByText(mockPrisma, faceIndexQueryHandlers([{ ok: 1 }], BOTH_INDEXES));
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'face.pgvector');
+
+      expect(check.status).toBe('ok');
+    });
+
+    it('is status:warning when the embedding_vec column is missing', async () => {
+      process.env = healthyEnv();
+      mockQueryRawByText(mockPrisma, faceIndexQueryHandlers([], BOTH_INDEXES));
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'face.pgvector');
+
+      expect(check.status).toBe('warning');
+      expect(check.message).toContain('column is missing');
+      expect(check.actionItem).toBeTruthy();
+    });
+
+    it('is status:warning when the main HNSW index is missing (column present)', async () => {
+      process.env = healthyEnv();
+      mockQueryRawByText(mockPrisma, faceIndexQueryHandlers([{ ok: 1 }], []));
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'face.pgvector');
+
+      expect(check.status).toBe('warning');
+      expect(check.message).toContain('faces_embedding_vec_hnsw_idx index is missing');
+    });
+
+    it('is status:warning when only the partial archive index is missing (column + main index present)', async () => {
+      process.env = healthyEnv();
+      mockQueryRawByText(
+        mockPrisma,
+        faceIndexQueryHandlers([{ ok: 1 }], [{ indexname: 'faces_embedding_vec_hnsw_idx' }]),
+      );
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'face.pgvector');
+
+      expect(check.status).toBe('warning');
+      expect(check.message).toContain('faces_embedding_vec_archive_hnsw_idx');
+      expect(check.message).toContain('partial archive index');
+      expect(check.actionItem).toBeTruthy();
     });
   });
 });

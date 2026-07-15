@@ -783,6 +783,15 @@ model Face {
   hiddenAt          DateTime? @map("hidden_at") @db.Timestamptz
   hiddenReason      String?   @map("hidden_reason")
 
+  // DERIVED column, maintained automatically by the `faces_sync_embedding_vec`
+  // DB trigger (migration 20260715000000_add_face_embedding_vector) — kept in
+  // sync with `embedding` on every INSERT/UPDATE, NULL for non-128-d or empty
+  // embeddings. Never written from application code: Prisma's `Unsupported`
+  // type intentionally makes it unreadable/unwritable through the client, so it
+  // must never appear in any select/create/update/include. Exists in the schema
+  // only so `prisma migrate diff` / `prisma db pull` don't propose dropping it.
+  embeddingVec Unsupported("vector(128)")? @map("embedding_vec")
+
   // Relations
   mediaItem      MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
   circle         Circle    @relation(fields: [circleId], references: [id], onDelete: Cascade)
