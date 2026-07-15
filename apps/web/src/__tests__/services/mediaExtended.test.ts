@@ -38,7 +38,7 @@ import {
 } from '../../services/media';
 import type {
   MediaItem,
-  MediaListResponse,
+  MediaKeysetResponse,
   InitUploadResponse,
   AlbumListResponse,
   Album,
@@ -88,9 +88,9 @@ const mockMediaItem: MediaItem = {
   thumbnailUrl: null,
 };
 
-const mockListResponse: MediaListResponse = {
+const mockListResponse: MediaKeysetResponse = {
   items: [mockMediaItem],
-  meta: { page: 1, pageSize: 20, totalItems: 1, totalPages: 1 },
+  meta: { pageSize: 20, nextCursor: 'cursor-next-1', hasMore: true },
 };
 
 const mockDashboard: DashboardResponse = {
@@ -153,12 +153,16 @@ describe('listMedia', () => {
   it('returns the list response', async () => {
     const result = await listMedia();
     expect(result).toEqual(mockListResponse);
+    expect(result.items).toEqual([mockMediaItem]);
+    expect(result.meta.nextCursor).toBe('cursor-next-1');
+    expect(result.meta.hasMore).toBe(true);
   });
 
-  it('includes page and pageSize in query string', async () => {
-    await listMedia({ page: 2, pageSize: 50 });
-    expect(capturedUrl!.searchParams.get('page')).toBe('2');
+  it('includes cursor and pageSize in query string, omits page', async () => {
+    await listMedia({ cursor: 'cursor-abc', pageSize: 50 });
+    expect(capturedUrl!.searchParams.get('cursor')).toBe('cursor-abc');
     expect(capturedUrl!.searchParams.get('pageSize')).toBe('50');
+    expect(capturedUrl!.searchParams.has('page')).toBe(false);
   });
 
   it('includes type filter', async () => {
