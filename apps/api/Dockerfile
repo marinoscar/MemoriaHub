@@ -20,10 +20,19 @@
 # -----------------------------------------------------------------------------
 # Base stage
 # -----------------------------------------------------------------------------
-FROM node:26-alpine AS base
+# glibc-based image (Debian) — REQUIRED: onnxruntime-node ships only
+# glibc-linked prebuilt binaries (libonnxruntime.so.1 needs ld-linux-x86-64.so.2),
+# which do not exist on Alpine/musl. Building on node:*-alpine here silently
+# degrades server-side CLIP visual embeddings (near-duplicate detection falls
+# back to hash-only). See GitHub issue #110.
+FROM node:26-slim AS base
 WORKDIR /app
-# Install OpenSSL for Prisma compatibility and ffmpeg for video processing
-RUN apk add --no-cache openssl openssl-dev ffmpeg
+# OpenSSL for Prisma; ffmpeg for video processing; wget + ca-certificates for
+# the Human model download below (busybox wget is builtin on Alpine but absent
+# on Debian slim, and HTTPS fetches need the CA bundle).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      openssl ffmpeg wget ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # -----------------------------------------------------------------------------
 # Dependencies stage

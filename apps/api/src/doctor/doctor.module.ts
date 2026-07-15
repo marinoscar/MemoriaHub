@@ -9,6 +9,7 @@ import { GeoModule } from '../geo/geo.module';
 import { StorageSettingsModule } from '../storage-settings/storage-settings.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { SocialMediaModule } from '../social-media/social-media.module';
+import { DedupModule } from '../dedup/dedup.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { SocialMediaModule } from '../social-media/social-media.module';
     StorageSettingsModule,
     EnrichmentModule,
     SocialMediaModule,
+    DedupModule,
   ],
   controllers: [DoctorController],
   providers: [DoctorService],

@@ -77,6 +77,7 @@ jest.mock('fs', () => ({
 // ---------------------------------------------------------------------------
 
 import { Test, TestingModule } from '@nestjs/testing';
+import { Logger } from '@nestjs/common';
 import {
   VisualEmbeddingService,
   preprocessImageForClip,
@@ -293,8 +294,140 @@ describe('VisualEmbeddingService — degraded mode', () => {
     expect(result).toBeNull();
     expect(mockOrtInferenceSessionCreate).not.toHaveBeenCalled();
   });
+
+  it('logs the degraded-mode message at error level (not warn) — GitHub issue #110 loudness regression guard', async () => {
+    const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    mockOrtInferenceSessionCreate.mockRejectedValue(new Error('unsupported platform'));
+
+    await service.embedImage(Buffer.from('irrelevant'));
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('VisualEmbeddingService running in degraded mode'),
+    );
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('VisualEmbeddingService running in degraded mode'),
+    );
+
+    errorSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
 });
 
+// ---------------------------------------------------------------------------
+// Section B.2: onApplicationBootstrap — eager boot-time native-runtime probe
+// added for GitHub issue #110 (musl/glibc mismatch silently degrading CLIP
+// dedup until the first lazy embed call). See the method's own doc comment
+// in visual-embedding.service.ts for the rationale.
+// ---------------------------------------------------------------------------
+
+describe('VisualEmbeddingService — onApplicationBootstrap', () => {
+  let service: VisualEmbeddingService;
+  let mockPrisma: MockPrismaService;
+  const ORIGINAL_NODE_ENV = process.env['NODE_ENV'];
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    mockPrisma = createMockPrismaService();
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [VisualEmbeddingService, { provide: PrismaService, useValue: mockPrisma }],
+    }).compile();
+
+    service = module.get<VisualEmbeddingService>(VisualEmbeddingService);
+  });
+
+  afterEach(() => {
+    service.onModuleDestroy();
+    process.env['NODE_ENV'] = ORIGINAL_NODE_ENV;
+  });
+
+  it('is a no-op under NODE_ENV=test: isAvailable() stays true and no bootstrap log is emitted', async () => {
+    process.env['NODE_ENV'] = 'test';
+    const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation();
+    const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+
+    await service.onApplicationBootstrap();
+
+    expect(service.isAvailable()).toBe(true);
+    // Returns before reaching either the success-log or failure-log branch.
+    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('onnxruntime native runtime'));
+    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('onnxruntime native runtime'));
+
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it('logs success and leaves isAvailable() true when the dynamic import resolves (NODE_ENV != test)', async () => {
+    process.env['NODE_ENV'] = 'production';
+    const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation();
+
+    // The file-level jest.mock('onnxruntime-node', ...) factory (top of this
+    // file) resolves successfully, so `await import('onnxruntime-node')`
+    // succeeds for this instance.
+    await service.onApplicationBootstrap();
+
+    expect(service.isAvailable()).toBe(true);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('onnxruntime native runtime loaded'),
+    );
+
+    logSpy.mockRestore();
+  });
+
+  it('sets degraded state and logs at error when the dynamic import rejects (NODE_ENV != test)', async () => {
+    // The shared top-of-file `jest.mock('onnxruntime-node', ...)` always
+    // resolves, so exercising the rejection branch requires temporarily
+    // swapping the module registry's mock factory for 'onnxruntime-node' to
+    // a throwing one, then re-requiring a fresh VisualEmbeddingService class
+    // bound to it. NOTE: an earlier attempt wrapped this in
+    // `jest.isolateModulesAsync` to scope the throwing mock to just this
+    // instance, but the sandbox did not reliably hold across the `await
+    // import(...)` microtask boundary inside `onApplicationBootstrap` — the
+    // fresh instance kept observing the shared success mock instead of the
+    // throwing one. `jest.resetModules()` + `jest.doMock()` on the shared
+    // (non-sandboxed) registry is used instead, with the original mock
+    // restored immediately after via `finally` so no other test in this file
+    // is affected.
+    jest.resetModules();
+    jest.doMock('onnxruntime-node', () => {
+      throw new Error('libonnxruntime.so.1: cannot open shared object file (musl/glibc mismatch)');
+    });
+
+    let errorSpy: jest.SpyInstance | undefined;
+    try {
+      const freshModule = require('./visual-embedding.service') as typeof import('./visual-embedding.service');
+      // `jest.resetModules()` above also gives '@nestjs/common' a fresh
+      // module instance, so `freshModule`'s internal `new Logger(...)` binds
+      // to a DIFFERENT class object than the `Logger` imported at the top of
+      // this file. Spy on the Logger class from the SAME (reset) registry
+      // freshModule resolved against, or the spy silently never intercepts
+      // (and the real logger prints to the console instead).
+      const freshCommon = require('@nestjs/common') as typeof import('@nestjs/common');
+      errorSpy = jest.spyOn(freshCommon.Logger.prototype, 'error').mockImplementation();
+
+      const freshService = new freshModule.VisualEmbeddingService(mockPrisma as unknown as PrismaService);
+      process.env['NODE_ENV'] = 'production';
+
+      await freshService.onApplicationBootstrap();
+
+      expect(freshService.isAvailable()).toBe(false);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('onnxruntime native runtime failed to load'),
+      );
+    } finally {
+      errorSpy?.mockRestore();
+      // Restore the shared success mock and module registry so every test
+      // after this one in the file (and the top-level `service` instance
+      // constructed from the original module binding) keeps working.
+      jest.resetModules();
+      jest.doMock('onnxruntime-node', () => ({
+        InferenceSession: { create: (...args: unknown[]) => mockOrtInferenceSessionCreate(...args) },
+        Tensor: (...args: unknown[]) => mockOrtTensor(...args),
+      }));
+    }
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Section C: persistence half (hasEmbedding / persistEmbedding)

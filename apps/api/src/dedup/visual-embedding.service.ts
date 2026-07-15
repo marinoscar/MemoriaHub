@@ -28,7 +28,12 @@
  * through `embedImage`, then persists via `persistEmbedding`.
  */
 
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import type { InferenceSession } from 'onnxruntime-node';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -73,7 +78,7 @@ const IDLE_RELEASE_MS = 5 * 60 * 1000; // 5 minutes
 // -----------------------------------------------------------------------------
 
 @Injectable()
-export class VisualEmbeddingService implements OnModuleDestroy {
+export class VisualEmbeddingService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(VisualEmbeddingService.name);
 
   private session: InferenceSession | null = null;
@@ -83,6 +88,36 @@ export class VisualEmbeddingService implements OnModuleDestroy {
   private degradedWarned = false;
 
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Boot-time native-runtime probe. Loud regression guard for GitHub issue #110:
+   * a musl/glibc mismatch in the container image silently disabled CLIP visual
+   * dedup because the onnxruntime-node native addon only failed to dlopen
+   * lazily, on the first embed call. Probe eagerly at startup so the failure is
+   * visible in boot logs immediately rather than degrading silently.
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    // The unit test suite mocks onnxruntime; an eager real probe would fight it.
+    if (process.env['NODE_ENV'] === 'test') return;
+
+    try {
+      // Bare import triggers the native addon's dlopen of libonnxruntime.so.1
+      // without needing the ~85MB model download, so startup timing is
+      // unchanged on success. Do NOT create an InferenceSession here.
+      await import('onnxruntime-node');
+      this.logger.log('onnxruntime native runtime loaded — CLIP visual embeddings available');
+    } catch (err) {
+      this.degraded = true;
+      // Suppress the lazy path's duplicate log (it uses the same guard).
+      this.degradedWarned = true;
+      this.logger.error(
+        `onnxruntime native runtime failed to load — CLIP visual embeddings unavailable, ` +
+          `near-duplicate detection will run hash-only. This usually means a libc mismatch in ` +
+          `the container image (onnxruntime-node needs glibc, not musl/Alpine). ` +
+          `Error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   onModuleDestroy(): void {
     if (this.idleTimer) {
@@ -186,7 +221,7 @@ export class VisualEmbeddingService implements OnModuleDestroy {
       this.degraded = true;
       if (!this.degradedWarned) {
         this.degradedWarned = true;
-        this.logger.warn(
+        this.logger.error(
           `VisualEmbeddingService running in degraded mode (visual embeddings unavailable, ` +
             `dedup will fall back to hash-only matching): ${err instanceof Error ? err.message : String(err)}`,
         );

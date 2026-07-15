@@ -23,6 +23,7 @@ import { GeoSettingsService } from '../geo/geo-settings.service';
 import { StorageSettingsService } from '../storage-settings/storage-settings.service';
 import { EnrichmentAdminService } from '../enrichment/enrichment-admin.service';
 import { SocialMediaOcrService } from '../social-media/social-media-ocr.service';
+import { VisualEmbeddingService } from '../dedup/visual-embedding.service';
 import {
   createMockPrismaService,
   MockPrismaService,
@@ -168,6 +169,7 @@ describe('DoctorService', () => {
   let mockStorageSettings: jest.Mocked<Pick<StorageSettingsService, 'testConnection'>>;
   let mockEnrichmentAdmin: jest.Mocked<Pick<EnrichmentAdminService, 'getStats'>>;
   let mockSocialMediaOcr: jest.Mocked<Pick<SocialMediaOcrService, 'getStatus'>>;
+  let mockVisualEmbeddingService: jest.Mocked<Pick<VisualEmbeddingService, 'isAvailable'>>;
   const ORIGINAL_ENV = { ...process.env };
 
   beforeEach(async () => {
@@ -179,6 +181,7 @@ describe('DoctorService', () => {
     mockStorageSettings = { testConnection: jest.fn() };
     mockEnrichmentAdmin = { getStats: jest.fn() };
     mockSocialMediaOcr = { getStatus: jest.fn() };
+    mockVisualEmbeddingService = { isAvailable: jest.fn().mockReturnValue(true) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -191,6 +194,7 @@ describe('DoctorService', () => {
         { provide: StorageSettingsService, useValue: mockStorageSettings },
         { provide: EnrichmentAdminService, useValue: mockEnrichmentAdmin },
         { provide: SocialMediaOcrService, useValue: mockSocialMediaOcr },
+        { provide: VisualEmbeddingService, useValue: mockVisualEmbeddingService },
       ],
     }).compile();
 
@@ -272,7 +276,7 @@ describe('DoctorService', () => {
       }
     });
 
-    it('includes all 25 documented checks across the 8 sections', async () => {
+    it('includes all 26 documented checks across the 8 sections', async () => {
       const report = await service.runDiagnostics();
 
       const allKeys = report.sections.flatMap((s) => s.checks.map((c) => c.key));
@@ -292,6 +296,7 @@ describe('DoctorService', () => {
         'ai.embedding',
         'ai.flagConsistency',
         'ai.socialMedia',
+        'ai.duplicateDetection',
         'face.detection',
         'face.flagConsistency',
         'geo.reverseProvider',
@@ -345,7 +350,7 @@ describe('DoctorService', () => {
       // Unrelated checks are unaffected.
       expect(findCheck(report, 'core.database').status).toBe('ok');
       expect(findCheck(report, 'ai.search').status).toBe('ok');
-      expect(report.summary.total).toBe(25);
+      expect(report.summary.total).toBe(26);
     });
   });
 
@@ -385,7 +390,7 @@ describe('DoctorService', () => {
         // The rest of the report still completed normally.
         expect(findCheck(report, 'core.database').status).toBe('ok');
         expect(findCheck(report, 'ai.search').status).toBe('ok');
-        expect(report.summary.total).toBe(25);
+        expect(report.summary.total).toBe(26);
       } finally {
         jest.useRealTimers();
       }
@@ -666,6 +671,72 @@ describe('DoctorService', () => {
       const check = findCheck(report, 'ai.socialMedia');
       expect(check.status).toBe('warning');
       expect(check.message).toContain('degraded');
+    });
+  });
+
+  describe('ai.duplicateDetection', () => {
+    beforeEach(() => {
+      process.env = healthyEnv();
+      mockQueryRawByText(mockPrisma, healthyQueryRawHandlers());
+      (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
+        provider: 's3',
+        enabled: true,
+      });
+      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
+      mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
+      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
+      mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
+      mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockNoWorkerNodes(mockPrisma);
+    });
+
+    it('is status:skipped when duplicate detection is disabled, and does not consult VisualEmbeddingService', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(makeSettings());
+
+      const report = await service.runDiagnostics();
+      expect(findCheck(report, 'ai.duplicateDetection').status).toBe('skipped');
+      expect(mockVisualEmbeddingService.isAvailable).not.toHaveBeenCalled();
+    });
+
+    it('is status:ok (two-tier operational) when the feature is on and the CLIP model is available', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeSettings({
+          features: {
+            autoTagging: false,
+            faceRecognition: false,
+            burstDetection: false,
+            duplicateDetection: true,
+          } as any,
+        }),
+      );
+      mockVisualEmbeddingService.isAvailable.mockReturnValue(true);
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'ai.duplicateDetection');
+      expect(check.status).toBe('ok');
+      expect(check.message).toContain('Two-tier');
+    });
+
+    it('is status:warning (degraded) when the feature is on but the CLIP model is unavailable', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeSettings({
+          features: {
+            autoTagging: false,
+            faceRecognition: false,
+            burstDetection: false,
+            duplicateDetection: true,
+          } as any,
+        }),
+      );
+      mockVisualEmbeddingService.isAvailable.mockReturnValue(false);
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'ai.duplicateDetection');
+      expect(check.status).toBe('warning');
+      expect(check.message).toContain('dHash-only');
+      expect(check.actionItem).toBeTruthy();
     });
   });
 

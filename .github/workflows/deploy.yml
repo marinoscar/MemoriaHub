@@ -80,7 +80,10 @@ jobs:
       - name: Build and push API image
         uses: docker/build-push-action@v7
         with:
-          context: ./apps/api
+          # Repo root: apps/api depends on the @memoriahub/enrichment-compute
+          # workspace, so the Dockerfile needs root manifests + the workspace
+          # member visible (matches infra/compose context: ../..).
+          context: .
           file: apps/api/Dockerfile
           push: true
           tags: ${{ steps.meta-api.outputs.tags }}
