@@ -56,3 +56,38 @@ sharp(buf, { raw: { width, height, channels } })
 See `test/golden.test.mjs` for the tests that consume these fixtures, and the
 top-of-file comment there for the observed max element-wise diff across
 repeated runs and the chosen tolerance.
+
+### golden-fixture.heic (HEIC decode regression, issue #106)
+
+`golden-fixture.heic` is **intentionally absent** from this repo. Unlike
+`golden-fixture.jpg` above, it cannot be generated in a plain Node.js script —
+producing a real HEIC/HEIF file requires an HEIC encoder (libheif) or an
+ffmpeg build with HEIC muxer support, neither of which is available in every
+dev/CI environment (this sandbox has neither system `ffmpeg` nor a sharp
+build with libheif).
+
+The test in `test/heic.test.mjs` (`computeDHash decodes a HEIC photo via the
+ffmpeg transcode fallback (issue #106)`) checks for both a system `ffmpeg`
+binary on PATH and this fixture file, and `t.skip(...)`s with a clear reason
+when either is missing — it never hard-fails just because the fixture isn't
+present.
+
+**To enable this regression guard:**
+
+1. Obtain a small real HEIC file — either a photo captured on an iPhone (HEIC
+   is Apple's default capture format), or generate one on a host where ffmpeg
+   was built with libheif support:
+   ```bash
+   ffmpeg -i sample.jpg -frames:v 1 golden-fixture.heic
+   ```
+2. Commit it at `packages/enrichment-compute/test/fixtures/golden-fixture.heic`
+   (keep it small — a few KB is enough to exercise the decode path).
+3. Run `node --test test/heic.test.mjs` on a machine with `ffmpeg` on PATH.
+   The end-to-end test will decode the fixture via `computeDHash` and print
+   the computed dHash (e.g. `[heic.test.mjs] computed dHash for
+   golden-fixture.heic: 1234567890...`) instead of asserting equality, since
+   no golden value is pinned yet.
+4. Copy that printed dHash into the `GOLDEN_HEIC_DHASH` constant near the top
+   of `test/heic.test.mjs` (replacing the `null` placeholder), then re-run the
+   test — it now asserts a bit-exact match, same as `GOLDEN_DHASH` does for
+   `golden-fixture.jpg` in `test/golden.test.mjs`.
