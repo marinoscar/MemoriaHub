@@ -48,7 +48,9 @@ import { groupByDay } from '../../utils/groupByDay';
 import { isThumbnailStuck } from '../../utils/thumbnailTimeout';
 import { MediaDetailDrawer } from './MediaDetailDrawer';
 import { MediaLightbox } from './MediaLightbox';
+import { MediaEnhancementDrawer } from './MediaEnhancementDrawer';
 import { BulkActionToolbar } from './BulkActionToolbar';
+import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { TrashBulkToolbar } from './TrashBulkToolbar';
 import { ArchiveBulkToolbar } from './ArchiveBulkToolbar';
 import { BulkLocationDialog } from './BulkLocationDialog';
@@ -565,6 +567,20 @@ export function MediaGallery({
   const [addToAlbumOpen, setAddToAlbumOpen] = useState(false);
 
   // -------------------------------------------------------------------------
+  // AI Picture Enhancer — trigger from the single-select bar (photo only)
+  // -------------------------------------------------------------------------
+
+  const { settings } = useSystemSettings();
+  const enhanceEnabled = Boolean(settings?.features?.pictureEnhancement);
+  const [enhanceOpen, setEnhanceOpen] = useState(false);
+
+  const singleSelectedItem = useMemo<MediaItem | null>(() => {
+    if (selected.size !== 1) return null;
+    const [onlyId] = Array.from(selected);
+    return mergedItems.find((it) => it.id === onlyId) ?? null;
+  }, [selected, mergedItems]);
+
+  // -------------------------------------------------------------------------
   // Bulk success handler
   // -------------------------------------------------------------------------
 
@@ -733,6 +749,9 @@ export function MediaGallery({
           onRemoveFromAlbum={albumId ? () => void handleRemoveFromAlbum() : undefined}
           onSuccess={handleBulkSuccess}
           onError={(msg) => setSnackbar({ message: msg, severity: 'error' })}
+          singleSelectedItem={singleSelectedItem}
+          enhanceEnabled={enhanceEnabled}
+          onOpenEnhance={() => setEnhanceOpen(true)}
         />
       )}
 
@@ -942,6 +961,23 @@ export function MediaGallery({
           setSnackbar({ message: msg, severity: 'error' });
         }}
       />
+
+      {/* AI enhancement drawer (single photo) */}
+      {singleSelectedItem && singleSelectedItem.type === 'photo' && (
+        <MediaEnhancementDrawer
+          item={singleSelectedItem}
+          open={enhanceOpen}
+          onClose={() => setEnhanceOpen(false)}
+          onReplaced={() => {
+            setEnhanceOpen(false);
+            handleBulkSuccess('Photo replaced with the enhanced version');
+          }}
+          onKeptBoth={(msg) => {
+            setEnhanceOpen(false);
+            handleBulkSuccess(msg);
+          }}
+        />
+      )}
 
       {/* Snackbar for bulk operation feedback */}
       <Snackbar

@@ -32,8 +32,10 @@ import {
   PhotoSizeSelectActual as PhotoSizeSelectActualIcon,
   Face as FaceIcon,
   AutoAwesome as AutoAwesomeIcon,
+  AutoFixHigh as AutoFixHighIcon,
 } from '@mui/icons-material';
 import type { CircleRole } from '../../types/circles';
+import type { MediaItem } from '../../types/media';
 import {
   bulkUpdateMedia,
   bulkDelete,
@@ -68,6 +70,15 @@ interface BulkActionToolbarProps {
   onRemoveFromAlbum?: () => void;
   /** Controls archive-related actions shown. Default: 'home'. */
   mode?: BulkActionMode;
+  /**
+   * The single selected item (present only when exactly one is selected). Used
+   * to decide whether the photo-only "AI Enhance" action can appear.
+   */
+  singleSelectedItem?: MediaItem | null;
+  /** Feature flag: features.pictureEnhancement. Gates the AI Enhance trigger. */
+  enhanceEnabled?: boolean;
+  /** Open the AI enhancement drawer for the single selected photo. */
+  onOpenEnhance?: () => void;
 }
 
 export function BulkActionToolbar({
@@ -85,6 +96,9 @@ export function BulkActionToolbar({
   albumMode,
   onRemoveFromAlbum,
   mode = 'home',
+  singleSelectedItem,
+  enhanceEnabled,
+  onOpenEnhance,
 }: BulkActionToolbarProps) {
   const [moreAnchor, setMoreAnchor] = useState<null | HTMLElement>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -94,6 +108,12 @@ export function BulkActionToolbar({
   const isViewer = activeCircleRole === 'viewer';
   const ids = Array.from(selected);
   const count = ids.length;
+
+  const canEnhance =
+    Boolean(enhanceEnabled) &&
+    Boolean(onOpenEnhance) &&
+    count === 1 &&
+    singleSelectedItem?.type === 'photo';
 
   if (count === 0) return null;
 
@@ -243,6 +263,19 @@ export function BulkActionToolbar({
 
         {!isViewer && (
           <>
+            {canEnhance && (
+              <Tooltip title="AI Enhance">
+                <IconButton
+                  aria-label="AI Enhance"
+                  onClick={onOpenEnhance}
+                  disabled={loading}
+                  color="primary"
+                >
+                  <AutoFixHighIcon />
+                </IconButton>
+              </Tooltip>
+            )}
+
             {onOpenAlbum && (
               <Tooltip title="Add to album">
                 <IconButton aria-label="Add to album" onClick={onOpenAlbum} disabled={loading}>
