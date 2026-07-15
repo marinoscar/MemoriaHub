@@ -38,8 +38,21 @@ jest.mock('@aws-sdk/client-s3', () => {
   };
 });
 
+// Capture the `params` object passed to `new Upload({ client, params, ... })`
+// so upload() tests can assert on CacheControl without a real S3 call.
+const mockUploadConstructor = jest.fn();
+jest.mock('@aws-sdk/lib-storage', () => ({
+  Upload: jest.fn().mockImplementation((opts: unknown) => {
+    mockUploadConstructor(opts);
+    return {
+      done: jest.fn().mockResolvedValue({ Location: 'https://example.com/key', ETag: 'etag-1' }),
+    };
+  }),
+}));
+
 // Import AFTER mocking
 import { S3StorageProvider, S3ProviderConfig } from './s3-storage.provider';
+import { Readable } from 'stream';
 
 // ---------------------------------------------------------------------------
 // Helper: build a ConfigService mock that returns specific values for known
@@ -321,5 +334,53 @@ describe('S3StorageProvider — checksum configuration (R2 compatibility)', () =
         secretAccessKey: 'r2-secret',
       });
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// upload() — Cache-Control passthrough
+//
+// `upload()` should set `CacheControl` on the S3 Upload params ONLY when the
+// caller supplies `options.cacheControl`, preserving existing behavior for
+// callers that don't opt in (see the "gallery-perf" cache-control-at-upload
+// change).
+// ---------------------------------------------------------------------------
+
+describe('S3StorageProvider — upload() cacheControl passthrough', () => {
+  const explicitConfig: S3ProviderConfig = {
+    region: 'us-east-1',
+    accessKeyId: 'key',
+    secretAccessKey: 'secret',
+    bucket: 'test-bucket',
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('sets CacheControl on the S3 params when options.cacheControl is provided', async () => {
+    const mockConfig = buildConfigMock();
+    const provider = new S3StorageProvider(mockConfig as unknown as ConfigService, explicitConfig);
+
+    await provider.upload('thumbnails/obj-1.jpg', Readable.from(['bytes']), {
+      mimeType: 'image/jpeg',
+      cacheControl: 'public, max-age=31536000, immutable',
+    });
+
+    const uploadArg = mockUploadConstructor.mock.calls[0][0] as { params: Record<string, unknown> };
+    expect(uploadArg.params.CacheControl).toBe('public, max-age=31536000, immutable');
+  });
+
+  it('omits CacheControl from the S3 params when options.cacheControl is not provided', async () => {
+    const mockConfig = buildConfigMock();
+    const provider = new S3StorageProvider(mockConfig as unknown as ConfigService, explicitConfig);
+
+    await provider.upload('uploads/photo.jpg', Readable.from(['bytes']), {
+      mimeType: 'image/jpeg',
+    });
+
+    const uploadArg = mockUploadConstructor.mock.calls[0][0] as { params: Record<string, unknown> };
+    expect(uploadArg.params.CacheControl).toBeUndefined();
+    expect('CacheControl' in uploadArg.params).toBe(false);
   });
 });

@@ -14,6 +14,7 @@ import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
+import { MediaThumbnailService } from './media-thumbnail.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 const CIRCLE_ID = 'circle-facets-test';
@@ -52,6 +53,7 @@ describe('MediaService.facetsLocations', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MediaService,
+        MediaThumbnailService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: { getSignedDownloadUrl: jest.fn() } },
         { provide: MediaMetadataSyncService, useValue: {} },

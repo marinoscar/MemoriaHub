@@ -285,6 +285,17 @@ export class MediaThumbnailService {
   }
 
   /**
+   * Test-support / ops hook: clear the entire in-memory signed-URL cache.
+   * Not used by any production code path — exists so unit tests can force a
+   * fresh signing round-trip between assertions without constructing a new
+   * service instance, and as a manual escape hatch if cached URLs ever need
+   * to be invalidated ahead of their TTL.
+   */
+  clearUrlCache(): void {
+    this.signedUrlCache.clear();
+  }
+
+  /**
    * Convenience wrapper: enrich an array of items (any shape that carries a
    * `metadata` field) with a signed `thumbnailUrl` field. Signing is batched
    * into a single StorageObject query via `signThumbsBatched`.

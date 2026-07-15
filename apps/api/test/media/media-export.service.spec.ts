@@ -34,6 +34,7 @@ import { GEO_LOCATION_PROVIDER } from '../../src/media/geo/geo-location-provider
 import { ForwardGeocodeService } from '../../src/media/geo/forward-geocode.service';
 import { StorageProviderResolver } from '../../src/storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from '../../src/media/enrichment/media-enrichment.service';
+import { MediaThumbnailService } from '../../src/media/media-thumbnail.service';
 import { randomUUID } from 'crypto';
 
 // ---------------------------------------------------------------------------
@@ -179,6 +180,10 @@ describe('MediaService.streamExport', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MediaService,
+        // Real MediaThumbnailService to satisfy the constructor dependency;
+        // streamExport does not sign thumbnails so its incomplete storage
+        // provider stub above is never exercised through this service.
+        MediaThumbnailService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         // MediaService constructor index [2]: syncFromStorageObject is not

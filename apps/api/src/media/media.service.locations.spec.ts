@@ -20,6 +20,7 @@ import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
+import { MediaThumbnailService } from './media-thumbnail.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 const CIRCLE_ID = 'circle-locations-test';
@@ -50,7 +51,7 @@ describe('MediaService.exploreLocations / exploreLocationLevel', () => {
   let service: MediaService;
   let mockPrisma: MockPrismaService;
   let mockCircleMembership: { assertCircleAccess: jest.Mock };
-  let mockStorageProvider: { getSignedDownloadUrl: jest.Mock };
+  let mockStorageProvider: { getSignedDownloadUrl: jest.Mock; getBucket: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -59,11 +60,20 @@ describe('MediaService.exploreLocations / exploreLocationLevel', () => {
     };
     mockStorageProvider = {
       getSignedDownloadUrl: jest.fn().mockResolvedValue(null),
+      // MediaThumbnailService's legacy-fallback signing path calls
+      // storageProvider.getBucket() to build its URL-cache key.
+      getBucket: jest.fn().mockReturnValue('legacy-static-bucket'),
     };
+    // Batched thumbnail signing (MediaThumbnailService.signThumbsBatched, used
+    // by buildLocationLevel's tier item enrichment) issues one
+    // storageObject.findMany call. Default to no matching rows -> falls back
+    // to the legacy static provider.
+    (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MediaService,
+        MediaThumbnailService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: MediaMetadataSyncService, useValue: {} },
@@ -255,7 +265,9 @@ describe('MediaService.exploreLocations / exploreLocationLevel', () => {
 
       const result = await service.exploreLocations(CIRCLE_ID, USER_ID, []);
 
-      expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledWith('thumb-key-1');
+      expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledWith('thumb-key-1', {
+        expiresIn: 86400,
+      });
       expect(result.countries[0].coverThumbnailUrl).toBe(
         'https://signed.example.com/thumb-key-1',
       );

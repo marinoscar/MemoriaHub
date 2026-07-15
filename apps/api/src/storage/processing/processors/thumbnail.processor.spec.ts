@@ -167,6 +167,21 @@ describe('ThumbnailProcessor', () => {
       expect(mockStaticProvider.upload).not.toHaveBeenCalled();
     });
 
+    it('passes cacheControl: "public, max-age=31536000, immutable" to the active provider', async () => {
+      const object = makeStorageObject({ mimeType: 'image/jpeg' });
+      const getStream = async () => Readable.from([Buffer.from('fake')]);
+
+      await processor.process(object as any, getStream);
+
+      expect(mockActiveProvider.upload).toHaveBeenCalledWith(
+        `thumbnails/${object.id}.jpg`,
+        expect.any(Readable),
+        expect.objectContaining({
+          cacheControl: 'public, max-age=31536000, immutable',
+        }),
+      );
+    });
+
     it('persists the active provider id (r2) in the upsert create branch, not s3', async () => {
       const object = makeStorageObject({ mimeType: 'image/jpeg' });
       const getStream = async () => Readable.from([Buffer.from('fake')]);

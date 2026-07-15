@@ -144,7 +144,7 @@ describe('DuplicateService', () => {
   let mockPrisma: MockPrismaService;
   let mockMembership: { assertCircleAccess: jest.Mock };
   let mockEnrichmentJobService: { enqueue: jest.Mock };
-  let mockStorageProvider: { getSignedDownloadUrl: jest.Mock };
+  let mockStorageProvider: { getSignedDownloadUrl: jest.Mock; getBucket: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
 
   beforeEach(async () => {
@@ -153,6 +153,10 @@ describe('DuplicateService', () => {
     mockEnrichmentJobService = { enqueue: jest.fn() };
     mockStorageProvider = {
       getSignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/signed-url'),
+      // MediaThumbnailService's legacy-fallback signing path calls
+      // storageProvider.getBucket() to build its URL-cache key, so the mock
+      // must implement it or that fallback throws and silently returns null.
+      getBucket: jest.fn().mockReturnValue('legacy-static-bucket'),
     };
     mockResolver = { getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider) };
 
@@ -161,10 +165,6 @@ describe('DuplicateService', () => {
     );
     // Default: no pairwise embedding similarity rows -> kind falls back to 'similar'
     (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-    (mockPrisma.storageObject.findFirst as jest.Mock).mockResolvedValue({
-      storageProvider: 's3',
-      bucket: 'test-bucket',
-    });
     // Batched thumbnail signing (MediaThumbnailService.signThumbsBatched, used
     // by listDuplicateGroups/getDuplicateGroup) issues one storageObject.findMany
     // call. Default to no matching rows -> falls back to the legacy static

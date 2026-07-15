@@ -194,7 +194,11 @@ const noPerms: string[] = [];
 describe('MediaService', () => {
   let service: MediaService;
   let mockPrisma: MockPrismaService;
-  let mockStorageProvider: { getSignedDownloadUrl: jest.Mock; delete: jest.Mock };
+  let mockStorageProvider: {
+    getSignedDownloadUrl: jest.Mock;
+    delete: jest.Mock;
+    getBucket: jest.Mock;
+  };
   let mockSyncService: jest.Mocked<Pick<MediaMetadataSyncService, 'syncFromStorageObject'>>;
   let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
   let mockGeoProvider: { reverseGeocode: jest.Mock };
@@ -222,6 +226,10 @@ describe('MediaService', () => {
     mockStorageProvider = {
       getSignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/signed'),
       delete: jest.fn().mockResolvedValue(undefined),
+      // MediaThumbnailService's legacy-fallback signing path calls
+      // storageProvider.getBucket() to build its URL-cache key, so the mock
+      // must implement it or that fallback throws and silently returns null.
+      getBucket: jest.fn().mockReturnValue('legacy-static-bucket'),
     };
     mockSyncService = {
       syncFromStorageObject: jest.fn().mockResolvedValue(undefined),
@@ -789,6 +797,104 @@ describe('MediaService', () => {
         totalItems: 45,
         totalPages: 5,
       });
+    });
+
+    it('legacy offset mode: calls prisma.mediaItem.count', async () => {
+      await service.listMedia({ ...defaultMediaQuery }, 'user-1', ownPerms);
+
+      expect(mockPrisma.mediaItem.count).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // listMedia — keyset pagination (page omitted)
+  // -------------------------------------------------------------------------
+
+  describe('listMedia keyset pagination (page omitted)', () => {
+    const keysetQuery = {
+      circleId: CIRCLE_ID,
+      pageSize: 2,
+      sortBy: 'capturedAt' as const,
+      sortOrder: 'desc' as const,
+    } as any;
+
+    beforeEach(() => {
+      mockPrisma.mediaItem.count.mockResolvedValue(0);
+    });
+
+    it('returns meta { pageSize, nextCursor, hasMore } with no totalItems/totalPages', async () => {
+      mockPrisma.mediaItem.findMany.mockResolvedValue([makeMediaItem()] as any);
+
+      const result = await service.listMedia(keysetQuery, 'user-1', ownPerms);
+
+      expect(result.meta).toEqual({ pageSize: 2, nextCursor: null, hasMore: false });
+      expect((result.meta as any).totalItems).toBeUndefined();
+      expect((result.meta as any).totalPages).toBeUndefined();
+      expect((result.meta as any).page).toBeUndefined();
+    });
+
+    it('does not call prisma.mediaItem.count', async () => {
+      mockPrisma.mediaItem.findMany.mockResolvedValue([makeMediaItem()] as any);
+
+      await service.listMedia(keysetQuery, 'user-1', ownPerms);
+
+      expect(mockPrisma.mediaItem.count).not.toHaveBeenCalled();
+    });
+
+    it('uses a compound orderBy with an id tiebreak and take: pageSize + 1', async () => {
+      mockPrisma.mediaItem.findMany.mockResolvedValue([] as any);
+
+      await service.listMedia(keysetQuery, 'user-1', ownPerms);
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].orderBy).toEqual([{ capturedAt: 'desc' }, { id: 'desc' }]);
+      expect(call[0].take).toBe(3);
+    });
+
+    it('hasMore: true and nextCursor set to the last returned item id when pageSize + 1 rows come back', async () => {
+      const rows = [
+        makeMediaItem({ id: 'item-1' }),
+        makeMediaItem({ id: 'item-2' }),
+        makeMediaItem({ id: 'item-3' }), // the pageSize+1'th row, sliced off
+      ];
+      mockPrisma.mediaItem.findMany.mockResolvedValue(rows as any);
+
+      const result = await service.listMedia(keysetQuery, 'user-1', ownPerms);
+
+      expect(result.items).toHaveLength(2);
+      expect(result.items.map((i: any) => i.id)).toEqual(['item-1', 'item-2']);
+      expect(result.meta).toEqual({ pageSize: 2, nextCursor: 'item-2', hasMore: true });
+    });
+
+    it('hasMore: false and nextCursor: null when fewer than pageSize + 1 rows come back', async () => {
+      const rows = [makeMediaItem({ id: 'item-1' }), makeMediaItem({ id: 'item-2' })];
+      mockPrisma.mediaItem.findMany.mockResolvedValue(rows as any);
+
+      const result = await service.listMedia(keysetQuery, 'user-1', ownPerms);
+
+      expect(result.items).toHaveLength(2);
+      expect(result.meta).toEqual({ pageSize: 2, nextCursor: null, hasMore: false });
+    });
+
+    it('passing a cursor adds { cursor: { id }, skip: 1 } to the findMany args', async () => {
+      mockPrisma.mediaItem.findMany.mockResolvedValue([] as any);
+      const cursorId = randomUUID();
+
+      await service.listMedia({ ...keysetQuery, cursor: cursorId }, 'user-1', ownPerms);
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].cursor).toEqual({ id: cursorId });
+      expect(call[0].skip).toBe(1);
+    });
+
+    it('omits cursor/skip from the findMany args when no cursor is supplied', async () => {
+      mockPrisma.mediaItem.findMany.mockResolvedValue([] as any);
+
+      await service.listMedia(keysetQuery, 'user-1', ownPerms);
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].cursor).toBeUndefined();
+      expect(call[0].skip).toBeUndefined();
     });
   });
 
@@ -2359,7 +2465,7 @@ describe('MediaService', () => {
         select: { storageKey: true, storageProvider: true, bucket: true },
       });
       expect(mockResolver.getProviderFor).toHaveBeenCalledWith('s3', 'bucket-a');
-      expect(signedUrl).toHaveBeenCalledWith(key);
+      expect(signedUrl).toHaveBeenCalledWith(key, { expiresIn: 86400 });
       expect(results).toEqual([{ id, thumbnailUrl: 'https://cdn.example.com/a-signed.jpg' }]);
     });
 
@@ -2440,7 +2546,9 @@ describe('MediaService', () => {
       const results = await service.getThumbnails(baseQuery([id]), 'user-1', ownPerms);
 
       expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
-      expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledWith(key);
+      expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledWith(key, {
+        expiresIn: 86400,
+      });
       expect(results).toEqual([{ id, thumbnailUrl: 'https://cdn.example.com/orphan-signed.jpg' }]);
     });
 
@@ -2506,8 +2614,8 @@ describe('MediaService', () => {
         { id: idA, thumbnailUrl: 'https://cdn.example.com/a-signed.jpg' },
         { id: idB, thumbnailUrl: 'https://cdn.example.com/b-signed.jpg' },
       ]);
-      expect(signA).toHaveBeenCalledWith(keyA);
-      expect(signB).toHaveBeenCalledWith(keyB);
+      expect(signA).toHaveBeenCalledWith(keyA, { expiresIn: 86400 });
+      expect(signB).toHaveBeenCalledWith(keyB, { expiresIn: 86400 });
     });
   });
 
@@ -3699,7 +3807,9 @@ describe('MediaService', () => {
       const result = await service.getMedia(item.id, 'user-1', anyPerms);
 
       expect(mockResolver.getProviderFor).toHaveBeenCalledWith('r2', 'r2-bucket');
-      expect(r2MockProvider.getSignedDownloadUrl).toHaveBeenCalledWith('thumbnails/obj-1.jpg');
+      expect(r2MockProvider.getSignedDownloadUrl).toHaveBeenCalledWith('thumbnails/obj-1.jpg', {
+        expiresIn: 86400,
+      });
       expect(result.thumbnailUrl).toBe('https://r2.example.com/signed');
     });
 
@@ -3725,6 +3835,7 @@ describe('MediaService', () => {
       expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
       expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledWith(
         'thumbnails/obj-missing.jpg',
+        { expiresIn: 86400 },
       );
       expect(result.thumbnailUrl).toBe('https://s3.example.com/fallback');
     });

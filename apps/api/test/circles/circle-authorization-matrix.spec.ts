@@ -12,6 +12,7 @@ import { GEO_LOCATION_PROVIDER } from '../../src/media/geo/geo-location-provider
 import { ForwardGeocodeService } from '../../src/media/geo/forward-geocode.service';
 import { StorageProviderResolver } from '../../src/storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from '../../src/media/enrichment/media-enrichment.service';
+import { MediaThumbnailService } from '../../src/media/media-thumbnail.service';
 import { randomUUID } from 'crypto';
 
 // ---------------------------------------------------------------------------
@@ -121,7 +122,11 @@ const noPerms: string[] = [];
 describe('Circle Authorization Matrix (MediaService unit)', () => {
   let service: MediaService;
   let mockPrisma: MockPrismaService;
-  let mockStorageProvider: { getSignedDownloadUrl: jest.Mock; delete: jest.Mock };
+  let mockStorageProvider: {
+    getSignedDownloadUrl: jest.Mock;
+    delete: jest.Mock;
+    getBucket: jest.Mock;
+  };
   let mockSyncService: jest.Mocked<Pick<MediaMetadataSyncService, 'syncFromStorageObject'>>;
   let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
 
@@ -130,7 +135,14 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
     mockStorageProvider = {
       getSignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/signed'),
       delete: jest.fn().mockResolvedValue(undefined),
+      // MediaThumbnailService's legacy-fallback signing path calls
+      // storageProvider.getBucket() to build its URL-cache key.
+      getBucket: jest.fn().mockReturnValue('legacy-static-bucket'),
     };
+    // Batched thumbnail signing (MediaThumbnailService.signThumbsBatched) issues
+    // one storageObject.findMany call for list surfaces. Default to no
+    // matching rows -> falls back to the legacy static provider.
+    (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([]);
     mockSyncService = {
       syncFromStorageObject: jest.fn().mockResolvedValue(undefined),
     };
@@ -142,6 +154,9 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MediaService,
+        // Real MediaThumbnailService, reusing the same PrismaService/
+        // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
+        MediaThumbnailService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },

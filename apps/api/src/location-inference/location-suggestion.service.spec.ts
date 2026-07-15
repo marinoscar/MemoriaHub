@@ -177,7 +177,9 @@ describe('LocationSuggestionService', () => {
       const result = await service.listSuggestions(makeQuery(), USER_ID, PERMS);
 
       expect(mockResolver.getProviderFor).toHaveBeenCalledWith('s3', 'bucket-1');
-      expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledWith('thumbs/x.jpg');
+      expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledWith('thumbs/x.jpg', {
+        expiresIn: 86400,
+      });
       expect(result.items[0].thumbnailUrl).toBe('https://cdn.example.com/signed');
     });
 
