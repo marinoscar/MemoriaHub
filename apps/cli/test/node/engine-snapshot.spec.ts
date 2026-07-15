@@ -188,4 +188,88 @@ describe('NodeEngine snapshot & counters', () => {
     expect(snap.lastHeartbeatAt).not.toBeNull();
     expect(Number.isNaN(Date.parse(snap.lastHeartbeatAt as string))).toBe(false);
   });
+
+  it('getSnapshot defaults faceProvider to human with a null comprefaceUrl', () => {
+    const engine = new NodeEngine({
+      api: stubApi([]).api,
+      dispatcher: stubDispatcher(),
+      nodeId: 'node-1',
+      options: {
+        concurrency: 1,
+        eligibleTypes: ['face_detection'],
+        pollIntervalMs: 5,
+        heartbeatIntervalMs: 60_000,
+        // faceProvider/comprefaceUrl intentionally omitted.
+      },
+      detectFn: async () => ({}),
+    });
+
+    const snap = engine.getSnapshot();
+    expect(snap.faceProvider).toBe('human');
+    expect(snap.comprefaceUrl).toBeNull();
+  });
+
+  it('getSnapshot reports a null comprefaceUrl when faceProvider is explicitly "human" even if a URL is configured', () => {
+    const engine = new NodeEngine({
+      api: stubApi([]).api,
+      dispatcher: stubDispatcher(),
+      nodeId: 'node-1',
+      options: {
+        concurrency: 1,
+        eligibleTypes: ['face_detection'],
+        pollIntervalMs: 5,
+        heartbeatIntervalMs: 60_000,
+        faceProvider: 'human',
+        // comprefaceUrl is only surfaced when faceProvider === 'compreface'.
+        comprefaceUrl: 'http://localhost:9999',
+      },
+      detectFn: async () => ({}),
+    });
+
+    const snap = engine.getSnapshot();
+    expect(snap.faceProvider).toBe('human');
+    expect(snap.comprefaceUrl).toBeNull();
+  });
+
+  it('getSnapshot surfaces faceProvider "compreface" and its comprefaceUrl', () => {
+    const engine = new NodeEngine({
+      api: stubApi([]).api,
+      dispatcher: stubDispatcher(),
+      nodeId: 'node-1',
+      options: {
+        concurrency: 1,
+        eligibleTypes: ['face_detection'],
+        pollIntervalMs: 5,
+        heartbeatIntervalMs: 60_000,
+        faceProvider: 'compreface',
+        comprefaceUrl: 'http://localhost:3000',
+      },
+      detectFn: async () => ({}),
+    });
+
+    const snap = engine.getSnapshot();
+    expect(snap.faceProvider).toBe('compreface');
+    expect(snap.comprefaceUrl).toBe('http://localhost:3000');
+  });
+
+  it('getSnapshot reports a null comprefaceUrl when faceProvider is "compreface" but no URL was configured', () => {
+    const engine = new NodeEngine({
+      api: stubApi([]).api,
+      dispatcher: stubDispatcher(),
+      nodeId: 'node-1',
+      options: {
+        concurrency: 1,
+        eligibleTypes: ['face_detection'],
+        pollIntervalMs: 5,
+        heartbeatIntervalMs: 60_000,
+        faceProvider: 'compreface',
+        // comprefaceUrl intentionally omitted.
+      },
+      detectFn: async () => ({}),
+    });
+
+    const snap = engine.getSnapshot();
+    expect(snap.faceProvider).toBe('compreface');
+    expect(snap.comprefaceUrl).toBeNull();
+  });
 });
