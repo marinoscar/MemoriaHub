@@ -23,6 +23,7 @@ import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
+import { MediaThumbnailService } from './media-thumbnail.service';
 import { randomUUID } from 'crypto';
 
 // ---------------------------------------------------------------------------
@@ -117,7 +118,11 @@ const archiveDto = { circleId: CIRCLE_ID, ids: ['item-1', 'item-2'] };
 describe('MediaService — archive & trash methods', () => {
   let service: MediaService;
   let mockPrisma: MockPrismaService;
-  let mockStorageProvider: { getSignedDownloadUrl: jest.Mock; delete: jest.Mock };
+  let mockStorageProvider: {
+    getSignedDownloadUrl: jest.Mock;
+    delete: jest.Mock;
+    getBucket: jest.Mock;
+  };
   let mockSyncService: jest.Mocked<Pick<MediaMetadataSyncService, 'syncFromStorageObject'>>;
   let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
   let mockGeoProvider: { reverseGeocode: jest.Mock };
@@ -134,7 +139,14 @@ describe('MediaService — archive & trash methods', () => {
     mockStorageProvider = {
       getSignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/signed'),
       delete: jest.fn().mockResolvedValue(undefined),
+      // MediaThumbnailService's legacy-fallback signing path calls
+      // storageProvider.getBucket() to build its URL-cache key.
+      getBucket: jest.fn().mockReturnValue('legacy-static-bucket'),
     };
+    // Batched thumbnail signing (MediaThumbnailService.signThumbsBatched) issues
+    // one storageObject.findMany call for list surfaces (listArchived/listTrash).
+    // Default to no matching rows -> falls back to the legacy static provider.
+    (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([]);
     mockSyncService = {
       syncFromStorageObject: jest.fn().mockResolvedValue(undefined),
     };
@@ -147,6 +159,9 @@ describe('MediaService — archive & trash methods', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MediaService,
+        // Real MediaThumbnailService, reusing the same PrismaService/
+        // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
+        MediaThumbnailService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },

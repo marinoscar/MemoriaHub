@@ -49,6 +49,7 @@ import { GEO_CLEAR_COLUMNS } from './geo/geo-result.mapper';
 import { applyLocation } from './geo/apply-location.util';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
+import { MediaThumbnailService } from './media-thumbnail.service';
 
 /** Shape of each element returned by listLocations. */
 export interface MediaLocation {
@@ -73,6 +74,7 @@ export class MediaService {
     private readonly forwardGeocodeService: ForwardGeocodeService,
     private readonly resolver: StorageProviderResolver,
     private readonly mediaEnrichmentService: MediaEnrichmentService,
+    private readonly mediaThumbnailService: MediaThumbnailService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -317,8 +319,8 @@ export class MediaService {
   async listMedia(query: MediaQueryDto, userId: string, userPermissions: string[]) {
     const {
       circleId,
-      page,
       pageSize,
+      cursor,
       type,
       capturedAtFrom,
       capturedAtTo,
@@ -343,8 +345,6 @@ export class MediaService {
       personIds,
       peopleMatch,
     } = query;
-
-    const skip = (page - 1) * pageSize;
 
     await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
 
@@ -382,9 +382,38 @@ export class MediaService {
       ...(effectivePersonIds.length > 0 ? wherePeople(effectivePersonIds, effectiveMode) : {}),
     };
 
-    const orderBy: Prisma.MediaItemOrderByWithRelationInput = {
-      [sortBy]: sortOrder,
-    };
+    const dir = sortOrder;
+    const orderBy = [
+      { [sortBy]: dir },
+      { id: dir },
+    ] as Prisma.MediaItemOrderByWithRelationInput[];
+
+    // Keyset mode: page omitted → cursor-based pagination (no COUNT).
+    if (query.page === undefined) {
+      const rows = await this.prisma.mediaItem.findMany({
+        where,
+        orderBy,
+        take: pageSize + 1,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      const hasMore = rows.length > pageSize;
+      const items = hasMore ? rows.slice(0, pageSize) : rows;
+      const nextCursor = hasMore ? items[items.length - 1].id : null;
+
+      // Sign thumbnail URLs for all items with a single batched StorageObject
+      // query (thumbnailStorageKey is already embedded in item.metadata).
+      const itemsWithUrls =
+        await this.mediaThumbnailService.attachThumbnailUrls(items);
+
+      return {
+        items: itemsWithUrls,
+        meta: { pageSize, nextCursor, hasMore },
+      };
+    }
+
+    // Legacy offset mode: explicit page number → offset pagination with COUNT.
+    const page = query.page;
+    const skip = (page - 1) * pageSize;
 
     const [items, totalItems] = await Promise.all([
       this.prisma.mediaItem.findMany({
@@ -396,14 +425,10 @@ export class MediaService {
       this.prisma.mediaItem.count({ where }),
     ]);
 
-    // Sign thumbnail URLs for all items in parallel (no extra DB query —
-    // thumbnailStorageKey is already embedded in item.metadata).
-    const itemsWithUrls = await Promise.all(
-      items.map(async (item) => ({
-        ...item,
-        thumbnailUrl: await this.signThumb(item.metadata),
-      })),
-    );
+    // Sign thumbnail URLs for all items with a single batched StorageObject
+    // query (thumbnailStorageKey is already embedded in item.metadata).
+    const itemsWithUrls =
+      await this.mediaThumbnailService.attachThumbnailUrls(items);
 
     return {
       items: itemsWithUrls,
@@ -712,86 +737,17 @@ export class MediaService {
       'viewer' as CircleRole,
     );
 
-    const items = await this.prisma.mediaItem.findMany({
-      where: { id: { in: ids }, circleId },
-      select: { id: true, metadata: true },
-    });
+    const itemsWithUrls = await this.mediaThumbnailService.attachThumbnailUrls(
+      await this.prisma.mediaItem.findMany({
+        where: { id: { in: ids }, circleId },
+        select: { id: true, metadata: true },
+      }),
+    );
 
-    // Extract thumbnail storage key per item (same extraction as signThumb).
-    const extractKey = (metadata: Prisma.JsonValue | null): string | null => {
-      if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-        return null;
-      }
-      const key = (metadata as Record<string, unknown>)['thumbnailStorageKey'];
-      return typeof key === 'string' && key ? key : null;
-    };
-
-    const idToKey = new Map<string, string | null>();
-    const distinctKeys = new Set<string>();
-    for (const item of items) {
-      const key = extractKey(item.metadata);
-      idToKey.set(item.id, key);
-      if (key) distinctKeys.add(key);
-    }
-
-    // One query to resolve all storage-object rows for the keys.
-    const keyToObject = new Map<
-      string,
-      { storageProvider: string; bucket: string | null }
-    >();
-    if (distinctKeys.size > 0) {
-      const objects = await this.prisma.storageObject.findMany({
-        where: { storageKey: { in: Array.from(distinctKeys) } },
-        select: { storageKey: true, storageProvider: true, bucket: true },
-      });
-      for (const obj of objects) {
-        keyToObject.set(obj.storageKey, {
-          storageProvider: obj.storageProvider,
-          bucket: obj.bucket,
-        });
-      }
-    }
-
-    // Cache resolved providers by (provider|bucket) so we resolve each once.
-    const providerCache = new Map<
-      string,
-      Awaited<ReturnType<StorageProviderResolver['getProviderFor']>>
-    >();
-
-    // Sign each distinct key once, reusing signThumb's resolution + fallback.
-    const keyToUrl = new Map<string, string | null>();
-    for (const key of distinctKeys) {
-      try {
-        const obj = keyToObject.get(key);
-        if (obj) {
-          const cacheKey = `${obj.storageProvider}|${obj.bucket ?? ''}`;
-          let provider = providerCache.get(cacheKey);
-          if (!provider) {
-            provider = await this.resolver.getProviderFor(
-              obj.storageProvider,
-              obj.bucket,
-            );
-            providerCache.set(cacheKey, provider);
-          }
-          keyToUrl.set(key, await provider.getSignedDownloadUrl(key));
-        } else {
-          // Row not yet created — fall back to the legacy static provider.
-          keyToUrl.set(key, await this.storageProvider.getSignedDownloadUrl(key));
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`Failed to sign thumbnail URL for key ${key}: ${msg}`);
-        keyToUrl.set(key, null);
-      }
-    }
-
-    return items.map((item) => {
-      const key = idToKey.get(item.id) ?? null;
-      return {
-        id: item.id,
-        thumbnailUrl: key ? keyToUrl.get(key) ?? null : null,
-      };
-    });
+    return itemsWithUrls.map((item) => ({
+      id: item.id,
+      thumbnailUrl: item.thumbnailUrl,
+    }));
   }
 
   /**
@@ -1135,11 +1091,8 @@ export class MediaService {
     // Flatten AlbumItem join rows into full MediaItem-shaped objects, each with
     // a signed thumbnailUrl (matching listMedia / listLocations item shape).
     const { items: albumItems, ...albumFields } = album;
-    const items = await Promise.all(
-      albumItems.map(async (ai) => ({
-        ...ai.mediaItem,
-        thumbnailUrl: await this.signThumb(ai.mediaItem.metadata),
-      })),
+    const items = await this.mediaThumbnailService.attachThumbnailUrls(
+      albumItems.map((ai) => ai.mediaItem),
     );
 
     const coverThumbnailUrl = await this.resolveAlbumCoverThumb(
@@ -1750,24 +1703,9 @@ export class MediaService {
       ]);
 
     const [onThisDay, recent, favorites] = await Promise.all([
-      Promise.all(
-        onThisDayItems.map(async (item) => ({
-          ...item,
-          thumbnailUrl: await this.signThumb(item.metadata),
-        })),
-      ),
-      Promise.all(
-        recentItems.map(async (item) => ({
-          ...item,
-          thumbnailUrl: await this.signThumb(item.metadata),
-        })),
-      ),
-      Promise.all(
-        favoriteItems.map(async (item) => ({
-          ...item,
-          thumbnailUrl: await this.signThumb(item.metadata),
-        })),
-      ),
+      this.mediaThumbnailService.attachThumbnailUrls(onThisDayItems),
+      this.mediaThumbnailService.attachThumbnailUrls(recentItems),
+      this.mediaThumbnailService.attachThumbnailUrls(favoriteItems),
     ]);
 
     return {
@@ -2032,12 +1970,8 @@ export class MediaService {
       this.prisma.mediaItem.count({ where }),
     ]);
 
-    const itemsWithUrls = await Promise.all(
-      items.map(async (item) => ({
-        ...item,
-        thumbnailUrl: await this.signThumb(item.metadata),
-      })),
-    );
+    const itemsWithUrls =
+      await this.mediaThumbnailService.attachThumbnailUrls(items);
 
     return {
       items: itemsWithUrls,
@@ -2071,12 +2005,8 @@ export class MediaService {
       this.prisma.mediaItem.count({ where }),
     ]);
 
-    const itemsWithUrls = await Promise.all(
-      items.map(async (item) => ({
-        ...item,
-        thumbnailUrl: await this.signThumb(item.metadata),
-      })),
-    );
+    const itemsWithUrls =
+      await this.mediaThumbnailService.attachThumbnailUrls(items);
 
     return {
       items: itemsWithUrls,
@@ -2316,42 +2246,16 @@ export class MediaService {
     return this.signThumb(fallback?.metadata ?? null);
   }
 
+  /**
+   * Single-item thumbnail signing. Delegates to the shared
+   * MediaThumbnailService so all signing logic (provider resolution + fallback
+   * + error handling) lives in one place. List paths use
+   * `signThumbsBatched`/`attachThumbnailUrls` to avoid the N+1 pattern.
+   */
   private async signThumb(
     metadata: Prisma.JsonValue | null,
   ): Promise<string | null> {
-    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-      return null;
-    }
-    const meta = metadata as Record<string, unknown>;
-    const key = meta['thumbnailStorageKey'];
-    if (typeof key !== 'string' || !key) {
-      return null;
-    }
-    try {
-      // Look up the StorageObject row for the thumbnail to route signing
-      // through the correct provider (the active provider may have changed
-      // since the thumbnail was created).
-      const thumbObject = await this.prisma.storageObject.findUnique({
-        where: { storageKey: key },
-        select: { storageProvider: true, bucket: true },
-      });
-
-      if (thumbObject) {
-        const provider = await this.resolver.getProviderFor(
-          thumbObject.storageProvider,
-          thumbObject.bucket,
-        );
-        return await provider.getSignedDownloadUrl(key);
-      }
-
-      // Row not yet created (thumbnail still in-flight) — fall back to the
-      // legacy static provider to preserve existing behaviour.
-      return await this.storageProvider.getSignedDownloadUrl(key);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Failed to sign thumbnail URL for key ${key}: ${msg}`);
-      return null;
-    }
+    return this.mediaThumbnailService.signThumb(metadata);
   }
 
   /**
@@ -2408,14 +2312,19 @@ export class MediaService {
       .sort((a, b) => b[1].count - a[1].count)
       .slice(0, 50);
 
-    // Sign cover thumbnails in parallel
-    return Promise.all(
-      sorted.map(async ([name, { count, coverMetadata }]) => ({
+    // Sign cover thumbnails with a single batched StorageObject query.
+    const withUrls = await this.mediaThumbnailService.attachThumbnailUrls(
+      sorted.map(([name, { count, coverMetadata }]) => ({
         name,
         count,
-        coverThumbnailUrl: await this.signThumb(coverMetadata),
+        metadata: coverMetadata,
       })),
     );
+    return withUrls.map(({ name, count, thumbnailUrl }) => ({
+      name,
+      count,
+      coverThumbnailUrl: thumbnailUrl,
+    }));
   }
 
   /**
@@ -2454,19 +2363,26 @@ export class MediaService {
       .sort((a, b) => b._count.mediaTags - a._count.mediaTags)
       .slice(0, 50);
 
-    // Sign cover thumbnails in parallel
-    return Promise.all(
-      sorted.map(async (tag) => {
+    // Sign cover thumbnails with a single batched StorageObject query.
+    const withUrls = await this.mediaThumbnailService.attachThumbnailUrls(
+      sorted.map((tag) => {
         const coverMedia = tag.mediaTags[0]?.mediaItem;
         const coverMeta =
-          coverMedia && !coverMedia.deletedAt && !coverMedia.archivedAt ? coverMedia.metadata : null;
+          coverMedia && !coverMedia.deletedAt && !coverMedia.archivedAt
+            ? coverMedia.metadata
+            : null;
         return {
           name: tag.name,
           count: tag._count.mediaTags,
-          coverThumbnailUrl: await this.signThumb(coverMeta),
+          metadata: coverMeta,
         };
       }),
     );
+    return withUrls.map(({ name, count, thumbnailUrl }) => ({
+      name,
+      count,
+      coverThumbnailUrl: thumbnailUrl,
+    }));
   }
 
   // ---------------------------------------------------------------------------
@@ -2564,7 +2480,7 @@ export class MediaService {
       .slice(0, cap);
 
     // One bounded, indexed cover lookup per surviving group, run in parallel.
-    return Promise.all(
+    const withCovers = await Promise.all(
       sorted.map(async (entry) => {
         const where: Prisma.MediaItemWhereInput = {
           circleId,
@@ -2591,10 +2507,20 @@ export class MediaService {
           name: entry.name,
           countryCode: entry.countryCode,
           count: entry.count,
-          coverThumbnailUrl: await this.signThumb(cover?.metadata ?? null),
+          metadata: cover?.metadata ?? null,
         };
       }),
     );
+
+    // Sign the group covers with a single batched StorageObject query.
+    const withUrls =
+      await this.mediaThumbnailService.attachThumbnailUrls(withCovers);
+    return withUrls.map(({ name, countryCode, count, thumbnailUrl }) => ({
+      name,
+      countryCode,
+      count,
+      coverThumbnailUrl: thumbnailUrl,
+    }));
   }
 
   /**

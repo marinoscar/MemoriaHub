@@ -96,6 +96,10 @@ export interface MediaItem {
   tags?: string[];
 }
 
+/**
+ * Offset (legacy) pagination meta — still returned by endpoints that send a
+ * `page` query param (Album lists, Search, Trash, Archive).
+ */
 export interface MediaListMeta {
   page: number;
   pageSize: number;
@@ -103,12 +107,29 @@ export interface MediaListMeta {
   totalPages: number;
 }
 
-// Album list uses the same meta shape
+/**
+ * Keyset (cursor) pagination meta — returned by `GET /api/media` when the
+ * request OMITS `page`. The gallery feed uses this mode.
+ */
+export interface MediaKeysetMeta {
+  pageSize: number;
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+// Album list uses the same offset meta shape
 export type AlbumListMeta = MediaListMeta;
 
+/** Offset-paginated list response (Album/Search/Trash/Archive). */
 export interface MediaListResponse {
   items: MediaItem[];
   meta: MediaListMeta;
+}
+
+/** Keyset-paginated list response (gallery feed via `GET /api/media`). */
+export interface MediaKeysetResponse {
+  items: MediaItem[];
+  meta: MediaKeysetMeta;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,6 +139,12 @@ export interface MediaListResponse {
 export interface MediaQueryParams {
   page?: number;
   pageSize?: number;
+  /**
+   * Keyset pagination cursor for `GET /api/media`. When provided (and `page`
+   * is omitted) the backend returns the next page after this cursor. `null` /
+   * omitted requests the first page.
+   */
+  cursor?: string | null;
   type?: MediaType;
   capturedAtFrom?: string;
   capturedAtTo?: string;

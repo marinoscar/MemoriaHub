@@ -7,6 +7,13 @@ export interface StorageUploadOptions {
   mimeType: string;
   metadata?: Record<string, string>;
   contentLength?: number;
+  /**
+   * Optional HTTP Cache-Control header to persist on the stored object so it is
+   * returned on subsequent GETs (e.g. `public, max-age=31536000, immutable` for
+   * immutable thumbnail bytes). Providers that don't serve objects over HTTP
+   * with headers (e.g. local disk) may safely ignore this.
+   */
+  cacheControl?: string;
 }
 
 /**

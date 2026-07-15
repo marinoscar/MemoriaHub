@@ -927,6 +927,7 @@ export class MediaController {
     description: 'Returns the caller\'s active (non-deleted) media items. Admins with media:read_any see all.',
   })
   @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'cursor', required: false, type: String, description: 'Keyset cursor: MediaItem id to fetch rows after; omit page to use keyset mode' })
   @ApiQuery({ name: 'pageSize', required: false, type: Number })
   @ApiQuery({ name: 'type', required: false, enum: ['photo', 'video'] })
   @ApiQuery({ name: 'capturedAtFrom', required: false, type: String, description: 'ISO 8601 date' })

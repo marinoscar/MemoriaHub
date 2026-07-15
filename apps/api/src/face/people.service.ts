@@ -123,21 +123,43 @@ export class PeopleService {
       this.prisma.person.count({ where }),
     ]);
 
-    const items = await Promise.all(
-      persons.map(async (p) => ({
+    // Resolve each person's cover face, then batch-sign all cover
+    // frame-thumbnail keys with a single StorageObject query.
+    const coverPicks = persons.map((p) =>
+      this.pickCoverFace(p.coverFace, p.faces ?? []),
+    );
+    const coverKeyToUrl = await this.mediaThumbnailService.signThumbsBatched(
+      coverPicks
+        .map((c) => c?.frameThumbnailKey ?? null)
+        .filter((k): k is string => !!k),
+    );
+
+    const items = persons.map((p, i) => {
+      const resolved = coverPicks[i];
+      const coverFace = resolved
+        ? {
+            faceId: resolved.id,
+            mediaItemId: resolved.mediaItemId,
+            boundingBox: resolved.boundingBox,
+            faceThumbnailUrl: resolved.frameThumbnailKey
+              ? coverKeyToUrl.get(resolved.frameThumbnailKey) ?? null
+              : null,
+          }
+        : null;
+      return {
         id: p.id,
         name: p.name,
         isUnlabeled: p.name === null,
         favorite: p.favorite,
         faceCount: p._count.faces,
-        coverFace: await this.resolveCoverFace(p.coverFace, p.faces ?? []),
+        coverFace,
         profileMediaItemId: p.profileMediaItemId ?? null,
         profileCrop: p.profileCrop ?? null,
         hiddenAt: p.hiddenAt,
         createdAt: p.createdAt,
         updatedAt: p.updatedAt,
-      })),
-    );
+      };
+    });
 
     return {
       items,
@@ -198,19 +220,24 @@ export class PeopleService {
       this.prisma.face.count({ where }),
     ]);
 
-    const items = await Promise.all(
-      faces.map(async (f) => ({
-        faceId: f.id,
-        mediaItemId: f.mediaItemId,
-        boundingBox: f.boundingBox,
-        confidence: f.confidence,
-        createdAt: f.createdAt,
-        hiddenAt: f.hiddenAt,
-        faceThumbnailUrl: f.frameThumbnailKey
-          ? await this.mediaThumbnailService.signThumb({ thumbnailStorageKey: f.frameThumbnailKey })
-          : null,
-      })),
+    // Batch-sign all frame-thumbnail keys with a single StorageObject query.
+    const frameKeyToUrl = await this.mediaThumbnailService.signThumbsBatched(
+      faces
+        .map((f) => f.frameThumbnailKey)
+        .filter((k): k is string => !!k),
     );
+
+    const items = faces.map((f) => ({
+      faceId: f.id,
+      mediaItemId: f.mediaItemId,
+      boundingBox: f.boundingBox,
+      confidence: f.confidence,
+      createdAt: f.createdAt,
+      hiddenAt: f.hiddenAt,
+      faceThumbnailUrl: f.frameThumbnailKey
+        ? frameKeyToUrl.get(f.frameThumbnailKey) ?? null
+        : null,
+    }));
 
     return {
       items,
@@ -278,8 +305,15 @@ export class PeopleService {
       coverFace: await this.resolveCoverFace(person.coverFace, person.faces),
       profileMediaItemId: person.profileMediaItemId ?? null,
       profileCrop: person.profileCrop ?? null,
-      faces: await Promise.all(
-        person.faces.map(async (f) => ({
+      faces: await (async () => {
+        // Batch-sign all frame-thumbnail keys with a single StorageObject query.
+        const frameKeyToUrl =
+          await this.mediaThumbnailService.signThumbsBatched(
+            person.faces
+              .map((f) => f.frameThumbnailKey)
+              .filter((k): k is string => !!k),
+          );
+        return person.faces.map((f) => ({
           faceId: f.id,
           mediaItemId: f.mediaItemId,
           boundingBox: f.boundingBox,
@@ -287,10 +321,10 @@ export class PeopleService {
           manuallyAssigned: f.manuallyAssigned,
           createdAt: f.createdAt,
           faceThumbnailUrl: f.frameThumbnailKey
-            ? await this.mediaThumbnailService.signThumb({ thumbnailStorageKey: f.frameThumbnailKey })
+            ? frameKeyToUrl.get(f.frameThumbnailKey) ?? null
             : null,
-        })),
-      ),
+        }));
+      })(),
       createdAt: person.createdAt,
       updatedAt: person.updatedAt,
     };
@@ -1385,11 +1419,23 @@ export class PeopleService {
    * can render video-sourced cover faces without cropping the full media image.
    * Photo cover faces return faceThumbnailUrl: null (no frameThumbnailKey).
    */
+  /**
+   * Pick the cover face (explicit coverFace, else the first/best face) without
+   * signing. Shared by the single-item `resolveCoverFace` and the batched
+   * list path so both stay in sync on selection logic.
+   */
+  private pickCoverFace(
+    coverFace: { id: string; mediaItemId: string; boundingBox: unknown; frameThumbnailKey?: string | null } | null,
+    faces: Array<{ id: string; mediaItemId: string; boundingBox: unknown; confidence?: number | null; frameThumbnailKey?: string | null }>,
+  ): { id: string; mediaItemId: string; boundingBox: unknown; frameThumbnailKey?: string | null } | null {
+    return coverFace ?? faces[0] ?? null;
+  }
+
   private async resolveCoverFace(
     coverFace: { id: string; mediaItemId: string; boundingBox: unknown; frameThumbnailKey?: string | null } | null,
     faces: Array<{ id: string; mediaItemId: string; boundingBox: unknown; confidence?: number | null; frameThumbnailKey?: string | null }>,
   ): Promise<{ faceId: string; mediaItemId: string; boundingBox: unknown; faceThumbnailUrl: string | null } | null> {
-    const resolved = coverFace ?? faces[0] ?? null;
+    const resolved = this.pickCoverFace(coverFace, faces);
     if (!resolved) return null;
     const faceThumbnailUrl = resolved.frameThumbnailKey
       ? await this.mediaThumbnailService.signThumb({ thumbnailStorageKey: resolved.frameThumbnailKey })

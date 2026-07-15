@@ -213,6 +213,11 @@ export class ThumbnailProcessor implements ObjectProcessor {
     await activeProvider.upload(thumbKey, thumbStream, {
       mimeType: 'image/jpeg',
       contentLength: thumbBuffer.length,
+      // Thumbnail bytes for a given storage key never change, so mark them
+      // immutable and cacheable for a year — combined with the stable, long-TTL
+      // signed URL from MediaThumbnailService this lets browsers reuse the
+      // downloaded thumbnail instead of re-fetching it on every gallery load.
+      cacheControl: 'public, max-age=31536000, immutable',
     });
 
     // Upsert a StorageObject row directly via Prisma (NOT emitting

@@ -56,8 +56,9 @@ export const mediaQuerySchema = z.object({
   // circleId is required in the list endpoint (override the optional from shared fields)
   circleId: z.string().uuid(),
   // Pagination / sort (not shared)
-  page: z.coerce.number().int().min(1).default(1),
+  page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().min(1).optional(),
   sortBy: z.enum(['capturedAt', 'importedAt', 'createdAt']).default('capturedAt'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
 });

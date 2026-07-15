@@ -4,6 +4,7 @@ import { StorageProvidersModule } from '../storage/providers/storage-providers.m
 import { PrismaModule } from '../prisma/prisma.module';
 import { CirclesModule } from '../circles/circles.module';
 import { SettingsModule } from '../settings/settings.module';
+import { MediaModule } from '../media/media.module';
 import { DuplicateController } from './duplicate.controller';
 import { DuplicateService } from './duplicate.service';
 import { AdminDuplicateController } from './admin-duplicate.controller';
@@ -16,7 +17,7 @@ import { ReviewInsightsController } from './review-insights.controller';
 import { ReviewInsightsService } from './review-insights.service';
 
 @Module({
-  imports: [EnrichmentModule, StorageProvidersModule, PrismaModule, CirclesModule, SettingsModule],
+  imports: [EnrichmentModule, StorageProvidersModule, PrismaModule, CirclesModule, SettingsModule, MediaModule],
   controllers: [DuplicateController, AdminDuplicateController, ReviewInsightsController],
   providers: [
     DuplicateService,

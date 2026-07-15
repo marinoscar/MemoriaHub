@@ -26,6 +26,7 @@ import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interfac
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { GEO_LOCATION_PROVIDER } from '../media/geo/geo-location-provider.interface';
 import { GEO_CLEAR_COLUMNS } from '../media/geo/geo-result.mapper';
+import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto';
 import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dto';
@@ -83,10 +84,18 @@ describe('LocationSuggestionService', () => {
     mockGeoProvider = { reverseGeocode: jest.fn().mockResolvedValue(null) };
 
     (mockPrisma.$transaction as jest.Mock).mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops));
+    // Batched thumbnail signing (MediaThumbnailService.signThumbsBatched, used
+    // by listSuggestions) issues one storageObject.findMany call. Default to
+    // no matching rows -> falls back to the legacy static STORAGE_PROVIDER.
+    // Tests asserting provider-routed signing set findMany explicitly.
+    (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         LocationSuggestionService,
+        // Real MediaThumbnailService, reusing the same PrismaService/
+        // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
+        MediaThumbnailService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CircleMembershipService, useValue: mockMembership },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
@@ -161,15 +170,16 @@ describe('LocationSuggestionService', () => {
           },
         },
       ]);
-      (mockPrisma.storageObject.findFirst as jest.Mock).mockResolvedValue({
-        storageProvider: 's3',
-        bucket: 'bucket-1',
-      });
+      (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([
+        { storageKey: 'thumbs/x.jpg', storageProvider: 's3', bucket: 'bucket-1' },
+      ]);
 
       const result = await service.listSuggestions(makeQuery(), USER_ID, PERMS);
 
       expect(mockResolver.getProviderFor).toHaveBeenCalledWith('s3', 'bucket-1');
-      expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledWith('thumbs/x.jpg');
+      expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledWith('thumbs/x.jpg', {
+        expiresIn: 86400,
+      });
       expect(result.items[0].thumbnailUrl).toBe('https://cdn.example.com/signed');
     });
 

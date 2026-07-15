@@ -1,0 +1,67 @@
+-- Add a partial composite index on media_items to accelerate the gallery's
+-- keyset-paginated default listing query (issue #104).
+--
+-- INTENT: Serves MediaService.listMedia (GET /api/media), which is moving to
+-- keyset pagination ordered by captured_at DESC, id DESC. The query filters
+-- on:
+--   circle_id = $circleId
+--   AND deleted_at IS NULL
+--   AND archived_at IS NULL
+--   [AND (captured_at, id) < ($cursorCapturedAt, $cursorId)]  -- keyset page
+-- ORDER BY captured_at DESC, id DESC
+-- Without this index the planner must scan every media_items row for the
+-- circle (or worse, the whole table) and perform a separate sort to satisfy
+-- ORDER BY captured_at DESC, id DESC on every page request.
+--
+-- WHY THIS PARTIAL PREDICATE:
+--   The partial WHERE clause below mirrors the query's filters exactly
+--   (non-deleted, non-archived) so the index only contains rows the gallery
+--   actually reads — keeping it small relative to the full table (trashed
+--   and archived items are excluded from every browse surface) and avoiding
+--   index bloat from rows the query never wants.
+--
+-- WHY THIS KEY ORDER:
+--   (circle_id, captured_at DESC, id DESC)
+--   - circle_id leads because every call is scoped to a single circle.
+--   - captured_at DESC, id DESC next matches ORDER BY captured_at DESC, id
+--     DESC exactly, including the id tiebreak used to make the keyset cursor
+--     deterministic when multiple items share the same captured_at. This
+--     lets the query be served as a pure index scan with NO separate sort
+--     node, and lets the keyset predicate (captured_at, id) < (cursor) be
+--     evaluated directly against the index order.
+--
+-- WHY A HAND-AUTHORED MIGRATION (not schema.prisma):
+--   Prisma's schema DSL has no syntax for partial indexes (a WHERE clause on
+--   @@index()) or DESC column ordering. Only plain ascending column lists are
+--   supported, so this index cannot be expressed via schema.prisma; it must
+--   be authored as raw SQL. See the precedent in migration
+--   20260713130000_media_locations_index (media_items_map_locations_idx) and
+--   20260703000000_add_coord_source_and_location_suggestions
+--   (idx_media_circle_device_captured) for the same pattern. This index is
+--   intentionally invisible to prisma/schema.prisma (deliberate schema
+--   drift, same precedent as those two).
+--
+-- NULLS ORDERING NOTE:
+--   Postgres DESC index columns default to NULLS FIRST, which matches the
+--   default null placement of ORDER BY captured_at DESC (Postgres defaults
+--   ORDER BY ... DESC to NULLS FIRST too). A nullable captured_at is
+--   therefore handled consistently between the index and the query — items
+--   with no captured_at sort first in both, so the index can still serve the
+--   query without an extra sort step.
+--
+-- DOWN DIRECTION:
+--   DROP INDEX "media_items_gallery_idx";
+--
+-- SCHEMA DRIFT NOTE:
+--   This index is intentionally hand-authored and is NOT fully representable
+--   in schema.prisma. The project uses `prisma migrate deploy` (not
+--   `migrate dev`) in all non-local environments, so Prisma never runs a
+--   drift-detection step that would error out. In local development
+--   `migrate dev` does detect drift; to avoid spurious warnings the
+--   developer should NOT run `migrate dev` after this migration is applied
+--   without first understanding this intentional gap.
+
+-- CreateIndex (partial, composite)
+CREATE INDEX "media_items_gallery_idx"
+  ON "media_items" ("circle_id", "captured_at" DESC, "id" DESC)
+  WHERE "deleted_at" IS NULL AND "archived_at" IS NULL;

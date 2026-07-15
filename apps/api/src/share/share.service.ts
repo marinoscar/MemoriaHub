@@ -307,30 +307,47 @@ export class ShareService {
       }),
     ]);
 
-    const items: ShareWithStatus[] = await Promise.all(
-      rows.map(async (row) => {
-        let preview: SharePreview | null = null;
+    // Collect every preview thumbnail key across the page (media items +
+    // album covers) and sign them with a single batched StorageObject query.
+    const previewKeys: string[] = [];
+    for (const row of rows) {
+      if (row.targetType === ShareTargetType.media_item && row.mediaItem) {
+        const k = this.thumbnailService.extractThumbKey(row.mediaItem.metadata);
+        if (k) previewKeys.push(k);
+      } else if (row.targetType === ShareTargetType.album && row.album) {
+        const firstItem = row.album.items[0]?.mediaItem;
+        const k = firstItem
+          ? this.thumbnailService.extractThumbKey(firstItem.metadata)
+          : null;
+        if (k) previewKeys.push(k);
+      }
+    }
+    const keyToUrl = await this.thumbnailService.signThumbsBatched(previewKeys);
+    const urlFor = (metadata: Prisma.JsonValue | null): string | null => {
+      const k = this.thumbnailService.extractThumbKey(metadata);
+      return k ? keyToUrl.get(k) ?? null : null;
+    };
 
-        if (row.targetType === ShareTargetType.media_item && row.mediaItem) {
-          preview = {
-            type: 'media_item',
-            thumbnailUrl: await this.thumbnailService.signThumb(row.mediaItem.metadata),
-          };
-        } else if (row.targetType === ShareTargetType.album && row.album) {
-          const firstItem = row.album.items[0]?.mediaItem;
-          preview = {
-            type: 'album',
-            albumName: row.album.name,
-            itemCount: row.album._count.items,
-            coverThumbnailUrl: firstItem
-              ? await this.thumbnailService.signThumb(firstItem.metadata)
-              : null,
-          };
-        }
+    const items: ShareWithStatus[] = rows.map((row) => {
+      let preview: SharePreview | null = null;
 
-        return this.toShareWithStatus(row, preview);
-      }),
-    );
+      if (row.targetType === ShareTargetType.media_item && row.mediaItem) {
+        preview = {
+          type: 'media_item',
+          thumbnailUrl: urlFor(row.mediaItem.metadata),
+        };
+      } else if (row.targetType === ShareTargetType.album && row.album) {
+        const firstItem = row.album.items[0]?.mediaItem;
+        preview = {
+          type: 'album',
+          albumName: row.album.name,
+          itemCount: row.album._count.items,
+          coverThumbnailUrl: firstItem ? urlFor(firstItem.metadata) : null,
+        };
+      }
+
+      return this.toShareWithStatus(row, preview);
+    });
 
     return {
       items,

@@ -177,6 +177,11 @@ export class S3StorageProvider implements StorageProvider {
           ContentType: options.mimeType,
           Metadata: options.metadata || {},
           ContentLength: options.contentLength,
+          // Only set CacheControl when the caller provided one so existing
+          // upload behavior is unchanged for callers that don't opt in.
+          ...(options.cacheControl
+            ? { CacheControl: options.cacheControl }
+            : {}),
         },
         // Use explicit part size when provided, otherwise fall back to config
         partSize: this.explicitPartSize ?? this.configService.get<number>('storage.partSize', 10485760), // 10MB default

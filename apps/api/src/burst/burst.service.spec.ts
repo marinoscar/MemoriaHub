@@ -23,6 +23,7 @@ import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interfac
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
+import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { BurstGroupStatus, CircleRole, MediaType } from '@prisma/client';
 import { BurstQueryDto } from './dto/burst-query.dto';
@@ -170,7 +171,7 @@ describe('BurstService', () => {
   let mockPrisma: MockPrismaService;
   let mockMembership: { assertCircleAccess: jest.Mock };
   let mockEnrichmentJobService: { enqueue: jest.Mock };
-  let mockStorageProvider: { getSignedDownloadUrl: jest.Mock };
+  let mockStorageProvider: { getSignedDownloadUrl: jest.Mock; getBucket: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
   let mockSystemSettings: { isFeatureEnabled: jest.Mock };
   let mockDuplicateDetectionService: { evictExistingBurstOverlaps: jest.Mock };
@@ -184,6 +185,10 @@ describe('BurstService', () => {
     mockSystemSettings = { isFeatureEnabled: jest.fn().mockResolvedValue(false) };
     mockStorageProvider = {
       getSignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/signed-url'),
+      // MediaThumbnailService's legacy-fallback signing path calls
+      // storageProvider.getBucket() to build its URL-cache key, so the mock
+      // must implement it or that fallback throws and silently returns null.
+      getBucket: jest.fn().mockReturnValue('legacy-static-bucket'),
     };
     // Resolver returns mockStorageProvider so getSignedDownloadUrl assertions are unchanged.
     mockResolver = { getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider) };
@@ -204,11 +209,13 @@ describe('BurstService', () => {
       value: { burst: { minGroupSize: 3 } },
     });
 
-    // Default storageObject.findFirst for signThumb: return a row so resolver is used.
-    (mockPrisma.storageObject.findFirst as jest.Mock).mockResolvedValue({
-      storageProvider: 's3',
-      bucket: 'test-bucket',
-    });
+    // Batched thumbnail signing (MediaThumbnailService.signThumbsBatched, used
+    // by listBurstGroups/getBurstGroup) issues one storageObject.findMany call.
+    // Default to no matching rows -> falls back to the legacy static
+    // STORAGE_PROVIDER, which in this spec is the SAME mock object returned by
+    // mockResolver.getProviderFor, so existing "signed-url" assertions still
+    // hold without needing per-test findMany rows.
+    (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([]);
 
     // resolveBurstGroup/dismissBurstGroup write an audit event after the transaction.
     (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
@@ -216,6 +223,9 @@ describe('BurstService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BurstService,
+        // Real MediaThumbnailService, reusing the same PrismaService/
+        // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
+        MediaThumbnailService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CircleMembershipService, useValue: mockMembership },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },

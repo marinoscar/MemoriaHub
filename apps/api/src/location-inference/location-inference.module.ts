@@ -5,6 +5,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { CirclesModule } from '../circles/circles.module';
 import { SettingsModule } from '../settings/settings.module';
 import { GeoLocationModule } from '../media/geo/geo-location.module';
+import { MediaModule } from '../media/media.module';
 import { LocationSuggestionController } from './location-suggestion.controller';
 import { LocationSuggestionService } from './location-suggestion.service';
 import { AdminLocationInferenceController } from './admin-location-inference.controller';
@@ -15,13 +16,14 @@ import { LocationInferenceBackfillService } from './location-inference-backfill.
 /**
  * LocationInferenceModule
  *
- * Imports GeoLocationModule (not MediaModule) so LocationSuggestionService can
- * call the shared applyLocation() helper via the GEO_LOCATION_PROVIDER token
- * directly, without depending on MediaModule/MediaService — avoiding any risk
- * of a circular module dependency (MediaModule never imports this module).
+ * Imports GeoLocationModule so LocationSuggestionService can call the shared
+ * applyLocation() helper via the GEO_LOCATION_PROVIDER token directly.
+ *
+ * Also imports MediaModule for MediaThumbnailService (batched thumbnail
+ * signing). This introduces no cycle: MediaModule never imports this module.
  */
 @Module({
-  imports: [EnrichmentModule, StorageProvidersModule, PrismaModule, CirclesModule, SettingsModule, GeoLocationModule],
+  imports: [EnrichmentModule, StorageProvidersModule, PrismaModule, CirclesModule, SettingsModule, GeoLocationModule, MediaModule],
   controllers: [LocationSuggestionController, AdminLocationInferenceController],
   providers: [
     LocationInferenceService,
