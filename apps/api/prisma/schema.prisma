@@ -556,8 +556,8 @@ model MediaItem {
   // Album cover relations
   coverForAlbums         Album[]              @relation("AlbumCover")
   // AI Picture Enhancer relations
-  enhancements           MediaEnhancement[]   @relation("MediaEnhancementSource")
-  enhancementResultOf    MediaEnhancement[]   @relation("MediaEnhancementResult")
+  enhancementsAsSource   MediaEnhancement[]   @relation("MediaEnhancementSource")
+  enhancementsAsResult   MediaEnhancement[]   @relation("MediaEnhancementResult")
 
   @@index([circleId])
   @@index([addedById])
