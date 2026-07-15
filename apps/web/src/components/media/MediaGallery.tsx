@@ -34,8 +34,6 @@ import {
   PlayCircleOutlined as PlayCircleOutlinedIcon,
   Star as StarIcon,
   StarBorder as StarBorderIcon,
-  CheckBox as CheckBoxIcon,
-  CheckBoxOutlineBlank as CheckBoxOutlineBlankIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { useInfiniteMedia } from '../../hooks/useInfiniteMedia';
@@ -47,6 +45,7 @@ import { usePendingThumbnails } from '../../hooks/usePendingThumbnails';
 import { groupByDay } from '../../utils/groupByDay';
 import { isThumbnailStuck } from '../../utils/thumbnailTimeout';
 import { MediaDetailDrawer } from './MediaDetailDrawer';
+import { MediaSelectionCheckbox } from './MediaSelectionCheckbox';
 import { MediaLightbox } from './MediaLightbox';
 import { MediaEnhancementDrawer } from './MediaEnhancementDrawer';
 import { BulkActionToolbar } from './BulkActionToolbar';
@@ -230,26 +229,11 @@ const GalleryTile = memo(function GalleryTile({
           '.MuiImageListItem-root:hover &': { opacity: 1 },
         }}
       >
-        <IconButton
-          size="small"
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleSelect(item.id);
-          }}
-          aria-label={isSelected ? 'Deselect item' : 'Select item'}
-          sx={{
-            color: isSelected ? 'primary.main' : 'white',
-            backgroundColor: 'rgba(0,0,0,0.4)',
-            '&:hover': { backgroundColor: 'rgba(0,0,0,0.6)' },
-            p: { xs: 0.5, sm: 0.25 },
-          }}
-        >
-          {isSelected ? (
-            <CheckBoxIcon fontSize="small" />
-          ) : (
-            <CheckBoxOutlineBlankIcon fontSize="small" />
-          )}
-        </IconButton>
+        <MediaSelectionCheckbox
+          checked={isSelected}
+          onToggle={() => onToggleSelect(item.id)}
+          ariaLabel={isSelected ? 'Deselect item' : 'Select item'}
+        />
       </Box>
 
       {/* Gradient overlay — always visible when favorited */}
