@@ -97,7 +97,21 @@ function getFaceDetector(): Promise<FaceDetector> {
 const computeFaceDetection: ComputeFn = async (inputPath, _params) => {
   const buffer = fs.readFileSync(inputPath);
   const cfg = loadConfig();
-  const faceProvider = cfg?.node?.faceProvider ?? 'human';
+  if (!cfg) {
+    // Config could not be read at job time (missing/corrupt ~/.memoriahub/
+    // config.json). We cannot know which face provider this node was
+    // configured for, so fail the job — routed through the engine's normal
+    // /failure + retry/backoff path — rather than silently defaulting to
+    // Human, which on a CompreFace-configured node would silently write
+    // embeddings in the wrong (1024-d Human vs 128-d CompreFace) space.
+    throw new Error(
+      'face_detection: could not load node config to resolve the face provider — ' +
+        'refusing to silently fall back to Human.',
+    );
+  }
+  // A genuinely unset provider (node never opted into CompreFace) legitimately
+  // defaults to the in-process Human detector.
+  const faceProvider = cfg.node?.faceProvider ?? 'human';
 
   // Same EXIF-orientation + downscale step the server runs before detection.
   const prepared = await prepareImageForProcessing(buffer, { maxDim: FACE_MAX_IMAGE_DIM });

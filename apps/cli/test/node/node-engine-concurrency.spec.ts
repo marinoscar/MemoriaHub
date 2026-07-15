@@ -20,6 +20,7 @@
  * fully stubbed ApiClient + ComputeDispatcher, no network, no real downloads.
  */
 
+import { jest } from '@jest/globals';
 import { NodeEngine } from '../../src/node/node-engine.js';
 import { NODE_EV } from '../../src/node/node-events.js';
 import type { ApiClient, ClaimedNodeJob, NodeClaimBody, NodeHeartbeatBody } from '../../src/api.js';
@@ -202,6 +203,92 @@ describe('NodeEngine heartbeat concurrency sync', () => {
     expect(heartbeatCalls).toHaveLength(2);
     expect(heartbeatCalls[1]?.nodeId).toBe('node-1');
     expect(heartbeatCalls[1]?.body.concurrency).toBe(7);
+
+    await engine.stop('test');
+  });
+});
+
+describe('NodeEngine heartbeat face-provider detectFn wiring', () => {
+  it('invokes detectFn with the configured comprefaceUrl on every beat', async () => {
+    const api = {
+      claimNodeJobs: async () => ({ jobs: [] }),
+      heartbeatNode: async () => ({}),
+      deregisterNode: async () => ({}),
+      renewLease: async () => ({}),
+      submitJobResult: async () => ({}),
+      reportJobFailure: async () => ({}),
+    } as unknown as ApiClient;
+
+    const dispatcher = {
+      compute: async () => ({ ok: true }),
+    } as unknown as ComputeDispatcher;
+
+    const detectFn = jest.fn(async () => ({}));
+
+    const engine = new NodeEngine({
+      api,
+      dispatcher,
+      nodeId: 'node-1',
+      options: {
+        concurrency: 1,
+        eligibleTypes: [],
+        pollIntervalMs: 5,
+        heartbeatIntervalMs: 60_000,
+        faceProvider: 'compreface',
+        comprefaceUrl: 'http://localhost:4242',
+      },
+      detectFn,
+    });
+
+    const idle = new Promise<void>((resolve) => {
+      engine.once(NODE_EV.IDLE, () => resolve());
+    });
+    void engine.start();
+    await idle;
+
+    // start() triggers one initial beat() before entering the claim loop.
+    expect(detectFn).toHaveBeenCalledWith({ comprefaceUrl: 'http://localhost:4242' });
+
+    await engine.stop('test');
+  });
+
+  it('invokes detectFn with an undefined comprefaceUrl when the node was not configured for compreface', async () => {
+    const api = {
+      claimNodeJobs: async () => ({ jobs: [] }),
+      heartbeatNode: async () => ({}),
+      deregisterNode: async () => ({}),
+      renewLease: async () => ({}),
+      submitJobResult: async () => ({}),
+      reportJobFailure: async () => ({}),
+    } as unknown as ApiClient;
+
+    const dispatcher = {
+      compute: async () => ({ ok: true }),
+    } as unknown as ComputeDispatcher;
+
+    const detectFn = jest.fn(async () => ({}));
+
+    const engine = new NodeEngine({
+      api,
+      dispatcher,
+      nodeId: 'node-1',
+      options: {
+        concurrency: 1,
+        eligibleTypes: [],
+        pollIntervalMs: 5,
+        heartbeatIntervalMs: 60_000,
+        // faceProvider/comprefaceUrl intentionally omitted (default 'human').
+      },
+      detectFn,
+    });
+
+    const idle = new Promise<void>((resolve) => {
+      engine.once(NODE_EV.IDLE, () => resolve());
+    });
+    void engine.start();
+    await idle;
+
+    expect(detectFn).toHaveBeenCalledWith({ comprefaceUrl: undefined });
 
     await engine.stop('test');
   });

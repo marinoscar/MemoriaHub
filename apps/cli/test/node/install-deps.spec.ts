@@ -94,9 +94,17 @@ jest.unstable_mockModule('node:fs', () => ({
 }));
 
 const userInfoMock = jest.fn(() => ({ username: 'testuser' }));
+// Controllable core-count for defaultComprefaceProcesses()'s cores-2 clamp
+// math. `install-deps.ts` prefers `os.availableParallelism()`; defaulting
+// this to the real core count keeps every other test in this file (which
+// doesn't care about core count) unaffected, while individual
+// `defaultComprefaceProcesses`/`buildComprefaceRunArgs` tests override it.
+let availableParallelismResult = osActual.cpus().length;
+const availableParallelismMock = jest.fn(() => availableParallelismResult);
 jest.unstable_mockModule('node:os', () => ({
   ...osActual,
   userInfo: userInfoMock,
+  availableParallelism: availableParallelismMock,
 }));
 
 const mockDetectCapabilities = jest.fn();
@@ -156,6 +164,8 @@ const {
   ensureComprefaceContainer,
   verifyCompreface,
   ensureModelsIfConfigured,
+  defaultComprefaceProcesses,
+  buildComprefaceRunArgs,
 } = await import('../../src/node/install-deps.js');
 
 type CapabilityStatus = { available: boolean; detail?: string };
@@ -190,6 +200,8 @@ beforeEach(() => {
   mockApiClientCtor.mockReset();
   mockCreateOcrEngine.mockReset();
   userInfoMock.mockClear();
+  availableParallelismResult = osActual.cpus().length;
+  availableParallelismMock.mockClear();
   originalGetuid = process.getuid;
   // Default: not root.
   (process as unknown as { getuid: () => number }).getuid = () => 1000;
@@ -601,7 +613,7 @@ describe('ensureDocker', () => {
 // ---------------------------------------------------------------------------
 
 describe('ensureComprefaceContainer', () => {
-  it('skips when the container is already running', async () => {
+  it('skips when the container is already running and recreate is not requested', async () => {
     (process as unknown as { getuid: () => number }).getuid = () => 0;
     spawnRouter = (cmd, args) =>
       cmd === 'docker' && args[0] === 'ps' && !args.includes('-a')
@@ -611,22 +623,58 @@ describe('ensureComprefaceContainer', () => {
     const res = await ensureComprefaceContainer(3000);
 
     expect(res.status).toBe('skipped');
+    expect(res.detail).toMatch(/--compreface-recreate/);
+    // The function returns immediately after the single running-check `ps`
+    // call — the `ps -a` existence check, `rm`, `run`, and `start` are never
+    // reached.
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0]?.cmd).toBe('docker');
+    expect(spawnCalls[0]?.args[0]).toBe('ps');
+    expect(spawnCalls.some((c) => c.args[0] === 'rm')).toBe(false);
+    expect(spawnCalls.some((c) => c.args[0] === 'run')).toBe(false);
+    expect(spawnCalls.some((c) => c.args[0] === 'start')).toBe(false);
   });
 
-  it('starts an existing stopped container without pulling', async () => {
+  it('recreates a RUNNING container when opts.recreate is true (rm -f then run)', async () => {
+    (process as unknown as { getuid: () => number }).getuid = () => 0;
+    spawnRouter = (cmd, args) => {
+      if (cmd === 'docker' && args[0] === 'ps' && !args.includes('-a')) {
+        return { code: 0, stdout: 'compreface-core\n' };
+      }
+      if (cmd === 'docker' && args[0] === 'ps' && args.includes('-a')) {
+        return { code: 0, stdout: 'compreface-core\n' };
+      }
+      if (cmd === 'docker' && args[0] === 'image') return { code: 0 };
+      return { code: 0 };
+    };
+
+    const res = await ensureComprefaceContainer(3000, { recreate: true });
+
+    expect(res.status).toBe('installed');
+    expect(spawnCalls).toContainEqual({ cmd: 'docker', args: ['rm', '-f', 'compreface-core'] });
+    expect(spawnCalls.some((c) => c.cmd === 'docker' && c.args[0] === 'run')).toBe(true);
+  });
+
+  it('recreates an existing stopped container (docker rm -f then run, never docker start)', async () => {
     (process as unknown as { getuid: () => number }).getuid = () => 0;
     spawnRouter = (cmd, args) => {
       if (cmd === 'docker' && args[0] === 'ps' && !args.includes('-a')) return { code: 0, stdout: '' };
       if (cmd === 'docker' && args[0] === 'ps' && args.includes('-a')) {
         return { code: 0, stdout: 'compreface-core\n' };
       }
+      if (cmd === 'docker' && args[0] === 'image') return { code: 0 }; // already present locally
       return { code: 0 };
     };
 
     const res = await ensureComprefaceContainer(3000);
 
     expect(res.status).toBe('installed');
-    expect(spawnCalls).toContainEqual({ cmd: 'docker', args: ['start', 'compreface-core'] });
+    // `docker start` cannot change flags — a stopped container is now removed
+    // and recreated via `run`, not resumed via `start`.
+    expect(spawnCalls).toContainEqual({ cmd: 'docker', args: ['rm', '-f', 'compreface-core'] });
+    expect(spawnCalls.some((c) => c.cmd === 'docker' && c.args[0] === 'run')).toBe(true);
+    expect(spawnCalls.some((c) => c.cmd === 'docker' && c.args[0] === 'start')).toBe(false);
+    // The image was already present locally, so no pull was needed.
     expect(spawnCalls.some((c) => c.args[0] === 'pull')).toBe(false);
   });
 
@@ -671,6 +719,92 @@ describe('ensureComprefaceContainer', () => {
 
     expect(res.status).toBe('failed');
     expect(res.detail).toMatch(/port is already allocated/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// defaultComprefaceProcesses
+// ---------------------------------------------------------------------------
+
+describe('defaultComprefaceProcesses', () => {
+  it('clamps a high core count down to the max of 6', () => {
+    availableParallelismResult = 8;
+    expect(defaultComprefaceProcesses()).toBe(6);
+  });
+
+  it('clamps a low core count up to the min of 1', () => {
+    availableParallelismResult = 2;
+    expect(defaultComprefaceProcesses()).toBe(1);
+  });
+
+  it('returns cores - 2 for a mid-range core count', () => {
+    availableParallelismResult = 4;
+    expect(defaultComprefaceProcesses()).toBe(2);
+  });
+
+  // The module prefers `os.availableParallelism()` and falls back to
+  // `os.cpus().length` only when `availableParallelism` isn't a function.
+  // This file's `node:os` mock always exports `availableParallelism` as a
+  // jest.fn (so `typeof os.availableParallelism === 'function'` is always
+  // true here) — cleanly forcing the fallback branch would require the mock
+  // to conditionally omit the export per-test, which isn't worth the
+  // complexity for one extra branch. Instead we assert the sanity bound that
+  // must hold regardless of which branch computed the value.
+  it('always returns an integer within [1, 6], regardless of the host core count', () => {
+    const n = defaultComprefaceProcesses();
+    expect(Number.isInteger(n)).toBe(true);
+    expect(n).toBeGreaterThanOrEqual(1);
+    expect(n).toBeLessThanOrEqual(6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildComprefaceRunArgs
+// ---------------------------------------------------------------------------
+
+describe('buildComprefaceRunArgs', () => {
+  beforeEach(() => {
+    // Fix the core-aware default so assertions on UWSGI_PROCESSES are stable
+    // across hosts: 4 cores - 2 = 2.
+    availableParallelismResult = 4;
+  });
+
+  it('builds the default args: restart policy, port mapping, uwsgi env, image last', () => {
+    const args = buildComprefaceRunArgs(3000);
+
+    expect(args[0]).toBe('run');
+    expect(args).toEqual(expect.arrayContaining(['-d']));
+    expect(args).toEqual(expect.arrayContaining(['--restart', 'unless-stopped']));
+    expect(args).toEqual(expect.arrayContaining(['-p', '3000:3000']));
+    expect(args).toEqual(expect.arrayContaining(['-e', 'UWSGI_PROCESSES=2']));
+    expect(args).toEqual(expect.arrayContaining(['-e', 'UWSGI_THREADS=1']));
+    expect(args[args.length - 1]).toBe('exadel/compreface-core:1.2.0-mobilenet');
+    expect(args).not.toContain('--memory');
+    expect(args).not.toContain('--cpus');
+  });
+
+  it('uses an explicit processes count when provided', () => {
+    const args = buildComprefaceRunArgs(3000, { processes: 6 });
+    expect(args).toEqual(expect.arrayContaining(['-e', 'UWSGI_PROCESSES=6']));
+  });
+
+  it('includes --memory and --cpus only when provided, image still last', () => {
+    const args = buildComprefaceRunArgs(3000, { memory: '4g', cpus: '4' });
+    expect(args).toEqual(expect.arrayContaining(['--memory', '4g']));
+    expect(args).toEqual(expect.arrayContaining(['--cpus', '4']));
+    expect(args[args.length - 1]).toBe('exadel/compreface-core:1.2.0-mobilenet');
+  });
+
+  it('omits --memory/--cpus entirely when not provided', () => {
+    const args = buildComprefaceRunArgs(3000);
+    expect(args.includes('--memory')).toBe(false);
+    expect(args.includes('--cpus')).toBe(false);
+  });
+
+  it('floors and clamps processes/threads to a minimum of 1', () => {
+    const args = buildComprefaceRunArgs(3000, { processes: 0.4, threads: -3 });
+    expect(args).toEqual(expect.arrayContaining(['-e', 'UWSGI_PROCESSES=1']));
+    expect(args).toEqual(expect.arrayContaining(['-e', 'UWSGI_THREADS=1']));
   });
 });
 

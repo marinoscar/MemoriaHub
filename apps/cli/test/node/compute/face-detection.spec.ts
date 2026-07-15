@@ -22,6 +22,17 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+// getFaceDetector() in the module under test does a REAL `fs.existsSync()`
+// check on the Human model directory before calling the (mocked)
+// `createFaceDetector`, and short-circuits to a hard failure if the
+// directory isn't present on disk. This repo/CI environment doesn't ship
+// the downloaded Human model files, so point `FACE_HUMAN_MODEL_PATH` (the
+// module's highest-precedence override — see resolveModelBasePath()) at
+// `os.tmpdir()`, which always exists, so the existence check passes and
+// control reaches the mocked `createFaceDetector` for every Human-path test
+// below regardless of whether real model files are installed.
+process.env['FACE_HUMAN_MODEL_PATH'] = os.tmpdir();
+
 // ---------------------------------------------------------------------------
 // Mocks — registered BEFORE importing the module under test.
 // ---------------------------------------------------------------------------
@@ -87,7 +98,10 @@ afterEach(() => {
 
 describe('computeFaceDetection — human (default)', () => {
   it('uses the Human detector when faceProvider is omitted from config', async () => {
-    mockLoadConfig.mockReturnValue(null);
+    // A present-but-empty config (logged in, no node.faceProvider set) — NOT
+    // a null/missing config, which is now a hard failure (see the "throws"
+    // test below).
+    mockLoadConfig.mockReturnValue({});
     mockCreateFaceDetector.mockResolvedValue({
       detect: jest.fn().mockResolvedValue({
         width: 800,
@@ -116,6 +130,21 @@ describe('computeFaceDetection — human (default)', () => {
 
     const result = (await computeFaceDetection(inputPath, {})) as { providerKey: string };
     expect(result.providerKey).toBe('human');
+    expect(mockDetectComprefaceFaces).not.toHaveBeenCalled();
+  });
+
+  it('throws (does not silently default to human) when loadConfig() returns null', async () => {
+    // Previously a null/missing config silently defaulted the provider to
+    // 'human'. That's now a hard failure — on a CompreFace-configured node,
+    // silently falling back to Human would write embeddings in the wrong
+    // (1024-d Human vs 128-d CompreFace) vector space. The engine's normal
+    // job-failure + retry/backoff path handles the thrown error.
+    mockLoadConfig.mockReturnValue(null);
+
+    await expect(computeFaceDetection(inputPath, {})).rejects.toThrow(
+      /could not load node config/,
+    );
+    expect(mockCreateFaceDetector).not.toHaveBeenCalled();
     expect(mockDetectComprefaceFaces).not.toHaveBeenCalled();
   });
 });

@@ -556,11 +556,77 @@ function containerNamePresent(psOutput: string, name: string): boolean {
     .some((l) => l === name);
 }
 
+/** Hard cap on the core-aware default process count to bound sidecar memory. */
+const COMPREFACE_MAX_DEFAULT_PROCESSES = 6;
+
+/**
+ * Core-aware default for `UWSGI_PROCESSES`. CompreFace serves one request per
+ * uwsgi worker process, so a single process serializes all face detection on
+ * ~1 core no matter the node's concurrency. Default to `cores - 2` (leaving
+ * headroom for the node daemon + OS), clamped to [1, 6] so a big host doesn't
+ * spin up a model copy per core and blow past its RAM.
+ */
+export function defaultComprefaceProcesses(): number {
+  const cores =
+    typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
+  return Math.min(Math.max(cores - 2, 1), COMPREFACE_MAX_DEFAULT_PROCESSES);
+}
+
+/** Tunables for the compreface-core sidecar container. */
+export interface ComprefaceContainerOptions {
+  dryRun?: boolean;
+  /** `UWSGI_PROCESSES`; omitted → {@link defaultComprefaceProcesses}. */
+  processes?: number;
+  /** `UWSGI_THREADS`; omitted → 1 (threads hit the Python GIL; processes give real parallelism). */
+  threads?: number;
+  /** `docker run --memory` value (e.g. `4g`); omitted → no cap. */
+  memory?: string;
+  /** `docker run --cpus` value (e.g. `4`); omitted → no cap. */
+  cpus?: string;
+  /** Force `docker rm -f` + recreate even if the container is currently running. */
+  recreate?: boolean;
+}
+
+/**
+ * Build the `docker run` argument vector for the compreface-core sidecar,
+ * baking in multi-process inference, an auto-restart policy, and optional
+ * resource caps. Exported so tests can assert the exact flags without spawning
+ * docker.
+ */
+export function buildComprefaceRunArgs(port: number, opts?: ComprefaceContainerOptions): string[] {
+  const processes = Math.max(1, Math.floor(opts?.processes ?? defaultComprefaceProcesses()));
+  const threads = Math.max(1, Math.floor(opts?.threads ?? 1));
+  const args = [
+    'run',
+    '-d',
+    '--name',
+    COMPREFACE_CONTAINER_NAME,
+    // Survive a crash or host reboot without manual intervention.
+    '--restart',
+    'unless-stopped',
+    '-p',
+    `${port}:3000`,
+    '-e',
+    `UWSGI_PROCESSES=${processes}`,
+    '-e',
+    `UWSGI_THREADS=${threads}`,
+  ];
+  if (opts?.memory) {
+    args.push('--memory', opts.memory);
+  }
+  if (opts?.cpus) {
+    args.push('--cpus', opts.cpus);
+  }
+  args.push(COMPREFACE_IMAGE);
+  return args;
+}
+
 export async function ensureComprefaceContainer(
   port: number,
-  opts?: { dryRun?: boolean },
+  opts?: ComprefaceContainerOptions,
 ): Promise<InstallStepResult> {
   const step = 'CompreFace container';
+  const dryRun = opts?.dryRun;
 
   const running = await runWithSudoAnnounced('docker', [
     'ps',
@@ -568,9 +634,20 @@ export async function ensureComprefaceContainer(
     `name=${COMPREFACE_CONTAINER_NAME}`,
     '--format',
     '{{.Names}}',
-  ], opts);
-  if (running.ok && containerNamePresent(running.stdout, COMPREFACE_CONTAINER_NAME)) {
-    return { step, status: 'skipped', detail: `${COMPREFACE_CONTAINER_NAME} container is already running.` };
+  ], { dryRun });
+  const isRunning = running.ok && containerNamePresent(running.stdout, COMPREFACE_CONTAINER_NAME);
+
+  // A running container is left untouched unless --compreface-recreate is set,
+  // so an install-deps re-run never interrupts an in-flight sidecar just to
+  // change flags. Resource/restart/process settings only apply on (re)create.
+  if (isRunning && !opts?.recreate) {
+    return {
+      step,
+      status: 'skipped',
+      detail:
+        `${COMPREFACE_CONTAINER_NAME} container is already running. ` +
+        'Re-run with --compreface-recreate to apply new process/restart/resource settings.',
+    };
   }
 
   const all = await runWithSudoAnnounced('docker', [
@@ -580,30 +657,28 @@ export async function ensureComprefaceContainer(
     `name=${COMPREFACE_CONTAINER_NAME}`,
     '--format',
     '{{.Names}}',
-  ], opts);
+  ], { dryRun });
   const exists = all.ok && containerNamePresent(all.stdout, COMPREFACE_CONTAINER_NAME);
 
+  // Any existing container (a running one under --compreface-recreate, or any
+  // stopped one) is removed and recreated: `docker start` cannot change a
+  // container's flags, so a bare start would keep the old single-process /
+  // no-restart config. compreface-core is stateless (no volumes), so recreate
+  // is safe.
   if (exists) {
-    if (opts?.dryRun) {
-      return { step, status: 'installed', detail: 'Dry run — would start the existing (stopped) compreface-core container.' };
-    }
-    const start = await runWithSudoAnnounced('docker', ['start', COMPREFACE_CONTAINER_NAME], opts);
-    if (!start.ok) {
+    const rm = await runWithSudoAnnounced('docker', ['rm', '-f', COMPREFACE_CONTAINER_NAME], { dryRun });
+    if (!rm.ok) {
       return {
         step,
         status: 'failed',
-        detail: `Failed to start existing ${COMPREFACE_CONTAINER_NAME} container: ${start.stderr || start.stdout}`,
+        detail: `Failed to remove existing ${COMPREFACE_CONTAINER_NAME} container before recreate: ${rm.stderr || rm.stdout}`,
       };
     }
-    return { step, status: 'installed', detail: `Started existing ${COMPREFACE_CONTAINER_NAME} container.` };
   }
 
-  const inspect = await runWithSudoAnnounced('docker', ['image', 'inspect', COMPREFACE_IMAGE], opts);
+  const inspect = await runWithSudoAnnounced('docker', ['image', 'inspect', COMPREFACE_IMAGE], { dryRun });
   if (!inspect.ok) {
-    if (opts?.dryRun) {
-      return { step, status: 'installed', detail: `Dry run — would pull ${COMPREFACE_IMAGE} and start a new container on port ${port}.` };
-    }
-    const pull = await runWithSudoAnnounced('docker', ['pull', COMPREFACE_IMAGE], opts);
+    const pull = await runWithSudoAnnounced('docker', ['pull', COMPREFACE_IMAGE], { dryRun });
     if (!pull.ok) {
       return {
         step,
@@ -613,27 +688,8 @@ export async function ensureComprefaceContainer(
     }
   }
 
-  if (opts?.dryRun) {
-    return { step, status: 'installed', detail: `Dry run — would start a new ${COMPREFACE_CONTAINER_NAME} container on port ${port}.` };
-  }
-
-  const run = await runWithSudoAnnounced(
-    'docker',
-    [
-      'run',
-      '-d',
-      '--name',
-      COMPREFACE_CONTAINER_NAME,
-      '-p',
-      `${port}:3000`,
-      '-e',
-      'UWSGI_PROCESSES=1',
-      '-e',
-      'UWSGI_THREADS=1',
-      COMPREFACE_IMAGE,
-    ],
-    opts,
-  );
+  const processes = Math.max(1, Math.floor(opts?.processes ?? defaultComprefaceProcesses()));
+  const run = await runWithSudoAnnounced('docker', buildComprefaceRunArgs(port, opts), { dryRun });
   if (!run.ok) {
     return {
       step,
@@ -642,7 +698,18 @@ export async function ensureComprefaceContainer(
     };
   }
 
-  return { step, status: 'installed', detail: `Started a new ${COMPREFACE_CONTAINER_NAME} container on port ${port}.` };
+  const capsNote = [
+    opts?.memory ? `memory ${opts.memory}` : null,
+    opts?.cpus ? `cpus ${opts.cpus}` : null,
+  ].filter(Boolean).join(', ');
+  const detailSuffix = `with ${processes} uwsgi process(es), --restart unless-stopped${capsNote ? `, ${capsNote}` : ''}`;
+  return {
+    step,
+    status: 'installed',
+    detail: dryRun
+      ? `Dry run — would (re)create the ${COMPREFACE_CONTAINER_NAME} container on port ${port} ${detailSuffix}.`
+      : `Started a new ${COMPREFACE_CONTAINER_NAME} container on port ${port} ${detailSuffix}.`,
+  };
 }
 
 // ---------------------------------------------------------------------------

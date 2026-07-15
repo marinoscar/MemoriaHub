@@ -134,11 +134,29 @@ Docker must be installed and running first — see §5.1.
 
 A node opting into CompreFace runs its OWN local `compreface-core` container — the same image the server itself runs (see `infra/compose/base.compose.yml`'s `compreface-core` service block). The node's compute calls this container directly at `http://localhost:<port>`, NOT proxied through the server: the server's own sidecar has no port exposed externally by design, and routing a node's face-detection calls through the server would defeat the whole point of a distributed worker.
 
-Start it once per node machine:
+**Multi-process inference is now the default.** `UWSGI_PROCESSES` now defaults to a core-aware value, `min(cores - 2, 6)`, instead of the previously-hardcoded `1`; `UWSGI_THREADS` stays `1`. This matters because CompreFace serves one request per uwsgi worker process — a single process serialized ALL face detection onto roughly one core regardless of the node's configured concurrency. Multiple processes give true parallelism; threads alone would just contend on Python's GIL, so they don't help here. Measured impact on an 8-core/32GB laptop: bumping to ~6 processes cut `face_detection` job time from roughly 17–20s down to roughly 2–3s — about an 8x improvement.
+
+**Auto-restart.** The container that `memoriahub node install-deps` creates now runs with `--restart unless-stopped`, so it survives a crash or host reboot without manual intervention.
+
+`memoriahub node install-deps` now sets all of this up automatically. The manual `docker run` recipe below remains the reference/manual path for people who want to do it by hand or customize further — consistent with how §2 frames the automated-vs-manual relationship elsewhere in this doc ("§3 onward — is the manual, step-by-step reference for exactly what this command automates").
+
+New `node install-deps` flags for CompreFace resource tuning:
+
+| Flag | Description |
+|------|-------------|
+| `--compreface-processes <n>` | Override the core-aware default (`min(cores - 2, 6)`) |
+| `--compreface-memory <size>` | e.g. `4g`; maps to Docker's `--memory` flag |
+| `--compreface-cpus <n>` | e.g. `4`; maps to Docker's `--cpus` flag |
+| `--compreface-recreate` | Remove and recreate an EXISTING container so new process/restart/resource settings actually take effect |
+
+**Recreate-vs-restart nuance.** This is easy to get wrong, so call it out explicitly: on a plain re-run of `node install-deps`, a currently-**running** container is left completely untouched — you must explicitly pass `--compreface-recreate` to pick up new settings (process count, restart policy, resource limits). A **stopped** container, however, IS now recreated automatically on a plain re-run; previously it was just `docker start`-ed, which cannot apply new flags at all, so recreation is required to change uwsgi process count, restart policy, or resource limits on a stopped container too. `compreface-core` is stateless (no volumes), so recreating it is always safe — no data is lost either way.
+
+`memoriahub node install-deps` now does all of the above automatically, so the manual recipe below is for people who want to do it by hand or customize further. Start it once per node machine, sizing `UWSGI_PROCESSES` to `min(cores - 2, 6)` for your machine (the example below uses 6, appropriate for an 8-core+ host):
 
 ```bash
 docker run -d --name compreface-core -p 3000:3000 \
-  -e UWSGI_PROCESSES=1 -e UWSGI_THREADS=1 \
+  --restart unless-stopped \
+  -e UWSGI_PROCESSES=6 -e UWSGI_THREADS=1 \
   exadel/compreface-core:1.2.0-mobilenet
 ```
 
@@ -178,9 +196,15 @@ The equivalent TUI path is Tools ▸ Worker Node ▸ Register node / Node config
 
 If a node is configured `faceProvider: 'compreface'` but its local sidecar is unreachable, `node doctor` reports the `compreface` capability unavailable, and `face_detection`/`video_face_detection` are **NOT READY** on that node — it simply stops advertising those job types as eligible, rather than silently falling back to Human. This is deliberate: a silent fallback would reintroduce the exact embedding-space mismatch this feature exists to prevent (see the overview above). See §9 (Troubleshooting) below for the exact symptom and fix.
 
+This same hard-fail principle also applies to the warm-up window at start time, not just to an already-known-unreachable sidecar. When a node's face provider is `compreface` and its eligible types include a face job (`face_detection`/`video_face_detection`), `node start` now **blocks** on a bounded wait (~40 seconds) polling CompreFace's `/status` endpoint until it reports healthy, before the node claims any jobs. This exists because CompreFace takes roughly 15–30 seconds to load its model on (re)create; starting immediately would let the node claim face jobs before the sidecar is actually ready. Previously this silently ran those jobs on the in-process Human provider instead — about 8x slower, with no error surfaced, and (per this section's whole premise) landing in the wrong embedding space vs. the rest of the circle.
+
+If CompreFace does not become healthy within the ~40s budget, `node start` now **fails outright** rather than silently falling back to Human. The operator must fix the sidecar (see §9 troubleshooting) or explicitly pass `--face-provider human` if that's the intended provider.
+
+The actively-selected face provider is now logged at start, and surfaced in `memoriahub node status` output as a new "Face provider" line — present in both the live/IPC status view (a running daemon) and the offline/config status view (reading local config when no daemon is running).
+
 ### 5.5 `node doctor` coverage
 
-`node doctor` (CLI and TUI) gains one new capability row, `compreface`, reported using the exact same installed-vs-operational model described in §8 for every other capability: **installed** means the configured `comprefaceUrl` responds at all to a `GET /status` call; **operational** means that response actually reports `status: 'OK'`. Like every other capability, a clean, fully-healthy node collapses this row into the one-line summary count; only a real problem expands it with detail.
+`node doctor` (CLI and TUI) gains one new capability row, `compreface`, reported using the exact same installed-vs-operational model described in §8 for every other capability: **installed** means the configured `comprefaceUrl` responds at all to a `GET /status` call; **operational** means that response actually reports `status: 'OK'`. Like every other capability, a clean, fully-healthy node collapses this row into the one-line summary count; only a real problem expands it with detail. (The `node start` warm-up wait described in §5.4 uses this same `/status` check.)
 
 ### 5.6 How this differs from the CLIP/Human model-file pattern
 
@@ -213,6 +237,10 @@ memoriahub node service install # always-on systemd user service
 
 Equivalent TUI menu items: Tools ▸ Worker Node ▸ Register node / Start worker (background) / Node service (systemd). See `apps/cli/README.md`'s ["Worker Nodes (distributed compute)"](../apps/cli/README.md#worker-nodes-distributed-compute) section for full command reference, flags, and the TUI dashboard's own doctor overlay — this document's job is dependency setup, not day-to-day operation.
 
+**Per-machine concurrency tuning.** `memoriahub node set-concurrency <n>` (and the `--concurrency` flag on `node register`/`node start`) lets you match a node's concurrency to the machine it runs on. Note that with the new multi-process CompreFace default (§5.2), face detection can now actually use multiple cores in parallel, which changes what a sensible concurrency value looks like on a given machine.
+
+**Each machine = its own node registration.** Every physical machine must run `node register` itself — do NOT clone `~/.memoriahub/config.json` from one machine to another. The config file embeds a `nodeId`; two machines sharing the same `nodeId` will fight over job leases, surfacing as `job not owned by this node` errors. This is the same lease-ownership guard documented elsewhere in the project (see CLAUDE.md's Distributed Nodes section) as protecting against late/duplicate submissions from a reaped node — a cloned config creates an analogous but self-inflicted conflict between two live machines, both alive at once.
+
 ---
 
 ## 8. Reading `node doctor` Output
@@ -240,3 +268,5 @@ Both the CLI command (`memoriahub node doctor`) and the TUI screen (Tools ▸ Wo
 | `node status`/`node list` shows the node as "not recognized by server" (a registered node ID the server 404s/403s on) | The node record was deleted or deregistered server-side — e.g. an admin removed it via `DELETE /api/admin/nodes/:id` on the Worker Nodes admin page, or another process ran `node deregister` for it | Run `memoriahub node register` again to create a fresh registration; the old node ID cannot be revived. |
 | `node service install` refuses, or reports systemd unavailable (WSL) | WSL distros often don't have a per-user systemd instance running by default (`systemctl --user show-environment` fails) | Enable systemd via `[boot]\nsystemd=true` in `/etc/wsl.conf`, then `wsl --shutdown` from Windows to restart the distro — or skip systemd entirely and use `memoriahub node start --daemon` instead. See [distributed-nodes.md §9.3](specs/distributed-nodes.md#93-worker-daemon-systemd-service-and-tui-attach) and `apps/cli/README.md`'s "Always-on service" section. |
 | `node service install` refuses on Windows outright | systemd has no Windows equivalent — `service install` is a no-op there by design, not a bug | Use `memoriahub node start --daemon` instead. |
+| Face jobs slow / appear to run on Human despite `--face-provider compreface` | The CompreFace warm-up race at start time, or the provider not actually being selected as configured | Check the "Face provider" line in `memoriahub node status` output to confirm which provider is actually active; confirm `node start` waited for CompreFace to report healthy before claiming jobs (see §5.4); verify the sidecar directly with `curl http://localhost:3000/status` (or the configured `comprefaceUrl`). |
+| `job not owned by this node` errors on a node that was recently set up | `~/.memoriahub/config.json` was copied/cloned from another machine instead of running `node register` fresh, so two machines share one `nodeId` and are fighting over job leases | Run `memoriahub node register` on the affected machine to get its own distinct node identity (do not reuse a cloned config across machines — see §7). |

@@ -69,6 +69,15 @@ export interface NodeEngineOptions {
   leaseMs?: number;
   /** Max jobs claimed per poll. Default = concurrency. */
   maxClaim?: number;
+  /** Face-detection provider this node runs face jobs on. Surfaced in status. */
+  faceProvider?: 'human' | 'compreface';
+  /**
+   * Base URL of the local compreface-core sidecar (only meaningful when
+   * faceProvider === 'compreface'). Passed to the capability probe on every
+   * heartbeat so reported capabilities reflect the node's ACTUAL sidecar
+   * rather than the localhost default.
+   */
+  comprefaceUrl?: string;
 }
 
 export interface NodeEngineDeps {
@@ -79,7 +88,7 @@ export interface NodeEngineDeps {
   /** Injectable for tests — defaults to the real streaming download. */
   downloadFn?: typeof downloadToFile;
   /** Injectable for tests — defaults to the real capability probe. */
-  detectFn?: () => Promise<Record<string, CapabilityStatus>>;
+  detectFn?: (opts?: { comprefaceUrl?: string }) => Promise<Record<string, CapabilityStatus>>;
   /** Injectable temp directory (defaults to os.tmpdir()). */
   tmpDir?: () => string;
 }
@@ -109,6 +118,10 @@ export interface EngineSnapshot {
   /** Current live concurrency cap (see setConcurrency). */
   concurrency: number;
   eligibleTypes: string[];
+  /** Face-detection provider this node runs face jobs on ('human' | 'compreface'). */
+  faceProvider: 'human' | 'compreface';
+  /** Sidecar URL when faceProvider === 'compreface'; null otherwise. */
+  comprefaceUrl: string | null;
   activeJobs: ActiveJobInfo[];
   /** Last 50 completed/failed jobs, oldest first. */
   history: CompletedJobRecord[];
@@ -221,6 +234,11 @@ export class NodeEngine extends NodeTypedEmitter {
       startedAt: this.startedAtIso,
       concurrency: this.concurrencyCap,
       eligibleTypes: [...this.opts.eligibleTypes],
+      faceProvider: this.opts.faceProvider ?? 'human',
+      comprefaceUrl:
+        (this.opts.faceProvider ?? 'human') === 'compreface'
+          ? this.opts.comprefaceUrl ?? null
+          : null,
       activeJobs: [...this.activeJobs.values()],
       history: [...this.history],
       counters: { ...this.counters },
@@ -490,7 +508,9 @@ export class NodeEngine extends NodeTypedEmitter {
   /** Send one heartbeat with the current capability summary. */
   private async beat(): Promise<void> {
     try {
-      const capabilities = await this.resolved.detectFn();
+      const capabilities = await this.resolved.detectFn({
+        comprefaceUrl: this.opts.comprefaceUrl,
+      });
       await this.api.heartbeatNode(this.nodeId, {
         status: this.draining ? 'draining' : 'online',
         capabilities,
