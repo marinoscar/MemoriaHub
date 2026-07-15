@@ -66,11 +66,14 @@ ffmpeg build with HEIC muxer support, neither of which is available in every
 dev/CI environment (this sandbox has neither system `ffmpeg` nor a sharp
 build with libheif).
 
-The test in `test/heic.test.mjs` (`computeDHash decodes a HEIC photo via the
-ffmpeg transcode fallback (issue #106)`) checks for both a system `ffmpeg`
-binary on PATH and this fixture file, and `t.skip(...)`s with a clear reason
-when either is missing — it never hard-fails just because the fixture isn't
-present.
+`test/heic.test.mjs` has six tests that mock `fluent-ffmpeg` (covering
+success, temp-file cleanup, a custom `fileExtension` option, an ffmpeg error,
+an empty-output guard, and the SIGKILL timeout) — those run unconditionally,
+with no real ffmpeg or fixture required. A separate, final test in that file
+(`transcodeToDecodableJpeg + computeDHash decode a real HEIC fixture
+end-to-end`) checks for both a system `ffmpeg` binary on PATH and this
+fixture file, and `t.skip(...)`s with a clear reason when either is missing —
+it never hard-fails just because the fixture isn't present.
 
 **To enable this regression guard:**
 
