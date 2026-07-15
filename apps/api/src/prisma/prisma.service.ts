@@ -1,31 +1,21 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { buildBaseDatabaseUrl, resolvePoolConfig } from '../config/database-url.util';
 
 /**
- * Builds a PostgreSQL connection string from individual environment variables,
+ * Builds the BASE PostgreSQL connection string (no Prisma pool query params),
  * falling back to DATABASE_URL when already provided.
  *
- * Mirrors the logic in src/config/configuration.ts and scripts/prisma-env.js
- * so PrismaService works regardless of NestJS module initialization order.
+ * The runtime pool sizing is applied separately, as `pg.PoolConfig` fields
+ * passed to the adapter (see the constructor) — NOT via URL query params. The
+ * `@prisma/adapter-pg` adapter runs on a real `pg.Pool`, and `pg` ignores
+ * Prisma's `connection_limit`/`pool_timeout` URL params (those only affect the
+ * Prisma query engine used by the CLI/migration path). So we hand pg the base
+ * URL and configure `max`/`connectionTimeoutMillis` explicitly.
  */
 function buildConnectionString(): string {
-  if (process.env.DATABASE_URL) {
-    return process.env.DATABASE_URL;
-  }
-
-  const host = process.env.POSTGRES_HOST ?? 'localhost';
-  const port = process.env.POSTGRES_PORT ?? '5432';
-  const user = process.env.POSTGRES_USER ?? 'postgres';
-  const password = process.env.POSTGRES_PASSWORD ?? 'postgres';
-  const dbName = process.env.POSTGRES_DB ?? 'appdb';
-  const ssl = process.env.POSTGRES_SSL === 'true';
-  const sslParam = ssl ? '?sslmode=require' : '';
-
-  // URL-encode the password to handle special characters
-  const encodedPassword = encodeURIComponent(password);
-
-  return `postgresql://${user}:${encodedPassword}@${host}:${port}/${dbName}${sslParam}`;
+  return buildBaseDatabaseUrl();
 }
 
 @Injectable()
@@ -36,9 +26,26 @@ export class PrismaService
   private readonly logger = new Logger(PrismaService.name);
 
   constructor() {
-    const adapter = new PrismaPg(buildConnectionString());
+    // Pass a pg.PoolConfig OBJECT (not a bare string) so the runtime pg pool is
+    // actually sized — `max` is the real connection_limit for the adapter, and
+    // `connectionTimeoutMillis` is pg's pool-acquisition timeout.
+    const { max, connectionTimeoutMillis } = resolvePoolConfig();
+    const adapter = new PrismaPg({
+      connectionString: buildConnectionString(),
+      max,
+      connectionTimeoutMillis,
+    });
     super({
       adapter,
+      // Raise the interactive-transaction budget above Prisma's 5s default.
+      // Under bulk-import load the default timeout expired ("expired
+      // transaction") and the pool starved ("Unable to start a transaction in
+      // the given time"). timeout = max wall-clock a tx body may run;
+      // maxWait = max time to wait for a pooled connection to start the tx.
+      transactionOptions: {
+        timeout: parseInt(process.env.PRISMA_TX_TIMEOUT_MS || '15000', 10),
+        maxWait: parseInt(process.env.PRISMA_TX_MAX_WAIT_MS || '5000', 10),
+      },
       // perceptualHash is an internal 64-bit dHash field used exclusively by
       // burst detection. It is not part of the public API surface and is omitted
       // globally to keep MediaItem responses clean. Burst detection code that

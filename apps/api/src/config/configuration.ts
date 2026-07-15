@@ -1,14 +1,16 @@
+import { buildDatabaseUrl } from './database-url.util';
+
 export default () => {
-  // Construct DATABASE_URL from individual PostgreSQL variables
+  // Individual PostgreSQL variables (kept for the `database` config object shape)
   const host = process.env.POSTGRES_HOST || 'localhost';
   const port = process.env.POSTGRES_PORT || '5432';
   const user = process.env.POSTGRES_USER || 'postgres';
   const password = process.env.POSTGRES_PASSWORD || 'postgres';
   const dbName = process.env.POSTGRES_DB || 'appdb';
   const ssl = process.env.POSTGRES_SSL === 'true';
-  const sslParam = ssl ? '?sslmode=require' : '';
 
-  const databaseUrl = `postgresql://${user}:${password}@${host}:${port}/${dbName}${sslParam}`;
+  // Construct DATABASE_URL (base + connection-pool params) from the shared helper
+  const databaseUrl = buildDatabaseUrl();
 
   // Set DATABASE_URL for Prisma
   process.env.DATABASE_URL = databaseUrl;
