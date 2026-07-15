@@ -5,6 +5,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { CirclesModule } from '../circles/circles.module';
 import { SettingsModule } from '../settings/settings.module';
 import { DedupModule } from '../dedup/dedup.module';
+import { MediaModule } from '../media/media.module';
 import { BurstController } from './burst.controller';
 import { BurstService } from './burst.service';
 import { BurstDetectionHandler } from './burst-detection.handler';
@@ -19,6 +20,7 @@ import { AdminBurstController } from './admin-burst.controller';
     CirclesModule,
     SettingsModule,
     DedupModule,
+    MediaModule,
   ],
   controllers: [BurstController, AdminBurstController],
   providers: [BurstService, BurstDetectionHandler, BurstDetectionService],

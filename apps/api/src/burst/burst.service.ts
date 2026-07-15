@@ -14,6 +14,7 @@ import {
   StorageProvider,
 } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { FEATURE_KEYS } from '../common/types/settings.types';
 import { PERMISSIONS } from '../common/constants/roles.constants';
@@ -37,6 +38,7 @@ export class BurstService {
     @Inject(STORAGE_PROVIDER)
     private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
+    private readonly mediaThumbnailService: MediaThumbnailService,
     private readonly systemSettings: SystemSettingsService,
     private readonly duplicateDetectionService: DuplicateDetectionService,
   ) {}
@@ -75,32 +77,13 @@ export class BurstService {
   // Private helpers
   // ---------------------------------------------------------------------------
 
+  /**
+   * Single-item thumbnail signing. Delegates to the shared
+   * MediaThumbnailService so provider resolution + fallback + error handling
+   * live in one place. List paths batch signing via `signThumbsBatched`.
+   */
   private async signThumb(metadata: Prisma.JsonValue | null): Promise<string | null> {
-    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-      return null;
-    }
-    const meta = metadata as Record<string, unknown>;
-    const key = meta['thumbnailStorageKey'];
-    if (typeof key !== 'string' || !key) {
-      return null;
-    }
-    try {
-      // Look up the thumbnail StorageObject row to find which provider+bucket it lives on.
-      // This handles the case where thumbnails were uploaded to R2 (or any non-default provider)
-      // while the static STORAGE_PROVIDER token still points at the legacy S3 bucket.
-      const thumbObj = await this.prisma.storageObject.findFirst({
-        where: { storageKey: key },
-        select: { storageProvider: true, bucket: true },
-      });
-      const provider = thumbObj
-        ? await this.resolver.getProviderFor(thumbObj.storageProvider, thumbObj.bucket)
-        : this.storageProvider; // fallback: row not found, use static provider
-      return await provider.getSignedDownloadUrl(key);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Failed to sign thumbnail URL for key ${key}: ${msg}`);
-      return null;
-    }
+    return this.mediaThumbnailService.signThumb(metadata);
   }
 
   private async getBurstMinGroupSize(): Promise<number> {
@@ -160,30 +143,47 @@ export class BurstService {
       this.prisma.burstGroup.count({ where }),
     ]);
 
-    const data = await Promise.all(
-      groups.map(async (group) => {
-        const coverThumbnailUrls = await Promise.all(
-          group.items.map((item) => this.signThumb(item.metadata)),
-        );
+    // Collect all thumbnail keys across every group (member covers +
+    // suggested-best) and sign them with a single batched StorageObject query.
+    const keys: string[] = [];
+    for (const group of groups) {
+      for (const item of group.items) {
+        const k = this.mediaThumbnailService.extractThumbKey(item.metadata);
+        if (k) keys.push(k);
+      }
+      const sk = group.suggestedBestItem
+        ? this.mediaThumbnailService.extractThumbKey(group.suggestedBestItem.metadata)
+        : null;
+      if (sk) keys.push(sk);
+    }
+    const keyToUrl = await this.mediaThumbnailService.signThumbsBatched(keys);
+    const urlFor = (metadata: Prisma.JsonValue | null): string | null => {
+      const k = this.mediaThumbnailService.extractThumbKey(metadata);
+      return k ? keyToUrl.get(k) ?? null : null;
+    };
 
-        const suggestedBestThumbnailUrl = group.suggestedBestItem
-          ? await this.signThumb(group.suggestedBestItem.metadata)
-          : null;
+    const data = groups.map((group) => {
+      const coverThumbnailUrls = group.items
+        .map((item) => urlFor(item.metadata))
+        .filter((url): url is string => url !== null);
 
-        return {
-          id: group.id,
-          circleId: group.circleId,
-          status: group.status,
-          mediaCount: group.mediaCount,
-          capturedAt: group.capturedAt,
-          confidence: group.confidence,
-          suggestedBestItemId: group.suggestedBestItemId,
-          suggestedBestThumbnailUrl,
-          coverThumbnailUrls: coverThumbnailUrls.filter((url): url is string => url !== null),
-          createdAt: group.createdAt,
-        };
-      }),
-    );
+      const suggestedBestThumbnailUrl = group.suggestedBestItem
+        ? urlFor(group.suggestedBestItem.metadata)
+        : null;
+
+      return {
+        id: group.id,
+        circleId: group.circleId,
+        status: group.status,
+        mediaCount: group.mediaCount,
+        capturedAt: group.capturedAt,
+        confidence: group.confidence,
+        suggestedBestItemId: group.suggestedBestItemId,
+        suggestedBestThumbnailUrl,
+        coverThumbnailUrls,
+        createdAt: group.createdAt,
+      };
+    });
 
     return {
       items: data,
@@ -231,18 +231,19 @@ export class BurstService {
 
     await this.membership.assertCircleAccess(userId, group.circleId, perms, CircleRole.viewer);
 
-    const membersWithUrls = await Promise.all(
-      group.items.map(async (item) => ({
-        id: item.id,
-        capturedAt: item.capturedAt,
-        burstScore: item.burstScore,
-        sharpnessScore: item.sharpnessScore,
-        thumbnailUrl: await this.signThumb(item.metadata),
-        width: item.width,
-        height: item.height,
-        isSuggestedBest: item.id === group.suggestedBestItemId,
-      })),
+    const itemsWithUrls = await this.mediaThumbnailService.attachThumbnailUrls(
+      group.items,
     );
+    const membersWithUrls = itemsWithUrls.map((item) => ({
+      id: item.id,
+      capturedAt: item.capturedAt,
+      burstScore: item.burstScore,
+      sharpnessScore: item.sharpnessScore,
+      thumbnailUrl: item.thumbnailUrl,
+      width: item.width,
+      height: item.height,
+      isSuggestedBest: item.id === group.suggestedBestItemId,
+    }));
 
     return {
       data: {

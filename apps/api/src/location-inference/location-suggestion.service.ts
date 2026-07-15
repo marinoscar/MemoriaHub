@@ -5,6 +5,7 @@ import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER, StorageProvider } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from '../media/geo/geo-location-provider.interface';
 import { applyLocation } from '../media/geo/apply-location.util';
 import { GEO_CLEAR_COLUMNS } from '../media/geo/geo-result.mapper';
@@ -23,36 +24,8 @@ export class LocationSuggestionService {
     @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
     @Inject(GEO_LOCATION_PROVIDER) private readonly geoProvider: GeoLocationProvider,
+    private readonly mediaThumbnailService: MediaThumbnailService,
   ) {}
-
-  // ---------------------------------------------------------------------------
-  // Private helpers
-  // ---------------------------------------------------------------------------
-
-  private async signThumb(metadata: Prisma.JsonValue | null): Promise<string | null> {
-    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-      return null;
-    }
-    const meta = metadata as Record<string, unknown>;
-    const key = meta['thumbnailStorageKey'];
-    if (typeof key !== 'string' || !key) {
-      return null;
-    }
-    try {
-      const thumbObj = await this.prisma.storageObject.findFirst({
-        where: { storageKey: key },
-        select: { storageProvider: true, bucket: true },
-      });
-      const provider = thumbObj
-        ? await this.resolver.getProviderFor(thumbObj.storageProvider, thumbObj.bucket)
-        : this.storageProvider;
-      return await provider.getSignedDownloadUrl(key);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Failed to sign thumbnail URL for key ${key}: ${msg}`);
-      return null;
-    }
-  }
 
   private async createAuditEvent(
     actorUserId: string,
@@ -100,8 +73,20 @@ export class LocationSuggestionService {
       }),
     ]);
 
-    const items = await Promise.all(
-      suggestions.map(async (s) => ({
+    // Batch-sign all suggestion thumbnails with a single StorageObject query.
+    const keyToUrl = await this.mediaThumbnailService.signThumbsBatched(
+      suggestions
+        .map((s) =>
+          this.mediaThumbnailService.extractThumbKey(s.mediaItem?.metadata ?? null),
+        )
+        .filter((k): k is string => k !== null),
+    );
+
+    const items = suggestions.map((s) => {
+      const key = this.mediaThumbnailService.extractThumbKey(
+        s.mediaItem?.metadata ?? null,
+      );
+      return {
         id: s.id,
         mediaItemId: s.mediaItemId,
         status: s.status,
@@ -118,9 +103,9 @@ export class LocationSuggestionService {
         capturedAt: s.mediaItem?.capturedAt ?? null,
         cameraMake: s.mediaItem?.cameraMake ?? null,
         cameraModel: s.mediaItem?.cameraModel ?? null,
-        thumbnailUrl: await this.signThumb(s.mediaItem?.metadata ?? null),
-      })),
-    );
+        thumbnailUrl: key ? keyToUrl.get(key) ?? null : null,
+      };
+    });
 
     return {
       items,

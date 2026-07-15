@@ -14,6 +14,7 @@ import {
   StorageProvider,
 } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { hammingDistance } from '../burst/burst-detection.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { DuplicateQueryDto } from './dto/duplicate-query.dto';
@@ -65,35 +66,19 @@ export class DuplicateService {
     @Inject(STORAGE_PROVIDER)
     private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
+    private readonly mediaThumbnailService: MediaThumbnailService,
   ) {}
 
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
 
+  /**
+   * Single-item thumbnail signing. Delegates to the shared
+   * MediaThumbnailService. List paths batch signing via `signThumbsBatched`.
+   */
   private async signThumb(metadata: Prisma.JsonValue | null): Promise<string | null> {
-    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-      return null;
-    }
-    const meta = metadata as Record<string, unknown>;
-    const key = meta['thumbnailStorageKey'];
-    if (typeof key !== 'string' || !key) {
-      return null;
-    }
-    try {
-      const thumbObj = await this.prisma.storageObject.findFirst({
-        where: { storageKey: key },
-        select: { storageProvider: true, bucket: true },
-      });
-      const provider = thumbObj
-        ? await this.resolver.getProviderFor(thumbObj.storageProvider, thumbObj.bucket)
-        : this.storageProvider;
-      return await provider.getSignedDownloadUrl(key);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Failed to sign thumbnail URL for key ${key}: ${msg}`);
-      return null;
-    }
+    return this.mediaThumbnailService.signThumb(metadata);
   }
 
   private async signOriginal(mediaItemId: string): Promise<string | null> {
@@ -273,24 +258,37 @@ export class DuplicateService {
     const start = (page - 1) * pageSize;
     const pageGroups = filtered.slice(start, start + pageSize);
 
-    const data = await Promise.all(
-      pageGroups.map(async (group) => {
-        const coverThumbnailUrls = await Promise.all(
-          group.items.slice(0, 4).map((item) => this.signThumb(item.metadata)),
-        );
+    // Collect the (up to 4) cover keys across every page group and sign them
+    // with a single batched StorageObject query.
+    const coverKeys: string[] = [];
+    for (const group of pageGroups) {
+      for (const item of group.items.slice(0, 4)) {
+        const k = this.mediaThumbnailService.extractThumbKey(item.metadata);
+        if (k) coverKeys.push(k);
+      }
+    }
+    const keyToUrl = await this.mediaThumbnailService.signThumbsBatched(coverKeys);
 
-        return {
-          id: group.id,
-          status: group.status,
-          kind: group.kind,
-          confidence: group.confidence,
-          mediaCount: group.mediaCount,
-          suggestedBestItemId: group.suggestedBestItemId,
-          capturedAt: group.capturedAt,
-          coverThumbnailUrls: coverThumbnailUrls.filter((url): url is string => url !== null),
-        };
-      }),
-    );
+    const data = pageGroups.map((group) => {
+      const coverThumbnailUrls = group.items
+        .slice(0, 4)
+        .map((item) => {
+          const k = this.mediaThumbnailService.extractThumbKey(item.metadata);
+          return k ? keyToUrl.get(k) ?? null : null;
+        })
+        .filter((url): url is string => url !== null);
+
+      return {
+        id: group.id,
+        status: group.status,
+        kind: group.kind,
+        confidence: group.confidence,
+        mediaCount: group.mediaCount,
+        suggestedBestItemId: group.suggestedBestItemId,
+        capturedAt: group.capturedAt,
+        coverThumbnailUrls,
+      };
+    });
 
     return {
       items: data,
@@ -350,10 +348,21 @@ export class DuplicateService {
       similarityMap = new Map(simRows.map((r) => [r.id, Number(r.sim)]));
     }
 
+    // Batch-sign member thumbnails with one StorageObject query; original
+    // previews are still signed per-item (each maps to its own object).
+    const thumbKeys = group.items
+      .map((item) => this.mediaThumbnailService.extractThumbKey(item.metadata))
+      .filter((k): k is string => k !== null);
+    const thumbKeyToUrl =
+      await this.mediaThumbnailService.signThumbsBatched(thumbKeys);
+
     const members = await Promise.all(
       group.items.map(async (item) => ({
         id: item.id,
-        thumbnailUrl: await this.signThumb(item.metadata),
+        thumbnailUrl: (() => {
+          const k = this.mediaThumbnailService.extractThumbKey(item.metadata);
+          return k ? thumbKeyToUrl.get(k) ?? null : null;
+        })(),
         previewUrl: await this.signOriginal(item.id),
         width: item.width,
         height: item.height,
