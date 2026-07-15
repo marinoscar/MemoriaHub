@@ -257,4 +257,85 @@ describe('StorageProcessingRecoveryService', () => {
       expect(handleObjectUploaded).toHaveBeenCalledTimes(1);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // recoverFailedImageObjects — issue #106 (HEIC/HEIF failed-image recovery)
+  // -------------------------------------------------------------------------
+
+  describe('recoverFailedImageObjects', () => {
+    it('queries failed image objects excluding thumbnails, with no take clause when no limit is given', async () => {
+      (prisma.storageObject.findMany as jest.Mock).mockResolvedValue([]);
+
+      await service.recoverFailedImageObjects();
+
+      expect(prisma.storageObject.findMany).toHaveBeenCalledWith({
+        where: {
+          status: 'failed',
+          mimeType: { startsWith: 'image/' },
+          NOT: { storageKey: { startsWith: 'thumbnails/' } },
+        },
+      });
+    });
+
+    it('includes take: <limit> in the same query when a limit is passed', async () => {
+      (prisma.storageObject.findMany as jest.Mock).mockResolvedValue([]);
+
+      await service.recoverFailedImageObjects({ limit: 25 });
+
+      expect(prisma.storageObject.findMany).toHaveBeenCalledWith({
+        where: {
+          status: 'failed',
+          mimeType: { startsWith: 'image/' },
+          NOT: { storageKey: { startsWith: 'thumbnails/' } },
+        },
+        take: 25,
+      });
+    });
+
+    it('returns { claimed: 0, reprocessed: 0, exhausted: 0, errors: 0 } and never calls reprocessObjectNow when there are no candidates', async () => {
+      (prisma.storageObject.findMany as jest.Mock).mockResolvedValue([]);
+      const reprocessSpy = jest.spyOn(service, 'reprocessObjectNow');
+
+      const result = await service.recoverFailedImageObjects();
+
+      expect(result).toEqual({ claimed: 0, reprocessed: 0, exhausted: 0, errors: 0 });
+      expect(reprocessSpy).not.toHaveBeenCalled();
+    });
+
+    it('delegates to reprocessObjectNow once per candidate and counts reprocessed for a multi-item batch', async () => {
+      const a = makeStorageObject({ id: 'obj-a', status: 'failed' });
+      const b = makeStorageObject({ id: 'obj-b', status: 'failed' });
+      const c = makeStorageObject({ id: 'obj-c', status: 'failed' });
+      (prisma.storageObject.findMany as jest.Mock).mockResolvedValue([a, b, c]);
+      const reprocessSpy = jest.spyOn(service, 'reprocessObjectNow').mockResolvedValue(undefined);
+
+      const result = await service.recoverFailedImageObjects();
+
+      expect(reprocessSpy).toHaveBeenCalledTimes(3);
+      expect(reprocessSpy).toHaveBeenNthCalledWith(1, a);
+      expect(reprocessSpy).toHaveBeenNthCalledWith(2, b);
+      expect(reprocessSpy).toHaveBeenNthCalledWith(3, c);
+      expect(result).toEqual({ claimed: 3, reprocessed: 3, exhausted: 0, errors: 0 });
+    });
+
+    it('counts an error and continues the batch when reprocessObjectNow rejects for one candidate', async () => {
+      const ok = makeStorageObject({ id: 'obj-ok', status: 'failed' });
+      const throws = makeStorageObject({ id: 'obj-throws', status: 'failed' });
+      (prisma.storageObject.findMany as jest.Mock).mockResolvedValue([ok, throws]);
+      const reprocessSpy = jest
+        .spyOn(service, 'reprocessObjectNow')
+        .mockImplementation(async (object: any) => {
+          if (object.id === 'obj-throws') {
+            throw new Error('sharp decode failed: still undecodable');
+          }
+        });
+
+      const result = await service.recoverFailedImageObjects();
+
+      expect(reprocessSpy).toHaveBeenCalledTimes(2);
+      expect(reprocessSpy).toHaveBeenNthCalledWith(1, ok);
+      expect(reprocessSpy).toHaveBeenNthCalledWith(2, throws);
+      expect(result).toEqual({ claimed: 2, reprocessed: 1, exhausted: 0, errors: 1 });
+    });
+  });
 });

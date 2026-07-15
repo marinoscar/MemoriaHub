@@ -9,7 +9,12 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { JobReason, JobStatus } from '@prisma/client';
-import { MediaReprocessController, ReprocessBodyDto, ReprocessStuckBodyDto } from './media-reprocess.controller';
+import {
+  MediaReprocessController,
+  ReprocessBodyDto,
+  ReprocessStuckBodyDto,
+  ReprocessFailedBodyDto,
+} from './media-reprocess.controller';
 import { MediaReprocessService } from './media-reprocess.service';
 import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -24,12 +29,16 @@ describe('MediaReprocessController', () => {
   let controller: MediaReprocessController;
   let mockReprocessCircle: jest.Mock;
   let mockRecoverStuckObjects: jest.Mock;
+  let mockRecoverFailedImageObjects: jest.Mock;
   let mockEnqueue: jest.Mock;
   let mockJobUpdate: jest.Mock;
 
   beforeEach(async () => {
     mockReprocessCircle = jest.fn().mockResolvedValue({ reprocessed: 3, failed: 0 });
     mockRecoverStuckObjects = jest.fn().mockResolvedValue({ claimed: 0, reprocessed: 0, exhausted: 0, errors: 0 });
+    mockRecoverFailedImageObjects = jest
+      .fn()
+      .mockResolvedValue({ claimed: 0, reprocessed: 0, exhausted: 0, errors: 0 });
     mockEnqueue = jest.fn().mockResolvedValue({ id: 'job-new-1', status: JobStatus.pending, priority: 0 });
     mockJobUpdate = jest.fn().mockResolvedValue({});
 
@@ -46,6 +55,7 @@ describe('MediaReprocessController', () => {
           provide: StorageProcessingRecoveryService,
           useValue: {
             recoverStuckObjects: mockRecoverStuckObjects,
+            recoverFailedImageObjects: mockRecoverFailedImageObjects,
           },
         },
         {
@@ -144,6 +154,37 @@ describe('MediaReprocessController', () => {
       const result = await controller.reprocessStuck(body);
 
       expect(result).toEqual({ claimed: 5, reprocessed: 4, exhausted: 1, errors: 0 });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // reprocessFailed — delegation to StorageProcessingRecoveryService (issue #106)
+  // -------------------------------------------------------------------------
+
+  describe('reprocessFailed', () => {
+    it('should call recoverFailedImageObjects with { limit: undefined } when body has no limit', async () => {
+      const body = {} as ReprocessFailedBodyDto;
+
+      await controller.reprocessFailed(body);
+
+      expect(mockRecoverFailedImageObjects).toHaveBeenCalledWith({ limit: undefined });
+    });
+
+    it('should call recoverFailedImageObjects with { limit: 25 } when body has limit: 25', async () => {
+      const body = { limit: 25 } as ReprocessFailedBodyDto;
+
+      await controller.reprocessFailed(body);
+
+      expect(mockRecoverFailedImageObjects).toHaveBeenCalledWith({ limit: 25 });
+    });
+
+    it('should return the service result directly', async () => {
+      mockRecoverFailedImageObjects.mockResolvedValue({ claimed: 5, reprocessed: 4, exhausted: 0, errors: 1 });
+      const body = {} as ReprocessFailedBodyDto;
+
+      const result = await controller.reprocessFailed(body);
+
+      expect(result).toEqual({ claimed: 5, reprocessed: 4, exhausted: 0, errors: 1 });
     });
   });
 
