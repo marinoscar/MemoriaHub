@@ -21,6 +21,7 @@ import { StorageSettingsService } from '../storage-settings/storage-settings.ser
 import { EnrichmentAdminService } from '../enrichment/enrichment-admin.service';
 import { isEnrichmentWorkerEnabled } from '../enrichment/enrichment-job.worker';
 import { SocialMediaOcrService } from '../social-media/social-media-ocr.service';
+import { VisualEmbeddingService } from '../dedup/visual-embedding.service';
 import {
   DoctorCheck,
   DoctorCheckStatus,
@@ -66,6 +67,7 @@ export class DoctorService {
     private readonly storageSettings: StorageSettingsService,
     private readonly enrichmentAdmin: EnrichmentAdminService,
     private readonly socialMediaOcr: SocialMediaOcrService,
+    private readonly visualEmbeddingService: VisualEmbeddingService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -113,6 +115,11 @@ export class DoctorService {
         key: 'ai.socialMedia',
         label: 'Social media detection',
         fn: () => this.checkSocialMedia(settings),
+      },
+      {
+        key: 'ai.duplicateDetection',
+        label: 'Duplicate detection (CLIP)',
+        fn: () => this.checkDuplicateDetection(settings),
       },
       // Face
       { key: 'face.detection', label: 'Face detection provider', fn: () => this.checkFaceDetection(settings) },
@@ -181,7 +188,14 @@ export class DoctorService {
       {
         key: 'ai',
         label: 'AI & Enrichment',
-        checkKeys: ['ai.search', 'ai.tagging', 'ai.embedding', 'ai.flagConsistency', 'ai.socialMedia'],
+        checkKeys: [
+          'ai.search',
+          'ai.tagging',
+          'ai.embedding',
+          'ai.flagConsistency',
+          'ai.socialMedia',
+          'ai.duplicateDetection',
+        ],
       },
       {
         key: 'face',
@@ -638,6 +652,29 @@ export class DoctorService {
       message: 'Running Tier-1 only — OCR model unavailable (degraded)',
       actionItem:
         'Ensure MODELS_DIR/tesseract is writable and traineddata can be fetched or pre-placed',
+    };
+  }
+
+  private async checkDuplicateDetection(settings: ResolvedSettings): Promise<CheckOutcome> {
+    if (settings.features?.['duplicateDetection'] !== true) {
+      return { status: 'skipped', message: 'Near-duplicate detection is disabled.' };
+    }
+
+    // dedup still functions hash-only when the CLIP model is unavailable, so a
+    // degraded runtime is a warning, never an error.
+    if (this.visualEmbeddingService.isAvailable()) {
+      return {
+        status: 'ok',
+        message: 'Two-tier operational (CLIP visual embeddings + dHash).',
+      };
+    }
+
+    return {
+      status: 'warning',
+      message: 'Running dHash-only — CLIP visual embedding model unavailable (degraded).',
+      actionItem:
+        'onnxruntime native runtime failed to load; verify the API image uses a glibc base ' +
+        '(not Alpine/musl) and MODELS_DIR is writable/reachable.',
     };
   }
 
