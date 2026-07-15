@@ -19,6 +19,7 @@ export interface AiSettingsResponse {
     search: { provider: string | null; model: string | null } | null;
     tagging: { provider: string | null; model: string | null } | null;
     embedding: { provider: string | null; model: string | null } | null;
+    enhance?: { provider: string | null; model: string | null } | null;
   };
   conversations: {
     archiveAfterDays: number;
@@ -94,6 +95,19 @@ export async function putAiEmbeddingFeature(body: {
 export async function getAiEmbeddingModels(provider: string): Promise<string[]> {
   return api.get<string[]>(
     `/ai/models?provider=${encodeURIComponent(provider)}&capability=embedding`,
+  );
+}
+
+export async function putAiEnhanceFeature(body: {
+  provider: string;
+  model: string;
+}): Promise<void> {
+  await api.put<void>('/ai/features/enhance', body);
+}
+
+export async function getAiImageModels(provider: string): Promise<string[]> {
+  return api.get<string[]>(
+    `/ai/models?provider=${encodeURIComponent(provider)}&capability=image`,
   );
 }
 
