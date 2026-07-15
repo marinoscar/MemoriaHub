@@ -252,6 +252,18 @@ All the environment variables referenced here are documented in full in [Enrichm
 
 ---
 
+## 11. Gallery read performance
+
+Everything above is about keeping the *write* side (uploads + enrichment) alive during a bulk import. A separate problem showed up on the *read* side: browsing the gallery while a large import was still running on a ~24k-item circle had a measured **p99 latency of ~20 seconds**, occasionally 502-ing. Three fixes landed together for this (issue #104):
+
+1. **Batched thumbnail signing.** Every list surface (gallery, dashboard, albums, archived, trash, explore, search, bursts, duplicates, people, location-suggestions, shares) previously signed each item's thumbnail URL with its own `storageObject.findUnique` call — an N+1 query pattern that dominated response time on any page with dozens of items. `MediaThumbnailService.signThumbsBatched` replaces this with a single `storageObject.findMany` per page, resolving each distinct `(provider|bucket)` pair once and signing each distinct key once.
+2. **Keyset pagination for the default gallery query.** `GET /api/media` is now dual-mode: when the web gallery omits `page`, the API pages by `(sortBy, id)` keyset cursor instead of `OFFSET`/`LIMIT`, and skips the `COUNT(*)` entirely (the query that made deep pages progressively slower as the circle grew). Legacy clients (Android app, CLI) that still pass `page` keep the old offset+COUNT behavior unchanged. The new `media_items_gallery_idx` partial composite index (migration `20260716000000_media_gallery_index`) lets the keyset query run as a pure index scan with no separate sort node.
+3. **Browser-cacheable thumbnails.** Thumbnail objects are now uploaded with `Cache-Control: public, max-age=31536000, immutable`, and signed thumbnail URLs use a 24h TTL plus an in-memory per-key cache so repeated requests for the same thumbnail return the identical URL string within that window — letting the browser serve cached bytes on repeat gallery visits instead of re-fetching.
+
+Net effect: gallery reads stay fast even while a bulk import is actively hammering the enrichment queue and the DB with writes. See [CLAUDE.md](../../CLAUDE.md) for the `GET /api/media` dual-mode contract and the `media_items_gallery_idx` schema note.
+
+---
+
 ## Document History
 
 | Version | Date | Author | Change |
@@ -259,3 +271,4 @@ All the environment variables referenced here are documented in full in [Enrichm
 | 1.0 | July 2026 | AI Assistant | Initial runbook: two-pool memory model (V8 heap vs off-heap), why bulk imports OOM, the four tuning levers, per-container-size presets, OOM diagnosis via dmesg, post-run recovery, and reference throughput/failure numbers from a real ~20k-job / ~4,200-photo import on a 512MB container |
 | 1.1 | July 2026 | AI Assistant | Added the video-specific tuning lever (§3 lever 5): `VIDEO_ENRICHMENT_MAX_BYTES` size cap (skip huge videos, no download) and `ENRICHMENT_VIDEO_JOB_TIMEOUT_MS` (20-min per-type video timeout); documented the temp-disk guards in §6 — `assertDiskSpaceForDownload` disk pre-flight and the `TempFileJanitorTask` orphan sweep |
 | 1.2 | July 2026 | AI Assistant | Reconciled heap sizing into two regimes — small (≤1GB): ~55% of container; large (≥2GB): `container − 1G` — after the 2026-07-15 V8 heap-OOM crash loop (`--max-old-space-size=320` pinned on a 2G container, `OOMKilled=false`, RSS only ~360MB); added the 6G/5120MB/concurrency-4 production preset and distinguished cgroup-kill vs. V8-heap-OOM diagnosis signatures (§6); added §4 "Database & CPU resilience" covering the separate 2026-07-14 CPU-starvation brownout (`API_CPU_LIMIT`, `PRISMA_TX_TIMEOUT_MS`/`PRISMA_TX_MAX_WAIT_MS`, `DB_CONNECTION_LIMIT`/`DB_POOL_TIMEOUT`) and the `ENRICHMENT_WORKER_ENABLED=false` posture for API instances running alongside distributed worker nodes; renumbered §4–§9 to §5–§10 |
+| 1.3 | July 2026 | AI Assistant | Added §11 Gallery read performance (issue #104): batched thumbnail signing, keyset pagination for the default `GET /api/media` gallery query plus the new `media_items_gallery_idx` index, and browser-cacheable thumbnails — motivated by a measured p99 ~20s during a bulk import on a ~24k-item circle |
