@@ -33,16 +33,26 @@ export class MediaThumbnailService {
   ) {}
 
   /**
+   * Extract the `thumbnailStorageKey` from an item's JSONB metadata field.
+   * Returns null if absent or not a non-empty string. Shared by both the
+   * per-item `signThumb` and the batched `signThumbsBatched` paths, and by
+   * consuming services that need keys to feed `signThumbsBatched` directly.
+   */
+  extractThumbKey(metadata: Prisma.JsonValue | null): string | null {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      return null;
+    }
+    const key = (metadata as Record<string, unknown>)['thumbnailStorageKey'];
+    return typeof key === 'string' && key ? key : null;
+  }
+
+  /**
    * Sign a download URL for a thumbnail, or return null if the item has no
    * thumbnail yet (processor has not run / image not yet uploaded).
    */
   async signThumb(metadata: Prisma.JsonValue | null): Promise<string | null> {
-    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-      return null;
-    }
-    const meta = metadata as Record<string, unknown>;
-    const key = meta['thumbnailStorageKey'];
-    if (typeof key !== 'string' || !key) {
+    const key = this.extractThumbKey(metadata);
+    if (!key) {
       return null;
     }
     try {
@@ -73,18 +83,98 @@ export class MediaThumbnailService {
   }
 
   /**
+   * Batched thumbnail signing. Given a set of storage keys, resolves all
+   * StorageObject rows in a SINGLE `findMany` query, resolves each distinct
+   * (provider|bucket) group once, and signs each distinct key once — avoiding
+   * the N+1 `findUnique`-per-item pattern of `signThumb`.
+   *
+   * Returns a Map<key, url|null>. A key with no StorageObject row falls back to
+   * the legacy static provider (thumbnail still in-flight); a signing failure
+   * logs a warning and maps to null — mirroring `signThumb` exactly.
+   */
+  async signThumbsBatched(
+    keys: string[],
+  ): Promise<Map<string, string | null>> {
+    const keyToUrl = new Map<string, string | null>();
+
+    // Dedupe keys (drop empties).
+    const distinctKeys = new Set<string>();
+    for (const key of keys) {
+      if (key) distinctKeys.add(key);
+    }
+    if (distinctKeys.size === 0) {
+      return keyToUrl;
+    }
+
+    // One query to resolve all storage-object rows for the keys.
+    const keyToObject = new Map<
+      string,
+      { storageProvider: string; bucket: string | null }
+    >();
+    const objects = await this.prisma.storageObject.findMany({
+      where: { storageKey: { in: Array.from(distinctKeys) } },
+      select: { storageKey: true, storageProvider: true, bucket: true },
+    });
+    for (const obj of objects) {
+      keyToObject.set(obj.storageKey, {
+        storageProvider: obj.storageProvider,
+        bucket: obj.bucket,
+      });
+    }
+
+    // Cache resolved providers by (provider|bucket) so we resolve each once.
+    const providerCache = new Map<
+      string,
+      Awaited<ReturnType<StorageProviderResolver['getProviderFor']>>
+    >();
+
+    // Sign each distinct key once, reusing signThumb's resolution + fallback.
+    for (const key of distinctKeys) {
+      try {
+        const obj = keyToObject.get(key);
+        if (obj) {
+          const cacheKey = `${obj.storageProvider}|${obj.bucket ?? ''}`;
+          let provider = providerCache.get(cacheKey);
+          if (!provider) {
+            provider = await this.resolver.getProviderFor(
+              obj.storageProvider,
+              obj.bucket,
+            );
+            providerCache.set(cacheKey, provider);
+          }
+          keyToUrl.set(key, await provider.getSignedDownloadUrl(key));
+        } else {
+          // Row not yet created — fall back to the legacy static provider.
+          keyToUrl.set(key, await this.storageProvider.getSignedDownloadUrl(key));
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Failed to sign thumbnail URL for key ${key}: ${msg}`);
+        keyToUrl.set(key, null);
+      }
+    }
+
+    return keyToUrl;
+  }
+
+  /**
    * Convenience wrapper: enrich an array of items (any shape that carries a
-   * `metadata` field) with a signed `thumbnailUrl` field.  Signing is done in
-   * parallel for all items in a single call.
+   * `metadata` field) with a signed `thumbnailUrl` field. Signing is batched
+   * into a single StorageObject query via `signThumbsBatched`.
    */
   async attachThumbnailUrls<T extends { metadata: Prisma.JsonValue | null }>(
     items: T[],
   ): Promise<(T & { thumbnailUrl: string | null })[]> {
-    return Promise.all(
-      items.map(async (item) => ({
-        ...item,
-        thumbnailUrl: await this.signThumb(item.metadata),
-      })),
+    const itemKeys = items.map((item) => this.extractThumbKey(item.metadata));
+    const keyToUrl = await this.signThumbsBatched(
+      itemKeys.filter((k): k is string => k !== null),
     );
+    return items.map((item, i) => {
+      const key = itemKeys[i];
+      return {
+        ...item,
+        thumbnailUrl: key ? keyToUrl.get(key) ?? null : null,
+      };
+    });
   }
 }
