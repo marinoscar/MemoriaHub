@@ -8,6 +8,28 @@ import {
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 
 /**
+ * TTL (seconds) requested when signing a thumbnail download URL. Longer than the
+ * provider default of 3600s so a signed URL — and therefore the URL STRING —
+ * stays valid across many gallery loads, letting the browser reuse the
+ * `Cache-Control: immutable` bytes instead of re-downloading on every request.
+ */
+const THUMB_URL_TTL_SECONDS = 24 * 3600;
+
+/**
+ * Refresh margin (seconds). A cached URL is treated as usable only while it has
+ * at least this much validity left, so a URL handed to a client always has
+ * meaningful remaining lifetime before its signature expires.
+ */
+const THUMB_URL_REFRESH_MARGIN_SECONDS = Math.round(THUMB_URL_TTL_SECONDS * 0.1);
+
+/**
+ * Hard cap on the in-memory signed-URL cache to prevent unbounded growth on a
+ * very large circle. On overflow, expired entries are dropped first, then the
+ * oldest ~10% by insertion order (a Map preserves insertion order).
+ */
+const THUMB_URL_CACHE_MAX_ENTRIES = 50_000;
+
+/**
  * MediaThumbnailService
  *
  * Extracted signing helper so that non-media modules (e.g. SearchService) can
@@ -26,11 +48,77 @@ import { StorageProviderResolver } from '../storage/providers/storage-provider.r
 export class MediaThumbnailService {
   private readonly logger = new Logger(MediaThumbnailService.name);
 
+  /**
+   * Bounded in-memory cache of signed thumbnail URLs, keyed by
+   * `${provider}|${bucket}|${storageKey}` so two providers/buckets that ever
+   * hold the same key can't collide. A signed URL for a given key is otherwise
+   * provider/bucket-stable, so returning the same URL string within its window
+   * lets the browser cache hit instead of re-downloading.
+   */
+  private readonly signedUrlCache = new Map<
+    string,
+    { url: string; expiresAt: number }
+  >();
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
   ) {}
+
+  /**
+   * Return a still-valid cached signed URL for a cache key, or null if there is
+   * no entry or the entry has fallen inside its refresh margin.
+   */
+  private getCachedUrl(cacheKey: string): string | null {
+    const entry = this.signedUrlCache.get(cacheKey);
+    if (entry && entry.expiresAt > Date.now()) {
+      return entry.url;
+    }
+    return null;
+  }
+
+  /**
+   * Store a freshly-signed URL. `expiresAt` is set to the real signature expiry
+   * minus the refresh margin so a returned URL always has meaningful validity
+   * left. Enforces the size cap after inserting.
+   */
+  private storeCachedUrl(cacheKey: string, url: string): void {
+    this.signedUrlCache.set(cacheKey, {
+      url,
+      expiresAt:
+        Date.now() +
+        (THUMB_URL_TTL_SECONDS - THUMB_URL_REFRESH_MARGIN_SECONDS) * 1000,
+    });
+    this.evictIfOverCap();
+  }
+
+  /**
+   * Keep the cache bounded: on overflow drop expired entries first, then, if
+   * still over the cap, drop the oldest ~10% by insertion order.
+   */
+  private evictIfOverCap(): void {
+    if (this.signedUrlCache.size <= THUMB_URL_CACHE_MAX_ENTRIES) {
+      return;
+    }
+    const now = Date.now();
+    for (const [k, v] of this.signedUrlCache) {
+      if (v.expiresAt <= now) {
+        this.signedUrlCache.delete(k);
+      }
+    }
+    if (this.signedUrlCache.size <= THUMB_URL_CACHE_MAX_ENTRIES) {
+      return;
+    }
+    const toDrop = Math.ceil(THUMB_URL_CACHE_MAX_ENTRIES * 0.1);
+    let dropped = 0;
+    for (const k of this.signedUrlCache.keys()) {
+      this.signedUrlCache.delete(k);
+      if (++dropped >= toDrop) {
+        break;
+      }
+    }
+  }
 
   /**
    * Extract the `thumbnailStorageKey` from an item's JSONB metadata field.
@@ -65,16 +153,34 @@ export class MediaThumbnailService {
       });
 
       if (thumbObject) {
+        const cacheKey = `${thumbObject.storageProvider}|${thumbObject.bucket ?? ''}|${key}`;
+        const cached = this.getCachedUrl(cacheKey);
+        if (cached) {
+          return cached;
+        }
         const provider = await this.resolver.getProviderFor(
           thumbObject.storageProvider,
           thumbObject.bucket,
         );
-        return await provider.getSignedDownloadUrl(key);
+        const url = await provider.getSignedDownloadUrl(key, {
+          expiresIn: THUMB_URL_TTL_SECONDS,
+        });
+        this.storeCachedUrl(cacheKey, url);
+        return url;
       }
 
       // Row not yet created (thumbnail still in-flight) — fall back to the
       // legacy static provider to preserve existing behaviour.
-      return await this.storageProvider.getSignedDownloadUrl(key);
+      const fallbackCacheKey = `__static__|${this.storageProvider.getBucket()}|${key}`;
+      const fallbackCached = this.getCachedUrl(fallbackCacheKey);
+      if (fallbackCached) {
+        return fallbackCached;
+      }
+      const fallbackUrl = await this.storageProvider.getSignedDownloadUrl(key, {
+        expiresIn: THUMB_URL_TTL_SECONDS,
+      });
+      this.storeCachedUrl(fallbackCacheKey, fallbackUrl);
+      return fallbackUrl;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(`Failed to sign thumbnail URL for key ${key}: ${msg}`);
@@ -133,19 +239,40 @@ export class MediaThumbnailService {
       try {
         const obj = keyToObject.get(key);
         if (obj) {
-          const cacheKey = `${obj.storageProvider}|${obj.bucket ?? ''}`;
-          let provider = providerCache.get(cacheKey);
+          const urlCacheKey = `${obj.storageProvider}|${obj.bucket ?? ''}|${key}`;
+          const cached = this.getCachedUrl(urlCacheKey);
+          if (cached) {
+            keyToUrl.set(key, cached);
+            continue;
+          }
+          const providerCacheKey = `${obj.storageProvider}|${obj.bucket ?? ''}`;
+          let provider = providerCache.get(providerCacheKey);
           if (!provider) {
             provider = await this.resolver.getProviderFor(
               obj.storageProvider,
               obj.bucket,
             );
-            providerCache.set(cacheKey, provider);
+            providerCache.set(providerCacheKey, provider);
           }
-          keyToUrl.set(key, await provider.getSignedDownloadUrl(key));
+          const url = await provider.getSignedDownloadUrl(key, {
+            expiresIn: THUMB_URL_TTL_SECONDS,
+          });
+          this.storeCachedUrl(urlCacheKey, url);
+          keyToUrl.set(key, url);
         } else {
           // Row not yet created — fall back to the legacy static provider.
-          keyToUrl.set(key, await this.storageProvider.getSignedDownloadUrl(key));
+          const fallbackCacheKey = `__static__|${this.storageProvider.getBucket()}|${key}`;
+          const fallbackCached = this.getCachedUrl(fallbackCacheKey);
+          if (fallbackCached) {
+            keyToUrl.set(key, fallbackCached);
+            continue;
+          }
+          const fallbackUrl = await this.storageProvider.getSignedDownloadUrl(
+            key,
+            { expiresIn: THUMB_URL_TTL_SECONDS },
+          );
+          this.storeCachedUrl(fallbackCacheKey, fallbackUrl);
+          keyToUrl.set(key, fallbackUrl);
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
