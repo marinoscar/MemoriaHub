@@ -42,6 +42,7 @@ import {
   ChevronRight,
   PlayArrow as PlayArrowIcon,
   Pause as PauseIcon,
+  AutoFixHigh as AutoFixHighIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import type { MediaItem } from '../../types/media';
@@ -59,7 +60,9 @@ import { useMediaMetadata } from '../../hooks/useMediaMetadata';
 import { SharePanel } from '../share/SharePanel';
 import { AddToAlbumDialog } from '../album/AddToAlbumDialog';
 import { MediaOrientationEditor } from './MediaOrientationEditor';
+import { MediaEnhancementDrawer } from './MediaEnhancementDrawer';
 import { VideoPlayer } from './VideoPlayer';
+import { useSystemSettings } from '../../hooks/useSystemSettings';
 
 // ---------------------------------------------------------------------------
 // Module-scope cache so full items survive lightbox close/reopen
@@ -100,6 +103,8 @@ export function MediaLightbox({
 }: MediaLightboxProps) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const { settings } = useSystemSettings();
+  const enhanceEnabled = Boolean(settings?.features?.pictureEnhancement);
 
   const item = index !== null ? items[index] ?? null : null;
 
@@ -119,6 +124,7 @@ export function MediaLightbox({
   const [shareAnchor, setShareAnchor] = useState<null | HTMLElement>(null);
   const [moreAnchor, setMoreAnchor] = useState<null | HTMLElement>(null);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [enhanceOpen, setEnhanceOpen] = useState(false);
   const [addAlbumOpen, setAddAlbumOpen] = useState(false);
   const [archiveLoading, setArchiveLoading] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -567,6 +573,19 @@ export function MediaLightbox({
                 </Tooltip>
               )}
 
+              {/* 5b. AI Enhance (photos only, feature-gated) */}
+              {displayItem.type === 'photo' && enhanceEnabled && (
+                <Tooltip title="AI Enhance">
+                  <IconButton
+                    aria-label="AI Enhance"
+                    onClick={() => setEnhanceOpen(true)}
+                    sx={{ color: 'white', minWidth: 44, minHeight: 44 }}
+                  >
+                    <AutoFixHighIcon />
+                  </IconButton>
+                </Tooltip>
+              )}
+
               {/* 6. Archive / Unarchive */}
               <Tooltip title={displayItem.archivedAt !== null ? 'Unarchive' : 'Archive'}>
                 <span>
@@ -887,6 +906,24 @@ export function MediaLightbox({
         onClose={() => setEditorOpen(false)}
         onEdited={() => void refreshFullItem()}
       />
+
+      {/* AI enhancement drawer (photos only) */}
+      {displayItem.type === 'photo' && (
+        <MediaEnhancementDrawer
+          item={displayItem}
+          open={enhanceOpen}
+          onClose={() => setEnhanceOpen(false)}
+          onReplaced={() => {
+            setEnhanceOpen(false);
+            void refreshFullItem();
+            setSnack({ message: 'Photo replaced with the enhanced version', severity: 'success' });
+          }}
+          onKeptBoth={(message) => {
+            setEnhanceOpen(false);
+            setSnack({ message, severity: 'success' });
+          }}
+        />
+      )}
 
       {/* Add to album */}
       <AddToAlbumDialog

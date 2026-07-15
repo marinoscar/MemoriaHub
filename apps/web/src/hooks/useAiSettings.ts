@@ -10,6 +10,8 @@ import {
   putAiEmbeddingFeature,
   getAiEmbeddingModels,
   testAiEmbedding,
+  putAiEnhanceFeature,
+  getAiImageModels,
 } from '../services/ai';
 import type { AiSettingsResponse, AiTestResult, AiEmbeddingTestResult } from '../services/ai';
 
@@ -88,6 +90,17 @@ export function useAiSettings() {
     [],
   );
 
+  const saveEnhanceFeature = useCallback(
+    async (provider: string, model: string) => {
+      await putAiEnhanceFeature({ provider, model });
+    },
+    [],
+  );
+
+  const getImageModels = useCallback(async (provider: string): Promise<string[]> => {
+    return getAiImageModels(provider);
+  }, []);
+
   return {
     settings,
     loading,
@@ -102,5 +115,7 @@ export function useAiSettings() {
     saveEmbeddingFeature,
     getEmbeddingModels,
     testEmbedding,
+    saveEnhanceFeature,
+    getImageModels,
   };
 }

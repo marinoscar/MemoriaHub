@@ -38,7 +38,7 @@ import type { BurstGroupSummary, GroupResolveAction } from '../../services/burst
 
 function CoverStack({ coverUrls, mediaCount }: { coverUrls: string[]; mediaCount: number }) {
   return (
-    <Box sx={{ position: 'relative', width: 120, height: 90, flexShrink: 0 }}>
+    <Box sx={{ position: 'relative', width: 120, height: 90, flexShrink: 0, isolation: 'isolate' }}>
       {coverUrls.slice(0, 3).map((url, i) => (
         <Box
           key={i}

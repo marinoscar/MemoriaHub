@@ -34,6 +34,7 @@ export interface ResolvedSettings {
   geo: SystemSettingsValue['geo'];
   email: SystemSettingsValue['email'];
   jobs: SystemSettingsValue['jobs'];
+  pictureEnhancement: SystemSettingsValue['pictureEnhancement'];
   updatedAt: Date;
   updatedBy: { id: string; email: string } | null;
   version: number;
@@ -113,6 +114,7 @@ export class SystemSettingsService {
       geo: value.geo,
       email: value.email,
       jobs: value.jobs,
+      pictureEnhancement: value.pictureEnhancement,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -175,6 +177,7 @@ export class SystemSettingsService {
       geo: value.geo,
       email: value.email,
       jobs: value.jobs,
+      pictureEnhancement: value.pictureEnhancement,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -226,6 +229,12 @@ export class SystemSettingsService {
             provider: (dto as any).ai?.features?.embedding?.provider ?? current.ai?.features?.embedding?.provider ?? null,
             model: (dto as any).ai?.features?.embedding?.model ?? current.ai?.features?.embedding?.model ?? null,
           },
+          // Nullable object: when the caller sends `enhance` (including null) use
+          // it verbatim; otherwise preserve the current value.
+          enhance:
+            (dto as any).ai?.features?.enhance !== undefined
+              ? (dto as any).ai?.features?.enhance
+              : ((current.ai?.features as any)?.enhance ?? null),
         },
       },
       face: {
@@ -421,6 +430,36 @@ export class SystemSettingsService {
           (current as any).jobs?.stuckThresholdMinutes ??
           defaultStuckThresholdMinutes(),
       },
+      pictureEnhancement: {
+        defaultQuality:
+          (dto as any).pictureEnhancement?.defaultQuality ??
+          (current as any).pictureEnhancement?.defaultQuality ??
+          'high',
+        defaultStrength:
+          (dto as any).pictureEnhancement?.defaultStrength ??
+          (current as any).pictureEnhancement?.defaultStrength ??
+          'balanced',
+        stampExif:
+          (dto as any).pictureEnhancement?.stampExif ??
+          (current as any).pictureEnhancement?.stampExif ??
+          false,
+        allowReplace:
+          (dto as any).pictureEnhancement?.allowReplace ??
+          (current as any).pictureEnhancement?.allowReplace ??
+          true,
+        blockReplaceOnDownscale:
+          (dto as any).pictureEnhancement?.blockReplaceOnDownscale ??
+          (current as any).pictureEnhancement?.blockReplaceOnDownscale ??
+          false,
+        maxInputMegapixels:
+          (dto as any).pictureEnhancement?.maxInputMegapixels ??
+          (current as any).pictureEnhancement?.maxInputMegapixels ??
+          50,
+        retentionHours:
+          (dto as any).pictureEnhancement?.retentionHours ??
+          (current as any).pictureEnhancement?.retentionHours ??
+          72,
+      },
     };
 
     // Validate merged result
@@ -466,6 +505,7 @@ export class SystemSettingsService {
       geo: value.geo,
       email: value.email,
       jobs: value.jobs,
+      pictureEnhancement: value.pictureEnhancement,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,

@@ -2,13 +2,22 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 0.1 (Draft — for review) |
+| **Version** | 1.0 (Implemented) |
 | **Last Updated** | July 2026 |
-| **Status** | Proposed (not yet implemented) |
+| **Status** | Implemented (v1) — see [Implementation status (v1)](#implementation-status-v1) below for scope shipped vs. deferred |
 | **Owner** | oscar@marin.cr |
 | **Scope** | Photos only. Single-item, human-reviewed, non-destructive by default. |
 
-> This document is written to double as the body of a GitHub feature issue **and** as the eventual `docs/specs/` spec. Sections marked **⟐ Decision for review** are the places where a product/engineering call is still open — those are called out explicitly so they can be settled before implementation.
+> This document was originally written to double as the body of a GitHub feature issue (#98) **and** as the eventual `docs/specs/` spec. Sections still marked **⟐ Decision for review** below are preserved for historical context; each is now resolved per the [Implementation status (v1)](#implementation-status-v1) note and the updated [§14 Open Decisions Summary](#14-open-decisions-summary).
+
+### Implementation status (v1)
+
+GitHub issue #98 shipped on this branch: DB migration, backend (endpoints, enrichment job handler, purge cron, OpenAI provider method), and frontend (gallery/lightbox triggers, compare-and-decide drawer, Admin AI settings). Key deviations from the original draft, resolved here so the rest of this document can be read as "what v1 actually does":
+
+- **EXIF writer deferred.** §5.1 lists three options; v1 ships **option (C) — DB/tag marker only, no file-level EXIF**. The `exiftool-vendored` writer (option A) was **not** added to `apps/api` in this pass. Enhanced bytes carry the in-app marker (`metadata._aiEnhanced` breadcrumb + "AI Enhanced" system tag, §5.3) but no `XMP-MemoriaHub:*`/`Software` tags in the file itself. Accordingly `pictureEnhancement.stampExif` **defaults to `false`** (not `true` as originally drafted in §7.1) — flip it on is a no-op today since there is no writer wired to honor it yet; it exists as a forward-compatible setting for when option (A) lands.
+- **`enhanceImage()` failures use the normal retry path, not rate-limit deferral.** `OpenAiProvider.enhanceImage` (`apps/api/src/ai/providers/openai.provider.ts`) catches SDK errors and rethrows a generic `Error` (only 401/404 are special-cased into distinct messages) — the original HTTP status code is not preserved on the thrown error. As a result, an actual OpenAI 429/529 during `images.edit` does **not** get classified by `classifyRateLimit` and routes through the job's normal-failure retry/backoff instead of the rate-limit-deferral path used elsewhere in the enrichment queue. This is a known limitation, not a design choice — a fast follow would have `enhanceImage` preserve `status` on the thrown error the way other provider methods do.
+- **§8.6 endpoints shipped as designed**: `PUT /api/ai/features/enhance` and `GET /api/ai/models?provider=openai&capability=image` (curated `['gpt-image-1']` list) both landed unchanged from the draft.
+- Everything else in this document (data model, endpoints, RBAC, config keys, Doctor check, retention cron) matches what was built; see [§14](#14-open-decisions-summary) for the resolved-decisions summary.
 
 ---
 
@@ -277,7 +286,7 @@ Validated via the shared Zod schema (`apps/api/src/settings/dto/update-system-se
 | `ai.features.enhance` | object | — | `null` | Active `{ provider, model }` for enhancement (set via `PUT /api/ai/features/enhance`). |
 | `pictureEnhancement.defaultQuality` | enum | low\|medium\|high | `high` | `gpt-image-1` quality. |
 | `pictureEnhancement.defaultStrength` | enum | subtle\|balanced\|strong | `balanced` | Default correction aggressiveness. |
-| `pictureEnhancement.stampExif` | boolean | — | `true` | Whether to embed the file-level EXIF/XMP marker (§5.4). Requires the §5.1(A) writer. |
+| `pictureEnhancement.stampExif` | boolean | — | `false` | Whether to embed the file-level EXIF/XMP marker (§5.4). Requires the §5.1(A) writer, which is **not present in v1** — setting this `true` currently has no effect; see [Implementation status (v1)](#implementation-status-v1). |
 | `pictureEnhancement.allowReplace` | boolean | — | `true` | If `false`, only "keep both" is offered (never overwrite originals). |
 | `pictureEnhancement.blockReplaceOnDownscale` | boolean | — | `false` | If `true`, disable "replace" when enhanced dims < original (§2 note 2, decision c/b). |
 | `pictureEnhancement.maxInputMegapixels` | number | 1–100 | `50` | Skip/guard absurdly large inputs. |
@@ -388,15 +397,17 @@ No new permission scopes. Super-admin bypass (`media:write_any`) applies as else
 
 ## 11. Doctor Integration
 
-Add an `ai.pictureEnhancer` check to the Doctor "AI & Enrichment" section (see [doctor.md §4](doctor.md)):
+Added an `ai.pictureEnhancer` check (`DoctorService.checkPictureEnhancer`) to the Doctor "AI & Enrichment" section, alongside `ai.socialMedia` and `ai.duplicateDetection` (see [doctor.md §4](doctor.md)). As implemented, the check does **not** call a live `testModel`/connectivity probe (unlike the original draft) — it's a presence/consistency check only:
 
 | Condition | Status | Message / Action |
 |-----------|--------|------------------|
-| `features.pictureEnhancement` off | `skipped` | Feature disabled. |
-| Feature on, no OpenAI credential configured | `error` | "Enable an OpenAI credential in AI Settings." |
-| Feature on, `ai.features.enhance` unset | `warning` | "Select an enhancement model in AI Settings → AI Picture Enhancer." |
-| Feature on, credential + model present, `testModel` OK | `ok` | Ready. |
-| `stampExif=true` but ExifTool writer unavailable | `warning` | "EXIF marking disabled — ExifTool not available." |
+| `features.pictureEnhancement` off | `skipped` | "AI picture enhancer is disabled." |
+| Feature on, `PICTURE_ENHANCEMENT_ENABLED=false` env override | `warning` | "Feature enabled in settings but PICTURE_ENHANCEMENT_ENABLED=false overrides it." / "Remove or set PICTURE_ENHANCEMENT_ENABLED=true." |
+| Feature on, no enabled credential for the resolved provider (configured provider, or `openai` default) | `error` | "No enabled `<provider>` credential configured for enhancement." / "Enable an OpenAI credential in Admin Settings → AI." |
+| Feature on, credential present, `ai.features.enhance` unset (no provider/model) | `warning` | "Enhancement feature is on but no enhancement model is selected." / "Select an enhancement model in Admin Settings → AI Picture Enhancer." |
+| Feature on, credential + model present | `ok` | "AI picture enhancer ready (`<provider>/<model>`)." |
+
+There is no `stampExif`/ExifTool-availability check in v1, consistent with the EXIF writer being deferred (see [Implementation status (v1)](#implementation-status-v1)).
 
 ---
 
@@ -430,16 +441,16 @@ Add an `ai.pictureEnhancer` check to the Doctor "AI & Enrichment" section (see [
 
 ## 14. Open Decisions Summary
 
-Collected here for the review pass — each is flagged **⟐** in context above:
+Collected here for the review pass — each is flagged **⟐** in context above. All eight were resolved for v1, as shipped:
 
-1. **Downscale policy on replace** (§2): warn-and-allow *(rec.)* / block replace / sharp-upscale.
-2. **Auto-straighten** (§2): optional prompt toggle off by default *(rec.)* / defer entirely.
-3. **contentHash rotation on replace** (§3): null-and-recompute *(rec.)*.
-4. **Two-tier analyze-then-edit** (§4.3): single-call v1 *(rec.)* / behind a flag.
-5. **EXIF writer** (§5.1): add `exiftool-vendored` to `apps/api` *(rec.)* / sharp-only / in-app marker only for v1.
-6. **First-class `aiEnhancedAt` column** (§5.3): add if we want a search facet.
-7. **One live enhancement per item** (§6.1): supersede semantics *(rec.)*.
-8. **`allowReplace` default** (§7): replace allowed by default *(rec.)*, admins can force keep-both-only.
+1. **Downscale policy on replace** (§2): **resolved as warn-and-allow** — `pictureEnhancement.blockReplaceOnDownscale` defaults to `false`; the UI shows the downscale warning but replace is not blocked unless an admin opts in.
+2. **Auto-straighten** (§2): **resolved as an optional prompt toggle, off by default** — `adjustments.straighten` (§4.1) ships as a request param, default `false`.
+3. **contentHash rotation on replace** (§3): **resolved as null-and-recompute** — `replace` nulls `MediaItem.contentHash` before `reprocessObjectNow`, matching the P2002-fallback handling already in `media-metadata-sync.service.ts`.
+4. **Two-tier analyze-then-edit** (§4.3): **resolved as single-call v1** — `picture_enhancement` makes exactly one `images.edit` call per enhancement; no `pictureEnhancement.analyzeFirst` flag exists. Remains future work.
+5. **EXIF writer** (§5.1): **resolved as (C) — in-app marker only for v1.** `exiftool-vendored` was **not** added to `apps/api`; `pictureEnhancement.stampExif` defaults to `false`. Option (A) remains the recommended next increment — see [Implementation status (v1)](#implementation-status-v1).
+6. **First-class `aiEnhancedAt` column** (§5.3): **not added** — v1 uses `metadata._aiEnhanced` + the "AI Enhanced" system tag only; no new `media_items` column. Still open as future work if a dedicated search facet is wanted.
+7. **One live enhancement per item** (§6.1): **resolved as supersede semantics** — a new `POST …/enhance` request discards any existing `pending`/`processing`/`ready` row's staging bytes for that item.
+8. **`allowReplace` default** (§7): **resolved as `true`** — replace is allowed by default; admins can set `pictureEnhancement.allowReplace=false` to force keep-both-only.
 
 ---
 
@@ -461,3 +472,4 @@ Collected here for the review pass — each is flagged **⟐** in context above:
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.1 | July 2026 | AI Assistant | Initial draft for review. |
+| 1.0 | July 2026 | AI Assistant | Marked Implemented (v1); documented deviations from the draft (EXIF writer deferred to option C, `stampExif` default flipped to `false`, `enhanceImage` failures use normal retry not rate-limit deferral, Doctor check has no live `testModel` probe); resolved all eight §14 open decisions. |

@@ -401,7 +401,7 @@ describe('BurstsPage', () => {
 
       render(<BurstsPage />);
 
-      const checkbox = await screen.findByRole('checkbox', { name: 'Select burst group' });
+      const checkbox = await screen.findByRole('button', { name: 'Select burst group' });
       await user.click(checkbox);
 
       await waitFor(() => {
@@ -425,7 +425,7 @@ describe('BurstsPage', () => {
 
       render(<BurstsPage />);
 
-      const checkbox = await screen.findByRole('checkbox');
+      const checkbox = await screen.findByRole('button', { name: 'Select burst group' });
       await user.click(checkbox);
       await user.click(await screen.findByRole('button', { name: /resolve.*archive/i }));
 
@@ -450,7 +450,7 @@ describe('BurstsPage', () => {
 
       render(<BurstsPage />);
 
-      const checkbox = await screen.findByRole('checkbox');
+      const checkbox = await screen.findByRole('button', { name: 'Select burst group' });
       await user.click(checkbox);
       await user.click(await screen.findByRole('button', { name: /resolve.*delete/i }));
 
@@ -478,7 +478,7 @@ describe('BurstsPage', () => {
 
       render(<BurstsPage />);
 
-      const checkbox = await screen.findByRole('checkbox');
+      const checkbox = await screen.findByRole('button', { name: 'Select burst group' });
       await user.click(checkbox);
 
       await waitFor(() => {

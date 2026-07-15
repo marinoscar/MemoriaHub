@@ -39,6 +39,8 @@ function AiSettingsContent() {
     saveEmbeddingFeature,
     getEmbeddingModels,
     testEmbedding,
+    saveEnhanceFeature,
+    getImageModels,
   } = useAiSettings();
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -80,6 +82,12 @@ function AiSettingsContent() {
     error?: string;
   } | null>(null);
   const [embeddingTestLoading, setEmbeddingTestLoading] = useState(false);
+
+  // Enhance feature state (AI Picture Enhancer — OpenAI image models only)
+  const [enhanceProvider] = useState('openai');
+  const [enhanceModel, setEnhanceModel] = useState('');
+  const [enhanceModels, setEnhanceModels] = useState<string[]>([]);
+  const [enhanceModelsLoading, setEnhanceModelsLoading] = useState(false);
 
   useEffect(() => {
     void fetchSettings();
@@ -125,6 +133,11 @@ function AiSettingsContent() {
     } else {
       setEmbeddingEnabled(false);
     }
+
+    // Pre-populate enhance feature selection
+    if (settings.features.enhance && settings.features.enhance.model) {
+      setEnhanceModel(settings.features.enhance.model);
+    }
   }, [settings]);
 
   // Load models when search provider changes
@@ -157,6 +170,15 @@ function AiSettingsContent() {
       .catch(() => setEmbeddingModels([]))
       .finally(() => setEmbeddingModelsLoading(false));
   }, [embeddingProvider, getEmbeddingModels]);
+
+  // Load image models on mount (OpenAI only, capability=image)
+  useEffect(() => {
+    setEnhanceModelsLoading(true);
+    getImageModels(enhanceProvider)
+      .then((models) => setEnhanceModels(models))
+      .catch(() => setEnhanceModels([]))
+      .finally(() => setEnhanceModelsLoading(false));
+  }, [enhanceProvider, getImageModels]);
 
   const handleSaveCredentials = async (provider: string) => {
     try {
@@ -246,6 +268,16 @@ function AiSettingsContent() {
       }
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : 'Failed to save embedding feature');
+    }
+  };
+
+  const handleSaveEnhanceFeature = async () => {
+    if (!enhanceProvider || !enhanceModel) return;
+    try {
+      await saveEnhanceFeature(enhanceProvider, enhanceModel);
+      setSuccessMessage('AI Picture Enhancer settings saved');
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to save enhancer feature');
     }
   };
 
@@ -687,6 +719,63 @@ function AiSettingsContent() {
                 Test
               </Button>
             )}
+          </Stack>
+        </Paper>
+
+        {/* AI Picture Enhancer section */}
+        <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>
+            AI Picture Enhancer
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Choose the OpenAI image model used to enhance photos. Enhancement is a
+            single-item, human-reviewed action gated by the{' '}
+            <strong>Picture Enhancement</strong> feature toggle in System Settings.
+          </Typography>
+
+          <Alert severity="info" icon={<InfoIcon fontSize="inherit" />} sx={{ mb: 2 }}>
+            Requires OpenAI — image editing is only available through the OpenAI API.
+            Make sure your OpenAI credentials are configured above before selecting a model.
+          </Alert>
+
+          <TextField
+            label="Provider"
+            value="OpenAI"
+            size="small"
+            fullWidth
+            disabled
+            sx={{ mb: 2 }}
+          />
+
+          <FormControl size="small" fullWidth sx={{ mb: 2 }} disabled={enhanceModelsLoading}>
+            <InputLabel>Model</InputLabel>
+            <Select
+              label="Model"
+              value={enhanceModel}
+              onChange={(e) => setEnhanceModel(e.target.value)}
+            >
+              {enhanceModelsLoading ? (
+                <MenuItem disabled>Loading models…</MenuItem>
+              ) : enhanceModels.length === 0 ? (
+                <MenuItem value="gpt-image-1">gpt-image-1</MenuItem>
+              ) : (
+                enhanceModels.map((m) => (
+                  <MenuItem key={m} value={m}>
+                    {m}
+                  </MenuItem>
+                ))
+              )}
+            </Select>
+          </FormControl>
+
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant="contained"
+              disabled={!enhanceModel}
+              onClick={() => void handleSaveEnhanceFeature()}
+            >
+              Save
+            </Button>
           </Stack>
         </Paper>
 

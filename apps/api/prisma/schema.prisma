@@ -26,43 +26,45 @@ model User {
   updatedAt               DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  identities                UserIdentity[]
-  userRoles                 UserRole[]
-  userSettings              UserSettings?
-  auditEvents               AuditEvent[]                @relation("ActorEvents")
-  settingsUpdates           SystemSettings[]            @relation("SettingsUpdater")
-  refreshTokens             RefreshToken[]              @relation("UserRefreshTokens")
-  allowlistEntriesAdded     AllowedEmail[]              @relation("AllowlistAddedBy")
-  allowlistEntry            AllowedEmail?               @relation("AllowlistClaimedBy")
-  deviceCodes               DeviceCode[]                @relation("UserDeviceCodes")
-  storageObjects            StorageObject[]             @relation("UserStorageObjects")
-  personalAccessTokens      PersonalAccessToken[]       @relation("UserPersonalAccessTokens")
-  mediaItems                MediaItem[]                 @relation("MediaAddedBy")
-  albums                    Album[]                     @relation("AlbumAddedBy")
-  tags                      Tag[]                       @relation("TagAddedBy")
+  identities                  UserIdentity[]
+  userRoles                   UserRole[]
+  userSettings                UserSettings?
+  auditEvents                 AuditEvent[]                @relation("ActorEvents")
+  settingsUpdates             SystemSettings[]            @relation("SettingsUpdater")
+  refreshTokens               RefreshToken[]              @relation("UserRefreshTokens")
+  allowlistEntriesAdded       AllowedEmail[]              @relation("AllowlistAddedBy")
+  allowlistEntry              AllowedEmail?               @relation("AllowlistClaimedBy")
+  deviceCodes                 DeviceCode[]                @relation("UserDeviceCodes")
+  storageObjects              StorageObject[]             @relation("UserStorageObjects")
+  personalAccessTokens        PersonalAccessToken[]       @relation("UserPersonalAccessTokens")
+  mediaItems                  MediaItem[]                 @relation("MediaAddedBy")
+  albums                      Album[]                     @relation("AlbumAddedBy")
+  tags                        Tag[]                       @relation("TagAddedBy")
   // Circle relations
-  ownedCircles              Circle[]                    @relation("CircleOwner")
-  circleMemberships         CircleMember[]
-  circleInvitesAdded        CircleInvite[]              @relation("CircleInviteAddedBy")
-  circleInvitesClaimed      CircleInvite[]              @relation("CircleInviteClaimedBy")
+  ownedCircles                Circle[]                    @relation("CircleOwner")
+  circleMemberships           CircleMember[]
+  circleInvitesAdded          CircleInvite[]              @relation("CircleInviteAddedBy")
+  circleInvitesClaimed        CircleInvite[]              @relation("CircleInviteClaimedBy")
   // AI Search relations
-  aiCredentialsUpdated      AiProviderCredential[]      @relation("AiCredentialUpdater")
+  aiCredentialsUpdated        AiProviderCredential[]      @relation("AiCredentialUpdater")
   // Face Recognition relations
-  faceCredentialsUpdated    FaceProviderCredential[]    @relation("FaceCredentialUpdater")
+  faceCredentialsUpdated      FaceProviderCredential[]    @relation("FaceCredentialUpdater")
   // Storage Provider relations
-  storageCredentialsUpdated StorageProviderCredential[] @relation("StorageCredentialUpdater")
-  peopleAdded               Person[]                    @relation("PersonAddedBy")
-  resolvedBursts            BurstGroup[]                @relation("BurstGroupResolvedBy")
+  storageCredentialsUpdated   StorageProviderCredential[] @relation("StorageCredentialUpdater")
+  peopleAdded                 Person[]                    @relation("PersonAddedBy")
+  resolvedBursts              BurstGroup[]                @relation("BurstGroupResolvedBy")
   // Duplicate Detection relations
-  resolvedDuplicates        DuplicateGroup[]            @relation("DuplicateGroupResolvedBy")
+  resolvedDuplicates          DuplicateGroup[]            @relation("DuplicateGroupResolvedBy")
   // Geo Provider relations
-  geoCredentialsUpdated     GeoProviderCredential[]     @relation("GeoCredentialUpdater")
+  geoCredentialsUpdated       GeoProviderCredential[]     @relation("GeoCredentialUpdater")
   // Media Sharing relations
-  mediaShares               MediaShare[]                @relation("MediaShareCreatedBy")
+  mediaShares                 MediaShare[]                @relation("MediaShareCreatedBy")
   // Location Inference relations
-  resolvedLocationSuggestions LocationSuggestion[]       @relation("LocationSuggestionResolvedBy")
+  resolvedLocationSuggestions LocationSuggestion[]        @relation("LocationSuggestionResolvedBy")
   // Distributed Worker Node relations
-  workerNodes                WorkerNode[]
+  workerNodes                 WorkerNode[]
+  // AI Picture Enhancer relations
+  mediaEnhancementsCreated    MediaEnhancement[]          @relation("MediaEnhancementCreatedBy")
 
   @@map("users")
 }
@@ -389,6 +391,8 @@ model Circle {
   mediaShares           MediaShare[]
   // Location Inference relations
   locationSuggestions   LocationSuggestion[]
+  // AI Picture Enhancer relations
+  mediaEnhancements     MediaEnhancement[]
 
   @@index([ownerId])
   @@map("circles")
@@ -497,19 +501,19 @@ model MediaItem {
   sourceDeviceName  String?   @map("source_device_name")
 
   // --- Location / reverse-geocoding (first-class) ---
-  takenLat       Float?    @map("taken_lat")
-  takenLng       Float?    @map("taken_lng")
-  takenAltitude  Float?    @map("taken_altitude")
-  geoCountry     String?   @map("geo_country") // "Costa Rica", "United States"
-  geoCountryCode String?   @map("geo_country_code") // ISO 3166-1 alpha-2: "CR", "US"
-  geoAdmin1      String?   @map("geo_admin1") // state / province / region
-  geoAdmin2      String?   @map("geo_admin2") // county / canton (optional tier)
-  geoLocality    String?   @map("geo_locality") // city / town
-  geoPlaceName   String?   @map("geo_place_name") // POI / landmark / display label
-  geoSource      String?   @map("geo_source") // provider that produced it
-  geocodedAt     DateTime? @map("geocoded_at") @db.Timestamptz // when reverse geocoding ran; null = not yet geocoded
-  coordSource    String?   @map("coord_source") // provenance of taken_lat/taken_lng: 'exif' | 'manual' | 'inferred'; null = no coordinates
-  socialMediaSource String? @map("social_media_source") // detected re-upload source: 'tiktok' | 'instagram' | 'facebook' | 'other'; null = clean/unknown. Written only by the social_media_detection handler; used to gate video enrichment.
+  takenLat          Float?    @map("taken_lat")
+  takenLng          Float?    @map("taken_lng")
+  takenAltitude     Float?    @map("taken_altitude")
+  geoCountry        String?   @map("geo_country") // "Costa Rica", "United States"
+  geoCountryCode    String?   @map("geo_country_code") // ISO 3166-1 alpha-2: "CR", "US"
+  geoAdmin1         String?   @map("geo_admin1") // state / province / region
+  geoAdmin2         String?   @map("geo_admin2") // county / canton (optional tier)
+  geoLocality       String?   @map("geo_locality") // city / town
+  geoPlaceName      String?   @map("geo_place_name") // POI / landmark / display label
+  geoSource         String?   @map("geo_source") // provider that produced it
+  geocodedAt        DateTime? @map("geocoded_at") @db.Timestamptz // when reverse geocoding ran; null = not yet geocoded
+  coordSource       String?   @map("coord_source") // provenance of taken_lat/taken_lng: 'exif' | 'manual' | 'inferred'; null = no coordinates
+  socialMediaSource String?   @map("social_media_source") // detected re-upload source: 'tiktok' | 'instagram' | 'facebook' | 'other'; null = clean/unknown. Written only by the social_media_detection handler; used to gate video enrichment.
 
   // --- Burst Detection ---
   perceptualHash String? @map("perceptual_hash") // 64-bit dHash stored as unsigned decimal string
@@ -551,6 +555,9 @@ model MediaItem {
   socialStatus           MediaSocialStatus?
   // Album cover relations
   coverForAlbums         Album[]              @relation("AlbumCover")
+  // AI Picture Enhancer relations
+  enhancementsAsSource   MediaEnhancement[]   @relation("MediaEnhancementSource")
+  enhancementsAsResult   MediaEnhancement[]   @relation("MediaEnhancementResult")
 
   @@index([circleId])
   @@index([addedById])
@@ -597,21 +604,21 @@ model MediaItemEmbedding {
 }
 
 model Album {
-  id          String       @id @default(uuid()) @db.Uuid
-  circleId    String       @map("circle_id") @db.Uuid
-  circle      Circle       @relation(fields: [circleId], references: [id])
-  addedById   String       @map("added_by_id") @db.Uuid
-  addedBy     User         @relation("AlbumAddedBy", fields: [addedById], references: [id])
-  name        String
-  description String?
-  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz
-  items       AlbumItem[]
+  id               String       @id @default(uuid()) @db.Uuid
+  circleId         String       @map("circle_id") @db.Uuid
+  circle           Circle       @relation(fields: [circleId], references: [id])
+  addedById        String       @map("added_by_id") @db.Uuid
+  addedBy          User         @relation("AlbumAddedBy", fields: [addedById], references: [id])
+  name             String
+  description      String?
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+  items            AlbumItem[]
   // Media Sharing relations
-  shares      MediaShare[]
+  shares           MediaShare[]
   // Album cover pointer
-  coverMediaItemId String?     @map("cover_media_item_id") @db.Uuid
-  coverMediaItem   MediaItem?  @relation("AlbumCover", fields: [coverMediaItemId], references: [id], onDelete: SetNull)
+  coverMediaItemId String?      @map("cover_media_item_id") @db.Uuid
+  coverMediaItem   MediaItem?   @relation("AlbumCover", fields: [coverMediaItemId], references: [id], onDelete: SetNull)
 
   @@index([circleId])
   @@index([coverMediaItemId])
@@ -764,18 +771,18 @@ model Person {
 }
 
 model Face {
-  id                String   @id @default(uuid()) @db.Uuid
-  mediaItemId       String   @map("media_item_id") @db.Uuid
-  circleId          String   @map("circle_id") @db.Uuid
-  personId          String?  @map("person_id") @db.Uuid
-  boundingBox       Json     @map("bounding_box")
+  id                String    @id @default(uuid()) @db.Uuid
+  mediaItemId       String    @map("media_item_id") @db.Uuid
+  circleId          String    @map("circle_id") @db.Uuid
+  personId          String?   @map("person_id") @db.Uuid
+  boundingBox       Json      @map("bounding_box")
   confidence        Float?
   landmarks         Json?
   embedding         Float[]
-  externalFaceId    String?  @map("external_face_id")
-  providerKey       String   @map("provider_key")
-  modelVersion      String   @map("model_version")
-  manuallyAssigned  Boolean  @default(false) @map("manually_assigned")
+  externalFaceId    String?   @map("external_face_id")
+  providerKey       String    @map("provider_key")
+  modelVersion      String    @map("model_version")
+  manuallyAssigned  Boolean   @default(false) @map("manually_assigned")
   videoTimestampMs  Int?      @map("video_timestamp_ms")
   videoTimestamps   Int[]     @map("video_timestamps")
   frameThumbnailKey String?   @map("frame_thumbnail_key")
@@ -807,33 +814,33 @@ model Face {
 }
 
 model EnrichmentJob {
-  id            String    @id @default(uuid()) @db.Uuid
-  type          String
-  mediaItemId   String?   @map("media_item_id") @db.Uuid
-  circleId      String?   @map("circle_id") @db.Uuid
-  status        JobStatus @default(pending)
-  reason        JobReason
-  priority      Int       @default(0)
-  providerKey   String?   @map("provider_key")
-  modelVersion  String?   @map("model_version")
-  payload       Json?     @db.JsonB
-  attempts      Int       @default(0)
-  lastError     String?   @map("last_error")
-  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  startedAt     DateTime? @map("started_at") @db.Timestamptz
-  finishedAt    DateTime? @map("finished_at") @db.Timestamptz
-  scheduledFor  DateTime? @map("scheduled_for") @db.Timestamptz
-  rateLimitedAt DateTime? @map("rate_limited_at") @db.Timestamptz
-  rateLimitHits Int       @default(0) @map("rate_limit_hits")
+  id              String    @id @default(uuid()) @db.Uuid
+  type            String
+  mediaItemId     String?   @map("media_item_id") @db.Uuid
+  circleId        String?   @map("circle_id") @db.Uuid
+  status          JobStatus @default(pending)
+  reason          JobReason
+  priority        Int       @default(0)
+  providerKey     String?   @map("provider_key")
+  modelVersion    String?   @map("model_version")
+  payload         Json?     @db.JsonB
+  attempts        Int       @default(0)
+  lastError       String?   @map("last_error")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  startedAt       DateTime? @map("started_at") @db.Timestamptz
+  finishedAt      DateTime? @map("finished_at") @db.Timestamptz
+  scheduledFor    DateTime? @map("scheduled_for") @db.Timestamptz
+  rateLimitedAt   DateTime? @map("rate_limited_at") @db.Timestamptz
+  rateLimitHits   Int       @default(0) @map("rate_limit_hits")
   // Distributed Worker Node claiming
   claimedByNodeId String?   @map("claimed_by_node_id") @db.Uuid
   leaseExpiresAt  DateTime? @map("lease_expires_at") @db.Timestamptz
   executor        String?   @map("executor") // 'server' | 'node'
 
   // Relations
-  mediaItem      MediaItem?  @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
-  circle         Circle?     @relation(fields: [circleId], references: [id], onDelete: Cascade)
-  claimedByNode  WorkerNode? @relation(fields: [claimedByNodeId], references: [id], onDelete: SetNull)
+  mediaItem     MediaItem?  @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  circle        Circle?     @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  claimedByNode WorkerNode? @relation(fields: [claimedByNodeId], references: [id], onDelete: SetNull)
 
   @@index([status, priority, createdAt])
   @@index([status, scheduledFor, priority, createdAt])
@@ -1071,24 +1078,24 @@ enum LocationSuggestionStatus {
 // "denormalized, no FK" precedent — so deleting the referenced anchor media item
 // never blocks or cascades against this row.
 model LocationSuggestion {
-  id                String                   @id @default(uuid()) @db.Uuid
-  mediaItemId       String                   @unique @map("media_item_id") @db.Uuid
-  circleId          String                   @map("circle_id") @db.Uuid
-  lat               Float
-  lng               Float
-  confidence        Float
-  method            String // 'interpolated' | 'nearest'
-  anchorBeforeId    String?                  @map("anchor_before_id") @db.Uuid
-  anchorAfterId     String?                  @map("anchor_after_id") @db.Uuid
-  gapBeforeSeconds  Int?                     @map("gap_before_seconds")
-  gapAfterSeconds   Int?                     @map("gap_after_seconds")
-  anchorDistanceKm  Float?                   @map("anchor_distance_km")
-  impliedSpeedKmh   Float?                   @map("implied_speed_kmh")
-  status            LocationSuggestionStatus @default(pending)
-  resolvedById      String?                  @map("resolved_by_id") @db.Uuid
-  resolvedAt        DateTime?                @map("resolved_at") @db.Timestamptz
-  createdAt         DateTime                 @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt         DateTime                 @updatedAt @map("updated_at") @db.Timestamptz
+  id               String                   @id @default(uuid()) @db.Uuid
+  mediaItemId      String                   @unique @map("media_item_id") @db.Uuid
+  circleId         String                   @map("circle_id") @db.Uuid
+  lat              Float
+  lng              Float
+  confidence       Float
+  method           String // 'interpolated' | 'nearest'
+  anchorBeforeId   String?                  @map("anchor_before_id") @db.Uuid
+  anchorAfterId    String?                  @map("anchor_after_id") @db.Uuid
+  gapBeforeSeconds Int?                     @map("gap_before_seconds")
+  gapAfterSeconds  Int?                     @map("gap_after_seconds")
+  anchorDistanceKm Float?                   @map("anchor_distance_km")
+  impliedSpeedKmh  Float?                   @map("implied_speed_kmh")
+  status           LocationSuggestionStatus @default(pending)
+  resolvedById     String?                  @map("resolved_by_id") @db.Uuid
+  resolvedAt       DateTime?                @map("resolved_at") @db.Timestamptz
+  createdAt        DateTime                 @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime                 @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
   mediaItem  MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
@@ -1331,4 +1338,68 @@ model WorkerNode {
   @@index([status])
   @@index([createdById])
   @@map("worker_nodes")
+}
+
+// =============================================================================
+// AI Picture Enhancer
+// =============================================================================
+
+enum MediaEnhancementStatus {
+  pending
+  processing
+  ready
+  failed
+  applied
+  discarded
+  expired
+}
+
+enum MediaEnhancementDecision {
+  keep_both
+  replace
+}
+
+// One row per AI-enhancement run requested against a source MediaItem. The
+// enhanced bytes are staged (stagingStorageKey/stagingProvider/stagingBucket)
+// rather than written directly onto the source item, so a user can preview
+// the result before deciding: keep_both (creates a new MediaItem, tracked via
+// resultMediaItemId) or replace (overwrites the source item's bytes).
+model MediaEnhancement {
+  id          String                    @id @default(uuid()) @db.Uuid
+  mediaItemId String                    @map("media_item_id") @db.Uuid
+  circleId    String                    @map("circle_id") @db.Uuid
+  status      MediaEnhancementStatus    @default(pending)
+  decision    MediaEnhancementDecision?
+  params      Json?                     @db.JsonB
+  provider    String
+  model       String
+  prompt      String?                   @db.Text
+
+  // --- Staged result (pre-decision) ---
+  stagingStorageKey String? @map("staging_storage_key")
+  stagingProvider   String? @map("staging_provider")
+  stagingBucket     String? @map("staging_bucket")
+  originalWidth     Int?    @map("original_width")
+  originalHeight    Int?    @map("original_height")
+  enhancedWidth     Int?    @map("enhanced_width")
+  enhancedHeight    Int?    @map("enhanced_height")
+  enhancedSize      BigInt? @map("enhanced_size")
+
+  resultMediaItemId String? @map("result_media_item_id") @db.Uuid
+  lastError         String? @map("last_error")
+  createdById       String? @map("created_by_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  mediaItem       MediaItem  @relation("MediaEnhancementSource", fields: [mediaItemId], references: [id], onDelete: Cascade)
+  circle          Circle     @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  resultMediaItem MediaItem? @relation("MediaEnhancementResult", fields: [resultMediaItemId], references: [id], onDelete: SetNull)
+  createdBy       User?      @relation("MediaEnhancementCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([mediaItemId, status])
+  @@index([circleId, status])
+  @@index([status, updatedAt])
+  @@map("media_enhancements")
 }
