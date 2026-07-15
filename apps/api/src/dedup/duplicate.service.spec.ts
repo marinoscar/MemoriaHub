@@ -27,6 +27,7 @@ import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { CircleRole, DuplicateGroupStatus, JobReason, JobStatus, MediaType } from '@prisma/client';
 import { DuplicateQueryDto } from './dto/duplicate-query.dto';
@@ -164,11 +165,21 @@ describe('DuplicateService', () => {
       storageProvider: 's3',
       bucket: 'test-bucket',
     });
+    // Batched thumbnail signing (MediaThumbnailService.signThumbsBatched, used
+    // by listDuplicateGroups/getDuplicateGroup) issues one storageObject.findMany
+    // call. Default to no matching rows -> falls back to the legacy static
+    // STORAGE_PROVIDER, which in this spec is the SAME mock object returned by
+    // mockResolver.getProviderFor, so existing "signed-url" assertions still
+    // hold without needing per-test findMany rows.
+    (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([]);
     (mockPrisma.duplicateGroup.update as jest.Mock).mockResolvedValue({});
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DuplicateService,
+        // Real MediaThumbnailService, reusing the same PrismaService/
+        // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
+        MediaThumbnailService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CircleMembershipService, useValue: mockMembership },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },

@@ -21,6 +21,7 @@ import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { mediaThumbnailsQuerySchema } from './dto/media-thumbnails-query.dto';
+import { MediaThumbnailService } from './media-thumbnail.service';
 
 // ---------------------------------------------------------------------------
 // AND-composition query helpers
@@ -244,10 +245,23 @@ describe('MediaService', () => {
       enqueueFaceRerun: jest.fn().mockResolvedValue(undefined),
       enqueueThumbnailRerun: jest.fn().mockResolvedValue(undefined),
     };
+    // Batched thumbnail signing (MediaThumbnailService.signThumbsBatched) always
+    // issues one storageObject.findMany call. The deep prisma mock returns
+    // undefined for unconfigured methods, which would throw inside a `for...of`
+    // loop, so default it to an empty result set (no matching rows -> falls
+    // back to the legacy static STORAGE_PROVIDER, mirroring signThumb's
+    // no-row fallback). Individual tests override this when they need to
+    // assert provider-routed thumbnail URLs on list results.
+    (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MediaService,
+        // Real MediaThumbnailService so batched/legacy thumbnail-signing logic
+        // stays faithful to production; its own dependencies (PrismaService,
+        // STORAGE_PROVIDER, StorageProviderResolver) reuse the same mocks
+        // registered below.
+        MediaThumbnailService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },

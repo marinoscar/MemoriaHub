@@ -73,7 +73,7 @@ describe('PeopleService', () => {
   };
   let mockEnrichmentJobService: { enqueue: jest.Mock };
   let mockSystemSettings: { isFeatureEnabled: jest.Mock; getSettings: jest.Mock };
-  let mockMediaThumbnailService: { signThumb: jest.Mock };
+  let mockMediaThumbnailService: { signThumb: jest.Mock; signThumbsBatched: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -101,6 +101,12 @@ describe('PeopleService', () => {
     };
     mockMediaThumbnailService = {
       signThumb: jest.fn().mockResolvedValue(null),
+      // listPeople/getPerson/listUnassignedFaces batch-sign cover/frame
+      // thumbnails via signThumbsBatched (gallery-perf#104). No test in this
+      // file asserts a specific signed URL for these fields, so an empty map
+      // (every key resolves to null, mirroring signThumb's default) is a
+      // faithful default; override per-test if a specific URL is needed.
+      signThumbsBatched: jest.fn().mockResolvedValue(new Map()),
     };
 
     const module: TestingModule = await Test.createTestingModule({

@@ -23,6 +23,7 @@ import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interfac
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
+import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { BurstGroupStatus, CircleRole, MediaType } from '@prisma/client';
 import { BurstQueryDto } from './dto/burst-query.dto';
@@ -209,6 +210,13 @@ describe('BurstService', () => {
       storageProvider: 's3',
       bucket: 'test-bucket',
     });
+    // Batched thumbnail signing (MediaThumbnailService.signThumbsBatched, used
+    // by listBurstGroups/getBurstGroup) issues one storageObject.findMany call.
+    // Default to no matching rows -> falls back to the legacy static
+    // STORAGE_PROVIDER, which in this spec is the SAME mock object returned by
+    // mockResolver.getProviderFor, so existing "signed-url" assertions still
+    // hold without needing per-test findMany rows.
+    (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([]);
 
     // resolveBurstGroup/dismissBurstGroup write an audit event after the transaction.
     (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
@@ -216,6 +224,9 @@ describe('BurstService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BurstService,
+        // Real MediaThumbnailService, reusing the same PrismaService/
+        // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
+        MediaThumbnailService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CircleMembershipService, useValue: mockMembership },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
