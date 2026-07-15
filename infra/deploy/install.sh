@@ -337,11 +337,19 @@ services:
       target: production
     env_file:
       - .env
+    environment:
+      # Node.js V8 old-space heap cap — a SEPARATE ceiling from the container
+      # `memory` limit below. Size it under the container limit with ~1 GB of
+      # off-heap headroom: max-old-space-size ≈ container_mem_MB − 1024. See #102.
+      - NODE_OPTIONS=${NODE_OPTIONS:---max-old-space-size=5120}
     restart: unless-stopped
     deploy:
       resources:
         limits:
-          memory: 512M
+          # `.env`-parameterized (Docker Compose auto-reads the sibling .env for
+          # ${VAR} interpolation). Defaults sized to real production load. See #102.
+          memory: ${API_MEMORY_LIMIT:-6G}
+          cpus: "${API_CPU_LIMIT:-4.0}"
     networks:
       - memoriahub-internal
 
@@ -358,7 +366,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 128M
+          memory: ${WEB_MEMORY_LIMIT:-128M}
     networks:
       - memoriahub-internal
 
