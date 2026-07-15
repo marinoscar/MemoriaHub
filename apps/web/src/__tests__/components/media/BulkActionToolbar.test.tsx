@@ -23,6 +23,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
 import { BulkActionToolbar } from '../../../components/media/BulkActionToolbar';
+import type { MediaItem } from '../../../types/media';
 
 // ---------------------------------------------------------------------------
 // Mock media service bulk functions
@@ -60,6 +61,53 @@ const mockBulkDelete = vi.mocked(bulkDelete);
 const mockBulkRerunTags = vi.mocked(bulkRerunTags);
 const mockBulkRerunFaces = vi.mocked(bulkRerunFaces);
 const mockBulkRerunThumbnails = vi.mocked(bulkRerunThumbnails);
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+function makeMediaItem(overrides: Partial<MediaItem> = {}): MediaItem {
+  return {
+    id: 'item-1',
+    storageObjectId: 'storage-obj-1',
+    addedById: 'user-1',
+    circleId: 'circle-1',
+    type: 'photo',
+    capturedAt: '2024-06-15T10:30:00.000Z',
+    capturedAtOffset: -360,
+    importedAt: '2024-06-16T08:00:00.000Z',
+    source: 'web',
+    contentHash: 'abc123def456',
+    width: 4032,
+    height: 3024,
+    durationMs: null,
+    orientation: 1,
+    takenLat: null,
+    takenLng: null,
+    takenAltitude: null,
+    cameraMake: 'Apple',
+    cameraModel: 'iPhone 15 Pro',
+    originalFilename: 'IMG_0001.jpg',
+    description: null,
+    favorite: false,
+    geoCountry: null,
+    geoCountryCode: null,
+    geoAdmin1: null,
+    geoAdmin2: null,
+    geoLocality: null,
+    geoPlaceName: null,
+    geoSource: null,
+    geocodedAt: null,
+    coordSource: null,
+    createdAt: '2024-06-16T08:00:00.000Z',
+    updatedAt: '2024-06-16T09:00:00.000Z',
+    deletedAt: null,
+    archivedAt: null,
+    metadata: null,
+    thumbnailUrl: null,
+    downloadUrl: null,
+    ...overrides,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Default props
@@ -404,6 +452,122 @@ describe('BulkActionToolbar', () => {
         circleId: 'circle-1',
         ids: expect.arrayContaining(Array.from(largeSelection)),
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // AI Enhance trigger (issue #98 — AI Picture Enhancer)
+  //
+  // The "AI Enhance" icon button is shown only when:
+  //   - exactly one item is selected
+  //   - that item's type is 'photo' (not 'video')
+  //   - the enhanceEnabled feature flag is true
+  //   - an onOpenEnhance callback is supplied
+  //   - the caller is not a viewer
+  // -------------------------------------------------------------------------
+  describe('AI Enhance action', () => {
+    const photoItem = makeMediaItem({ id: 'item-1', type: 'photo' });
+    const videoItem = makeMediaItem({ id: 'item-1', type: 'video' });
+
+    it('renders the AI Enhance button when a single photo is selected and the feature is enabled', () => {
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['item-1'])}
+          singleSelectedItem={photoItem}
+          enhanceEnabled
+          onOpenEnhance={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByRole('button', { name: /ai enhance/i })).toBeInTheDocument();
+    });
+
+    it('does not render the AI Enhance button when the selected item is a video', () => {
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['item-1'])}
+          singleSelectedItem={videoItem}
+          enhanceEnabled
+          onOpenEnhance={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /ai enhance/i })).not.toBeInTheDocument();
+    });
+
+    it('does not render the AI Enhance button when more than one item is selected', () => {
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['item-1', 'item-2'])}
+          singleSelectedItem={undefined}
+          enhanceEnabled
+          onOpenEnhance={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /ai enhance/i })).not.toBeInTheDocument();
+    });
+
+    it('does not render the AI Enhance button when the feature flag is off', () => {
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['item-1'])}
+          singleSelectedItem={photoItem}
+          enhanceEnabled={false}
+          onOpenEnhance={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /ai enhance/i })).not.toBeInTheDocument();
+    });
+
+    it('does not render the AI Enhance button when no onOpenEnhance callback is supplied', () => {
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['item-1'])}
+          singleSelectedItem={photoItem}
+          enhanceEnabled
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /ai enhance/i })).not.toBeInTheDocument();
+    });
+
+    it('does not render the AI Enhance button for viewer role, even with a single photo selected', () => {
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['item-1'])}
+          singleSelectedItem={photoItem}
+          activeCircleRole="viewer"
+          enhanceEnabled
+          onOpenEnhance={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /ai enhance/i })).not.toBeInTheDocument();
+    });
+
+    it('calls onOpenEnhance when the AI Enhance button is clicked', async () => {
+      const onOpenEnhance = vi.fn();
+      const user = userEvent.setup();
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['item-1'])}
+          singleSelectedItem={photoItem}
+          enhanceEnabled
+          onOpenEnhance={onOpenEnhance}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: /ai enhance/i }));
+      expect(onOpenEnhance).toHaveBeenCalledTimes(1);
     });
   });
 });
