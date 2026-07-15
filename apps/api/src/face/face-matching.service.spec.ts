@@ -377,6 +377,272 @@ describe('FaceMatchingService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // pgvector backend
+  // -------------------------------------------------------------------------
+
+  // NOTE: SQL correctness and recall parity between the pgvector KNN path and
+  // the in-app cosine-scan path (i.e. whether the two paths actually agree on
+  // real data against a live `faces.embedding_vec` HNSW index) is NOT verified
+  // by this mocked unit suite — `$transaction`/`$queryRaw` are stubbed here, so
+  // the raw SQL template strings themselves are never executed or type-checked
+  // against a real Postgres/pgvector instance. `apps/api/test/integration/`
+  // exists (e.g. `device-auth.integration.spec.ts`, `share.integration.spec.ts`)
+  // and does hit a real test database via `.env.test`, but there is no
+  // pgvector-specific integration test in this repo as of this writing. This
+  // gap is documented rather than closed here — see the task report for what
+  // was checked.
+  describe('pgvector backend', () => {
+    // A 128-length one-hot unit vector (L2 norm 1) at index `i`. Reused to
+    // build query/centroid embeddings whose cosine similarity is exactly 1
+    // (identical index) or exactly 0 (different index), so accept/reject
+    // outcomes are unambiguous without needing real embedding data.
+    function oneHot128(i: number): number[] {
+      return new Array(128).fill(0).map((_, idx) => (idx === i ? 1 : 0));
+    }
+
+    function oneHot1024(i: number): number[] {
+      return new Array(1024).fill(0).map((_, idx) => (idx === i ? 1 : 0));
+    }
+
+    // -----------------------------------------------------------------------
+    // matchFaceToPerson pgvector routing
+    // -----------------------------------------------------------------------
+
+    describe('matchFaceToPerson', () => {
+      it('routes 128-d probes through pgvector, de-dupes candidate person ids, and picks the best centroid', async () => {
+        const pgvectorConfig = makeConfigService({ FACE_VECTOR_BACKEND: 'pgvector' });
+        const module: TestingModule = await Test.createTestingModule({
+          providers: [
+            FaceMatchingService,
+            { provide: PrismaService, useValue: mockPrisma },
+            { provide: ConfigService, useValue: pgvectorConfig },
+          ],
+        }).compile();
+        const customService = module.get<FaceMatchingService>(FaceMatchingService);
+
+        const query = oneHot128(0);
+        const p1Centroid = oneHot128(0); // identical -> similarity 1.0
+        const p2Centroid = oneHot128(1); // orthogonal -> similarity 0
+
+        (mockPrisma.$transaction as unknown as jest.Mock).mockResolvedValue([
+          undefined,
+          [{ person_id: 'p1' }, { person_id: 'p1' }, { person_id: 'p2' }],
+        ]);
+        (mockPrisma.face.findMany as jest.Mock)
+          .mockResolvedValueOnce([{ embedding: p1Centroid }])
+          .mockResolvedValueOnce([{ embedding: p2Centroid }]);
+
+        const result = await customService.matchFaceToPerson('circle-1', query);
+
+        expect(result).not.toBeNull();
+        expect(result!.personId).toBe('p1');
+        expect(result!.similarity).toBeCloseTo(1, 10);
+        expect(mockPrisma.$transaction).toHaveBeenCalled();
+        expect(mockPrisma.person.findMany).not.toHaveBeenCalled();
+      });
+
+      it('returns null without querying centroids when the KNN query returns no candidate rows', async () => {
+        const pgvectorConfig = makeConfigService({ FACE_VECTOR_BACKEND: 'pgvector' });
+        const module: TestingModule = await Test.createTestingModule({
+          providers: [
+            FaceMatchingService,
+            { provide: PrismaService, useValue: mockPrisma },
+            { provide: ConfigService, useValue: pgvectorConfig },
+          ],
+        }).compile();
+        const customService = module.get<FaceMatchingService>(FaceMatchingService);
+
+        (mockPrisma.$transaction as unknown as jest.Mock).mockResolvedValue([undefined, []]);
+
+        const result = await customService.matchFaceToPerson('circle-1', oneHot128(0));
+
+        expect(result).toBeNull();
+        expect(mockPrisma.face.findMany).not.toHaveBeenCalled();
+      });
+
+      it('returns null when the KNN candidate exists but its centroid similarity is below threshold', async () => {
+        const pgvectorConfig = makeConfigService({ FACE_VECTOR_BACKEND: 'pgvector' });
+        const module: TestingModule = await Test.createTestingModule({
+          providers: [
+            FaceMatchingService,
+            { provide: PrismaService, useValue: mockPrisma },
+            { provide: ConfigService, useValue: pgvectorConfig },
+          ],
+        }).compile();
+        const customService = module.get<FaceMatchingService>(FaceMatchingService);
+
+        (mockPrisma.$transaction as unknown as jest.Mock).mockResolvedValue([
+          undefined,
+          [{ person_id: 'p1' }],
+        ]);
+        (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
+          { embedding: oneHot128(1) }, // orthogonal to query -> similarity 0
+        ]);
+
+        const result = await customService.matchFaceToPerson('circle-1', oneHot128(0));
+
+        expect(result).toBeNull();
+      });
+
+      it('falls back to the in-app path for a 1024-d ("human") embedding even with pgvector configured', async () => {
+        const pgvectorConfig = makeConfigService({ FACE_VECTOR_BACKEND: 'pgvector' });
+        const module: TestingModule = await Test.createTestingModule({
+          providers: [
+            FaceMatchingService,
+            { provide: PrismaService, useValue: mockPrisma },
+            { provide: ConfigService, useValue: pgvectorConfig },
+          ],
+        }).compile();
+        const customService = module.get<FaceMatchingService>(FaceMatchingService);
+
+        const probe = oneHot1024(0);
+        (mockPrisma.person.findMany as jest.Mock).mockResolvedValue([{ id: 'person-a' }]);
+        (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([{ embedding: oneHot1024(0) }]);
+
+        const result = await customService.matchFaceToPerson('circle-1', probe);
+
+        expect(mockPrisma.person.findMany).toHaveBeenCalled();
+        expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+        expect(result).not.toBeNull();
+        expect(result!.personId).toBe('person-a');
+      });
+
+      it('uses the in-app path when the backend is explicitly "app", regardless of a 128-d embedding', async () => {
+        const appConfig = makeConfigService({ FACE_VECTOR_BACKEND: 'app' });
+        const module: TestingModule = await Test.createTestingModule({
+          providers: [
+            FaceMatchingService,
+            { provide: PrismaService, useValue: mockPrisma },
+            { provide: ConfigService, useValue: appConfig },
+          ],
+        }).compile();
+        const customService = module.get<FaceMatchingService>(FaceMatchingService);
+
+        const probe = oneHot128(0);
+        (mockPrisma.person.findMany as jest.Mock).mockResolvedValue([{ id: 'person-a' }]);
+        (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([{ embedding: oneHot128(0) }]);
+
+        const result = await customService.matchFaceToPerson('circle-1', probe);
+
+        expect(mockPrisma.person.findMany).toHaveBeenCalled();
+        expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+        expect(result).not.toBeNull();
+        expect(result!.personId).toBe('person-a');
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // matchFaceToArchived pgvector routing
+    // -----------------------------------------------------------------------
+
+    describe('matchFaceToArchived', () => {
+      it('honors opts.candidates via the in-app path regardless of a pgvector-configured backend', async () => {
+        const pgvectorConfig = makeConfigService({ FACE_VECTOR_BACKEND: 'pgvector' });
+        const module: TestingModule = await Test.createTestingModule({
+          providers: [
+            FaceMatchingService,
+            { provide: PrismaService, useValue: mockPrisma },
+            { provide: ConfigService, useValue: pgvectorConfig },
+          ],
+        }).compile();
+        const customService = module.get<FaceMatchingService>(FaceMatchingService);
+
+        const result = await customService.matchFaceToArchived('circle-1', [1, 0], {
+          candidates: [{ id: 'f1', embedding: [1, 0] }],
+        });
+
+        expect(result).toEqual({ faceId: 'f1', similarity: expect.any(Number) });
+        expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+        expect(mockPrisma.face.findMany).not.toHaveBeenCalled();
+      });
+
+      it('routes a 128-d probe with no candidates through pgvector and accepts the nearest archived face', async () => {
+        const pgvectorConfig = makeConfigService({ FACE_VECTOR_BACKEND: 'pgvector' });
+        const module: TestingModule = await Test.createTestingModule({
+          providers: [
+            FaceMatchingService,
+            { provide: PrismaService, useValue: mockPrisma },
+            { provide: ConfigService, useValue: pgvectorConfig },
+          ],
+        }).compile();
+        const customService = module.get<FaceMatchingService>(FaceMatchingService);
+
+        (mockPrisma.$transaction as unknown as jest.Mock).mockResolvedValue([
+          undefined,
+          [{ id: 'f1', similarity: 0.9 }],
+        ]);
+
+        const result = await customService.matchFaceToArchived('circle-1', oneHot128(0));
+
+        expect(result).toEqual({ faceId: 'f1', similarity: 0.9 });
+      });
+
+      it('returns null when the nearest pgvector archived match is below threshold', async () => {
+        const pgvectorConfig = makeConfigService({ FACE_VECTOR_BACKEND: 'pgvector' });
+        const module: TestingModule = await Test.createTestingModule({
+          providers: [
+            FaceMatchingService,
+            { provide: PrismaService, useValue: mockPrisma },
+            { provide: ConfigService, useValue: pgvectorConfig },
+          ],
+        }).compile();
+        const customService = module.get<FaceMatchingService>(FaceMatchingService);
+
+        (mockPrisma.$transaction as unknown as jest.Mock).mockResolvedValue([
+          undefined,
+          [{ id: 'f1', similarity: 0.1 }],
+        ]);
+
+        const result = await customService.matchFaceToArchived('circle-1', oneHot128(0));
+
+        expect(result).toBeNull();
+      });
+
+      it('returns null when the pgvector KNN query returns no archived candidate rows', async () => {
+        const pgvectorConfig = makeConfigService({ FACE_VECTOR_BACKEND: 'pgvector' });
+        const module: TestingModule = await Test.createTestingModule({
+          providers: [
+            FaceMatchingService,
+            { provide: PrismaService, useValue: mockPrisma },
+            { provide: ConfigService, useValue: pgvectorConfig },
+          ],
+        }).compile();
+        const customService = module.get<FaceMatchingService>(FaceMatchingService);
+
+        (mockPrisma.$transaction as unknown as jest.Mock).mockResolvedValue([undefined, []]);
+
+        const result = await customService.matchFaceToArchived('circle-1', oneHot128(0));
+
+        expect(result).toBeNull();
+      });
+
+      it('falls back to the in-app query path for a 1024-d probe with no candidates', async () => {
+        const pgvectorConfig = makeConfigService({ FACE_VECTOR_BACKEND: 'pgvector' });
+        const module: TestingModule = await Test.createTestingModule({
+          providers: [
+            FaceMatchingService,
+            { provide: PrismaService, useValue: mockPrisma },
+            { provide: ConfigService, useValue: pgvectorConfig },
+          ],
+        }).compile();
+        const customService = module.get<FaceMatchingService>(FaceMatchingService);
+
+        const probe = oneHot1024(0);
+        (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
+          { id: 'f1', embedding: oneHot1024(0) },
+        ]);
+
+        const result = await customService.matchFaceToArchived('circle-1', probe);
+
+        expect(mockPrisma.face.findMany).toHaveBeenCalled();
+        expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+        expect(result).not.toBeNull();
+        expect(result!.faceId).toBe('f1');
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // findLiveMatchesAgainstArchived
   // -------------------------------------------------------------------------
 
