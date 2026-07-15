@@ -38,6 +38,7 @@ import {
   IosShare as IosShareIcon,
   Undo as UndoIcon,
   MyLocation as MyLocationIcon,
+  AutoFixHigh as AutoFixHighIcon,
 } from '@mui/icons-material';
 import { SharePanel } from '../share/SharePanel';
 import { useTheme } from '@mui/material/styles';
@@ -767,6 +768,18 @@ export function MediaDetailDrawer({
         >
           Details
         </Typography>
+
+        {item.metadata && item.metadata['_aiEnhanced'] != null && (
+          <Box sx={{ mb: 0.5 }}>
+            <Chip
+              icon={<AutoFixHighIcon fontSize="small" />}
+              label="AI Enhanced"
+              size="small"
+              color="primary"
+              variant="outlined"
+            />
+          </Box>
+        )}
 
         <MetaRow label="Type" value={item.type} />
         <MetaRow label="Captured" value={formatDateTime(item.capturedAt)} />
