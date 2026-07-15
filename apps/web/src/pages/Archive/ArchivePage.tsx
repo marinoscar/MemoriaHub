@@ -49,12 +49,14 @@ export default function ArchivePage() {
         mode="archive"
         circleId={circleId}
         activeCircleRole={activeCircleRole}
-        fetcher={(page, pageSize) =>
-          listArchived({ circleId, page, pageSize }).then((r) => ({
+        fetcher={(cursor, pageSize) => {
+          // Archive is still offset-paginated; encode the page as the cursor.
+          const page = cursor ? Number(cursor) : 1;
+          return listArchived({ circleId, page, pageSize }).then((r) => ({
             items: r.items,
-            totalPages: r.meta.totalPages,
-          }))
-        }
+            nextCursor: page < r.meta.totalPages ? String(page + 1) : null,
+          }));
+        }}
         queryKey={`archive:${circleId}`}
         emptyState={emptyState}
       />

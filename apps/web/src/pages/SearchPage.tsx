@@ -244,12 +244,14 @@ export default function SearchPage() {
           mode="home"
           circleId={searchRequest.circleId}
           activeCircleRole={activeCircleRole}
-          fetcher={(page, pageSize) =>
-            performSearch({ ...searchRequest, page, pageSize }).then((r) => ({
+          fetcher={(cursor, pageSize) => {
+            // Search is still offset-paginated; encode the page as the cursor.
+            const page = cursor ? Number(cursor) : 1;
+            return performSearch({ ...searchRequest, page, pageSize }).then((r) => ({
               items: r.items,
-              totalPages: r.meta.totalPages,
-            }))
-          }
+              nextCursor: page < r.meta.totalPages ? String(page + 1) : null,
+            }));
+          }}
           queryKey={`search:${JSON.stringify(searchRequest)}`}
           emptyState={
             <Typography variant="body2" color="text.secondary">

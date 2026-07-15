@@ -119,12 +119,14 @@ export default function TrashPage() {
         mode="trash"
         circleId={circleId}
         activeCircleRole={activeCircleRole}
-        fetcher={(page, pageSize) =>
-          listTrash({ circleId, page, pageSize }).then((r) => ({
+        fetcher={(cursor, pageSize) => {
+          // Trash is still offset-paginated; encode the page as the cursor.
+          const page = cursor ? Number(cursor) : 1;
+          return listTrash({ circleId, page, pageSize }).then((r) => ({
             items: r.items,
-            totalPages: r.meta.totalPages,
-          }))
-        }
+            nextCursor: page < r.meta.totalPages ? String(page + 1) : null,
+          }));
+        }}
         queryKey={`trash:${circleId}:${refreshToken}`}
         emptyState={emptyState}
       />

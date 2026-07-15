@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import type {
   MediaItem,
-  MediaListMeta,
+  MediaKeysetMeta,
   MediaQueryParams,
   PatchMediaDto,
 } from '../types/media';
@@ -33,7 +33,7 @@ export interface MediaFilters {
 
 interface UseMediaResult {
   items: MediaItem[];
-  meta: MediaListMeta | null;
+  meta: MediaKeysetMeta | null;
   isLoading: boolean;
   error: string | null;
   filters: MediaFilters;
@@ -47,7 +47,7 @@ interface UseMediaResult {
 
 export function useMedia(): UseMediaResult {
   const [items, setItems] = useState<MediaItem[]>([]);
-  const [meta, setMeta] = useState<MediaListMeta | null>(null);
+  const [meta, setMeta] = useState<MediaKeysetMeta | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFiltersState] = useState<MediaFilters>({

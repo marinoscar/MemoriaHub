@@ -2,6 +2,7 @@ import { api } from './api';
 import type {
   MediaItem,
   MediaListResponse,
+  MediaKeysetResponse,
   MediaQueryParams,
   MediaLocation,
   MapCluster,
@@ -39,10 +40,18 @@ import type {
 // MediaItem CRUD
 // ---------------------------------------------------------------------------
 
-export async function listMedia(params?: MediaQueryParams): Promise<MediaListResponse> {
+/**
+ * List media via `GET /api/media` in KEYSET (cursor) mode.
+ *
+ * `page` is deliberately never sent so the backend uses keyset pagination and
+ * responds with `{ items, meta: { pageSize, nextCursor, hasMore } }`. Pass
+ * `cursor` (from a prior response's `nextCursor`) to fetch the next page;
+ * omit it (or pass `null`) for the first page.
+ */
+export async function listMedia(params?: MediaQueryParams): Promise<MediaKeysetResponse> {
   const searchParams = new URLSearchParams();
 
-  if (params?.page) searchParams.set('page', String(params.page));
+  if (params?.cursor) searchParams.set('cursor', params.cursor);
   if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
   if (params?.type) searchParams.set('type', params.type);
   if (params?.capturedAtFrom) searchParams.set('capturedAtFrom', params.capturedAtFrom);
@@ -72,7 +81,7 @@ export async function listMedia(params?: MediaQueryParams): Promise<MediaListRes
   if (params?.noFaces !== undefined) searchParams.set('noFaces', params.noFaces ? '1' : '0');
 
   const qs = searchParams.toString();
-  return api.get<MediaListResponse>(`/media${qs ? `?${qs}` : ''}`);
+  return api.get<MediaKeysetResponse>(`/media${qs ? `?${qs}` : ''}`);
 }
 
 export async function getMedia(id: string): Promise<MediaItem> {
