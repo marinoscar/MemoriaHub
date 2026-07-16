@@ -1984,6 +1984,19 @@ describe('MediaService', () => {
       expect(call[0].where).toMatchObject({ deletedAt: null });
     });
 
+    it('always excludes exact (0,0) Null Island coordinates via a NOT clause', async () => {
+      await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({ NOT: { takenLat: 0, takenLng: 0 } });
+    });
+
+    it('still excludes exact (0,0) Null Island coordinates when bbox is supplied', async () => {
+      const bbox = { minLat: 9, minLng: -85, maxLat: 10, maxLng: -84 };
+      await service.listLocations({ circleId: CIRCLE_ID, bbox } as any, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].where).toMatchObject({ NOT: { takenLat: 0, takenLng: 0 } });
+    });
+
     // ----- Where-clause: ownership branch -----
 
     it('filters by circleId from query', async () => {
@@ -2204,6 +2217,13 @@ describe('MediaService', () => {
       expect(sqlObj.values).toEqual([CIRCLE_ID]);
     });
 
+    it('always excludes exact (0,0) Null Island coordinates, even with no optional filters supplied', async () => {
+      await service.aggregateLocations(baseQuery, 'user-1', ownPerms);
+      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+
+      expect(sqlObj.text).toContain('NOT (taken_lat = 0 AND taken_lng = 0)');
+    });
+
     it('interpolates capturedAtFrom into the query when supplied', async () => {
       const from = new Date('2024-01-01');
       await service.aggregateLocations({ ...baseQuery, capturedAtFrom: from }, 'user-1', ownPerms);
@@ -2303,6 +2323,7 @@ describe('MediaService', () => {
         takenLng: { not: null },
         deletedAt: null,
         archivedAt: null,
+        NOT: { takenLat: 0, takenLng: 0 },
       });
       expect(arg._min).toEqual({ takenLat: true, takenLng: true });
       expect(arg._max).toEqual({ takenLat: true, takenLng: true });
@@ -2363,6 +2384,12 @@ describe('MediaService', () => {
       await service.getLocationsExtent(baseQuery, 'user-1', ownPerms);
       const arg = (mockPrisma.mediaItem.aggregate as jest.Mock).mock.calls[0][0];
       expect(arg.where.type).toBeUndefined();
+    });
+
+    it('always excludes exact (0,0) Null Island coordinates via a NOT clause', async () => {
+      await service.getLocationsExtent(baseQuery, 'user-1', ownPerms);
+      const arg = (mockPrisma.mediaItem.aggregate as jest.Mock).mock.calls[0][0];
+      expect(arg.where).toMatchObject({ NOT: { takenLat: 0, takenLng: 0 } });
     });
 
     it('returns { minLat, minLng, maxLat, maxLng, count } mapped from a non-null aggregate result', async () => {
