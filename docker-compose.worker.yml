@@ -1,0 +1,74 @@
+# =============================================================================
+# memoriahub-worker bundle — a self-contained worker node for any machine
+# =============================================================================
+# One local CompreFace + N worker replicas. Copy this file (and .env.worker) to
+# any host — VPS or laptop — set 2-3 env vars, and:
+#
+#   docker compose -f docker-compose.worker.yml --env-file .env.worker up -d
+#   docker compose -f docker-compose.worker.yml --env-file .env.worker up -d --scale memoriahub-worker=4
+#
+# This is image-only (pulls published images); no repo checkout needed. For a
+# LOCAL source build instead, add docker-compose.worker.build.yml as an overlay.
+# See docs/worker-node-setup.md.
+#
+# Each replica registers as its OWN node (register-or-reattach on the API keyed
+# by (owner, name)); derive a distinct MEMORIAHUB_NODE_NAME per host so replicas
+# on different machines don't collide. Replicas load-balance via the server's
+# FOR UPDATE SKIP LOCKED claim — no lease conflicts.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Local CompreFace face-detection core (128-d ArcFace/mobilenet embeddings).
+  # We are committed to CompreFace — all existing face embeddings live in this
+  # space. Multi-process (not the throttled UWSGI_PROCESSES=1 of the shared VPS
+  # api bundle); tune COMPREFACE_PROCESSES to ~cores-2 (cap ~6) per host.
+  # ---------------------------------------------------------------------------
+  compreface-core:
+    image: exadel/compreface-core:1.2.0-mobilenet
+    restart: unless-stopped
+    environment:
+      - UWSGI_PROCESSES=${COMPREFACE_PROCESSES:-2}
+      - UWSGI_THREADS=1
+    # /status is CompreFace's readiness endpoint. The image is python-based, so
+    # a stdlib urllib probe needs no extra tooling (curl/wget may be absent).
+    # NOTE: the real guarantee against a silent Human fallback is the worker's
+    # own start-time verifyCompreface gate (it hard-exits if CompreFace is not
+    # healthy and compose restarts it); this healthcheck just orders startup.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:3000/status')" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    # No ports published — only the co-located workers reach it over the compose
+    # network at http://compreface-core:3000.
+
+  # ---------------------------------------------------------------------------
+  # Headless enrichment worker. Runs the identical compute stack as the server
+  # (packages/enrichment-compute), so output is numerically identical. Scale
+  # with --scale memoriahub-worker=N.
+  # ---------------------------------------------------------------------------
+  memoriahub-worker:
+    image: ghcr.io/marinoscar/memoriahub-worker:${WORKER_VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      compreface-core:
+        condition: service_healthy
+    environment:
+      # --- required ---
+      - MEMORIAHUB_URL=${MEMORIAHUB_URL:?set MEMORIAHUB_URL to your API base URL}
+      - MEMORIAHUB_TOKEN=${MEMORIAHUB_TOKEN:?set MEMORIAHUB_TOKEN to a node credential (nod_...) or PAT}
+      # --- identity / tuning ---
+      - MEMORIAHUB_NODE_NAME=${MEMORIAHUB_NODE_NAME:-worker}
+      - MEMORIAHUB_CONCURRENCY=${MEMORIAHUB_CONCURRENCY:-2}
+      # --- face provider: committed to CompreFace, pointed at the local core ---
+      - MEMORIAHUB_FACE_PROVIDER=compreface
+      - MEMORIAHUB_COMPREFACE_URL=http://compreface-core:3000
+    # SIGTERM drains in-flight jobs (headless mode does NOT deregister, so the
+    # node record persists and the replica re-attaches on restart). A job killed
+    # past the grace window is requeued by the server lease reaper (<=30 min), so
+    # this need not cover the full 20-min video-job budget.
+    stop_grace_period: ${WORKER_STOP_GRACE:-180s}

@@ -1,0 +1,19 @@
+# =============================================================================
+# Local source-build overlay for the worker bundle.
+# =============================================================================
+# Builds the memoriahub-worker image from this checkout instead of pulling the
+# published image. Usage (overlay AFTER the base bundle file):
+#
+#   docker compose -f docker-compose.worker.yml -f docker-compose.worker.build.yml \
+#     --env-file .env.worker up -d --build
+#
+# The build context is the repository root (required for npm-workspace linking
+# of @memoriahub/enrichment-compute — see apps/cli/Dockerfile header).
+# =============================================================================
+
+services:
+  memoriahub-worker:
+    build:
+      context: .
+      dockerfile: apps/cli/Dockerfile
+      target: worker
