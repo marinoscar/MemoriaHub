@@ -63,6 +63,7 @@ model User {
   resolvedLocationSuggestions LocationSuggestion[]       @relation("LocationSuggestionResolvedBy")
   // Distributed Worker Node relations
   workerNodes                WorkerNode[]
+  nodeCredentials            NodeCredential[]            @relation("UserNodeCredentials")
 
   @@map("users")
 }
@@ -1335,4 +1336,27 @@ model WorkerNode {
   @@index([status])
   @@index([createdById])
   @@map("worker_nodes")
+}
+
+// Durable, least-privilege bearer credential for worker nodes (`nod_` prefix).
+// Authenticates exactly like a PAT but is only accepted on /api/nodes/* routes
+// (enforced by JwtAuthGuard's route allowlist) and may never expire
+// (`expiresAt` NULL = never). Mirrors PersonalAccessToken minus the duration
+// bookkeeping. Migration 20260716020000_add_node_credentials.
+model NodeCredential {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  name        String
+  tokenHash   String    @unique @map("token_hash")
+  tokenPrefix String    @map("token_prefix")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  lastUsedAt  DateTime? @map("last_used_at") @db.Timestamptz
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz
+  expiresAt   DateTime? @map("expires_at") @db.Timestamptz
+
+  // Relations
+  user User @relation("UserNodeCredentials", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("node_credentials")
 }

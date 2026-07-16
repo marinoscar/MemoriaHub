@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { NodesService } from './nodes.service';
 import { NodesController } from './nodes.controller';
 import { NodesAdminController } from './nodes-admin.controller';
+import { NodeCredentialsController } from './node-credentials.controller';
+import { NodeCredentialModule } from './node-credential.module';
 import { NodeOfflinePruneTask } from './node-offline-prune.task';
 import { PrismaModule } from '../prisma/prisma.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
@@ -35,8 +37,12 @@ import { TaggingModule } from '../tagging/tagging.module';
     AiModule,
     SettingsModule,
     TaggingModule,
+    // Global module providing NodeCredentialService (nod_ bearer tokens) —
+    // kept separate + @Global so JwtAuthGuard can inject it in every module
+    // context, mirroring the PatModule wiring.
+    NodeCredentialModule,
   ],
-  controllers: [NodesController, NodesAdminController],
+  controllers: [NodesController, NodesAdminController, NodeCredentialsController],
   providers: [NodesService, NodeOfflinePruneTask],
 })
 export class NodesModule {}
