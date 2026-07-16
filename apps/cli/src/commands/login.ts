@@ -19,13 +19,12 @@
 import { Command } from 'commander';
 import * as readline from 'readline/promises';
 import { stdin as input, stdout as output } from 'process';
-import * as os from 'os';
 import chalk from 'chalk';
 import { saveConfig } from '../config.js';
 import { ApiClient, ApiError } from '../api.js';
 import { ui, createSpinner, printBox } from '../ui.js';
-import { requestDeviceCode, pollForDeviceToken, type DeviceTokenResult } from '../device-auth.js';
-import { openBrowser } from '../open-browser.js';
+import { type DeviceTokenResult } from '../device-auth.js';
+import { runDeviceLogin } from '../device-login.js';
 
 // ---------------------------------------------------------------------------
 // Shared helper: validate PAT and save config
@@ -133,80 +132,17 @@ export function loginCommand(): Command {
       ui.step('Login to MemoriaHub');
       ui.blank();
 
-      // Step 1: Request device code
-      const codeSpinner = createSpinner('Requesting authorization code…');
-      codeSpinner.start();
-
-      let codeResp;
-      try {
-        codeResp = await requestDeviceCode(serverUrl, {
-          tokenType: 'pat',
-          name: 'MemoriaHub CLI',
-          hostname: os.hostname(),
-          platform: os.platform(),
-        });
-      } catch (err) {
-        codeSpinner.fail(
-          `Failed to request device code: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        process.exit(1);
-      }
-
-      codeSpinner.succeed('Authorization code issued');
-
-      const { deviceCode, userCode, verificationUri, verificationUriComplete, expiresIn, interval } =
-        codeResp;
-
-      // Step 2: Show instructions
-      ui.blank();
-      printBox(
-        [
-          chalk.bold('To authorize this device, open the URL below in your browser:'),
-          '',
-          `  ${chalk.cyan(verificationUri)}`,
-          '',
-          `  Then enter the code: ${chalk.bold(chalk.yellow(userCode))}`,
-          '',
-          chalk.dim(`(Or open the direct link: ${verificationUriComplete})`),
-          '',
-          chalk.dim(
-            `This code expires in ${Math.round(expiresIn / 60)} minutes.`,
-          ),
-        ],
-        'Device Authorization',
-      );
-
-      // Step 3: Best-effort browser open
-      ui.dim(`Opening browser to: ${verificationUriComplete}`);
-      openBrowser(verificationUriComplete);
-
-      // Step 4: Poll for approval
-      const pollSpinner = createSpinner('Waiting for authorization in browser…');
-      pollSpinner.start();
-
+      // Run the shared interactive device-authorization flow. It owns the
+      // spinner/instruction UI and fails the spinner with a message on error;
+      // we just translate a thrown error into a non-zero exit here.
       let tokenResult: DeviceTokenResult;
       try {
-        tokenResult = await pollForDeviceToken(
-          serverUrl,
-          deviceCode,
-          interval,
-          expiresIn,
-          (state) => {
-            if (state === 'slow_down') {
-              pollSpinner.text = 'Waiting for authorization… (server asked to slow down)';
-            }
-          },
-        );
-      } catch (err) {
-        pollSpinner.fail(
-          err instanceof Error ? err.message : String(err),
-        );
+        tokenResult = await runDeviceLogin(serverUrl);
+      } catch {
         process.exit(1);
       }
 
-      pollSpinner.succeed('Device authorized');
-
-      // Step 5: Validate token and save (include expiry for pre-flight warnings)
+      // Validate token and save (include expiry for pre-flight warnings)
       await validateAndSave(serverUrl, tokenResult.accessToken, 'Verifying token', tokenResult.expiresAt);
     } finally {
       rl.close();

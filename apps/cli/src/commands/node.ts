@@ -20,6 +20,8 @@
 
 import { createRequire } from 'node:module';
 import { spawn, spawnSync } from 'node:child_process';
+import * as readline from 'node:readline/promises';
+import { stdin as input, stdout as output } from 'node:process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -29,6 +31,12 @@ import Table from 'cli-table3';
 import { requireConfig, saveConfig, loadConfig } from '../config.js';
 import { ApiClient, ApiError, type ModelManifestEntry } from '../api.js';
 import { ui, isTTY } from '../ui.js';
+import { runDeviceLogin } from '../device-login.js';
+import {
+  enrollNode,
+  defaultNodeCredentialName,
+  NodeEnrollmentUnsupportedError,
+} from '../node/enroll.js';
 import { logsDir, nodePidPath } from '../paths.js';
 import {
   detectCapabilities,
@@ -258,6 +266,89 @@ function registerCmd(): Command {
         ui.dim('Run `memoriahub node start` to begin processing jobs.');
       },
     );
+
+  return cmd;
+}
+
+// ---------------------------------------------------------------------------
+// node enroll
+// ---------------------------------------------------------------------------
+
+function enrollCmd(): Command {
+  const cmd = new Command('enroll');
+  cmd
+    .description(
+      'Log in and mint a durable node credential, storing it as this CLI\'s token ' +
+        '(enrollment without hand-copying a soon-to-expire PAT)',
+    )
+    .option('--name <label>', 'Credential label (default: node-<hostname>)')
+    .option('--server <url>', 'Server URL (default: configured server, else prompt)')
+    .option('--show-token', 'Print the full node token once (default: masked prefix only)')
+    .action(async (opts: { name?: string; server?: string; showToken?: boolean }) => {
+      const existing = loadConfig();
+
+      // Resolve server URL: --server > existing config > interactive prompt.
+      let serverUrl = opts.server?.trim() ?? '';
+      if (!serverUrl) serverUrl = existing?.serverUrl ?? '';
+      if (!serverUrl) {
+        const rl = readline.createInterface({ input, output });
+        try {
+          serverUrl = (
+            await rl.question(chalk.cyan('  Server URL (e.g. https://example.com): '))
+          ).trim();
+        } finally {
+          rl.close();
+        }
+      }
+      if (!serverUrl) {
+        ui.error('Server URL cannot be empty.');
+        process.exit(1);
+      }
+
+      const name = opts.name?.trim() || defaultNodeCredentialName();
+
+      ui.step('Enrolling this machine as a worker node');
+      ui.dim(`Credential name: ${name}`);
+      ui.blank();
+
+      let result;
+      try {
+        result = await enrollNode(
+          { serverUrl, name, cfg: existing },
+          {
+            deviceLogin: (url) => runDeviceLogin(url, 'MemoriaHub Node Enrollment'),
+            makeApi: (o) => new ApiClient(o),
+            saveConfigFn: saveConfig,
+          },
+        );
+      } catch (err) {
+        if (err instanceof NodeEnrollmentUnsupportedError) {
+          ui.error(err.message);
+          process.exit(1);
+        }
+        if (err instanceof ApiError) {
+          ui.error(`Enrollment failed (HTTP ${err.status}): ${err.serverMessage}`);
+          process.exit(1);
+        }
+        ui.error(`Enrollment failed: ${(err as Error).message}`);
+        process.exit(1);
+      }
+
+      const cred = result.credential;
+      ui.blank();
+      ui.success(`Node credential minted: ${cred.name}`);
+      ui.dim(`  Token prefix : ${cred.tokenPrefix}…`);
+      ui.dim(`  Expires      : ${cred.expiresAt ?? 'never'}`);
+      if (opts.showToken) {
+        ui.blank();
+        ui.warn('Full node token (store securely — it is not shown again):');
+        ui.line(`  ${cred.token}`);
+      }
+      ui.blank();
+      ui.success(
+        'Stored as this CLI\'s credential. Run `memoriahub node register` to register this machine.',
+      );
+    });
 
   return cmd;
 }
@@ -1448,6 +1539,7 @@ export function nodeCommand(): Command {
   cmd.description('Run this machine as a worker node that processes the enrichment queue');
 
   cmd.addCommand(registerCmd());
+  cmd.addCommand(enrollCmd());
   cmd.addCommand(startCmd());
   cmd.addCommand(stopCmd());
   cmd.addCommand(statusCmd());

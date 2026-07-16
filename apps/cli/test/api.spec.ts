@@ -149,6 +149,48 @@ describe('ApiClient listCircles', () => {
   });
 });
 
+describe('ApiClient createNodeCredential', () => {
+  it('POSTs { name, expiresAt } and unwraps the { data } envelope', async () => {
+    const fetchMock = mockFetchSequence([
+      () =>
+        new Response(
+          JSON.stringify({
+            data: {
+              id: 'cred-1',
+              name: 'node-box',
+              token: 'nod_full',
+              tokenPrefix: 'nod_ful',
+              createdAt: '2026-07-16T00:00:00.000Z',
+              expiresAt: null,
+            },
+          }),
+          { status: 200 },
+        ),
+    ]);
+    const api = makeClient();
+    const cred = await api.createNodeCredential('node-box', null);
+
+    expect(cred.token).toBe('nod_full');
+    expect(cred.expiresAt).toBeNull();
+
+    const [url, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://example.test/api/node-credentials');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(String(opts.body))).toEqual({ name: 'node-box', expiresAt: null });
+  });
+
+  it('omits expiresAt from the body when the arg is not supplied', async () => {
+    const fetchMock = mockFetchSequence([
+      () => new Response(JSON.stringify({ data: { token: 'nod_x' } }), { status: 200 }),
+    ]);
+    const api = makeClient();
+    await api.createNodeCredential('node-y');
+
+    const [, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(opts.body))).toEqual({ name: 'node-y' });
+  });
+});
+
 describe('ApiClient + cooldown gate', () => {
   it('trips the shared gate on a throttle response', async () => {
     const gate = new CooldownGate({ cooldownMs: 50, maxCooldownMs: 100 });

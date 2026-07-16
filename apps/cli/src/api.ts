@@ -192,6 +192,22 @@ export interface NodeRenewBody {
   leaseMs?: number;
 }
 
+/**
+ * Response shape for `POST /api/node-credentials` — a durable, least-privilege
+ * `nod_` credential minted for a worker node. `token` is the full secret,
+ * returned exactly once at creation; `tokenPrefix` is a display-safe prefix
+ * used for later identification. `expiresAt` is null for a never-expiring
+ * credential (the default enrollment uses this).
+ */
+export interface NodeCredentialResult {
+  id: string;
+  name: string;
+  token: string;
+  tokenPrefix: string;
+  createdAt: string;
+  expiresAt: string | null;
+}
+
 export interface ModelManifestEntry {
   name: string;
   url: string;
@@ -388,6 +404,20 @@ export class ApiClient {
   // -------------------------------------------------------------------------
   // Worker-node endpoints
   // -------------------------------------------------------------------------
+
+  /**
+   * Mint a durable, least-privilege node credential (`nod_` token) via
+   * `POST /api/node-credentials`. Requires a normal authenticated session/PAT
+   * (NOT a `nod_` token) on this client. Pass `expiresAt = null` (the default)
+   * for a never-expiring credential, or an ISO 8601 string to bound its life.
+   * Returns the full `token` exactly once — the caller must persist it, as it
+   * is never returned again.
+   */
+  createNodeCredential(name: string, expiresAt?: string | null): Promise<NodeCredentialResult> {
+    const body: { name: string; expiresAt?: string | null } = { name };
+    if (expiresAt !== undefined) body.expiresAt = expiresAt;
+    return this.post<NodeCredentialResult>('/api/node-credentials', body);
+  }
 
   /** Register this machine as a worker node; returns the assigned nodeId. */
   registerNode(body: NodeRegisterBody): Promise<NodeRegisterResult> {
