@@ -6,8 +6,8 @@
  *   pan/zoom. This keeps payloads bounded regardless of library size.
  * - Renders each cluster as a Leaflet marker: a count badge for multi-item
  *   cells, a normal pin for single-item cells.
- * - Clicking a multi-item cluster flies in one drill-down level; the moveend
- *   handler refetches at finer precision.
+ * - Clicking a multi-item cluster opens the "Photos here" drawer (a preview of
+ *   the cluster's photos plus a "Show all" jump into search).
  * - Clicking a single-item marker opens MediaDetailDrawer for that item.
  */
 
@@ -16,6 +16,7 @@ import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-lea
 import L from 'leaflet';
 import {
   Box,
+  Button,
   CircularProgress,
   Alert,
   Typography,
@@ -38,6 +39,7 @@ import {
 } from '../../services/media';
 import { useCircle } from '../../hooks/useCircle';
 import { useAuth } from '../../contexts/AuthContext';
+import { useSearch } from '../../contexts/SearchContext';
 import { MediaDetailDrawer } from '../../components/media/MediaDetailDrawer';
 import { MapTimeFilter, type MapTimeRange } from '../../components/map/MapTimeFilter';
 import { MapControls } from '../../components/map/MapControls';
@@ -65,14 +67,13 @@ const DEFAULT_ZOOM = 2;
 /** Debounce (ms) applied to viewport change events before refetching. */
 const VIEWPORT_DEBOUNCE_MS = 250;
 
-/** How many zoom levels a cluster drill-down flies in. */
-const DRILL_ZOOM_STEP = 3;
-
 /**
- * Clusters at or below this member count open the "Photos here" drawer
- * (fetch + show thumbnails) instead of flying in to drill down further.
+ * Maximum number of thumbnails fetched for the "Photos here" drawer preview.
+ * Kept well under the server-side `GET /api/media/thumbnails` cap of 200 ids so
+ * a large cluster never overruns it; the full count is still shown in the title
+ * and the "Show all" button drills into search for the complete set.
  */
-const CLUSTER_DRAWER_MAX = 60;
+const CLUSTER_THUMB_LIMIT = 24;
 
 // ---------------------------------------------------------------------------
 // Zoom → grid precision. Coarser cells at low zoom keep bucket counts bounded.
@@ -274,8 +275,8 @@ function AlbumTile({ point, onClick }: AlbumTileProps) {
 
 // ---------------------------------------------------------------------------
 // ClusterLayer — renders one Leaflet marker per aggregate cluster and handles
-// clicks: single-item cells open the media drawer, small clusters open the
-// "Photos here" drawer, larger clusters fly in one drill-down level.
+// clicks: single-item cells open the media drawer, and any multi-item cluster
+// opens the "Photos here" drawer.
 // ---------------------------------------------------------------------------
 
 interface ClusterLayerProps {
@@ -293,12 +294,12 @@ function ClusterLayer({ clusters, onOpenItem, onOpenCluster }: ClusterLayerProps
         onOpenItem(cluster.sampleId);
         return;
       }
-      if (cluster.count <= CLUSTER_DRAWER_MAX) {
-        onOpenCluster(cluster, precisionForZoom(map.getZoom()));
-        return;
-      }
-      const target = Math.min(map.getZoom() + DRILL_ZOOM_STEP, map.getMaxZoom());
-      map.flyTo([cluster.lat, cluster.lng], target);
+      // Any multi-item cluster opens the "Photos here" drawer. A cluster that
+      // cannot split further (e.g. every item at the same point) previously
+      // dead-ended on a programmatic fly-in that did nothing; the drawer always
+      // gives the user a way in. Native Leaflet scroll/double-click zoom is
+      // unaffected.
+      onOpenCluster(cluster, precisionForZoom(map.getZoom()));
     },
     [map, onOpenItem, onOpenCluster],
   );
@@ -325,6 +326,7 @@ export default function MediaMapPage() {
   const theme = useTheme();
   const { activeCircle } = useCircle();
   const { isLoading: authIsLoading } = useAuth();
+  const { runDeterministicSearch } = useSearch();
 
   // Leaflet map instance, captured from inside <MapContainer> so page-level
   // overlays (MapControls) can drive it imperatively.
@@ -410,8 +412,17 @@ export default function MediaMapPage() {
   }, [activeCircle, authIsLoading, timeRange]);
 
   // ----- "Photos here" cluster drawer (lazy points + thumbnails) -----
-  // null = closed; [] = open + loading; populated array = loaded.
-  const [albumPoints, setAlbumPoints] = useState<MediaLocation[] | null>(null);
+  // `clusterDrawer === null` means closed; otherwise the drawer is open and
+  // `status` reflects the fetch lifecycle. `points` holds only the first
+  // CLUSTER_THUMB_LIMIT items (with thumbnails merged in); `total` is the full
+  // cluster size so the title and "Show all" button reflect every photo.
+  type ClusterDrawerState = {
+    status: 'loading' | 'loaded' | 'error';
+    points: MediaLocation[];
+    total: number;
+    near: { lat: number; lng: number; radiusKm: number };
+  };
+  const [clusterDrawer, setClusterDrawer] = useState<ClusterDrawerState | null>(null);
   const albumReqRef = useRef(0);
 
   const handleOpenCluster = useCallback(
@@ -419,11 +430,19 @@ export default function MediaMapPage() {
       if (!activeCircle) return;
       const reqId = ++albumReqRef.current;
       const circleId = activeCircle.id;
-      setAlbumPoints([]); // open in loading state
 
       // Cell bounds: half a grid cell each way around the cluster centroid.
       const half = 0.5 * Math.pow(10, -precision);
       const bbox = `${cluster.lng - half},${cluster.lat - half},${cluster.lng + half},${cluster.lat + half}`;
+
+      // Derive a "near" radius from the grid cell so "Show all" searches the
+      // same area the drawer previews. Half a cell in degrees → km (~111.32
+      // km/deg of latitude), widened 1.5× for margin, floored at 0.5 km.
+      const radiusKm = Math.max(0.5, half * 111.32 * 1.5);
+      const near = { lat: cluster.lat, lng: cluster.lng, radiusKm };
+
+      // Open immediately in the loading state.
+      setClusterDrawer({ status: 'loading', points: [], total: 0, near });
 
       void (async () => {
         try {
@@ -434,19 +453,27 @@ export default function MediaMapPage() {
             capturedAtTo: timeRange.to ?? undefined,
           });
           if (albumReqRef.current !== reqId) return;
-          setAlbumPoints(pts);
+          const total = pts.length;
 
+          // Only request thumbnails for the first N points — the server caps
+          // GET /api/media/thumbnails at 200 ids, and a large cluster would
+          // blow past it.
+          const head = pts.slice(0, CLUSTER_THUMB_LIMIT);
           const thumbs = await getThumbnails(
             circleId,
-            pts.map((p) => p.id),
+            head.map((p) => p.id),
           );
           if (albumReqRef.current !== reqId) return;
           const byId = new Map(thumbs.map((t) => [t.id, t.thumbnailUrl]));
-          setAlbumPoints(
-            pts.map((p) => ({ ...p, thumbnailUrl: byId.get(p.id) ?? null })),
-          );
+          const headWithThumbs = head.map((p) => ({
+            ...p,
+            thumbnailUrl: byId.get(p.id) ?? null,
+          }));
+          setClusterDrawer({ status: 'loaded', points: headWithThumbs, total, near });
         } catch {
-          if (albumReqRef.current === reqId) setAlbumPoints([]);
+          if (albumReqRef.current === reqId) {
+            setClusterDrawer({ status: 'error', points: [], total: 0, near });
+          }
         }
       })();
     },
@@ -455,7 +482,7 @@ export default function MediaMapPage() {
 
   const handleCloseCluster = useCallback(() => {
     albumReqRef.current++; // invalidate any in-flight request
-    setAlbumPoints(null);
+    setClusterDrawer(null);
   }, []);
 
   // ----- MediaDetailDrawer (single item) -----
@@ -607,7 +634,7 @@ export default function MediaMapPage() {
         // Default zoom control replaced by the custom MapControls stack.
         zoomControl={false}
         // Disable scroll-wheel zoom while the cluster drawer is open.
-        scrollWheelZoom={albumPoints === null}
+        scrollWheelZoom={clusterDrawer === null}
       >
         {/* Theme-aware basemap: CARTO dark tiles in dark mode, light otherwise.
             The `key` forces react-leaflet to swap the layer cleanly on theme
@@ -662,7 +689,7 @@ export default function MediaMapPage() {
       {/* "Photos here" cluster drawer — lazy points + batched thumbnails */}
       <Drawer
         anchor="right"
-        open={albumPoints !== null}
+        open={clusterDrawer !== null}
         onClose={handleCloseCluster}
         variant="temporary"
         ModalProps={{ keepMounted: false }}
@@ -686,17 +713,47 @@ export default function MediaMapPage() {
           <IconButton onClick={handleCloseCluster} size="small" aria-label="Close photos panel">
             <CloseIcon />
           </IconButton>
-          <Typography variant="h6">Photos here ({albumPoints?.length ?? 0})</Typography>
+          <Typography variant="h6">Photos here ({clusterDrawer?.total ?? 0})</Typography>
         </Box>
 
         <Box sx={{ p: 2, overflowY: 'auto', flex: 1 }}>
-          <Grid container spacing={1}>
-            {(albumPoints ?? []).map((point) => (
-              <Grid key={point.id} size={{ xs: 4 }}>
-                <AlbumTile point={point} onClick={() => handleMarkerOpen(point.id)} />
+          {clusterDrawer?.status === 'error' ? (
+            <Alert severity="error">Couldn&apos;t load photos for this location.</Alert>
+          ) : clusterDrawer?.status === 'loading' ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress aria-label="Loading photos" />
+            </Box>
+          ) : (
+            <>
+              <Grid container spacing={1}>
+                {(clusterDrawer?.points ?? []).map((point) => (
+                  <Grid key={point.id} size={{ xs: 4 }}>
+                    <AlbumTile point={point} onClick={() => handleMarkerOpen(point.id)} />
+                  </Grid>
+                ))}
               </Grid>
-            ))}
-          </Grid>
+
+              {clusterDrawer &&
+                clusterDrawer.status === 'loaded' &&
+                clusterDrawer.total > clusterDrawer.points.length &&
+                activeCircle && (
+                  <Button
+                    variant="contained"
+                    fullWidth
+                    sx={{ mt: 2 }}
+                    onClick={() => {
+                      runDeterministicSearch({
+                        circleId: activeCircle.id,
+                        filters: { near: clusterDrawer.near },
+                      });
+                      handleCloseCluster();
+                    }}
+                  >
+                    Show all {clusterDrawer.total} photos
+                  </Button>
+                )}
+            </>
+          )}
         </Box>
       </Drawer>
 
