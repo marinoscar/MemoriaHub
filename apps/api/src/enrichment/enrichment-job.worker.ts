@@ -22,20 +22,105 @@ function getEnvInt(key: string, defaultValue: number): number {
   return isNaN(parsed) ? defaultValue : parsed;
 }
 
+// ---------------------------------------------------------------------------
+// Worker mode (ENRICHMENT_WORKER_MODE=all|system|off)
+// ---------------------------------------------------------------------------
+
+export type EnrichmentWorkerMode = 'all' | 'system' | 'off';
+
+const WORKER_MODES: readonly EnrichmentWorkerMode[] = ['all', 'system', 'off'];
+
+const modeLogger = new Logger('EnrichmentWorkerMode');
+// Warn-once latch for an unrecognized ENRICHMENT_WORKER_MODE value — the mode
+// is re-resolved on every claim, so without the latch a typo would spam a warn
+// line every few seconds.
+let warnedInvalidWorkerMode = false;
+
 /**
- * Whether the shared enrichment worker is enabled, per env-var kill-switches.
- * Checks both the current `ENRICHMENT_WORKER_ENABLED` var and the legacy
- * `FACE_WORKER_ENABLED` alias for backwards compatibility — either one set to
- * 'false' disables the worker.
+ * Resolve the in-process enrichment worker's operating mode.
  *
+ * - `'all'`    — claim every registered handler type (classic single-box posture).
+ * - `'system'` — claim ONLY server-only job types (light, DB-bound global jobs);
+ *                all media compute is left for external worker nodes. The
+ *                recommended posture when a distributed node fleet is running.
+ * - `'off'`    — do not start the worker pool at all.
+ *
+ * An explicit `ENRICHMENT_WORKER_MODE` value wins; an unrecognized value warns
+ * once and is treated as `'all'` (fail open — jobs must not be silently
+ * stranded by a typo). When the mode var is unset, the legacy boolean
+ * kill-switches decide: `ENRICHMENT_WORKER_ENABLED=false` or the older
+ * `FACE_WORKER_ENABLED=false` alias → `'off'`, otherwise `'all'`.
+ */
+export function resolveWorkerMode(env: NodeJS.ProcessEnv = process.env): EnrichmentWorkerMode {
+  const raw = env['ENRICHMENT_WORKER_MODE'];
+  if (raw !== undefined && raw !== '') {
+    if ((WORKER_MODES as readonly string[]).includes(raw)) {
+      return raw as EnrichmentWorkerMode;
+    }
+    if (!warnedInvalidWorkerMode) {
+      warnedInvalidWorkerMode = true;
+      modeLogger.warn(
+        `Unknown ENRICHMENT_WORKER_MODE "${raw}" — expected one of ${WORKER_MODES.join('|')}; treating as 'all'`,
+      );
+    }
+    return 'all';
+  }
+  // Legacy fallback: the on/off boolean switches predate the mode var.
+  return env['ENRICHMENT_WORKER_ENABLED'] === 'false' || env['FACE_WORKER_ENABLED'] === 'false'
+    ? 'off'
+    : 'all';
+}
+
+/**
+ * Whether the shared enrichment worker runs at all (mode `'all'` or `'system'`).
+ *
+ * Kept exported for back-compat with earlier consumers of the boolean
+ * kill-switch semantics; now a thin wrapper over {@link resolveWorkerMode}.
  * Extracted as a pure function (rather than inlined in the lifecycle hook) so
- * other consumers — e.g. DoctorService's diagnostics sweep — can check the
- * same enabled/disabled state without duplicating the boolean logic.
+ * other consumers can check the same enabled/disabled state without
+ * duplicating the logic.
  */
 export function isEnrichmentWorkerEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const enrichmentEnabled = env['ENRICHMENT_WORKER_ENABLED'];
-  const faceEnabled = env['FACE_WORKER_ENABLED'];
-  return !(enrichmentEnabled === 'false' || faceEnabled === 'false');
+  return resolveWorkerMode(env) !== 'off';
+}
+
+/**
+ * The claim-eligibility set for `'system'` mode: every server-only type
+ * (handlers WITHOUT the nodeResultSchema/persistNodeResult pair — they can
+ * only ever run in-process, see EnrichmentHandlerRegistry.serverOnlyTypes)
+ * PLUS `'thumbnail_repair'`, added explicitly because its handler DOES carry a
+ * nodeResultSchema (interface parity with `thumbnail_regen`) but the job is a
+ * global sweep (`mediaItemId: null`) that is not end-to-end node-claimable —
+ * deriving the set purely from the schema pair would strand it entirely.
+ *
+ * `ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES` (comma-separated) is an operator escape
+ * hatch to pin additional types to the server in system mode. Entries that are
+ * not registered handler types are dropped with a warning — claiming an
+ * unregistered type would permanently fail its jobs with "no handler
+ * registered".
+ */
+export function systemModeEligibleTypes(
+  registry: Pick<EnrichmentHandlerRegistry, 'serverOnlyTypes' | 'types'>,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  const eligible = new Set(registry.serverOnlyTypes());
+  eligible.add('thumbnail_repair');
+
+  const registered = new Set(registry.types());
+  const extras = (env['ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES'] ?? '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
+  for (const extra of extras) {
+    if (registered.has(extra)) {
+      eligible.add(extra);
+    } else {
+      modeLogger.warn(
+        `ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES entry "${extra}" is not a registered handler type; ignoring`,
+      );
+    }
+  }
+  return Array.from(eligible);
 }
 
 // Active per-job execution timeout. A handler that runs longer than this is
@@ -99,9 +184,10 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
    * OnApplicationBootstrap closes that race structurally.
    */
   onApplicationBootstrap(): void {
-    // Check both new and legacy env vars for backwards compatibility
-    if (!isEnrichmentWorkerEnabled()) {
-      this.logger.log('EnrichmentJobWorker disabled via env var');
+    // ENRICHMENT_WORKER_MODE wins; falls back to the legacy on/off env vars.
+    const mode = resolveWorkerMode();
+    if (mode === 'off') {
+      this.logger.log('EnrichmentJobWorker disabled via env var (mode: off)');
       return;
     }
 
@@ -121,7 +207,7 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
     );
     this.shuttingDown = false;
     this.logger.log(
-      `EnrichmentJobWorker starting; pool size ${concurrency}, poll interval ${this.pollMs}ms`,
+      `EnrichmentJobWorker starting (mode: ${mode}); pool size ${concurrency}, poll interval ${this.pollMs}ms`,
     );
     // Fire off N long-lived loops. We deliberately do NOT await them — they run
     // for the lifetime of the worker.
@@ -190,11 +276,26 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
     });
   }
 
+  /**
+   * The job types this worker claims. In `'system'` mode the set is restricted
+   * to server-only types (plus `thumbnail_repair` and any operator extras — see
+   * systemModeEligibleTypes) so all media compute is left for external worker
+   * nodes; in every other mode it is every registered handler type. Resolved
+   * per claim (cheap env read) so the mode is honored even when tick() is
+   * driven directly, without depending on bootstrap-time state.
+   */
+  private claimEligibleTypes(): string[] {
+    return resolveWorkerMode() === 'system'
+      ? systemModeEligibleTypes(this.registry)
+      : this.registry.types();
+  }
+
   private async claimNextJob(): Promise<EnrichmentJob | null> {
     // Multi-process-safe atomic claim via the shared claim service:
     // UPDATE ... WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED). The server
     // in-process worker claims with nodeId=null / executor='server' over every
-    // registered handler type, one job at a time. `attempts` is charged at
+    // registered handler type (restricted to the server-only set in 'system'
+    // mode — see claimEligibleTypes), one job at a time. `attempts` is charged at
     // CLAIM time inside the SQL (attempts + 1) — preserving the semantic that a
     // job which takes the whole process down (OOM SIGKILL) before the in-process
     // failure path still consumes its attempt, so the stuck/lease reaper can
@@ -204,7 +305,7 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
     const claimed = await this.claimService.claim({
       nodeId: null,
       executor: 'server',
-      eligibleTypes: this.registry.types(),
+      eligibleTypes: this.claimEligibleTypes(),
       limit: 1,
       leaseMs: LEASE_MS,
     });

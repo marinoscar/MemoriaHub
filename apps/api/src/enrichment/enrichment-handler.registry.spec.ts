@@ -23,6 +23,16 @@ function makeHandler(type: string): EnrichmentHandler {
   };
 }
 
+/** A node-eligible handler: carries BOTH nodeResultSchema and persistNodeResult. */
+function makeNodeEligibleHandler(type: string): EnrichmentHandler {
+  return {
+    type,
+    process: jest.fn().mockResolvedValue(undefined),
+    nodeResultSchema: { parse: jest.fn() } as unknown as EnrichmentHandler['nodeResultSchema'],
+    persistNodeResult: jest.fn().mockResolvedValue(undefined),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -157,6 +167,42 @@ describe('EnrichmentHandlerRegistry', () => {
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('face_detection'),
       );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // serverOnlyTypes() — handlers lacking the node-result pair
+  // -------------------------------------------------------------------------
+
+  describe('serverOnlyTypes()', () => {
+    it('returns an empty array for an empty registry', () => {
+      expect(registry.serverOnlyTypes()).toEqual([]);
+    });
+
+    it('includes handlers WITHOUT the nodeResultSchema/persistNodeResult pair', () => {
+      registry.register(makeHandler('burst_detection'));
+      registry.register(makeHandler('trash_purge'));
+
+      expect(registry.serverOnlyTypes().sort()).toEqual(['burst_detection', 'trash_purge']);
+    });
+
+    it('excludes node-eligible handlers (both members present)', () => {
+      registry.register(makeNodeEligibleHandler('face_detection'));
+      registry.register(makeHandler('storage_insights'));
+
+      expect(registry.serverOnlyTypes()).toEqual(['storage_insights']);
+    });
+
+    it('treats a handler with only ONE of the pair as server-only', () => {
+      const schemaOnly = makeNodeEligibleHandler('schema_only');
+      delete (schemaOnly as { persistNodeResult?: unknown }).persistNodeResult;
+      const persistOnly = makeNodeEligibleHandler('persist_only');
+      delete (persistOnly as { nodeResultSchema?: unknown }).nodeResultSchema;
+
+      registry.register(schemaOnly);
+      registry.register(persistOnly);
+
+      expect(registry.serverOnlyTypes().sort()).toEqual(['persist_only', 'schema_only']);
     });
   });
 });

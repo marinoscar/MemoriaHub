@@ -19,7 +19,7 @@ import { FaceSettingsService } from '../face/face-settings.service';
 import { GeoSettingsService } from '../geo/geo-settings.service';
 import { StorageSettingsService } from '../storage-settings/storage-settings.service';
 import { EnrichmentAdminService } from '../enrichment/enrichment-admin.service';
-import { isEnrichmentWorkerEnabled } from '../enrichment/enrichment-job.worker';
+import { resolveWorkerMode } from '../enrichment/enrichment-job.worker';
 import { SocialMediaOcrService } from '../social-media/social-media-ocr.service';
 import { VisualEmbeddingService } from '../dedup/visual-embedding.service';
 import { DEFAULT_FACE_VECTOR_BACKEND } from '../face/face-matching.service';
@@ -828,10 +828,33 @@ export class DoctorService {
   // Jobs checks
   // ===========================================================================
 
+  /**
+   * Heavy media-compute job types a healthy external worker node must serve
+   * for a fleet to substitute for the in-process worker (mode 'system'/'off').
+   */
+  private static readonly NODE_HEAVY_MEDIA_TYPES = ['face_detection', 'auto_tagging'];
+
+  /**
+   * Cheap DB read: online nodes with a fresh heartbeat (same staleness window
+   * as the nodes checks) whose eligibleTypes cover at least one heavy media
+   * compute type — i.e. nodes that can actually stand in for the worker.
+   */
+  private async countFreshMediaComputeNodes(): Promise<number> {
+    const cutoff = new Date(Date.now() - this.nodeStaleWindowMs());
+    return this.prisma.workerNode.count({
+      where: {
+        status: 'online',
+        lastHeartbeatAt: { gte: cutoff },
+        eligibleTypes: { hasSome: DoctorService.NODE_HEAVY_MEDIA_TYPES },
+      },
+    });
+  }
+
   private async checkWorkerEnabled(settings: ResolvedSettings): Promise<CheckOutcome> {
-    const enabled = isEnrichmentWorkerEnabled();
-    if (enabled) {
-      return { status: 'ok', message: 'Enrichment worker is enabled.' };
+    const mode = resolveWorkerMode();
+
+    if (mode === 'all') {
+      return { status: 'ok', message: 'Enrichment worker is enabled (mode: all).' };
     }
 
     const anyEnrichmentFeatureOn =
@@ -839,15 +862,52 @@ export class DoctorService {
       settings.features?.['faceRecognition'] === true ||
       settings.features?.['burstDetection'] === true;
 
-    if (anyEnrichmentFeatureOn) {
+    // In 'system' and 'off' modes, media compute depends on an external node
+    // fleet — check whether one is actually there and healthy.
+    const freshNodes = await this.countFreshMediaComputeNodes();
+
+    if (mode === 'system') {
+      if (freshNodes > 0) {
+        return {
+          status: 'ok',
+          message: `Enrichment worker is in system mode; ${freshNodes} healthy worker node(s) serving media compute.`,
+        };
+      }
+      if (anyEnrichmentFeatureOn) {
+        return {
+          status: 'warning',
+          message:
+            'Enrichment worker is in system mode but no healthy worker nodes are registered — media enrichment jobs will not be processed.',
+          actionItem:
+            'Start a worker node (memoriahub node start) or set ENRICHMENT_WORKER_MODE=all.',
+        };
+      }
       return {
-        status: 'error',
-        message: 'Enrichment worker is disabled but at least one enrichment feature flag is on.',
-        actionItem: 'Set ENRICHMENT_WORKER_ENABLED=true so enrichment jobs get processed.',
+        status: 'warning',
+        message:
+          'Enrichment worker is in system mode with no healthy worker nodes registered (no enrichment features enabled).',
       };
     }
 
-    return { status: 'warning', message: 'Enrichment worker is disabled.' };
+    // mode === 'off'
+    if (freshNodes > 0) {
+      return {
+        status: 'warning',
+        message: `Enrichment worker is off; relying entirely on ${freshNodes} external worker node(s) with no server fallback — server-only jobs (purges, sweeps, insights) will not run.`,
+        actionItem:
+          'Consider ENRICHMENT_WORKER_MODE=system so server-only jobs keep running on the API tier.',
+      };
+    }
+    if (anyEnrichmentFeatureOn) {
+      return {
+        status: 'error',
+        message:
+          'Enrichment worker is off but at least one enrichment feature flag is on, and no healthy worker nodes are registered.',
+        actionItem:
+          'Set ENRICHMENT_WORKER_MODE=all (or =system with a running node fleet) so enrichment jobs get processed.',
+      };
+    }
+    return { status: 'warning', message: 'Enrichment worker is off.' };
   }
 
   private async checkQueueHealth(): Promise<CheckOutcome> {

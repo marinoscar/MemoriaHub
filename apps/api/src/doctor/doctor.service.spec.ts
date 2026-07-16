@@ -922,4 +922,152 @@ describe('DoctorService', () => {
       expect(check.actionItem).toBeTruthy();
     });
   });
+
+  // =========================================================================
+  // 10. jobs.workerEnabled — worker-mode aware (ENRICHMENT_WORKER_MODE)
+  // =========================================================================
+
+  describe('jobs.workerEnabled — worker mode aware', () => {
+    beforeEach(() => {
+      mockQueryRawByText(mockPrisma, healthyQueryRawHandlers());
+      (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
+        provider: 's3',
+        enabled: true,
+      });
+      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
+      mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
+      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
+      mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
+      mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockNoWorkerNodes(mockPrisma);
+    });
+
+    it("is ok in mode 'all' (explicit) without touching worker_nodes for this check", async () => {
+      process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'all' });
+      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'jobs.workerEnabled');
+
+      expect(check.status).toBe('ok');
+      expect(check.message).toContain('mode: all');
+    });
+
+    it("is ok when the mode var is unset and the legacy vars are truthy (legacy → 'all')", async () => {
+      process.env = healthyEnv(); // ENRICHMENT_WORKER_ENABLED=true, no mode var
+      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+
+      const report = await service.runDiagnostics();
+
+      expect(findCheck(report, 'jobs.workerEnabled').status).toBe('ok');
+    });
+
+    it("is ok in mode 'system' when a fresh heavy-media node is registered", async () => {
+      process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'system' });
+      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(2);
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'jobs.workerEnabled');
+
+      expect(check.status).toBe('ok');
+      expect(check.message).toContain('system mode');
+      expect(check.message).toContain('2 healthy worker node(s)');
+    });
+
+    it('the fresh-node count is scoped to online, fresh-heartbeat nodes serving heavy media types', async () => {
+      process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'system' });
+      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(1);
+
+      await service.runDiagnostics();
+
+      const heavyCall = (mockPrisma.workerNode.count as jest.Mock).mock.calls.find(
+        ([arg]) => arg?.where?.eligibleTypes !== undefined,
+      );
+      expect(heavyCall).toBeDefined();
+      const where = heavyCall![0].where;
+      expect(where.status).toBe('online');
+      expect(where.lastHeartbeatAt.gte).toBeInstanceOf(Date);
+      expect(where.eligibleTypes).toEqual({ hasSome: ['face_detection', 'auto_tagging'] });
+    });
+
+    it("is warning in mode 'system' when enrichment features are on but no healthy node exists", async () => {
+      process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'system' });
+      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(0);
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'jobs.workerEnabled');
+
+      expect(check.status).toBe('warning');
+      expect(check.message).toContain('no healthy worker nodes');
+      expect(check.actionItem).toBeTruthy();
+    });
+
+    it("is warning (not error) in mode 'system' when no features are on and no nodes exist", async () => {
+      process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'system' });
+      mockSystemSettings.getSettings.mockResolvedValue(makeSettings()); // all features off
+      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(0);
+
+      const report = await service.runDiagnostics();
+
+      expect(findCheck(report, 'jobs.workerEnabled').status).toBe('warning');
+    });
+
+    it("is warning in mode 'off' with fresh nodes — no server fallback", async () => {
+      process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'off' });
+      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(3);
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'jobs.workerEnabled');
+
+      expect(check.status).toBe('warning');
+      expect(check.message).toContain('no server fallback');
+      expect(check.actionItem).toContain('ENRICHMENT_WORKER_MODE=system');
+    });
+
+    it("is error in mode 'off' when enrichment features are on and no healthy nodes exist", async () => {
+      process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'off' });
+      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(0);
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'jobs.workerEnabled');
+
+      expect(check.status).toBe('error');
+      expect(check.actionItem).toContain('ENRICHMENT_WORKER_MODE=all');
+    });
+
+    it("is error via the LEGACY off switch too (ENRICHMENT_WORKER_ENABLED=false, mode unset)", async () => {
+      process.env = healthyEnv({
+        ENRICHMENT_WORKER_MODE: undefined,
+        ENRICHMENT_WORKER_ENABLED: 'false',
+        FACE_WORKER_ENABLED: undefined,
+      });
+      delete process.env['ENRICHMENT_WORKER_MODE'];
+      delete process.env['FACE_WORKER_ENABLED'];
+      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(0);
+
+      const report = await service.runDiagnostics();
+
+      expect(findCheck(report, 'jobs.workerEnabled').status).toBe('error');
+    });
+
+    it("is plain warning in mode 'off' when no features are on and no nodes exist", async () => {
+      process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'off' });
+      mockSystemSettings.getSettings.mockResolvedValue(makeSettings()); // all features off
+      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(0);
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'jobs.workerEnabled');
+
+      expect(check.status).toBe('warning');
+      expect(check.message).toContain('off');
+    });
+  });
 });

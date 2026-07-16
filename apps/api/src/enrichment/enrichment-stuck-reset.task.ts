@@ -11,7 +11,16 @@
 // jobs.stuckThresholdMinutes system setting (default 3 minutes; the legacy
 // ENRICHMENT_STUCK_MINUTES env var acts as fallback when the setting is unset),
 // so stats, the admin endpoint, and this cron all share one threshold.
-// Only active on instances that run the enrichment worker (same disable flag).
+//
+// resetStuck() is also the ONLY lease-expiry reaper: it requeues (or, budget
+// exhausted, fails) running jobs whose lease_expires_at has passed — including
+// jobs claimed by DISTRIBUTED WORKER NODES that died without renewing. That
+// makes this a CONTROL-PLANE duty, not a worker duty, so it deliberately does
+// NOT follow the enrichment worker's mode/enable switches: an API tier running
+// as a pure control plane (ENRICHMENT_WORKER_MODE=off/system with an external
+// node fleet) still depends on this cron. The only opt-out is the dedicated
+// ENRICHMENT_REAPER_ENABLED=false flag, for instances that must never touch
+// the queue (e.g. read replicas) when some other instance runs the reaper.
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -26,9 +35,11 @@ export class EnrichmentStuckResetTask {
 
   @Cron(CronExpression.EVERY_10_MINUTES)
   async handleStuckReset(): Promise<void> {
-    // Respect the same disable flag as the enrichment worker so non-worker
-    // instances (e.g. web-only pods, read replicas) do not reset stuck jobs.
-    if (process.env['ENRICHMENT_WORKER_ENABLED'] === 'false') {
+    // Deliberately NOT gated on the enrichment worker's mode/enable switches:
+    // this is the lease-expiry reaper external node fleets depend on, so it
+    // must run even on a control-plane instance whose in-process worker is off
+    // (see the header comment). Dedicated opt-out only.
+    if (process.env['ENRICHMENT_REAPER_ENABLED'] === 'false') {
       return;
     }
 

@@ -10,9 +10,11 @@
 // this task sweeps matching files older than 6 hours (mtime; safely beyond
 // the longest legitimate single-job runtime).
 //
-// Per-file errors are swallowed (best-effort). Only active on instances that
-// run the enrichment worker (same disable flag as EnrichmentStuckResetTask)
-// since only worker instances create these files.
+// Per-file errors are swallowed (best-effort). Only active on instances whose
+// enrichment worker runs at all (resolveWorkerMode() !== 'off') since only
+// worker instances create these files — note that 'system' mode still sweeps:
+// server-only jobs (e.g. a thumbnail_repair full reprocess) still stream
+// video downloads to memoriaHub-* temp files.
 // =============================================================================
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
@@ -20,6 +22,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { promises as fs } from 'fs';
+import { resolveWorkerMode } from './enrichment-job.worker';
 
 /** Temp files created by MemoriaHub processing/enrichment code. */
 const TEMP_FILE_PREFIX = /^memoriaHub-/;
@@ -42,9 +45,10 @@ export class TempFileJanitorTask implements OnModuleInit {
   }
 
   private async sweep(): Promise<void> {
-    // Respect the same disable flag as the enrichment worker so non-worker
-    // instances (which never create these files) skip the scan.
-    if (process.env['ENRICHMENT_WORKER_ENABLED'] === 'false') {
+    // Skip only when the enrichment worker is fully off — non-worker instances
+    // never create these files. 'system' mode still sweeps: the in-process
+    // worker keeps running server-only jobs that write memoriaHub-* temp files.
+    if (resolveWorkerMode() === 'off') {
       return;
     }
 
