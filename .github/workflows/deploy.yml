@@ -31,6 +31,7 @@ jobs:
       api-image: ${{ steps.meta-api.outputs.tags }}
       web-image: ${{ steps.meta-web.outputs.tags }}
       version: ${{ steps.version.outputs.version }}
+      cli-version: ${{ steps.cli-version.outputs.cli_version }}
 
     steps:
       - name: Checkout
@@ -44,6 +45,16 @@ jobs:
           else
             echo "version=${{ github.sha }}" >> $GITHUB_OUTPUT
           fi
+
+      - name: Get CLI version
+        id: cli-version
+        # The worker image is versioned by the CLI version so a given tag is
+        # auditable against the parity package it ships (cli-<version>).
+        run: echo "cli_version=$(node -p "require('./apps/cli/package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Set up QEMU
+        # Enables linux/arm64 emulation for the multi-arch worker image build.
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -103,6 +114,67 @@ jobs:
           labels: ${{ steps.meta-web.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+
+      # -----------------------------------------------------------------------
+      # memoriahub-worker image (multi-arch) + golden-vector parity gate
+      # -----------------------------------------------------------------------
+      - name: Extract metadata for Worker
+        id: meta-worker
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker
+          # Also tag cli-<version> so a running node's CLI version maps to an
+          # auditable image (compute-parity guarantee).
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=
+            type=raw,value=cli-${{ steps.cli-version.outputs.cli_version }}
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+
+      - name: Build Worker image (amd64) for parity gate
+        # Load a single-arch image locally (no push yet) so the golden-vector
+        # test can run inside the exact artifact. Shares the gha cache with the
+        # push build below, so amd64 layers are reused.
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/cli/Dockerfile
+          target: worker
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: memoriahub-worker:parity-gate
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker
+
+      - name: Golden-vector parity gate (inside the worker image)
+        # Runs the shared parity test against the CLIP model baked into the
+        # image. REQUIRE_CLIP_MODEL=1 makes a missing/misplaced model a hard
+        # failure instead of a skip, so the gate actually exercises CLIP.
+        run: |
+          docker run --rm \
+            --entrypoint node \
+            -e MODELS_DIR=/app/models \
+            -e REQUIRE_CLIP_MODEL=1 \
+            -w /app/packages/enrichment-compute \
+            memoriahub-worker:parity-gate \
+            --test test/golden.test.mjs
+
+      - name: Build and push Worker image (multi-arch)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/cli/Dockerfile
+          target: worker
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta-worker.outputs.tags }}
+          labels: ${{ steps.meta-worker.outputs.labels }}
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
 
