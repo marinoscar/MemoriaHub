@@ -1328,6 +1328,10 @@ model WorkerNode {
   createdBy   User            @relation(fields: [createdById], references: [id], onDelete: Cascade)
   claimedJobs EnrichmentJob[]
 
+  // Idempotent register-or-reattach: a containerized replica re-registering
+  // under the same (owner, name) re-attaches to its existing row instead of
+  // minting a duplicate. Migration 20260716010000_worker_node_unique_name.
+  @@unique([createdById, name])
   @@index([status])
   @@index([createdById])
   @@map("worker_nodes")

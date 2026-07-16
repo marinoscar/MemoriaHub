@@ -149,6 +149,9 @@ export interface NodeRegisterBody {
 
 export interface NodeRegisterResult {
   nodeId: string;
+  /** True when the server re-attached to an existing (owner, name) node row
+   * instead of creating a new one. Optional for older-server compatibility. */
+  reattached?: boolean;
 }
 
 export interface NodeHeartbeatBody {

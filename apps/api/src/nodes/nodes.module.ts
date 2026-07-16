@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { NodesService } from './nodes.service';
 import { NodesController } from './nodes.controller';
 import { NodesAdminController } from './nodes-admin.controller';
+import { NodeOfflinePruneTask } from './node-offline-prune.task';
 import { PrismaModule } from '../prisma/prisma.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { StorageModule } from '../storage/storage.module';
@@ -36,6 +37,6 @@ import { TaggingModule } from '../tagging/tagging.module';
     TaggingModule,
   ],
   controllers: [NodesController, NodesAdminController],
-  providers: [NodesService],
+  providers: [NodesService, NodeOfflinePruneTask],
 })
 export class NodesModule {}

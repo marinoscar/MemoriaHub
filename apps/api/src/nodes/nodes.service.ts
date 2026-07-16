@@ -106,23 +106,92 @@ export class NodesService {
   // register
   // -------------------------------------------------------------------------
 
-  async register(userId: string, dto: RegisterNodeInput): Promise<{ nodeId: string }> {
+  /**
+   * Register-or-reattach (idempotent on `(createdById, name)` — see the
+   * `@@unique` on WorkerNode). A containerized replica that restarts and
+   * re-registers under the same owner + name RE-ATTACHES to its existing node
+   * row (refreshing hostname/platform/cliVersion/eligibleTypes/concurrency and
+   * flipping it back online) instead of minting a duplicate row on every boot.
+   */
+  async register(
+    userId: string,
+    dto: RegisterNodeInput,
+  ): Promise<{ nodeId: string; reattached: boolean }> {
     const now = new Date();
-    const node = await this.prisma.workerNode.create({
+
+    const existing = await this.prisma.workerNode.findUnique({
+      where: { createdById_name: { createdById: userId, name: dto.name } },
+    });
+    if (existing) {
+      return this.reattach(existing, dto, now);
+    }
+
+    try {
+      const node = await this.prisma.workerNode.create({
+        data: {
+          name: dto.name,
+          hostname: dto.hostname,
+          platform: dto.platform,
+          cliVersion: dto.cliVersion,
+          eligibleTypes: dto.eligibleTypes,
+          concurrency: dto.concurrency ?? 1,
+          status: NodeStatus.online,
+          registeredAt: now,
+          lastHeartbeatAt: now,
+          createdById: userId,
+        },
+      });
+      return { nodeId: node.id, reattached: false };
+    } catch (e: any) {
+      // A concurrent replica won the find-then-create race (P2002 on the
+      // (created_by_id, name) unique) — re-read its row and reattach to it.
+      if (e.code === 'P2002') {
+        const raced = await this.prisma.workerNode.findUnique({
+          where: { createdById_name: { createdById: userId, name: dto.name } },
+        });
+        if (raced) {
+          return this.reattach(raced, dto, now);
+        }
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Reattach an existing node row: refresh the registration-time fields and
+   * bring the node back online. When the existing row's heartbeat is still
+   * FRESH (within the stale window) another live process is likely using the
+   * same name — we warn but proceed (last writer wins), matching the
+   * documented conflict policy for replica restarts.
+   */
+  private async reattach(
+    existing: WorkerNode,
+    dto: RegisterNodeInput,
+    now: Date,
+  ): Promise<{ nodeId: string; reattached: true }> {
+    if (
+      existing.lastHeartbeatAt &&
+      now.getTime() - existing.lastHeartbeatAt.getTime() <= staleWindowMs()
+    ) {
+      this.logger.warn(
+        `Worker node name conflict — node "${existing.name}" (${existing.id}) has a fresh heartbeat; ` +
+          'last writer wins, re-attaching anyway',
+      );
+    }
+
+    const node = await this.prisma.workerNode.update({
+      where: { id: existing.id },
       data: {
-        name: dto.name,
         hostname: dto.hostname,
         platform: dto.platform,
         cliVersion: dto.cliVersion,
         eligibleTypes: dto.eligibleTypes,
         concurrency: dto.concurrency ?? 1,
         status: NodeStatus.online,
-        registeredAt: now,
         lastHeartbeatAt: now,
-        createdById: userId,
       },
     });
-    return { nodeId: node.id };
+    return { nodeId: node.id, reattached: true };
   }
 
   // -------------------------------------------------------------------------

@@ -21,6 +21,12 @@
  *     reports it (issue #105 concurrency-sync fix); leaves it untouched when
  *     omitted; ownership still enforced; claim() reads the persisted value
  *     fresh on its next call (simulated round-trip — no test DB available)
+ *  8. register — idempotent register-or-reattach on (createdById, name)
+ *     (issue #108 Phase 2): reattach refreshes fields, flips status online,
+ *     returns reattached:true; a fresh-heartbeat conflict warns but proceeds
+ *     (last writer wins); lookups are owner-scoped so the same name under a
+ *     different user creates a separate row; a lost find-then-create race
+ *     (P2002) falls back to reattach
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -797,6 +803,166 @@ describe('NodesService — result/failure ingestion', () => {
         sha256: 'dc9a97fdc50bc43216554bdd69aa3e7b9361a519ee7bdd996a2f69a98a6f9b72',
         bytes: 538928,
       });
+    });
+  });
+
+  // =========================================================================
+  // register — idempotent register-or-reattach (issue #108 Phase 2)
+  // =========================================================================
+
+  describe('register', () => {
+    const registerDto = {
+      name: 'worker-a',
+      hostname: 'replica-1',
+      platform: 'linux',
+      cliVersion: '1.2.3',
+      eligibleTypes: ['duplicate_detection'],
+      concurrency: 4,
+    };
+
+    it('creates a new node and returns reattached:false when no (owner, name) row exists', async () => {
+      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.workerNode.create as jest.Mock).mockResolvedValue(
+        makeNode({ id: 'new-node' }),
+      );
+
+      const res = await service.register(USER_ID, registerDto);
+
+      expect(res).toEqual({ nodeId: 'new-node', reattached: false });
+      expect(mockPrisma.workerNode.findUnique).toHaveBeenCalledWith({
+        where: { createdById_name: { createdById: USER_ID, name: 'worker-a' } },
+      });
+      expect(mockPrisma.workerNode.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          name: 'worker-a',
+          hostname: 'replica-1',
+          concurrency: 4,
+          status: 'online',
+          createdById: USER_ID,
+        }),
+      });
+      expect(mockPrisma.workerNode.update).not.toHaveBeenCalled();
+    });
+
+    it('reattaches to an existing (owner, name) row: refreshes fields, flips status online, returns reattached:true', async () => {
+      // A stale row left behind by a previous container run.
+      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(
+        makeNode({
+          id: 'existing-node',
+          name: 'worker-a',
+          status: 'offline',
+          lastHeartbeatAt: new Date(Date.now() - 3_600_000),
+        }),
+      );
+      (mockPrisma.workerNode.update as jest.Mock).mockResolvedValue(
+        makeNode({ id: 'existing-node' }),
+      );
+
+      const res = await service.register(USER_ID, registerDto);
+
+      expect(res).toEqual({ nodeId: 'existing-node', reattached: true });
+      expect(mockPrisma.workerNode.update).toHaveBeenCalledWith({
+        where: { id: 'existing-node' },
+        data: expect.objectContaining({
+          hostname: 'replica-1',
+          platform: 'linux',
+          cliVersion: '1.2.3',
+          eligibleTypes: ['duplicate_detection'],
+          concurrency: 4,
+          status: 'online',
+          lastHeartbeatAt: expect.any(Date),
+        }),
+      });
+      expect(mockPrisma.workerNode.create).not.toHaveBeenCalled();
+    });
+
+    it('warns (last writer wins) but still reattaches when the existing row has a FRESH heartbeat', async () => {
+      const warnSpy = jest
+        .spyOn(service['logger'], 'warn')
+        .mockImplementation(() => undefined);
+      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(
+        makeNode({
+          id: 'existing-node',
+          name: 'worker-a',
+          // Well inside the NODE_HEARTBEAT_STALE_SECONDS window (default 60s).
+          lastHeartbeatAt: new Date(Date.now() - 1_000),
+        }),
+      );
+      (mockPrisma.workerNode.update as jest.Mock).mockResolvedValue(
+        makeNode({ id: 'existing-node' }),
+      );
+
+      const res = await service.register(USER_ID, registerDto);
+
+      expect(res).toEqual({ nodeId: 'existing-node', reattached: true });
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('name conflict'));
+    });
+
+    it('does not warn when reattaching to a row with a stale heartbeat', async () => {
+      const warnSpy = jest
+        .spyOn(service['logger'], 'warn')
+        .mockImplementation(() => undefined);
+      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(
+        makeNode({
+          id: 'existing-node',
+          lastHeartbeatAt: new Date(Date.now() - 3_600_000),
+        }),
+      );
+      (mockPrisma.workerNode.update as jest.Mock).mockResolvedValue(
+        makeNode({ id: 'existing-node' }),
+      );
+
+      await service.register(USER_ID, registerDto);
+
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('scopes the lookup by owner: the same name under a DIFFERENT user creates a separate row', async () => {
+      // No row exists for THIS user + name (another user's identically-named
+      // node does not match the compound unique lookup).
+      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.workerNode.create as jest.Mock).mockResolvedValue(
+        makeNode({ id: 'other-users-node', createdById: 'user-2' }),
+      );
+
+      const res = await service.register('user-2', registerDto);
+
+      expect(res).toEqual({ nodeId: 'other-users-node', reattached: false });
+      expect(mockPrisma.workerNode.findUnique).toHaveBeenCalledWith({
+        where: { createdById_name: { createdById: 'user-2', name: 'worker-a' } },
+      });
+      expect(mockPrisma.workerNode.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ createdById: 'user-2', name: 'worker-a' }),
+      });
+    });
+
+    it('falls back to reattach when a concurrent replica wins the find-then-create race (P2002)', async () => {
+      const racedRow = makeNode({ id: 'raced-node', name: 'worker-a' });
+      // First lookup: no row yet; second lookup (post-P2002): the winner's row.
+      (mockPrisma.workerNode.findUnique as jest.Mock)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(racedRow);
+      (mockPrisma.workerNode.create as jest.Mock).mockRejectedValue(
+        Object.assign(new Error('unique violation'), { code: 'P2002' }),
+      );
+      (mockPrisma.workerNode.update as jest.Mock).mockResolvedValue(racedRow);
+
+      const res = await service.register(USER_ID, registerDto);
+
+      expect(res).toEqual({ nodeId: 'raced-node', reattached: true });
+      expect(mockPrisma.workerNode.update).toHaveBeenCalledWith({
+        where: { id: 'raced-node' },
+        data: expect.objectContaining({ status: 'online' }),
+      });
+    });
+
+    it('rethrows non-P2002 create errors unchanged', async () => {
+      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(null);
+      const boom = Object.assign(new Error('connection lost'), { code: 'P1001' });
+      (mockPrisma.workerNode.create as jest.Mock).mockRejectedValue(boom);
+
+      await expect(service.register(USER_ID, registerDto)).rejects.toBe(boom);
+      expect(mockPrisma.workerNode.update).not.toHaveBeenCalled();
     });
   });
 
