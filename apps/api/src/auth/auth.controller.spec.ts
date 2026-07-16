@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { PatService } from '../pat/pat.service';
+import { NodeCredentialService } from '../nodes/node-credential.service';
 
 describe('AuthController', () => {
   let controller: AuthController;
@@ -27,6 +28,9 @@ describe('AuthController', () => {
         { provide: AuthService, useValue: mockAuthService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: PatService, useValue: { validateToken: jest.fn() } },
+        // JwtAuthGuard (global, instantiated for this controller's routes) now
+        // also injects NodeCredentialService for Bearer nod_ tokens.
+        { provide: NodeCredentialService, useValue: { validateToken: jest.fn() } },
       ],
     }).compile();
 
