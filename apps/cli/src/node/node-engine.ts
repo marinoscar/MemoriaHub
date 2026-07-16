@@ -11,7 +11,9 @@
  *   drain()  → stop claiming, finish in-flight jobs, keep heartbeating as
  *              'draining' — does NOT deregister.
  *   stop()   → set draining, wake the idle sleep, await in-flight jobs,
- *              deregister, emit 'stopped'.
+ *              deregister (skippable via { deregister: false } for headless/
+ *              container shutdowns that must re-attach on restart), emit
+ *              'stopped'.
  *
  * Observability: getSnapshot() returns a point-in-time EngineSnapshot (active
  * jobs, last-50 history ring, counters, heartbeat age) consumed by `node
@@ -269,8 +271,10 @@ export class NodeEngine extends NodeTypedEmitter {
   }
 
   /** Signal the engine to drain and stop: wakes the idle sleep, awaits the loop,
-   *  deregisters, emits 'stopped'. Safe to call more than once. */
-  async stop(reason = 'requested'): Promise<void> {
+   *  deregisters (unless `opts.deregister` is false — used by headless/container
+   *  SIGTERM so the node row persists and the replica re-attaches on restart),
+   *  emits 'stopped'. Safe to call more than once. */
+  async stop(reason = 'requested', opts?: { deregister?: boolean }): Promise<void> {
     if (!this.running && !this.loopPromise) return;
     this.draining = true;
     // Wake an in-progress idle sleep so the loop exits promptly.
@@ -285,11 +289,14 @@ export class NodeEngine extends NodeTypedEmitter {
       this.heartbeatTimer = null;
     }
 
-    // Best-effort deregister.
-    try {
-      await this.api.deregisterNode(this.nodeId);
-    } catch {
-      /* server may already have expired the node — non-fatal */
+    // Best-effort deregister (skipped when opts.deregister === false so the
+    // server-side node row survives a container restart for re-attachment).
+    if (opts?.deregister !== false) {
+      try {
+        await this.api.deregisterNode(this.nodeId);
+      } catch {
+        /* server may already have expired the node — non-fatal */
+      }
     }
 
     this.running = false;

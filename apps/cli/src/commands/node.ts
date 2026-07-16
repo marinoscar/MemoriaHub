@@ -26,7 +26,7 @@ import * as path from 'node:path';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import Table from 'cli-table3';
-import { requireConfig, saveConfig, loadConfig, type NodeConfig } from '../config.js';
+import { requireConfig, saveConfig, loadConfig } from '../config.js';
 import { ApiClient, ApiError, type ModelManifestEntry } from '../api.js';
 import { ui, isTTY } from '../ui.js';
 import { logsDir, nodePidPath } from '../paths.js';
@@ -38,7 +38,6 @@ import {
   ComputeDispatcher,
   DEFAULT_COMPREFACE_URL,
   type CapabilityStatus,
-  type NodeJobType,
 } from '../node/capabilities.js';
 import { ensureModels } from '../node/models.js';
 import { runOperationalSelfTests } from '../node/self-test.js';
@@ -50,6 +49,13 @@ import {
   WORKER_NODE_SETUP_GUIDE_URL,
   type CapabilityRowSummary,
 } from '../node/doctor-summary.js';
+import {
+  resolveHeadless,
+  defaultHeadlessNodeName,
+  supportedTypes,
+  registerWorkerNode,
+  DEFAULT_NODE_POLL_MS as DEFAULT_POLL_MS,
+} from '../node/register.js';
 import {
   NodeEngine,
   type NodeEngineOptions,
@@ -91,8 +97,6 @@ function cliVersion(): string {
   }
 }
 
-/** Default poll interval when neither flag nor config supplies one. */
-const DEFAULT_POLL_MS = 5000;
 /** Default worker concurrency. */
 const DEFAULT_CONCURRENCY = 1;
 
@@ -112,14 +116,6 @@ function parseTypes(csv?: string): string[] {
     process.exit(1);
   }
   return parts;
-}
-
-/** Job types whose required capabilities are all satisfied by `caps`. */
-function supportedTypes(
-  caps: Record<string, CapabilityStatus>,
-  faceProvider: 'human' | 'compreface' = 'human',
-): NodeJobType[] {
-  return NODE_JOB_TYPES.filter((t) => missingRequirements(t, caps, faceProvider).length === 0);
 }
 
 /** Validate --face-provider, exiting with a clear error on an unknown value. */
@@ -216,32 +212,23 @@ function registerCmd(): Command {
         const cfg = requireConfig();
         const api = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
 
-        const hostname = os.hostname();
-        const name = opts.name ?? hostname;
+        const name = opts.name ?? os.hostname();
         const concurrency = Math.max(1, parseInt(opts.concurrency ?? String(DEFAULT_CONCURRENCY), 10) || DEFAULT_CONCURRENCY);
         const faceProvider = parseFaceProvider(opts.faceProvider) ?? 'human';
         const comprefaceUrl = opts.comprefaceUrl;
-
-        const caps = await detectCapabilities({ comprefaceUrl });
         const requested = parseTypes(opts.types);
-        const eligibleTypes = requested.length > 0 ? requested : supportedTypes(caps, faceProvider);
 
-        if (eligibleTypes.length === 0) {
-          ui.warn(
-            'No job types are supported on this machine (missing native libraries / ffmpeg). ' +
-              'Registering with an empty type list — install dependencies and re-register.',
-          );
-        }
-
-        let res;
+        let reg;
         try {
-          res = await api.registerNode({
+          reg = await registerWorkerNode({
+            cfg,
+            api,
             name,
-            hostname,
-            platform: os.platform(),
-            cliVersion: cliVersion(),
-            eligibleTypes,
             concurrency,
+            requestedTypes: requested,
+            faceProvider,
+            comprefaceUrl,
+            cliVersion: cliVersion(),
           });
         } catch (err) {
           if (err instanceof ApiError && err.status === 403) {
@@ -252,18 +239,19 @@ function registerCmd(): Command {
           process.exit(1);
         }
 
-        const node: NodeConfig = {
-          name,
-          concurrency,
-          eligibleTypes,
-          pollIntervalMs: cfg.node?.pollIntervalMs ?? DEFAULT_POLL_MS,
-          faceProvider,
-          comprefaceUrl,
-        };
-        saveConfig({ ...cfg, nodeId: res.nodeId, node });
+        if (reg.eligibleTypes.length === 0) {
+          ui.warn(
+            'No job types are supported on this machine (missing native libraries / ffmpeg). ' +
+              'Registered with an empty type list — install dependencies and re-register.',
+          );
+        }
 
-        ui.success(`Registered as worker node: ${name} (${res.nodeId})`);
-        ui.dim(`Eligible types: ${eligibleTypes.join(', ') || '(none)'}`);
+        ui.success(
+          reg.reattached
+            ? `Re-attached to existing worker node: ${name} (${reg.nodeId})`
+            : `Registered as worker node: ${name} (${reg.nodeId})`,
+        );
+        ui.dim(`Eligible types: ${reg.eligibleTypes.join(', ') || '(none)'}`);
         if (faceProvider === 'compreface') {
           ui.dim(`Face provider: compreface (${comprefaceUrl ?? DEFAULT_COMPREFACE_URL})`);
         }
@@ -286,6 +274,12 @@ function startCmd(): Command {
     .option('--types <csv>', 'Override configured job types')
     .option('--poll <ms>', 'Override poll interval (ms) when idle')
     .option('--daemon', 'Detach and run in the background (logs under ~/.memoriahub/logs)')
+    .option(
+      '--headless',
+      'Container mode: auto-register when no nodeId is stored, and drain WITHOUT ' +
+        'deregistering on SIGTERM/SIGINT so the node re-attaches on restart ' +
+        '(also implied by MEMORIAHUB_HEADLESS=1)',
+    )
     .option('--face-provider <human|compreface>', 'Set face-detection provider (persisted to config)')
     .option(
       '--compreface-url <url>',
@@ -297,11 +291,16 @@ function startCmd(): Command {
         types?: string;
         poll?: string;
         daemon?: boolean;
+        headless?: boolean;
         faceProvider?: string;
         comprefaceUrl?: string;
       }) => {
         const cfg = requireConfig();
-        if (!cfg.nodeId) {
+        const headless = resolveHeadless(opts);
+        // Headless/container mode may self-register below (config is already
+        // complete via MEMORIAHUB_* env vars); interactive users are still
+        // pointed at the explicit `node register` flow.
+        if (!cfg.nodeId && !headless) {
           ui.error('This machine is not registered. Run `memoriahub node register` first.');
           process.exit(1);
         }
@@ -372,7 +371,7 @@ function startCmd(): Command {
           return;
         }
         const requested = parseTypes(opts.types);
-        const eligibleTypes =
+        let eligibleTypes =
           requested.length > 0 ? requested : cfg.node?.eligibleTypes ?? [...NODE_JOB_TYPES];
         const pollIntervalMs =
           parseInt(opts.poll ?? String(cfg.node?.pollIntervalMs ?? DEFAULT_POLL_MS), 10) ||
@@ -389,6 +388,43 @@ function startCmd(): Command {
           validatedFaceProvider ?? cfg.node?.faceProvider ?? 'human';
         const resolvedComprefaceUrl =
           opts.comprefaceUrl ?? cfg.node?.comprefaceUrl ?? DEFAULT_COMPREFACE_URL;
+
+        // Headless auto-registration: a container starts with no stored nodeId
+        // (only MEMORIAHUB_URL/TOKEN env vars), so run the same registration
+        // flow `node register` uses inline. The server's register endpoint is
+        // idempotent per (user, name), so a restarted replica re-attaches to
+        // its existing node row instead of creating a duplicate.
+        let nodeId = cfg.nodeId;
+        if (!nodeId) {
+          const name = defaultHeadlessNodeName(cfg);
+          ui.step(`No node registered — auto-registering as "${name}" (headless mode)…`);
+          try {
+            const reg = await registerWorkerNode({
+              cfg,
+              api,
+              name,
+              concurrency,
+              // Honor --types, else env/config-supplied types (Phase 1 overlays
+              // MEMORIAHUB_ELIGIBLE_TYPES into cfg.node.eligibleTypes); empty →
+              // auto-detect from capabilities inside the helper.
+              requestedTypes: requested.length > 0 ? requested : cfg.node?.eligibleTypes ?? [],
+              faceProvider: resolvedFaceProvider,
+              comprefaceUrl: opts.comprefaceUrl ?? cfg.node?.comprefaceUrl,
+              cliVersion: cliVersion(),
+            });
+            nodeId = reg.nodeId;
+            eligibleTypes = reg.eligibleTypes;
+            ui.success(
+              reg.reattached
+                ? `Re-attached to existing node ${reg.nodeId}`
+                : `Registered new node ${reg.nodeId}`,
+            );
+          } catch (err) {
+            ui.error(`Failed to auto-register node: ${(err as Error).message}`);
+            process.exit(1);
+          }
+        }
+
         const claimsFaceJobs =
           eligibleTypes.includes('face_detection') ||
           eligibleTypes.includes('video_face_detection');
@@ -456,7 +492,7 @@ function startCmd(): Command {
         const engine = new NodeEngine({
           api,
           dispatcher: new ComputeDispatcher(),
-          nodeId: cfg.nodeId,
+          nodeId,
           options,
         });
 
@@ -477,8 +513,16 @@ function startCmd(): Command {
           if (stopping) return;
           stopping = true;
           ui.blank();
-          ui.info('Draining — finishing in-flight jobs, then deregistering…');
-          void engine.stop('signal');
+          if (headless) {
+            // Container shutdown: drain but keep the server-side node row so
+            // the restarted replica re-attaches. Explicit `node stop` (IPC)
+            // still deregisters in both modes.
+            ui.info('Draining — finishing in-flight jobs (node stays registered for re-attach)…');
+            void engine.stop('signal', { deregister: false });
+          } else {
+            ui.info('Draining — finishing in-flight jobs, then deregistering…');
+            void engine.stop('signal');
+          }
         };
         process.on('SIGINT', onSignal);
         process.on('SIGTERM', onSignal);
