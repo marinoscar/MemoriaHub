@@ -53,17 +53,27 @@ async function isValid(dest: string, entry: ModelManifestEntry): Promise<boolean
 }
 
 /**
+ * Resolve the models directory: an explicit MODELS_DIR env var wins (so a
+ * container with models baked at e.g. /app/models verifies them in place
+ * instead of re-downloading), falling back to the state-dir models path.
+ */
+function resolveModelsDir(): string {
+  return process.env['MODELS_DIR']?.trim() || defaultModelsDir();
+}
+
+/**
  * Ensure every manifest entry is present and valid under `targetDir`.
  *
  * Downloads missing/invalid files with retry, verifies size+sha256 when the
  * manifest supplies them (skips verification when null), and renames atomically.
  * Never throws for a single failed file — failures are collected in the result
- * so `node doctor` / `node start` can surface them. Sets MODELS_DIR and
+ * so `node doctor` / `node start` can surface them. Honors an existing
+ * MODELS_DIR env var as the default target directory, and sets MODELS_DIR and
  * FACE_HUMAN_MODEL_PATH env vars pointing at the local directory.
  */
 export async function ensureModels(
   manifest: ModelManifestEntry[],
-  targetDir: string = defaultModelsDir(),
+  targetDir: string = resolveModelsDir(),
 ): Promise<EnsureModelsResult> {
   const result: EnsureModelsResult = {
     targetDir,
