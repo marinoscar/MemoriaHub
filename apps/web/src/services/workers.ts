@@ -55,3 +55,53 @@ export async function getWorkers(): Promise<WorkerNodeDto[]> {
 export async function deleteWorker(id: string): Promise<{ deleted: boolean }> {
   return api.delete<{ deleted: boolean }>(`/admin/nodes/${id}`);
 }
+
+// ---------------------------------------------------------------------------
+// Node credentials
+// ---------------------------------------------------------------------------
+
+/**
+ * A node credential row as returned by `GET /admin/nodes/credentials`.
+ *
+ * Flat shape (not nested under `owner`) matching the admin list endpoint.
+ */
+export interface AdminNodeCredentialDto {
+  id: string;
+  name: string;
+  tokenPrefix: string;
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  createdAt: string;
+  revokedAt: string | null;
+  userId: string;
+  ownerEmail: string;
+  ownerDisplayName: string | null;
+}
+
+/** Response from `POST /node-credentials` — includes the RAW token, shown once. */
+export interface CreatedNodeCredentialDto {
+  token: string;
+  id: string;
+  name: string;
+  tokenPrefix: string;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+/** List all node credentials across all users (admin view). */
+export async function getNodeCredentials(): Promise<AdminNodeCredentialDto[]> {
+  return api.get<AdminNodeCredentialDto[]>('/admin/nodes/credentials');
+}
+
+/** Create a new node credential (owned by the calling admin). */
+export async function createNodeCredential(body: {
+  name: string;
+  expiresAt: string | null;
+}): Promise<CreatedNodeCredentialDto> {
+  return api.post<CreatedNodeCredentialDto>('/node-credentials', body);
+}
+
+/** Revoke a node credential by id. */
+export async function revokeNodeCredential(id: string): Promise<void> {
+  await api.delete<void>(`/admin/nodes/credentials/${id}`);
+}
