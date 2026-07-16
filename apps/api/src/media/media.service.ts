@@ -482,6 +482,10 @@ export class MediaService {
       takenLng: bbox
         ? { not: null, gte: bbox.minLng, lte: bbox.maxLng }
         : { not: null },
+      // Exclude implausible (0,0) "Null Island" coordinates written by devices
+      // that failed to acquire a GPS fix — only when BOTH are exactly zero, so a
+      // legitimate photo on the equator or prime meridian is kept.
+      NOT: { takenLat: 0, takenLng: 0 },
       // Exclude soft-deleted and archived items
       deletedAt: null,
       archivedAt: null,
@@ -633,6 +637,7 @@ export class MediaService {
       WHERE circle_id = ${circleId}::uuid
         AND deleted_at IS NULL AND archived_at IS NULL
         AND taken_lat IS NOT NULL AND taken_lng IS NOT NULL
+        AND NOT (taken_lat = 0 AND taken_lng = 0)
         ${Prisma.join(fragments, ' ')}
       GROUP BY gy, gx
     `);
@@ -679,6 +684,10 @@ export class MediaService {
       circleId,
       takenLat: { not: null },
       takenLng: { not: null },
+      // Exclude implausible (0,0) "Null Island" coordinates written by devices
+      // that failed to acquire a GPS fix — only when BOTH are exactly zero, so a
+      // legitimate photo on the equator or prime meridian is kept.
+      NOT: { takenLat: 0, takenLng: 0 },
       deletedAt: null,
       archivedAt: null,
       ...(type && { type }),
