@@ -130,6 +130,12 @@ async function probeCompreface(baseUrl: string): Promise<CapabilityStatus> {
 // Node-eligible job types
 // ---------------------------------------------------------------------------
 
+// NOTE: `thumbnail_repair` is deliberately absent — it is a GLOBAL sweep job
+// (mediaItemId: null, inputUrl: null) that scans the whole database for media
+// items missing thumbnails, which a node cannot do; only the per-item
+// `thumbnail_regen` type is node-runnable (same compute module server-side).
+// `face_auto_archive_sweep` and `location_inference` sweeps are server-only
+// for the same reason.
 export const NODE_JOB_TYPES = [
   'face_detection',
   'video_face_detection',
@@ -137,7 +143,6 @@ export const NODE_JOB_TYPES = [
   'metadata_extraction',
   'social_media_detection',
   'thumbnail_regen',
-  'thumbnail_repair',
   'auto_tagging',
   'geocode',
 ] as const;
@@ -162,7 +167,6 @@ export const JOB_TYPE_REQUIREMENTS: Record<NodeJobType, string[]> = {
   metadata_extraction: ['sharp'],
   social_media_detection: ['ffprobe'], // tesseract optional → Tier-1-only mode
   thumbnail_regen: ['sharp', 'ffmpeg'],
-  thumbnail_repair: ['sharp', 'ffmpeg'],
   auto_tagging: ['sharp'],
   geocode: [],
 };
@@ -313,7 +317,6 @@ export class ComputeDispatcher {
         'social_media_detection',
       ),
       thumbnail_regen: lazy(() => import('./compute/thumbnail.js'), 'thumbnail_regen'),
-      thumbnail_repair: lazy(() => import('./compute/thumbnail.js'), 'thumbnail_repair'),
       auto_tagging: lazy(() => import('./compute/auto-tagging.js'), 'auto_tagging'),
       geocode: lazy(() => import('./compute/geocode.js'), 'geocode'),
     };

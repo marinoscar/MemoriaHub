@@ -9,8 +9,19 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-/** Root config/data directory: ~/.memoriahub */
+/**
+ * Root config/data directory: ~/.memoriahub by default.
+ *
+ * `MEMORIAHUB_STATE_DIR` (absolute path) relocates the whole state tree —
+ * config.json, SQLite db, pidfile, IPC socket, logs, and models all derive
+ * from this base — so containers can mount a single writable volume without
+ * needing a writable home directory.
+ */
 export function configDir(): string {
+  const override = process.env['MEMORIAHUB_STATE_DIR']?.trim();
+  if (override) {
+    return path.resolve(override);
+  }
   return path.join(os.homedir(), '.memoriahub');
 }
 

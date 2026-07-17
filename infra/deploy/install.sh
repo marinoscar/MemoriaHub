@@ -332,8 +332,12 @@ services:
   api:
     container_name: memoriahub-api
     build:
-      context: ./repo/apps/api
-      dockerfile: Dockerfile
+      # Repo-root context: apps/api depends on the @memoriahub/enrichment-compute
+      # npm workspace, so the build needs the root manifests + the workspace
+      # member visible (matches infra/compose and deploy.yml). An apps/api-scoped
+      # context breaks the install.
+      context: ./repo
+      dockerfile: apps/api/Dockerfile
       target: production
     env_file:
       - .env

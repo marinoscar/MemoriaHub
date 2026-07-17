@@ -44,7 +44,13 @@ import os from 'node:os';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = path.join(__dirname, 'fixtures', 'golden-fixture.jpg');
 const GOLDEN_CLIP_PATH = path.join(__dirname, 'fixtures', 'golden-clip-512.json');
-const MODEL_PATH = path.join(os.homedir(), '.memoriahub', 'models', 'clip-vit-b32-vision-quantized.onnx');
+// Prefer MODELS_DIR (set inside the worker image, where the CLIP model is baked
+// at /app/models) so the CI parity gate finds the model and runs the CLIP
+// assertion instead of skipping; fall back to the CLI's default models dir.
+const MODELS_DIR = process.env.MODELS_DIR
+  ? process.env.MODELS_DIR
+  : path.join(os.homedir(), '.memoriahub', 'models');
+const MODEL_PATH = path.join(MODELS_DIR, 'clip-vit-b32-vision-quantized.onnx');
 
 // dHash of golden-fixture.jpg, computed once and pinned. dHash is a
 // bit-exact algorithm (resize + adjacent-pixel comparison), so this must
@@ -87,6 +93,15 @@ test('CLIP embedding of golden-fixture.jpg matches the committed golden vector',
   try {
     modelBuffer = readFileSync(MODEL_PATH);
   } catch {
+    // REQUIRE_CLIP_MODEL=1 turns the "model absent" skip into a hard failure —
+    // used by the CI parity gate that runs this test inside the worker image
+    // (where the model is baked), so a missing/misplaced model fails the build
+    // instead of silently passing as a skip.
+    if (process.env.REQUIRE_CLIP_MODEL === '1') {
+      assert.fail(
+        `REQUIRE_CLIP_MODEL=1 but CLIP model not found at ${MODEL_PATH} — the baked model is missing or MODELS_DIR is wrong.`,
+      );
+    }
     t.skip(
       `CLIP model not found at ${MODEL_PATH} (expected on CI/other machines) — skipping CLIP golden-vector test. ` +
         'Download the model (~89MB, sha256 583fd111...) to run this test locally.',

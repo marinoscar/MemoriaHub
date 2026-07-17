@@ -1,14 +1,16 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import { ExecutionContext, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { PatService } from '../../pat/pat.service';
+import { NodeCredentialService } from '../../nodes/node-credential.service';
 
 describe('JwtAuthGuard', () => {
   let guard: JwtAuthGuard;
   let reflector: jest.Mocked<Reflector>;
   let patService: jest.Mocked<PatService>;
+  let nodeCredentialService: jest.Mocked<NodeCredentialService>;
 
   beforeEach(async () => {
     reflector = {
@@ -19,11 +21,16 @@ describe('JwtAuthGuard', () => {
       validateToken: jest.fn(),
     } as any;
 
+    nodeCredentialService = {
+      validateToken: jest.fn(),
+    } as any;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         JwtAuthGuard,
         { provide: Reflector, useValue: reflector },
         { provide: PatService, useValue: patService },
+        { provide: NodeCredentialService, useValue: nodeCredentialService },
       ],
     }).compile();
 
@@ -37,10 +44,13 @@ describe('JwtAuthGuard', () => {
     jest.restoreAllMocks();
   });
 
-  function createMockContext(authorizationHeader?: string): ExecutionContext {
+  function createMockContext(authorizationHeader?: string, url?: string): ExecutionContext {
     const request: any = {};
     if (authorizationHeader !== undefined) {
       request.headers = { authorization: authorizationHeader };
+    }
+    if (url !== undefined) {
+      request.url = url;
     }
     return {
       switchToHttp: () => ({
@@ -272,6 +282,147 @@ describe('JwtAuthGuard', () => {
       await guard.canActivate(context);
 
       expect(patService.validateToken).toHaveBeenCalledWith(rawToken);
+    });
+  });
+
+  // ============================================================================
+  // Node credential handling: Bearer nod_... tokens (route-allowlisted)
+  // ============================================================================
+
+  describe('Node credential (nod_) token handling', () => {
+    const mockUser = {
+      id: 'user-node-1',
+      email: 'node@example.com',
+      isActive: true,
+      userRoles: [],
+    };
+
+    it('should accept a valid nod_ token on /api/nodes (exact match)', async () => {
+      reflector.getAllAndOverride.mockReturnValue(false);
+      nodeCredentialService.validateToken.mockResolvedValue(mockUser as any);
+
+      const context = createMockContext('Bearer nod_abc123', '/api/nodes');
+      const request = context.switchToHttp().getRequest();
+
+      const result = await guard.canActivate(context);
+
+      expect(nodeCredentialService.validateToken).toHaveBeenCalledWith('nod_abc123');
+      expect(result).toBe(true);
+      expect(request.user).toBe(mockUser);
+    });
+
+    it('should accept a valid nod_ token on nested /api/nodes/* routes (query stripped)', async () => {
+      reflector.getAllAndOverride.mockReturnValue(false);
+      nodeCredentialService.validateToken.mockResolvedValue(mockUser as any);
+
+      const context = createMockContext(
+        'Bearer nod_abc123',
+        '/api/nodes/6a3f/claim?max=2',
+      );
+
+      const result = await guard.canActivate(context);
+
+      expect(result).toBe(true);
+      expect(nodeCredentialService.validateToken).toHaveBeenCalledWith('nod_abc123');
+    });
+
+    it('should reject a nod_ token on non-node routes with ForbiddenException', async () => {
+      reflector.getAllAndOverride.mockReturnValue(false);
+
+      const context = createMockContext('Bearer nod_abc123', '/api/media?circleId=x');
+
+      await expect(guard.canActivate(context)).rejects.toThrow(ForbiddenException);
+      await expect(guard.canActivate(context)).rejects.toThrow(
+        'node credentials are valid only for node endpoints',
+      );
+      expect(nodeCredentialService.validateToken).not.toHaveBeenCalled();
+    });
+
+    it('should reject a nod_ token on the /api/node-credentials management routes', async () => {
+      reflector.getAllAndOverride.mockReturnValue(false);
+
+      const context = createMockContext('Bearer nod_abc123', '/api/node-credentials');
+
+      await expect(guard.canActivate(context)).rejects.toThrow(ForbiddenException);
+      expect(nodeCredentialService.validateToken).not.toHaveBeenCalled();
+    });
+
+    it('should reject a nod_ token on /api/admin/nodes (admin plane is JWT/PAT only)', async () => {
+      reflector.getAllAndOverride.mockReturnValue(false);
+
+      const context = createMockContext('Bearer nod_abc123', '/api/admin/nodes');
+
+      await expect(guard.canActivate(context)).rejects.toThrow(ForbiddenException);
+      expect(nodeCredentialService.validateToken).not.toHaveBeenCalled();
+    });
+
+    it('should not treat a prefix-sharing path like /api/nodesX as a node route', async () => {
+      reflector.getAllAndOverride.mockReturnValue(false);
+
+      const context = createMockContext('Bearer nod_abc123', '/api/nodesX');
+
+      await expect(guard.canActivate(context)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should throw UnauthorizedException for unknown/revoked/expired nod_ tokens on node routes', async () => {
+      reflector.getAllAndOverride.mockReturnValue(false);
+      nodeCredentialService.validateToken.mockResolvedValue(null);
+
+      const context = createMockContext('Bearer nod_badtoken', '/api/nodes/register');
+
+      await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
+      await expect(guard.canActivate(context)).rejects.toThrow(
+        'Invalid, expired, or revoked node credential',
+      );
+    });
+
+    it('should leave PAT handling unaffected on node routes (back-compat)', async () => {
+      reflector.getAllAndOverride.mockReturnValue(false);
+      patService.validateToken.mockResolvedValue(mockUser as any);
+
+      const context = createMockContext('Bearer pat_stillworks', '/api/nodes/register');
+
+      const result = await guard.canActivate(context);
+
+      expect(result).toBe(true);
+      expect(patService.validateToken).toHaveBeenCalledWith('pat_stillworks');
+      expect(nodeCredentialService.validateToken).not.toHaveBeenCalled();
+    });
+
+    it('should leave PAT handling unaffected on NON-node routes (back-compat)', async () => {
+      reflector.getAllAndOverride.mockReturnValue(false);
+      patService.validateToken.mockResolvedValue(mockUser as any);
+
+      const context = createMockContext('Bearer pat_stillworks', '/api/media');
+
+      const result = await guard.canActivate(context);
+
+      expect(result).toBe(true);
+      expect(patService.validateToken).toHaveBeenCalledWith('pat_stillworks');
+    });
+
+    it('should NOT invoke NodeCredentialService for @Public() routes even with nod_ token', async () => {
+      reflector.getAllAndOverride.mockReturnValue(true); // route is public
+
+      const context = createMockContext('Bearer nod_sometoken', '/api/nodes');
+
+      const result = await guard.canActivate(context);
+
+      expect(nodeCredentialService.validateToken).not.toHaveBeenCalled();
+      expect(result).toBe(true);
+    });
+
+    it('should prefer originalUrl over url when both are present', async () => {
+      reflector.getAllAndOverride.mockReturnValue(false);
+      nodeCredentialService.validateToken.mockResolvedValue(mockUser as any);
+
+      const context = createMockContext('Bearer nod_abc123', '/api/media');
+      const request = context.switchToHttp().getRequest();
+      request.originalUrl = '/api/nodes/register';
+
+      const result = await guard.canActivate(context);
+
+      expect(result).toBe(true);
     });
   });
 

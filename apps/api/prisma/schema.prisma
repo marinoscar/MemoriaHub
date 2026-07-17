@@ -63,6 +63,7 @@ model User {
   resolvedLocationSuggestions LocationSuggestion[]        @relation("LocationSuggestionResolvedBy")
   // Distributed Worker Node relations
   workerNodes                 WorkerNode[]
+  nodeCredentials             NodeCredential[]            @relation("UserNodeCredentials")
   // AI Picture Enhancer relations
   mediaEnhancementsCreated    MediaEnhancement[]          @relation("MediaEnhancementCreatedBy")
 
@@ -1335,9 +1336,36 @@ model WorkerNode {
   createdBy   User            @relation(fields: [createdById], references: [id], onDelete: Cascade)
   claimedJobs EnrichmentJob[]
 
+  // Idempotent register-or-reattach: a containerized replica re-registering
+  // under the same (owner, name) re-attaches to its existing row instead of
+  // minting a duplicate. Migration 20260716010000_worker_node_unique_name.
+  @@unique([createdById, name])
   @@index([status])
   @@index([createdById])
   @@map("worker_nodes")
+}
+
+// Durable, least-privilege bearer credential for worker nodes (`nod_` prefix).
+// Authenticates exactly like a PAT but is only accepted on /api/nodes/* routes
+// (enforced by JwtAuthGuard's route allowlist) and may never expire
+// (`expiresAt` NULL = never). Mirrors PersonalAccessToken minus the duration
+// bookkeeping. Migration 20260716020000_add_node_credentials.
+model NodeCredential {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  name        String
+  tokenHash   String    @unique @map("token_hash")
+  tokenPrefix String    @map("token_prefix")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  lastUsedAt  DateTime? @map("last_used_at") @db.Timestamptz
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz
+  expiresAt   DateTime? @map("expires_at") @db.Timestamptz
+
+  // Relations
+  user User @relation("UserNodeCredentials", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("node_credentials")
 }
 
 // =============================================================================

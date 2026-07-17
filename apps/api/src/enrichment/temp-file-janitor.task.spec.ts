@@ -11,7 +11,9 @@
  *  - old matching files are unlinked (full path under tmpdir())
  *  - young files, non-matching names (prefix is anchored and case-sensitive),
  *    and directories are left alone
- *  - ENRICHMENT_WORKER_ENABLED='false' short-circuits the sweep entirely
+ *  - worker mode 'off' (ENRICHMENT_WORKER_MODE=off, or the legacy
+ *    ENRICHMENT_WORKER_ENABLED='false' fallback) short-circuits the sweep
+ *    entirely; mode 'system' still sweeps (server-only jobs create temp files)
  *  - per-file stat/unlink errors are swallowed and do NOT abort the sweep
  *  - a readdir failure is swallowed (logged) and never throws
  *
@@ -55,10 +57,12 @@ describe('TempFileJanitorTask', () => {
   let task: TempFileJanitorTask;
 
   const SAVED_WORKER_ENABLED = process.env['ENRICHMENT_WORKER_ENABLED'];
+  const SAVED_WORKER_MODE = process.env['ENRICHMENT_WORKER_MODE'];
 
   beforeEach(() => {
     jest.clearAllMocks();
     delete process.env['ENRICHMENT_WORKER_ENABLED'];
+    delete process.env['ENRICHMENT_WORKER_MODE'];
 
     // Defaults: empty dir, everything old, unlink succeeds.
     mockReaddir.mockResolvedValue([]);
@@ -73,6 +77,11 @@ describe('TempFileJanitorTask', () => {
       delete process.env['ENRICHMENT_WORKER_ENABLED'];
     } else {
       process.env['ENRICHMENT_WORKER_ENABLED'] = SAVED_WORKER_ENABLED;
+    }
+    if (SAVED_WORKER_MODE === undefined) {
+      delete process.env['ENRICHMENT_WORKER_MODE'];
+    } else {
+      process.env['ENRICHMENT_WORKER_MODE'] = SAVED_WORKER_MODE;
     }
   });
 
@@ -170,9 +179,18 @@ describe('TempFileJanitorTask', () => {
   // Disable flag
   // ---------------------------------------------------------------------------
 
-  describe('ENRICHMENT_WORKER_ENABLED=false short-circuit', () => {
-    it('skips the sweep entirely (no readdir) when the worker is disabled', async () => {
+  describe('worker mode gating (only mode "off" skips)', () => {
+    it('skips the sweep entirely (no readdir) when the legacy ENRICHMENT_WORKER_ENABLED=false maps to mode off', async () => {
       process.env['ENRICHMENT_WORKER_ENABLED'] = 'false';
+
+      await task.handleSweep();
+
+      expect(mockReaddir).not.toHaveBeenCalled();
+      expect(mockUnlink).not.toHaveBeenCalled();
+    });
+
+    it('skips the sweep when ENRICHMENT_WORKER_MODE=off', async () => {
+      process.env['ENRICHMENT_WORKER_MODE'] = 'off';
 
       await task.handleSweep();
 
@@ -188,7 +206,24 @@ describe('TempFileJanitorTask', () => {
       expect(mockReaddir).not.toHaveBeenCalled();
     });
 
-    it('is strict equality — "true" (or anything else) still sweeps', async () => {
+    it('STILL sweeps in system mode — server-only jobs create temp files too', async () => {
+      process.env['ENRICHMENT_WORKER_MODE'] = 'system';
+
+      await task.handleSweep();
+
+      expect(mockReaddir).toHaveBeenCalledTimes(1);
+    });
+
+    it('system mode sweeps even when the legacy var says false (explicit mode wins)', async () => {
+      process.env['ENRICHMENT_WORKER_MODE'] = 'system';
+      process.env['ENRICHMENT_WORKER_ENABLED'] = 'false';
+
+      await task.handleSweep();
+
+      expect(mockReaddir).toHaveBeenCalledTimes(1);
+    });
+
+    it('is strict equality — legacy "true" (or anything else) still sweeps', async () => {
       process.env['ENRICHMENT_WORKER_ENABLED'] = 'true';
 
       await task.handleSweep();

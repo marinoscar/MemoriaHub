@@ -40,7 +40,13 @@ import { createMockPrismaService, MockPrismaService } from '../../test/mocks/pri
 import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
 import { RateLimitError } from './rate-limit.error';
 // Import with a regular import; for the isolated-module tests we re-import below.
-import { EnrichmentJobWorker } from './enrichment-job.worker';
+import {
+  EnrichmentJobWorker,
+  isEnrichmentWorkerEnabled,
+  resolveWorkerMode,
+  systemModeEligibleTypes,
+} from './enrichment-job.worker';
+import { Logger } from '@nestjs/common';
 import { EnrichmentClaimService } from './enrichment-claim.service';
 import { EnrichmentTerminalService } from './enrichment-terminal.service';
 import { ProviderThrottleService } from './provider-throttle.service';
@@ -83,11 +89,15 @@ function makeClaimMock(mockPrisma: MockPrismaService): { claim: jest.Mock } {
   };
 }
 
-/** A mock handler registry exposing the get()/types() surface the worker uses. */
-function makeRegistryMock(handler: unknown): { get: jest.Mock; types: jest.Mock } {
+/** A mock handler registry exposing the get()/types()/serverOnlyTypes() surface the worker uses. */
+function makeRegistryMock(
+  handler: unknown,
+  opts: { types?: string[]; serverOnlyTypes?: string[] } = {},
+): { get: jest.Mock; types: jest.Mock; serverOnlyTypes: jest.Mock } {
   return {
     get: jest.fn().mockReturnValue(handler),
-    types: jest.fn().mockReturnValue(['face_detection', 'metadata_extraction']),
+    types: jest.fn().mockReturnValue(opts.types ?? ['face_detection', 'metadata_extraction']),
+    serverOnlyTypes: jest.fn().mockReturnValue(opts.serverOnlyTypes ?? []),
   };
 }
 
@@ -171,10 +181,13 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
     savedEnv = {
       ENRICHMENT_WORKER_ENABLED: process.env['ENRICHMENT_WORKER_ENABLED'],
       FACE_WORKER_ENABLED: process.env['FACE_WORKER_ENABLED'],
+      ENRICHMENT_WORKER_MODE: process.env['ENRICHMENT_WORKER_MODE'],
     };
-    // Disable the polling interval for all tests in this file
+    // Disable the polling interval for all tests in this file (mode 'off' —
+    // the worker never starts loops; tests drive tick() directly).
     process.env['ENRICHMENT_WORKER_ENABLED'] = 'false';
     delete process.env['FACE_WORKER_ENABLED'];
+    delete process.env['ENRICHMENT_WORKER_MODE'];
   });
 
   afterAll(() => {
@@ -1117,5 +1130,273 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       w2.onModuleDestroy();
     });
+  });
+});
+
+// =============================================================================
+// Worker mode (ENRICHMENT_WORKER_MODE=all|system|off) — issue #108 Phase 4
+// =============================================================================
+
+describe('resolveWorkerMode', () => {
+  it("returns each explicit mode value ('all' | 'system' | 'off')", () => {
+    expect(resolveWorkerMode({ ENRICHMENT_WORKER_MODE: 'all' })).toBe('all');
+    expect(resolveWorkerMode({ ENRICHMENT_WORKER_MODE: 'system' })).toBe('system');
+    expect(resolveWorkerMode({ ENRICHMENT_WORKER_MODE: 'off' })).toBe('off');
+  });
+
+  it('an explicit mode wins over the legacy on/off switches', () => {
+    expect(
+      resolveWorkerMode({ ENRICHMENT_WORKER_MODE: 'system', ENRICHMENT_WORKER_ENABLED: 'false' }),
+    ).toBe('system');
+    expect(
+      resolveWorkerMode({ ENRICHMENT_WORKER_MODE: 'all', FACE_WORKER_ENABLED: 'false' }),
+    ).toBe('all');
+    expect(
+      resolveWorkerMode({ ENRICHMENT_WORKER_MODE: 'off', ENRICHMENT_WORKER_ENABLED: 'true' }),
+    ).toBe('off');
+  });
+
+  it("unset mode + ENRICHMENT_WORKER_ENABLED=false → 'off' (legacy fallback)", () => {
+    expect(resolveWorkerMode({ ENRICHMENT_WORKER_ENABLED: 'false' })).toBe('off');
+  });
+
+  it("unset mode + legacy FACE_WORKER_ENABLED=false → 'off'", () => {
+    expect(resolveWorkerMode({ FACE_WORKER_ENABLED: 'false' })).toBe('off');
+  });
+
+  it("unset mode + legacy vars truthy or absent → 'all'", () => {
+    expect(resolveWorkerMode({})).toBe('all');
+    expect(resolveWorkerMode({ ENRICHMENT_WORKER_ENABLED: 'true' })).toBe('all');
+    expect(resolveWorkerMode({ FACE_WORKER_ENABLED: 'true' })).toBe('all');
+  });
+
+  it('an empty-string mode is treated as unset (legacy fallback applies)', () => {
+    expect(resolveWorkerMode({ ENRICHMENT_WORKER_MODE: '' })).toBe('all');
+    expect(
+      resolveWorkerMode({ ENRICHMENT_WORKER_MODE: '', ENRICHMENT_WORKER_ENABLED: 'false' }),
+    ).toBe('off');
+  });
+
+  it("an unrecognized value warns (at most once) and is treated as 'all'", () => {
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    expect(resolveWorkerMode({ ENRICHMENT_WORKER_MODE: 'bogus' })).toBe('all');
+    const warnsAfterFirst = warnSpy.mock.calls.length;
+    // Warn-once latch: the flag is module-level, so an earlier test in the same
+    // process may already have consumed the single warn — assert <= 1 here and
+    // that a SECOND invalid resolve adds nothing.
+    expect(warnsAfterFirst).toBeLessThanOrEqual(1);
+
+    expect(resolveWorkerMode({ ENRICHMENT_WORKER_MODE: 'bogus' })).toBe('all');
+    expect(warnSpy.mock.calls.length).toBe(warnsAfterFirst);
+
+    warnSpy.mockRestore();
+  });
+});
+
+describe('isEnrichmentWorkerEnabled (back-compat wrapper over resolveWorkerMode)', () => {
+  it("is false only for mode 'off'", () => {
+    expect(isEnrichmentWorkerEnabled({ ENRICHMENT_WORKER_MODE: 'off' })).toBe(false);
+    expect(isEnrichmentWorkerEnabled({ ENRICHMENT_WORKER_MODE: 'system' })).toBe(true);
+    expect(isEnrichmentWorkerEnabled({ ENRICHMENT_WORKER_MODE: 'all' })).toBe(true);
+  });
+
+  it('preserves the legacy boolean semantics when the mode var is unset', () => {
+    expect(isEnrichmentWorkerEnabled({})).toBe(true);
+    expect(isEnrichmentWorkerEnabled({ ENRICHMENT_WORKER_ENABLED: 'false' })).toBe(false);
+    expect(isEnrichmentWorkerEnabled({ FACE_WORKER_ENABLED: 'false' })).toBe(false);
+    expect(isEnrichmentWorkerEnabled({ ENRICHMENT_WORKER_ENABLED: 'true' })).toBe(true);
+  });
+});
+
+describe('systemModeEligibleTypes', () => {
+  const registry = {
+    serverOnlyTypes: () => ['burst_detection', 'trash_purge'],
+    types: () => [
+      'burst_detection',
+      'trash_purge',
+      'face_detection',
+      'auto_tagging',
+      'thumbnail_repair',
+    ],
+  };
+
+  it("returns the server-only set plus the explicit 'thumbnail_repair' addition", () => {
+    const types = systemModeEligibleTypes(registry, {});
+
+    expect(types.sort()).toEqual(['burst_detection', 'thumbnail_repair', 'trash_purge']);
+  });
+
+  it('excludes node-eligible media compute types', () => {
+    const types = systemModeEligibleTypes(registry, {});
+
+    expect(types).not.toContain('face_detection');
+    expect(types).not.toContain('auto_tagging');
+  });
+
+  it('appends registered ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES entries (csv, whitespace-tolerant)', () => {
+    const types = systemModeEligibleTypes(registry, {
+      ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES: ' face_detection , auto_tagging ',
+    });
+
+    expect(types.sort()).toEqual([
+      'auto_tagging',
+      'burst_detection',
+      'face_detection',
+      'thumbnail_repair',
+      'trash_purge',
+    ]);
+  });
+
+  it('drops extra entries that are not registered handler types (typo safety)', () => {
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    const types = systemModeEligibleTypes(registry, {
+      ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES: 'not_a_real_type,face_detection',
+    });
+
+    expect(types).not.toContain('not_a_real_type');
+    expect(types).toContain('face_detection');
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('not_a_real_type'));
+
+    warnSpy.mockRestore();
+  });
+
+  it('does not duplicate an extra that is already in the set', () => {
+    const types = systemModeEligibleTypes(registry, {
+      ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES: 'thumbnail_repair,burst_detection',
+    });
+
+    expect(types.filter((t) => t === 'thumbnail_repair')).toHaveLength(1);
+    expect(types.filter((t) => t === 'burst_detection')).toHaveLength(1);
+  });
+});
+
+describe('EnrichmentJobWorker — system-mode claim eligibility', () => {
+  const REGISTERED_TYPES = [
+    'face_detection',
+    'auto_tagging',
+    'burst_detection',
+    'trash_purge',
+    'thumbnail_repair',
+  ];
+  const SERVER_ONLY_TYPES = ['burst_detection', 'trash_purge'];
+
+  let savedModeEnv: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    savedModeEnv = {
+      ENRICHMENT_WORKER_MODE: process.env['ENRICHMENT_WORKER_MODE'],
+      ENRICHMENT_WORKER_ENABLED: process.env['ENRICHMENT_WORKER_ENABLED'],
+      ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES: process.env['ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES'],
+    };
+  });
+
+  afterEach(() => {
+    for (const [key, val] of Object.entries(savedModeEnv)) {
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+    }
+    jest.clearAllMocks();
+  });
+
+  /**
+   * Builds the worker WITHOUT calling onApplicationBootstrap (no loops); the
+   * mode is resolved per claim, so claimNextJob is driven directly.
+   */
+  async function buildWorkerNoBootstrap(): Promise<{
+    worker: EnrichmentJobWorker;
+    mockClaim: { claim: jest.Mock };
+  }> {
+    const mockPrisma = createMockPrismaService();
+    const mockHandler = { type: 'burst_detection', process: jest.fn() };
+    const mockRegistry = makeRegistryMock(mockHandler, {
+      types: REGISTERED_TYPES,
+      serverOnlyTypes: SERVER_ONLY_TYPES,
+    });
+    const mockClaim = { claim: jest.fn().mockResolvedValue([]) };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        EnrichmentJobWorker,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
+        { provide: ProviderThrottleService, useValue: new ProviderThrottleService() },
+        { provide: EnrichmentClaimService, useValue: mockClaim },
+        EnrichmentTerminalService,
+      ],
+    }).compile();
+
+    return { worker: module.get<EnrichmentJobWorker>(EnrichmentJobWorker), mockClaim };
+  }
+
+  it('system mode claims ONLY the server-only set plus thumbnail_repair', async () => {
+    process.env['ENRICHMENT_WORKER_MODE'] = 'system';
+    delete process.env['ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES'];
+    const { worker, mockClaim } = await buildWorkerNoBootstrap();
+
+    await (worker as any).claimNextJob();
+
+    expect(mockClaim.claim).toHaveBeenCalledTimes(1);
+    const args = mockClaim.claim.mock.calls[0][0];
+    expect([...args.eligibleTypes].sort()).toEqual([
+      'burst_detection',
+      'thumbnail_repair',
+      'trash_purge',
+    ]);
+    // Still the server plane.
+    expect(args.nodeId).toBeNull();
+    expect(args.executor).toBe('server');
+  });
+
+  it('system mode honors ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES for registered types', async () => {
+    process.env['ENRICHMENT_WORKER_MODE'] = 'system';
+    process.env['ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES'] = 'auto_tagging';
+    const { worker, mockClaim } = await buildWorkerNoBootstrap();
+
+    await (worker as any).claimNextJob();
+
+    const args = mockClaim.claim.mock.calls[0][0];
+    expect([...args.eligibleTypes].sort()).toEqual([
+      'auto_tagging',
+      'burst_detection',
+      'thumbnail_repair',
+      'trash_purge',
+    ]);
+  });
+
+  it("mode 'all' (explicit) claims every registered handler type", async () => {
+    process.env['ENRICHMENT_WORKER_MODE'] = 'all';
+    const { worker, mockClaim } = await buildWorkerNoBootstrap();
+
+    await (worker as any).claimNextJob();
+
+    const args = mockClaim.claim.mock.calls[0][0];
+    expect([...args.eligibleTypes].sort()).toEqual([...REGISTERED_TYPES].sort());
+  });
+
+  it('unset mode (legacy default) claims every registered handler type', async () => {
+    delete process.env['ENRICHMENT_WORKER_MODE'];
+    delete process.env['ENRICHMENT_WORKER_ENABLED'];
+    const { worker, mockClaim } = await buildWorkerNoBootstrap();
+
+    await (worker as any).claimNextJob();
+
+    const args = mockClaim.claim.mock.calls[0][0];
+    expect([...args.eligibleTypes].sort()).toEqual([...REGISTERED_TYPES].sort());
+  });
+
+  it('onApplicationBootstrap does not start loops in mode off, but does in system mode', async () => {
+    process.env['ENRICHMENT_WORKER_MODE'] = 'off';
+    const { worker: offWorker } = await buildWorkerNoBootstrap();
+    offWorker.onApplicationBootstrap();
+    expect(((offWorker as any).loops as unknown[]).length).toBe(0);
+    offWorker.onModuleDestroy();
+
+    process.env['ENRICHMENT_WORKER_MODE'] = 'system';
+    const { worker: sysWorker } = await buildWorkerNoBootstrap();
+    sysWorker.onApplicationBootstrap();
+    expect(((sysWorker as any).loops as unknown[]).length).toBeGreaterThan(0);
+    sysWorker.onModuleDestroy();
   });
 });

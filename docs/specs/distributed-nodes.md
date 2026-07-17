@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 2.0 |
+| **Version** | 2.1 |
 | **Last Updated** | July 2026 |
 | **Status** | Implemented |
 
@@ -23,6 +23,10 @@
    - [9.3 Worker Daemon, systemd Service, and TUI Attach](#93-worker-daemon-systemd-service-and-tui-attach)
 10. [Doctor Coverage](#10-doctor-coverage)
 11. [Risks and Open Questions](#11-risks-and-open-questions)
+12. [Registration Lifecycle: Register-or-Reattach and Offline Pruning](#12-registration-lifecycle-register-or-reattach-and-offline-pruning)
+13. [Durable Node Credentials (`nod_` Tokens)](#13-durable-node-credentials-nod_-tokens)
+14. [Worker Modes and the Lease Reaper](#14-worker-modes-and-the-lease-reaper)
+15. [Container Fleet Topology](#15-container-fleet-topology)
 
 ---
 
@@ -84,6 +88,8 @@ Nodes authenticate to the API using the existing **Personal Access Token** syste
 Every subsequent node → API call is scoped by `createdById`: a PAT can only claim jobs, renew leases, and submit results for nodes **it itself registered**. This means a PAT scoped to one user cannot see or interfere with another user's registered nodes, even within the same household/circle — node ownership follows the same "resource belongs to the user who created it" convention used elsewhere in this codebase (e.g. `personal_access_tokens`, `storage_objects`).
 
 Because a node is "just" a PAT holder making authenticated API calls, all existing PAT lifecycle behavior applies unmodified: revoking the PAT (`DELETE /api/pat/{id}`) immediately cuts off every node registered with it, with no separate node-credential revocation path to build or maintain.
+
+**Update (Phase 5 — Durable Node Credentials):** the "no new node-specific credential type" claim above no longer fully holds. A node can still authenticate with a PAT exactly as described here — nothing above is a breaking change — but a new, narrower credential type now exists specifically to address the gap a long-lived, unattended worker (a systemd service, or a fleet container per §15) leaves open: a PAT valid on every `jobs:write`-gated endpoint, not just node routes. See [§13, Durable Node Credentials](#13-durable-node-credentials-nod_-tokens) below for the `nod_`-prefixed, `/api/nodes/*`-only, non-expiring, individually-revocable credential this section originally argued would never be built.
 
 ### 2.5 Presigned URLs: Deliberately Ephemeral, Deliberately Unrevocable
 
@@ -238,7 +244,7 @@ All node routes are mounted at `/api/nodes` and, per `NodesController`'s own con
 
 | Endpoint | Description |
 |----------|-------------|
-| `POST /api/nodes/register` | Register a machine as a node; body includes `name`, `hostname`, `platform`, `cliVersion`, `eligibleTypes`, `concurrency`; returns the created `worker_nodes` row |
+| `POST /api/nodes/register` | Register a machine as a node; body includes `name`, `hostname`, `platform`, `cliVersion`, `eligibleTypes`, `concurrency`; idempotent per `(createdById, name)` — returns the `worker_nodes` row plus `reattached: true` if this call re-attached an existing record rather than creating a new one (§12.1) |
 | `POST /api/nodes/:id/deregister` | Cleanly remove a node registration (operator-initiated, e.g. retiring a laptop) |
 | `POST /api/nodes/:id/heartbeat` | Periodic liveness + capability payload; updates `lastHeartbeatAt`, and optionally `status`/`capabilities` (latest `node doctor` summary); this payload also feeds the Doctor `nodes` section (§10) |
 | `POST /api/nodes/:id/claim` | Atomic claim per §4; body includes `max` (jobs to claim this round, capped at the node's `concurrency`) and an optional `types` filter (intersected with the node's registered `eligibleTypes`); returns `{ jobs: [{ job, inputUrl, params }] }` — `inputUrl` is a presigned GET for the source object bytes (`null` for a global job with no `mediaItemId`), `params` is the job's raw `payload` |
@@ -259,6 +265,8 @@ Four of these — `upload-url`, `credentials`, `result`, `failure` — share one
 |----------|------------|-------------|
 | `GET /api/admin/nodes` | `jobs:read` (Admin) | List all registered nodes across the deployment plus a health summary (status, last heartbeat age, eligible types, current claim count) |
 | `DELETE /api/admin/nodes/:id` | `jobs:write` (Admin) | Force-deregister/remove a node record — e.g. a laptop that was lost or decommissioned without running `node deregister` first; any jobs it held are picked up by the lease-expiry reaper (§4.3) once the lease naturally expires |
+| `GET /api/admin/nodes/credentials` | `jobs:read` (Admin) | List all node credentials (`nod_` tokens) across the deployment, masked — see §13 |
+| `DELETE /api/admin/nodes/credentials/:id` | `jobs:write` (Admin) | Revoke any node credential regardless of owner — see §13 |
 
 **Correction from the v1.0 draft:** this feature does **not** introduce a new `nodes:read`/`nodes:write` permission pair. The admin endpoints above reuse the existing `jobs:read`/`jobs:write` permissions already granted to the Admin role for the enrichment job queue dashboard, and every node-facing endpoint in §5.1 is gated the same way (via the registering user's PAT, which must carry `jobs:write`).
 
@@ -448,9 +456,9 @@ Not every enrichment handler is a good candidate for remote execution. `apps/cli
 | `duplicate_detection` | ✅ Implemented | Real compute via `@memoriahub/enrichment-compute/clip` + `/dhash`; degrades to dHash-only when `onnxruntime` is absent (not a hard requirement — see `JOB_TYPE_REQUIREMENTS`) |
 | `metadata_extraction` | ✅ Implemented | **Note the type name:** the job type (and the `NODE_JOB_TYPES` entry) is `metadata_extraction`, not `metadata` |
 | `thumbnail_regen` | ✅ Implemented, photos only | Shares one compute module with `thumbnail_repair` (`apps/cli/src/node/compute/thumbnail.ts`); uploads generated bytes via the new `POST /api/nodes/:id/jobs/:jobId/upload-url` presigned-PUT flow (§5.1, §5.3) instead of returning bytes inline. A video input surfaces as a sharp decode failure, mapped to `CapabilityUnavailableError` — video thumbnails still fall back to the server's existing in-process `StorageProcessingRecoveryService.reprocessObjectNow` path, nothing regresses |
-| `thumbnail_repair` | ⚠️ Interface parity only, not end-to-end node-claimable | Listed in `NODE_JOB_TYPES` and shares the same compute module as `thumbnail_regen` for future-proofing, but `ThumbnailRepairTask` enqueues it as a single **global sweep job** (`mediaItemId: null`, `circleId: null`) that iterates many media items server-side in one job — a node claiming it gets no `inputUrl` (§5.1's `resolveInputUrl` returns `null` for any job with no `mediaItemId`) and has no way to iterate the underlying candidate set itself. Honest status: wired for the day this job type becomes per-item, not currently distributable |
+| `thumbnail_repair` | ⚠️ Server-only — removed from `NODE_JOB_TYPES` | Previously listed in `NODE_JOB_TYPES` alongside `thumbnail_regen` for future-proofing; removed once it was clear it could never actually be claimed — `ThumbnailRepairTask` enqueues it as a single **global sweep job** (`mediaItemId: null`, `circleId: null`) that iterates many media items server-side in one job, so a node claiming it would get no `inputUrl` (§5.1's `resolveInputUrl` returns `null` for any job with no `mediaItemId`) and has no way to iterate the underlying candidate set itself. The API-side `nodeResultSchema`/`persistNodeResult` pair is kept only for interface parity with `thumbnail_regen` — a node will never actually be offered this job type. Honest status: server-only until (if ever) it is redesigned as per-item |
 | `social_media_detection` | ✅ Implemented, with a known gap | Real two-tier compute (ffprobe/filename Tier 1, on-device OCR Tier 2) via `@memoriahub/enrichment-compute/metadata` + `/social` + `/video` + `/ocr`. **Known gap:** `job.payload` is currently `null` server-side for this job type (`MediaEnrichmentService`'s enqueue call), so a node has no reliable original filename to feed Tier-1's filename rules — only the container-metadata rules (read from the downloaded bytes via ffprobe) are guaranteed to fire. The pre-flight caps, landscape-no-OCR gate, and feature flag remain entirely server-authoritative regardless |
-| `video_face_detection` | ⚠️ **DEFERRED — scaffold only** | `apps/cli/src/node/compute/video-face-detection.ts` proves the required native libs (`sharp`, `human`) load, then unconditionally throws `CapabilityUnavailableError` — cross-frame embedding dedup and `frameThumbnailKey` upload were never wired. Frame extraction itself WAS extracted into the shared package (`/video`'s `extractFramesAt`, used by the social-media-detection compute module above), but the video-face compute module does not yet call it. This job type stays server-only in practice today, despite appearing in `NODE_JOB_TYPES` |
+| `video_face_detection` | ✅ Implemented | `apps/cli/src/node/compute/video-face-detection.ts` is now fully implemented, matching the server's `VideoFaceDetectionService`: probe → frame extraction (the shared `/video` package's `extractFramesAt`, the same function the social-media-detection compute module uses) → per-frame detection (Human, or opt-in CompreFace — the same provider choice as `face_detection` above) → cross-frame embedding-similarity clustering → face-crop thumbnail build and upload via the same `upload-url` presigned-PUT flow `thumbnail_regen` uses. The only remaining throw is the ordinary missing-model capability guard (`getFaceDetector`, shared with the photo path) — not a stub. Node-eligible like every other row in this tier, with the same hard-fail-not-silent-fallback CompreFace behavior as `face_detection` (see [worker-node-setup.md §5.4](../worker-node-setup.md#54-hard-fail-behavior--no-silent-fallback-to-human)) |
 | `auto_tagging` | ✅ Implemented, via transient credentials | See §8.2 — moved out of the "AI-Proxy" tier this section originally proposed |
 | `geocode` | ✅ Implemented, via transient credentials, with a provider gap | See §8.2. The `offline` reverse-geocode provider (server-side GeoNames dataset) has no node-side equivalent; `apps/cli/src/node/compute/geocode.ts` declines gracefully with `CapabilityUnavailableError` when the transient credential response reports `provider: 'offline'`, leaving that job server-only. Only `nominatim`/`google` are node-computable |
 
@@ -598,9 +606,101 @@ This section is a candid accounting of what this design does not fully solve, in
 
 ---
 
+## 12. Registration Lifecycle: Register-or-Reattach and Offline Pruning
+
+### 12.1 Register-or-Reattach
+
+`POST /api/nodes/register` is idempotent per `(createdById, name)`, backed by a new `@@unique([createdById, name])` constraint on `worker_nodes`. Re-registering under a name the caller already owns does not mint a duplicate row: the API re-attaches to the existing record — updating `hostname`, `platform`, `cliVersion`, `eligibleTypes`, and `concurrency` from the new payload and setting `status` back to `online` — and returns `{ nodeId, reattached: true }` instead of the `{ nodeId, reattached: false }` a genuinely new registration returns.
+
+This is what makes the container fleet's restart behavior safe (see [worker-node-setup.md's Quick Start](../worker-node-setup.md#quick-start-container-bundle-recommended) and §15 below): a worker container that is replaced, redeployed, or simply restarted re-registers under the same `MEMORIAHUB_NODE_NAME` on boot and resumes the same node identity, job-claim history, and admin-visible record, rather than accumulating a fresh `worker_nodes` row on every restart.
+
+### 12.2 Offline Node Pruning
+
+A daily `NodeOfflinePruneTask` deletes `worker_nodes` rows that are BOTH offline past `NODE_OFFLINE_RETENTION_DAYS` (default 14, measured from `lastHeartbeatAt`) AND have no jobs currently claimed and `running` — a node mid-job is never pruned regardless of how stale its heartbeat looks, since the still-running job's own `claimedByNodeId`/`leaseExpiresAt` are the source of truth for whether it's really abandoned, not `lastHeartbeatAt` alone. This keeps the admin fleet view (`GET /api/admin/nodes`, §5.2) from accumulating rows for laptops or containers retired without a clean `node deregister`, while never deleting a record a live job still references.
+
+---
+
+## 13. Durable Node Credentials (`nod_` Tokens)
+
+### 13.1 Motivation
+
+§2.4 originally argued that PATs were sufficient and that "there is no new node-specific credential type" — deliberately, since a PAT already scopes cleanly by `createdById` and reuses an existing revocation path. In practice this meant a household running an always-on worker (a systemd service, or — as of §15 — a container) had to hand it a PAT that is equally valid on every OTHER `jobs:write`-gated endpoint too, including the admin job-queue dashboard's retry/reset/delete actions for an Admin-owned PAT. A credential meant to sit on a headless worker indefinitely deserved a narrower blast radius than that.
+
+### 13.2 The Credential
+
+A `node_credentials` table stores the new credential type: a `nod_`-prefixed bearer token, sha256-hashed at rest (raw value never stored, shown once at creation — the same handling convention as a PAT), that authenticates like a PAT but is accepted **only** on `/api/nodes/*` routes. It can never reach `/api/media/*`, general `/api/admin/*` endpoints, or any settings endpoint — even for a credential minted by an Admin user; the two node-scoped admin endpoints in §13.3 are the sole exception, and they too are gated by `jobs:read`/`jobs:write` like every other admin node endpoint. `expiresAt` is nullable and a `nod_` credential may be minted to never expire; it is individually revocable at any time regardless of expiry.
+
+### 13.3 Endpoints
+
+| Endpoint | Description |
+|----------|--------------|
+| `POST /api/node-credentials` | Mint a new `nod_` credential for the caller; raw token returned once in the response body, never retrievable again |
+| `GET /api/node-credentials` | List the caller's own node credentials (masked) |
+| `DELETE /api/node-credentials/:id` | Revoke one of the caller's own node credentials |
+| `GET /api/admin/nodes/credentials` | Admin: list all node credentials across the deployment |
+| `DELETE /api/admin/nodes/credentials/:id` | Admin: revoke any node credential |
+
+No new permission was introduced for any of these — minting, listing, and revoking a node credential all require the same `jobs:write` permission that already gates every node-facing endpoint in §5.1 (the credential itself, once minted, is what actually enforces the `/api/nodes/*`-only route allowlist; `jobs:write` only gates who may mint/manage one). The user-facing endpoints are managed in the web UI at `/admin/settings/nodes` (Node Credentials section: list, create-and-copy-once, revoke).
+
+### 13.4 Relationship to PATs
+
+PATs remain fully valid on every node-facing endpoint — nothing here is a breaking change, and §2.4's description of PAT-based node auth is otherwise unchanged. A `nod_` credential is the new, preferred, least-privilege option specifically for a worker that runs unattended for a long time: it can do everything a node needs to do and nothing else, so a stolen or leaked credential from a compromised worker host cannot be used against any other part of the API. `memoriahub node enroll` (CLI) drives the interactive onboarding path for this: it runs the existing device-flow login, then mints a `nod_` credential automatically and stores it as the CLI's token. An operator setting up a fleet container instead mints the credential in the admin UI first (§13.3) and passes it in directly via `MEMORIAHUB_TOKEN` (§15).
+
+---
+
+## 14. Worker Modes and the Lease Reaper
+
+### 14.1 `ENRICHMENT_WORKER_MODE`
+
+The API's in-process worker now has three modes, set via `ENRICHMENT_WORKER_MODE` (the legacy `ENRICHMENT_WORKER_ENABLED` boolean is still honored as a fallback: `false` maps to `off`):
+
+| Mode | Behavior |
+|------|----------|
+| `all` (default) | The in-process worker runs every job type, exactly as before this feature — the appropriate default for a single-machine dev/small deployment with no node fleet |
+| `system` | The in-process worker runs ONLY the server-only job types — `burst_detection`, `duplicate_detection_batch`, `job_history_purge`, `face_auto_archive_sweep`, `storage_insights`, `location_inference`, `trash_purge`, `storage_migration`, `thumbnail_repair` (light, DB-bound global jobs — see §8.3 plus the two global-sweep exceptions in §8.1) — while every media-compute job type (`face_detection`, `video_face_detection`, `auto_tagging`, `geocode`, `duplicate_detection`, `metadata_extraction`, `social_media_detection`, `thumbnail_regen`) is left for the worker-container fleet (§15) to claim |
+| `off` | No in-process worker runs at all; every claimable job type must be served by the node fleet |
+
+**`system` is the recommended production posture once a container fleet (§15) is running.** It keeps the API responsive — the API process is never itself burning CPU/memory on face detection or vision-model calls — while never stranding the server-only job types, which a node structurally cannot run at all (they need direct DB access, which §2.1 explicitly forbids a node from having).
+
+### 14.2 The Lease Reaper Is Always On
+
+`EnrichmentStuckResetTask` (§4.3's lease-expiry reaper) is now **decoupled from `ENRICHMENT_WORKER_MODE`** and runs regardless of which mode is configured — including `off`, where no in-process worker claims jobs at all. This is deliberate: an external fleet (§15) is exactly the deployment shape where a node dies mid-job most often (a container is killed, rescheduled, or OOM'd), and those jobs need requeuing whether or not the API is also running its own worker loop. Opt out only via `ENRICHMENT_REAPER_ENABLED=false`.
+
+### 14.3 Doctor Awareness
+
+The Doctor `jobs.workerEnabled` check (see [doctor.md](doctor.md)) is mode-aware: it reports the configured mode rather than a bare enabled/disabled boolean, and does not flag `system` or `off` as a misconfiguration on their own — a fleet-backed deployment intentionally running `system` or `off` is a valid, expected configuration, not a broken one.
+
+---
+
+## 15. Container Fleet Topology
+
+### 15.1 Worker Image
+
+`apps/cli/Dockerfile` (target `worker`) builds a glibc `node:26-slim`-based image with `ffmpeg`/`perl` and the native compute dependencies (§7.3) installed, plus the CLIP, Human, and tesseract model files baked in at `/app/models` at build time — so a freshly-started container needs no first-run download to become operational (contrast with a native install's lazy model fetch, [worker-node-setup.md §6](../worker-node-setup.md#6-model-manifest--downloads)). It runs as an unprivileged user with a `/data` volume for node state, and its entrypoint execs `node .../index.js node start --headless` directly (exec form, so `SIGTERM` reaches the Node process rather than a shell wrapper) with `STOPSIGNAL SIGTERM` set in the image. The image is published multi-arch (amd64 + arm64) to `ghcr.io/marinoscar/memoriahub-worker`, tagged with the exact CLI version that built it (`cli-<version>`) — pulling a specific tag pins a known-good compute stack, the same parity guarantee §7.3 makes for any other install path.
+
+### 15.2 Compose Bundle
+
+A root-level `docker-compose.worker.yml` bundles:
+
+- **`compreface-core`**, health-gated (the worker's `depends_on` uses `condition: service_healthy`) and multi-process (`UWSGI_PROCESSES=${COMPREFACE_PROCESSES:-2}`, tunable per host — see [worker-node-setup.md §5.2](../worker-node-setup.md#52-prerequisite-run-your-own-local-compreface-sidecar) for the same core-aware sizing guidance applied to the native install path).
+- **`memoriahub-worker`**, `restart: unless-stopped`, with a `stop_grace_period` so an in-flight job gets a real chance to drain on shutdown (§14.2's reaper is the backstop if it doesn't), configured by default with `MEMORIAHUB_FACE_PROVIDER=compreface` and `MEMORIAHUB_COMPREFACE_URL=http://compreface-core:3000` so the bundle's own sidecar is used out of the box.
+
+Scale the worker service with `docker compose -f docker-compose.worker.yml --env-file .env.worker up -d --scale memoriahub-worker=N`; `.env.worker.example` documents every variable the bundle reads. `docker-compose.worker.build.yml` overlays a local source build of the image in place of the published `ghcr.io` tag, for development or an air-gapped build pipeline.
+
+### 15.3 Per-Replica Identity and Headless Drain
+
+Every running worker container is its own node — see §12.1's register-or-reattach contract for what happens when a container restarts under the same `MEMORIAHUB_NODE_NAME`, and [worker-node-setup.md's Quick Start](../worker-node-setup.md#quick-start-container-bundle-recommended) for the operator-facing setup walkthrough, per-replica naming rule, and the "don't share `/data` across replicas" warning. A container's headless mode (implied by the image's entrypoint, or by `MEMORIAHUB_HEADLESS=1`) drains in-flight jobs on `SIGTERM` and exits WITHOUT deregistering, which is what makes the register-or-reattach contract (§12.1) the normal restart path rather than an edge case — a non-headless `node start`, and an explicit `node stop`/`node deregister`, still deregister on exit (§9).
+
+### 15.4 CI: Multi-Arch Build and Parity Gate
+
+`.github/workflows/deploy.yml` builds and pushes the multi-arch worker image (QEMU + buildx) on `v*` tags, and gates the push on running the golden-vector parity test (§7.3, item 4) INSIDE the freshly-built amd64 image with `REQUIRE_CLIP_MODEL=1` — turning the test's normal graceful skip-when-absent behavior into a hard failure specifically for this CI check, so a release can never ship a worker image with a missing or corrupted baked CLIP model.
+
+---
+
 ## Document History
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | July 2026 | AI Assistant | Initial specification (proposal, pre-implementation) |
 | 2.0 | July 2026 | AI Assistant | Brought current with the completed implementation on `feat/finish-nodes`: replaced the AI-proxy design with transient per-job credentials (§2.7, §8.2); corrected all endpoint paths to include `:id` and added `credentials`/`upload-url`/owner-list endpoints (§5); documented the actual zod-schema result contract, its extended fields, and the compute/persist handler split (§6, §6.1); documented the real `packages/enrichment-compute` shared package, its dual-build/pinned-deps/subpath-export structure, and the golden-vector test (§7.3); updated per-job-type status including the `video_face_detection`/`thumbnail_repair` gaps (§8); documented the worker daemon, systemd service mode, and TUI attach mode added mid-implementation as a product requirement (§9.3); corrected the CLI/server Doctor coverage to the actual six-section report and `nodes.capabilityHealth` key (§10) |
+| 2.1 | July 2026 | AI Assistant | Corrected §8.1: `video_face_detection` compute is fully implemented (not a scaffold) and is node-eligible; `thumbnail_repair` was removed from the CLI's `NODE_JOB_TYPES` (server-only, kept for interface parity only). Reconciled §2.4's original "no new node-specific credential type" claim. Documented, as new sections: register-or-reattach idempotency and offline node pruning (§12); the new durable `nod_` node-credential type (§13); the `ENRICHMENT_WORKER_MODE` all/system/off control-plane split and the now-always-on lease reaper (§14); and the containerized worker image + `docker-compose.worker.yml` fleet bundle with its CI multi-arch build and golden-vector parity gate (§15). Added the corresponding endpoints to §5.1/§5.2 |

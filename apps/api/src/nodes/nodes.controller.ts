@@ -86,8 +86,20 @@ export class NodesController {
 
   @Post('register')
   @Auth({ permissions: [PERMISSIONS.JOBS_WRITE] })
-  @ApiOperation({ summary: 'Register a worker node' })
-  @ApiResponse({ status: 201, description: 'Node registered; returns { nodeId }' })
+  @ApiOperation({
+    summary: 'Register a worker node (idempotent register-or-reattach)',
+    description:
+      'Registration is idempotent on (owner, name): re-registering under the same name ' +
+      're-attaches to the existing node row — refreshing hostname/platform/cliVersion/' +
+      'eligibleTypes/concurrency and flipping it back online — instead of creating a ' +
+      'duplicate, so containerized replicas keep their node identity across restarts.',
+  })
+  @ApiResponse({
+    status: 201,
+    description:
+      'Node registered or re-attached; returns { nodeId, reattached } — reattached is true ' +
+      'when an existing node row with the same (owner, name) was reused',
+  })
   async register(@CurrentUser() user: RequestUser, @Body() dto: RegisterNodeDto) {
     return this.nodesService.register(user.id, dto);
   }

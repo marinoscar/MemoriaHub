@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
+| **Version** | 1.1 |
 | **Last Updated** | July 2026 |
 | **Status** | Implemented |
 
@@ -11,16 +11,19 @@
 ## Table of Contents
 
 1. [Overview](#1-overview)
-2. [Automated Setup (`memoriahub node install-deps`)](#2-automated-setup-memoriahub-node-install-deps)
-3. [System Prerequisites](#3-system-prerequisites)
-4. [Native Compute Dependencies](#4-native-compute-dependencies)
-5. [Matching the Server's Face-Detection Provider (CompreFace)](#5-matching-the-servers-face-detection-provider-compreface)
-6. [Model Manifest & Downloads](#6-model-manifest--downloads)
-7. [Registering and Running](#7-registering-and-running)
-8. [Reading `node doctor` Output](#8-reading-node-doctor-output)
-9. [Troubleshooting](#9-troubleshooting)
+2. [Quick Start: Container Bundle (Recommended)](#quick-start-container-bundle-recommended)
+3. [Automated Setup (`memoriahub node install-deps`) — Advanced / Legacy, Native Install](#2-automated-setup-memoriahub-node-install-deps)
+4. [System Prerequisites](#3-system-prerequisites)
+5. [Native Compute Dependencies](#4-native-compute-dependencies)
+6. [Matching the Server's Face-Detection Provider (CompreFace) — Advanced / Legacy](#5-matching-the-servers-face-detection-provider-compreface)
+7. [Model Manifest & Downloads](#6-model-manifest--downloads)
+8. [Registering and Running](#7-registering-and-running)
+9. [Reading `node doctor` Output](#8-reading-node-doctor-output)
+10. [Troubleshooting](#9-troubleshooting)
 
 This is a practical setup/troubleshooting companion to the [Distributed Nodes spec](specs/distributed-nodes.md), which covers the feature's architecture, security model, and API contract in full. This document does not repeat that content — it exists to answer "what do I install, and what do I do when `node doctor` says something is wrong."
+
+**Two setup paths exist.** The containerized worker bundle (this document's Quick Start, below) is the recommended path for anything beyond a single ad-hoc machine: it needs no native dependency installation on the host at all, since ffmpeg, the npm native compute libraries, tesseract's OCR language data, and the CLIP/Human model files are all baked into the published image. §2 onward documents the native, non-container install — kept as the advanced/legacy path for a machine that can't or shouldn't run Docker, or for understanding/customizing exactly what the container bundle automates.
 
 ---
 
@@ -28,9 +31,79 @@ This is a practical setup/troubleshooting companion to the [Distributed Nodes sp
 
 A worker node (`apps/cli`'s `memoriahub node start`) needs four things before it is fully operational: the native compute libraries (`sharp`, `onnxruntime-node`, `@vladmandic/human` + its TensorFlow.js backends, `tesseract.js`), the `ffmpeg`/`ffprobe` system binaries, the model files those libraries load at runtime, and — optionally, for a household running a node unattended — a persistent daemon or systemd service. `memoriahub node doctor` (a CLI command, and identically a full-screen TUI screen under Tools ▸ Worker Node ▸ Node doctor) is the single command that tells you exactly which of these four things is missing and where, distinguishing a library that merely **resolves** (installed) from one that has been proven to **actually work** (operational) — see §8 for why that distinction matters and is the most common source of confusion.
 
+The containerized worker bundle described in the Quick Start immediately below satisfies all four of these automatically — a fresh container is dependency-complete, model-complete, and always-on by construction, with no doctor pass needed before first use. §2 onward is the native install path, where doctor is the primary tool for finding what's still missing.
+
+---
+
+## Quick Start: Container Bundle (Recommended)
+
+The fastest, most consistent way to add compute to the enrichment fleet is the pre-built worker container image (`ghcr.io/marinoscar/memoriahub-worker`) plus the root-level `docker-compose.worker.yml` bundle — not the native `node install-deps` path described in §2 onward, which remains available for a machine that can't or shouldn't run Docker (see that section's own note below). This is the recommended path for anything beyond a single ad-hoc laptop: it needs no native dependency installation on the host at all, since ffmpeg, the npm native compute libraries, tesseract's OCR language data, and the CLIP/Human model files are all baked into the image at build time.
+
+### Steps
+
+1. **Mint a node credential.** In the web UI, go to `/admin/settings/nodes` → Node Credentials → Create. Copy the raw `nod_`-prefixed token shown — it is displayed only once. This is a durable, `/api/nodes/*`-only credential (never valid for media/settings/admin endpoints); a Personal Access Token also still works here for back-compat, but a node credential is the least-privilege option and is what this quick start assumes. See the [Distributed Nodes spec §13](specs/distributed-nodes.md#13-durable-node-credentials-nod_-tokens) for the full credential model.
+2. **Copy the compose bundle to the host.** From the repo root, copy `docker-compose.worker.yml` and `.env.worker.example` (renamed to `.env.worker`) to the machine that will run the worker(s).
+3. **Configure `.env.worker`.** At minimum set `MEMORIAHUB_URL` (your API's base URL, e.g. `https://your-domain/api`), `MEMORIAHUB_TOKEN` (the `nod_` token from step 1), and a per-host `MEMORIAHUB_NODE_NAME` (must be unique per machine — see the per-replica identity note below).
+4. **Start the bundle.**
+   ```bash
+   docker compose -f docker-compose.worker.yml --env-file .env.worker up -d
+   ```
+   This starts a health-gated `compreface-core` sidecar (see below) and one `memoriahub-worker` service instance.
+5. **Scale as needed.**
+   ```bash
+   docker compose -f docker-compose.worker.yml --env-file .env.worker up -d --scale memoriahub-worker=N
+   ```
+
+### `MEMORIAHUB_*` environment reference
+
+The worker container is configured entirely through environment variables — there is no interactive `node register`/`node start` step to run by hand; the container's entrypoint runs `node start --headless` at boot.
+
+| Variable | Description |
+|----------|--------------|
+| `MEMORIAHUB_URL` | Base URL of the API the node connects to |
+| `MEMORIAHUB_TOKEN` | Bearer credential — a `nod_` node credential (preferred) or a PAT |
+| `MEMORIAHUB_NODE_ID` | Existing node ID to resume, if known; normally left unset and let register-or-reattach (below) resolve it |
+| `MEMORIAHUB_NODE_NAME` | This machine/replica's display name; **must be distinct per host/replica** — see below |
+| `MEMORIAHUB_CONCURRENCY` | Local worker slot count for this node |
+| `MEMORIAHUB_ELIGIBLE_TYPES` | CSV of job types this node advertises (defaults to everything the local capability probe supports) |
+| `MEMORIAHUB_POLL_INTERVAL_MS` | Claim-loop poll interval |
+| `MEMORIAHUB_FACE_PROVIDER` | `human` or `compreface` — the bundle sets this to `compreface` and points it at the bundled sidecar |
+| `MEMORIAHUB_COMPREFACE_URL` | Base URL of the local `compreface-core` sidecar; the bundle sets this to `http://compreface-core:3000` |
+| `MEMORIAHUB_STATE_DIR` | Relocates the whole state directory (config, pidfile, socket, logs, models) — the bundle maps this to the `/data` volume |
+| `MEMORIAHUB_HEADLESS` | `1` implies `--headless`; the worker image's entrypoint always runs headless regardless |
+| `MODELS_DIR` | Overrides where model resolution looks; the image bakes models at `/app/models` already, so this is only needed to point at a different/mounted model directory |
+
+`loadConfig()` (`apps/cli/src/config.ts`) overlays these env vars over any `~/.memoriahub/config.json` on disk (env wins), and synthesizes a full config from env alone when no config file exists at all — this is what lets the container run with zero interactive setup.
+
+### The bundled CompreFace sidecar
+
+`docker-compose.worker.yml` runs a health-gated, multi-process `compreface-core` (`exadel/compreface-core:1.2.0-mobilenet`) alongside the worker service; the worker's `depends_on` waits for `condition: service_healthy` before starting. `UWSGI_PROCESSES` defaults to `${COMPREFACE_PROCESSES:-2}` in the bundle — raise it in `.env.worker` on a host with more cores to get real parallelism across concurrent face-detection jobs (see §5.2 below for the equivalent core-aware sizing guidance on the native install path).
+
+### Per-replica identity
+
+**Each replica registers as its own node.** Whether you scale via `--scale memoriahub-worker=N` or run the bundle on several separate machines, every running worker container needs a distinct identity — set a unique `MEMORIAHUB_NODE_NAME` per host/replica. Two containers sharing one node identity will fight over job leases (`job not owned by this node` errors), the same failure mode §7's "Each machine = its own node registration" note describes for the native path.
+
+**Do NOT share the `/data` state volume between replicas.** The state directory holds a pidfile and a Unix-domain-socket IPC channel that assume a single running instance; two containers pointed at the same volume will collide on both. Give each replica its own volume/mount.
+
+### Re-attach on restart, and SIGTERM drain
+
+Registration is idempotent: re-registering under the same name re-attaches to the existing node record (refreshing hostname/platform/cliVersion/eligibleTypes/concurrency and marking it `online`) instead of creating a duplicate — so a replaced or restarted container keeps its identity and job history. On `docker compose ... down`, `docker stop`, or a container restart, the worker receives `SIGTERM`; running headless it **drains** in-flight jobs and exits WITHOUT deregistering, so the node record persists and the next container start simply re-attaches to it. (A non-headless `node start`, and an explicit `node stop`/`node deregister`, still deregister — that only matters for the native install path below, since the container image always runs headless.) See the [Distributed Nodes spec §12](specs/distributed-nodes.md#12-registration-lifecycle-register-or-reattach-and-offline-pruning) for the full register-or-reattach contract.
+
+### Image parity and air-gapped models
+
+The worker image is published multi-arch (amd64 + arm64) and tagged with the exact CLI version that built it (`cli-<version>`) — pulling a specific tag guarantees the same compute stack (and therefore the same embeddings) as a server running that CLI version, per the parity guarantees in [distributed-nodes.md §7.3](specs/distributed-nodes.md#73-four-mechanisms-to-guarantee-parity--as-built). CLIP, Human, and the tesseract OCR data are baked into the image at `/app/models` at build time, so a freshly-started container is air-gap friendly — nothing needs to be downloaded from Hugging Face/GitHub at startup.
+
+For a local source build instead of the published `ghcr.io` image, use `docker-compose.worker.build.yml` as an overlay.
+
+### Pairing with the API
+
+On the API side, set `ENRICHMENT_WORKER_MODE=system` so the API's own in-process worker stops competing for media-compute job types and leaves them entirely to this fleet, while still running the server-only jobs a node cannot (they need direct DB access). See the [Distributed Nodes spec §14](specs/distributed-nodes.md#14-worker-modes-and-the-lease-reaper) for the full mode semantics.
+
 ---
 
 ## 2. Automated Setup (`memoriahub node install-deps`)
+
+> **Advanced / legacy path.** This section (and §3–§6 below) documents the native, non-container install — useful for a single ad-hoc machine, a platform without Docker, or fine-grained customization. For a production fleet, the containerized worker bundle in [Quick Start: Container Bundle (Recommended)](#quick-start-container-bundle-recommended) above is the recommended path and needs none of this.
 
 Everything in §3 through §6 below can be handled in one command for the common case: a Linux machine with Node.js and the `memoriahub` CLI already installed. `memoriahub node install-deps` checks what's already present and skips it, installs and configures whatever is missing (using `sudo` where required, always announcing the exact command before running it), and finishes with a fresh `node doctor`-style pass/fail report so you can immediately see what changed. It is Linux-only for now — see §3 and §5 for the manual macOS/Windows/non-apt-distro paths.
 
@@ -99,6 +172,8 @@ These install automatically as part of a normal `memoriahub` install (curl insta
 ---
 
 ## 5. Matching the Server's Face-Detection Provider (CompreFace)
+
+> **Advanced / legacy path.** This section covers configuring CompreFace by hand for a native (non-container) node install. The container bundle's `docker-compose.worker.yml` already runs a health-gated, multi-process `compreface-core` sidecar and points the worker at it automatically (`MEMORIAHUB_FACE_PROVIDER=compreface`) — see [Quick Start: Container Bundle (Recommended)](#quick-start-container-bundle-recommended) above. Read on only if you're setting up a native install or want to understand what the bundle automates.
 
 By default, a worker node performs face detection with the keyless Human provider (`@vladmandic/human`, 1024-dimensional embeddings), regardless of which face-detection provider the server itself is actively configured to use (`PUT /api/face/features/detection` — `human`, `compreface`, or `rekognition`). If the server's active provider is `compreface` (128-d ArcFace MobileFaceNet embeddings) rather than `human`, a node still defaulting to Human will keep working, but its face rows land in a different embedding space than the rest of the circle's faces — person-matching cosine similarity assumes one consistent embedding space per circle, so cross-provider faces can silently fail to match, or worse, produce spurious matches. The API's `FaceDetectionService.warnOnProviderMismatch` logs a warning when it detects this (never blocking) — see the [Distributed Nodes spec](specs/distributed-nodes.md) for the full embedding-space rationale. This section does not re-derive that explanation; it covers the practical fix.
 

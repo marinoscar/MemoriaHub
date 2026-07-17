@@ -281,16 +281,26 @@ The worker is a **continuous worker pool**: `ENRICHMENT_WORKER_CONCURRENCY` long
 
 Because each loop processes exactly one job at a time and there is no batch barrier, **one hung or slow job (bounded by the active per-job timeout) only stalls its own slot — never the other loops or the queue as a whole.** The remaining loops keep claiming and processing, and the freed slot resumes as soon as its job settles or times out.
 
-### Disabling the Worker
+### Worker Mode (`ENRICHMENT_WORKER_MODE=all|system|off`)
 
-The worker checks two environment variables once in `onApplicationBootstrap`:
+The worker resolves its operating mode via `resolveWorkerMode()` (exported from `enrichment-job.worker.ts`):
+
+- **`all`** — claim every registered handler type (classic single-box posture; the default).
+- **`system`** — start the pool but claim ONLY server-only job types: handlers without the `nodeResultSchema`/`persistNodeResult` pair (`EnrichmentHandlerRegistry.serverOnlyTypes()` — burst_detection, duplicate_detection_batch, job_history_purge, face_auto_archive_sweep, storage_insights, location_inference, trash_purge, storage_migration) **plus `thumbnail_repair`**, which carries a nodeResultSchema for interface parity but is a global sweep job that is not end-to-end node-claimable. All media compute is left for external worker nodes — the recommended posture when a distributed node fleet is running. `ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES` (comma-separated) appends additional *registered* types to the set; unknown entries are dropped with a warning.
+- **`off`** — `onApplicationBootstrap` returns early and **no loops start** — the pool is never created. Useful in test environments and CI to prevent background jobs from interfering with tests.
+
+An explicit `ENRICHMENT_WORKER_MODE` value wins (an unrecognized value warns once and is treated as `all`). When the mode var is unset, the **legacy** boolean switches decide:
 
 ```
 ENRICHMENT_WORKER_ENABLED  (checked first)
 FACE_WORKER_ENABLED        (legacy alias, checked second)
 ```
 
-If either is set to `'false'`, `onApplicationBootstrap` returns early and **no loops start** — the pool is never created. Useful in test environments and CI to prevent background jobs from interfering with tests.
+Either set to `'false'` maps to mode `off`; otherwise mode `all`. `isEnrichmentWorkerEnabled()` remains exported for back-compat as `resolveWorkerMode() !== 'off'`.
+
+The eligibility set is resolved per claim (`claimEligibleTypes()`), and the mode is stamped into the startup log line (`EnrichmentJobWorker starting (mode: system); ...`).
+
+> **Note:** the lease-expiry/stuck-job reaper (`EnrichmentStuckResetTask`) is deliberately **NOT** governed by the worker mode — it is a control-plane duty that external node fleets depend on and runs in every mode, including `off`. Its only opt-out is the dedicated `ENRICHMENT_REAPER_ENABLED=false` flag. The `TempFileJanitorTask` skips only in mode `off` (system mode still creates `memoriaHub-*` temp files).
 
 ### Poll Interval
 
@@ -743,8 +753,11 @@ No dashboard code changes are needed.
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `ENRICHMENT_WORKER_ENABLED` | `'true'` | Set to `'false'` to disable the worker. Checked before the legacy variable. |
-| `FACE_WORKER_ENABLED` | `'true'` | Legacy alias. Either variable set to `'false'` disables the worker. |
+| `ENRICHMENT_WORKER_MODE` | `'all'` | Worker operating mode: `all` (claim every registered type), `system` (claim only server-only types + `thumbnail_repair`; media compute left for external worker nodes — recommended with a node fleet), or `off` (pool never starts). Explicit value wins over the legacy booleans; unknown values warn once and act as `all`. See [Worker Mode](#worker-mode-enrichment_worker_modeallsystemoff). |
+| `ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES` | _(unset)_ | Comma-separated escape hatch appending extra *registered* job types to the `system`-mode claim set; unknown entries are dropped with a warning. |
+| `ENRICHMENT_REAPER_ENABLED` | `'true'` | Set to `'false'` to disable the `EnrichmentStuckResetTask` lease/stuck reaper on this instance. The reaper is otherwise ALWAYS on, in every worker mode including `off` — it is a control-plane duty external node fleets depend on. |
+| `ENRICHMENT_WORKER_ENABLED` | `'true'` | **Legacy fallback** — consulted only when `ENRICHMENT_WORKER_MODE` is unset. Set to `'false'` to disable the worker (mode `off`). Checked before the legacy alias below. |
+| `FACE_WORKER_ENABLED` | `'true'` | Legacy alias. Either variable set to `'false'` disables the worker when the mode var is unset. |
 | `ENRICHMENT_JOB_POLL_MS` | `'5000'` | Worker poll interval in milliseconds. |
 | `FACE_JOB_POLL_MS` | `'5000'` | Legacy alias for `ENRICHMENT_JOB_POLL_MS`. |
 | `ENRICHMENT_WORKER_CONCURRENCY` | `'1'` | Worker-pool size — the number of long-lived worker loops, fixed at startup. Each loop independently claims and processes one job at a time; there is no batch barrier, so a slow/hung job only stalls its own slot. Raise for throughput; the per-provider throttle gate keeps higher values 429-safe. Memory scales with this value (each concurrent job buffers a decoded image). See [Section 8 — Concurrency (Pool Size)](#concurrency-pool-size). |

@@ -17,10 +17,39 @@ import {
   detectCapabilities,
   effectiveRequirements,
   missingRequirements,
+  isNodeJobType,
   DEFAULT_COMPREFACE_URL,
   JOB_TYPE_REQUIREMENTS,
+  NODE_JOB_TYPES,
   type CapabilityStatus,
 } from '../../src/node/capabilities.js';
+
+describe('NODE_JOB_TYPES', () => {
+  it('does not advertise thumbnail_repair (global sweep job, inputUrl:null, never node-runnable)', () => {
+    expect(NODE_JOB_TYPES).not.toContain('thumbnail_repair');
+    expect(isNodeJobType('thumbnail_repair')).toBe(false);
+    expect(Object.keys(JOB_TYPE_REQUIREMENTS)).not.toContain('thumbnail_repair');
+  });
+
+  it('keeps the per-item thumbnail_regen type intact', () => {
+    expect(NODE_JOB_TYPES).toContain('thumbnail_regen');
+    expect(isNodeJobType('thumbnail_regen')).toBe(true);
+    expect(JOB_TYPE_REQUIREMENTS.thumbnail_regen).toEqual(['sharp', 'ffmpeg']);
+  });
+
+  it('lists exactly the node-claimable job types', () => {
+    expect([...NODE_JOB_TYPES]).toEqual([
+      'face_detection',
+      'video_face_detection',
+      'duplicate_detection',
+      'metadata_extraction',
+      'social_media_detection',
+      'thumbnail_regen',
+      'auto_tagging',
+      'geocode',
+    ]);
+  });
+});
 
 describe('detectCapabilities — compreface probe', () => {
   const savedFetch: typeof global.fetch = global.fetch;

@@ -61,9 +61,9 @@ apps/api/prisma/*.db-journal
 .DS_Store
 Thumbs.db
 
-# Apps not needed for the api/web Docker images
+# Apps not needed for any Docker image
+# (apps/cli IS needed — it builds the memoriahub-worker image, apps/cli/Dockerfile)
 apps/android/
-apps/cli/
 
 # Misc top-level content not needed inside the images
 docs/
