@@ -88,6 +88,42 @@ jobs:
             type=sha,prefix=
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
 
+      - name: Build API image (amd64) for parity gate
+        # Load a single-arch API image locally (no push yet) so the golden-vector
+        # test can run inside the exact artifact — mirrors the worker parity gate
+        # below. Shares the gha cache (scope=api) with the push build, so amd64
+        # layers are reused and this doesn't double the build cost.
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          target: production
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: memoriahub-api:parity-gate
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+
+      - name: Golden-vector parity gate (inside the API image)
+        # Enforces AC#4 of issue #128: the parity test passes IDENTICALLY inside
+        # the API image and the worker image, proving both build sharp against the
+        # same HEIF-enabled libvips and decode the committed golden-fixture.heic
+        # natively (no ffmpeg fallback) with the same JPEG dHash. REQUIRE_CLIP_MODEL
+        # is intentionally NOT set here — the API image does not bake the CLIP model
+        # (the server downloads it to MODELS_DIR at runtime), so the CLIP assertion
+        # skips gracefully while the HEIC/JPEG dHash assertions run.
+        run: |
+          docker run --rm \
+            --entrypoint node \
+            -e MODELS_DIR=/app/models \
+            -e REQUIRE_HEIC_DECODE=1 \
+            -w /app/packages/enrichment-compute \
+            memoriahub-api:parity-gate \
+            --test test/golden.test.mjs
+
       - name: Build and push API image
         uses: docker/build-push-action@v7
         with:
@@ -99,8 +135,8 @@ jobs:
           push: true
           tags: ${{ steps.meta-api.outputs.tags }}
           labels: ${{ steps.meta-api.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
 
@@ -154,11 +190,17 @@ jobs:
         # Runs the shared parity test against the CLIP model baked into the
         # image. REQUIRE_CLIP_MODEL=1 makes a missing/misplaced model a hard
         # failure instead of a skip, so the gate actually exercises CLIP.
+        # REQUIRE_HEIC_DECODE=1 makes "sharp cannot decode HEIC natively" a hard
+        # failure too — proving the HEIF-enabled global libvips built into the
+        # image decodes the committed golden-fixture.heic WITHOUT hitting the
+        # ffmpeg fallback (issue #128). The gate also prints the computed HEIC
+        # dHash for a maintainer to pin into GOLDEN_HEIC_DHASH.
         run: |
           docker run --rm \
             --entrypoint node \
             -e MODELS_DIR=/app/models \
             -e REQUIRE_CLIP_MODEL=1 \
+            -e REQUIRE_HEIC_DECODE=1 \
             -w /app/packages/enrichment-compute \
             memoriahub-worker:parity-gate \
             --test test/golden.test.mjs
