@@ -29,13 +29,26 @@
 FROM node:26-slim AS base
 WORKDIR /app
 # ffmpeg/ffprobe: video probe, frame extraction, and the HEIC transcode fallback
-#   (packages/enrichment-compute transcodeToDecodableJpeg — resolves the node
-#   side of #106 via the same code path the server uses).
+#   (packages/enrichment-compute transcodeToDecodableJpeg — retained as a safety
+#   net now that sharp decodes HEIC natively; see the libvips note below).
 # perl: required by exiftool-vendored at runtime for metadata_extraction.
 # wget + ca-certificates: model downloads in the models stage (HTTPS needs the
 #   CA bundle; Debian slim has no busybox wget).
+# libvips42t64 + libheif1 + libde265-0 + libheif-plugin-libde265: a HEIF-enabled
+#   system libvips so sharp (built from source against it via
+#   SHARP_FORCE_GLOBAL_LIBVIPS in the deps stage) decodes HEIC/HEIF NATIVELY
+#   instead of falling back to the ffmpeg transcode path (issue #128). sharp's
+#   bundled libvips omits the HEVC/HEIC decoder for patent/licensing reasons;
+#   Debian trixie's libvips42t64 is compiled with libheif, and trixie's libheif
+#   uses plugin decoders, so the libheif-plugin-libde265 package (which pulls
+#   libde265-0) is required for the actual HEVC decode. These are RUNTIME libs
+#   and must live in `base` because the final `worker` stage is FROM base and the
+#   source-built sharp addon dynamically links libvips-cpp.so.42 at runtime. Must
+#   switch in lockstep with apps/api/Dockerfile so both executors decode HEIC via
+#   the identical libvips build (cross-executor embedding parity — see #128/#108).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg perl wget ca-certificates \
+      libvips42t64 libheif1 libde265-0 libheif-plugin-libde265 \
     && rm -rf /var/lib/apt/lists/*
 
 # -----------------------------------------------------------------------------
@@ -45,9 +58,21 @@ FROM base AS deps
 # Build toolchain for native modules that may fall back to source compilation
 # (better-sqlite3 via node-gyp when no prebuild matches the target arch). Kept
 # in this stage only so the final image stays lean.
+# pkg-config + libvips-dev: build-only deps for sharp's from-source addon build
+# against the global HEIF-enabled libvips (see SHARP_FORCE_GLOBAL_LIBVIPS below).
+# sharp locates libvips via `pkg-config --modversion vips-cpp`; libheif-dev is not
+# needed here (libvips dlopens libheif internally).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 make g++ \
+      python3 make g++ pkg-config libvips-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Force sharp to build its native addon FROM SOURCE against the global
+# (HEIF-enabled) libvips installed in the base stage, instead of using its
+# bundled, HEIC-less libvips. Read at install time by sharp's install script,
+# which runs here because this stage does NOT pass --ignore-scripts. Must switch
+# together with apps/api/Dockerfile so both executors decode HEIC identically
+# (issue #128).
+ENV SHARP_FORCE_GLOBAL_LIBVIPS=1
 
 # Root workspace manifests plus the two members the worker needs: apps/cli and
 # the local @memoriahub/enrichment-compute it depends on. Manifests first keeps
@@ -136,11 +161,15 @@ COPY --from=models /app/models /app/models
 # dir; MODELS_DIR/FACE_HUMAN_MODEL_PATH point at the baked models so ensureModels
 # verifies them in place instead of re-downloading; MEMORIAHUB_HEADLESS makes
 # `node start` self-register and drain-without-deregister on SIGTERM.
+# SHARP_FORCE_GLOBAL_LIBVIPS: keep set at runtime too so sharp resolves the
+# system HEIF-enabled libvips (matches the deps stage that built its addon), and
+# any runtime `npm rebuild` keeps building against global libvips (issue #128).
 ENV MEMORIAHUB_STATE_DIR=/data \
     MODELS_DIR=/app/models \
     FACE_HUMAN_MODEL_PATH=/app/models/human \
     MEMORIAHUB_HEADLESS=1 \
-    NODE_ENV=production
+    NODE_ENV=production \
+    SHARP_FORCE_GLOBAL_LIBVIPS=1
 
 # Per-replica writable state dir, owned by the unprivileged runtime user. The
 # baked models must also be writable by that user because ensureModels may
