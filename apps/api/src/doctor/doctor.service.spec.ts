@@ -297,6 +297,7 @@ describe('DoctorService', () => {
         'ai.flagConsistency',
         'ai.socialMedia',
         'ai.duplicateDetection',
+        'ai.pictureEnhancer',
         'face.detection',
         'face.flagConsistency',
         'face.pgvector',
@@ -351,7 +352,7 @@ describe('DoctorService', () => {
       // Unrelated checks are unaffected.
       expect(findCheck(report, 'core.database').status).toBe('ok');
       expect(findCheck(report, 'ai.search').status).toBe('ok');
-      expect(report.summary.total).toBe(27);
+      expect(report.summary.total).toBe(28);
     });
   });
 
@@ -391,7 +392,7 @@ describe('DoctorService', () => {
         // The rest of the report still completed normally.
         expect(findCheck(report, 'core.database').status).toBe('ok');
         expect(findCheck(report, 'ai.search').status).toBe('ok');
-        expect(report.summary.total).toBe(27);
+        expect(report.summary.total).toBe(28);
       } finally {
         jest.useRealTimers();
       }

@@ -25,6 +25,7 @@ import {
   SetSearchFeatureDto,
   SetTaggingFeatureDto,
   SetEmbeddingFeatureDto,
+  SetEnhanceFeatureDto,
   TestEmbeddingDto,
 } from './dto/ai-credentials.dto';
 
@@ -102,13 +103,14 @@ export class AiSettingsController {
     summary: 'List available models for a provider (Admin)',
     description:
       'When capability=embedding, returns embedding model IDs instead of chat model IDs. ' +
+      'When capability=image, returns image-edit (enhancement) model IDs. ' +
       'Providers that do not support the requested capability return an empty array.',
   })
   @ApiQuery({ name: 'provider', required: true, description: 'Provider key' })
   @ApiQuery({
     name: 'capability',
     required: false,
-    description: 'Model capability filter: "chat" (default) | "embedding"',
+    description: 'Model capability filter: "chat" (default) | "embedding" | "image"',
   })
   @ApiResponse({ status: 200, description: 'List of model IDs' })
   async listModels(
@@ -117,6 +119,9 @@ export class AiSettingsController {
   ) {
     if (capability === 'embedding') {
       return this.aiSettingsService.listEmbeddingModels(provider);
+    }
+    if (capability === 'image') {
+      return this.aiSettingsService.listImageModels(provider);
     }
     return this.aiSettingsService.listModels(provider);
   }
@@ -158,5 +163,18 @@ export class AiSettingsController {
     @CurrentUser('id') userId: string,
   ) {
     return this.aiSettingsService.setEmbeddingFeature(dto, userId);
+  }
+
+  @Put('features/enhance')
+  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.AI_SETTINGS_WRITE] })
+  @ApiOperation({
+    summary: 'Set active provider and model for AI picture enhancement (Admin)',
+  })
+  @ApiResponse({ status: 200, description: 'Enhance feature config updated' })
+  async setEnhanceFeature(
+    @Body() dto: SetEnhanceFeatureDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.aiSettingsService.setEnhanceFeature(dto, userId);
   }
 }

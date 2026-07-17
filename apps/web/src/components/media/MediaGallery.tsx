@@ -34,8 +34,6 @@ import {
   PlayCircleOutlined as PlayCircleOutlinedIcon,
   Star as StarIcon,
   StarBorder as StarBorderIcon,
-  CheckBox as CheckBoxIcon,
-  CheckBoxOutlineBlank as CheckBoxOutlineBlankIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { useInfiniteMedia } from '../../hooks/useInfiniteMedia';
@@ -47,8 +45,11 @@ import { usePendingThumbnails } from '../../hooks/usePendingThumbnails';
 import { groupByDay } from '../../utils/groupByDay';
 import { isThumbnailStuck } from '../../utils/thumbnailTimeout';
 import { MediaDetailDrawer } from './MediaDetailDrawer';
+import { MediaSelectionCheckbox } from './MediaSelectionCheckbox';
 import { MediaLightbox } from './MediaLightbox';
+import { MediaEnhancementDrawer } from './MediaEnhancementDrawer';
 import { BulkActionToolbar } from './BulkActionToolbar';
+import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { TrashBulkToolbar } from './TrashBulkToolbar';
 import { ArchiveBulkToolbar } from './ArchiveBulkToolbar';
 import { BulkLocationDialog } from './BulkLocationDialog';
@@ -228,26 +229,11 @@ const GalleryTile = memo(function GalleryTile({
           '.MuiImageListItem-root:hover &': { opacity: 1 },
         }}
       >
-        <IconButton
-          size="small"
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleSelect(item.id);
-          }}
-          aria-label={isSelected ? 'Deselect item' : 'Select item'}
-          sx={{
-            color: isSelected ? 'primary.main' : 'white',
-            backgroundColor: 'rgba(0,0,0,0.4)',
-            '&:hover': { backgroundColor: 'rgba(0,0,0,0.6)' },
-            p: { xs: 0.5, sm: 0.25 },
-          }}
-        >
-          {isSelected ? (
-            <CheckBoxIcon fontSize="small" />
-          ) : (
-            <CheckBoxOutlineBlankIcon fontSize="small" />
-          )}
-        </IconButton>
+        <MediaSelectionCheckbox
+          checked={isSelected}
+          onToggle={() => onToggleSelect(item.id)}
+          ariaLabel={isSelected ? 'Deselect item' : 'Select item'}
+        />
       </Box>
 
       {/* Gradient overlay — always visible when favorited */}
@@ -565,6 +551,20 @@ export function MediaGallery({
   const [addToAlbumOpen, setAddToAlbumOpen] = useState(false);
 
   // -------------------------------------------------------------------------
+  // AI Picture Enhancer — trigger from the single-select bar (photo only)
+  // -------------------------------------------------------------------------
+
+  const { settings } = useSystemSettings();
+  const enhanceEnabled = Boolean(settings?.features?.pictureEnhancement);
+  const [enhanceOpen, setEnhanceOpen] = useState(false);
+
+  const singleSelectedItem = useMemo<MediaItem | null>(() => {
+    if (selected.size !== 1) return null;
+    const [onlyId] = Array.from(selected);
+    return mergedItems.find((it) => it.id === onlyId) ?? null;
+  }, [selected, mergedItems]);
+
+  // -------------------------------------------------------------------------
   // Bulk success handler
   // -------------------------------------------------------------------------
 
@@ -733,6 +733,9 @@ export function MediaGallery({
           onRemoveFromAlbum={albumId ? () => void handleRemoveFromAlbum() : undefined}
           onSuccess={handleBulkSuccess}
           onError={(msg) => setSnackbar({ message: msg, severity: 'error' })}
+          singleSelectedItem={singleSelectedItem}
+          enhanceEnabled={enhanceEnabled}
+          onOpenEnhance={() => setEnhanceOpen(true)}
         />
       )}
 
@@ -942,6 +945,23 @@ export function MediaGallery({
           setSnackbar({ message: msg, severity: 'error' });
         }}
       />
+
+      {/* AI enhancement drawer (single photo) */}
+      {singleSelectedItem && singleSelectedItem.type === 'photo' && (
+        <MediaEnhancementDrawer
+          item={singleSelectedItem}
+          open={enhanceOpen}
+          onClose={() => setEnhanceOpen(false)}
+          onReplaced={() => {
+            setEnhanceOpen(false);
+            handleBulkSuccess('Photo replaced with the enhanced version');
+          }}
+          onKeptBoth={(msg) => {
+            setEnhanceOpen(false);
+            handleBulkSuccess(msg);
+          }}
+        />
+      )}
 
       {/* Snackbar for bulk operation feedback */}
       <Snackbar

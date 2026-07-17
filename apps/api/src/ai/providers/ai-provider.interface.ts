@@ -49,6 +49,30 @@ export interface AnalyzeImageRequest {
   mimeType: string;
 }
 
+export interface EnhanceImageRequest {
+  model: string;
+  /** Raw base64-encoded input image data — no `data:` URI prefix. */
+  imageBase64: string;
+  /** MIME type of the input image, e.g. 'image/jpeg' */
+  mimeType: string;
+  /** Compiled enhancement prompt. */
+  prompt: string;
+  /** Output canvas size; closest supported aspect ratio to the original. */
+  size: '1024x1024' | '1024x1536' | '1536x1024';
+  quality: 'low' | 'medium' | 'high';
+  inputFidelity: 'low' | 'high';
+  outputFormat?: 'jpeg' | 'png';
+  /** Output compression (0–100), applies to jpeg/webp output formats. */
+  outputCompression?: number;
+}
+
+export interface EnhanceImageResult {
+  /** Base64 of the enhanced bytes — no `data:` URI prefix. */
+  imageBase64: string;
+  /** MIME type of the enhanced bytes, e.g. 'image/jpeg' */
+  mimeType: string;
+}
+
 export interface AiProvider {
   /** Unique key identifying this provider, e.g. 'openai' | 'anthropic' */
   readonly key: string;
@@ -65,4 +89,9 @@ export interface AiProvider {
    */
   analyzeImage(creds: AiProviderCredentials, req: AnalyzeImageRequest): Promise<string>;
   embedText?(creds: AiProviderCredentials, model: string, input: string): Promise<number[]>;
+  /**
+   * Image-to-image enhancement. Optional — only providers with an image-edit
+   * capability implement it (OpenAI only in v1). Returns the enhanced bytes.
+   */
+  enhanceImage?(creds: AiProviderCredentials, req: EnhanceImageRequest): Promise<EnhanceImageResult>;
 }

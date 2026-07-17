@@ -53,6 +53,11 @@ export interface SystemSettingsValue {
         provider: string | null;
         model: string | null;
       };
+      /** Active provider+model for AI picture enhancement; null when unset. */
+      enhance?: {
+        provider: string;
+        model: string;
+      } | null;
     };
   };
   face?: {
@@ -147,6 +152,20 @@ export interface SystemSettingsValue {
      */
     stuckThresholdMinutes?: number;
   };
+  pictureEnhancement?: {
+    defaultQuality: 'low' | 'medium' | 'high';
+    defaultStrength: 'subtle' | 'balanced' | 'strong';
+    /** Whether to embed the file-level EXIF/XMP marker (deferred writer — default false). */
+    stampExif: boolean;
+    /** If false, only "keep both" is offered — originals are never overwritten. */
+    allowReplace: boolean;
+    /** If true, disable "replace" when enhanced dims < original. */
+    blockReplaceOnDownscale: boolean;
+    /** Skip/guard absurdly large inputs. */
+    maxInputMegapixels: number;
+    /** How long unapplied staging previews live before the purge cron reaps them. */
+    retentionHours: number;
+  };
 }
 
 /**
@@ -206,6 +225,7 @@ export const FEATURE_KEYS = {
   LOCATION_INFERENCE: 'locationInference',
   SOCIAL_MEDIA_DETECTION: 'socialMediaDetection',
   FACE_AUTO_ARCHIVE: 'faceAutoArchive',
+  PICTURE_ENHANCEMENT: 'pictureEnhancement',
 } as const;
 
 /**
@@ -236,12 +256,14 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     [FEATURE_KEYS.LOCATION_INFERENCE]: false,
     [FEATURE_KEYS.SOCIAL_MEDIA_DETECTION]: false,
     [FEATURE_KEYS.FACE_AUTO_ARCHIVE]: false,
+    [FEATURE_KEYS.PICTURE_ENHANCEMENT]: false,
   },
   ai: {
     features: {
       search: { provider: null, model: null },
       tagging: { provider: null, model: null },
       embedding: { provider: null, model: null },
+      enhance: null,
     },
   },
   face: {
@@ -300,5 +322,14 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
       purgeEnabled: true,
     },
     stuckThresholdMinutes: defaultStuckThresholdMinutes(),
+  },
+  pictureEnhancement: {
+    defaultQuality: 'high',
+    defaultStrength: 'balanced',
+    stampExif: false,
+    allowReplace: true,
+    blockReplaceOnDownscale: false,
+    maxInputMegapixels: 50,
+    retentionHours: 72,
   },
 };

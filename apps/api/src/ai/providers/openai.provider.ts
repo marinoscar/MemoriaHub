@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import OpenAI, { toFile } from 'openai';
 import { callOpenAiVision } from '@memoriahub/enrichment-compute/ai';
 import type {
   AiProvider,
@@ -7,6 +7,8 @@ import type {
   ChatMessage,
   ChatRequest,
   ChatStreamEvent,
+  EnhanceImageRequest,
+  EnhanceImageResult,
 } from './ai-provider.interface';
 
 // =============================================================================
@@ -38,6 +40,11 @@ const OPENAI_REASONING_EFFORT = process.env['OPENAI_REASONING_EFFORT'] ?? 'low';
 const OPENAI_CURATED_MODELS = ['gpt-5.4', 'gpt-5.5'] as const;
 
 const OPENAI_EMBEDDING_MODELS = ['text-embedding-3-small', 'text-embedding-3-large'] as const;
+
+// Curated image-edit models. `client.models.list()` output is filtered OUT by
+// the chat-model isEligibleOpenAiModel regex (which excludes the 'image'
+// keyword), so image models need their own curated source.
+const OPENAI_IMAGE_MODELS = ['gpt-image-1'] as const;
 
 /**
  * Returns true for OpenAI chat/LLM model ids that have a GPT major.minor
@@ -222,6 +229,10 @@ export class OpenAiProvider implements AiProvider {
     return [...OPENAI_EMBEDDING_MODELS];
   }
 
+  listImageModels(): string[] {
+    return [...OPENAI_IMAGE_MODELS];
+  }
+
   async testModel(
     creds: AiProviderCredentials,
     model: string,
@@ -295,6 +306,59 @@ export class OpenAiProvider implements AiProvider {
         throw new Error(`Model not found: ${model}`);
       }
       throw new Error(e?.message ?? 'Unknown error calling OpenAI embeddings');
+    }
+  }
+
+  async enhanceImage(
+    creds: AiProviderCredentials,
+    req: EnhanceImageRequest,
+  ): Promise<EnhanceImageResult> {
+    const outputFormat = req.outputFormat ?? 'jpeg';
+    try {
+      const client = new OpenAI({
+        apiKey: creds.apiKey,
+        ...(creds.baseUrl && { baseURL: creds.baseUrl }),
+      });
+
+      // Build an uploadable file from the raw image bytes. The extension is
+      // derived from the input MIME so OpenAI infers the format correctly.
+      const ext = req.mimeType === 'image/png' ? 'png' : 'jpg';
+      const image = await toFile(Buffer.from(req.imageBase64, 'base64'), `input.${ext}`, {
+        type: req.mimeType,
+      });
+
+      const resp = await client.images.edit({
+        model: req.model,
+        image,
+        prompt: req.prompt,
+        size: req.size,
+        quality: req.quality,
+        input_fidelity: req.inputFidelity,
+        n: 1,
+        output_format: outputFormat,
+        ...(req.outputCompression !== undefined && {
+          output_compression: req.outputCompression,
+        }),
+      } as any);
+
+      const b64 = resp.data?.[0]?.b64_json;
+      if (!b64) {
+        throw new Error('OpenAI image edit returned no image data');
+      }
+
+      return {
+        imageBase64: b64,
+        mimeType: outputFormat === 'png' ? 'image/png' : 'image/jpeg',
+      };
+    } catch (err: unknown) {
+      const e = err as { status?: number; code?: string; message?: string };
+      if (e?.status === 401) {
+        throw new Error('Invalid API key');
+      }
+      if (e?.status === 404 || e?.code === 'model_not_found') {
+        throw new Error(`Model not found: ${req.model}`);
+      }
+      throw new Error(e?.message ?? 'Unknown error calling OpenAI image edit');
     }
   }
 }

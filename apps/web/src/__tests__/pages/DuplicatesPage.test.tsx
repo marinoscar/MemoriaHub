@@ -401,7 +401,7 @@ describe('DuplicatesPage', () => {
       render(<DuplicatesPage />);
 
       expect(
-        await screen.findByRole('checkbox', { name: 'Select duplicate group' }),
+        await screen.findByRole('button', { name: 'Select duplicate group' }),
       ).toBeInTheDocument();
     });
   });

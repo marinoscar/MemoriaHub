@@ -62,6 +62,10 @@ export const systemSettingsSchema = z.object({
         provider: z.string().nullable(),
         model: z.string().nullable(),
       }),
+      enhance: z.object({
+        provider: z.string(),
+        model: z.string(),
+      }).nullable().default(null),
     }),
   }),
   face: z.object({
@@ -170,6 +174,23 @@ export const systemSettingsSchema = z.object({
     }).default({ retentionDays: 30, purgeEnabled: true }),
     stuckThresholdMinutes: z.number().int().min(1).max(120).default(3),
   }).optional().default({ history: { retentionDays: 30, purgeEnabled: true }, stuckThresholdMinutes: 3 }),
+  pictureEnhancement: z.object({
+    defaultQuality: z.enum(['low', 'medium', 'high']).default('high'),
+    defaultStrength: z.enum(['subtle', 'balanced', 'strong']).default('balanced'),
+    stampExif: z.boolean().default(false),
+    allowReplace: z.boolean().default(true),
+    blockReplaceOnDownscale: z.boolean().default(false),
+    maxInputMegapixels: z.number().min(1).max(100).default(50),
+    retentionHours: z.number().int().min(1).max(720).default(72),
+  }).optional().default({
+    defaultQuality: 'high',
+    defaultStrength: 'balanced',
+    stampExif: false,
+    allowReplace: true,
+    blockReplaceOnDownscale: false,
+    maxInputMegapixels: 50,
+    retentionHours: 72,
+  }),
 });
 
 export type SystemSettingsDto = z.infer<typeof systemSettingsSchema>;
@@ -194,6 +215,10 @@ export const systemSettingsPatchSchema = z.object({
         provider: z.string().nullable().optional(),
         model: z.string().nullable().optional(),
       }).optional(),
+      enhance: z.object({
+        provider: z.string(),
+        model: z.string(),
+      }).nullable().optional(),
     }).optional(),
   }).optional(),
   face: z.object({
@@ -272,5 +297,14 @@ export const systemSettingsPatchSchema = z.object({
       purgeEnabled: z.boolean().optional(),
     }).optional(),
     stuckThresholdMinutes: z.number().int().min(1).max(120).optional(),
+  }).optional(),
+  pictureEnhancement: z.object({
+    defaultQuality: z.enum(['low', 'medium', 'high']).optional(),
+    defaultStrength: z.enum(['subtle', 'balanced', 'strong']).optional(),
+    stampExif: z.boolean().optional(),
+    allowReplace: z.boolean().optional(),
+    blockReplaceOnDownscale: z.boolean().optional(),
+    maxInputMegapixels: z.number().min(1).max(100).optional(),
+    retentionHours: z.number().int().min(1).max(720).optional(),
   }).optional(),
 });

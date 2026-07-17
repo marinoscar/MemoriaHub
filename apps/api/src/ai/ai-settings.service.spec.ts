@@ -208,6 +208,7 @@ describe('AiSettingsService', () => {
         search: { provider: null, model: null },
         tagging: { provider: null, model: null },
         embedding: { provider: null, model: null },
+        enhance: null,
       });
     });
 

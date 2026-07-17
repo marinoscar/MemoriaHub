@@ -42,13 +42,14 @@
  * MapTimeFilter is also left unmocked (pure MUI, no leaflet dependency).
  *
  * Tests cover the fetch lifecycle (no-circle guard, loading, empty, error,
- * data), the two cluster-click flows (single-item → detail drawer,
- * small multi-item → "Photos here" drawer data fetch), and the
- * extent-driven initial framing (fitBounds/setView call, null-extent and
- * rejected-fetch handling, and the GPS-fallback regression check above).
- * The large-cluster drill-down (`map.flyTo`) is not asserted — it requires
- * no additional network calls and is the lowest-value path to cover
- * through the mocked leaflet layer.
+ * data), the cluster-click flows (single-item → detail drawer, multi-item →
+ * "Photos here" drawer data fetch — both small clusters and large clusters,
+ * since the old `count > 60` fly-drill branch was removed and every
+ * multi-item cluster now opens the drawer), the drawer's "Show all N
+ * photos" jump into deterministic search (via `useSearch()`), the drawer's
+ * error state, and the extent-driven initial framing (fitBounds/setView
+ * call, null-extent and rejected-fetch handling, and the GPS-fallback
+ * regression check above).
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -142,6 +143,17 @@ vi.mock('../../components/media/MediaDetailDrawer', () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Mock SearchContext — the component calls useSearch() to get
+// runDeterministicSearch for the "Show all N photos" button. Following the
+// exact pattern used in SearchPage.test.tsx.
+// ---------------------------------------------------------------------------
+
+vi.mock('../../contexts/SearchContext', () => ({
+  useSearch: vi.fn(),
+  SearchProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+// ---------------------------------------------------------------------------
 // Mock services/media
 // ---------------------------------------------------------------------------
 
@@ -166,6 +178,11 @@ const mockListMediaLocations = vi.mocked(listMediaLocations);
 const mockGetThumbnails = vi.mocked(getThumbnails);
 const mockGetMedia = vi.mocked(getMedia);
 const mockGetLocationExtent = vi.mocked(getLocationExtent);
+
+import { useSearch } from '../../contexts/SearchContext';
+
+const mockUseSearch = vi.mocked(useSearch);
+const mockRunDeterministicSearch = vi.fn();
 
 // ---------------------------------------------------------------------------
 // Now import the component under test (after all mocks are registered)
@@ -277,6 +294,18 @@ describe('MediaMapPage', () => {
     Object.defineProperty(window.navigator, 'geolocation', {
       value: { getCurrentPosition: mockGetCurrentPosition, watchPosition: vi.fn() },
       configurable: true,
+    });
+
+    mockRunDeterministicSearch.mockReset();
+    mockUseSearch.mockReturnValue({
+      messages: [],
+      results: null,
+      searchRequest: null,
+      isSearching: false,
+      error: null,
+      runAgentSearch: vi.fn(),
+      runDeterministicSearch: mockRunDeterministicSearch,
+      clearSearch: vi.fn(),
     });
   });
 
@@ -458,6 +487,120 @@ describe('MediaMapPage', () => {
       await waitFor(() => {
         expect(screen.getByText(/photos here \(2\)/i)).toBeInTheDocument();
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Large cluster click → "Photos here" drawer with capped thumbnail fetch
+  // and a "Show all N photos" jump into deterministic search.
+  // -------------------------------------------------------------------------
+
+  describe('large cluster — Show all photos', () => {
+    function makeManyLocations(count: number): MediaLocation[] {
+      return Array.from({ length: count }, (_, i) =>
+        makeLocation({ id: `p${i + 1}` }),
+      );
+    }
+
+    it('opens the drawer showing the full total and caps the thumbnail fetch at CLUSTER_THUMB_LIMIT (24)', async () => {
+      mockAggregateLocations.mockResolvedValue([
+        makeCluster({ count: 50, sampleId: 'cluster-big', lat: 10, lng: -85 }),
+      ]);
+      mockListMediaLocations.mockResolvedValue(makeManyLocations(50));
+      mockGetThumbnails.mockResolvedValue(
+        Array.from({ length: 24 }, (_, i) => ({
+          id: `p${i + 1}`,
+          thumbnailUrl: `https://cdn.example.com/p${i + 1}.jpg`,
+        })),
+      );
+
+      render(<MediaMapPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('marker')).toBeInTheDocument();
+      });
+
+      await userEvent.click(screen.getByTestId('marker'));
+
+      await waitFor(() => {
+        expect(mockGetThumbnails).toHaveBeenCalled();
+      });
+      const [, requestedIds] = mockGetThumbnails.mock.calls[0];
+      expect(requestedIds).toHaveLength(24);
+
+      await waitFor(() => {
+        expect(screen.getByText(/photos here \(50\)/i)).toBeInTheDocument();
+      });
+      expect(
+        screen.getByRole('button', { name: /show all 50 photos/i }),
+      ).toBeInTheDocument();
+    });
+
+    it('clicking "Show all N photos" calls runDeterministicSearch with a near filter and closes the drawer', async () => {
+      mockAggregateLocations.mockResolvedValue([
+        makeCluster({ count: 50, sampleId: 'cluster-big', lat: 10, lng: -85 }),
+      ]);
+      mockListMediaLocations.mockResolvedValue(makeManyLocations(50));
+      mockGetThumbnails.mockResolvedValue(
+        Array.from({ length: 24 }, (_, i) => ({
+          id: `p${i + 1}`,
+          thumbnailUrl: `https://cdn.example.com/p${i + 1}.jpg`,
+        })),
+      );
+
+      render(<MediaMapPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('marker')).toBeInTheDocument();
+      });
+      await userEvent.click(screen.getByTestId('marker'));
+
+      const showAllButton = await screen.findByRole('button', {
+        name: /show all 50 photos/i,
+      });
+      await userEvent.click(showAllButton);
+
+      await waitFor(() => {
+        expect(mockRunDeterministicSearch).toHaveBeenCalledWith({
+          circleId: 'circle-1',
+          filters: {
+            near: expect.objectContaining({
+              lat: expect.any(Number),
+              lng: expect.any(Number),
+              radiusKm: expect.any(Number),
+            }),
+          },
+        });
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByText(/show all/i)).not.toBeInTheDocument();
+      });
+    });
+
+    it('renders the error Alert (not a silent empty grid) when the drawer fetch rejects', async () => {
+      mockAggregateLocations.mockResolvedValue([
+        makeCluster({ count: 50, sampleId: 'cluster-big', lat: 10, lng: -85 }),
+      ]);
+      mockListMediaLocations.mockRejectedValue(new Error('network error'));
+
+      render(<MediaMapPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('marker')).toBeInTheDocument();
+      });
+      await userEvent.click(screen.getByTestId('marker'));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/couldn.t load photos for this location\./i),
+        ).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('button', { name: /show all/i })).not.toBeInTheDocument();
+      // No photo tiles rendered in the error state — AlbumTile gives each
+      // tile role="button" with an aria-label derived from geoLocality/coords.
+      expect(screen.queryByText('La Fortuna')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^photo taken at/i)).not.toBeInTheDocument();
     });
   });
 
