@@ -42,3 +42,34 @@ jobs:
       # known-rotted UI suites are excluded and tracked in docs/ci-known-failing-tests.md.
       - run: npm run test:ci --workspace=api
       - run: npm run test:ci --workspace=web
+
+  cli-test:
+    name: CLI Build & Test
+    runs-on: ubuntu-latest
+    # No `needs: build` — this job runs CONCURRENTLY with `build` on GitHub's
+    # default parallel scheduling, not after it, so adding CLI coverage does
+    # not add to the wall-clock time until the workflow shows all-green. Keep
+    # it that way: this job is unit tests only (no docker/QEMU/image build —
+    # that's the separate, deliberately slow multi-arch worker image build in
+    # deploy.yml, which this job must never touch or depend on).
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      # Same rationale as the build job: apps/cli imports @memoriahub/enrichment-compute
+      # by subpath resolved against its git-ignored dist/, built fresh here.
+      - run: npm run build --workspace=@memoriahub/enrichment-compute
+
+      - run: npm run typecheck --workspace=@memoriahub/cli
+
+      # Unit-scoped test run. Fixture-drift and one concurrency-flaky suite are
+      # excluded and tracked in docs/ci-known-failing-tests.md.
+      - run: npm run test:ci --workspace=@memoriahub/cli

@@ -1,6 +1,6 @@
 # CI Known-Failing Tests
 
-These suites are excluded from `test:ci` in both apps. Each exclusion is intentional and tracked here as follow-up debt.
+These suites are excluded from `test:ci` in each app. Each exclusion is intentional and tracked here as follow-up debt.
 
 ---
 
@@ -50,8 +50,33 @@ These specs are excluded individually. Components evolved (new props, renamed sl
 
 ---
 
+## CLI — Rotted Fixture Suites (4 files)
+
+Added when `apps/cli` first gained CI coverage (`cli-test` job in `ci.yml`, issue #151). These fail due to fixture/schema drift unrelated to any recent change — the specs were simply never updated when the code they cover moved on:
+
+| File | Reason |
+|------|--------|
+| `test/db/migrations.spec.ts` | Asserts sqlite `user_version` is `8`; `src/db/migrations.ts` has since added later migrations, so the version is now higher |
+| `test/db/migration-v6.spec.ts` | Same root cause — asserts the pre-migration `user_version`, now stale |
+| `test/export/scan-export.spec.ts` | Asserts an export column set that predates the "Fallback date"/"Fallback location" columns added later |
+| `test/sync/sync-engine-date-range.spec.ts` | Same fallback-date/location column drift as the export spec |
+
+**Fix:** Update each fixture's expected `user_version` / column list to match the current schema. No behaviour regressions.
+
+## CLI — Concurrency-Flaky Suite (1 file)
+
+| File | Reason |
+|------|--------|
+| `test/tui/menu-nav.spec.tsx` | Passes reliably in isolation (3/3 local runs) but fails intermittently when run alongside the full suite — likely shared terminal/env state between concurrently-rendered Ink TUI suites, not a fixture or assertion problem |
+
+**Fix:** Isolate whatever global state (terminal width/env var/stdout mock) leaks between this suite and its neighbors — likely needs a per-suite reset in a `beforeEach`/`afterEach` or moving the offending state into a fixture torn down per test.
+
+---
+
 ## Priority
 
 1. **Web UI suites** — straightforward RTL query updates; no architectural change needed.
 2. **API rotted unit suites** — update mock expectations to match current service interfaces.
-3. **API integration suites** — requires CI infrastructure work (DB service container).
+3. **CLI rotted fixture suites** — update stale fixture expectations (version numbers, column lists) to match current schema.
+4. **CLI concurrency-flaky suite** — find and isolate the leaking shared state.
+5. **API integration suites** — requires CI infrastructure work (DB service container).
