@@ -21,14 +21,18 @@
 //   - 'app': the original path — load candidates into the process and compute
 //     cosine similarity in JS.
 //
-// KNN-candidate → centroid parity design (matchFaceToPerson): the pgvector KNN
-// only SELECTS which persons are worth scoring (nearest float4 vectors); the
-// final accept/reject decision is still made by recomputing each candidate
-// person's float8 centroid via computePersonCentroid() and comparing against
-// matchThreshold with the exact same cosineSimilarity() used by the in-app
-// path. This keeps the pgvector path's accept/reject decision numerically
-// identical to the in-app path — the float4 mirror column only accelerates
-// candidate selection, it never decides a match on its own.
+// KNN-candidate → centroid design (matchFaceToPerson): the pgvector KNN only
+// SELECTS which persons are worth scoring (nearest float4 vectors); each
+// candidate person's centroid is then computed SQL-side via
+// `avg(embedding_vec)` (computePersonCentroidPgvector) — one aggregate row per
+// person instead of loading every face row of the person into the process —
+// and cached per-process for a short TTL. The accept/reject decision compares
+// that centroid against matchThreshold with the exact same cosineSimilarity()
+// used by the in-app path. Precision note: avg() over the float4 vector column
+// differs from the float8 mean at ~1e-7/element — negligible vs
+// FACE_MATCH_THRESHOLD 0.38; decision parity is preserved for practical
+// purposes. Persons with no vector-eligible faces (legacy 'human'-only 1024-d
+// embeddings) fall back to the float8 computePersonCentroid() path unchanged.
 //
 // Threshold conventions (ArcFace on LFW benchmark):
 //   - Same-person pairs typically score > 0.40 cosine similarity.
@@ -112,6 +116,17 @@ const HNSW_EF_SEARCH_FLOOR = 100;
 /** The one embedding dimensionality mirrored into the vector(128) column. */
 const PGVECTOR_EMBEDDING_DIM = 128;
 
+/**
+ * TTL for the per-process person-centroid cache used by the pgvector match
+ * path. Cache invalidation: a 60s-stale centroid only marginally shifts a
+ * fuzzy threshold decision; new-face assignments during a bulk run make
+ * centroids MORE representative over time, not less — acceptable staleness.
+ */
+const CENTROID_CACHE_TTL_MS = 60_000;
+
+/** Max centroid-cache entries before a wholesale clear (simple overflow guard). */
+const CENTROID_CACHE_MAX_ENTRIES = 5000;
+
 @Injectable()
 export class FaceMatchingService {
   private readonly logger = new Logger(FaceMatchingService.name);
@@ -133,6 +148,17 @@ export class FaceMatchingService {
 
   /** KNN candidate count fetched from the pgvector index before centroid recompute. */
   readonly matchKnnCandidates: number;
+
+  /**
+   * Per-process TTL cache of person centroids, used ONLY by the pgvector match
+   * path (matchFaceToPersonPgvector). See CENTROID_CACHE_TTL_MS for the
+   * staleness rationale. Other computePersonCentroid callers (people merge,
+   * clustering) keep the uncached method's exact semantics.
+   */
+  private readonly centroidCache = new Map<
+    string,
+    { centroid: number[]; expiresAt: number }
+  >();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -163,6 +189,31 @@ export class FaceMatchingService {
       this.config.get<string>('FACE_MATCH_KNN_CANDIDATES') ??
         String(DEFAULT_FACE_MATCH_KNN_CANDIDATES),
       10,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // usesPgvectorFor
+  // ---------------------------------------------------------------------------
+
+  /**
+   * True when a probe embedding would be routed through the pgvector KNN path:
+   * the resolved backend is 'pgvector' AND the embedding is exactly 128-d
+   * (the dimensionality mirrored into the vector(128) column). Exposed so
+   * callers (face-detection-core's auto-archive branch) can decide whether a
+   * per-probe indexed KNN beats preloading an in-app candidate set.
+   */
+  usesPgvectorFor(embedding: number[]): boolean {
+    return (
+      this.resolveVectorBackend() === 'pgvector' &&
+      embedding.length === PGVECTOR_EMBEDDING_DIM
+    );
+  }
+
+  /** Single source of truth for the FACE_VECTOR_BACKEND resolution. */
+  private resolveVectorBackend(): string {
+    return (
+      this.config.get<string>('FACE_VECTOR_BACKEND') ?? DEFAULT_FACE_VECTOR_BACKEND
     );
   }
 
@@ -232,6 +283,89 @@ export class FaceMatchingService {
   }
 
   // ---------------------------------------------------------------------------
+  // computePersonCentroidPgvector / centroid cache
+  // ---------------------------------------------------------------------------
+
+  /**
+   * SQL-side centroid: `avg(embedding_vec)` over the person's vector-eligible
+   * faces — one aggregate row instead of loading every embedding into the
+   * process (computePersonCentroid is O(faces) rows per call and was the
+   * dominant DB load of the pgvector match path during bulk imports).
+   *
+   * Precision note: avg() over the float4 vector column differs from the
+   * float8 mean at ~1e-7/element — negligible vs FACE_MATCH_THRESHOLD 0.38;
+   * decision parity is preserved for practical purposes.
+   *
+   * Falls back to the float8 computePersonCentroid() path when avg() returns
+   * NULL (person has only non-128-d 'human' or empty embeddings, so no
+   * embedding_vec rows exist) — behavior for legacy Human-only persons is
+   * unchanged.
+   */
+  async computePersonCentroidPgvector(personId: string): Promise<number[]> {
+    const rows = await this.prisma.$queryRaw<
+      { centroid: string | null; n: number }[]
+    >`
+      SELECT avg(embedding_vec)::text AS centroid, count(*)::int AS n
+      FROM faces
+      WHERE person_id = ${personId}::uuid
+        AND embedding_vec IS NOT NULL
+    `;
+
+    const centroidText = rows?.[0]?.centroid;
+    if (!centroidText) {
+      // No vector-eligible faces: legacy float8 path.
+      return this.computePersonCentroid(personId);
+    }
+
+    // pgvector text format: '[x,y,...]'
+    const parsed = centroidText
+      .replace(/^\[/, '')
+      .replace(/\]$/, '')
+      .split(',')
+      .map(Number);
+
+    if (parsed.length === 0 || parsed.some((v) => !Number.isFinite(v))) {
+      return this.computePersonCentroid(personId);
+    }
+
+    return l2NormalizeVec(parsed);
+  }
+
+  /**
+   * TTL-cached centroid retrieval, used ONLY inside the pgvector match loop.
+   * See CENTROID_CACHE_TTL_MS for the staleness rationale.
+   */
+  private async getPersonCentroidCached(personId: string): Promise<number[]> {
+    const now = Date.now();
+    const hit = this.centroidCache.get(personId);
+    if (hit && hit.expiresAt > now) {
+      return hit.centroid;
+    }
+
+    const centroid = await this.computePersonCentroidPgvector(personId);
+
+    // Simple overflow guard: wholesale clear rather than LRU bookkeeping.
+    if (this.centroidCache.size >= CENTROID_CACHE_MAX_ENTRIES) {
+      this.centroidCache.clear();
+    }
+    this.centroidCache.set(personId, {
+      centroid,
+      expiresAt: now + CENTROID_CACHE_TTL_MS,
+    });
+
+    return centroid;
+  }
+
+  /**
+   * Drop a person's cached centroid. Called by face-detection-core right after
+   * it assigns a newly detected face to the person, so the next probe in the
+   * same bulk run recomputes against the fresh face set.
+   */
+  invalidateCentroid(personId: string): void {
+    this.centroidCache.delete(personId);
+  }
+
+  // ---------------------------------------------------------------------------
   // matchFaceToPerson
   // ---------------------------------------------------------------------------
 
@@ -262,10 +396,7 @@ export class FaceMatchingService {
     circleId: string,
     embedding: number[],
   ): Promise<{ personId: string; similarity: number } | null> {
-    const vectorBackend =
-      this.config.get<string>('FACE_VECTOR_BACKEND') ?? DEFAULT_FACE_VECTOR_BACKEND;
-
-    if (vectorBackend === 'pgvector' && embedding.length === PGVECTOR_EMBEDDING_DIM) {
+    if (this.usesPgvectorFor(embedding)) {
       return this.matchFaceToPersonPgvector(circleId, embedding);
     }
 
@@ -303,15 +434,17 @@ export class FaceMatchingService {
   }
 
   /**
-   * pgvector implementation of matchFaceToPerson (option (b): KNN candidate
-   * selection → bounded centroid recompute for exact in-app parity).
+   * pgvector implementation of matchFaceToPerson (KNN candidate selection →
+   * bounded centroid recompute).
    *
    * Only invoked for 128-d probes (guarded by the caller). The KNN JOINs to
    * `people` so only active persons' faces are considered, and returns the
    * nearest candidate faces ordered by cosine distance; we collect the distinct
-   * person ids in nearest-first order, recompute each candidate's float8
-   * centroid, and keep the accept/reject decision on that centroid — identical
-   * to the in-app path.
+   * person ids in nearest-first order, then score each candidate against its
+   * SQL-side avg(embedding_vec) centroid (TTL-cached — see
+   * getPersonCentroidCached; precision/staleness rationale in the class
+   * header) and keep the accept/reject decision on cosineSimilarity() vs.
+   * matchThreshold, same comparison as the in-app path.
    *
    * `SET LOCAL hnsw.ef_search` only takes effect inside an explicit transaction,
    * so the SET and the SELECT are issued together via `$transaction([...])`
@@ -359,7 +492,7 @@ export class FaceMatchingService {
     let bestSimilarity = -Infinity;
 
     for (const personId of candidatePersonIds) {
-      const centroid = await this.computePersonCentroid(personId);
+      const centroid = await this.getPersonCentroidCached(personId);
       if (centroid.length === 0) continue;
 
       const similarity = this.cosineSimilarity(embedding, centroid);
@@ -429,9 +562,11 @@ export class FaceMatchingService {
    *
    * Backend selection (FACE_VECTOR_BACKEND, default DEFAULT_FACE_VECTOR_BACKEND):
    *   - opts.candidates supplied: ALWAYS the in-app path, regardless of backend.
-   *     This is the in-loop reuse case (face-detection-core loads the archived
-   *     reference set once and probes many faces against it), so a per-probe KNN
-   *     round-trip would be strictly worse.
+   *     This is the in-loop reuse case (face-detection-core, on the app backend
+   *     or for non-128-d probes, loads the archived reference set once and
+   *     probes many faces against it), so a per-probe KNN round-trip would be
+   *     strictly worse there. On the pgvector backend face-detection-core calls
+   *     this method WITHOUT candidates so each probe is one indexed KNN.
    *   - 'pgvector' (128-d probes only): a KNN query on the PARTIAL archive HNSW
    *     index (`faces_embedding_vec_archive_hnsw_idx`, scoped to
    *     person_id IS NULL AND hidden_at IS NOT NULL) returns the nearest archived
@@ -466,10 +601,7 @@ export class FaceMatchingService {
         : null;
     }
 
-    const vectorBackend =
-      this.config.get<string>('FACE_VECTOR_BACKEND') ?? DEFAULT_FACE_VECTOR_BACKEND;
-
-    if (vectorBackend === 'pgvector' && embedding.length === PGVECTOR_EMBEDDING_DIM) {
+    if (this.usesPgvectorFor(embedding)) {
       return this.matchFaceToArchivedPgvector(circleId, embedding, threshold);
     }
 

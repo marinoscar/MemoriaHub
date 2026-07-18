@@ -277,9 +277,11 @@ export class FaceDetectionCore {
       createdFaces.push(created);
     }
 
-    // Lazily-loaded archived-face candidate pool (populated at most once per
-    // job, only when the first unmatched face needs it) and the batch of newly
-    // created faces to auto-archive after the loop completes.
+    // Lazily-loaded archived-face candidate pool — FALLBACK path only (app
+    // backend / non-128-d probes; populated at most once per job, only when
+    // the first unmatched face needs it). On the pgvector backend each probe
+    // is a single indexed KNN and this pool is never loaded. Also the batch of
+    // newly created faces to auto-archive after the loop completes.
     let archivedCandidates: Array<{ id: string; embedding: number[] }> | null =
       null;
     const toArchive: string[] = [];
@@ -306,37 +308,63 @@ export class FaceDetectionCore {
             where: { id: face.id },
             data: { personId: matchResult.personId },
           });
+          // The person just gained a face — drop its cached centroid so the
+          // next probe in this run recomputes against the fresh face set.
+          this.matchingService.invalidateCentroid(matchResult.personId);
           this.logger.debug(
             `Face ${face.id} matched to person ${matchResult.personId}`,
           );
         } else if (autoArchiveOn && face.embedding.length > 0) {
           // No person match: check whether this face matches a previously
           // archived unassigned face and, if so, auto-archive it.
-          if (archivedCandidates === null) {
-            archivedCandidates = await this.prisma.face.findMany({
-              where: {
-                circleId,
-                personId: null,
-                hiddenAt: { not: null },
-                embedding: { isEmpty: false },
-              },
-              select: { id: true, embedding: true },
-              orderBy: { hiddenAt: 'desc' },
-              take: this.matchingService.archiveMaxCandidates,
-            });
-          }
-
-          if (archivedCandidates.length > 0) {
+          //
+          // Faces archived by this same job are batch-applied after the loop,
+          // so neither path below sees them mid-loop — unchanged behavior.
+          if (this.matchingService.usesPgvectorFor(face.embedding)) {
+            // pgvector backend + 128-d probe: one indexed KNN against the
+            // partial archive HNSW index per face. Skipping the preload avoids
+            // reading up to archiveMaxCandidates (5000) rows per job.
             const archMatch = await this.matchingService.matchFaceToArchived(
               circleId,
               face.embedding,
-              { threshold: archiveThreshold, candidates: archivedCandidates },
+              { threshold: archiveThreshold },
             );
             if (archMatch) {
               toArchive.push(face.id);
               this.logger.debug(
                 `Face ${face.id} auto-archived (matched archived ${archMatch.faceId}, sim=${archMatch.similarity})`,
               );
+            }
+          } else {
+            // App backend / non-128-d probe: preload the archived reference
+            // set once per job and reuse it for every probe (in-loop reuse —
+            // candidates short-circuit matchFaceToArchived to the in-JS scan).
+            if (archivedCandidates === null) {
+              archivedCandidates = await this.prisma.face.findMany({
+                where: {
+                  circleId,
+                  personId: null,
+                  hiddenAt: { not: null },
+                  embedding: { isEmpty: false },
+                },
+                select: { id: true, embedding: true },
+                orderBy: { hiddenAt: 'desc' },
+                take: this.matchingService.archiveMaxCandidates,
+              });
+            }
+
+            if (archivedCandidates.length > 0) {
+              const archMatch = await this.matchingService.matchFaceToArchived(
+                circleId,
+                face.embedding,
+                { threshold: archiveThreshold, candidates: archivedCandidates },
+              );
+              if (archMatch) {
+                toArchive.push(face.id);
+                this.logger.debug(
+                  `Face ${face.id} auto-archived (matched archived ${archMatch.faceId}, sim=${archMatch.similarity})`,
+                );
+              }
             }
           }
         }

@@ -147,6 +147,198 @@ describe('FaceMatchingService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // usesPgvectorFor
+  // -------------------------------------------------------------------------
+
+  describe('usesPgvectorFor', () => {
+    function vec(dim: number): number[] {
+      return new Array(dim).fill(0).map((_, i) => (i === 0 ? 1 : 0));
+    }
+
+    async function makeService(backend?: string): Promise<FaceMatchingService> {
+      const config = makeConfigService(
+        backend ? { FACE_VECTOR_BACKEND: backend } : {},
+      );
+      const module = await Test.createTestingModule({
+        providers: [
+          FaceMatchingService,
+          { provide: PrismaService, useValue: mockPrisma },
+          { provide: ConfigService, useValue: config },
+        ],
+      }).compile();
+      return module.get<FaceMatchingService>(FaceMatchingService);
+    }
+
+    it('returns true for a 128-d embedding on the default (pgvector) backend', () => {
+      // beforeEach service has no FACE_VECTOR_BACKEND override → default 'pgvector'
+      expect(service.usesPgvectorFor(vec(128))).toBe(true);
+    });
+
+    it('returns true for a 128-d embedding with FACE_VECTOR_BACKEND=pgvector', async () => {
+      const s = await makeService('pgvector');
+      expect(s.usesPgvectorFor(vec(128))).toBe(true);
+    });
+
+    it('returns false for a 128-d embedding with FACE_VECTOR_BACKEND=app', async () => {
+      const s = await makeService('app');
+      expect(s.usesPgvectorFor(vec(128))).toBe(false);
+    });
+
+    it('returns false for a 1024-d ("human") embedding even on the pgvector backend', async () => {
+      const s = await makeService('pgvector');
+      expect(s.usesPgvectorFor(vec(1024))).toBe(false);
+    });
+
+    it('returns false for an empty embedding on the pgvector backend', async () => {
+      const s = await makeService('pgvector');
+      expect(s.usesPgvectorFor([])).toBe(false);
+    });
+
+    it('returns false for a small (2-d) test embedding on the default backend', () => {
+      expect(service.usesPgvectorFor([1, 0])).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // computePersonCentroidPgvector + centroid cache
+  // -------------------------------------------------------------------------
+
+  describe('computePersonCentroidPgvector', () => {
+    it('parses the avg(embedding_vec) text result and L2-normalizes it', async () => {
+      (mockPrisma.$queryRaw as unknown as jest.Mock).mockResolvedValue([
+        { centroid: '[3,4]', n: 2 },
+      ]);
+
+      const centroid = await service.computePersonCentroidPgvector('person-1');
+
+      expect(centroid).toHaveLength(2);
+      expect(centroid[0]).toBeCloseTo(0.6, 10);
+      expect(centroid[1]).toBeCloseTo(0.8, 10);
+      // No float8 fallback query
+      expect(mockPrisma.face.findMany).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the float8 computePersonCentroid path when avg() returns NULL', async () => {
+      // Person has only non-128-d / empty embeddings → no embedding_vec rows
+      (mockPrisma.$queryRaw as unknown as jest.Mock).mockResolvedValue([
+        { centroid: null, n: 0 },
+      ]);
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
+        { embedding: [1, 0] },
+        { embedding: [0, 1] },
+      ]);
+
+      const centroid = await service.computePersonCentroidPgvector('person-legacy');
+      const expected = 1 / Math.sqrt(2);
+
+      expect(mockPrisma.face.findMany).toHaveBeenCalledWith({
+        where: { personId: 'person-legacy' },
+        select: { embedding: true },
+      });
+      expect(centroid[0]).toBeCloseTo(expected, 5);
+      expect(centroid[1]).toBeCloseTo(expected, 5);
+    });
+
+    it('falls back to the float8 path when the aggregate query returns no rows', async () => {
+      (mockPrisma.$queryRaw as unknown as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
+        { embedding: [1, 0] },
+      ]);
+
+      const centroid = await service.computePersonCentroidPgvector('person-x');
+
+      expect(mockPrisma.face.findMany).toHaveBeenCalled();
+      expect(centroid[0]).toBeCloseTo(1, 5);
+    });
+
+    it('falls back to the float8 path when the centroid text is unparseable', async () => {
+      (mockPrisma.$queryRaw as unknown as jest.Mock).mockResolvedValue([
+        { centroid: '[1,not-a-number]', n: 1 },
+      ]);
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
+        { embedding: [0, 1] },
+      ]);
+
+      const centroid = await service.computePersonCentroidPgvector('person-y');
+
+      expect(mockPrisma.face.findMany).toHaveBeenCalled();
+      expect(centroid[1]).toBeCloseTo(1, 5);
+    });
+  });
+
+  describe('centroid TTL cache (pgvector match path)', () => {
+    // Drives the cache through matchFaceToPerson on the default (pgvector)
+    // backend: the KNN returns one candidate person, and the SQL centroid is
+    // spied on to observe cache hits/misses.
+    function oneHot128(i: number): number[] {
+      return new Array(128).fill(0).map((_, idx) => (idx === i ? 1 : 0));
+    }
+
+    let nowSpy: jest.SpyInstance<number, []>;
+    let currentNow: number;
+
+    beforeEach(() => {
+      currentNow = 1_000_000;
+      nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => currentNow);
+
+      (mockPrisma.$transaction as unknown as jest.Mock).mockResolvedValue([
+        undefined,
+        [{ person_id: 'p1' }],
+      ]);
+      // Centroid aggregate: identical to the oneHot128(0) probe → similarity 1
+      (mockPrisma.$queryRaw as unknown as jest.Mock).mockResolvedValue([
+        { centroid: `[${oneHot128(0).join(',')}]`, n: 3 },
+      ]);
+    });
+
+    afterEach(() => {
+      nowSpy.mockRestore();
+    });
+
+    it('computes the centroid once and serves the second probe from cache within the TTL', async () => {
+      const centroidSpy = jest.spyOn(service, 'computePersonCentroidPgvector');
+
+      const r1 = await service.matchFaceToPerson('circle-1', oneHot128(0));
+      currentNow += 30_000; // still inside the 60s TTL
+      const r2 = await service.matchFaceToPerson('circle-1', oneHot128(0));
+
+      expect(r1!.personId).toBe('p1');
+      expect(r2!.personId).toBe('p1');
+      expect(centroidSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('recomputes the centroid after the TTL expires', async () => {
+      const centroidSpy = jest.spyOn(service, 'computePersonCentroidPgvector');
+
+      await service.matchFaceToPerson('circle-1', oneHot128(0));
+      currentNow += 60_001; // past the 60s TTL
+      await service.matchFaceToPerson('circle-1', oneHot128(0));
+
+      expect(centroidSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('recomputes the centroid after invalidateCentroid(personId)', async () => {
+      const centroidSpy = jest.spyOn(service, 'computePersonCentroidPgvector');
+
+      await service.matchFaceToPerson('circle-1', oneHot128(0));
+      service.invalidateCentroid('p1');
+      await service.matchFaceToPerson('circle-1', oneHot128(0));
+
+      expect(centroidSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('invalidateCentroid for a different person does not evict the cached entry', async () => {
+      const centroidSpy = jest.spyOn(service, 'computePersonCentroidPgvector');
+
+      await service.matchFaceToPerson('circle-1', oneHot128(0));
+      service.invalidateCentroid('someone-else');
+      await service.matchFaceToPerson('circle-1', oneHot128(0));
+
+      expect(centroidSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // matchFaceToPerson
   // -------------------------------------------------------------------------
 
