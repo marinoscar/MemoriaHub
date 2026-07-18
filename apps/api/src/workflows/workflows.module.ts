@@ -22,6 +22,7 @@ import { WorkflowHistoryPurgeTask } from './runs/workflow-history-purge.task';
 import { WorkflowScheduleTask } from './runs/workflow-schedule.task';
 import { WorkflowEvaluateItemHandler } from './runs/workflow-evaluate-item.handler';
 import { WorkflowMicroRunFinalizeTask } from './runs/workflow-micro-run-finalize.task';
+import { WorkflowTriggerListener } from './runs/workflow-trigger.listener';
 
 /**
  * Media Workflow Automation — Phase 2 action library (issue #140).
@@ -67,6 +68,7 @@ import { WorkflowMicroRunFinalizeTask } from './runs/workflow-micro-run-finalize
     WorkflowScheduleTask,
     WorkflowEvaluateItemHandler,
     WorkflowMicroRunFinalizeTask,
+    WorkflowTriggerListener,
   ],
   exports: [WorkflowDefinitionValidator, WorkflowConditionCompiler, WorkflowActionExecutor],
 })

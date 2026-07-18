@@ -17,11 +17,16 @@
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EnrichmentJob, JobStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RateLimitError, classifyRateLimit } from './rate-limit.error';
 import { computeQueueBackoffMs } from './backoff.util';
 import { ProviderThrottleService } from './provider-throttle.service';
+import {
+  ENRICHMENT_JOB_SETTLED_EVENT,
+  EnrichmentJobSettledEvent,
+} from './events/enrichment-job-settled.event';
 
 // ---------------------------------------------------------------------------
 // Config helpers — read from env at startup (same pattern as the worker)
@@ -63,7 +68,35 @@ export class EnrichmentTerminalService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly throttle: ProviderThrottleService,
+    private readonly events: EventEmitter2,
   ) {}
+
+  /**
+   * Emit the generic terminal-settlement domain event (best-effort — never lets
+   * an event-bus error affect the terminal write). Fired only from the truly
+   * terminal branches (succeeded / given-up failed), always AFTER the DB write.
+   */
+  private emitSettled(job: EnrichmentJob, outcome: 'succeeded' | 'failed'): void {
+    try {
+      this.events.emit(
+        ENRICHMENT_JOB_SETTLED_EVENT,
+        new EnrichmentJobSettledEvent(
+          job.id,
+          job.type,
+          job.reason,
+          job.mediaItemId,
+          job.circleId,
+          outcome,
+        ),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Failed to emit ${ENRICHMENT_JOB_SETTLED_EVENT} for job ${job.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
 
   // -------------------------------------------------------------------------
   // completeSucceeded
@@ -94,6 +127,9 @@ export class EnrichmentTerminalService {
     this.logger.log(
       `EnrichmentJob ${job.id} (type="${job.type}") succeeded for MediaItem ${job.mediaItemId ?? 'global'}`,
     );
+
+    // Terminal success → settlement event (after the DB write).
+    this.emitSettled(job, 'succeeded');
   }
 
   // -------------------------------------------------------------------------
@@ -176,6 +212,9 @@ export class EnrichmentTerminalService {
             ? 'giving up — marked failed'
             : `backing off ${Math.round(delayMs / 1000)}s (scheduledFor +${Math.round(delayMs / 1000)}s)`),
       );
+
+      // Only the TERMINAL (given-up) rate-limit branch settles; deferrals do not.
+      if (giveUp) this.emitSettled(job, 'failed');
     } else {
       // ── Normal failure / exponential retry path ───────────────────────
       // The claimed row already carries the claim-time charge, so
@@ -206,6 +245,9 @@ export class EnrichmentTerminalService {
             ? `will retry in ${Math.round(delayMs / 1000)}s`
             : 'marked failed'),
       );
+
+      // Only the TERMINAL (no-more-retries) normal-failure branch settles.
+      if (!shouldRetry) this.emitSettled(job, 'failed');
     }
 
     // Always log the underlying error for debugging
