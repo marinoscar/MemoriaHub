@@ -831,9 +831,10 @@ describe('DoctorService', () => {
       ];
     }
 
-    const BOTH_INDEXES = [
+    const ALL_INDEXES = [
       { indexname: 'faces_embedding_vec_hnsw_idx' },
       { indexname: 'faces_embedding_vec_archive_hnsw_idx' },
+      { indexname: 'faces_embedding_vec_assigned_hnsw_idx' },
     ];
 
     beforeEach(() => {
@@ -865,18 +866,18 @@ describe('DoctorService', () => {
 
     it('is status:ok when the backend defaults to pgvector (env unset) and both the column and both indexes are present', async () => {
       process.env = healthyEnv();
-      mockQueryRawByText(mockPrisma, faceIndexQueryHandlers([{ ok: 1 }], BOTH_INDEXES));
+      mockQueryRawByText(mockPrisma, faceIndexQueryHandlers([{ ok: 1 }], ALL_INDEXES));
 
       const report = await service.runDiagnostics();
       const check = findCheck(report, 'face.pgvector');
 
       expect(check.status).toBe('ok');
-      expect(check.message).toContain('both HNSW indexes present');
+      expect(check.message).toContain('all three HNSW indexes present');
     });
 
     it('is status:ok when FACE_VECTOR_BACKEND=pgvector is set explicitly and both the column and both indexes are present', async () => {
       process.env = healthyEnv({ FACE_VECTOR_BACKEND: 'pgvector' });
-      mockQueryRawByText(mockPrisma, faceIndexQueryHandlers([{ ok: 1 }], BOTH_INDEXES));
+      mockQueryRawByText(mockPrisma, faceIndexQueryHandlers([{ ok: 1 }], ALL_INDEXES));
 
       const report = await service.runDiagnostics();
       const check = findCheck(report, 'face.pgvector');
@@ -886,7 +887,7 @@ describe('DoctorService', () => {
 
     it('is status:warning when the embedding_vec column is missing', async () => {
       process.env = healthyEnv();
-      mockQueryRawByText(mockPrisma, faceIndexQueryHandlers([], BOTH_INDEXES));
+      mockQueryRawByText(mockPrisma, faceIndexQueryHandlers([], ALL_INDEXES));
 
       const report = await service.runDiagnostics();
       const check = findCheck(report, 'face.pgvector');
@@ -921,6 +922,28 @@ describe('DoctorService', () => {
       expect(check.message).toContain('faces_embedding_vec_archive_hnsw_idx');
       expect(check.message).toContain('partial archive index');
       expect(check.actionItem).toBeTruthy();
+    });
+
+    it('is status:warning when only the partial assigned-set index is missing (column + main + archive index present)', async () => {
+      process.env = healthyEnv();
+      mockQueryRawByText(
+        mockPrisma,
+        faceIndexQueryHandlers(
+          [{ ok: 1 }],
+          [
+            { indexname: 'faces_embedding_vec_hnsw_idx' },
+            { indexname: 'faces_embedding_vec_archive_hnsw_idx' },
+          ],
+        ),
+      );
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'face.pgvector');
+
+      expect(check.status).toBe('warning');
+      expect(check.message).toContain(
+        'faces_embedding_vec_assigned_hnsw_idx (partial assigned-set index) is missing',
+      );
     });
   });
 

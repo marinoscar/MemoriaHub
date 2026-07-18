@@ -798,6 +798,12 @@ model Face {
   // type intentionally makes it unreadable/unwritable through the client, so it
   // must never appear in any select/create/update/include. Exists in the schema
   // only so `prisma migrate diff` / `prisma db pull` don't propose dropping it.
+  // Indexed by three HNSW cosine indexes — main (faces_embedding_vec_hnsw_idx)
+  // and partial archive-set (faces_embedding_vec_archive_hnsw_idx), both added
+  // by migration 20260715000000_add_face_embedding_vector, plus partial
+  // assigned-set (faces_embedding_vec_assigned_hnsw_idx) added by migration
+  // 20260718000000_add_face_assigned_embedding_index — none representable here
+  // since Prisma cannot express a `vector_cosine_ops` HNSW index.
   embeddingVec Unsupported("vector(128)")? @map("embedding_vec")
 
   // Relations
