@@ -160,7 +160,7 @@ export class WorkflowEvaluateHandler implements EnrichmentHandler, OnModuleInit 
         return;
       }
 
-      if (this.runService.shouldBypassApproval(definition, settings)) {
+      if (this.runService.shouldBypassApproval(definition, settings, run.triggerType)) {
         const running = await this.prisma.workflowRun.update({
           where: { id: runId },
           data: { status: WorkflowRunStatus.running, startedAt: new Date() },
