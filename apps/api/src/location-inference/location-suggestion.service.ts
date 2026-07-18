@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { CircleRole, JobReason, LocationSuggestionStatus, MediaType, Prisma } from '@prisma/client';
+import { CircleRole, JobReason, JobStatus, LocationSuggestionStatus, MediaType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -16,6 +16,9 @@ import { BulkAcceptLocationSuggestionsDto } from './dto/bulk-accept-location-sug
 @Injectable()
 export class LocationSuggestionService {
   private readonly logger = new Logger(LocationSuggestionService.name);
+
+  /** Pending suggestions drained per DB page by processBulkAccept (bounds memory). */
+  private static readonly BULK_ACCEPT_BATCH_SIZE = 100;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -230,42 +233,113 @@ export class LocationSuggestionService {
   // Bulk accept
   // ---------------------------------------------------------------------------
 
+  /**
+   * Public entrypoint — enqueue an async `location_bulk_accept` job and return
+   * immediately. The old synchronous loop ran an uncapped findMany + a
+   * reverse-geocode call + a $transaction per pending suggestion, which blew
+   * past the nginx 60s proxy timeout (→ 504 with partial application) on
+   * post-import backlogs of thousands of suggestions (issue #125). The actual
+   * work now runs in bounded batches on the enrichment worker via
+   * processBulkAccept below.
+   */
   async bulkAcceptSuggestions(dto: BulkAcceptLocationSuggestionsDto, userId: string, perms: string[]) {
     await this.membership.assertCircleAccess(userId, dto.circleId, perms, CircleRole.collaborator);
 
-    const suggestions = await this.prisma.locationSuggestion.findMany({
+    // Dedup-safe enqueue (mirrors the face_auto_archive_sweep pattern): a
+    // pending/running bulk-accept for this circle is returned as-is rather than
+    // stacking a second job. `skipDedup: true` is required because the default
+    // dedup collapses ALL global (mediaItemId=null) jobs of a type into one —
+    // this per-circle guard is the narrower, correct dedup.
+    const existing = await this.prisma.enrichmentJob.findFirst({
       where: {
+        type: 'location_bulk_accept',
         circleId: dto.circleId,
-        status: LocationSuggestionStatus.pending,
-        confidence: { gte: dto.minConfidence },
+        status: { in: [JobStatus.pending, JobStatus.running] },
       },
     });
 
-    let accepted = 0;
-    for (const s of suggestions) {
-      // Bulk-accept never carries a per-item lat/lng override, so coords are
-      // always unmodified -> coordSource='inferred'.
-      const patch = await applyLocation(this.geoProvider, s.lat, s.lng, null, 'inferred');
-      await this.prisma.$transaction([
-        this.prisma.mediaItem.update({ where: { id: s.mediaItemId }, data: patch }),
-        this.prisma.locationSuggestion.update({
-          where: { id: s.id },
-          data: { status: LocationSuggestionStatus.accepted, resolvedById: userId, resolvedAt: new Date() },
-        }),
-      ]);
-      accepted++;
+    if (existing) {
+      this.logger.debug(
+        `Bulk-accept job already ${existing.status} for circle ${dto.circleId}; returning job ${existing.id}`,
+      );
+      return { data: { jobId: existing.id, status: existing.status } };
     }
 
-    await this.createAuditEvent(userId, 'location_suggestion:bulk_accepted', dto.circleId, {
-      count: accepted,
-      minConfidence: dto.minConfidence,
+    const job = await this.enrichmentJobService.enqueue({
+      type: 'location_bulk_accept',
+      mediaItemId: null,
+      circleId: dto.circleId,
+      reason: JobReason.rerun,
+      priority: 0,
+      skipDedup: true,
+      payload: { minConfidence: dto.minConfidence, requestedById: userId },
     });
 
     this.logger.log(
-      `Bulk-accepted ${accepted} location suggestion(s) in circle ${dto.circleId} by user ${userId} (minConfidence=${dto.minConfidence})`,
+      `Bulk-accept job ${job.id} enqueued for circle ${dto.circleId} by user ${userId} (minConfidence=${dto.minConfidence})`,
     );
 
-    return { data: { accepted } };
+    return { data: { jobId: job.id, status: job.status } };
+  }
+
+  /**
+   * The ACTUAL bulk-accept work, run asynchronously by the
+   * `location_bulk_accept` enrichment handler. Processes pending suggestions in
+   * bounded batches so a large backlog drains without unbounded memory. Each
+   * accepted row leaves the `pending` set, so re-querying `take: BATCH` with a
+   * stable `createdAt asc` order naturally advances (no offset needed).
+   */
+  async processBulkAccept(circleId: string, minConfidence: number, requestedById: string): Promise<number> {
+    let accepted = 0;
+
+    for (;;) {
+      const batch = await this.prisma.locationSuggestion.findMany({
+        where: {
+          circleId,
+          status: LocationSuggestionStatus.pending,
+          confidence: { gte: minConfidence },
+        },
+        take: LocationSuggestionService.BULK_ACCEPT_BATCH_SIZE,
+        orderBy: { createdAt: 'asc' },
+      });
+
+      if (batch.length === 0) break;
+
+      for (const s of batch) {
+        // Bulk-accept never carries a per-item lat/lng override, so coords are
+        // always unmodified -> coordSource='inferred'.
+        const patch = await applyLocation(this.geoProvider, s.lat, s.lng, null, 'inferred');
+        await this.prisma.$transaction([
+          this.prisma.mediaItem.update({ where: { id: s.mediaItemId }, data: patch }),
+          this.prisma.locationSuggestion.update({
+            where: { id: s.id },
+            data: {
+              status: LocationSuggestionStatus.accepted,
+              resolvedById: requestedById,
+              resolvedAt: new Date(),
+            },
+          }),
+        ]);
+        accepted++;
+      }
+
+      this.logger.log(
+        `Bulk-accept progress for circle ${circleId}: ${accepted} accepted so far (batch=${batch.length})`,
+      );
+
+      if (batch.length < LocationSuggestionService.BULK_ACCEPT_BATCH_SIZE) break;
+    }
+
+    await this.createAuditEvent(requestedById, 'location_suggestion:bulk_accepted', circleId, {
+      count: accepted,
+      minConfidence,
+    });
+
+    this.logger.log(
+      `Bulk-accepted ${accepted} location suggestion(s) in circle ${circleId} by user ${requestedById} (minConfidence=${minConfidence})`,
+    );
+
+    return accepted;
   }
 
   // ---------------------------------------------------------------------------
