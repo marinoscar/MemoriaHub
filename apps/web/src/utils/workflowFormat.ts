@@ -225,7 +225,7 @@ function paramStringList(value: unknown): string[] {
  * Examples:
  *   { type: 'move_to_trash' }                              → "Move to Trash"
  *   { type: 'archive' }                                    → "Archive"
- *   { type: 'add_tag', tags: ['screenshot'] }              → "Add tag 'screenshot'"
+ *   { type: 'add_tags', names: ['screenshot'] }             → "Add tag 'screenshot'"
  *   { type: 'add_to_album', createAlbumNamed: 'Italy' }    → "Add to album 'Italy'"
  *   { type: 'resolve_duplicate_group', action: 'trash' }   → "Resolve duplicate groups: keep best, trash the rest"
  */
@@ -257,12 +257,16 @@ export function describeWorkflowAction(action: WorkflowActionInstance): string {
         paramString(action.albumId);
       return name ? `Add to album '${name}'` : 'Add to album';
     }
-    case 'add_tag': {
-      const tags = paramStringList(action.tags ?? action.tag ?? action.tagName);
+    case 'add_tags': {
+      // `names` is the actual param key (see ACTION_PARAM_KIND in
+      // workflowActionMeta.ts and the backend registry); `tags`/`tag`/
+      // `tagName` are accepted defensively in case an older payload shape
+      // is ever encountered, but `names` is always checked first.
+      const tags = paramStringList(action.names ?? action.tags ?? action.tag ?? action.tagName);
       return tags.length > 0 ? `Add tag ${tags.map((t) => `'${t}'`).join(', ')}` : 'Add tag';
     }
-    case 'remove_tag': {
-      const tags = paramStringList(action.tags ?? action.tag ?? action.tagName);
+    case 'remove_tags': {
+      const tags = paramStringList(action.names ?? action.tags ?? action.tag ?? action.tagName);
       return tags.length > 0 ? `Remove tag ${tags.map((t) => `'${t}'`).join(', ')}` : 'Remove tag';
     }
     case 'set_location':
