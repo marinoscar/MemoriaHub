@@ -41,7 +41,16 @@ import {
 import { SubjectBlock } from '../../components/workflows/builder/SubjectBlock';
 import { TriggerBlock } from '../../components/workflows/builder/TriggerBlock';
 import { ConditionsBlock } from '../../components/workflows/builder/ConditionsBlock';
+import { ActionsBlock } from '../../components/workflows/builder/ActionsBlock';
+import { api } from '../../services/api';
 import type { CreateWorkflowDto, UpdateWorkflowDto } from '../../types/workflows';
+
+/** Subset of `workflows.*` system settings the builder reads (admin-only). */
+interface WorkflowSystemSettings {
+  allowHardDelete?: boolean;
+  maxItemsPerRun?: number;
+  requirePreview?: boolean;
+}
 
 const GATED_ACTION_TYPES = new Set(['hard_delete']);
 
@@ -69,6 +78,27 @@ export default function WorkflowBuilderPage() {
 
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Admin-only `workflows.*` settings (cap, requirePreview, allowHardDelete).
+  // Non-admins get 403 here; we fall back to safe defaults.
+  const [sysWorkflows, setSysWorkflows] = useState<WorkflowSystemSettings | null>(null);
+  const canReadSettings = hasPermission('system_settings:read');
+  useEffect(() => {
+    if (!canReadSettings) return;
+    let active = true;
+    void api
+      .get<{ workflows?: WorkflowSystemSettings }>('/system-settings')
+      .then((res) => active && setSysWorkflows(res.workflows ?? {}))
+      .catch(() => active && setSysWorkflows(null));
+    return () => {
+      active = false;
+    };
+  }, [canReadSettings]);
+
+  // null when unknown (non-admin); the backend still enforces the gate.
+  const hardDeleteAllowed: boolean | null = sysWorkflows
+    ? sysWorkflows.allowHardDelete ?? false
+    : null;
 
   const canManage =
     (activeCircleRole === 'collaborator' || activeCircleRole === 'circle_admin') &&
@@ -276,8 +306,17 @@ export default function WorkflowBuilderPage() {
             />
           )}
 
-          {/* Actions (Then) and Safety blocks are added in the following
-              checkpoints. */}
+          {subjectEntry && (
+            <ActionsBlock
+              circleId={activeCircle.id}
+              actionCatalog={subjectEntry.actions}
+              actions={state.definition.actions}
+              dispatch={dispatch}
+              hardDeleteAllowed={hardDeleteAllowed}
+            />
+          )}
+
+          {/* Safety block is added in a following checkpoint. */}
         </Stack>
 
         {/* The live plain-language summary + preview panel is added in a later
