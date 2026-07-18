@@ -31,9 +31,11 @@ import {
   Hub as HubIcon,
   Insights as InsightsIcon,
   Public as PublicIcon,
+  AccountTree as AccountTreeIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
+import { useWorkflowsEnabled } from '../../hooks/useWorkflowSubjects';
 
 interface SidebarProps {
   open: boolean;
@@ -59,6 +61,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { isAdmin, hasPermission } = usePermissions();
+  const workflowsEnabled = useWorkflowsEnabled();
 
   const primaryItems: NavItemDef[] = [
     { label: 'Photos', icon: <HomeIcon />, path: '/' },
@@ -79,6 +82,9 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     { label: 'Review Duplicates', icon: <ContentCopyIcon />, path: '/duplicates' },
     { label: 'Review Insights', icon: <InsightsIcon />, path: '/review-insights' },
     { label: 'Location Suggestions', icon: <MyLocationIcon />, path: '/location-suggestions' },
+    ...(workflowsEnabled === true
+      ? [{ label: 'Workflows', icon: <AccountTreeIcon />, path: '/workflows' }]
+      : []),
   ];
 
   const adminItems: NavItemDef[] = [
