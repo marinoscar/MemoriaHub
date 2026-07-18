@@ -166,6 +166,51 @@ export interface SystemSettingsValue {
     /** How long unapplied staging previews live before the purge cron reaps them. */
     retentionHours: number;
   };
+  /**
+   * Media Workflow Automation (epic #138). Full namespace ships in Phase 1 so all
+   * later phases read through getSettings() with no further schema change. Phase 1
+   * actively reads maxItemsPerRun / maxWorkflowsPerCircle / requirePreview /
+   * previewTtlHours; the rest are consumed by Phases 2/4.
+   */
+  workflows?: {
+    /** Hard cap on media items materialized/evaluated per run. */
+    maxItemsPerRun: number;
+    /** Items per queue-backed execution batch (Phase 2). */
+    batchSize: number;
+    /** Simultaneous non-terminal runs allowed (Phase 2/4). */
+    maxConcurrentRuns: number;
+    /** When true, manual runs default to preview + approval (Phase 2). */
+    requirePreview: boolean;
+    /** When false, hard-delete actions are never permitted (Phase 2). */
+    allowHardDelete: boolean;
+    /** Max stored workflow definitions per circle. */
+    maxWorkflowsPerCircle: number;
+    /** How long a stateless preview result is considered fresh (Phase 3). */
+    previewTtlHours: number;
+    /** Run/item history retention before the purge sweep (Phase 5). */
+    runHistoryRetentionDays: number;
+    /** Per-trigger master switches (Phase 4). */
+    triggers: {
+      onEnrichment: boolean;
+      scheduled: boolean;
+    };
+    /** Minimum cron interval enforced for scheduled workflows (Phase 4). */
+    scheduleMinIntervalMinutes: number;
+  };
+}
+
+/**
+ * Resolve whether the Media Workflow Automation feature is active: the
+ * `features.workflows` system-setting toggle must be on AND the
+ * `WORKFLOWS_ENABLED` env kill-switch must not be explicitly set to 'false'.
+ */
+export function isWorkflowsEnabled(settings: {
+  features?: Record<string, boolean>;
+}): boolean {
+  return (
+    settings.features?.[FEATURE_KEYS.WORKFLOWS] === true &&
+    process.env['WORKFLOWS_ENABLED'] !== 'false'
+  );
 }
 
 /**
@@ -226,6 +271,7 @@ export const FEATURE_KEYS = {
   SOCIAL_MEDIA_DETECTION: 'socialMediaDetection',
   FACE_AUTO_ARCHIVE: 'faceAutoArchive',
   PICTURE_ENHANCEMENT: 'pictureEnhancement',
+  WORKFLOWS: 'workflows',
 } as const;
 
 /**
@@ -257,6 +303,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     [FEATURE_KEYS.SOCIAL_MEDIA_DETECTION]: false,
     [FEATURE_KEYS.FACE_AUTO_ARCHIVE]: false,
     [FEATURE_KEYS.PICTURE_ENHANCEMENT]: false,
+    [FEATURE_KEYS.WORKFLOWS]: false,
   },
   ai: {
     features: {
@@ -331,5 +378,20 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     blockReplaceOnDownscale: false,
     maxInputMegapixels: 50,
     retentionHours: 72,
+  },
+  workflows: {
+    maxItemsPerRun: 10000,
+    batchSize: 200,
+    maxConcurrentRuns: 2,
+    requirePreview: true,
+    allowHardDelete: false,
+    maxWorkflowsPerCircle: 20,
+    previewTtlHours: 24,
+    runHistoryRetentionDays: 30,
+    triggers: {
+      onEnrichment: true,
+      scheduled: true,
+    },
+    scheduleMinIntervalMinutes: 60,
   },
 };

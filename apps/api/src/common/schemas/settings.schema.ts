@@ -191,6 +191,36 @@ export const systemSettingsSchema = z.object({
     maxInputMegapixels: 50,
     retentionHours: 72,
   }),
+  // Media Workflow Automation (issue #139 / epic #138). The full namespace ships
+  // here in Phase 1; later phases read these values via getSettings() without a
+  // further schema change. Phase 1 actively reads maxItemsPerRun,
+  // maxWorkflowsPerCircle, requirePreview, previewTtlHours (+ features.workflows).
+  workflows: z.object({
+    maxItemsPerRun: z.number().int().min(100).max(500000).default(10000),
+    batchSize: z.number().int().min(50).max(1000).default(200),
+    maxConcurrentRuns: z.number().int().min(1).max(10).default(2),
+    requirePreview: z.boolean().default(true),
+    allowHardDelete: z.boolean().default(false),
+    maxWorkflowsPerCircle: z.number().int().min(1).max(100).default(20),
+    previewTtlHours: z.number().int().min(1).max(168).default(24),
+    runHistoryRetentionDays: z.number().int().min(1).max(365).default(30),
+    triggers: z.object({
+      onEnrichment: z.boolean().default(true),
+      scheduled: z.boolean().default(true),
+    }).default({ onEnrichment: true, scheduled: true }),
+    scheduleMinIntervalMinutes: z.number().int().min(60).max(10080).default(60),
+  }).optional().default({
+    maxItemsPerRun: 10000,
+    batchSize: 200,
+    maxConcurrentRuns: 2,
+    requirePreview: true,
+    allowHardDelete: false,
+    maxWorkflowsPerCircle: 20,
+    previewTtlHours: 24,
+    runHistoryRetentionDays: 30,
+    triggers: { onEnrichment: true, scheduled: true },
+    scheduleMinIntervalMinutes: 60,
+  }),
 });
 
 export type SystemSettingsDto = z.infer<typeof systemSettingsSchema>;
@@ -306,5 +336,20 @@ export const systemSettingsPatchSchema = z.object({
     blockReplaceOnDownscale: z.boolean().optional(),
     maxInputMegapixels: z.number().min(1).max(100).optional(),
     retentionHours: z.number().int().min(1).max(720).optional(),
+  }).optional(),
+  workflows: z.object({
+    maxItemsPerRun: z.number().int().min(100).max(500000).optional(),
+    batchSize: z.number().int().min(50).max(1000).optional(),
+    maxConcurrentRuns: z.number().int().min(1).max(10).optional(),
+    requirePreview: z.boolean().optional(),
+    allowHardDelete: z.boolean().optional(),
+    maxWorkflowsPerCircle: z.number().int().min(1).max(100).optional(),
+    previewTtlHours: z.number().int().min(1).max(168).optional(),
+    runHistoryRetentionDays: z.number().int().min(1).max(365).optional(),
+    triggers: z.object({
+      onEnrichment: z.boolean().optional(),
+      scheduled: z.boolean().optional(),
+    }).optional(),
+    scheduleMinIntervalMinutes: z.number().int().min(60).max(10080).optional(),
   }).optional(),
 });
