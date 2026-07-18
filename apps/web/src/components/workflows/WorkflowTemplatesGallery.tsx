@@ -1,5 +1,5 @@
 import { Box, Typography, Grid, Card, CardActionArea, CardContent } from '@mui/material';
-import { AddCircleOutline as AddCircleOutlineIcon } from '@mui/icons-material';
+import { AddCircle as AddCircleIcon } from '@mui/icons-material';
 import { WORKFLOW_TEMPLATES, type WorkflowTemplate } from '../../constants/workflowTemplates';
 
 interface WorkflowTemplatesGalleryProps {
@@ -97,7 +97,7 @@ export function WorkflowTemplatesGallery({
                   p: 2,
                 }}
               >
-                <AddCircleOutlineIcon sx={{ fontSize: 40, color: 'text.secondary', mb: 1 }} />
+                <AddCircleIcon sx={{ fontSize: 40, color: 'text.secondary', mb: 1 }} />
                 <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                   Start from scratch
                 </Typography>
