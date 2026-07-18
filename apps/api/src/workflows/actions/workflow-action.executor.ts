@@ -414,12 +414,14 @@ export class WorkflowActionExecutor {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      // Drop circle-scoped associations; also null the source-circle burst /
-      // duplicate group pointers so the moved item never references a group in
+      // Drop circle-scoped associations (album memberships, faces, tags, and
+      // any pending location suggestion); also null the source-circle burst /
+      // duplicate group pointers so the moved item never references anything in
       // its old circle.
       await tx.albumItem.deleteMany({ where: { mediaItemId: item.id } });
       await tx.face.deleteMany({ where: { mediaItemId: item.id } });
       await tx.mediaTag.deleteMany({ where: { mediaItemId: item.id } });
+      await tx.locationSuggestion.deleteMany({ where: { mediaItemId: item.id } });
       await tx.mediaItem.update({
         where: { id: item.id },
         data: { circleId: targetCircleId, burstGroupId: null, duplicateGroupId: null },
