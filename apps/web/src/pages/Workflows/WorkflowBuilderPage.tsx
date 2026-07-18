@@ -16,6 +16,8 @@ import {
   Alert,
   Snackbar,
   Stack,
+  Tabs,
+  Tab,
 } from '@mui/material';
 import { Close as CloseIcon, Save as SaveIcon } from '@mui/icons-material';
 import {
@@ -28,6 +30,7 @@ import { useCircle } from '../../hooks/useCircle';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useWorkflowSubjects } from '../../hooks/useWorkflowSubjects';
 import { useWorkflow } from '../../hooks/useWorkflow';
+import { useWorkflowRuns } from '../../hooks/useWorkflowRuns';
 import { useWorkflowMutations } from '../../hooks/useWorkflowMutations';
 import { getWorkflowTemplate } from '../../constants/workflowTemplates';
 import type { WorkflowTemplate } from '../../constants/workflowTemplates';
@@ -44,6 +47,8 @@ import { ConditionsBlock } from '../../components/workflows/builder/ConditionsBl
 import { ActionsBlock } from '../../components/workflows/builder/ActionsBlock';
 import { WorkflowPreviewPanel } from '../../components/workflows/builder/WorkflowPreviewPanel';
 import { SafetyBlock } from '../../components/workflows/builder/SafetyBlock';
+import { WorkflowRunHistory } from '../../components/workflows/WorkflowRunHistory';
+import type { WorkflowRun } from '../../types/workflows';
 import { api } from '../../services/api';
 
 // Fallback defaults mirroring the backend when the admin-only settings read is
@@ -60,6 +65,8 @@ interface WorkflowSystemSettings {
 }
 
 const GATED_ACTION_TYPES = new Set(['hard_delete']);
+
+const RUNS_PAGE_SIZE = 20;
 
 export default function WorkflowBuilderPage() {
   const { id } = useParams<{ id?: string }>();
@@ -78,7 +85,18 @@ export default function WorkflowBuilderPage() {
   } = useWorkflowSubjects();
   const { workflow, isLoading: workflowLoading, error: workflowError, fetchWorkflow } =
     useWorkflow();
+  const {
+    runs,
+    meta: runsMeta,
+    isLoading: runsLoading,
+    error: runsError,
+    fetchRuns,
+  } = useWorkflowRuns();
   const { createWorkflow, updateWorkflow, isSaving } = useWorkflowMutations();
+
+  // Builder vs. Run history tab (run history is edit-mode only).
+  const [tab, setTab] = useState<'builder' | 'runs'>('builder');
+  const [runsPage, setRunsPage] = useState(1);
 
   const [state, dispatch] = useReducer(builderReducer, undefined, blankState);
   const hydratedRef = useRef(false);
@@ -139,10 +157,22 @@ export default function WorkflowBuilderPage() {
     hydratedRef.current = true;
   }, [isEdit, workflow, location.state, searchParams]);
 
+  // Load run history when the tab is active (edit mode only). Refetches on page
+  // change so pagination works.
+  useEffect(() => {
+    if (isEdit && id && tab === 'runs') {
+      void fetchRuns(id, { page: runsPage, pageSize: RUNS_PAGE_SIZE });
+    }
+  }, [isEdit, id, tab, runsPage, fetchRuns]);
+
   const subjectEntry = useMemo(
     () => subjects?.find((s) => s.subject === state.definition.subject),
     [subjects, state.definition.subject],
   );
+
+  const handleOpenRun = (run: WorkflowRun) => {
+    navigate(`/workflows/${run.workflowId}/runs/${run.id}`);
+  };
 
   // Validation --------------------------------------------------------------
   const hasGatedAction = state.definition.actions.some((a) =>
@@ -258,15 +288,17 @@ export default function WorkflowBuilderPage() {
           >
             Cancel
           </Button>
-          <Button
-            variant="contained"
-            startIcon={isSaving ? <CircularProgress size={16} color="inherit" /> : <SaveIcon />}
-            onClick={() => void handleSave()}
-            disabled={!canSave}
-            sx={{ minHeight: 44 }}
-          >
-            {isSaving ? 'Saving…' : isEdit ? 'Save changes' : 'Create workflow'}
-          </Button>
+          {tab === 'builder' && (
+            <Button
+              variant="contained"
+              startIcon={isSaving ? <CircularProgress size={16} color="inherit" /> : <SaveIcon />}
+              onClick={() => void handleSave()}
+              disabled={!canSave}
+              sx={{ minHeight: 44 }}
+            >
+              {isSaving ? 'Saving…' : isEdit ? 'Save changes' : 'Create workflow'}
+            </Button>
+          )}
         </Box>
       </Box>
 
@@ -277,6 +309,28 @@ export default function WorkflowBuilderPage() {
         </Alert>
       )}
 
+      {isEdit && (
+        <Tabs
+          value={tab}
+          onChange={(_, next: 'builder' | 'runs') => setTab(next)}
+          sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
+        >
+          <Tab value="builder" label="Builder" />
+          <Tab value="runs" label="Run history" />
+        </Tabs>
+      )}
+
+      {isEdit && tab === 'runs' ? (
+        <WorkflowRunHistory
+          runs={runs}
+          isLoading={runsLoading}
+          error={runsError}
+          onOpenRun={handleOpenRun}
+          page={runsMeta?.page}
+          totalPages={runsMeta?.totalPages}
+          onPageChange={setRunsPage}
+        />
+      ) : (
       <Box
         sx={{
           display: 'flex',
@@ -351,6 +405,7 @@ export default function WorkflowBuilderPage() {
           cronExpression={state.cronExpression}
         />
       </Box>
+      )}
 
       <Snackbar
         open={Boolean(saveError)}
