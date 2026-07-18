@@ -4,7 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { CircleRole, JobReason, MediaType } from '@prisma/client';
+import { CircleRole, JobReason, MediaTagSource, MediaType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MediaService } from '../../media/media.service';
 import { MediaEnrichmentService } from '../../media/enrichment/media-enrichment.service';
@@ -247,6 +247,7 @@ export class WorkflowActionExecutor {
       { circleId: ctx.circleId, ids: [item.id], add: names } as BulkTagsDto,
       ctx.actorUserId,
       ctx.actorPermissions,
+      { addSource: MediaTagSource.system },
     );
     return added > 0 ? { status: 'applied' } : { status: 'skipped', reason: 'noop' };
   }
@@ -257,13 +258,14 @@ export class WorkflowActionExecutor {
     ctx: WorkflowActionContext,
   ): Promise<ActionOutcome> {
     const names = action.params['names'] as string[];
-    // NOTE: MediaService.bulkTags removes tag instances by name regardless of
-    // source, so the `sources` param is not honored by the reused method (see
-    // the executor reuse-map notes).
+    // sources defaults to ['ai','system'] in the param schema, so a cleanup
+    // workflow never strips a user's manually-applied tags.
+    const sources = action.params['sources'] as MediaTagSource[];
     const { removed } = await this.media.bulkTags(
       { circleId: ctx.circleId, ids: [item.id], remove: names } as BulkTagsDto,
       ctx.actorUserId,
       ctx.actorPermissions,
+      { removeSources: sources },
     );
     return removed > 0 ? { status: 'applied' } : { status: 'skipped', reason: 'noop' };
   }

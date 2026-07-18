@@ -6,7 +6,7 @@ import {
   BadRequestException,
   Inject,
 } from '@nestjs/common';
-import { Prisma, BurstGroupStatus, DuplicateGroupStatus, LocationSuggestionStatus } from '@prisma/client';
+import { Prisma, BurstGroupStatus, DuplicateGroupStatus, LocationSuggestionStatus, MediaTagSource } from '@prisma/client';
 import { CircleRole } from '@prisma/client';
 import { FastifyReply } from 'fastify';
 import { stringify as csvStringify } from 'csv-stringify';
@@ -1771,11 +1771,17 @@ export class MediaService {
     dto: BulkTagsDto,
     userId: string,
     perms: string[],
+    opts?: { addSource?: MediaTagSource; removeSources?: MediaTagSource[] },
   ): Promise<{ added: number; removed: number }> {
     await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
 
     let added = 0;
     let removed = 0;
+
+    // Default add source is `manual` (HTTP callers) — unchanged behavior.
+    // Workflow actions pass `system` so automated tagging never masquerades as
+    // a user-applied tag.
+    const addSource = opts?.addSource ?? MediaTagSource.manual;
 
     await this.prisma.$transaction(async (tx) => {
       if (dto.add && dto.add.length > 0) {
@@ -1789,19 +1795,22 @@ export class MediaService {
           tagIds.push(tag.id);
         }
 
-        // Add source=manual to each pair
         const pairsWithSource = dto.ids.flatMap((mediaItemId) =>
-          tagIds.map((tagId) => ({ mediaItemId, tagId, source: 'manual' as const })),
+          tagIds.map((tagId) => ({ mediaItemId, tagId, source: addSource })),
         );
         const result = await tx.mediaTag.createMany({ data: pairsWithSource, skipDuplicates: true });
-        // Promote any existing ai-sourced tags to manual for these pairs
+        // Source-aware promotion of existing ai-sourced rows (createMany's
+        // skipDuplicates already leaves manual rows untouched). `manual` add
+        // promotes ai→manual; `system` add promotes ai→system (mirrors
+        // SocialMediaDetectionHandler). A `source='manual'` row is never
+        // downgraded because the filter targets `source='ai'` only.
         await tx.mediaTag.updateMany({
           where: {
             tagId: { in: tagIds },
             mediaItemId: { in: dto.ids },
-            source: 'ai',
+            source: MediaTagSource.ai,
           },
-          data: { source: 'manual' },
+          data: { source: addSource },
         });
         added = result.count;
       }
@@ -1820,6 +1829,9 @@ export class MediaService {
             where: {
               tagId: { in: removeTagIds },
               mediaItemId: { in: dto.ids },
+              // Scope removal to specific sources when requested (workflow
+              // remove_tags); omitted → all sources (HTTP callers), unchanged.
+              ...(opts?.removeSources ? { source: { in: opts.removeSources } } : {}),
             },
           });
           removed = result.count;
