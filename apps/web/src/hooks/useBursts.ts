@@ -5,6 +5,7 @@ import {
   resolveBurstGroup,
   bulkResolveBurstGroups,
   bulkResolveBurstGroupsByThreshold,
+  fetchAllPendingBurstGroupIds,
   dismissBurstGroup,
 } from '../services/bursts';
 import type {
@@ -15,6 +16,7 @@ import type {
   BurstResolveResult,
   GroupResolveAction,
   GroupBulkResolveResult,
+  GroupBulkResolveByThresholdResult,
 } from '../services/bursts';
 
 interface FetchBurstGroupsParams {
@@ -33,7 +35,9 @@ interface UseBurstGroupsResult {
   bulkResolveByThreshold: (
     threshold: number,
     action: GroupResolveAction,
-  ) => Promise<GroupBulkResolveResult>;
+  ) => Promise<GroupBulkResolveByThresholdResult>;
+  /** Collect the ids of every pending burst group in the active circle (cross-page). */
+  fetchAllPendingIds: () => Promise<string[]>;
 }
 
 export function useBurstGroups(): UseBurstGroupsResult {
@@ -90,7 +94,24 @@ export function useBurstGroups(): UseBurstGroupsResult {
     [fetchGroups],
   );
 
-  return { items, meta, isLoading, error, fetchGroups, bulkResolve, bulkResolveByThreshold };
+  const fetchAllPendingIds = useCallback(async () => {
+    const circleId = lastParamsRef.current?.circleId;
+    if (!circleId) {
+      throw new Error('No active circle to select burst groups');
+    }
+    return fetchAllPendingBurstGroupIds(circleId);
+  }, []);
+
+  return {
+    items,
+    meta,
+    isLoading,
+    error,
+    fetchGroups,
+    bulkResolve,
+    bulkResolveByThreshold,
+    fetchAllPendingIds,
+  };
 }
 
 interface UseBurstGroupDetailResult {

@@ -58,7 +58,7 @@ describe('LocationSuggestionController', () => {
 
   it('bulkAcceptSuggestions delegates to service.bulkAcceptSuggestions(dto, user.id, user.permissions)', async () => {
     const dto = { circleId: 'circle-1', minConfidence: 0.7 } as BulkAcceptLocationSuggestionsDto;
-    const expected = { data: { accepted: 3 } };
+    const expected = { data: { jobId: 'job-1', status: 'pending' } };
     mockService.bulkAcceptSuggestions.mockResolvedValue(expected);
 
     const result = await controller.bulkAcceptSuggestions(dto, USER);

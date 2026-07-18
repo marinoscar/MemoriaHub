@@ -855,11 +855,12 @@ describe('BurstService', () => {
       };
     }
 
-    function setupThresholdGroups(groups: ReturnType<typeof makeThresholdGroup>[]) {
+    function setupThresholdGroups(groups: ReturnType<typeof makeThresholdGroup>[], remainingCount = 0) {
       (mockPrisma.burstGroup.findMany as jest.Mock).mockResolvedValue(groups);
       (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
       (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
       (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+      (mockPrisma.burstGroup.count as jest.Mock).mockResolvedValue(remainingCount);
     }
 
     it('calls assertCircleAccess with collaborator role', async () => {
@@ -911,7 +912,7 @@ describe('BurstService', () => {
         suggestedBestItemId: 'media-10',
         items: [{ id: 'media-10' }, { id: 'media-11' }],
       });
-      setupThresholdGroups([groupA, groupB]);
+      setupThresholdGroups([groupA, groupB], 0);
 
       const result = await service.bulkResolveBurstGroupsByThreshold(
         makeBulkResolveThresholdDto(70, 'archive'),
@@ -926,6 +927,7 @@ describe('BurstService', () => {
         action: 'archive',
         skipped: 0,
         errors: 0,
+        remaining: 0,
       });
       expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1046,6 +1048,46 @@ describe('BurstService', () => {
       expect(mockPrisma.burstGroup.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'group-c' } }),
       );
+    });
+
+    it('returns remaining = the post-resolve count of still-pending eligible groups', async () => {
+      const group = makeThresholdGroup();
+      // 1200 pending+eligible groups existed; this call resolves the first 500
+      // (capped by MAX_THRESHOLD_RESOLVE), leaving 700 still eligible.
+      setupThresholdGroups([group], 700);
+
+      const result = await service.bulkResolveBurstGroupsByThreshold(
+        makeBulkResolveThresholdDto(70, 'archive'),
+        USER_ID,
+        PERMS_MEDIA_DELETE,
+      );
+
+      expect(result.data.remaining).toBe(700);
+      expect(mockPrisma.burstGroup.count).toHaveBeenCalledWith({
+        where: {
+          circleId: CIRCLE_ID,
+          status: BurstGroupStatus.pending,
+          confidence: { gte: 0.7 },
+        },
+      });
+    });
+
+    it('the remaining count query runs AFTER the resolve loop (reflects post-resolve state)', async () => {
+      const group = makeThresholdGroup();
+      setupThresholdGroups([group], 0);
+
+      await service.bulkResolveBurstGroupsByThreshold(
+        makeBulkResolveThresholdDto(70, 'archive'),
+        USER_ID,
+        PERMS_MEDIA_DELETE,
+      );
+
+      const findManyOrder = (mockPrisma.burstGroup.findMany as jest.Mock).mock.invocationCallOrder[0];
+      const countOrder = (mockPrisma.burstGroup.count as jest.Mock).mock.invocationCallOrder[0];
+      const updateManyOrder = (mockPrisma.mediaItem.updateMany as jest.Mock).mock.invocationCallOrder[0];
+
+      expect(findManyOrder).toBeLessThan(updateManyOrder);
+      expect(updateManyOrder).toBeLessThan(countOrder);
     });
   });
 

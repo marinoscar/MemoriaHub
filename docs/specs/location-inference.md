@@ -412,13 +412,16 @@ Undo an auto-applied inference.
 
 ### 8.5 `POST /api/media/location-suggestions/bulk-accept`
 
-Accept every pending suggestion in a circle at or above a confidence floor, in one call.
+Accept every pending suggestion in a circle at or above a confidence floor. **Asynchronous** — enqueues a job and returns immediately rather than running the accept-loop inside the request.
 
 - **Auth:** `media:write` + per-circle `collaborator` role.
 - **Request body:** `{ "circleId": "uuid", "minConfidence": number (0-1) }`.
-- **Behavior:** iterates matching `pending` suggestions sequentially; each is accepted **unmodified** (no per-item lat/lng override is possible in bulk), so every accepted item gets `coordSource = 'inferred'`.
-- **Response `200`:** `{ "data": { "accepted": number } }`.
-- Writes a single `audit_events` row (`location_suggestion:bulk_accepted`) with the count and threshold used.
+- **Behavior:** enqueues a `location_bulk_accept` enrichment job (`mediaItemId: null`, `circleId` set, priority 0, reason `rerun`, `payload: { minConfidence, requestedById }`). The handler drains matching `pending` suggestions in bounded batches of 100, accepting each **unmodified** (no per-item lat/lng override is possible in bulk, so every accepted item gets `coordSource = 'inferred'`) via the shared `applyLocation()` helper (§2) and marking it `accepted`.
+- **Idempotency:** enqueued with `skipDedup: true` plus a caller-side per-circle `findFirst` dedup on `(type='location_bulk_accept', circleId, status IN (pending, running))` — a request while a job is already in flight for that circle returns the existing job instead of enqueueing a duplicate.
+- **Response `200`:** `{ "data": { "jobId": "uuid", "status": "pending" | "running" } }` — previously a synchronous `{ "data": { "accepted": number } }`; see "Why async" below.
+- Writes a single `audit_events` row (`location_suggestion:bulk_accepted`) with the final count and threshold, emitted once the job completes rather than on enqueue.
+
+**Why async:** the original handler ran the entire accept-loop — including a per-item synchronous reverse-geocode (§2, and the exception noted at the end of §12) — inside the HTTP request. On a circle with a large pending backlog (e.g. after a big import followed by a sweep backfill), that loop could exceed the request timeout, returning a 504 to the client after having already applied a partial subset of suggestions with no way for the caller to know how far it got. Moving the work onto the `location_bulk_accept` enrichment job decouples it from the request lifetime: the endpoint returns as soon as the job is queued, and the job runs to completion (or fails/retries per the standard enrichment-queue backoff) independent of any HTTP timeout. Nginx's `proxy_read_timeout`/`proxy_send_timeout` were intentionally left unchanged for this fix — taking bulk-accept off the synchronous request path makes the long-running-request/timeout concern moot rather than something to tune around.
 
 ### 8.6 `POST /api/media/:id/infer-location`
 
@@ -505,7 +508,7 @@ Researched (July 2026) against every notable prior-art implementation for GPS-fr
 
 Auto-applied inferences (both per-item and sweep-driven) write coordinates **immediately** but only *enqueue* a `geocode` enrichment job to fill in place-name columns (`geoCountry`, `geoLocality`, etc.) — they do not call the geocode provider synchronously. This means an auto-applied item shows correct coordinates on a map right away, but **its place name may not appear until the `geocode` job drains off the shared enrichment queue** at whatever pace the queue and the active reverse-geocoding provider (`offline`/`nominatim`/`google`) allow — potentially hours for a large sweep, since these geocode jobs are enqueued at priority 100 (sweep) or 0 (per-item auto-apply's own follow-on) and compete with every other job type on the same worker. This is a pre-existing behavior class shared by every other feature that writes coordinates and defers geocoding (e.g. the existing app-wide geocode backfill, `docs/specs/geocoding.md`) — not something new introduced by this feature, but worth calling out explicitly here since a reviewer staring at an auto-applied suggestion with a blank place name might otherwise assume something is broken.
 
-Note the one exception: the **accept** endpoints (`accept`, `bulk-accept`) perform a **synchronous** reverse-geocode via `applyLocation()` (§2) rather than deferring — because those are already interactive, single-request human actions where waiting for one geocode call is acceptable UX, unlike a sweep processing thousands of items.
+Note the one exception: the **accept** endpoints (`accept`, and — per accepted item — `bulk-accept`'s `location_bulk_accept` job) perform a **synchronous** reverse-geocode via `applyLocation()` (§2) rather than deferring, because a single geocode call per accepted item is cheap even run many times in sequence. `bulk-accept` itself no longer executes that loop inside the HTTP request (§8.5) — it now runs on the enrichment queue, which is precisely what fixes the timeout/partial-apply failure mode the old synchronous implementation had at scale.
 
 ---
 

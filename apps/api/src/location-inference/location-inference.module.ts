@@ -11,6 +11,7 @@ import { LocationSuggestionService } from './location-suggestion.service';
 import { AdminLocationInferenceController } from './admin-location-inference.controller';
 import { LocationInferenceService } from './location-inference.service';
 import { LocationInferenceHandler } from './location-inference.handler';
+import { LocationBulkAcceptHandler } from './location-bulk-accept.handler';
 import { LocationInferenceBackfillService } from './location-inference-backfill.service';
 
 /**
@@ -28,6 +29,7 @@ import { LocationInferenceBackfillService } from './location-inference-backfill.
   providers: [
     LocationInferenceService,
     LocationInferenceHandler,
+    LocationBulkAcceptHandler,
     LocationInferenceBackfillService,
     LocationSuggestionService,
   ],

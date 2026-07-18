@@ -5,6 +5,7 @@ import {
   resolveDuplicateGroup,
   bulkResolveDuplicateGroups,
   bulkResolveDuplicateGroupsByThreshold,
+  fetchAllPendingDuplicateGroupIds,
   dismissDuplicateGroup,
 } from '../services/duplicates';
 import type {
@@ -16,6 +17,7 @@ import type {
   DuplicateResolveAction,
   DuplicateResolveResult,
   DuplicateDismissResult,
+  DuplicateBulkResolveByThresholdResult,
 } from '../services/duplicates';
 import type { GroupBulkResolveResult } from '../services/bursts';
 
@@ -36,7 +38,9 @@ interface UseDuplicateGroupsResult {
   bulkResolveByThreshold: (
     threshold: number,
     action: DuplicateResolveAction,
-  ) => Promise<GroupBulkResolveResult>;
+  ) => Promise<DuplicateBulkResolveByThresholdResult>;
+  /** Collect the ids of every pending duplicate group in the active circle (cross-page, respects the kind filter). */
+  fetchAllPendingIds: () => Promise<string[]>;
 }
 
 export function useDuplicateGroups(): UseDuplicateGroupsResult {
@@ -93,7 +97,24 @@ export function useDuplicateGroups(): UseDuplicateGroupsResult {
     [fetchGroups],
   );
 
-  return { items, meta, isLoading, error, fetchGroups, bulkResolve, bulkResolveByThreshold };
+  const fetchAllPendingIds = useCallback(async () => {
+    const circleId = lastParamsRef.current?.circleId;
+    if (!circleId) {
+      throw new Error('No active circle to select duplicate groups');
+    }
+    return fetchAllPendingDuplicateGroupIds({ circleId, kind: lastParamsRef.current?.kind });
+  }, []);
+
+  return {
+    items,
+    meta,
+    isLoading,
+    error,
+    fetchGroups,
+    bulkResolve,
+    bulkResolveByThreshold,
+    fetchAllPendingIds,
+  };
 }
 
 interface UseDuplicateGroupDetailResult {

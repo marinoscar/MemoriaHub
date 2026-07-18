@@ -47,8 +47,13 @@ export interface RejectRevertResult {
   status: string;
 }
 
+/**
+ * The bulk-accept endpoint is asynchronous: it enqueues an enrichment job and
+ * returns immediately. Progress is observed by re-polling the pending list.
+ */
 export interface BulkAcceptResult {
-  accepted: number;
+  jobId: string;
+  status: string;
 }
 
 export interface InferLocationResult {

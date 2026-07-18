@@ -1,5 +1,9 @@
 import { api } from './api';
+import { BULK_RESOLVE_CHUNK_SIZE } from './bursts';
 import type { GroupBulkResolveResult } from './bursts';
+
+/** Max page size the list endpoint accepts; used when collecting all ids. */
+const LIST_MAX_PAGE_SIZE = 100;
 
 export type DuplicateGroupStatus = 'pending' | 'resolved' | 'dismissed';
 export type DuplicateGroupKind = 'exact_variant' | 'edited' | 'similar';
@@ -76,6 +80,15 @@ export interface DuplicateRerunResult {
   status: string;
 }
 
+/**
+ * Result of a threshold-based duplicate bulk resolve. The endpoint returns
+ * `hasMore` (there may be more eligible groups beyond this batch); callers
+ * auto-loop while `hasMore === true`.
+ */
+export interface DuplicateBulkResolveByThresholdResult extends GroupBulkResolveResult {
+  hasMore: boolean;
+}
+
 export async function listDuplicateGroups(params: {
   circleId: string;
   status?: DuplicateGroupStatus;
@@ -104,20 +117,87 @@ export async function resolveDuplicateGroup(
   return api.post<DuplicateResolveResult>(`/media/duplicates/${id}/resolve`, { keepIds, action });
 }
 
+/** Empty aggregate used as the seed when summing per-chunk results. */
+function emptyBulkResult(action: DuplicateResolveAction): GroupBulkResolveResult {
+  return { resolvedGroups: 0, keptCount: 0, removedCount: 0, action, skipped: 0, errors: 0 };
+}
+
+/** Fold a per-chunk result into a running aggregate. */
+function mergeBulkResult(
+  acc: GroupBulkResolveResult,
+  next: GroupBulkResolveResult,
+): GroupBulkResolveResult {
+  return {
+    resolvedGroups: acc.resolvedGroups + next.resolvedGroups,
+    keptCount: acc.keptCount + next.keptCount,
+    removedCount: acc.removedCount + next.removedCount,
+    action: next.action,
+    skipped: acc.skipped + next.skipped,
+    errors: acc.errors + next.errors,
+  };
+}
+
+/**
+ * Resolve explicit duplicate-group ids in bulk. The backend caps a single
+ * request at {@link BULK_RESOLVE_CHUNK_SIZE} ids, so larger selections are split
+ * into sequential chunks and their results aggregated into one summed result
+ * whose shape matches a single-call response.
+ */
 export async function bulkResolveDuplicateGroups(params: {
   circleId: string;
   ids: string[];
   action: DuplicateResolveAction;
 }): Promise<GroupBulkResolveResult> {
-  return api.post<GroupBulkResolveResult>('/media/duplicates/bulk/resolve', params);
+  const { circleId, ids, action } = params;
+  let aggregate = emptyBulkResult(action);
+  for (let i = 0; i < ids.length; i += BULK_RESOLVE_CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + BULK_RESOLVE_CHUNK_SIZE);
+    const result = await api.post<GroupBulkResolveResult>('/media/duplicates/bulk/resolve', {
+      circleId,
+      ids: chunk,
+      action,
+    });
+    aggregate = mergeBulkResult(aggregate, result);
+  }
+  return aggregate;
 }
 
 export async function bulkResolveDuplicateGroupsByThreshold(params: {
   circleId: string;
   threshold: number;
   action: DuplicateResolveAction;
-}): Promise<GroupBulkResolveResult> {
-  return api.post<GroupBulkResolveResult>('/media/duplicates/bulk/resolve-by-threshold', params);
+}): Promise<DuplicateBulkResolveByThresholdResult> {
+  return api.post<DuplicateBulkResolveByThresholdResult>(
+    '/media/duplicates/bulk/resolve-by-threshold',
+    params,
+  );
+}
+
+/**
+ * Collect the ids of every pending duplicate group in a circle (optionally
+ * filtered by kind) by paginating the list endpoint at the maximum page size.
+ * Used for true cross-page "select all".
+ */
+export async function fetchAllPendingDuplicateGroupIds(params: {
+  circleId: string;
+  kind?: DuplicateGroupKind;
+}): Promise<string[]> {
+  const ids: string[] = [];
+  let page = 1;
+  for (let guard = 0; guard < 1000; guard += 1) {
+    const { items, meta } = await listDuplicateGroups({
+      circleId: params.circleId,
+      status: 'pending',
+      kind: params.kind,
+      page,
+      pageSize: LIST_MAX_PAGE_SIZE,
+    });
+    ids.push(...items.map((g) => g.id));
+    const totalPages = meta ? Math.ceil(meta.total / meta.pageSize) : page;
+    if (page >= totalPages || items.length === 0) break;
+    page += 1;
+  }
+  return ids;
 }
 
 export async function dismissDuplicateGroup(id: string): Promise<DuplicateDismissResult> {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Box,
   Typography,
@@ -31,6 +31,13 @@ import { AdjustLocationDialog } from './AdjustLocationDialog';
 import type { LocationSuggestionSummary } from '../../services/locationSuggestions';
 
 const BULK_ACCEPT_THRESHOLD = 0.8;
+
+// Bulk-accept is asynchronous (backend enqueues a job). Poll the pending list
+// to reflect progress: every 4s for up to ~2 minutes, stopping early once the
+// count reaches zero or stalls across several consecutive polls.
+const BULK_POLL_INTERVAL_MS = 4000;
+const MAX_BULK_POLL_TICKS = 30;
+const BULK_POLL_STALL_TICKS = 3;
 
 function confidenceChipColor(confidence: number): 'success' | 'warning' | 'default' {
   if (confidence >= 0.8) return 'success';
@@ -199,6 +206,13 @@ export default function LocationSuggestionsPage() {
   const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [bulkInfo, setBulkInfo] = useState<string | null>(null);
+  const [bulkPolling, setBulkPolling] = useState(false);
+
+  // Mirror the latest pending count into a ref so the poll can compare across
+  // ticks without re-creating the interval on every render.
+  const pendingTotalRef = useRef<number | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(() => {
     if (!activeCircleId) return;
@@ -212,6 +226,55 @@ export default function LocationSuggestionsPage() {
   useEffect(() => {
     setPage(1);
   }, [activeCircleId]);
+
+  useEffect(() => {
+    pendingTotalRef.current = meta?.total ?? items.length;
+  }, [meta, items.length]);
+
+  const stopBulkPoll = useCallback(() => {
+    if (pollRef.current !== null) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    setBulkPolling(false);
+  }, []);
+
+  // Clean up the poll on unmount.
+  useEffect(() => stopBulkPoll, [stopBulkPoll]);
+
+  // Stop polling if the circle changes out from under an in-flight job.
+  useEffect(() => stopBulkPoll, [activeCircleId, stopBulkPoll]);
+
+  const startBulkPoll = useCallback(() => {
+    stopBulkPoll();
+    setBulkPolling(true);
+    let ticks = 0;
+    let stallTicks = 0;
+    let lastTotal = pendingTotalRef.current;
+    refresh();
+    pollRef.current = setInterval(() => {
+      ticks += 1;
+      const current = pendingTotalRef.current ?? 0;
+      if (current === 0) {
+        stopBulkPoll();
+        setBulkInfo(null);
+        setSuccessMsg('Accepted all high-confidence suggestions');
+        return;
+      }
+      if (current === lastTotal) {
+        stallTicks += 1;
+      } else {
+        stallTicks = 0;
+        lastTotal = current;
+      }
+      if (stallTicks >= BULK_POLL_STALL_TICKS || ticks >= MAX_BULK_POLL_TICKS) {
+        stopBulkPoll();
+        setBulkInfo(null);
+        return;
+      }
+      refresh();
+    }, BULK_POLL_INTERVAL_MS);
+  }, [refresh, stopBulkPoll]);
 
   const handleAccept = async (id: string) => {
     setActionError(null);
@@ -240,11 +303,11 @@ export default function LocationSuggestionsPage() {
     if (!activeCircleId) return;
     setActionError(null);
     try {
-      const result = await bulkAccept(activeCircleId, BULK_ACCEPT_THRESHOLD);
-      setSuccessMsg(`Accepted ${result.accepted} suggestion${result.accepted !== 1 ? 's' : ''}`);
-      refresh();
+      await bulkAccept(activeCircleId, BULK_ACCEPT_THRESHOLD);
+      setBulkInfo('Queued — accepting high-confidence suggestions in the background…');
+      startBulkPoll();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to bulk-accept suggestions');
+      setActionError(err instanceof Error ? err.message : 'Failed to queue bulk-accept');
     }
   };
 
@@ -270,13 +333,19 @@ export default function LocationSuggestionsPage() {
         </Box>
         <Button
           variant="outlined"
-          disabled={items.length === 0 || bulkAccepting}
-          startIcon={bulkAccepting ? <CircularProgress size={16} /> : undefined}
+          disabled={items.length === 0 || bulkAccepting || bulkPolling}
+          startIcon={bulkAccepting || bulkPolling ? <CircularProgress size={16} /> : undefined}
           onClick={() => setBulkConfirmOpen(true)}
         >
           Accept all &ge; 80% confidence
         </Button>
       </Box>
+
+      {bulkInfo && (
+        <Alert severity="info" sx={{ mb: 2 }} icon={<CircularProgress size={18} />}>
+          {bulkInfo}
+        </Alert>
+      )}
 
       {actionError && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setActionError(null)}>
@@ -350,8 +419,9 @@ export default function LocationSuggestionsPage() {
         <DialogContent>
           <DialogContentText>
             All pending suggestions in this circle with confidence &ge; {Math.round(BULK_ACCEPT_THRESHOLD * 100)}%
-            will be accepted as-is (unmodified coordinates). This cannot be bulk-undone, though each item can still
-            be individually reverted afterward.
+            will be accepted as-is (unmodified coordinates). This runs in the background — the list updates as items
+            are accepted, so it may take a moment to fully drain. This cannot be bulk-undone, though each item can
+            still be individually reverted afterward.
           </DialogContentText>
         </DialogContent>
         <DialogActions>

@@ -54,8 +54,19 @@ export class LocationSuggestionController {
   @Post('location-suggestions/bulk-accept')
   @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Bulk-accept pending location suggestions above a confidence threshold' })
-  @ApiResponse({ status: 200, description: 'Suggestions accepted' })
+  @ApiOperation({
+    summary: 'Bulk-accept pending location suggestions above a confidence threshold',
+    description:
+      'Enqueues an async `location_bulk_accept` enrichment job that drains the ' +
+      'circle\'s pending suggestion queue at/above the confidence floor in bounded ' +
+      'batches, then returns immediately with the job id/status — the work no ' +
+      'longer runs synchronously in the request (issue #125). Idempotent: a ' +
+      'pending/running bulk-accept job for the same circle is returned as-is.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Bulk-accept job enqueued; returns `{ data: { jobId, status } }`',
+  })
   async bulkAcceptSuggestions(
     @Body() dto: BulkAcceptLocationSuggestionsDto,
     @CurrentUser() user: RequestUser,

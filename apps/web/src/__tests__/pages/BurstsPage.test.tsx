@@ -160,6 +160,7 @@ function makeBurstGroupsHook(overrides: Partial<ReturnType<typeof useBurstGroups
       action: 'archive',
       skipped: 0,
       errors: [],
+      remaining: 0,
     }),
     ...overrides,
   };
@@ -570,6 +571,7 @@ describe('BurstsPage', () => {
         action: 'archive',
         skipped: 0,
         errors: 0,
+        remaining: 0,
       });
       mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(60));
       mockUseBurstGroups.mockReturnValue(
@@ -601,6 +603,7 @@ describe('BurstsPage', () => {
         action: 'trash',
         skipped: 0,
         errors: 0,
+        remaining: 0,
       });
       mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(60));
       mockUseBurstGroups.mockReturnValue(
@@ -632,6 +635,9 @@ describe('BurstsPage', () => {
         action: 'archive',
         skipped: 1,
         errors: 0,
+        // remaining:0 -> the auto-loop (added alongside this field) drains in
+        // exactly one iteration, matching this test's single-call assertion.
+        remaining: 0,
       });
       mockUseBurstGroups.mockReturnValue(
         makeBurstGroupsHook({ items: [makeSummary('g-1')], bulkResolveByThreshold }),
@@ -645,6 +651,80 @@ describe('BurstsPage', () => {
       await waitFor(() => {
         expect(screen.getByText(/resolved 2 groups; 3 photos archived \(1 skipped\)\./i)).toBeInTheDocument();
       });
+    });
+
+    it('auto-loops bulkResolveByThreshold while remaining > 0, stopping once remaining reaches 0', async () => {
+      const user = userEvent.setup();
+      const bulkResolveByThreshold = vi
+        .fn()
+        .mockResolvedValueOnce({
+          resolvedGroups: 10,
+          keptCount: 10,
+          removedCount: 20,
+          action: 'archive',
+          skipped: 0,
+          errors: 0,
+          remaining: 600,
+        })
+        .mockResolvedValueOnce({
+          resolvedGroups: 10,
+          keptCount: 10,
+          removedCount: 20,
+          action: 'archive',
+          skipped: 0,
+          errors: 0,
+          remaining: 100,
+        })
+        .mockResolvedValueOnce({
+          resolvedGroups: 10,
+          keptCount: 10,
+          removedCount: 20,
+          action: 'archive',
+          skipped: 0,
+          errors: 0,
+          remaining: 0,
+        });
+      mockUseBurstGroups.mockReturnValue(
+        makeBurstGroupsHook({ items: [makeSummary('g-1')], bulkResolveByThreshold }),
+      );
+
+      render(<BurstsPage />);
+
+      await user.click(await screen.findByRole('button', { name: 'Archive above 60' }));
+      await user.click(await screen.findByRole('button', { name: /^archive$/i }));
+
+      await waitFor(() => {
+        expect(bulkResolveByThreshold).toHaveBeenCalledTimes(3);
+      });
+      // Drained -> no further calls once remaining hits 0.
+      expect(bulkResolveByThreshold).toHaveBeenNthCalledWith(1, 60, 'archive');
+      expect(bulkResolveByThreshold).toHaveBeenNthCalledWith(3, 60, 'archive');
+    });
+
+    it('stops the auto-loop early when a batch makes no progress, even if remaining > 0', async () => {
+      const user = userEvent.setup();
+      const bulkResolveByThreshold = vi.fn().mockResolvedValue({
+        resolvedGroups: 0,
+        keptCount: 0,
+        removedCount: 0,
+        action: 'archive',
+        skipped: 5,
+        errors: 0,
+        remaining: 600,
+      });
+      mockUseBurstGroups.mockReturnValue(
+        makeBurstGroupsHook({ items: [makeSummary('g-1')], bulkResolveByThreshold }),
+      );
+
+      render(<BurstsPage />);
+
+      await user.click(await screen.findByRole('button', { name: 'Archive above 60' }));
+      await user.click(await screen.findByRole('button', { name: /^archive$/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/resolved 0 groups/i)).toBeInTheDocument();
+      });
+      expect(bulkResolveByThreshold).toHaveBeenCalledTimes(1);
     });
   });
 });

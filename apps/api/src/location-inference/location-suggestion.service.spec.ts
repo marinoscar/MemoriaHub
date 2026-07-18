@@ -9,8 +9,10 @@
  *  - rejectSuggestion: 404, 400 on non-pending, audit event
  *  - revertSuggestion: 404, 400 when not auto_applied, GEO_CLEAR_COLUMNS,
  *    audit event
- *  - bulkAcceptSuggestions: RBAC (collaborator), pending+confidence filter,
- *    always coordSource:'inferred', audit event
+ *  - bulkAcceptSuggestions: RBAC (collaborator), dedup-safe async enqueue of a
+ *    location_bulk_accept job, returns { data: { jobId, status } }
+ *  - processBulkAccept: bounded-batch drain loop, pending+confidence filter,
+ *    always coordSource:'inferred', exactly one audit event with final count
  *  - inferLocation: 404, RBAC (collaborator) runs BEFORE other guards, 400 on
  *    non-photo, success enqueue shape
  */
@@ -424,7 +426,7 @@ describe('LocationSuggestionService', () => {
     }
 
     it('checks circle access at the collaborator level', async () => {
-      (mockPrisma.locationSuggestion.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(null);
 
       await service.bulkAcceptSuggestions(makeDto(), USER_ID, PERMS);
 
@@ -436,10 +438,90 @@ describe('LocationSuggestionService', () => {
       );
     });
 
-    it('queries pending suggestions with confidence >= minConfidence', async () => {
-      (mockPrisma.locationSuggestion.findMany as jest.Mock).mockResolvedValue([]);
+    it('enqueues a location_bulk_accept job with circleId/minConfidence/requestedById and returns { data: { jobId, status } }', async () => {
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockEnrichmentJobService.enqueue as jest.Mock).mockResolvedValue({ id: 'job-99', status: 'pending' });
 
-      await service.bulkAcceptSuggestions(makeDto({ minConfidence: 0.85 }), USER_ID, PERMS);
+      const result = await service.bulkAcceptSuggestions(makeDto({ minConfidence: 0.85 }), USER_ID, PERMS);
+
+      expect(mockPrisma.enrichmentJob.findFirst).toHaveBeenCalledWith({
+        where: {
+          type: 'location_bulk_accept',
+          circleId: CIRCLE_ID,
+          status: { in: ['pending', 'running'] },
+        },
+      });
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith({
+        type: 'location_bulk_accept',
+        mediaItemId: null,
+        circleId: CIRCLE_ID,
+        reason: JobReason.rerun,
+        priority: 0,
+        skipDedup: true,
+        payload: { minConfidence: 0.85, requestedById: USER_ID },
+      });
+      expect(result).toEqual({ data: { jobId: 'job-99', status: 'pending' } });
+    });
+
+    it('is idempotent — returns the existing pending/running job instead of enqueueing a second one', async () => {
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue({ id: 'existing-job', status: 'running' });
+
+      const result = await service.bulkAcceptSuggestions(makeDto(), USER_ID, PERMS);
+
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+      expect(result).toEqual({ data: { jobId: 'existing-job', status: 'running' } });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // processBulkAccept
+  // -------------------------------------------------------------------------
+
+  describe('processBulkAccept', () => {
+    const BATCH_SIZE = 100;
+
+    function makeBatch(count: number, prefix: string): ReturnType<typeof makeSuggestion>[] {
+      return Array.from({ length: count }, (_, i) =>
+        makeSuggestion({ id: `${prefix}-${i}`, mediaItemId: `${prefix}-media-${i}` }),
+      );
+    }
+
+    it('drains a multi-batch backlog: full batch -> partial batch -> stop, applying coordSource:"inferred" and marking each suggestion accepted', async () => {
+      const findMany = mockPrisma.locationSuggestion.findMany as jest.Mock;
+      findMany
+        .mockResolvedValueOnce(makeBatch(BATCH_SIZE, 'b1'))
+        .mockResolvedValueOnce(makeBatch(40, 'b2'));
+
+      const accepted = await service.processBulkAccept(CIRCLE_ID, 0.7, USER_ID);
+
+      expect(accepted).toBe(BATCH_SIZE + 40);
+      expect(findMany).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.mediaItem.update).toHaveBeenCalledTimes(BATCH_SIZE + 40);
+      for (const call of (mockPrisma.mediaItem.update as jest.Mock).mock.calls) {
+        expect(call[0].data.coordSource).toBe('inferred');
+      }
+      expect(mockPrisma.locationSuggestion.update).toHaveBeenCalledTimes(BATCH_SIZE + 40);
+      for (const call of (mockPrisma.locationSuggestion.update as jest.Mock).mock.calls) {
+        expect(call[0].data).toEqual(
+          expect.objectContaining({ status: LocationSuggestionStatus.accepted, resolvedById: USER_ID }),
+        );
+      }
+    });
+
+    it('stops after an empty batch and never calls applyLocation/update when there are no pending suggestions', async () => {
+      (mockPrisma.locationSuggestion.findMany as jest.Mock).mockResolvedValueOnce([]);
+
+      const accepted = await service.processBulkAccept(CIRCLE_ID, 0.7, USER_ID);
+
+      expect(accepted).toBe(0);
+      expect(mockPrisma.mediaItem.update).not.toHaveBeenCalled();
+      expect(mockPrisma.locationSuggestion.update).not.toHaveBeenCalled();
+    });
+
+    it('filters by circleId, status:pending, and confidence >= minConfidence, ordered by createdAt asc', async () => {
+      (mockPrisma.locationSuggestion.findMany as jest.Mock).mockResolvedValueOnce([]);
+
+      await service.processBulkAccept(CIRCLE_ID, 0.85, USER_ID);
 
       expect(mockPrisma.locationSuggestion.findMany).toHaveBeenCalledWith({
         where: {
@@ -447,35 +529,41 @@ describe('LocationSuggestionService', () => {
           status: LocationSuggestionStatus.pending,
           confidence: { gte: 0.85 },
         },
+        take: BATCH_SIZE,
+        orderBy: { createdAt: 'asc' },
       });
     });
 
-    it('applies each suggestion via applyLocation(..., "inferred") — never a per-item override', async () => {
-      const suggestions = [makeSuggestion({ id: 's1', mediaItemId: 'm1' }), makeSuggestion({ id: 's2', mediaItemId: 'm2' })];
-      (mockPrisma.locationSuggestion.findMany as jest.Mock).mockResolvedValue(suggestions);
+    it('emits exactly ONE location_suggestion:bulk_accepted audit event with the final total count', async () => {
+      const findMany = mockPrisma.locationSuggestion.findMany as jest.Mock;
+      findMany
+        .mockResolvedValueOnce(makeBatch(BATCH_SIZE, 'b1'))
+        .mockResolvedValueOnce(makeBatch(5, 'b2'));
 
-      const result = await service.bulkAcceptSuggestions(makeDto(), USER_ID, PERMS);
+      await service.processBulkAccept(CIRCLE_ID, 0.6, USER_ID);
 
-      expect(result.data.accepted).toBe(2);
-      expect(mockPrisma.mediaItem.update).toHaveBeenCalledTimes(2);
-      for (const call of (mockPrisma.mediaItem.update as jest.Mock).mock.calls) {
-        expect(call[0].data.coordSource).toBe('inferred');
-      }
-      expect(mockPrisma.locationSuggestion.update).toHaveBeenCalledTimes(2);
-    });
-
-    it('writes an audit event with count and minConfidence', async () => {
-      const suggestions = [makeSuggestion()];
-      (mockPrisma.locationSuggestion.findMany as jest.Mock).mockResolvedValue(suggestions);
-
-      await service.bulkAcceptSuggestions(makeDto({ minConfidence: 0.6 }), USER_ID, PERMS);
-
+      expect(mockPrisma.auditEvent.create).toHaveBeenCalledTimes(1);
       expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
+            actorUserId: USER_ID,
             action: 'location_suggestion:bulk_accepted',
-            meta: expect.objectContaining({ count: 1, minConfidence: 0.6 }),
+            targetId: CIRCLE_ID,
+            meta: expect.objectContaining({ count: BATCH_SIZE + 5, minConfidence: 0.6 }),
           }),
+        }),
+      );
+    });
+
+    it('emits the audit event with count:0 when there is nothing to accept', async () => {
+      (mockPrisma.locationSuggestion.findMany as jest.Mock).mockResolvedValueOnce([]);
+
+      await service.processBulkAccept(CIRCLE_ID, 0.7, USER_ID);
+
+      expect(mockPrisma.auditEvent.create).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ meta: expect.objectContaining({ count: 0 }) }),
         }),
       );
     });

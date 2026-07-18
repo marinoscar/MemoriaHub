@@ -36,6 +36,10 @@ import { SelectionCheckboxOverlay } from '../../components/review/SelectionCheck
 import { ConfidenceMeter } from '../../components/review/ConfidenceMeter';
 import type { BurstGroupSummary, GroupResolveAction } from '../../services/bursts';
 
+// Safety ceiling for the threshold auto-loop so a misbehaving backend can never
+// spin forever. Each iteration resolves a bounded batch of eligible groups.
+const MAX_THRESHOLD_ITERATIONS = 100;
+
 function CoverStack({ coverUrls, mediaCount }: { coverUrls: string[]; mediaCount: number }) {
   return (
     <Box sx={{ position: 'relative', width: 120, height: 90, flexShrink: 0, isolation: 'isolate' }}>
@@ -121,8 +125,16 @@ export default function BurstsPage() {
   const { activeCircle, activeCircleId } = useCircle();
   const { hasPermission, isAdmin } = usePermissions();
   const { settings } = useSystemSettings();
-  const { items, meta, isLoading, error, fetchGroups, bulkResolve, bulkResolveByThreshold } =
-    useBurstGroups();
+  const {
+    items,
+    meta,
+    isLoading,
+    error,
+    fetchGroups,
+    bulkResolve,
+    bulkResolveByThreshold,
+    fetchAllPendingIds,
+  } = useBurstGroups();
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -156,8 +168,15 @@ export default function BurstsPage() {
     });
   };
 
-  const handleSelectAll = () => {
-    setSelected(new Set(items.map((g) => g.id)));
+  // Select ALL pending groups across every page, not just the visible one.
+  const handleSelectAll = async () => {
+    setActionError(null);
+    try {
+      const ids = await fetchAllPendingIds();
+      setSelected(new Set(ids));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to select all burst groups');
+    }
   };
 
   const handleResolve = async (action: GroupResolveAction) => {
@@ -180,16 +199,35 @@ export default function BurstsPage() {
     if (!action || !activeCircleId) return;
     setActionError(null);
     setThresholdLoading(true);
+    const verb = action === 'trash' ? 'moved to Trash' : 'archived';
+    let totalGroups = 0;
+    let totalRemoved = 0;
+    let totalSkipped = 0;
     try {
-      const result = await bulkResolveByThreshold(threshold, action);
+      // The endpoint resolves at most a bounded batch per call and reports how
+      // many eligible groups remain. Auto-loop until the queue is drained.
+      for (let iteration = 0; iteration < MAX_THRESHOLD_ITERATIONS; iteration += 1) {
+        const result = await bulkResolveByThreshold(threshold, action);
+        totalGroups += result.resolvedGroups;
+        totalRemoved += result.removedCount;
+        totalSkipped += result.skipped;
+        // Stop if nothing left, or if a batch made no progress (avoids a spin
+        // when the remaining groups are all ineligible).
+        if (result.remaining <= 0 || result.resolvedGroups === 0) break;
+        setSuccessMsg(`Resolved ${totalGroups} group${totalGroups !== 1 ? 's' : ''} so far…`);
+      }
       setSelected(new Set());
-      const verb = action === 'trash' ? 'moved to Trash' : 'archived';
-      const skippedNote = result.skipped > 0 ? ` (${result.skipped} skipped)` : '';
+      const skippedNote = totalSkipped > 0 ? ` (${totalSkipped} skipped)` : '';
       setSuccessMsg(
-        `Resolved ${result.resolvedGroups} group${result.resolvedGroups !== 1 ? 's' : ''}; ${result.removedCount} photo${result.removedCount !== 1 ? 's' : ''} ${verb}${skippedNote}.`,
+        `Resolved ${totalGroups} group${totalGroups !== 1 ? 's' : ''}; ${totalRemoved} photo${totalRemoved !== 1 ? 's' : ''} ${verb}${skippedNote}.`,
       );
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to resolve burst groups');
+      if (totalGroups > 0) {
+        setSuccessMsg(
+          `Resolved ${totalGroups} group${totalGroups !== 1 ? 's' : ''} before the error.`,
+        );
+      }
     } finally {
       setThresholdLoading(false);
     }
