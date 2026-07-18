@@ -16,6 +16,7 @@
 import { jest } from '@jest/globals';
 import React from 'react';
 import type { Circle } from '../../src/api.js';
+import { waitForFrame, waitForCalls } from './wait-for.js';
 
 // ---------------------------------------------------------------------------
 // Mock ApiClient
@@ -50,10 +51,6 @@ const { CircleManager } = await import('../../src/tui/CircleManager.js');
 
 const BASE_CONFIG = { serverUrl: 'https://test.server', pat: 'pat-123' };
 
-function flushAsync(ms = 80): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 afterEach(() => {
   cleanup();
   jest.clearAllMocks();
@@ -64,7 +61,7 @@ describe('CircleManager — set active circle', () => {
     mockListCircles.mockResolvedValue(FAKE_CIRCLES);
     const onConfigChange = jest.fn();
 
-    const { stdin } = render(
+    const { lastFrame, stdin } = render(
       <CircleManager
         config={BASE_CONFIG}
         onConfigChange={onConfigChange}
@@ -72,12 +69,13 @@ describe('CircleManager — set active circle', () => {
       />,
     );
 
-    // Let the circle list load (loading → ready).
-    await flushAsync();
+    // Let the circle list load (loading → ready) — poll for the loaded
+    // content rather than sleeping a fixed duration (see wait-for.ts).
+    await waitForFrame(lastFrame, (f) => f.includes('Personal'));
 
     // Press Enter to select the first (pre-highlighted) circle.
     stdin.write('\r');
-    await flushAsync();
+    await waitForCalls(mockSaveConfig);
 
     const expected = { ...BASE_CONFIG, activeCircleId: 'circle-1' };
     expect(mockSaveConfig).toHaveBeenCalledWith(expected);
@@ -88,7 +86,7 @@ describe('CircleManager — set active circle', () => {
     mockListCircles.mockResolvedValue(FAKE_CIRCLES);
     const onConfigChange = jest.fn();
 
-    const { stdin } = render(
+    const { lastFrame, stdin } = render(
       <CircleManager
         config={BASE_CONFIG}
         onConfigChange={onConfigChange}
@@ -96,13 +94,23 @@ describe('CircleManager — set active circle', () => {
       />,
     );
 
-    await flushAsync();
+    await waitForFrame(lastFrame, (f) => f.includes('Personal'));
 
-    // Move down to the second circle, then select it.
-    stdin.write('[B'); // down arrow
-    await flushAsync();
+    // Move down to the second circle, and wait for the highlight ('▶') to
+    // actually move onto the Family row before pressing Enter — the arrow
+    // and Enter keys are handled by the SAME useInput callback here (unlike
+    // ink-select-input's own internal index in the menu-nav test), but
+    // `selected` is only updated via React state, so sending Enter before
+    // that state update (and re-render capturing it in a fresh closure) has
+    // committed still reads the stale `selected` and picks the wrong row.
+    stdin.write('\x1B[B'); // down arrow
+    await waitForFrame(lastFrame, (f) => {
+      const line = f.split('\n').find((l) => l.includes('Family'));
+      return !!line && line.includes('▶');
+    });
+
     stdin.write('\r');
-    await flushAsync();
+    await waitForCalls(mockSaveConfig);
 
     const expected = { ...BASE_CONFIG, activeCircleId: 'circle-2' };
     expect(mockSaveConfig).toHaveBeenCalledWith(expected);
@@ -112,13 +120,13 @@ describe('CircleManager — set active circle', () => {
   it('does not throw when onConfigChange is omitted', async () => {
     mockListCircles.mockResolvedValue(FAKE_CIRCLES);
 
-    const { stdin } = render(
+    const { lastFrame, stdin } = render(
       <CircleManager config={BASE_CONFIG} onBack={() => {}} />,
     );
 
-    await flushAsync();
+    await waitForFrame(lastFrame, (f) => f.includes('Personal'));
     stdin.write('\r');
-    await flushAsync();
+    await waitForCalls(mockSaveConfig);
 
     expect(mockSaveConfig).toHaveBeenCalledWith({
       ...BASE_CONFIG,

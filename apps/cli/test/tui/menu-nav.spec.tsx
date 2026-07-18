@@ -29,6 +29,7 @@ import {
   breadcrumb,
   type MenuNode,
 } from '../../src/tui/menu-config.js';
+import { waitForFrame } from './wait-for.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -37,10 +38,6 @@ import {
 function stripAnsi(str: string): string {
   // eslint-disable-next-line no-control-regex
   return str.replace(/\x1B\[[0-9;]*m/g, '');
-}
-
-function flushAsync(ms = 30): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 const FAKE_CONFIG = { serverUrl: 'http://test.local', pat: 'tok-test' };
@@ -131,13 +128,22 @@ describe('menu navigation stack: root -> Sync -> back', () => {
   it('navigates into the Sync submenu and shows its breadcrumb + child label', async () => {
     const { lastFrame, stdin } = render(<NavHarness />);
 
-    // Move down from Login to Sync, then select it.
+    // Move down from Login to Sync, and wait for the highlight to actually
+    // move before pressing Enter — ink-select-input tracks its own selected
+    // index internally, so sending Enter before that update (and the
+    // useInput re-subscription that follows it) has committed can be
+    // processed against the PREVIOUS selection instead of Sync. Polling for
+    // the visible highlight change, with a small settle buffer for the
+    // listener re-subscription (see wait-for.ts), replaces the fixed-duration
+    // sleep that raced this same gap intermittently under CI.
     stdin.write('\x1B[B'); // down arrow
-    await flushAsync();
-    stdin.write('\r'); // Enter
-    await flushAsync();
+    await waitForFrame(lastFrame, (f) => stripAnsi(f).includes('> Sync ▸'));
 
-    const plain = stripAnsi(lastFrame()!);
+    stdin.write('\r'); // Enter
+    const plain = await waitForFrame(lastFrame, (f) =>
+      stripAnsi(f).includes('Menu › Sync'),
+    ).then(stripAnsi);
+
     expect(plain).toContain('Menu › Sync');
     expect(plain).toContain('Sync all folders');
     expect(plain).toContain('Sync selected folders');
@@ -148,17 +154,16 @@ describe('menu navigation stack: root -> Sync -> back', () => {
     const { lastFrame, stdin } = render(<NavHarness />);
 
     stdin.write('\x1B[B');
-    await flushAsync();
+    await waitForFrame(lastFrame, (f) => stripAnsi(f).includes('> Sync ▸'));
     stdin.write('\r');
-    await flushAsync();
-
-    // Confirm we're in the submenu first.
-    expect(stripAnsi(lastFrame()!)).toContain('Menu › Sync');
+    await waitForFrame(lastFrame, (f) => stripAnsi(f).includes('Menu › Sync'));
 
     stdin.write('\x1B'); // Esc
-    await flushAsync();
+    const plain = await waitForFrame(lastFrame, (f) => {
+      const p = stripAnsi(f);
+      return p.includes('MemoriaHub') && !p.includes('Sync all folders');
+    }).then(stripAnsi);
 
-    const plain = stripAnsi(lastFrame()!);
     expect(plain).toContain('MemoriaHub');
     expect(plain).toContain('Sync ▸');
     expect(plain).not.toContain('Sync all folders');
