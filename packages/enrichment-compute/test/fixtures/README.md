@@ -57,40 +57,73 @@ See `test/golden.test.mjs` for the tests that consume these fixtures, and the
 top-of-file comment there for the observed max element-wise diff across
 repeated runs and the chosen tolerance.
 
-### golden-fixture.heic (HEIC decode regression, issue #106)
+### golden-fixture.heic (HEIC decode regression, issues #106 and #128)
 
-`golden-fixture.heic` is **intentionally absent** from this repo. Unlike
-`golden-fixture.jpg` above, it cannot be generated in a plain Node.js script —
-producing a real HEIC/HEIF file requires an HEIC encoder (libheif) or an
-ffmpeg build with HEIC muxer support, neither of which is available in every
-dev/CI environment (this sandbox has neither system `ffmpeg` nor a sharp
-build with libheif).
+`golden-fixture.heic` **now exists** and is committed as the source of truth
+— a small (6.2 KB) HEVC/`hvc1`-coded HEIC file, decoding to a 256×192 image,
+encoded from the existing `golden-fixture.jpg` above.
 
-`test/heic.test.mjs` has six tests that mock `fluent-ffmpeg` (covering
-success, temp-file cleanup, a custom `fileExtension` option, an ffmpeg error,
-an empty-output guard, and the SIGKILL timeout) — those run unconditionally,
-with no real ffmpeg or fixture required. A separate, final test in that file
-(`transcodeToDecodableJpeg + computeDHash decode a real HEIC fixture
-end-to-end`) checks for both a system `ffmpeg` binary on PATH and this
-fixture file, and `t.skip(...)`s with a clear reason when either is missing —
-it never hard-fails just because the fixture isn't present.
+**How it was generated** (Python, `pillow-heif`):
 
-**To enable this regression guard:**
+```python
+import pillow_heif
+from PIL import Image
 
-1. Obtain a small real HEIC file — either a photo captured on an iPhone (HEIC
-   is Apple's default capture format), or generate one on a host where ffmpeg
-   was built with libheif support:
-   ```bash
-   ffmpeg -i sample.jpg -frames:v 1 golden-fixture.heic
-   ```
-2. Commit it at `packages/enrichment-compute/test/fixtures/golden-fixture.heic`
-   (keep it small — a few KB is enough to exercise the decode path).
-3. Run `node --test test/heic.test.mjs` on a machine with `ffmpeg` on PATH.
-   The end-to-end test will decode the fixture via `computeDHash` and print
-   the computed dHash (e.g. `[heic.test.mjs] computed dHash for
-   golden-fixture.heic: 1234567890...`) instead of asserting equality, since
-   no golden value is pinned yet.
-4. Copy that printed dHash into the `GOLDEN_HEIC_DHASH` constant near the top
-   of `test/heic.test.mjs` (replacing the `null` placeholder), then re-run the
-   test — it now asserts a bit-exact match, same as `GOLDEN_DHASH` does for
-   `golden-fixture.jpg` in `test/golden.test.mjs`.
+pillow_heif.register_heif_opener()
+
+img = Image.open("golden-fixture.jpg")
+img.save("golden-fixture.heic", format="HEIF", quality=80)
+```
+
+Any small, valid HEVC-coded HEIC file works as the fixture — only the DECODE
+path is asserted (dHash of the fixture's *own* pixel content, not a
+cross-format comparison against `golden-fixture.jpg`), so byte-for-byte
+reproducibility of the encoder output is not required the way it is for the
+JPEG fixture above.
+
+**Two consumers, two eras:**
+
+- `test/heic.test.mjs` has six tests that mock `fluent-ffmpeg` (covering
+  success, temp-file cleanup, a custom `fileExtension` option, an ffmpeg
+  error, an empty-output guard, and the SIGKILL timeout) — this is the
+  regression coverage for the issue #106 fallback (`transcodeToDecodableJpeg`)
+  itself, and runs unconditionally with no real ffmpeg or fixture required.
+  Its final test decodes the real fixture end-to-end through `computeDHash`
+  and no longer requires a real `ffmpeg` binary on PATH, since (post #128) a
+  HEIF-enabled sharp decodes it natively without ever reaching the fallback.
+- `test/golden.test.mjs` has the AUTHORITATIVE issue #128 parity-gate test:
+  it asserts sharp reports `format: 'heif'` for the fixture (native decode,
+  no exception), and — by installing the same fake-ffmpeg mock as
+  `heic.test.mjs` around a real `computeDHash` call — asserts the ffmpeg
+  fallback is **never invoked** in that path. This is the test the CI
+  golden-vector parity gate (`.github/workflows/deploy.yml`) runs inside the
+  built worker image, and — new as of #128 — the API image too, both switched
+  to a system HEIF-enabled libvips. `REQUIRE_HEIC_DECODE=1` in that gate turns
+  "sharp couldn't decode HEIC natively" from a skip into a hard build failure,
+  since a regression back to bundled/non-HEIF libvips must never pass
+  silently.
+
+**Pinning `GOLDEN_HEIC_DHASH`:**
+
+Neither test file has a value pinned yet (`GOLDEN_HEIC_DHASH = null` in both
+— `golden.test.mjs`'s copy is the single source of truth; `heic.test.mjs`
+keeps a matching `null` placeholder only so its own equality-or-print
+assertion has the same shape as the JPEG golden test). Both tests print the
+computed dHash instead of failing when unpinned.
+
+1. Run `node --test test/golden.test.mjs` **inside the built image** (worker
+   or API) that has the production HEIF-enabled global libvips (issue #128) —
+   not on a plain dev machine, since the value must come from a genuine
+   native decode, and a different libvips/libheif build could in principle
+   produce different pixels.
+2. Copy the printed value (`[golden.test.mjs] computed HEIC dHash: ...`) into
+   the `GOLDEN_HEIC_DHASH` constant near the top of `test/golden.test.mjs`
+   (replacing the `null` placeholder). Optionally also pin
+   `test/heic.test.mjs`'s copy for a redundant cross-check.
+3. Re-run — the test now asserts a bit-exact match, same as `GOLDEN_DHASH`
+   does for `golden-fixture.jpg`.
+4. This value is executor-dependent (it depends on the exact libvips/libheif
+   build baked into the image). Keep the CI parity gate amd64-only unless/
+   until cross-arch bit-stability has actually been verified — if the gate
+   ever runs on a second architecture, re-derive and separately track the
+   value for that arch rather than assuming it matches.
