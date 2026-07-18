@@ -42,6 +42,7 @@ import { SubjectBlock } from '../../components/workflows/builder/SubjectBlock';
 import { TriggerBlock } from '../../components/workflows/builder/TriggerBlock';
 import { ConditionsBlock } from '../../components/workflows/builder/ConditionsBlock';
 import { ActionsBlock } from '../../components/workflows/builder/ActionsBlock';
+import { WorkflowPreviewPanel } from '../../components/workflows/builder/WorkflowPreviewPanel';
 import { api } from '../../services/api';
 import type { CreateWorkflowDto, UpdateWorkflowDto } from '../../types/workflows';
 
@@ -267,7 +268,14 @@ export default function WorkflowBuilderPage() {
         </Alert>
       )}
 
-      <Box sx={{ display: 'flex', gap: 3, alignItems: 'flex-start' }}>
+      <Box
+        sx={{
+          display: 'flex',
+          gap: 3,
+          alignItems: 'flex-start',
+          flexDirection: { xs: 'column', md: 'row' },
+        }}
+      >
         {/* Main column — stacked blocks */}
         <Stack spacing={2.5} sx={{ flex: 1, minWidth: 0 }}>
           {subjects && (
@@ -319,8 +327,13 @@ export default function WorkflowBuilderPage() {
           {/* Safety block is added in a following checkpoint. */}
         </Stack>
 
-        {/* The live plain-language summary + preview panel is added in a later
-            checkpoint. */}
+        <WorkflowPreviewPanel
+          circleId={activeCircle.id}
+          definition={state.definition}
+          subjectEntry={subjectEntry}
+          trigger={state.trigger}
+          cronExpression={state.cronExpression}
+        />
       </Box>
 
       <Snackbar

@@ -86,6 +86,29 @@ export function cloneDefinition(def: WorkflowDefinition): WorkflowDefinition {
   return JSON.parse(JSON.stringify(def)) as WorkflowDefinition;
 }
 
+const isCompleteLeaf = (leaf: WorkflowLeafCondition): boolean =>
+  leaf.field.trim() !== '' && leaf.op.trim() !== '';
+
+/**
+ * Produce a preview-safe definition: drop half-built leaf rows (no field/op)
+ * and any group left empty, so the live preview doesn't 400 while the user is
+ * mid-edit. Does not mutate the input.
+ */
+export function sanitizeDefinitionForPreview(
+  def: WorkflowDefinition,
+): WorkflowDefinition {
+  const conditions: WorkflowTopCondition[] = [];
+  for (const c of def.conditions) {
+    if (isWorkflowGroupCondition(c)) {
+      const kept = c.conditions.filter(isCompleteLeaf);
+      if (kept.length > 0) conditions.push({ ...c, conditions: kept });
+    } else if (isCompleteLeaf(c)) {
+      conditions.push(c);
+    }
+  }
+  return { ...def, conditions };
+}
+
 // ---------------------------------------------------------------------------
 // Reducer
 // ---------------------------------------------------------------------------
