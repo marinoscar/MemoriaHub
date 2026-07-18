@@ -132,12 +132,23 @@ describe('menu navigation stack: root -> Sync -> back', () => {
     // move before pressing Enter — ink-select-input tracks its own selected
     // index internally, so sending Enter before that update (and the
     // useInput re-subscription that follows it) has committed can be
-    // processed against the PREVIOUS selection instead of Sync. Polling for
-    // the visible highlight change, with a small settle buffer for the
-    // listener re-subscription (see wait-for.ts), replaces the fixed-duration
-    // sleep that raced this same gap intermittently under CI.
+    // processed against the PREVIOUS selection instead of Sync. We detect
+    // "moved" by diffing the Sync row against its unselected baseline rather
+    // than matching a specific pointer glyph — ink-select-input's default
+    // indicator character varies by environment (Unicode-support detection),
+    // so a hardcoded glyph like '>' or '❯' is not portable across machines/CI
+    // (this is what broke this test in GitHub Actions CI despite passing
+    // locally). Diffing the raw (non-stripped) line also catches a
+    // color-only change, not just a glyph change.
+    const syncLineBaseline = (lastFrame() ?? '')
+      .split('\n')
+      .find((l) => l.includes('Sync ▸'));
+
     stdin.write('\x1B[B'); // down arrow
-    await waitForFrame(lastFrame, (f) => stripAnsi(f).includes('> Sync ▸'));
+    await waitForFrame(lastFrame, (f) => {
+      const line = f.split('\n').find((l) => l.includes('Sync ▸'));
+      return !!line && line !== syncLineBaseline;
+    });
 
     stdin.write('\r'); // Enter
     const plain = await waitForFrame(lastFrame, (f) =>
@@ -153,8 +164,15 @@ describe('menu navigation stack: root -> Sync -> back', () => {
   it('returns to the root menu after pressing Esc from the Sync submenu', async () => {
     const { lastFrame, stdin } = render(<NavHarness />);
 
+    const syncLineBaseline = (lastFrame() ?? '')
+      .split('\n')
+      .find((l) => l.includes('Sync ▸'));
+
     stdin.write('\x1B[B');
-    await waitForFrame(lastFrame, (f) => stripAnsi(f).includes('> Sync ▸'));
+    await waitForFrame(lastFrame, (f) => {
+      const line = f.split('\n').find((l) => l.includes('Sync ▸'));
+      return !!line && line !== syncLineBaseline;
+    });
     stdin.write('\r');
     await waitForFrame(lastFrame, (f) => stripAnsi(f).includes('Menu › Sync'));
 
