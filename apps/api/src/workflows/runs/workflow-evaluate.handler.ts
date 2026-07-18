@@ -1,7 +1,9 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import {
   EnrichmentJob,
   Prisma,
+  WorkflowRun,
   WorkflowRunItemStatus,
   WorkflowRunStatus,
 } from '@prisma/client';
@@ -21,6 +23,9 @@ interface WorkflowEvaluatePayload {
 
 /** Keyset page size for streaming the matched-item scan. */
 const PAGE_SIZE = 1000;
+
+/** OTEL tracer for the Media Workflow Automation compute path. */
+const tracer = trace.getTracer('workflows');
 
 /**
  * Media Workflow Automation — evaluation handler (issue #140).
@@ -64,6 +69,53 @@ export class WorkflowEvaluateHandler implements EnrichmentHandler, OnModuleInit 
     // Idempotent no-op: run gone, or already past evaluation.
     if (!run || run.status !== WorkflowRunStatus.evaluating) return;
 
+    // OTEL span around the whole evaluation pass, tagged with run/workflow/circle.
+    await tracer.startActiveSpan(
+      'workflow.evaluate',
+      {
+        kind: SpanKind.INTERNAL,
+        attributes: {
+          'workflow.run_id': run.id,
+          'workflow.id': run.workflowId,
+          'workflow.circle_id': run.circleId,
+        },
+      },
+      async (span) => {
+        try {
+          await this.runEvaluation(job, run, payload);
+          span.setStatus({ code: SpanStatusCode.OK });
+        } catch (err) {
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: err instanceof Error ? err.message : String(err),
+          });
+          span.recordException(err as Error);
+          throw err;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  /** Structured Pino log for a run transition, tagged with run/workflow/circle. */
+  private logTransition(run: WorkflowRun, toStatus: WorkflowRunStatus, extra: Record<string, unknown> = {}): void {
+    this.logger.log({
+      event: 'workflow_run.evaluated',
+      runId: run.id,
+      workflowId: run.workflowId,
+      circleId: run.circleId,
+      status: toStatus,
+      ...extra,
+    });
+  }
+
+  private async runEvaluation(
+    job: EnrichmentJob,
+    run: WorkflowRun,
+    payload: WorkflowEvaluatePayload,
+  ): Promise<void> {
+    const runId = run.id;
     try {
       const settings = await this.systemSettings.getSettings();
       const definition = run.definitionSnapshot as unknown as WorkflowDefinition;
@@ -157,6 +209,7 @@ export class WorkflowEvaluateHandler implements EnrichmentHandler, OnModuleInit 
         await this.audit(run.startedById, 'workflow_run:completed', runId, {
           matchedCount: 0,
         });
+        this.logTransition(run, WorkflowRunStatus.completed, { matchedCount: 0 });
         return;
       }
 
@@ -166,12 +219,17 @@ export class WorkflowEvaluateHandler implements EnrichmentHandler, OnModuleInit 
           data: { status: WorkflowRunStatus.running, startedAt: new Date() },
         });
         await this.runService.enqueueExecuteBatches(running, definition, settings);
+        this.logTransition(run, WorkflowRunStatus.running, { matchedCount: accepted, truncated });
         return;
       }
 
       await this.prisma.workflowRun.update({
         where: { id: runId },
         data: { status: WorkflowRunStatus.awaiting_approval },
+      });
+      this.logTransition(run, WorkflowRunStatus.awaiting_approval, {
+        matchedCount: accepted,
+        truncated,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -191,6 +249,7 @@ export class WorkflowEvaluateHandler implements EnrichmentHandler, OnModuleInit 
             },
           })
           .catch(() => undefined);
+        this.logTransition(run, WorkflowRunStatus.failed, { error: message });
       }
       throw err;
     }

@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { trace, SpanKind, SpanStatusCode, Span } from '@opentelemetry/api';
 import {
   EnrichmentJob,
   Prisma,
@@ -39,6 +40,9 @@ type ItemResult =
 /** Re-check the run's cancellation flag every N items. */
 const CANCEL_CHECK_INTERVAL = 25;
 
+/** OTEL tracer for the Media Workflow Automation compute path. */
+const tracer = trace.getTracer('workflows');
+
 /**
  * Media Workflow Automation — batch execution handler (issue #140).
  *
@@ -74,11 +78,47 @@ export class WorkflowExecuteBatchHandler implements EnrichmentHandler, OnModuleI
       this.logger.warn(`workflow_execute_batch job ${job.id} missing payload; skipping`);
       return;
     }
+
+    // OTEL span around the batch, tagged with run/workflow/circle + batch size.
+    await tracer.startActiveSpan(
+      'workflow.execute_batch',
+      {
+        kind: SpanKind.INTERNAL,
+        attributes: {
+          'workflow.run_id': payload.runId,
+          'workflow.batch_size': payload.itemIds.length,
+        },
+      },
+      async (span) => {
+        try {
+          await this.executeBatch(payload, span);
+          span.setStatus({ code: SpanStatusCode.OK });
+        } catch (err) {
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: err instanceof Error ? err.message : String(err),
+          });
+          span.recordException(err as Error);
+          throw err;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  private async executeBatch(
+    payload: WorkflowExecuteBatchPayload,
+    span: Span,
+  ): Promise<void> {
     const { runId, itemIds } = payload;
 
     const run = await this.prisma.workflowRun.findUnique({ where: { id: runId } });
     if (!run) return; // run gone → nothing to do
     if (run.status === WorkflowRunStatus.cancelled) return; // no-op on a cancelled run
+
+    span.setAttribute('workflow.id', run.workflowId);
+    span.setAttribute('workflow.circle_id', run.circleId);
 
     const definition = run.definitionSnapshot as unknown as WorkflowDefinition;
     const compiled = this.compiler.compile(run.circleId, definition);
@@ -304,6 +344,14 @@ export class WorkflowExecuteBatchHandler implements EnrichmentHandler, OnModuleI
           errorItems,
         });
       }
+      this.logger.log({
+        event: 'workflow_run.finalized',
+        runId,
+        workflowId: run?.workflowId ?? null,
+        circleId: run?.circleId ?? null,
+        status: finalStatus,
+        errorItems,
+      });
       this.executor.clearRunCache(runId);
     }
   }
