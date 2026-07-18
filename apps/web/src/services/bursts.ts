@@ -83,7 +83,7 @@ export interface GroupBulkResolveResult {
   removedCount: number;
   action: GroupResolveAction;
   skipped: number;
-  errors: string[];
+  errors: number;
 }
 
 /**
@@ -123,7 +123,7 @@ export async function resolveBurstGroup(
 
 /** Empty aggregate used as the seed when summing per-chunk results. */
 function emptyBulkResult(action: GroupResolveAction): GroupBulkResolveResult {
-  return { resolvedGroups: 0, keptCount: 0, removedCount: 0, action, skipped: 0, errors: [] };
+  return { resolvedGroups: 0, keptCount: 0, removedCount: 0, action, skipped: 0, errors: 0 };
 }
 
 /** Fold a per-chunk result into a running aggregate. */
@@ -137,7 +137,7 @@ function mergeBulkResult(
     removedCount: acc.removedCount + next.removedCount,
     action: next.action,
     skipped: acc.skipped + next.skipped,
-    errors: [...acc.errors, ...next.errors],
+    errors: acc.errors + next.errors,
   };
 }
 

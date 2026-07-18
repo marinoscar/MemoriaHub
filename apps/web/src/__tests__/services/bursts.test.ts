@@ -62,7 +62,7 @@ describe('bulkResolveBurstGroups', () => {
             removedCount: body.ids.length * 2,
             action: body.action,
             skipped: 1,
-            errors: [`err-${body.ids.length}`],
+            errors: 2,
           },
         });
       }),
@@ -84,7 +84,7 @@ describe('bulkResolveBurstGroups', () => {
       removedCount: 500,
       action: 'archive',
       skipped: 3,
-      errors: ['err-100', 'err-100', 'err-50'],
+      errors: 6,
     });
   });
 
@@ -101,7 +101,7 @@ describe('bulkResolveBurstGroups', () => {
             removedCount: 0,
             action: 'archive',
             skipped: 0,
-            errors: [],
+            errors: 0,
           },
         });
       }),

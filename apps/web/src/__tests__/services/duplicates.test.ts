@@ -60,7 +60,7 @@ describe('bulkResolveDuplicateGroups', () => {
             removedCount: body.ids.length * 2,
             action: body.action,
             skipped: 1,
-            errors: [`err-${body.ids.length}`],
+            errors: 2,
           },
         });
       }),
@@ -81,7 +81,7 @@ describe('bulkResolveDuplicateGroups', () => {
       removedCount: 500,
       action: 'trash',
       skipped: 3,
-      errors: ['err-100', 'err-100', 'err-50'],
+      errors: 6,
     });
   });
 
@@ -98,7 +98,7 @@ describe('bulkResolveDuplicateGroups', () => {
             removedCount: 0,
             action: 'archive',
             skipped: 0,
-            errors: [],
+            errors: 0,
           },
         });
       }),
