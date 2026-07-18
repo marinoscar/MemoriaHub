@@ -28,8 +28,8 @@ export class DoctorController {
   @ApiOperation({ summary: 'Run an on-demand configuration health sweep (Admin)' })
   @ApiOkResponse({
     description:
-      'Diagnostics report grouped into sections (core, auth, storage, AI, face, geo, jobs). ' +
-      'Computed fresh on every call — nothing is persisted.',
+      'Diagnostics report grouped into sections (core, auth, storage, AI, face, geo, jobs, ' +
+      'nodes, workflows). Computed fresh on every call — nothing is persisted.',
   })
   async runDiagnostics(): Promise<DoctorReport> {
     return this.doctorService.runDiagnostics();
