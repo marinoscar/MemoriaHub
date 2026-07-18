@@ -256,3 +256,273 @@ describe('WorkflowsService — hard_delete trigger-compat guard', () => {
     });
   });
 });
+
+/**
+ * Unit tests for the Phase 4 scheduling additions to WorkflowsService (issue
+ * #142): cron minimum-interval enforcement on save
+ * (`workflows.scheduleMinIntervalMinutes`) and `next_run_at` computation /
+ * maintenance on create and update.
+ */
+describe('WorkflowsService — scheduling (cron min-interval + next_run_at)', () => {
+  let service: WorkflowsService;
+  let prisma: MockPrismaService;
+  let systemSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettings'>>;
+
+  beforeEach(async () => {
+    prisma = createMockPrismaService();
+
+    systemSettings = {
+      getSettings: jest.fn().mockResolvedValue({
+        ...DEFAULT_SYSTEM_SETTINGS,
+        features: { ...DEFAULT_SYSTEM_SETTINGS.features, workflows: true },
+      }),
+    };
+    const circleMembership: jest.Mocked<Pick<CircleMembershipService, 'assertCircleAccess'>> = {
+      assertCircleAccess: jest
+        .fn()
+        .mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
+    };
+    const thumbnails: jest.Mocked<Pick<MediaThumbnailService, 'attachThumbnailUrls'>> = {
+      attachThumbnailUrls: jest.fn().mockResolvedValue([]),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        WorkflowsService,
+        WorkflowDefinitionValidator,
+        WorkflowConditionCompiler,
+        { provide: PrismaService, useValue: prisma },
+        { provide: SystemSettingsService, useValue: systemSettings },
+        { provide: CircleMembershipService, useValue: circleMembership },
+        { provide: MediaThumbnailService, useValue: thumbnails },
+      ],
+    }).compile();
+
+    service = module.get(WorkflowsService);
+
+    prisma.circle.findUnique.mockResolvedValue({ id: CIRCLE_ID } as any);
+    prisma.circleMember.findUnique.mockResolvedValue({
+      circleId: CIRCLE_ID,
+      userId: USER_ID,
+      role: 'collaborator',
+      joinedAt: new Date(),
+    } as any);
+    prisma.workflow.count.mockResolvedValue(0);
+    (prisma.workflow.create as jest.Mock).mockImplementation(async ({ data }: any) => ({
+      ...makeWorkflowRow(),
+      ...data,
+      id: randomUUID(),
+    }));
+  });
+
+  describe('createWorkflow — minimum interval enforcement', () => {
+    it('rejects a cron denser than the default 60-minute minimum', async () => {
+      await expect(
+        service.createWorkflow(
+          {
+            circleId: CIRCLE_ID,
+            name: 'Too dense',
+            trigger: 'scheduled',
+            cronExpression: '*/5 * * * *', // 5-minute gap < 60-minute default floor
+            definition: defWithActions([{ type: 'move_to_trash' }]),
+          } as any,
+          makeUser(),
+        ),
+      ).rejects.toThrow(/at least 60 minutes/);
+      expect(prisma.workflow.create).not.toHaveBeenCalled();
+    });
+
+    it('accepts a cron exactly at a raised minimum interval', async () => {
+      systemSettings.getSettings.mockResolvedValue({
+        ...DEFAULT_SYSTEM_SETTINGS,
+        features: { ...DEFAULT_SYSTEM_SETTINGS.features, workflows: true },
+        workflows: { ...DEFAULT_SYSTEM_SETTINGS.workflows, scheduleMinIntervalMinutes: 30 },
+      } as any);
+
+      await expect(
+        service.createWorkflow(
+          {
+            circleId: CIRCLE_ID,
+            name: 'Exactly at floor',
+            trigger: 'scheduled',
+            cronExpression: '0,30 * * * *', // 30-minute gap
+            definition: defWithActions([{ type: 'move_to_trash' }]),
+          } as any,
+          makeUser(),
+        ),
+      ).resolves.toMatchObject({ trigger: 'scheduled' });
+    });
+
+    it('rejects a cron just below a raised minimum interval', async () => {
+      systemSettings.getSettings.mockResolvedValue({
+        ...DEFAULT_SYSTEM_SETTINGS,
+        features: { ...DEFAULT_SYSTEM_SETTINGS.features, workflows: true },
+        workflows: { ...DEFAULT_SYSTEM_SETTINGS.workflows, scheduleMinIntervalMinutes: 45 },
+      } as any);
+
+      await expect(
+        service.createWorkflow(
+          {
+            circleId: CIRCLE_ID,
+            name: 'Just under floor',
+            trigger: 'scheduled',
+            cronExpression: '0,30 * * * *', // 30-minute gap < 45-minute floor
+            definition: defWithActions([{ type: 'move_to_trash' }]),
+          } as any,
+          makeUser(),
+        ),
+      ).rejects.toThrow(/at least 45 minutes/);
+    });
+  });
+
+  describe('createWorkflow — next_run_at computation', () => {
+    it('computes next_run_at on a scheduled workflow at create time', async () => {
+      const result = await service.createWorkflow(
+        {
+          circleId: CIRCLE_ID,
+          name: 'Nightly purge',
+          trigger: 'scheduled',
+          cronExpression: '0 3 * * *',
+          definition: defWithActions([{ type: 'move_to_trash' }]),
+        } as any,
+        makeUser(),
+      );
+
+      const createCall = (prisma.workflow.create as jest.Mock).mock.calls[0][0];
+      expect(createCall.data.nextRunAt).toBeInstanceOf(Date);
+      expect(createCall.data.nextRunAt.getTime()).toBeGreaterThan(Date.now());
+      expect((result as any).nextRunAt).toBeInstanceOf(Date);
+    });
+
+    it('leaves next_run_at null on a manual-trigger workflow', async () => {
+      await service.createWorkflow(
+        {
+          circleId: CIRCLE_ID,
+          name: 'Manual only',
+          trigger: 'manual',
+          definition: defWithActions([{ type: 'move_to_trash' }]),
+        } as any,
+        makeUser(),
+      );
+
+      const createCall = (prisma.workflow.create as jest.Mock).mock.calls[0][0];
+      expect(createCall.data.nextRunAt).toBeNull();
+    });
+
+    it('leaves next_run_at null on an on_media_enriched-trigger workflow', async () => {
+      await service.createWorkflow(
+        {
+          circleId: CIRCLE_ID,
+          name: 'On enrich',
+          trigger: 'on_media_enriched',
+          definition: defWithActions([{ type: 'move_to_trash' }]),
+        } as any,
+        makeUser(),
+      );
+
+      const createCall = (prisma.workflow.create as jest.Mock).mock.calls[0][0];
+      expect(createCall.data.nextRunAt).toBeNull();
+    });
+  });
+
+  describe('updateWorkflow — next_run_at maintenance', () => {
+    it('computes next_run_at when switching an existing manual workflow to scheduled', async () => {
+      const row = makeWorkflowRow({ trigger: 'manual', cronExpression: null, nextRunAt: null });
+      prisma.workflow.findUnique.mockResolvedValue(row as any);
+      (prisma.workflow.update as jest.Mock).mockImplementation(async ({ data }: any) => ({
+        ...row,
+        ...data,
+      }));
+
+      await service.updateWorkflow(
+        WORKFLOW_ID,
+        { trigger: 'scheduled', cronExpression: '0 3 * * *' } as any,
+        makeUser(),
+      );
+
+      const updateCall = (prisma.workflow.update as jest.Mock).mock.calls[0][0];
+      expect(updateCall.data.nextRunAt).toBeInstanceOf(Date);
+    });
+
+    it('clears next_run_at when switching an already-scheduled workflow away to manual', async () => {
+      const existingNextRunAt = new Date('2026-02-01T03:00:00.000Z');
+      const row = makeWorkflowRow({
+        trigger: 'scheduled',
+        cronExpression: '0 3 * * *',
+        nextRunAt: existingNextRunAt,
+      });
+      prisma.workflow.findUnique.mockResolvedValue(row as any);
+      (prisma.workflow.update as jest.Mock).mockImplementation(async ({ data }: any) => ({
+        ...row,
+        ...data,
+      }));
+
+      await service.updateWorkflow(WORKFLOW_ID, { trigger: 'manual' } as any, makeUser());
+
+      const updateCall = (prisma.workflow.update as jest.Mock).mock.calls[0][0];
+      expect(updateCall.data.nextRunAt).toBeNull();
+    });
+
+    it('recomputes next_run_at when the cron expression changes on an already-scheduled workflow', async () => {
+      const existingNextRunAt = new Date('2026-02-01T03:00:00.000Z');
+      const row = makeWorkflowRow({
+        trigger: 'scheduled',
+        cronExpression: '0 3 * * *',
+        nextRunAt: existingNextRunAt,
+      });
+      prisma.workflow.findUnique.mockResolvedValue(row as any);
+      (prisma.workflow.update as jest.Mock).mockImplementation(async ({ data }: any) => ({
+        ...row,
+        ...data,
+      }));
+
+      await service.updateWorkflow(
+        WORKFLOW_ID,
+        { cronExpression: '0 4 * * *' } as any,
+        makeUser(),
+      );
+
+      const updateCall = (prisma.workflow.update as jest.Mock).mock.calls[0][0];
+      expect(updateCall.data.nextRunAt).toBeInstanceOf(Date);
+      // The new 4am cron's next fire must differ from the stale 3am nextRunAt.
+      expect(updateCall.data.nextRunAt.getTime()).not.toBe(existingNextRunAt.getTime());
+    });
+
+    it('leaves next_run_at untouched when an already-scheduled workflow is updated without changing trigger or cron', async () => {
+      const existingNextRunAt = new Date('2026-02-01T03:00:00.000Z');
+      const row = makeWorkflowRow({
+        trigger: 'scheduled',
+        cronExpression: '0 3 * * *',
+        nextRunAt: existingNextRunAt,
+      });
+      prisma.workflow.findUnique.mockResolvedValue(row as any);
+      (prisma.workflow.update as jest.Mock).mockImplementation(async ({ data }: any) => ({
+        ...row,
+        ...data,
+      }));
+
+      await service.updateWorkflow(WORKFLOW_ID, { name: 'Renamed only' } as any, makeUser());
+
+      const updateCall = (prisma.workflow.update as jest.Mock).mock.calls[0][0];
+      expect(updateCall.data.nextRunAt).toBeUndefined();
+    });
+
+    it('rejects tightening the cron below the minimum interval on update', async () => {
+      const row = makeWorkflowRow({
+        trigger: 'scheduled',
+        cronExpression: '0 3 * * *',
+        nextRunAt: new Date('2026-02-01T03:00:00.000Z'),
+      });
+      prisma.workflow.findUnique.mockResolvedValue(row as any);
+
+      await expect(
+        service.updateWorkflow(
+          WORKFLOW_ID,
+          { cronExpression: '*/5 * * * *' } as any,
+          makeUser(),
+        ),
+      ).rejects.toThrow(/at least 60 minutes/);
+      expect(prisma.workflow.update).not.toHaveBeenCalled();
+    });
+  });
+});
