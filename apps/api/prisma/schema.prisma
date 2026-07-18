@@ -848,6 +848,14 @@ model EnrichmentJob {
   @@index([mediaItemId])
   @@index([type, status])
   @@index([status, leaseExpiresAt])
+  // Admin surfaces (migration 20260718000000_enrichment_jobs_admin_indexes):
+  // - claimedByNodeId: WorkersPage polls groupBy(['claimedByNodeId','status'])
+  //   every 5s (nodes.service getJobCountsForNodes) — seq scan without it.
+  // - createdAt DESC: JobsPage default list orders by createdAt desc with no
+  //   status filter (enrichment-admin.service listJobs) — seq scan + sort
+  //   without it.
+  @@index([claimedByNodeId])
+  @@index([createdAt(sort: Desc)])
   @@map("enrichment_jobs")
 }
 
