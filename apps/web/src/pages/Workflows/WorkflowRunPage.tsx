@@ -19,6 +19,14 @@ import {
   List,
   ListItem,
   ListItemText,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Link,
+  Tooltip,
 } from '@mui/material';
 import {
   BrokenImage as BrokenImageIcon,
@@ -175,6 +183,30 @@ function RunCountsSummary({ run }: { run: WorkflowRunDetail }) {
   );
 }
 
+/** Severity + message for a terminal run status. */
+function terminalSummary(run: WorkflowRunDetail): {
+  severity: 'success' | 'warning' | 'error' | 'info';
+  message: string;
+} {
+  switch (run.status) {
+    case 'completed':
+      return { severity: 'success', message: 'All actions applied successfully.' };
+    case 'completed_with_errors':
+      return {
+        severity: 'warning',
+        message: 'The run completed, but some items failed. Review them below.',
+      };
+    case 'failed':
+      return { severity: 'error', message: run.lastError ?? 'The run failed.' };
+    case 'cancelled':
+      return { severity: 'info', message: 'This run was cancelled.' };
+    case 'expired':
+      return { severity: 'warning', message: 'This run expired before it was approved.' };
+    default:
+      return { severity: 'info', message: '' };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -197,6 +229,7 @@ export default function WorkflowRunPage() {
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
   const [confirmText, setConfirmText] = useState('');
   const [itemsPage, setItemsPage] = useState(1);
+  const [failedPage, setFailedPage] = useState(1);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -246,6 +279,17 @@ export default function WorkflowRunPage() {
       pageSize: ITEMS_PAGE_SIZE,
     });
   }, [runId, run?.status, itemsPage, fetchItems]);
+
+  // Load the failed-item table once the run is terminal and has failures.
+  const isTerminal = run ? isTerminalRunStatus(run.status) : false;
+  useEffect(() => {
+    if (!runId || !run || !isTerminal || run.failedCount <= 0) return;
+    void fetchItems(runId, {
+      status: 'failed',
+      page: failedPage,
+      pageSize: ITEMS_PAGE_SIZE,
+    });
+  }, [runId, run, isTerminal, failedPage, fetchItems]);
 
   const effectiveMatched = useMemo(
     () => (run ? Math.max(0, run.matchedCount - excluded.size) : 0),
@@ -549,11 +593,30 @@ export default function WorkflowRunPage() {
         </Box>
       )}
 
-      {/* Running + terminal (compact summary — expanded in the next checkpoint) */}
-      {(run.status === 'running' || isTerminalRunStatus(run.status)) && (
+      {/* Running */}
+      {run.status === 'running' && (
         <Box>
+          <Card variant="outlined" sx={{ mb: 2 }}>
+            <CardContent>
+              <Typography variant="subtitle1" gutterBottom>
+                Applying actions…
+              </Typography>
+              <LinearProgress
+                variant={run.matchedCount > 0 ? 'determinate' : 'indeterminate'}
+                value={
+                  run.matchedCount > 0
+                    ? Math.min(100, (run.processedCount / run.matchedCount) * 100)
+                    : undefined
+                }
+                sx={{ height: 8, borderRadius: 1, mb: 1 }}
+              />
+              <Typography variant="body2" color="text.secondary">
+                {formatCount(run.processedCount)} of {formatCount(run.matchedCount)} processed
+              </Typography>
+            </CardContent>
+          </Card>
           <RunCountsSummary run={run} />
-          {run.status === 'running' && canApprove && (
+          {canApprove && (
             <Button
               variant="outlined"
               disabled={isSaving}
@@ -563,10 +626,112 @@ export default function WorkflowRunPage() {
               Cancel
             </Button>
           )}
-          {run.lastError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              {run.lastError}
-            </Alert>
+        </Box>
+      )}
+
+      {/* Terminal */}
+      {isTerminal && (
+        <Box>
+          {(() => {
+            const summary = terminalSummary(run);
+            return (
+              <Alert severity={summary.severity} sx={{ mb: 2 }}>
+                <AlertTitle>{runStatusLabel(run.status)}</AlertTitle>
+                {summary.message}
+              </Alert>
+            );
+          })()}
+
+          <RunCountsSummary run={run} />
+
+          {run.failedCount > 0 && (
+            <Card variant="outlined" sx={{ mt: 1 }}>
+              <CardContent>
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    mb: 1.5,
+                    flexWrap: 'wrap',
+                    gap: 1,
+                  }}
+                >
+                  <Typography variant="subtitle2">
+                    Failed items ({formatCount(run.failedCount)})
+                  </Typography>
+                  {canApprove && (
+                    <Tooltip title="Coming soon">
+                      <span>
+                        <Button size="small" variant="outlined" disabled>
+                          Retry failed items
+                        </Button>
+                      </span>
+                    </Tooltip>
+                  )}
+                </Box>
+                {itemsLoading && items.length === 0 ? (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                    <CircularProgress size={28} />
+                  </Box>
+                ) : (
+                  <>
+                    <TableContainer sx={{ overflowX: 'auto' }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>File</TableCell>
+                            <TableCell>Error</TableCell>
+                            <TableCell align="right">Item</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {items.map((item) => (
+                            <TableRow key={item.id}>
+                              <TableCell sx={{ maxWidth: 220 }}>
+                                <Typography variant="body2" noWrap title={item.media?.filename ?? undefined}>
+                                  {item.media?.filename ?? 'Untitled'}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {formatCaptureDate(item.media?.capturedAt ?? null)}
+                                </Typography>
+                              </TableCell>
+                              <TableCell sx={{ maxWidth: 360 }}>
+                                <Typography variant="body2" color="error">
+                                  {item.error ?? 'Unknown error'}
+                                </Typography>
+                              </TableCell>
+                              <TableCell align="right">
+                                <Link
+                                  component="button"
+                                  type="button"
+                                  variant="body2"
+                                  onClick={() =>
+                                    navigate(`/media?item=${item.mediaItemId}`)
+                                  }
+                                >
+                                  View
+                                </Link>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                    {itemsMeta && itemsMeta.totalPages > 1 && (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+                        <Pagination
+                          count={itemsMeta.totalPages}
+                          page={failedPage}
+                          onChange={(_, p) => setFailedPage(p)}
+                          size="small"
+                        />
+                      </Box>
+                    )}
+                  </>
+                )}
+              </CardContent>
+            </Card>
           )}
         </Box>
       )}
