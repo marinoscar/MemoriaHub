@@ -14,6 +14,10 @@
  *    also match the archived pool.
  *  - A face with an empty embedding and no externalFaceId is skipped
  *    entirely: no matching calls, no archive attempt, no crash.
+ *  - pgvector routing (usesPgvectorFor=true): NO archived-candidates preload
+ *    query and matchFaceToArchived is called WITHOUT candidates; the app
+ *    backend keeps the preload+candidates in-loop reuse.
+ *  - A person match invalidates that person's cached centroid.
  *
  * FaceProviderRegistry, FaceSettingsService, FaceMatchingService, and
  * SystemSettingsService are all replaced with mocks — no transitive
@@ -73,6 +77,8 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
     matchFaceByExternalId: jest.Mock;
     matchFaceToPerson: jest.Mock;
     matchFaceToArchived: jest.Mock;
+    usesPgvectorFor: jest.Mock;
+    invalidateCentroid: jest.Mock;
     archiveMaxCandidates: number;
   };
   let mockSystemSettings: { getSettings: jest.Mock };
@@ -107,6 +113,10 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
       matchFaceByExternalId: jest.fn().mockResolvedValue(null),
       matchFaceToPerson: jest.fn().mockResolvedValue(null),
       matchFaceToArchived: jest.fn().mockResolvedValue(null),
+      // Default to the app-backend (preload+candidates) path; individual
+      // tests flip this to true to exercise the pgvector KNN path.
+      usesPgvectorFor: jest.fn().mockReturnValue(false),
+      invalidateCentroid: jest.fn(),
       archiveMaxCandidates: 5000,
     };
     mockSystemSettings = {
@@ -249,6 +259,158 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
 
     expect(mockMatchingService.matchFaceToArchived).not.toHaveBeenCalled();
     expect(mockPrisma.face.updateMany).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // Auto-archive: pgvector path (no candidate preload)
+  // -------------------------------------------------------------------------
+
+  it('skips the archived-candidates preload and calls matchFaceToArchived WITHOUT candidates on the pgvector path', async () => {
+    mockSystemSettings.getSettings.mockResolvedValue(makeSettings(true, 0.45));
+    mockMatchingService.matchFaceToPerson.mockResolvedValue(null);
+    mockMatchingService.usesPgvectorFor.mockReturnValue(true);
+    mockMatchingService.matchFaceToArchived.mockResolvedValue({
+      faceId: 'archived-ref-1',
+      similarity: 0.6,
+    });
+
+    const face = makeFace({ embedding: [1, 0] });
+
+    await service.persistAndMatchFaces({
+      mediaItemId: MEDIA_ID,
+      circleId: CIRCLE_ID,
+      providerKey: 'compreface',
+      modelVersion: 'v1',
+      faces: [face],
+      isVideo: false,
+    });
+
+    // No preload query for the archived reference set.
+    expect(mockPrisma.face.findMany).not.toHaveBeenCalled();
+    // KNN routing: called with threshold only — NO candidates key.
+    expect(mockMatchingService.matchFaceToArchived).toHaveBeenCalledWith(
+      CIRCLE_ID,
+      [1, 0],
+      { threshold: 0.45 },
+    );
+    // The match still lands in the batch archive.
+    expect(mockPrisma.face.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['face-0'] },
+        circleId: CIRCLE_ID,
+        personId: null,
+        hiddenAt: null,
+      },
+      data: { hiddenAt: expect.any(Date), hiddenReason: 'auto_archive_match' },
+    });
+  });
+
+  it('does not archive on the pgvector path when the KNN finds no archived match', async () => {
+    mockSystemSettings.getSettings.mockResolvedValue(makeSettings(true, 0.45));
+    mockMatchingService.matchFaceToPerson.mockResolvedValue(null);
+    mockMatchingService.usesPgvectorFor.mockReturnValue(true);
+    mockMatchingService.matchFaceToArchived.mockResolvedValue(null);
+
+    const face = makeFace({ embedding: [1, 0] });
+
+    await service.persistAndMatchFaces({
+      mediaItemId: MEDIA_ID,
+      circleId: CIRCLE_ID,
+      providerKey: 'compreface',
+      modelVersion: 'v1',
+      faces: [face],
+      isVideo: false,
+    });
+
+    expect(mockPrisma.face.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.face.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('preserves the preload+candidates behavior on the app backend (usesPgvectorFor=false)', async () => {
+    mockSystemSettings.getSettings.mockResolvedValue(makeSettings(true, 0.45));
+    mockMatchingService.matchFaceToPerson.mockResolvedValue(null);
+    mockMatchingService.usesPgvectorFor.mockReturnValue(false);
+
+    const archivedPool = [{ id: 'archived-ref-1', embedding: [0.9, 0.1] }];
+    (mockPrisma.face.findMany as jest.Mock).mockResolvedValue(archivedPool);
+    mockMatchingService.matchFaceToArchived.mockResolvedValue(null);
+
+    const faceA = makeFace({ embedding: [1, 0] });
+    const faceB = makeFace({ embedding: [0, 1] });
+
+    await service.persistAndMatchFaces({
+      mediaItemId: MEDIA_ID,
+      circleId: CIRCLE_ID,
+      providerKey: 'human',
+      modelVersion: 'v1',
+      faces: [faceA, faceB],
+      isVideo: false,
+    });
+
+    // Preloaded exactly once for the whole job (in-loop reuse) …
+    expect(mockPrisma.face.findMany).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.face.findMany).toHaveBeenCalledWith({
+      where: {
+        circleId: CIRCLE_ID,
+        personId: null,
+        hiddenAt: { not: null },
+        embedding: { isEmpty: false },
+      },
+      select: { id: true, embedding: true },
+      orderBy: { hiddenAt: 'desc' },
+      take: 5000,
+    });
+    // … and every probe passes the preloaded set as candidates.
+    expect(mockMatchingService.matchFaceToArchived).toHaveBeenCalledTimes(2);
+    expect(mockMatchingService.matchFaceToArchived).toHaveBeenCalledWith(
+      CIRCLE_ID,
+      [1, 0],
+      { threshold: 0.45, candidates: archivedPool },
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // Centroid cache invalidation on person assignment
+  // -------------------------------------------------------------------------
+
+  it('invalidates the matched person\'s cached centroid after assigning a face', async () => {
+    mockSystemSettings.getSettings.mockResolvedValue(makeSettings(false));
+    mockMatchingService.matchFaceToPerson.mockResolvedValue({ personId: 'person-1' });
+
+    const face = makeFace({ embedding: [1, 0] });
+
+    await service.persistAndMatchFaces({
+      mediaItemId: MEDIA_ID,
+      circleId: CIRCLE_ID,
+      providerKey: 'human',
+      modelVersion: 'v1',
+      faces: [face],
+      isVideo: false,
+    });
+
+    expect(mockPrisma.face.update).toHaveBeenCalledWith({
+      where: { id: 'face-0' },
+      data: { personId: 'person-1' },
+    });
+    expect(mockMatchingService.invalidateCentroid).toHaveBeenCalledWith('person-1');
+  });
+
+  it('does not invalidate any centroid when no person match occurs', async () => {
+    mockSystemSettings.getSettings.mockResolvedValue(makeSettings(false));
+    mockMatchingService.matchFaceToPerson.mockResolvedValue(null);
+
+    const face = makeFace({ embedding: [1, 0] });
+
+    await service.persistAndMatchFaces({
+      mediaItemId: MEDIA_ID,
+      circleId: CIRCLE_ID,
+      providerKey: 'human',
+      modelVersion: 'v1',
+      faces: [face],
+      isVideo: false,
+    });
+
+    expect(mockMatchingService.invalidateCentroid).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
