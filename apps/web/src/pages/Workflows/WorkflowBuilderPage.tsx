@@ -43,7 +43,13 @@ import { TriggerBlock } from '../../components/workflows/builder/TriggerBlock';
 import { ConditionsBlock } from '../../components/workflows/builder/ConditionsBlock';
 import { ActionsBlock } from '../../components/workflows/builder/ActionsBlock';
 import { WorkflowPreviewPanel } from '../../components/workflows/builder/WorkflowPreviewPanel';
+import { SafetyBlock } from '../../components/workflows/builder/SafetyBlock';
 import { api } from '../../services/api';
+
+// Fallback defaults mirroring the backend when the admin-only settings read is
+// unavailable (non-admin users get 403 on GET /system-settings).
+const DEFAULT_MAX_ITEMS_PER_RUN = 10000;
+const DEFAULT_REQUIRE_PREVIEW = true;
 import type { CreateWorkflowDto, UpdateWorkflowDto } from '../../types/workflows';
 
 /** Subset of `workflows.*` system settings the builder reads (admin-only). */
@@ -100,6 +106,9 @@ export default function WorkflowBuilderPage() {
   const hardDeleteAllowed: boolean | null = sysWorkflows
     ? sysWorkflows.allowHardDelete ?? false
     : null;
+  const systemCap = sysWorkflows?.maxItemsPerRun ?? DEFAULT_MAX_ITEMS_PER_RUN;
+  const systemRequiresPreview =
+    sysWorkflows?.requirePreview ?? DEFAULT_REQUIRE_PREVIEW;
 
   const canManage =
     (activeCircleRole === 'collaborator' || activeCircleRole === 'circle_admin') &&
@@ -324,7 +333,14 @@ export default function WorkflowBuilderPage() {
             />
           )}
 
-          {/* Safety block is added in a following checkpoint. */}
+          <SafetyBlock
+            maxItems={state.definition.options?.maxItems}
+            requirePreview={state.definition.options?.requirePreview}
+            systemCap={systemCap}
+            systemRequiresPreview={systemRequiresPreview}
+            hasGatedAction={hasGatedAction}
+            dispatch={dispatch}
+          />
         </Stack>
 
         <WorkflowPreviewPanel
