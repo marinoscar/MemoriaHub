@@ -51,6 +51,7 @@ import { downloadToFile } from './download.js';
 import {
   ComputeDispatcher,
   detectCapabilities,
+  mergeOperationalCapabilities,
   type CapabilityStatus,
 } from './capabilities.js';
 import { ProviderRateLimitError } from '@memoriahub/enrichment-compute/rate-limit';
@@ -91,6 +92,13 @@ export interface NodeEngineDeps {
   downloadFn?: typeof downloadToFile;
   /** Injectable for tests — defaults to the real capability probe. */
   detectFn?: (opts?: { comprefaceUrl?: string }) => Promise<Record<string, CapabilityStatus>>;
+  /**
+   * Cached STARTUP operational self-test snapshot (issue #148). Merged into the
+   * reported capabilities on every heartbeat WITHOUT being re-run (self-tests
+   * are far too expensive for a ~20s cadence). Undefined → presence-only
+   * heartbeat, exactly the pre-#148 behaviour.
+   */
+  operationalCapabilities?: Record<string, CapabilityStatus>;
   /** Injectable temp directory (defaults to os.tmpdir()). */
   tmpDir?: () => string;
 }
@@ -163,6 +171,8 @@ export class NodeEngine extends NodeTypedEmitter {
   private readonly dispatcher: ComputeDispatcher;
   private readonly nodeId: string;
   private readonly opts: NodeEngineOptions;
+  /** Cached startup operational self-test snapshot; see NodeEngineDeps. */
+  private readonly operationalSnapshot?: Record<string, CapabilityStatus>;
   private readonly resolved: Resolved;
 
   private running = false;
@@ -195,6 +205,7 @@ export class NodeEngine extends NodeTypedEmitter {
     this.dispatcher = deps.dispatcher;
     this.nodeId = deps.nodeId;
     this.opts = deps.options;
+    this.operationalSnapshot = deps.operationalCapabilities;
     this.concurrencyCap = Math.max(1, Math.floor(deps.options.concurrency));
     this.resolved = {
       downloadFn: deps.downloadFn ?? downloadToFile,
@@ -515,9 +526,13 @@ export class NodeEngine extends NodeTypedEmitter {
   /** Send one heartbeat with the current capability summary. */
   private async beat(): Promise<void> {
     try {
-      const capabilities = await this.resolved.detectFn({
+      const presence = await this.resolved.detectFn({
         comprefaceUrl: this.opts.comprefaceUrl,
       });
+      // #148: enrich the live presence probe with the cached startup
+      // operational self-test result (not re-run per heartbeat — far too
+      // expensive) so the admin Doctor sees true operational health.
+      const capabilities = mergeOperationalCapabilities(presence, this.operationalSnapshot);
       await this.api.heartbeatNode(this.nodeId, {
         status: this.draining ? 'draining' : 'online',
         capabilities,

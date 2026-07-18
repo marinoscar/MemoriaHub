@@ -1203,7 +1203,14 @@ export class DoctorService {
         consider(name, value);
       } else if (value && typeof value === 'object') {
         const rec = value as Record<string, unknown>;
-        if (typeof rec['status'] === 'string') consider(name, rec['status']);
+        if (typeof rec['status'] === 'string') {
+          consider(name, rec['status']);
+        } else if (rec['operational'] === false) {
+          // #148: enriched worker-node capability payload — a startup
+          // operational self-test that FAILED is a degrade distinct from a
+          // merely-absent package (available:false with no operational field).
+          consider(name, 'error');
+        }
       }
     }
 
@@ -1225,8 +1232,13 @@ export class DoctorService {
 
     const capToJobTypes: Record<string, string[]> = {
       face: ['face_detection', 'video_face_detection'],
+      human: ['face_detection', 'video_face_detection'],
+      compreface: ['face_detection', 'video_face_detection'],
       clip: ['duplicate_detection', 'duplicate_detection_batch'],
+      onnxruntime: ['duplicate_detection', 'duplicate_detection_batch'],
       ocr: ['social_media_detection'],
+      tesseract: ['social_media_detection'],
+      ffprobe: ['video_face_detection', 'social_media_detection'],
       ffmpeg: ['video_face_detection', 'social_media_detection'],
       sharp: [
         'face_detection',

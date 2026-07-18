@@ -26,11 +26,13 @@ const NODE_JOB_TYPES = ['face_detection', 'auto_tagging'] as const;
 
 const mockDetectCapabilities = jest.fn();
 const mockMissingRequirements = jest.fn();
+const mockEvaluateStartupSelfTest = jest.fn();
 jest.unstable_mockModule('../../src/node/capabilities.js', () => ({
   NODE_JOB_TYPES,
   isNodeJobType: (t: string) => (NODE_JOB_TYPES as readonly string[]).includes(t),
   detectCapabilities: mockDetectCapabilities,
   missingRequirements: mockMissingRequirements,
+  evaluateStartupSelfTest: mockEvaluateStartupSelfTest,
 }));
 
 const mockRunOperationalSelfTests = jest.fn();
@@ -86,6 +88,9 @@ beforeEach(() => {
     human: { available: false, detail: 'human not installed' },
   });
   mockMissingRequirements.mockReset().mockReturnValue([]);
+  mockEvaluateStartupSelfTest
+    .mockReset()
+    .mockReturnValue({ ok: true, blockingFailures: [], degraded: [] });
   mockRunOperationalSelfTests.mockReset().mockImplementation(async (caps: unknown) => caps);
   mockRunApiAccessChecks.mockReset().mockResolvedValue(OK_ACCESS);
   mockCheckDaemonLiveness.mockReset().mockResolvedValue(OK_DAEMON);
@@ -323,6 +328,65 @@ describe('runNodeDoctorSweep — threads faceProvider/comprefaceUrl from config'
     for (const t of NODE_JOB_TYPES) {
       expect(mockMissingRequirements).toHaveBeenCalledWith(t, expect.anything(), 'human');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Startup gate step (issue #148)
+// ---------------------------------------------------------------------------
+
+describe('runNodeDoctorSweep — startup gate', () => {
+  it('evaluates the gate against the operational snapshot + resolved eligibleTypes/faceProvider and stores the verdict', async () => {
+    const evaluation = { ok: true, blockingFailures: [], degraded: [] };
+    mockEvaluateStartupSelfTest.mockReturnValue(evaluation);
+
+    const result = await runNodeDoctorSweep(fakeApi() as never, {
+      nodeId: undefined,
+      node: { faceProvider: 'compreface', eligibleTypes: ['face_detection'] },
+    });
+
+    expect(mockEvaluateStartupSelfTest).toHaveBeenCalledWith(
+      result.caps,
+      result.operationalCaps,
+      ['face_detection'],
+      'compreface',
+    );
+    expect(result.startupGate).toEqual(evaluation);
+    expect(result.completedSteps).toContain('startupGate');
+    expect(result.hasError).toBe(false);
+  });
+
+  it('sets hasError when the gate reports a blocking failure, even if job readiness passed', async () => {
+    // Job readiness sees no missing requirements (default mock), but the gate
+    // independently reports a required capability that failed its self-test.
+    mockEvaluateStartupSelfTest.mockReturnValue({
+      ok: false,
+      blockingFailures: [{ capability: 'sharp', jobType: 'face_detection', detail: 'decode failed' }],
+      degraded: [],
+    });
+
+    const result = await runNodeDoctorSweep(fakeApi() as never, {
+      nodeId: undefined,
+      node: { eligibleTypes: ['face_detection'] },
+    });
+
+    expect(result.hasError).toBe(true);
+    expect(result.startupGate?.blockingFailures).toHaveLength(1);
+    expect(result.done).toBe(true);
+    expect(result.completedSteps).toEqual(DOCTOR_STEP_ORDER);
+  });
+
+  it('does NOT set hasError for a degrade-only gate verdict', async () => {
+    mockEvaluateStartupSelfTest.mockReturnValue({
+      ok: true,
+      blockingFailures: [],
+      degraded: [{ capability: 'tesseract', detail: 'OCR data missing' }],
+    });
+
+    const result = await runNodeDoctorSweep(fakeApi() as never, { nodeId: undefined, node: undefined });
+
+    expect(result.hasError).toBe(false);
+    expect(result.startupGate?.degraded).toHaveLength(1);
   });
 });
 

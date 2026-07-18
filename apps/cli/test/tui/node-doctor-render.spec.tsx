@@ -38,6 +38,7 @@ const DOCTOR_STEP_ORDER: DoctorStepKey[] = [
   'capabilities',
   'selfTest',
   'jobReadiness',
+  'startupGate',
   'models',
   'daemon',
 ];
@@ -47,6 +48,7 @@ const DOCTOR_STEP_LABELS: Record<DoctorStepKey, string> = {
   capabilities: 'Capabilities (installed)',
   selfTest: 'Operational self-tests',
   jobReadiness: 'Job-type readiness',
+  startupGate: 'Startup gate',
   models: 'Models',
   daemon: 'Daemon',
 };
@@ -110,6 +112,7 @@ function healthyState(): DoctorSweepState {
       { type: 'face_detection', ready: true, missing: [] },
       { type: 'auto_tagging', ready: true, missing: [] },
     ],
+    startupGate: { ok: true, blockingFailures: [], degraded: [] },
     models: {
       manifestCount: 2,
       downloaded: [],
@@ -229,6 +232,36 @@ describe('NodeDoctor — one not-ready job type', () => {
     expect(plain).toContain('✖ auto_tagging');
     expect(plain).toContain('missing sharp');
     expect(plain).not.toContain('face_detection');
+    unmount();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Startup gate section (issue #148)
+// ---------------------------------------------------------------------------
+
+describe('NodeDoctor — startup gate', () => {
+  it('collapses to a single PASS line when the gate is ok', () => {
+    const { plain, unmount } = renderDoctor(healthyState());
+    expect(plain).toContain('✔ Startup gate: PASS — all required capabilities operational.');
+    unmount();
+  });
+
+  it('renders the BLOCKED verdict and each required capability that failed', () => {
+    const state = healthyState();
+    state.startupGate = {
+      ok: false,
+      blockingFailures: [{ capability: 'human', jobType: 'face_detection', detail: 'model missing' }],
+      degraded: [{ capability: 'tesseract', detail: 'OCR data not present' }],
+    };
+    state.hasError = true;
+
+    const { plain, unmount } = renderDoctor(state);
+    expect(plain).toContain('✖ Startup gate: BLOCKED');
+    expect(plain).toContain('human (required by face_detection)');
+    expect(plain).toContain('tesseract — degraded but non-blocking');
+    // Top-checklist row reflects the error, not a plain check.
+    expect(plain).toContain('✖ Startup gate');
     unmount();
   });
 });

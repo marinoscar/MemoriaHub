@@ -31,16 +31,20 @@ const NODE_JOB_TYPES = ['face_detection', 'auto_tagging'] as const;
 
 const mockDetectCapabilities = jest.fn();
 const mockMissingRequirements = jest.fn();
+const mockEvaluateStartupSelfTest = jest.fn();
 jest.unstable_mockModule('../../src/node/capabilities.js', () => ({
   NODE_JOB_TYPES,
   isNodeJobType: (t: string) => (NODE_JOB_TYPES as readonly string[]).includes(t),
   detectCapabilities: mockDetectCapabilities,
   missingRequirements: mockMissingRequirements,
-  // Unused by this suite (no engine is ever started), but NodeDashboard.tsx
-  // imports it at module scope, so the mock factory must provide it.
+  evaluateStartupSelfTest: mockEvaluateStartupSelfTest,
+  // Unused by this suite (no engine is ever started), but NodeDashboard.tsx →
+  // NodeEngine imports these at module scope, so the mock factory must provide
+  // them or the ESM linker rejects the whole graph before any test runs.
   ComputeDispatcher: class {
     compute = jest.fn();
   },
+  mergeOperationalCapabilities: (presence: unknown) => presence,
 }));
 
 const mockRunOperationalSelfTests = jest.fn();
@@ -126,6 +130,9 @@ beforeEach(() => {
     human: { available: true, detail: '@vladmandic/human' },
   });
   mockMissingRequirements.mockReset().mockReturnValue([]);
+  mockEvaluateStartupSelfTest
+    .mockReset()
+    .mockReturnValue({ ok: true, blockingFailures: [], degraded: [] });
   mockRunOperationalSelfTests.mockReset().mockImplementation(async (caps: unknown) => caps);
   mockRunApiAccessChecks.mockReset().mockResolvedValue(OK_ACCESS);
   mockCheckDaemonLiveness.mockReset().mockResolvedValue(OK_DAEMON);
@@ -160,6 +167,7 @@ describe('NodeDashboard doctor overlay ([r]) — all healthy', () => {
     expect(plain).toContain('Worker Node — Doctor');
     expect(plain).toContain('✔ All 2 capabilities operational.');
     expect(plain).toContain('✔ All 2 job type(s) ready.');
+    expect(plain).toContain('✔ Startup gate: PASS — all required capabilities operational.');
     expect(plain).toContain('✔ Doctor: all checks passed.');
     expect(plain).toContain('https://github.com/marinoscar/MemoriaHub/blob/main/docs/worker-node-setup.md');
     // The per-row table must not render when nothing needs attention.
@@ -186,6 +194,23 @@ describe('NodeDashboard doctor overlay ([r]) — one capability issue', () => {
     expect(plain).toContain('human');
     expect(plain).toContain('human model not downloaded yet');
     expect(plain).not.toContain('sharp');
+    unmount();
+  });
+});
+
+describe('NodeDashboard doctor overlay ([r]) — startup gate blocked', () => {
+  it('renders the BLOCKED verdict and lists the required capability that failed', async () => {
+    mockEvaluateStartupSelfTest.mockReturnValue({
+      ok: false,
+      blockingFailures: [{ capability: 'human', jobType: 'face_detection', detail: 'model missing' }],
+      degraded: [],
+    });
+
+    const { plain, unmount } = await openDoctorOverlay();
+
+    expect(plain).toContain('✖ Startup gate: BLOCKED');
+    expect(plain).toContain('human (required by face_detection)');
+    expect(plain).toContain('✖ Doctor found problems.');
     unmount();
   });
 });

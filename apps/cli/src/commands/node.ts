@@ -45,6 +45,7 @@ import {
   isNodeJobType,
   ComputeDispatcher,
   DEFAULT_COMPREFACE_URL,
+  evaluateStartupSelfTest,
   type CapabilityStatus,
 } from '../node/capabilities.js';
 import { ensureModels } from '../node/models.js';
@@ -53,6 +54,7 @@ import { runApiAccessChecks, checkDaemonLiveness } from '../node/doctor-checks.j
 import {
   summarizeCapabilities,
   summarizeJobReadiness,
+  summarizeStartupGate,
   apiAccessLevel,
   WORKER_NODE_SETUP_GUIDE_URL,
   type CapabilityRowSummary,
@@ -62,6 +64,7 @@ import {
   defaultHeadlessNodeName,
   supportedTypes,
   registerWorkerNode,
+  resolveStartupSelfTest,
   DEFAULT_NODE_POLL_MS as DEFAULT_POLL_MS,
 } from '../node/register.js';
 import {
@@ -568,6 +571,56 @@ function startCmd(): Command {
           );
         }
 
+        // 1.5. Startup operational self-test (issue #148). Runs the same real
+        //      decode/embed/detect/OCR-init pass as `node doctor`, then
+        //      FAIL-FAST if a capability REQUIRED by this node's eligible types
+        //      is not operational — so a container with a broken baked
+        //      capability crash-loops visibly (compose restart: unless-stopped)
+        //      instead of silently failing every claimed job. Optional/
+        //      degradable capabilities (OCR Tier-2, CLIP dHash-fallback) never
+        //      block. Default ON in headless/container mode; gated by
+        //      MEMORIAHUB_STARTUP_SELFTEST. Runs AFTER the model-ensure above so
+        //      the CLIP/Human self-tests find their freshly-downloaded models.
+        let operationalSnapshot: Record<string, CapabilityStatus> | undefined;
+        if (resolveStartupSelfTest(headless)) {
+          ui.step('Running startup operational self-tests…');
+          const selfTestComprefaceOpts =
+            resolvedFaceProvider === 'compreface'
+              ? { comprefaceUrl: resolvedComprefaceUrl }
+              : undefined;
+          const selfTestCaps = await detectCapabilities(selfTestComprefaceOpts);
+          operationalSnapshot = await runOperationalSelfTests(selfTestCaps, selfTestComprefaceOpts);
+          const evaluation = evaluateStartupSelfTest(
+            selfTestCaps,
+            operationalSnapshot,
+            eligibleTypes,
+            resolvedFaceProvider,
+          );
+          for (const d of evaluation.degraded) {
+            ui.warn(
+              `Capability degraded (non-fatal): ${d.capability}` +
+                (d.detail ? ` — ${d.detail}` : ''),
+            );
+          }
+          if (!evaluation.ok) {
+            ui.error('Startup operational self-test FAILED for required capability(ies):');
+            for (const b of evaluation.blockingFailures) {
+              ui.error(
+                `  • ${b.capability} (required by ${b.jobType})` +
+                  (b.detail ? `: ${b.detail}` : ''),
+              );
+            }
+            ui.error(
+              'Refusing to start — a broken required capability would fail every claimed job. ' +
+                'Diagnose with `memoriahub node doctor`, or set MEMORIAHUB_STARTUP_SELFTEST=0 to skip this check.',
+            );
+            process.exit(1);
+          }
+          ui.success('Startup operational self-test passed for all required capabilities.');
+        } else {
+          ui.dim('Startup operational self-test skipped (MEMORIAHUB_STARTUP_SELFTEST disabled).');
+        }
+
         // 2. Build the engine with file logging and the IPC daemon host, so
         //    every run (foreground or daemonized) is attachable by a second
         //    CLI instance.
@@ -585,6 +638,7 @@ function startCmd(): Command {
           dispatcher: new ComputeDispatcher(),
           nodeId,
           options,
+          ...(operationalSnapshot ? { operationalCapabilities: operationalSnapshot } : {}),
         });
 
         const logger = createNodeLogger();
@@ -1243,6 +1297,27 @@ function doctorCmd(): Command {
       } else if (jobSummary.totalCount > 0) {
         ui.success(`All ${jobSummary.totalCount} job type(s) ready.`);
       }
+      ui.blank();
+
+      // 4.5. Startup gate — the exact operational-gate verdict `node start`
+      //      uses to decide whether a headless container may boot (issue #148).
+      //      Reuses evaluateStartupSelfTest() against the SAME operational
+      //      snapshot and eligibleTypes resolved above: a REQUIRED capability
+      //      whose self-test failed BLOCKS; an optional/degradable one only
+      //      DEGRADES. Both surfaces (this section and the TUI doctor row)
+      //      render the shared summarizeStartupGate() output so they never drift.
+      ui.step('Startup gate');
+      const startupGate = summarizeStartupGate(
+        evaluateStartupSelfTest(caps, operationalCaps, eligibleTypes, faceProvider),
+      );
+      if (startupGate.ok) {
+        ui.success('Startup gate: PASS — all required capabilities operational.');
+      } else {
+        hasError = true;
+        ui.error('Startup gate: BLOCKED — a required capability is not operational:');
+        for (const b of startupGate.blockers) ui.error(`  • ${b}`);
+      }
+      for (const d of startupGate.degrades) ui.warn(d);
       ui.blank();
 
       // 5. Model presence (download-and-verify, as `node start` does).

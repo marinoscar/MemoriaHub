@@ -44,6 +44,7 @@ import { runNodeDoctorSweep, type DoctorSweepState } from './useNodeDoctorSweep.
 import {
   summarizeCapabilities,
   summarizeJobReadiness,
+  summarizeStartupGate,
   WORKER_NODE_SETUP_GUIDE_URL,
 } from '../node/doctor-summary.js';
 import {
@@ -494,6 +495,7 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
         ? summarizeCapabilities(doctorSweep.caps, doctorSweep.operationalCaps)
         : null;
     const jobsSummary = doctorSweep?.jobReadiness ? summarizeJobReadiness(doctorSweep.jobReadiness) : null;
+    const gateSummary = doctorSweep?.startupGate ? summarizeStartupGate(doctorSweep.startupGate) : null;
     return (
       <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Worker Node — Doctor</Text>
@@ -566,6 +568,29 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
                 ))}
               </>
             )}
+          </Box>
+        )}
+        {gateSummary && (
+          <Box flexDirection="column" marginTop={1}>
+            {gateSummary.ok ? (
+              <Text color="green">✔ Startup gate: PASS — all required capabilities operational.</Text>
+            ) : (
+              <>
+                <Text color="red">✖ Startup gate: BLOCKED — a required capability is not operational:</Text>
+                {gateSummary.blockers.map((b, i) => (
+                  <Text key={`gate-block-${i}`} color="red">
+                    {'  ✖ '}
+                    {truncate(b, 40)}
+                  </Text>
+                ))}
+              </>
+            )}
+            {gateSummary.degrades.map((d, i) => (
+              <Text key={`gate-degrade-${i}`} color="yellow">
+                {'  ⚠ '}
+                {truncate(d, 40)}
+              </Text>
+            ))}
           </Box>
         )}
         {doctorSweep?.done && (

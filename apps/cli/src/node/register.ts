@@ -38,6 +38,23 @@ export function resolveHeadless(
 }
 
 /**
+ * Whether `node start` should run the startup operational self-test (issue #148).
+ * Explicit `MEMORIAHUB_STARTUP_SELFTEST` wins (`1`/`true` → on, `0`/`false` →
+ * off); otherwise it defaults ON in headless (container) mode — where a broken
+ * baked capability must crash-loop visibly — and OFF for an interactive
+ * `node start`, which has `node doctor` a keystroke away.
+ */
+export function resolveStartupSelfTest(
+  headless: boolean,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const raw = env['MEMORIAHUB_STARTUP_SELFTEST']?.trim().toLowerCase();
+  if (raw === '1' || raw === 'true') return true;
+  if (raw === '0' || raw === 'false') return false;
+  return headless;
+}
+
+/**
  * Node name used by headless auto-registration when none is configured.
  * Precedence: persisted/env-overlaid config name (Phase 1 already overlays
  * MEMORIAHUB_NODE_NAME into cfg.node.name) → raw MEMORIAHUB_NODE_NAME env
