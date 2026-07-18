@@ -35,6 +35,7 @@ import { ShareModule } from './share/share.module';
 import { SocialMediaModule } from './social-media/social-media.module';
 import { EnhancementModule } from './enhancement/enhancement.module';
 import { NodesModule } from './nodes/nodes.module';
+import { WorkflowsModule } from './workflows/workflows.module';
 import { DoctorModule } from './doctor/doctor.module';
 import { LoggerModule } from './common/logger/logger.module';
 import { TestAuthModule } from './test-auth/test-auth.module';
@@ -97,6 +98,7 @@ import configuration from './config/configuration';
     SocialMediaModule,
     EnhancementModule,
     NodesModule,
+    WorkflowsModule,
 
     // Test modules (non-production only)
     ...(process.env.NODE_ENV !== 'production' ? [TestAuthModule] : []),
