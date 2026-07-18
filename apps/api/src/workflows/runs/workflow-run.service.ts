@@ -18,6 +18,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { CircleMembershipService } from '../../circles/circle-membership.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
+import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { isWorkflowsEnabled } from '../../common/types/settings.types';
 import { RequestUser } from '../../auth/interfaces/authenticated-user.interface';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
@@ -62,6 +63,7 @@ export class WorkflowRunService {
     private readonly systemSettings: SystemSettingsService,
     private readonly circleMembership: CircleMembershipService,
     private readonly enrichmentJobs: EnrichmentJobService,
+    private readonly thumbnails: MediaThumbnailService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -242,6 +244,225 @@ export class WorkflowRunService {
     await this.audit(user.id, 'workflow_run:cancelled', run.id, {});
 
     return { runId: run.id, status: WorkflowRunStatus.cancelled };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Reads
+  // ---------------------------------------------------------------------------
+
+  /** Paginated run history for one workflow (viewer). */
+  async listRuns(
+    workflowId: string,
+    query: { page: number; pageSize: number },
+    user: RequestUser,
+  ) {
+    await this.assertFeatureEnabled();
+    const workflow = await this.prisma.workflow.findUnique({ where: { id: workflowId } });
+    if (!workflow) throw new NotFoundException(`Workflow ${workflowId} not found`);
+    await this.circleMembership.assertCircleAccess(
+      user.id,
+      workflow.circleId,
+      user.permissions,
+      CircleRole.viewer,
+    );
+
+    const { page, pageSize } = query;
+    const [items, totalItems] = await this.prisma.$transaction([
+      this.prisma.workflowRun.findMany({
+        where: { workflowId },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.workflowRun.count({ where: { workflowId } }),
+    ]);
+
+    return {
+      items: items.map((r) => this.serializeRun(r)),
+      meta: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.ceil(totalItems / pageSize),
+      },
+    };
+  }
+
+  /** Run detail incl. counts, per-item status tally, and best-effort action summary (viewer). */
+  async getRunDetail(runId: string, user: RequestUser) {
+    await this.assertFeatureEnabled();
+    const run = await this.prisma.workflowRun.findUnique({ where: { id: runId } });
+    if (!run) throw new NotFoundException(`Workflow run ${runId} not found`);
+    await this.circleMembership.assertCircleAccess(
+      user.id,
+      run.circleId,
+      user.permissions,
+      CircleRole.viewer,
+    );
+
+    const statusGroups = await this.prisma.workflowRunItem.groupBy({
+      by: ['status'],
+      where: { runId },
+      _count: { _all: true },
+    });
+    const itemStatusCounts: Record<string, number> = {};
+    for (const g of statusGroups) itemStatusCounts[g.status] = g._count._all;
+
+    const actionSummary = await this.buildActionSummary(runId);
+
+    return {
+      ...this.serializeRun(run),
+      definitionSnapshot: run.definitionSnapshot,
+      itemStatusCounts,
+      actionSummary,
+    };
+  }
+
+  /** Paginated run items with batched signed thumbnails (viewer). */
+  async listRunItems(
+    runId: string,
+    query: { status?: WorkflowRunItemStatus; page: number; pageSize: number },
+    user: RequestUser,
+  ) {
+    await this.assertFeatureEnabled();
+    const run = await this.prisma.workflowRun.findUnique({ where: { id: runId } });
+    if (!run) throw new NotFoundException(`Workflow run ${runId} not found`);
+    await this.circleMembership.assertCircleAccess(
+      user.id,
+      run.circleId,
+      user.permissions,
+      CircleRole.viewer,
+    );
+
+    const { page, pageSize, status } = query;
+    const where: Prisma.WorkflowRunItemWhereInput = { runId, ...(status ? { status } : {}) };
+
+    const [items, totalItems] = await this.prisma.$transaction([
+      this.prisma.workflowRunItem.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          mediaItemId: true,
+          status: true,
+          actionResults: true,
+          error: true,
+          updatedAt: true,
+        },
+      }),
+      this.prisma.workflowRunItem.count({ where }),
+    ]);
+
+    // Batched thumbnail signing for the page's media items.
+    const mediaRows = await this.prisma.mediaItem.findMany({
+      where: { id: { in: items.map((i) => i.mediaItemId) } },
+      select: {
+        id: true,
+        type: true,
+        capturedAt: true,
+        originalFilename: true,
+        width: true,
+        height: true,
+        metadata: true,
+      },
+    });
+    const signed = await this.thumbnails.attachThumbnailUrls(mediaRows);
+    const byId = new Map(signed.map((m) => [m.id, m]));
+
+    const rows = items.map((i) => {
+      const m = byId.get(i.mediaItemId);
+      return {
+        id: i.id,
+        mediaItemId: i.mediaItemId,
+        status: i.status,
+        actionResults: i.actionResults,
+        error: i.error,
+        updatedAt: i.updatedAt,
+        media: m
+          ? {
+              type: m.type,
+              capturedAt: m.capturedAt,
+              filename: m.originalFilename,
+              width: m.width,
+              height: m.height,
+            }
+          : null,
+        thumbnailUrl: m ? m.thumbnailUrl : null,
+      };
+    });
+
+    return {
+      items: rows,
+      meta: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.ceil(totalItems / pageSize),
+      },
+    };
+  }
+
+  /**
+   * Best-effort per-action-type rollup from item action_results. Bounded scan —
+   * caps rows read so a huge run never scans unbounded history; `partial` flags
+   * when the cap was hit.
+   */
+  private async buildActionSummary(runId: string): Promise<{
+    scanned: number;
+    partial: boolean;
+    byActionType: Record<string, { applied: number; failed: number; skipped: number }>;
+  }> {
+    const SCAN_CAP = 5000;
+    const rows = await this.prisma.workflowRunItem.findMany({
+      where: { runId },
+      select: { actionResults: true },
+      orderBy: { updatedAt: 'desc' },
+      take: SCAN_CAP,
+    });
+
+    const byActionType: Record<string, { applied: number; failed: number; skipped: number }> = {};
+    for (const r of rows) {
+      const outcomes = r.actionResults as unknown as
+        | Array<{ type?: string; status?: string }>
+        | null;
+      if (!Array.isArray(outcomes)) continue;
+      for (const o of outcomes) {
+        if (!o || typeof o.type !== 'string') continue;
+        const bucket = (byActionType[o.type] ??= { applied: 0, failed: 0, skipped: 0 });
+        if (o.status === 'applied') bucket.applied += 1;
+        else if (o.status === 'failed') bucket.failed += 1;
+        else bucket.skipped += 1;
+      }
+    }
+
+    return { scanned: rows.length, partial: rows.length === SCAN_CAP, byActionType };
+  }
+
+  /** Serialize a run row for API responses (counts included). */
+  private serializeRun(run: WorkflowRun) {
+    return {
+      id: run.id,
+      workflowId: run.workflowId,
+      circleId: run.circleId,
+      status: run.status,
+      triggerType: run.triggerType,
+      matchedCount: run.matchedCount,
+      truncated: run.truncated,
+      processedCount: run.processedCount,
+      succeededCount: run.succeededCount,
+      failedCount: run.failedCount,
+      skippedCount: run.skippedCount,
+      startedById: run.startedById,
+      approvedById: run.approvedById,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+      approvedAt: run.approvedAt,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+      lastError: run.lastError,
+    };
   }
 
   // ---------------------------------------------------------------------------

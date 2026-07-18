@@ -13,6 +13,12 @@ import { WorkflowsService } from './workflows.service';
 import { WorkflowDefinitionValidator } from './definition/workflow-definition.validator';
 import { WorkflowConditionCompiler } from './compiler/workflow-condition.compiler';
 import { WorkflowActionExecutor } from './actions/workflow-action.executor';
+import { WorkflowRunsController } from './runs/workflow-runs.controller';
+import { WorkflowRunService } from './runs/workflow-run.service';
+import { WorkflowEvaluateHandler } from './runs/workflow-evaluate.handler';
+import { WorkflowExecuteBatchHandler } from './runs/workflow-execute-batch.handler';
+import { WorkflowHistoryPurgeHandler } from './runs/workflow-history-purge.handler';
+import { WorkflowHistoryPurgeTask } from './runs/workflow-history-purge.task';
 
 /**
  * Media Workflow Automation — Phase 2 action library (issue #140).
@@ -44,12 +50,17 @@ import { WorkflowActionExecutor } from './actions/workflow-action.executor';
     LocationInferenceModule,
     EnrichmentModule,
   ],
-  controllers: [WorkflowsController],
+  controllers: [WorkflowsController, WorkflowRunsController],
   providers: [
     WorkflowsService,
     WorkflowDefinitionValidator,
     WorkflowConditionCompiler,
     WorkflowActionExecutor,
+    WorkflowRunService,
+    WorkflowEvaluateHandler,
+    WorkflowExecuteBatchHandler,
+    WorkflowHistoryPurgeHandler,
+    WorkflowHistoryPurgeTask,
   ],
   exports: [WorkflowDefinitionValidator, WorkflowConditionCompiler, WorkflowActionExecutor],
 })
