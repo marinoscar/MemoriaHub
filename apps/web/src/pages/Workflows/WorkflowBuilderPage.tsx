@@ -40,6 +40,7 @@ import {
 } from './builderState';
 import { SubjectBlock } from '../../components/workflows/builder/SubjectBlock';
 import { TriggerBlock } from '../../components/workflows/builder/TriggerBlock';
+import { ConditionsBlock } from '../../components/workflows/builder/ConditionsBlock';
 import type { CreateWorkflowDto, UpdateWorkflowDto } from '../../types/workflows';
 
 const GATED_ACTION_TYPES = new Set(['hard_delete']);
@@ -265,8 +266,18 @@ export default function WorkflowBuilderPage() {
             nameError={nameError}
           />
 
-          {/* Conditions (If), Actions (Then), and Safety blocks are added in
-              the following checkpoints. */}
+          {subjectEntry && (
+            <ConditionsBlock
+              circleId={activeCircle.id}
+              fields={subjectEntry.fields}
+              match={state.definition.match}
+              conditions={state.definition.conditions}
+              dispatch={dispatch}
+            />
+          )}
+
+          {/* Actions (Then) and Safety blocks are added in the following
+              checkpoints. */}
         </Stack>
 
         {/* The live plain-language summary + preview panel is added in a later
