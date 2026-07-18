@@ -1160,6 +1160,7 @@ describe('DuplicateService', () => {
         resolvedGroups: 1,
         skipped: 2,
         errors: 0,
+        hasMore: false,
       });
       expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledTimes(1);
       expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
@@ -1310,6 +1311,36 @@ describe('DuplicateService', () => {
       expect(mockPrisma.duplicateGroup.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'group-b' } }),
       );
+    });
+
+    it('hasMore=true when the candidate scan returns exactly MAX_THRESHOLD_RESOLVE (500) groups', async () => {
+      const groups = Array.from({ length: 500 }, (_, i) => makeThresholdGroup({ id: `group-${i}` }));
+      setupThresholdGroups(groups);
+      // maxSim null for every group (no embedding rows) -> all skipped; we only
+      // care about hasMore here, which is driven by the candidate scan size.
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+
+      const result = await service.bulkResolveDuplicateGroupsByThreshold(
+        makeBulkResolveThresholdDto(70, 'archive'),
+        USER_ID,
+        PERMS_MEDIA_WRITE_DELETE,
+      );
+
+      expect(result.data.hasMore).toBe(true);
+    });
+
+    it('hasMore=false when the candidate scan returns fewer than MAX_THRESHOLD_RESOLVE groups', async () => {
+      const groups = Array.from({ length: 3 }, (_, i) => makeThresholdGroup({ id: `group-${i}` }));
+      setupThresholdGroups(groups);
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+
+      const result = await service.bulkResolveDuplicateGroupsByThreshold(
+        makeBulkResolveThresholdDto(70, 'archive'),
+        USER_ID,
+        PERMS_MEDIA_WRITE_DELETE,
+      );
+
+      expect(result.data.hasMore).toBe(false);
     });
   });
 
