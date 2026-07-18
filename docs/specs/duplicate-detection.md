@@ -469,8 +469,8 @@ Unlike the equivalent [burst-detection endpoint](burst-detection.md#72-group-act
   - A group whose `maxSim` cannot be computed — fewer than two members carry a `media_visual_embedding` row, or the embedding lookup fails — is **excluded from matching** and counted in `skipped`, the same bucket as a group that computed a similarity below the threshold. There is no separate "unscoreable" counter; both cases are indistinguishable from the caller's point of view.
   - A group below the threshold, or lacking a `suggestedBestItemId`, is also skipped (counted in `skipped`).
   - A group that is eligible but fails during its own transaction is counted in `errors` without blocking the rest.
-- **Response `200`:** `{ "data": { "resolvedGroups": 11, "keptCount": 11, "removedCount": 37, "action": "archive", "skipped": 4, "errors": 0 } }`.
-- **Response `400`:** `threshold` is out of range, or more than 500 pending groups exist in the circle.
+- **Response `200`:** `{ "data": { "resolvedGroups": 11, "keptCount": 11, "removedCount": 37, "action": "archive", "skipped": 4, "errors": 0, "hasMore": true } }`. `hasMore` is a boolean, not an exact count — unlike the burst endpoint's `remaining` (`burst-detection.md#72-group-actions`), duplicate confidence isn't a persisted column, so a cheap `COUNT(*)` of the remaining eligible backlog isn't available; `hasMore` instead reports whether the initial candidate scan hit the `MAX_THRESHOLD_RESOLVE` cap (`groups.length === MAX_THRESHOLD_RESOLVE`), meaning more eligible groups may exist beyond this batch. The duplicate review page auto-loops the call — issuing another request immediately on success — while `hasMore` is `true`, fully draining the queue without the reviewer needing to click the button repeatedly.
+- **Response `400`:** `threshold` is out of range.
 
 `dedup.autoResolveThreshold` (§8.1) is the system-setting default that pre-fills the duplicate review page's "Archive above N" / "Delete above N" buttons; it does not gate or auto-fire this endpoint on its own.
 
