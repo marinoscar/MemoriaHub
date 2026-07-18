@@ -13,6 +13,7 @@
 import { jest } from '@jest/globals';
 import {
   resolveHeadless,
+  resolveStartupSelfTest,
   defaultHeadlessNodeName,
   supportedTypes,
   registerWorkerNode,
@@ -56,6 +57,66 @@ describe('resolveHeadless', () => {
   it('does not treat other MEMORIAHUB_HEADLESS values as headless', () => {
     expect(resolveHeadless({}, { MEMORIAHUB_HEADLESS: '0' })).toBe(false);
     expect(resolveHeadless({}, { MEMORIAHUB_HEADLESS: 'true' })).toBe(false);
+  });
+});
+
+describe('resolveStartupSelfTest', () => {
+  // resolveStartupSelfTest falls back to the real process.env when no env
+  // argument is supplied, so save/restore around every test to avoid leaking
+  // mutations across the suite even though most cases pass an explicit env.
+  const ENV_KEY = 'MEMORIAHUB_STARTUP_SELFTEST';
+  let prevValue: string | undefined;
+
+  beforeEach(() => {
+    prevValue = process.env[ENV_KEY];
+    delete process.env[ENV_KEY];
+  });
+
+  afterEach(() => {
+    if (prevValue === undefined) delete process.env[ENV_KEY];
+    else process.env[ENV_KEY] = prevValue;
+  });
+
+  it('defaults ON in headless mode when the env var is unset', () => {
+    expect(resolveStartupSelfTest(true, {})).toBe(true);
+  });
+
+  it('defaults OFF in interactive mode when the env var is unset', () => {
+    expect(resolveStartupSelfTest(false, {})).toBe(false);
+  });
+
+  it('MEMORIAHUB_STARTUP_SELFTEST=0 disables the self-test even in headless mode', () => {
+    expect(resolveStartupSelfTest(true, { [ENV_KEY]: '0' })).toBe(false);
+  });
+
+  it('MEMORIAHUB_STARTUP_SELFTEST=false disables the self-test even in headless mode', () => {
+    expect(resolveStartupSelfTest(true, { [ENV_KEY]: 'false' })).toBe(false);
+  });
+
+  it('MEMORIAHUB_STARTUP_SELFTEST=1 forces the self-test on in interactive mode', () => {
+    expect(resolveStartupSelfTest(false, { [ENV_KEY]: '1' })).toBe(true);
+  });
+
+  it('MEMORIAHUB_STARTUP_SELFTEST=true forces the self-test on in interactive mode', () => {
+    expect(resolveStartupSelfTest(false, { [ENV_KEY]: 'true' })).toBe(true);
+  });
+
+  it('trims whitespace and is case-insensitive', () => {
+    expect(resolveStartupSelfTest(true, { [ENV_KEY]: ' FALSE ' })).toBe(false);
+    expect(resolveStartupSelfTest(false, { [ENV_KEY]: ' TRUE ' })).toBe(true);
+  });
+
+  it('falls back to the headless default for an unrecognized value', () => {
+    expect(resolveStartupSelfTest(true, { [ENV_KEY]: 'yes' })).toBe(true);
+    expect(resolveStartupSelfTest(false, { [ENV_KEY]: 'yes' })).toBe(false);
+  });
+
+  it('reads from the real process.env by default (no env argument supplied)', () => {
+    process.env[ENV_KEY] = '0';
+    expect(resolveStartupSelfTest(true)).toBe(false);
+
+    process.env[ENV_KEY] = '1';
+    expect(resolveStartupSelfTest(false)).toBe(true);
   });
 });
 

@@ -1094,4 +1094,142 @@ describe('DoctorService', () => {
       expect(check.message).toContain('off');
     });
   });
+
+  // =========================================================================
+  // 11. nodes.capabilityHealth — issue #148 operational-self-test overlay
+  // =========================================================================
+
+  describe('nodes.capabilityHealth', () => {
+    beforeEach(() => {
+      process.env = healthyEnv();
+      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      mockQueryRawByText(mockPrisma, healthyQueryRawHandlers());
+      (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
+        provider: 's3',
+        enabled: true,
+      });
+      mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
+      mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
+      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
+      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
+      (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
+      // One online node with a fresh heartbeat so nodes.heartbeatFreshness stays
+      // 'ok' and doesn't interfere with this check's isolated assertions —
+      // checkNodesHeartbeat and checkNodesCapabilityHealth both read from the
+      // same mocked workerNode.findMany() call.
+      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(1);
+    });
+
+    /** A single online node fixture with a fresh heartbeat. */
+    function nodeFixture(opts: { name?: string; eligibleTypes: string[]; capabilities: unknown }): any[] {
+      return [
+        {
+          name: opts.name ?? 'worker-1',
+          eligibleTypes: opts.eligibleTypes,
+          capabilities: opts.capabilities,
+          lastHeartbeatAt: new Date(),
+        },
+      ];
+    }
+
+    it('is status:warning when a node reports operational:false on a capability backing one of its eligibleTypes (#148 shape)', async () => {
+      (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue(
+        nodeFixture({
+          eligibleTypes: ['face_detection'],
+          capabilities: {
+            human: {
+              available: true,
+              detail: '@vladmandic/human',
+              operational: false,
+              operationalDetail: 'Human self-test failed: model load error',
+            },
+            sharp: { available: true, detail: 'sharp', operational: true },
+          },
+        }),
+      );
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'nodes.capabilityHealth');
+
+      expect(check.status).toBe('warning');
+      expect(check.message).toContain('worker-1 (human)');
+      expect(check.actionItem).toBeTruthy();
+    });
+
+    it('does not flag operational:false for a capability that backs none of the node eligibleTypes', async () => {
+      (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue(
+        nodeFixture({
+          // geocode has no capability requirements at all (JOB_TYPE_REQUIREMENTS.geocode === []),
+          // and tesseract only backs social_media_detection — not eligible here.
+          eligibleTypes: ['geocode'],
+          capabilities: {
+            tesseract: {
+              available: true,
+              detail: 'tesseract.js',
+              operational: false,
+              operationalDetail: 'language data not present',
+            },
+          },
+        }),
+      );
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'nodes.capabilityHealth');
+
+      expect(check.status).toBe('ok');
+      expect(check.message).toContain('healthy capabilities');
+    });
+
+    it('backward-compat: a node reporting presence-only capabilities (no operational field, pre-#148 shape) is classified exactly as before this change — not degraded', async () => {
+      (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue(
+        nodeFixture({
+          eligibleTypes: ['face_detection'],
+          capabilities: {
+            // Older CLI: presence-only shape, no 'status' and no 'operational' field
+            // at all — collectCapabilityEntries has nothing to key on for either of
+            // them, so (both before and after #148) this produces no entry and the
+            // node is never flagged as degraded by this check, regardless of
+            // whether the capability itself is actually present.
+            human: { available: false, detail: '@vladmandic/human not installed' },
+            sharp: { available: true, detail: 'sharp' },
+          },
+        }),
+      );
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'nodes.capabilityHealth');
+
+      expect(check.status).toBe('ok');
+      expect(check.message).toContain('healthy capabilities');
+    });
+
+    it('still recognizes the legacy flat-string status shape ({ face: "error" }) as degraded — unchanged by #148', async () => {
+      (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue(
+        nodeFixture({
+          eligibleTypes: ['face_detection'],
+          capabilities: { face: 'error' },
+        }),
+      );
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'nodes.capabilityHealth');
+
+      expect(check.status).toBe('warning');
+      expect(check.message).toContain('worker-1 (face)');
+    });
+
+    it('is status:skipped when no online node has reported a capability summary at all', async () => {
+      (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue(
+        nodeFixture({ eligibleTypes: ['face_detection'], capabilities: undefined }),
+      );
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'nodes.capabilityHealth');
+
+      expect(check.status).toBe('skipped');
+    });
+  });
 });

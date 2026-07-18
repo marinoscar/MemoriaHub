@@ -254,6 +254,121 @@ export function missingRequirements(
 }
 
 // ---------------------------------------------------------------------------
+// Startup operational self-test evaluation (issue #148)
+// ---------------------------------------------------------------------------
+
+/** A required capability whose operational self-test failed for an eligible type. */
+export interface StartupSelfTestBlocker {
+  capability: string;
+  jobType: NodeJobType;
+  detail?: string;
+}
+
+/** An optional/degradable capability that failed its self-test but does not block. */
+export interface StartupSelfTestDegrade {
+  capability: string;
+  detail?: string;
+}
+
+export interface StartupSelfTestEvaluation {
+  /** True when no REQUIRED capability failed — safe to start the engine. */
+  ok: boolean;
+  blockingFailures: StartupSelfTestBlocker[];
+  degraded: StartupSelfTestDegrade[];
+}
+
+/**
+ * Decide whether a node may start given its startup operational self-test.
+ *
+ * Reuses `missingRequirements()` — the exact readiness logic `node doctor`
+ * uses — against the OPERATIONAL snapshot (not mere presence), so a required
+ * capability whose real decode/embed/detect self-test failed is a blocker,
+ * while an optional/degradable one (e.g. tesseract for social_media_detection
+ * Tier-2 OCR, onnxruntime for duplicate_detection's CLIP) is never listed as a
+ * requirement and therefore only surfaces in `degraded`, never `blockingFailures`.
+ *
+ * Pure — no process side effects; the command layer owns the exit.
+ */
+export function evaluateStartupSelfTest(
+  caps: Record<string, CapabilityStatus>,
+  operationalResults: Record<string, CapabilityStatus>,
+  eligibleTypes: string[],
+  faceProvider: 'human' | 'compreface' = 'human',
+): StartupSelfTestEvaluation {
+  const types = eligibleTypes.filter(isNodeJobType);
+  const blockingFailures: StartupSelfTestBlocker[] = [];
+  const blockingCaps = new Set<string>();
+  for (const t of types) {
+    for (const cap of missingRequirements(t, operationalResults, faceProvider)) {
+      blockingFailures.push({
+        capability: cap,
+        jobType: t,
+        detail: operationalResults[cap]?.detail,
+      });
+      blockingCaps.add(cap);
+    }
+  }
+
+  const degraded: StartupSelfTestDegrade[] = [];
+  for (const [cap, presence] of Object.entries(caps)) {
+    if (blockingCaps.has(cap)) continue;
+    const op = operationalResults[cap];
+    // Installed (presence ok) but its operational self-test did not pass, and it
+    // is not a hard requirement of any eligible type → a non-fatal degrade.
+    if (presence.available && op && !op.available) {
+      degraded.push({ capability: cap, detail: op.detail });
+    }
+  }
+
+  return { ok: blockingFailures.length === 0, blockingFailures, degraded };
+}
+
+// ---------------------------------------------------------------------------
+// Heartbeat capability payload enrichment (issue #148)
+// ---------------------------------------------------------------------------
+
+/**
+ * A capability status enriched with the STARTUP operational self-test outcome.
+ * Backward-compatible superset of {@link CapabilityStatus}: the `operational*`
+ * fields are optional and omitted for capabilities that were never
+ * operationally tested (or are simply absent), so a payload without them is
+ * exactly the pre-#148 presence-only shape an older API already tolerates.
+ */
+export interface OperationalCapabilityStatus extends CapabilityStatus {
+  /** Result of the startup operational self-test; absent = not tested. */
+  operational?: boolean;
+  operationalDetail?: string;
+}
+
+/**
+ * Merge a FRESH presence snapshot (probed every heartbeat) with the CACHED
+ * startup operational self-test result, producing the heartbeat capability
+ * payload. Presence stays live; the (expensive) operational result is only ever
+ * computed once at startup and carried forward here.
+ *
+ * Only present capabilities carry an `operational` field — an absent capability
+ * stays presence-only so the server can distinguish "operational self-test
+ * failed" from "package not installed".
+ */
+export function mergeOperationalCapabilities(
+  presence: Record<string, CapabilityStatus>,
+  operational?: Record<string, CapabilityStatus>,
+): Record<string, OperationalCapabilityStatus> {
+  const out: Record<string, OperationalCapabilityStatus> = {};
+  for (const [key, status] of Object.entries(presence)) {
+    const op = status.available ? operational?.[key] : undefined;
+    out[key] = op
+      ? {
+          ...status,
+          operational: op.available,
+          ...(op.detail ? { operationalDetail: op.detail } : {}),
+        }
+      : { ...status };
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Compute dispatcher
 // ---------------------------------------------------------------------------
 
