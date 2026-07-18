@@ -66,6 +66,10 @@ model User {
   nodeCredentials             NodeCredential[]            @relation("UserNodeCredentials")
   // AI Picture Enhancer relations
   mediaEnhancementsCreated    MediaEnhancement[]          @relation("MediaEnhancementCreatedBy")
+  // Workflow Automation relations
+  workflowsCreated            Workflow[]                  @relation("WorkflowCreatedBy")
+  workflowRunsStarted         WorkflowRun[]               @relation("WorkflowRunStartedBy")
+  workflowRunsApproved        WorkflowRun[]               @relation("WorkflowRunApprovedBy")
 
   @@map("users")
 }
@@ -394,6 +398,9 @@ model Circle {
   locationSuggestions   LocationSuggestion[]
   // AI Picture Enhancer relations
   mediaEnhancements     MediaEnhancement[]
+  // Workflow Automation relations
+  workflows             Workflow[]
+  workflowRuns          WorkflowRun[]
 
   @@index([ownerId])
   @@map("circles")
@@ -559,6 +566,8 @@ model MediaItem {
   // AI Picture Enhancer relations
   enhancementsAsSource   MediaEnhancement[]   @relation("MediaEnhancementSource")
   enhancementsAsResult   MediaEnhancement[]   @relation("MediaEnhancementResult")
+  // Workflow Automation relations
+  workflowRunItems       WorkflowRunItem[]
 
   @@index([circleId])
   @@index([addedById])
@@ -1444,4 +1453,133 @@ model MediaEnhancement {
   @@index([circleId, status])
   @@index([status, updatedAt])
   @@map("media_enhancements")
+}
+
+// =============================================================================
+// Media Workflow Automation
+// =============================================================================
+
+// WorkflowSubject is the extension point for future subjects beyond media
+// items (e.g. people, albums); v1 only supports media_item.
+enum WorkflowSubject {
+  media_item
+}
+
+enum WorkflowTrigger {
+  manual
+  on_media_enriched
+  scheduled
+}
+
+enum WorkflowRunStatus {
+  evaluating
+  awaiting_approval
+  running
+  completed
+  completed_with_errors
+  failed
+  cancelled
+  expired
+}
+
+enum WorkflowRunItemStatus {
+  matched
+  excluded
+  applied
+  partially_applied
+  failed
+  skipped
+}
+
+// A circle-scoped, user-authored automation definition: a subject (currently
+// only media_item), a match/filter + action document (`definition`), and a
+// trigger (manual run, on_media_enriched event, or a cron schedule).
+// cronExpression is required only when trigger=scheduled — enforced in the
+// application layer, not the DB. nextRunAt is maintained by the Phase 4
+// scheduler for scheduled workflows.
+model Workflow {
+  id             String          @id @default(uuid()) @db.Uuid
+  circleId       String          @map("circle_id") @db.Uuid
+  name           String
+  description    String?
+  subjectType    WorkflowSubject @map("subject_type")
+  enabled        Boolean         @default(true)
+  trigger        WorkflowTrigger
+  cronExpression String?         @map("cron_expression")
+  nextRunAt      DateTime?       @map("next_run_at") @db.Timestamptz
+  definition     Json
+  createdById    String?         @map("created_by_id") @db.Uuid
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  circle    Circle        @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  createdBy User?         @relation("WorkflowCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  runs      WorkflowRun[]
+
+  @@index([circleId, enabled])
+  @@index([trigger, enabled, nextRunAt])
+  @@map("workflows")
+}
+
+// One row per execution attempt of a Workflow. definitionSnapshot freezes
+// the parent Workflow's `definition` at run time so edits to the workflow
+// after a run has started never change what that run evaluates/applies.
+// circleId is denormalized from the parent Workflow for direct circle-scoped
+// queries without a join, mirroring the media_visual_embedding.circleId /
+// media_tag_status.circleId precedent elsewhere in this schema.
+model WorkflowRun {
+  id                  String            @id @default(uuid()) @db.Uuid
+  workflowId          String            @map("workflow_id") @db.Uuid
+  circleId            String            @map("circle_id") @db.Uuid
+  status              WorkflowRunStatus
+  triggerType         WorkflowTrigger   @map("trigger_type")
+  definitionSnapshot  Json              @map("definition_snapshot")
+  matchedCount        Int               @default(0) @map("matched_count")
+  truncated           Boolean           @default(false)
+  processedCount      Int               @default(0) @map("processed_count")
+  succeededCount      Int               @default(0) @map("succeeded_count")
+  failedCount         Int               @default(0) @map("failed_count")
+  skippedCount        Int               @default(0) @map("skipped_count")
+  startedById         String?           @map("started_by_id") @db.Uuid
+  approvedById        String?           @map("approved_by_id") @db.Uuid
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+  approvedAt          DateTime?         @map("approved_at") @db.Timestamptz
+  startedAt           DateTime?         @map("started_at") @db.Timestamptz
+  finishedAt          DateTime?         @map("finished_at") @db.Timestamptz
+  lastError           String?           @map("last_error")
+
+  // Relations
+  workflow    Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  circle      Circle            @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  startedBy   User?             @relation("WorkflowRunStartedBy", fields: [startedById], references: [id], onDelete: SetNull)
+  approvedBy  User?             @relation("WorkflowRunApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  items       WorkflowRunItem[]
+
+  @@index([workflowId, createdAt])
+  @@index([circleId, status])
+  @@index([status, updatedAt])
+  @@map("workflow_runs")
+}
+
+// Per-media-item outcome row within a WorkflowRun. @@unique([runId, mediaItemId])
+// is the idempotency anchor for batch retries, mirroring the
+// storage_migration_items @@unique([runId, objectId]) precedent.
+model WorkflowRunItem {
+  id            String                 @id @default(uuid()) @db.Uuid
+  runId         String                 @map("run_id") @db.Uuid
+  mediaItemId   String                 @map("media_item_id") @db.Uuid
+  status        WorkflowRunItemStatus
+  actionResults Json?                  @map("action_results")
+  error         String?
+  updatedAt     DateTime               @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  run       WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  mediaItem MediaItem   @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, mediaItemId])
+  @@index([runId, status])
+  @@map("workflow_run_items")
 }
