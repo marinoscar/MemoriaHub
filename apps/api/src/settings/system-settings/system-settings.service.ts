@@ -35,6 +35,7 @@ export interface ResolvedSettings {
   email: SystemSettingsValue['email'];
   jobs: SystemSettingsValue['jobs'];
   pictureEnhancement: SystemSettingsValue['pictureEnhancement'];
+  workflows: SystemSettingsValue['workflows'];
   updatedAt: Date;
   updatedBy: { id: string; email: string } | null;
   version: number;
@@ -115,6 +116,7 @@ export class SystemSettingsService {
       email: value.email,
       jobs: value.jobs,
       pictureEnhancement: value.pictureEnhancement,
+      workflows: value.workflows,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -178,6 +180,7 @@ export class SystemSettingsService {
       email: value.email,
       jobs: value.jobs,
       pictureEnhancement: value.pictureEnhancement,
+      workflows: value.workflows,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -460,6 +463,54 @@ export class SystemSettingsService {
           (current as any).pictureEnhancement?.retentionHours ??
           72,
       },
+      workflows: {
+        maxItemsPerRun:
+          (dto as any).workflows?.maxItemsPerRun ??
+          (current as any).workflows?.maxItemsPerRun ??
+          10000,
+        batchSize:
+          (dto as any).workflows?.batchSize ??
+          (current as any).workflows?.batchSize ??
+          200,
+        maxConcurrentRuns:
+          (dto as any).workflows?.maxConcurrentRuns ??
+          (current as any).workflows?.maxConcurrentRuns ??
+          2,
+        requirePreview:
+          (dto as any).workflows?.requirePreview ??
+          (current as any).workflows?.requirePreview ??
+          true,
+        allowHardDelete:
+          (dto as any).workflows?.allowHardDelete ??
+          (current as any).workflows?.allowHardDelete ??
+          false,
+        maxWorkflowsPerCircle:
+          (dto as any).workflows?.maxWorkflowsPerCircle ??
+          (current as any).workflows?.maxWorkflowsPerCircle ??
+          20,
+        previewTtlHours:
+          (dto as any).workflows?.previewTtlHours ??
+          (current as any).workflows?.previewTtlHours ??
+          24,
+        runHistoryRetentionDays:
+          (dto as any).workflows?.runHistoryRetentionDays ??
+          (current as any).workflows?.runHistoryRetentionDays ??
+          30,
+        triggers: {
+          onEnrichment:
+            (dto as any).workflows?.triggers?.onEnrichment ??
+            (current as any).workflows?.triggers?.onEnrichment ??
+            true,
+          scheduled:
+            (dto as any).workflows?.triggers?.scheduled ??
+            (current as any).workflows?.triggers?.scheduled ??
+            true,
+        },
+        scheduleMinIntervalMinutes:
+          (dto as any).workflows?.scheduleMinIntervalMinutes ??
+          (current as any).workflows?.scheduleMinIntervalMinutes ??
+          60,
+      },
     };
 
     // Validate merged result
@@ -506,6 +557,7 @@ export class SystemSettingsService {
       email: value.email,
       jobs: value.jobs,
       pictureEnhancement: value.pictureEnhancement,
+      workflows: value.workflows,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
