@@ -20,6 +20,8 @@ import { WorkflowExecuteBatchHandler } from './runs/workflow-execute-batch.handl
 import { WorkflowHistoryPurgeHandler } from './runs/workflow-history-purge.handler';
 import { WorkflowHistoryPurgeTask } from './runs/workflow-history-purge.task';
 import { WorkflowScheduleTask } from './runs/workflow-schedule.task';
+import { WorkflowEvaluateItemHandler } from './runs/workflow-evaluate-item.handler';
+import { WorkflowMicroRunFinalizeTask } from './runs/workflow-micro-run-finalize.task';
 
 /**
  * Media Workflow Automation — Phase 2 action library (issue #140).
@@ -63,6 +65,8 @@ import { WorkflowScheduleTask } from './runs/workflow-schedule.task';
     WorkflowHistoryPurgeHandler,
     WorkflowHistoryPurgeTask,
     WorkflowScheduleTask,
+    WorkflowEvaluateItemHandler,
+    WorkflowMicroRunFinalizeTask,
   ],
   exports: [WorkflowDefinitionValidator, WorkflowConditionCompiler, WorkflowActionExecutor],
 })
