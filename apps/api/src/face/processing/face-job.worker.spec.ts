@@ -11,6 +11,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EnrichmentJobWorker } from '../../enrichment/enrichment-job.worker';
 import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
 import { EnrichmentClaimService } from '../../enrichment/enrichment-claim.service';
@@ -135,6 +136,9 @@ describe('EnrichmentJobWorker', () => {
         { provide: EnrichmentClaimService, useValue: makeClaimMock(mockPrisma) },
         // Real terminal service (wraps the same mock prisma + real throttle).
         EnrichmentTerminalService,
+        // EnrichmentTerminalService now emits ENRICHMENT_JOB_SETTLED_EVENT on
+        // terminal success/failure — provide a minimal emit()-only mock.
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile();
 
@@ -193,6 +197,7 @@ describe('EnrichmentJobWorker', () => {
           { provide: ProviderThrottleService, useValue: new ProviderThrottleService() },
           { provide: EnrichmentClaimService, useValue: makeClaimMock(mockPrisma) },
           EnrichmentTerminalService,
+          { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         ],
       }).compile();
 
