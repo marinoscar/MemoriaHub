@@ -49,6 +49,10 @@ const KIND_COLORS: Record<DuplicateGroupKind, 'default' | 'success' | 'warning' 
   similar: 'info',
 };
 
+// Safety ceiling for the threshold auto-loop so a misbehaving backend can never
+// spin forever. Each iteration resolves a bounded batch of eligible groups.
+const MAX_THRESHOLD_ITERATIONS = 100;
+
 const KIND_FILTERS: Array<{ label: string; value: DuplicateGroupKind | null }> = [
   { label: 'All', value: null },
   { label: 'Exact copy', value: 'exact_variant' },
@@ -146,8 +150,16 @@ export default function DuplicatesPage() {
   const { activeCircle, activeCircleId } = useCircle();
   const { hasPermission, isAdmin } = usePermissions();
   const { settings } = useSystemSettings();
-  const { items, meta, isLoading, error, fetchGroups, bulkResolve, bulkResolveByThreshold } =
-    useDuplicateGroups();
+  const {
+    items,
+    meta,
+    isLoading,
+    error,
+    fetchGroups,
+    bulkResolve,
+    bulkResolveByThreshold,
+    fetchAllPendingIds,
+  } = useDuplicateGroups();
   const [kindFilter, setKindFilter] = useState<DuplicateGroupKind | null>(null);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -187,8 +199,16 @@ export default function DuplicatesPage() {
     });
   };
 
-  const handleSelectAll = () => {
-    setSelected(new Set(items.map((g) => g.id)));
+  // Select ALL pending groups across every page (respecting the kind filter),
+  // not just the visible one.
+  const handleSelectAll = async () => {
+    setActionError(null);
+    try {
+      const ids = await fetchAllPendingIds();
+      setSelected(new Set(ids));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to select all duplicate groups');
+    }
   };
 
   const handleResolve = async (action: DuplicateResolveAction) => {
@@ -211,16 +231,34 @@ export default function DuplicatesPage() {
     if (!action || !activeCircleId) return;
     setActionError(null);
     setThresholdLoading(true);
+    const verb = action === 'trash' ? 'moved to Trash' : 'archived';
+    let totalGroups = 0;
+    let totalRemoved = 0;
+    let totalSkipped = 0;
     try {
-      const result = await bulkResolveByThreshold(threshold, action);
+      // The endpoint resolves at most a bounded batch per call and reports
+      // whether more eligible groups remain. Auto-loop until the queue drains.
+      for (let iteration = 0; iteration < MAX_THRESHOLD_ITERATIONS; iteration += 1) {
+        const result = await bulkResolveByThreshold(threshold, action);
+        totalGroups += result.resolvedGroups;
+        totalRemoved += result.removedCount;
+        totalSkipped += result.skipped;
+        // Stop if the backend reports no more, or a batch made no progress.
+        if (!result.hasMore || result.resolvedGroups === 0) break;
+        setSuccessMsg(`Resolved ${totalGroups} group${totalGroups !== 1 ? 's' : ''} so far…`);
+      }
       setSelected(new Set());
-      const verb = action === 'trash' ? 'moved to Trash' : 'archived';
-      const skippedNote = result.skipped > 0 ? ` (${result.skipped} skipped)` : '';
+      const skippedNote = totalSkipped > 0 ? ` (${totalSkipped} skipped)` : '';
       setSuccessMsg(
-        `Resolved ${result.resolvedGroups} group${result.resolvedGroups !== 1 ? 's' : ''}; ${result.removedCount} photo${result.removedCount !== 1 ? 's' : ''} ${verb}${skippedNote}.`,
+        `Resolved ${totalGroups} group${totalGroups !== 1 ? 's' : ''}; ${totalRemoved} photo${totalRemoved !== 1 ? 's' : ''} ${verb}${skippedNote}.`,
       );
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to resolve duplicate groups');
+      if (totalGroups > 0) {
+        setSuccessMsg(
+          `Resolved ${totalGroups} group${totalGroups !== 1 ? 's' : ''} before the error.`,
+        );
+      }
     } finally {
       setThresholdLoading(false);
     }
