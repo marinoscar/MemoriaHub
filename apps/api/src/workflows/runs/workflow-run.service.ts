@@ -584,29 +584,39 @@ export class WorkflowRunService {
   /**
    * Approval-bypass rule.
    *
-   * Manual runs may skip `awaiting_approval` and execute immediately IFF the
+   * UNATTENDED runs (any `triggerType !== 'manual'` — scheduled / on_media_enriched)
+   * flow straight into execution per issue #142's shared policy ("No approval
+   * stop … everything except hard_delete is allowed"): they have no human to
+   * approve, so a stop would strand the run at `awaiting_approval` until it
+   * expires. `hard_delete` (the only `manual_only`/destructive action) is already
+   * rejected at definition validation for non-manual triggers, and the creator's
+   * permissions were gated at `startUnattendedRun` (which skips the run entirely
+   * if a required perm is missing). We therefore return `true`, keeping only a
+   * defensive `manual_only` assertion (unreachable post-validation).
+   *
+   * MANUAL runs may skip `awaiting_approval` and execute immediately IFF the
    * per-workflow AND system `requirePreview` are BOTH explicitly false AND the
    * definition contains NO gated action.
-   *
-   * UNATTENDED runs (any `triggerType !== 'manual'` — scheduled / on_media_enriched)
-   * have no interactive approver, so they ALWAYS bypass the `requirePreview`
-   * checks regardless of the settings — but they still refuse to auto-run if a
-   * gated action somehow slipped through definition validation (which forbids
-   * manual-only actions on these triggers but not every gated variant). Such a
-   * run stays at `awaiting_approval` rather than silently running a gated action.
-   *
-   * Permission gating already ran at run creation, so this is otherwise
-   * gating-free.
    */
   shouldBypassApproval(
     definition: WorkflowDefinition,
     settings: ResolvedSettings,
     triggerType: WorkflowTrigger = WorkflowTrigger.manual,
   ): boolean {
-    if (triggerType === WorkflowTrigger.manual) {
-      if (definition.options?.requirePreview !== false) return false;
-      if ((settings.workflows?.requirePreview ?? true) !== false) return false;
+    if (triggerType !== WorkflowTrigger.manual) {
+      // Unattended: straight to execution — refuse only a manual-only action
+      // (a safety assertion; definition validation already forbids these here).
+      for (const rawAction of definition.actions) {
+        const action = rawAction as Record<string, unknown>;
+        const descriptor = getActionDescriptor(definition.subject, String(action['type']));
+        if (descriptor?.triggerCompatibility === 'manual_only') return false;
+      }
+      return true;
     }
+
+    // Manual path: requirePreview gate + full gated-action refusal loop.
+    if (definition.options?.requirePreview !== false) return false;
+    if ((settings.workflows?.requirePreview ?? true) !== false) return false;
 
     for (const rawAction of definition.actions) {
       const action = rawAction as Record<string, unknown>;
