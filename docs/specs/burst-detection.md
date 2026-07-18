@@ -502,11 +502,13 @@ Resolve every **pending** burst group whose detection-time `confidence` (§3.5) 
       "removedCount": 41,
       "action": "archive",
       "skipped": 3,
-      "errors": 0
+      "errors": 0,
+      "remaining": 6
     }
   }
   ```
-- **Response `400`:** `threshold` is out of range, or more than 500 pending groups exist in the circle (narrow the scope by resolving in batches, or use the by-id bulk endpoint above).
+  `remaining` is the exact count of still-pending groups meeting the threshold after this batch, computed with a fresh SQL `COUNT(*)` against the persisted `confidence` column — cheap because, unlike duplicate confidence (§9.4a of `duplicate-detection.md`), burst confidence doesn't need to be recomputed per group. On a circle whose pending backlog exceeds the 500-group `MAX_THRESHOLD_RESOLVE` cap, a single call only resolves the first 500; the review page auto-loops the call — issuing another request immediately on success — until `remaining === 0`, fully draining the queue without the reviewer needing to click the button repeatedly.
+- **Response `400`:** `threshold` is out of range.
 
 `burst.autoResolveThreshold` (§6.1) is the system-setting default that pre-fills the "Archive above N" / "Delete above N" buttons' threshold value on the review queue page; it does not gate or auto-fire this endpoint on its own.
 
