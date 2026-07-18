@@ -416,7 +416,8 @@ export class DoctorService {
           WHERE tablename = 'faces'
             AND indexname IN (
               'faces_embedding_vec_hnsw_idx',
-              'faces_embedding_vec_archive_hnsw_idx'
+              'faces_embedding_vec_archive_hnsw_idx',
+              'faces_embedding_vec_assigned_hnsw_idx'
             )
         `,
       ]);
@@ -425,6 +426,7 @@ export class DoctorService {
       const idxNames = new Set(idxRows.map((r) => r.indexname));
       const mainIndexPresent = idxNames.has('faces_embedding_vec_hnsw_idx');
       const archiveIndexPresent = idxNames.has('faces_embedding_vec_archive_hnsw_idx');
+      const assignedIndexPresent = idxNames.has('faces_embedding_vec_assigned_hnsw_idx');
 
       const rollbackHint =
         'Run migrations (npx prisma migrate deploy) to add the face pgvector column/indexes, ' +
@@ -450,9 +452,20 @@ export class DoctorService {
         };
       }
 
+      if (!assignedIndexPresent) {
+        return {
+          status: 'warning',
+          message:
+            'faces_embedding_vec_assigned_hnsw_idx (partial assigned-set index) is missing; ' +
+            'person-match KNN falls back to the main index and can be starved by unassigned faces after bulk imports.',
+          actionItem:
+            'Run migrations (npx prisma migrate deploy) to add the partial assigned-set index.',
+        };
+      }
+
       return {
         status: 'ok',
-        message: 'faces.embedding_vec column and both HNSW indexes present.',
+        message: 'faces.embedding_vec column and all three HNSW indexes present.',
       };
     } catch (err) {
       return { status: 'error', message: err instanceof Error ? err.message : String(err) };
