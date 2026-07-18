@@ -23,7 +23,11 @@ import type { GroupResolveAction } from '../../services/bursts';
 interface GroupBulkResolveToolbarProps {
   selectedIds: Set<string>;
   onClear: () => void;
-  onSelectAll: () => void;
+  /**
+   * Select ALL pending groups across every page. May be async (the page fetches
+   * the full id set), so a spinner is shown on the button while it resolves.
+   */
+  onSelectAll: () => void | Promise<void>;
   /** Resolve the selected groups. Parent clears selection + refreshes on success. */
   onResolve: (action: GroupResolveAction) => Promise<void>;
   /** When false, the "Resolve & Delete" (trash) action is hidden. */
@@ -46,6 +50,7 @@ export function GroupBulkResolveToolbar({
   canTrash,
 }: GroupBulkResolveToolbarProps) {
   const [loading, setLoading] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false);
   const [confirmAction, setConfirmAction] = useState<GroupResolveAction | null>(null);
 
   const count = selectedIds.size;
@@ -57,6 +62,15 @@ export function GroupBulkResolveToolbar({
       await onResolve(action);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSelectAll = async () => {
+    setSelectingAll(true);
+    try {
+      await onSelectAll();
+    } finally {
+      setSelectingAll(false);
     }
   };
 
@@ -112,10 +126,16 @@ export function GroupBulkResolveToolbar({
         <Box sx={{ flexGrow: 1 }} />
 
         {/* Right cluster */}
-        <Tooltip title="Select all">
-          <IconButton aria-label="Select all" onClick={onSelectAll} disabled={loading}>
-            <SelectAllIcon />
-          </IconButton>
+        <Tooltip title="Select all pending (all pages)">
+          <span>
+            <IconButton
+              aria-label="Select all pending"
+              onClick={() => void handleSelectAll()}
+              disabled={loading || selectingAll}
+            >
+              {selectingAll ? <CircularProgress size={20} /> : <SelectAllIcon />}
+            </IconButton>
+          </span>
         </Tooltip>
 
         <Button
