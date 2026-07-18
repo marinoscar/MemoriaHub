@@ -23,6 +23,8 @@
 
 This is a practical setup/troubleshooting companion to the [Distributed Nodes spec](specs/distributed-nodes.md), which covers the feature's architecture, security model, and API contract in full. This document does not repeat that content — it exists to answer "what do I install, and what do I do when `node doctor` says something is wrong."
 
+For a complete configuration-settings reference across the API and worker container, see [Worker Container Configuration Reference](worker-container-config.md).
+
 **Two setup paths exist.** The containerized worker bundle (this document's Quick Start, below) is the recommended path for anything beyond a single ad-hoc machine: it needs no native dependency installation on the host at all, since ffmpeg, the npm native compute libraries, tesseract's OCR language data, and the CLIP/Human model files are all baked into the published image. §2 onward documents the native, non-container install — kept as the advanced/legacy path for a machine that can't or shouldn't run Docker, or for understanding/customizing exactly what the container bundle automates.
 
 ---
