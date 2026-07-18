@@ -27,11 +27,14 @@
  *    adjusted-coords path via the LocationPickerMap stub
  *  - Bulk "Accept all >= 80% confidence" flow: confirm dialog, bulkAccept call,
  *    toolbar button disabled states
+ *  - Bulk-accept is ASYNC (issue #125): confirming shows a queued/background
+ *    message rather than a synchronous "Accepted N" count, and the page polls
+ *    the pending list on an interval afterward (fake timers)
  *  - Empty state text when items is empty
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils/test-utils';
 
@@ -145,7 +148,7 @@ function makeLocationSuggestionsHook(
     accept: vi.fn().mockResolvedValue({ id: 's-1', status: 'accepted', lat: 0, lng: 0, coordSource: 'inferred' }),
     reject: vi.fn().mockResolvedValue({ id: 's-1', status: 'rejected' }),
     revert: vi.fn().mockResolvedValue({ id: 's-1', status: 'reverted' }),
-    bulkAccept: vi.fn().mockResolvedValue({ accepted: 0 }),
+    bulkAccept: vi.fn().mockResolvedValue({ jobId: 'job-1', status: 'pending' }),
     actingIds: new Set<string>(),
     bulkAccepting: false,
     ...overrides,
@@ -630,12 +633,14 @@ describe('LocationSuggestionsPage', () => {
       });
     });
 
-    it('shows a success snackbar with the accepted count after a successful bulk accept', async () => {
+    // Bulk-accept is asynchronous (issue #125): the backend enqueues a
+    // `location_bulk_accept` job and returns { jobId, status } immediately —
+    // there is no synchronous "accepted count" to report. The UI instead
+    // shows a queued/background message and polls the pending list.
+    it('shows a queued/background message (not an "Accepted N" count) after confirming bulk accept', async () => {
+      const bulkAccept = vi.fn().mockResolvedValue({ jobId: 'job-1', status: 'pending' });
       mockUseLocationSuggestions.mockReturnValue(
-        makeLocationSuggestionsHook({
-          items: [makeSuggestion()],
-          bulkAccept: vi.fn().mockResolvedValue({ accepted: 4 }),
-        }),
+        makeLocationSuggestionsHook({ items: [makeSuggestion()], bulkAccept }),
       );
       const user = userEvent.setup();
 
@@ -646,8 +651,56 @@ describe('LocationSuggestionsPage', () => {
       await user.click(within(dialog).getByRole('button', { name: /^accept all$/i }));
 
       await waitFor(() => {
-        expect(screen.getByText('Accepted 4 suggestions')).toBeInTheDocument();
+        expect(bulkAccept).toHaveBeenCalledWith(CIRCLE_ID, 0.8);
       });
+      await waitFor(() => {
+        expect(
+          screen.getByText(/queued.*accepting high-confidence suggestions in the background/i),
+        ).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/accepted \d+ suggestions?/i)).not.toBeInTheDocument();
+    });
+
+    it('polls the pending list on an interval after bulk accept is queued', async () => {
+      vi.useFakeTimers();
+      try {
+        const fetchSuggestions = vi.fn().mockResolvedValue(undefined);
+        const bulkAccept = vi.fn().mockResolvedValue({ jobId: 'job-1', status: 'pending' });
+        mockUseLocationSuggestions.mockReturnValue(
+          makeLocationSuggestionsHook({ items: [makeSuggestion()], fetchSuggestions, bulkAccept }),
+        );
+
+        render(<LocationSuggestionsPage />);
+
+        // Initial mount fetch.
+        expect(fetchSuggestions).toHaveBeenCalledTimes(1);
+
+        fireEvent.click(screen.getByRole('button', { name: /accept all.*confidence/i }));
+        // MUI Dialog mounts synchronously on `open` state change — avoid an
+        // async findBy/waitFor here, which would stall waiting on real timers
+        // that fake timers have replaced.
+        const dialog = screen.getByRole('dialog');
+        fireEvent.click(within(dialog).getByRole('button', { name: /^accept all$/i }));
+
+        // Flush the awaited bulkAccept() call and the state updates/refresh()
+        // that follow it (advanceTimersByTimeAsync also drains microtasks).
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(bulkAccept).toHaveBeenCalledWith(CIRCLE_ID, 0.8);
+        // startBulkPoll() issues an immediate refresh on top of the mount fetch.
+        const callsAfterQueue = fetchSuggestions.mock.calls.length;
+        expect(callsAfterQueue).toBeGreaterThanOrEqual(2);
+
+        // Advance past two 4s poll ticks. The mocked hook's item count never
+        // changes (it's a static mock), so each tick re-fetches (the
+        // stall-break needs 3 unchanged ticks before it stops).
+        await vi.advanceTimersByTimeAsync(4000);
+        await vi.advanceTimersByTimeAsync(4000);
+
+        expect(fetchSuggestions.mock.calls.length).toBeGreaterThan(callsAfterQueue);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('shows an error alert when bulkAccept rejects', async () => {
