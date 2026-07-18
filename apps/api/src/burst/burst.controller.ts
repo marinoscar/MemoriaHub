@@ -104,9 +104,15 @@ export class BurstController {
       'eligible group, keeps its suggested-best item and applies the chosen ' +
       '`action` to the remaining live members: `archive` sets archivedAt, `trash` ' +
       'soft-deletes (sets deletedAt). Legacy groups with null confidence are ' +
-      'excluded. Requires media:write; `action: "trash"` additionally requires media:delete.',
+      'excluded. Requires media:write; `action: "trash"` additionally requires media:delete. ' +
+      'The response `data.remaining` is the count of still-pending eligible groups ' +
+      'after this batch (non-zero means run again to drain the rest).',
   })
-  @ApiResponse({ status: 200, description: 'Bulk threshold resolve completed' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Bulk threshold resolve completed; `data` includes `remaining` (still-pending eligible groups)',
+  })
   @ApiResponse({
     status: 400,
     description: 'Invalid body or missing media:delete for trash',

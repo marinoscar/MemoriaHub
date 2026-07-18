@@ -105,9 +105,16 @@ export class DuplicateController {
       'up to a hard cap of 500 groups. For each eligible group, keeps its ' +
       'suggested-best item and applies the chosen `action` to the remaining live ' +
       'members: `archive` sets archivedAt, `trash` soft-deletes (sets deletedAt). ' +
-      'Requires media:write; `action: "trash"` additionally requires media:delete.',
+      'Requires media:write; `action: "trash"` additionally requires media:delete. ' +
+      'The response `data.hasMore` is a boolean (not an exact count — duplicate ' +
+      'confidence is computed at read time, so it cannot be counted cheaply in SQL) ' +
+      'indicating the candidate scan hit the 500-group cap and more may remain.',
   })
-  @ApiResponse({ status: 200, description: 'Bulk threshold resolve completed' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Bulk threshold resolve completed; `data` includes `hasMore` (candidate scan hit the cap)',
+  })
   @ApiResponse({
     status: 400,
     description: 'Invalid body or missing media:delete for trash',

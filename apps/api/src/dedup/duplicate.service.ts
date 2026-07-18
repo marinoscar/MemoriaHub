@@ -667,6 +667,14 @@ export class DuplicateService {
       }
     }
 
+    // Unlike burst confidence (a persisted column that can be counted with a
+    // cheap SQL filter), duplicate confidence is computed at READ time via
+    // computeGroupKind — so an exact "remaining eligible" count is not cheaply
+    // computable. Instead signal `hasMore` = whether the initial candidate scan
+    // hit the MAX_THRESHOLD_RESOLVE cap, meaning there may be more eligible
+    // groups beyond this batch and the caller should run again.
+    const hasMore = groups.length === MAX_THRESHOLD_RESOLVE;
+
     return {
       data: {
         resolvedGroups,
@@ -675,6 +683,7 @@ export class DuplicateService {
         action: dto.action,
         skipped,
         errors,
+        hasMore,
       },
     };
   }
