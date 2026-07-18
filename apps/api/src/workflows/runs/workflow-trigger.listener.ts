@@ -165,7 +165,18 @@ export class WorkflowTriggerListener {
       } catch {
         continue; // malformed definition — skip defensively
       }
-      if (!isFullySettled(deps, state)) continue;
+
+      // A no-condition / empty-dependency workflow should still fire once, keyed
+      // off the metadata (OBJECT_PROCESSED) signal.
+      const effectiveDeps = deps.size === 0 ? new Set<WorkflowDependency>(['metadata']) : deps;
+
+      // Dependency-aware: only react when the JUST-settled dependency is one this
+      // workflow actually reads — otherwise a metadata-only workflow would enqueue
+      // on every subsequent tag/face/burst/dup/location settlement (~6x redundant
+      // per item during bulk import). This collapses the fan-out to ~1 enqueue:
+      // the last-completing relevant dependency triggers it.
+      if (!effectiveDeps.has(settledDep)) continue;
+      if (!isFullySettled(effectiveDeps, state)) continue;
 
       // skipDedup: dedup is keyed on (type, mediaItemId) and would collapse the
       // second workflow's job for the same item; the evaluate-once guard +
