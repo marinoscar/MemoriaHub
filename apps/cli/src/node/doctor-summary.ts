@@ -20,7 +20,7 @@
  * vice versa).
  */
 
-import type { CapabilityStatus } from './capabilities.js';
+import type { CapabilityStatus, StartupSelfTestEvaluation } from './capabilities.js';
 import type { ApiAccessCheckResult } from './doctor-checks.js';
 
 // ---------------------------------------------------------------------------
@@ -150,6 +150,52 @@ export function apiAccessLevel(access: ApiAccessCheckResult): HealthLevel {
   if (!access.authOk) return 'error';
   if (access.nodeRegistrationOk === false || !access.manifestOk) return 'warn';
   return 'ok';
+}
+
+// ---------------------------------------------------------------------------
+// Startup operational gate (issue #148)
+// ---------------------------------------------------------------------------
+
+/**
+ * A render-agnostic, pre-formatted verdict of the startup operational gate —
+ * the evaluation `evaluateStartupSelfTest()` (node/capabilities.ts) produces —
+ * shaped so both `doctorCmd()` (CLI `ui.*`) and the TUI doctor row render
+ * identical wording from a single place. `blockers`/`degrades` are
+ * ready-to-print strings; `level` maps to the shared {@link HealthLevel} so the
+ * TUI picks its glyph/color exactly as it does for every other doctor row.
+ *
+ *   - 'error' — at least one REQUIRED capability for an eligible job type
+ *     failed its operational self-test (a startup blocker).
+ *   - 'warn'  — no blockers, but at least one optional/degradable capability
+ *     failed (e.g. OCR Tier-2, CLIP dHash fallback) — non-fatal.
+ *   - 'ok'    — every required capability is operational and nothing degraded.
+ */
+export interface StartupGateSummary {
+  /** True when no REQUIRED capability failed its operational self-test. */
+  ok: boolean;
+  level: HealthLevel;
+  /** Blocking-failure lines (a required cap for an eligible job type). */
+  blockers: string[];
+  /** Degrade lines (optional/degradable cap failed, non-blocking). */
+  degrades: string[];
+}
+
+/**
+ * Format a startup-gate evaluation into the shared, render-agnostic summary.
+ * Pure; the wording lives here so the CLI section and the TUI row never drift.
+ * Both surfaces consume this rather than re-formatting the evaluation twice.
+ */
+export function summarizeStartupGate(
+  evaluation: StartupSelfTestEvaluation,
+): StartupGateSummary {
+  const blockers = evaluation.blockingFailures.map(
+    (b) => `${b.capability} (required by ${b.jobType})` + (b.detail ? `: ${b.detail}` : ''),
+  );
+  const degrades = evaluation.degraded.map(
+    (d) => `${d.capability} — degraded but non-blocking` + (d.detail ? ` (${d.detail})` : ''),
+  );
+  const level: HealthLevel = blockers.length > 0 ? 'error' : degrades.length > 0 ? 'warn' : 'ok';
+  return { ok: evaluation.ok, level, blockers, degrades };
 }
 
 // ---------------------------------------------------------------------------

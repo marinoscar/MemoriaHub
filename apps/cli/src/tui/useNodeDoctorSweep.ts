@@ -39,10 +39,12 @@ import type { CliConfig } from '../config.js';
 import {
   detectCapabilities,
   missingRequirements,
+  evaluateStartupSelfTest,
   NODE_JOB_TYPES,
   isNodeJobType,
   type CapabilityStatus,
   type NodeJobType,
+  type StartupSelfTestEvaluation,
 } from '../node/capabilities.js';
 import { ensureModels } from '../node/models.js';
 import { runOperationalSelfTests } from '../node/self-test.js';
@@ -66,15 +68,17 @@ export type DoctorStepKey =
   | 'capabilities'
   | 'selfTest'
   | 'jobReadiness'
+  | 'startupGate'
   | 'models'
   | 'daemon';
 
-/** Sweep step order — mirrors doctorCmd()'s six sections, in order. */
+/** Sweep step order — mirrors doctorCmd()'s sections, in order. */
 export const DOCTOR_STEP_ORDER: DoctorStepKey[] = [
   'apiAccess',
   'capabilities',
   'selfTest',
   'jobReadiness',
+  'startupGate',
   'models',
   'daemon',
 ];
@@ -84,6 +88,7 @@ export const DOCTOR_STEP_LABELS: Record<DoctorStepKey, string> = {
   capabilities: 'Capabilities (installed)',
   selfTest: 'Operational self-tests',
   jobReadiness: 'Job-type readiness',
+  startupGate: 'Startup gate',
   models: 'Models',
   daemon: 'Daemon',
 };
@@ -116,6 +121,12 @@ export interface DoctorSweepState {
   /** Real self-test result — `runOperationalSelfTests()`. */
   operationalCaps: Record<string, CapabilityStatus> | null;
   jobReadiness: JobReadinessRow[] | null;
+  /**
+   * The startup operational-gate verdict — the exact `evaluateStartupSelfTest()`
+   * result `node start` uses to fail-fast a headless container: which required
+   * capabilities BLOCK startup vs. which optional ones only DEGRADE.
+   */
+  startupGate: StartupSelfTestEvaluation | null;
   models: ModelsSweepResult | null;
   daemon: DaemonLivenessResult | null;
   /** True once every step has finished (success or failure). */
@@ -138,6 +149,7 @@ export function initialDoctorSweepState(): DoctorSweepState {
     caps: null,
     operationalCaps: null,
     jobReadiness: null,
+    startupGate: null,
     models: null,
     daemon: null,
     done: false,
@@ -252,6 +264,18 @@ export async function runNodeDoctorSweep(
     return { type: t, ready: missing.length === 0, missing };
   });
   leaveStep('jobReadiness', { jobReadiness });
+
+  // 4.5. Startup gate — the exact operational-gate verdict `node start` uses
+  //      to fail-fast a headless container (issue #148). Reuses the SAME
+  //      operational snapshot and eligibleTypes resolution as job readiness
+  //      above: a REQUIRED capability for an eligible type that failed its
+  //      self-test is a blocker; an optional/degradable one only degrades.
+  //      Pure — never throws — so it needs no per-step try/catch (like the
+  //      job-readiness step above).
+  enterStep('startupGate');
+  const startupGate = evaluateStartupSelfTest(caps, operationalCaps, eligibleTypes, faceProvider);
+  if (!startupGate.ok) hasError = true;
+  leaveStep('startupGate', { startupGate });
 
   // 5. Models — download-and-verify, as `node start` does.
   enterStep('models');

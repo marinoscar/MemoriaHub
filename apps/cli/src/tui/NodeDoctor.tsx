@@ -50,6 +50,7 @@ import {
   apiAccessLevel,
   summarizeCapabilities,
   summarizeJobReadiness,
+  summarizeStartupGate,
   WORKER_NODE_SETUP_GUIDE_URL,
   type CapabilityRowSummary,
   type HealthLevel,
@@ -121,6 +122,11 @@ function computeStepLevel(step: DoctorStepKey, state: DoctorSweepState): StepDis
       if (!state.jobReadiness) return running ? 'running' : 'pending';
       const summary = summarizeJobReadiness(state.jobReadiness);
       return summary.issues.length > 0 ? 'error' : 'ok';
+    }
+
+    case 'startupGate': {
+      if (!state.startupGate) return running ? 'running' : 'pending';
+      return summarizeStartupGate(state.startupGate).level;
     }
 
     case 'models': {
@@ -227,6 +233,7 @@ export function NodeDoctor({ config, onBack, variant = 'screen' }: NodeDoctorPro
   const capsSummary =
     state.caps && state.operationalCaps ? summarizeCapabilities(state.caps, state.operationalCaps) : null;
   const jobsSummary = state.jobReadiness ? summarizeJobReadiness(state.jobReadiness) : null;
+  const gateSummary = state.startupGate ? summarizeStartupGate(state.startupGate) : null;
 
   return (
     <Box
@@ -325,6 +332,37 @@ export function NodeDoctor({ config, onBack, variant = 'screen' }: NodeDoctorPro
               ))}
             </>
           )}
+        </Box>
+      )}
+
+      {/* Startup gate — the same fail-fast verdict `node start` uses to decide
+          whether a headless container may boot. Collapses to one green line on
+          PASS; a blocked gate lists each required capability that failed, and
+          any optional/degradable failures render as non-blocking warnings.
+          Renders in both variants, mirroring the Capabilities/Job-readiness
+          sections. */}
+      {gateSummary && (
+        <Box flexDirection="column" marginTop={1}>
+          {!compact && <Text bold color="cyan">Startup gate</Text>}
+          {gateSummary.ok ? (
+            <Text color="green">✔ Startup gate: PASS — all required capabilities operational.</Text>
+          ) : (
+            <>
+              <Text color="red">✖ Startup gate: BLOCKED — a required capability is not operational:</Text>
+              {gateSummary.blockers.map((b, i) => (
+                <Text key={`gate-block-${i}`} color="red">
+                  {'  ✖ '}
+                  {truncate(b, compact ? 40 : 84)}
+                </Text>
+              ))}
+            </>
+          )}
+          {gateSummary.degrades.map((d, i) => (
+            <Text key={`gate-degrade-${i}`} color="yellow">
+              {'  ⚠ '}
+              {truncate(d, compact ? 40 : 84)}
+            </Text>
+          ))}
         </Box>
       )}
 

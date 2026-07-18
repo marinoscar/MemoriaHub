@@ -11,10 +11,14 @@ import {
   capabilityRowLevel,
   summarizeCapabilities,
   summarizeJobReadiness,
+  summarizeStartupGate,
   apiAccessLevel,
   type HealthLevel,
 } from '../../src/node/doctor-summary.js';
-import type { CapabilityStatus } from '../../src/node/capabilities.js';
+import type {
+  CapabilityStatus,
+  StartupSelfTestEvaluation,
+} from '../../src/node/capabilities.js';
 import type { ApiAccessCheckResult } from '../../src/node/doctor-checks.js';
 
 function status(available: boolean, detail?: string): CapabilityStatus {
@@ -157,6 +161,71 @@ describe('summarizeJobReadiness', () => {
     expect(summary.issues).toHaveLength(0);
     expect(summary.readyCount).toBe(0);
     expect(summary.totalCount).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// summarizeStartupGate
+// ---------------------------------------------------------------------------
+
+describe('summarizeStartupGate', () => {
+  it('is level "ok" with no lines when the gate passes clean', () => {
+    const evaluation: StartupSelfTestEvaluation = { ok: true, blockingFailures: [], degraded: [] };
+    const summary = summarizeStartupGate(evaluation);
+    expect(summary.ok).toBe(true);
+    expect(summary.level).toBe('ok');
+    expect(summary.blockers).toEqual([]);
+    expect(summary.degrades).toEqual([]);
+  });
+
+  it('formats each blocking failure with its capability, required job type, and detail; level "error"', () => {
+    const evaluation: StartupSelfTestEvaluation = {
+      ok: false,
+      blockingFailures: [
+        { capability: 'human', jobType: 'face_detection', detail: 'model missing' },
+        { capability: 'sharp', jobType: 'auto_tagging' },
+      ],
+      degraded: [],
+    };
+    const summary = summarizeStartupGate(evaluation);
+    expect(summary.ok).toBe(false);
+    expect(summary.level).toBe('error');
+    expect(summary.blockers).toEqual([
+      'human (required by face_detection): model missing',
+      'sharp (required by auto_tagging)',
+    ]);
+    expect(summary.degrades).toEqual([]);
+  });
+
+  it('is level "warn" for a degrade-only verdict and formats the degrade lines', () => {
+    const evaluation: StartupSelfTestEvaluation = {
+      ok: true,
+      blockingFailures: [],
+      degraded: [
+        { capability: 'tesseract', detail: 'OCR data not present' },
+        { capability: 'onnxruntime' },
+      ],
+    };
+    const summary = summarizeStartupGate(evaluation);
+    expect(summary.ok).toBe(true);
+    expect(summary.level).toBe('warn');
+    expect(summary.blockers).toEqual([]);
+    expect(summary.degrades).toEqual([
+      'tesseract — degraded but non-blocking (OCR data not present)',
+      'onnxruntime — degraded but non-blocking',
+    ]);
+  });
+
+  it('is level "error" when both blockers and degrades are present (blockers dominate)', () => {
+    const evaluation: StartupSelfTestEvaluation = {
+      ok: false,
+      blockingFailures: [{ capability: 'ffmpeg', jobType: 'video_face_detection' }],
+      degraded: [{ capability: 'tesseract' }],
+    };
+    const summary = summarizeStartupGate(evaluation);
+    expect(summary.level).toBe('error');
+    expect(summary.blockers).toHaveLength(1);
+    expect(summary.degrades).toHaveLength(1);
   });
 });
 

@@ -54,6 +54,7 @@ import { runApiAccessChecks, checkDaemonLiveness } from '../node/doctor-checks.j
 import {
   summarizeCapabilities,
   summarizeJobReadiness,
+  summarizeStartupGate,
   apiAccessLevel,
   WORKER_NODE_SETUP_GUIDE_URL,
   type CapabilityRowSummary,
@@ -1296,6 +1297,27 @@ function doctorCmd(): Command {
       } else if (jobSummary.totalCount > 0) {
         ui.success(`All ${jobSummary.totalCount} job type(s) ready.`);
       }
+      ui.blank();
+
+      // 4.5. Startup gate — the exact operational-gate verdict `node start`
+      //      uses to decide whether a headless container may boot (issue #148).
+      //      Reuses evaluateStartupSelfTest() against the SAME operational
+      //      snapshot and eligibleTypes resolved above: a REQUIRED capability
+      //      whose self-test failed BLOCKS; an optional/degradable one only
+      //      DEGRADES. Both surfaces (this section and the TUI doctor row)
+      //      render the shared summarizeStartupGate() output so they never drift.
+      ui.step('Startup gate');
+      const startupGate = summarizeStartupGate(
+        evaluateStartupSelfTest(caps, operationalCaps, eligibleTypes, faceProvider),
+      );
+      if (startupGate.ok) {
+        ui.success('Startup gate: PASS — all required capabilities operational.');
+      } else {
+        hasError = true;
+        ui.error('Startup gate: BLOCKED — a required capability is not operational:');
+        for (const b of startupGate.blockers) ui.error(`  • ${b}`);
+      }
+      for (const d of startupGate.degrades) ui.warn(d);
       ui.blank();
 
       // 5. Model presence (download-and-verify, as `node start` does).
