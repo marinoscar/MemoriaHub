@@ -24,10 +24,13 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { WorkflowsService } from './workflows.service';
+import { WorkflowRunService } from './runs/workflow-run.service';
 import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
 import { ListWorkflowsQueryDto } from './dto/list-workflows-query.dto';
 import { PreviewWorkflowDto } from './dto/preview-workflow.dto';
+import { CreateRunDto } from './runs/dto/create-run.dto';
+import { ListRunsQueryDto } from './runs/dto/list-runs-query.dto';
 
 /**
  * Media Workflow Automation — Phase 1 API (definition, validation, preview).
@@ -40,7 +43,10 @@ import { PreviewWorkflowDto } from './dto/preview-workflow.dto';
 @ApiBearerAuth()
 @Controller('workflows')
 export class WorkflowsController {
-  constructor(private readonly workflowsService: WorkflowsService) {}
+  constructor(
+    private readonly workflowsService: WorkflowsService,
+    private readonly runService: WorkflowRunService,
+  ) {}
 
   @Post()
   @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
@@ -120,5 +126,40 @@ export class WorkflowsController {
   @ApiResponse({ status: 404, description: 'Workflow not found or feature disabled' })
   async remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser): Promise<void> {
     await this.workflowsService.deleteWorkflow(id, user);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Runs
+  // ---------------------------------------------------------------------------
+
+  @Post(':id/run')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Start a workflow run (circle collaborator)' })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Run created (evaluating)' })
+  @ApiResponse({ status: 409, description: 'Too many concurrent runs' })
+  @ApiResponse({ status: 404, description: 'Workflow not found or feature disabled' })
+  async run(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateRunDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.runService.createRun(id, dto, user);
+  }
+
+  @Get(':id/runs')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({ summary: 'List a workflow’s run history (paginated)' })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiQuery({ name: 'page', type: Number, required: false })
+  @ApiQuery({ name: 'pageSize', type: Number, required: false })
+  @ApiResponse({ status: 200, description: 'Run history listed' })
+  async runs(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ListRunsQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.runService.listRuns(id, query, user);
   }
 }

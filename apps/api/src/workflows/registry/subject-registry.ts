@@ -1,6 +1,7 @@
 import { WorkflowSubject } from '@prisma/client';
 import {
   SubjectRegistryEntry,
+  WorkflowActionDescriptor,
   WorkflowFieldDescriptor,
 } from './field-descriptor.interface';
 import { MEDIA_ITEM_ACTIONS, MEDIA_ITEM_FIELDS } from './media-item-fields';
@@ -58,4 +59,23 @@ export function isRegisteredAction(subject: string, actionType: string): boolean
   const entry = REGISTRY[subject];
   if (!entry) return false;
   return entry.actions.some((a) => a.type === actionType);
+}
+
+/** All action descriptors registered for a Subject (empty for an unknown Subject). */
+export function registeredActions(subject: string): WorkflowActionDescriptor[] {
+  return REGISTRY[subject]?.actions ?? [];
+}
+
+/**
+ * O(1)-ish action lookup within a Subject. Returns the descriptor (with its
+ * `paramsSchema` and `permission`) or undefined for an unknown Subject/action.
+ * Used by the run-create path to validate action params and authorize them.
+ */
+export function getActionDescriptor(
+  subject: string,
+  type: string,
+): WorkflowActionDescriptor | undefined {
+  const entry = REGISTRY[subject];
+  if (!entry) return undefined;
+  return entry.actions.find((a) => a.type === type);
 }

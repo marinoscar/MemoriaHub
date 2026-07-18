@@ -14,7 +14,7 @@ import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { WorkflowDefinitionValidator } from './definition/workflow-definition.validator';
 import { WorkflowDefinition } from './definition/workflow-definition.schema';
 import { WorkflowConditionCompiler } from './compiler/workflow-condition.compiler';
-import { getFullRegistry } from './registry/subject-registry';
+import { getActionDescriptor, getFullRegistry } from './registry/subject-registry';
 import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
 import { ListWorkflowsQueryDto } from './dto/list-workflows-query.dto';
@@ -53,6 +53,8 @@ export class WorkflowsService {
     // Registry-aware validation (subject + fields/ops/values + action types).
     const definition = this.validator.validate(dto.definition);
     const trigger = (dto.trigger ?? 'manual') as WorkflowTrigger;
+    // Reject manual-only actions (hard_delete) on an automatic trigger.
+    this.assertActionsAllowedForTrigger(definition, trigger);
     const cronExpression = this.resolveCron(trigger, dto.cronExpression ?? null);
 
     // Enforce the per-circle workflow cap.
@@ -147,10 +149,11 @@ export class WorkflowsService {
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.enabled !== undefined) data.enabled = dto.enabled;
 
+    let validatedDefinition: WorkflowDefinition | undefined;
     if (dto.definition !== undefined) {
-      const definition = this.validator.validate(dto.definition);
-      data.definition = definition as unknown as Prisma.InputJsonValue;
-      data.subjectType = definition.subject as WorkflowSubject;
+      validatedDefinition = this.validator.validate(dto.definition);
+      data.definition = validatedDefinition as unknown as Prisma.InputJsonValue;
+      data.subjectType = validatedDefinition.subject as WorkflowSubject;
     }
 
     // Resolve the trigger/cron pair after applying any partial change, then
@@ -159,6 +162,12 @@ export class WorkflowsService {
     const resultingCronInput =
       dto.cronExpression !== undefined ? dto.cronExpression : existing.cronExpression;
     const cronExpression = this.resolveCron(resultingTrigger, resultingCronInput);
+
+    // Re-check trigger/action compatibility against the resulting (post-patch)
+    // definition + trigger — either side may have changed in this update.
+    const effectiveDefinition =
+      validatedDefinition ?? (existing.definition as unknown as WorkflowDefinition);
+    this.assertActionsAllowedForTrigger(effectiveDefinition, resultingTrigger);
     if (dto.trigger !== undefined) data.trigger = resultingTrigger;
     if (dto.trigger !== undefined || dto.cronExpression !== undefined) {
       data.cronExpression = cronExpression;
@@ -311,6 +320,27 @@ export class WorkflowsService {
       throw new NotFoundException('Workflows feature is not enabled');
     }
     return settings;
+  }
+
+  /**
+   * Enforce action/trigger compatibility: an action whose descriptor is
+   * `triggerCompatibility: 'manual_only'` (currently only `hard_delete`) may not
+   * be attached to a non-manual (on_media_enriched / scheduled) workflow. All
+   * other actions are allowed on every trigger.
+   */
+  private assertActionsAllowedForTrigger(
+    definition: WorkflowDefinition,
+    trigger: WorkflowTrigger,
+  ): void {
+    if (trigger === 'manual') return;
+    for (const action of definition.actions) {
+      const descriptor = getActionDescriptor(definition.subject, action.type);
+      if (descriptor?.triggerCompatibility === 'manual_only') {
+        throw new BadRequestException(
+          `Action "${action.type}" is only allowed on manual-trigger workflows`,
+        );
+      }
+    }
   }
 
   private async findWorkflowOrThrow(id: string): Promise<Workflow> {

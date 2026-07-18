@@ -28,6 +28,6 @@ import { ReviewInsightsService } from './review-insights.service';
     VisualEmbeddingService,
     ReviewInsightsService,
   ],
-  exports: [VisualEmbeddingService, DuplicateDetectionService],
+  exports: [VisualEmbeddingService, DuplicateDetectionService, DuplicateService],
 })
 export class DedupModule {}

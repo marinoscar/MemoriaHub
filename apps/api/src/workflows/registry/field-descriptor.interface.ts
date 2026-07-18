@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import type { ZodTypeAny } from 'zod';
 
 /**
  * Media Workflow Automation — condition (field) descriptor model.
@@ -143,16 +144,62 @@ export interface WorkflowFieldDescriptor {
 }
 
 /**
- * Phase-1 action descriptor stub. The action LIBRARY (per-action parameter
- * schemas + execution) is Phase 2 (#140); Phase 1 only needs the registered
- * TYPE set so the validator can reject an unregistered action and
- * `GET /api/workflows/subjects` can advertise the catalog shape.
+ * Permission requirement for a workflow action, in a typed shape the
+ * run-create / approval path consumes to decide who may schedule and run it.
+ *
+ * Encoding:
+ *   - `circleRole` — the minimum per-circle role the actor must hold on the
+ *     workflow's circle (always `'collaborator'` in v1).
+ *   - `systemPerms` — system permission strings the actor must ALL hold
+ *     (base is `['media:write']`; `hard_delete` also needs `'media:delete'`).
+ *   - `gates` — system-settings feature-flag keys that must be enabled for the
+ *     action to be schedulable (`hard_delete` → `['workflows.allowHardDelete']`).
+ *   - `bothCircles` — when true the actor must satisfy `circleRole` +
+ *     `systemPerms` on BOTH the source and the target circle
+ *     (`move_to_circle`).
+ *   - `extraPermForTrashVariant` — an extra system permission required ONLY
+ *     when the action's `action` param is `'trash'` (the burst/duplicate
+ *     resolve actions require `'media:delete'` to trash, not to archive).
+ */
+export interface WorkflowActionPermission {
+  circleRole: 'collaborator';
+  systemPerms: string[];
+  gates?: string[];
+  bothCircles?: boolean;
+  extraPermForTrashVariant?: 'media:delete';
+}
+
+/**
+ * Media Workflow Automation — action (the "Then" half) descriptor.
+ *
+ * Carries everything the engine needs to validate an action instance and the
+ * run-create/approval path needs to authorize it, without any I/O:
+ *   - `paramsSchema` — a Zod schema validating this action's `params`
+ *     (`z.object({}).strict()` for no-param actions).
+ *   - `permission` — the typed permission requirement (see above).
+ *   - `triggerCompatibility` — `'manual_only'` for actions too destructive to
+ *     run on an automatic trigger (`hard_delete`), `'all'` otherwise.
+ *   - `reversible` / `highImpact` — advisory flags surfaced to the builder UI
+ *     and the approval gate: `hard_delete` is non-reversible + high-impact;
+ *     `move_to_circle` is reversible but high-impact (re-enrichment fan-out);
+ *     everything else is reversible + not high-impact.
+ *   - `destructive` — retained from Phase 1; `true` only for `hard_delete`.
  */
 export interface WorkflowActionDescriptor {
   type: string;
   label: string;
-  /** Whether this action destroys data irreversibly (hard delete). Phase 2 gates it. */
+  /** Whether this action destroys data irreversibly (hard delete). */
   destructive?: boolean;
+  /** Per-action Zod schema for the action's `params`. */
+  paramsSchema: ZodTypeAny;
+  /** Typed permission requirement consumed by the run-create / approval path. */
+  permission: WorkflowActionPermission;
+  /** Which triggers may drive this action. */
+  triggerCompatibility: 'manual_only' | 'all';
+  /** Advisory: can the action be undone? */
+  reversible: boolean;
+  /** Advisory: does the action have outsized/expensive side effects? */
+  highImpact: boolean;
 }
 
 /**

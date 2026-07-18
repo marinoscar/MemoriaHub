@@ -31,5 +31,6 @@ import { LocationInferenceBackfillService } from './location-inference-backfill.
     LocationInferenceBackfillService,
     LocationSuggestionService,
   ],
+  exports: [LocationSuggestionService],
 })
 export class LocationInferenceModule {}
