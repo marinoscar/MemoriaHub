@@ -119,6 +119,7 @@ function makeDuplicateGroupsHook(
       action: 'archive',
       skipped: 0,
       errors: 0,
+      hasMore: false,
     }),
     ...overrides,
   };
@@ -485,6 +486,7 @@ describe('DuplicatesPage', () => {
         action: 'archive',
         skipped: 0,
         errors: 0,
+        hasMore: false,
       });
       mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(60));
       mockUseDuplicateGroups.mockReturnValue(
@@ -516,6 +518,7 @@ describe('DuplicatesPage', () => {
         action: 'trash',
         skipped: 0,
         errors: 0,
+        hasMore: false,
       });
       mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(60));
       mockUseDuplicateGroups.mockReturnValue(
@@ -536,6 +539,79 @@ describe('DuplicatesPage', () => {
       await waitFor(() => {
         expect(bulkResolveByThreshold).toHaveBeenCalledWith(60, 'trash');
       });
+    });
+
+    it('auto-loops bulkResolveByThreshold while hasMore is true, stopping once hasMore is false', async () => {
+      const user = userEvent.setup();
+      const bulkResolveByThreshold = vi
+        .fn()
+        .mockResolvedValueOnce({
+          resolvedGroups: 10,
+          keptCount: 10,
+          removedCount: 20,
+          action: 'archive',
+          skipped: 0,
+          errors: 0,
+          hasMore: true,
+        })
+        .mockResolvedValueOnce({
+          resolvedGroups: 10,
+          keptCount: 10,
+          removedCount: 20,
+          action: 'archive',
+          skipped: 0,
+          errors: 0,
+          hasMore: true,
+        })
+        .mockResolvedValueOnce({
+          resolvedGroups: 10,
+          keptCount: 10,
+          removedCount: 20,
+          action: 'archive',
+          skipped: 0,
+          errors: 0,
+          hasMore: false,
+        });
+      mockUseDuplicateGroups.mockReturnValue(
+        makeDuplicateGroupsHook({ items: [makeSummary('g-1')], bulkResolveByThreshold }),
+      );
+
+      render(<DuplicatesPage />);
+
+      await user.click(await screen.findByRole('button', { name: 'Archive above 60' }));
+      await user.click(await screen.findByRole('button', { name: /^archive$/i }));
+
+      await waitFor(() => {
+        expect(bulkResolveByThreshold).toHaveBeenCalledTimes(3);
+      });
+      expect(bulkResolveByThreshold).toHaveBeenNthCalledWith(1, 60, 'archive');
+      expect(bulkResolveByThreshold).toHaveBeenNthCalledWith(3, 60, 'archive');
+    });
+
+    it('stops the auto-loop early when a batch makes no progress, even if hasMore is true', async () => {
+      const user = userEvent.setup();
+      const bulkResolveByThreshold = vi.fn().mockResolvedValue({
+        resolvedGroups: 0,
+        keptCount: 0,
+        removedCount: 0,
+        action: 'archive',
+        skipped: 5,
+        errors: 0,
+        hasMore: true,
+      });
+      mockUseDuplicateGroups.mockReturnValue(
+        makeDuplicateGroupsHook({ items: [makeSummary('g-1')], bulkResolveByThreshold }),
+      );
+
+      render(<DuplicatesPage />);
+
+      await user.click(await screen.findByRole('button', { name: 'Archive above 60' }));
+      await user.click(await screen.findByRole('button', { name: /^archive$/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/resolved 0 groups/i)).toBeInTheDocument();
+      });
+      expect(bulkResolveByThreshold).toHaveBeenCalledTimes(1);
     });
   });
 });
