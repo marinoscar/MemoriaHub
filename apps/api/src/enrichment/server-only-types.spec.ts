@@ -36,6 +36,7 @@ import { AutoTaggingHandler } from '../tagging/auto-tagging.handler';
 import { ThumbnailRegenHandler } from '../media/thumbnail-regen.handler';
 import { ThumbnailRepairHandler } from '../media/thumbnail-repair.handler';
 import { TrashPurgeHandler } from '../media/trash-purge.handler';
+import { WorkflowEvaluateItemHandler } from '../workflows/runs/workflow-evaluate-item.handler';
 
 /** Every registered enrichment handler class (keep in sync with the modules). */
 const ALL_HANDLER_CLASSES = [
@@ -56,6 +57,7 @@ const ALL_HANDLER_CLASSES = [
   ThumbnailRegenHandler,
   ThumbnailRepairHandler,
   TrashPurgeHandler,
+  WorkflowEvaluateItemHandler,
 ];
 
 /**
@@ -71,6 +73,7 @@ const DOCUMENTED_SERVER_ONLY_TYPES = [
   'storage_insights',
   'storage_migration',
   'trash_purge',
+  'workflow_evaluate_item',
 ];
 
 /** Documented system-mode claim set = server-only + explicit thumbnail_repair. */
@@ -89,7 +92,7 @@ describe('server-only type derivation (drift guard)', () => {
     }
   });
 
-  it('registers all 17 known handler types', () => {
+  it('registers all 18 known handler types', () => {
     expect(registry.types()).toHaveLength(ALL_HANDLER_CLASSES.length);
   });
 
