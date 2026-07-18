@@ -24,5 +24,6 @@ import { AdminBurstController } from './admin-burst.controller';
   ],
   controllers: [BurstController, AdminBurstController],
   providers: [BurstService, BurstDetectionHandler, BurstDetectionService],
+  exports: [BurstService],
 })
 export class BurstModule {}
