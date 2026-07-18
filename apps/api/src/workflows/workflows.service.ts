@@ -19,7 +19,10 @@ import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
 import { ListWorkflowsQueryDto } from './dto/list-workflows-query.dto';
 import { PreviewWorkflowDto } from './dto/preview-workflow.dto';
-import { isValidCron } from './util/cron.util';
+import { cronMinIntervalMinutes, isValidCron, nextCronDate } from './util/cron.util';
+
+/** Fallback minimum schedule interval (minutes) when the setting is absent. */
+const DEFAULT_SCHEDULE_MIN_INTERVAL_MINUTES = 60;
 
 /** Max sample items returned by the preview. */
 const PREVIEW_SAMPLE_SIZE = 12;
@@ -55,7 +58,13 @@ export class WorkflowsService {
     const trigger = (dto.trigger ?? 'manual') as WorkflowTrigger;
     // Reject manual-only actions (hard_delete) on an automatic trigger.
     this.assertActionsAllowedForTrigger(definition, trigger);
-    const cronExpression = this.resolveCron(trigger, dto.cronExpression ?? null);
+    const minInterval =
+      settings.workflows?.scheduleMinIntervalMinutes ?? DEFAULT_SCHEDULE_MIN_INTERVAL_MINUTES;
+    const cronExpression = this.resolveCron(trigger, dto.cronExpression ?? null, minInterval);
+    // Scheduled workflows are made due immediately on their next cron fire; the
+    // Phase-4 scheduler cron then advances nextRunAt after each tick.
+    const nextRunAt =
+      trigger === 'scheduled' ? nextCronDate(cronExpression as string, new Date()) : null;
 
     // Enforce the per-circle workflow cap.
     const max = settings.workflows?.maxWorkflowsPerCircle ?? 20;
@@ -77,6 +86,7 @@ export class WorkflowsService {
         enabled: dto.enabled ?? true,
         trigger,
         cronExpression,
+        nextRunAt,
         definition: definition as unknown as Prisma.InputJsonValue,
         createdById: user.id,
       },
@@ -134,7 +144,7 @@ export class WorkflowsService {
   }
 
   async updateWorkflow(id: string, dto: UpdateWorkflowDto, user: RequestUser) {
-    await this.assertFeatureEnabled();
+    const settings = await this.assertFeatureEnabled();
     const existing = await this.findWorkflowOrThrow(id);
     await this.circleMembership.assertCircleAccess(
       user.id,
@@ -161,7 +171,9 @@ export class WorkflowsService {
     const resultingTrigger = (dto.trigger ?? existing.trigger) as WorkflowTrigger;
     const resultingCronInput =
       dto.cronExpression !== undefined ? dto.cronExpression : existing.cronExpression;
-    const cronExpression = this.resolveCron(resultingTrigger, resultingCronInput);
+    const minInterval =
+      settings.workflows?.scheduleMinIntervalMinutes ?? DEFAULT_SCHEDULE_MIN_INTERVAL_MINUTES;
+    const cronExpression = this.resolveCron(resultingTrigger, resultingCronInput, minInterval);
 
     // Re-check trigger/action compatibility against the resulting (post-patch)
     // definition + trigger — either side may have changed in this update.
@@ -171,6 +183,20 @@ export class WorkflowsService {
     if (dto.trigger !== undefined) data.trigger = resultingTrigger;
     if (dto.trigger !== undefined || dto.cronExpression !== undefined) {
       data.cronExpression = cronExpression;
+    }
+
+    // Maintain nextRunAt: clear it whenever the resulting trigger is not
+    // scheduled; (re)compute it when the workflow becomes/stays scheduled AND
+    // either the trigger or the cron changed. An unchanged scheduled workflow
+    // keeps its existing nextRunAt untouched.
+    if (resultingTrigger !== 'scheduled') {
+      data.nextRunAt = null;
+    } else {
+      const triggerChanged = resultingTrigger !== existing.trigger;
+      const cronChanged = cronExpression !== existing.cronExpression;
+      if (triggerChanged || cronChanged) {
+        data.nextRunAt = nextCronDate(cronExpression as string, new Date());
+      }
     }
 
     const workflow = await this.prisma.workflow.update({ where: { id }, data });
@@ -353,13 +379,25 @@ export class WorkflowsService {
 
   /**
    * Resolve the cron column for a trigger: required + valid for `scheduled`,
-   * forced null otherwise.
+   * forced null otherwise. For a scheduled workflow the cron's minimum fire
+   * interval must also be at least `minIntervalMinutes` (the
+   * `workflows.scheduleMinIntervalMinutes` setting) — a denser schedule is
+   * rejected with 400.
    */
-  private resolveCron(trigger: WorkflowTrigger, cron: string | null): string | null {
+  private resolveCron(
+    trigger: WorkflowTrigger,
+    cron: string | null,
+    minIntervalMinutes: number,
+  ): string | null {
     if (trigger === 'scheduled') {
       if (!cron || !isValidCron(cron)) {
         throw new BadRequestException(
           'cronExpression is required and must be a valid 5-field cron when trigger is scheduled',
+        );
+      }
+      if (cronMinIntervalMinutes(cron) < minIntervalMinutes) {
+        throw new BadRequestException(
+          `Schedule interval must be at least ${minIntervalMinutes} minutes`,
         );
       }
       return cron;

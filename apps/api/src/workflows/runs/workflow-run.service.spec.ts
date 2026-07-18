@@ -9,7 +9,10 @@
  *     non-awaiting-approval rejection; hard_delete confirmation string
  *     matching; excludedItemIds flip to 'excluded' and > 500 rejection.
  *   - cancelRun: non-terminal -> cancelled; terminal run rejection.
- *   - shouldBypassApproval: the full AND/AND/NOR gating matrix.
+ *   - shouldBypassApproval: the full AND/AND/NOR gating matrix for the manual
+ *     path, plus the Phase 4 (issue #142) unattended-trigger bypass rule --
+ *     any triggerType !== 'manual' skips straight to execution regardless of
+ *     requirePreview/gated actions, refusing only a manual_only action.
  *   - enqueueExecuteBatches: chunking by workflows.batchSize.
  *
  * No database required -- PrismaService and all injected services are mocked.
@@ -22,7 +25,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { WorkflowRunStatus, WorkflowRunItemStatus } from '@prisma/client';
+import { WorkflowRunStatus, WorkflowRunItemStatus, WorkflowTrigger } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { WorkflowRunService } from './workflow-run.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -510,6 +513,55 @@ describe('WorkflowRunService', () => {
       });
       const settings = settingsWithWorkflows({ requirePreview: false });
       expect(service.shouldBypassApproval(def, settings as any)).toBe(false);
+    });
+
+    // -------------------------------------------------------------------------
+    // Phase 4 (issue #142): unattended-trigger bypass rule.
+    //
+    // "No approval stop" for any triggerType !== 'manual' -- there is no human
+    // in the loop for scheduled/on_media_enriched runs, so requirePreview and
+    // the manual gated-action refusal list (hard_delete, move_to_circle, a
+    // trash-variant needing extra perms, etc.) do NOT apply. The restricted
+    // action set (hard_delete rejected at definition-validation time) is the
+    // safety mechanism instead -- shouldBypassApproval only defensively
+    // refuses a `triggerCompatibility: 'manual_only'` action, which should be
+    // unreachable post-validation.
+    // -------------------------------------------------------------------------
+    describe('unattended triggers (issue #142)', () => {
+      it.each([WorkflowTrigger.scheduled, WorkflowTrigger.on_media_enriched])(
+        'is true for trigger "%s" even when requirePreview is unset (opposite of the manual default)',
+        (trigger) => {
+          const def = screenshotDefinition({ options: undefined });
+          const settings = settingsWithWorkflows({ requirePreview: true });
+          expect(service.shouldBypassApproval(def, settings as any, trigger)).toBe(true);
+        },
+      );
+
+      it.each([WorkflowTrigger.scheduled, WorkflowTrigger.on_media_enriched])(
+        'is true for trigger "%s" even with a gated action present (move_to_circle) -- gating does not apply to unattended runs',
+        (trigger) => {
+          const def = screenshotDefinition({
+            actions: [{ type: 'move_to_circle', targetCircleId: OTHER_CIRCLE_ID }],
+          });
+          const settings = settingsWithWorkflows();
+          expect(service.shouldBypassApproval(def, settings as any, trigger)).toBe(true);
+        },
+      );
+
+      it.each([WorkflowTrigger.scheduled, WorkflowTrigger.on_media_enriched])(
+        'is false for trigger "%s" when a manual_only action (hard_delete) is present (defensive; unreachable post-validation)',
+        (trigger) => {
+          const def = screenshotDefinition({ actions: [{ type: 'hard_delete' }] });
+          const settings = settingsWithWorkflows({ allowHardDelete: true });
+          expect(service.shouldBypassApproval(def, settings as any, trigger)).toBe(false);
+        },
+      );
+
+      it('defaults to the manual path (false, since requirePreview is not explicitly false) when triggerType is omitted', () => {
+        const def = screenshotDefinition({ options: undefined });
+        const settings = settingsWithWorkflows({ requirePreview: false });
+        expect(service.shouldBypassApproval(def, settings as any)).toBe(false);
+      });
     });
   });
 

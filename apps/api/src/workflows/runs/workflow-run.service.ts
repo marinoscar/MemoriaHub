@@ -10,9 +10,11 @@ import {
   CircleRole,
   JobReason,
   Prisma,
+  Workflow,
   WorkflowRun,
   WorkflowRunItemStatus,
   WorkflowRunStatus,
+  WorkflowTrigger,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
@@ -131,6 +133,83 @@ export class WorkflowRunService {
     });
 
     return { runId: run.id, status: run.status };
+  }
+
+  /**
+   * Start an UNATTENDED run (scheduled cron trigger or on_media_enriched micro-run
+   * dispatch is NOT this path — see the schedule task / evaluate-item handler).
+   * Mirrors createRun's body WITHOUT the HTTP concurrency 409 (the scheduler
+   * already gated concurrency + overlap) and WITHOUT awaiting_approval — the
+   * evaluate handler bypasses approval for any non-manual trigger.
+   *
+   * Authorization: the acting user is the workflow's creator. Their effective
+   * permissions are loaded and gated-action authorization runs up front; a
+   * missing permission (or absent creator) returns null instead of crashing the
+   * scheduler.
+   */
+  async startUnattendedRun(
+    workflow: Workflow,
+    triggerType: WorkflowTrigger,
+  ): Promise<{ runId: string } | null> {
+    const creatorUserId = workflow.createdById;
+    if (!creatorUserId) {
+      this.logger.warn(
+        `Workflow ${workflow.id} has no creator; cannot authorize an unattended run — skipping`,
+      );
+      return null;
+    }
+
+    const settings = await this.systemSettings.getSettings();
+    const definition = workflow.definition as unknown as WorkflowDefinition;
+
+    // Synthetic actor built from the creator's effective permissions; gate the
+    // actions before committing a run row.
+    const permissions = await this.loadUserPermissions(creatorUserId);
+    const actor: RequestUser = {
+      id: creatorUserId,
+      email: '',
+      roles: [],
+      permissions,
+      isActive: true,
+    };
+    try {
+      await this.checkGatedActionPermissions(definition, actor, workflow.circleId, settings);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Skipping unattended run for workflow ${workflow.id}: creator lacks required authorization (${message})`,
+      );
+      return null;
+    }
+
+    const run = await this.prisma.workflowRun.create({
+      data: {
+        workflowId: workflow.id,
+        circleId: workflow.circleId,
+        status: WorkflowRunStatus.evaluating,
+        triggerType,
+        definitionSnapshot: workflow.definition as Prisma.InputJsonValue,
+        startedById: creatorUserId,
+      },
+    });
+
+    await this.enrichmentJobs.enqueue({
+      type: 'workflow_evaluate',
+      mediaItemId: null,
+      circleId: workflow.circleId,
+      reason: JobReason.rerun,
+      priority: 20,
+      payload: { runId: run.id, maxItems: null },
+      skipDedup: true,
+    });
+
+    await this.audit(creatorUserId, 'workflow_run:started', run.id, {
+      workflowId: workflow.id,
+      circleId: workflow.circleId,
+      trigger: triggerType,
+    });
+
+    return { runId: run.id };
   }
 
   async approveRun(
@@ -503,12 +582,39 @@ export class WorkflowRunService {
   }
 
   /**
-   * Approval-bypass rule: a run may skip `awaiting_approval` and execute
-   * immediately IFF the per-workflow AND system `requirePreview` are BOTH
-   * explicitly false AND the definition contains NO gated action. Permission
-   * gating already ran at createRun, so this is intentionally gating-free.
+   * Approval-bypass rule.
+   *
+   * UNATTENDED runs (any `triggerType !== 'manual'` — scheduled / on_media_enriched)
+   * flow straight into execution per issue #142's shared policy ("No approval
+   * stop … everything except hard_delete is allowed"): they have no human to
+   * approve, so a stop would strand the run at `awaiting_approval` until it
+   * expires. `hard_delete` (the only `manual_only`/destructive action) is already
+   * rejected at definition validation for non-manual triggers, and the creator's
+   * permissions were gated at `startUnattendedRun` (which skips the run entirely
+   * if a required perm is missing). We therefore return `true`, keeping only a
+   * defensive `manual_only` assertion (unreachable post-validation).
+   *
+   * MANUAL runs may skip `awaiting_approval` and execute immediately IFF the
+   * per-workflow AND system `requirePreview` are BOTH explicitly false AND the
+   * definition contains NO gated action.
    */
-  shouldBypassApproval(definition: WorkflowDefinition, settings: ResolvedSettings): boolean {
+  shouldBypassApproval(
+    definition: WorkflowDefinition,
+    settings: ResolvedSettings,
+    triggerType: WorkflowTrigger = WorkflowTrigger.manual,
+  ): boolean {
+    if (triggerType !== WorkflowTrigger.manual) {
+      // Unattended: straight to execution — refuse only a manual-only action
+      // (a safety assertion; definition validation already forbids these here).
+      for (const rawAction of definition.actions) {
+        const action = rawAction as Record<string, unknown>;
+        const descriptor = getActionDescriptor(definition.subject, String(action['type']));
+        if (descriptor?.triggerCompatibility === 'manual_only') return false;
+      }
+      return true;
+    }
+
+    // Manual path: requirePreview gate + full gated-action refusal loop.
     if (definition.options?.requirePreview !== false) return false;
     if ((settings.workflows?.requirePreview ?? true) !== false) return false;
 
@@ -518,6 +624,25 @@ export class WorkflowRunService {
       if (descriptor && this.isGatedAction(descriptor, action)) return false;
     }
     return true;
+  }
+
+  /** Resolve a user's effective (distinct) system permission-string list. */
+  private async loadUserPermissions(userId: string): Promise<string[]> {
+    const rows = await this.prisma.userRole.findMany({
+      where: { userId },
+      select: {
+        role: {
+          select: {
+            rolePermissions: { select: { permission: { select: { name: true } } } },
+          },
+        },
+      },
+    });
+    const perms = new Set<string>();
+    for (const ur of rows) {
+      for (const rp of ur.role.rolePermissions) perms.add(rp.permission.name);
+    }
+    return [...perms];
   }
 
   // ---------------------------------------------------------------------------

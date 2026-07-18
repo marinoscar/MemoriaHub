@@ -34,6 +34,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
@@ -161,6 +162,9 @@ async function buildWorker(
       // Real terminal service (wraps the same mock prisma + real throttle) so
       // the extracted terminal state machine is exercised end-to-end.
       EnrichmentTerminalService,
+      // EnrichmentTerminalService now emits ENRICHMENT_JOB_SETTLED_EVENT on
+      // terminal success/failure — provide a minimal emit()-only mock.
+      { provide: EventEmitter2, useValue: { emit: jest.fn() } },
     ],
   }).compile();
 
@@ -278,6 +282,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
           { provide: ProviderThrottleService, useValue: new ProviderThrottleService() },
           { provide: EnrichmentClaimService, useValue: makeClaimMock(mockPrisma) },
           EnrichmentTerminalService,
+          { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         ],
       }).compile();
       const w2 = module.get<EnrichmentJobWorker>(EnrichmentJobWorker);
@@ -1106,6 +1111,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
           { provide: ProviderThrottleService, useValue: new ProviderThrottleService() },
           { provide: EnrichmentClaimService, useValue: makeClaimMock(mockPrisma) },
           EnrichmentTerminalService,
+          { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         ],
       }).compile();
       const w2 = module.get<EnrichmentJobWorker>(EnrichmentJobWorker);
@@ -1324,6 +1330,7 @@ describe('EnrichmentJobWorker — system-mode claim eligibility', () => {
         { provide: ProviderThrottleService, useValue: new ProviderThrottleService() },
         { provide: EnrichmentClaimService, useValue: mockClaim },
         EnrichmentTerminalService,
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile();
 
