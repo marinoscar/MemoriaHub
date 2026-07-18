@@ -27,17 +27,39 @@
 # back to hash-only). See GitHub issue #110.
 FROM node:26-slim AS base
 WORKDIR /app
-# OpenSSL for Prisma; ffmpeg for video processing; wget + ca-certificates for
-# the Human model download below (busybox wget is builtin on Alpine but absent
-# on Debian slim, and HTTPS fetches need the CA bundle).
+# OpenSSL for Prisma; ffmpeg for video processing (and the HEIC transcode
+# fallback, retained as a safety net); wget + ca-certificates for the Human model
+# download below (busybox wget is builtin on Alpine but absent on Debian slim,
+# and HTTPS fetches need the CA bundle).
+# libvips42t64 + libheif1 + libde265-0 + libheif-plugin-libde265: a HEIF-enabled
+#   system libvips so sharp (rebuilt from source against it in the deps stage via
+#   SHARP_FORCE_GLOBAL_LIBVIPS) decodes HEIC/HEIF NATIVELY instead of falling back
+#   to ffmpeg (issue #128). sharp's bundled libvips omits the HEVC/HEIC decoder
+#   for patent/licensing reasons; Debian trixie's libvips42t64 is compiled with
+#   libheif, and trixie's libheif uses plugin decoders, so libheif-plugin-libde265
+#   (pulling libde265-0) is required for the HEVC decode. RUNTIME libs — must live
+#   in `base` because the `production` stage is FROM base and the source-built
+#   sharp addon links libvips-cpp.so.42 at runtime. Must switch in lockstep with
+#   apps/cli/Dockerfile so both executors decode HEIC via the identical libvips
+#   build (cross-executor embedding parity — see #128/#108).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       openssl ffmpeg wget ca-certificates \
+      libvips42t64 libheif1 libde265-0 libheif-plugin-libde265 \
     && rm -rf /var/lib/apt/lists/*
 
 # -----------------------------------------------------------------------------
 # Dependencies stage
 # -----------------------------------------------------------------------------
 FROM base AS deps
+# Build toolchain + headers for sharp's from-source addon build against the
+# global HEIF-enabled libvips (issue #128). Build-only: the runtime stages copy
+# node_modules (with the built addon) out of this stage, not this toolchain, so
+# the final image stays lean. sharp locates libvips via
+# `pkg-config --modversion vips-cpp`; node-gyp is provided by npm.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 make g++ pkg-config libvips-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Root workspace manifests plus the two workspace members apps/api needs:
 # itself, and the local @memoriahub/enrichment-compute package it depends on.
 # Copying manifests (not full source) first keeps this layer cache-friendly.
@@ -49,6 +71,17 @@ COPY apps/api/scripts ./apps/api/scripts/
 COPY packages/enrichment-compute ./packages/enrichment-compute/
 # Using npm install since this is a workspace package without its own lock file
 RUN npm install --ignore-scripts
+
+# The main install runs with --ignore-scripts (keeps control over other
+# postinstalls), which also suppresses sharp's build script — so sharp would
+# otherwise keep its bundled, HEIC-less libvips. Explicitly rebuild ONLY sharp
+# from source against the global HEIF-enabled libvips installed in the base
+# stage, so it decodes HEIC/HEIF natively (issue #128). node-gyp comes from npm;
+# python3/make/g++ + pkg-config/libvips-dev were installed above. VERIFY in-image
+# that `node -e "console.log(require('sharp').versions.vips)"` reports the system
+# libvips (Debian trixie's 8.16.x), not sharp's bundled version — if the build
+# fails against 8.16.x, fall back to compiling libvips 8.18.3 from source.
+RUN SHARP_FORCE_GLOBAL_LIBVIPS=1 npm rebuild sharp --build-from-source
 
 # Build the shared enrichment-compute workspace package so its dist/ is
 # present before apps/api (which imports it) is compiled or run.
@@ -99,6 +132,9 @@ RUN npm run build
 # Production stage
 # -----------------------------------------------------------------------------
 FROM base AS production
+# Keep set at runtime so sharp resolves the system HEIF-enabled libvips (matches
+# the addon built in the deps stage) and any runtime rebuild stays global (#128).
+ENV SHARP_FORCE_GLOBAL_LIBVIPS=1
 COPY --from=build /app/apps/api/dist /app/apps/api/dist
 COPY --from=deps /app/node_modules /app/node_modules
 COPY --from=deps /app/packages /app/packages
