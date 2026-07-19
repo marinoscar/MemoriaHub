@@ -114,6 +114,18 @@ export async function createClipSession(modelPath: string): Promise<InferenceSes
   const ort = await loadOrt();
   return ort.InferenceSession.create(modelPath, {
     intraOpNumThreads: 2,
+    // Memory-stability options for a long-lived worker running sustained
+    // inference (hours of bulk-import image jobs). Both are PARITY-SAFE — they
+    // change only onnxruntime's internal memory management, never the computed
+    // embedding, so a node stays numerically identical to the server:
+    //   - enableCpuMemArena: the CPU arena allocator grows to an inference's
+    //     high-water mark and holds it; disabling trades a little per-call
+    //     allocation cost for not pinning that peak for the process lifetime.
+    //   - enableMemPattern: pre-planned reuse buffers, another retained pool.
+    // "Slow but alive" is the queue's design goal, so we favor lower steady-
+    // state memory over marginal throughput here.
+    enableCpuMemArena: false,
+    enableMemPattern: false,
   });
 }
 
@@ -143,9 +155,26 @@ export async function embedImageWithSession(
   const outputs = await session.run({ [inputName]: tensor });
   const raw = outputs[outputName]?.data as Float32Array | undefined;
 
-  if (!raw || raw.length === 0) {
-    return null;
-  }
+  // Copy out what we need, then promptly release the input + output tensors'
+  // native backing rather than waiting on V8 GC / finalizers to catch up — a
+  // long-lived worker running sustained inference must not accumulate one
+  // undisposed OrtValue per image. `dispose()` exists on onnxruntime-node's
+  // Tensor in recent versions; guard so older versions (no-op) still work.
+  const result = raw && raw.length > 0 ? l2Normalize(Array.from(raw)) : null;
+  disposeTensor(tensor);
+  for (const key of Object.keys(outputs)) disposeTensor(outputs[key]);
 
-  return l2Normalize(Array.from(raw));
+  return result;
+}
+
+/** Best-effort release of an onnxruntime tensor's native backing (version-guarded). */
+function disposeTensor(t: unknown): void {
+  const d = (t as { dispose?: unknown } | null | undefined)?.dispose;
+  if (typeof d === 'function') {
+    try {
+      (d as () => void).call(t);
+    } catch {
+      /* older onnxruntime-node: no-op / not disposable — GC will reclaim it */
+    }
+  }
 }
