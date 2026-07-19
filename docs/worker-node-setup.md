@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.1 |
+| **Version** | 1.2 |
 | **Last Updated** | July 2026 |
 | **Status** | Implemented |
 
@@ -349,3 +349,4 @@ Both the CLI command (`memoriahub node doctor`) and the TUI screen (Tools ▸ Wo
 | `node service install` refuses on Windows outright | systemd has no Windows equivalent — `service install` is a no-op there by design, not a bug | Use `memoriahub node start --daemon` instead. |
 | Face jobs slow / appear to run on Human despite `--face-provider compreface` | The CompreFace warm-up race at start time, or the provider not actually being selected as configured | Check the "Face provider" line in `memoriahub node status` output to confirm which provider is actually active; confirm `node start` waited for CompreFace to report healthy before claiming jobs (see §5.4); verify the sidecar directly with `curl http://localhost:3000/status` (or the configured `comprefaceUrl`). |
 | `job not owned by this node` errors on a node that was recently set up | `~/.memoriahub/config.json` was copied/cloned from another machine instead of running `node register` fresh, so two machines share one `nodeId` and are fighting over job leases | Run `memoriahub node register` on the affected machine to get its own distinct node identity (do not reuse a cloned config across machines — see §7). |
+| Worker crashes with `Ineffective mark-compacts near heap limit — JavaScript heap out of memory` during a long-running import | The node auto-hardens its heap ceiling on startup assuming a 16 GB RAM / 8-core host (`apps/cli/src/node/runtime-tuning.ts`); on a smaller or memory-limited host/container the auto-computed ceiling may still not fit | See [Worker Container Configuration Reference §3.5](worker-container-config.md#35-memory--oom-hardening) — set `MEMORIAHUB_MAX_OLD_SPACE_MB` explicitly (below a container's cgroup limit) or `0` to disable re-tuning; a recurrence writes a heap snapshot in the process's CWD. |
