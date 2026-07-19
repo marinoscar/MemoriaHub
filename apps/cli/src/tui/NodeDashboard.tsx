@@ -329,9 +329,31 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
 
     // Surface memory pressure in the dashboard log so a slow climb is visible
     // (heapUsed vs external/arrayBuffers vs rss). Stopped when the engine stops.
+    //
+    // Safety valve (TUI): unlike `node start` — which drains and exits for a
+    // supervised restart — we must NOT kill an interactive session, and
+    // restarting just the in-process engine wouldn't free native singletons
+    // (the CLIP session, sharp) held for the TUI's lifetime. So on critical
+    // pressure we drain and STOP the embedded engine to halt further growth,
+    // and tell the operator to relaunch (ideally as a daemon/container for
+    // sustained loads).
     stopMemWatchRef.current?.();
-    stopMemWatchRef.current = startMemoryWatchdog((level, s) =>
-      pushLog(level, `memory rss=${s.rssMb}MB heapUsed=${s.heapUsedMb}/${s.heapLimitMb}MB external=${s.externalMb}MB arrayBuffers=${s.arrayBuffersMb}MB`),
+    stopMemWatchRef.current = startMemoryWatchdog(
+      (level, s) =>
+        pushLog(
+          level,
+          `memory rss=${s.rssMb}MB heapUsed=${s.heapUsedMb}/${s.heapLimitMb}MB external=${s.externalMb}MB arrayBuffers=${s.arrayBuffersMb}MB`,
+        ),
+      {
+        onCritical: (s) => {
+          pushLog(
+            'error',
+            `heap at ${Math.round(s.heapUsedFraction * 100)}% of ceiling — stopping the embedded worker to pre-empt an out-of-memory crash. ` +
+              'Relaunch it (press s), or run it as a daemon/container (auto-restarts) for sustained loads.',
+          );
+          void engineRef.current?.stop('memory-pressure', { deregister: false });
+        },
+      },
     );
 
     const engine = new NodeEngine({

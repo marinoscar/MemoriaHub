@@ -123,6 +123,16 @@ function cliVersion(): string {
  */
 const DEFAULT_CONCURRENCY = resolveDefaultConcurrency();
 
+/**
+ * Exit code used when the memory safety valve drains and exits so a supervisor
+ * restarts the worker fresh. Non-zero so systemd `Restart=on-failure` fires;
+ * container `restart: unless-stopped` restarts on any exit. 75 = EX_TEMPFAIL.
+ */
+const EXIT_MEMORY_RESTART = 75;
+
+/** Max time to wait for in-flight jobs to drain before the safety valve force-exits. */
+const MEMORY_RESTART_DRAIN_MS = 60_000;
+
 /** Parse a comma-separated list of job types, validating each against the set. */
 function parseTypes(csv?: string): string[] {
   if (!csv) return [];
@@ -714,7 +724,36 @@ function startCmd(): Command {
         // under sustained load is VISIBLE (and a post-mortem can tell which
         // pool grew: heapUsed vs external/arrayBuffers vs rss). Disable with
         // MEMORIAHUB_MEMWATCH=0.
-        startMemoryWatchdog((level, s) => logger.log(level, { ev: 'memory', ...s }));
+        //
+        // Safety valve: if heapUsed crosses ~90% of the ceiling, drain in-flight
+        // jobs and exit non-zero so the supervisor (container `restart:
+        // unless-stopped`, systemd `Restart=on-failure`) starts a FRESH process
+        // — pre-empting an OOM crash-loop while a slow leak is still being root-
+        // caused. No work is lost: drained/expired job leases are re-queued
+        // server-side. Drain is bounded so a stuck job can't wedge the exit.
+        // Disable with MEMORIAHUB_HEAP_RESTART_FRACTION=0.
+        let memoryRestarting = false;
+        startMemoryWatchdog((level, s) => logger.log(level, { ev: 'memory', ...s }), {
+          onCritical: (s) => {
+            if (memoryRestarting) return;
+            memoryRestarting = true;
+            logger.log('error', {
+              ev: 'memory-restart',
+              msg: 'heapUsed crossed the restart threshold — draining and exiting for a supervised restart',
+              ...s,
+            });
+            ui.warn(
+              `Heap at ${Math.round(s.heapUsedFraction * 100)}% of ceiling — draining in-flight jobs and ` +
+                'restarting to pre-empt an out-of-memory crash (no work lost; the server re-queues in-flight jobs).',
+            );
+            const drain = engine.stop('memory-pressure', { deregister: false });
+            const bounded = Promise.race([
+              drain,
+              new Promise<void>((resolve) => setTimeout(resolve, MEMORY_RESTART_DRAIN_MS).unref?.()),
+            ]);
+            void bounded.finally(() => process.exit(EXIT_MEMORY_RESTART));
+          },
+        });
 
         await engine.start();
       },

@@ -43,6 +43,21 @@ export interface MemoryWatchdogOptions {
   intervalMs?: number;
   /** heapUsed/heapLimit fraction at/above which a sample escalates to `warn` (default 0.85). */
   warnFraction?: number;
+  /**
+   * heapUsed/heapLimit fraction at/above which `onCritical` fires ONCE (default
+   * 0.90; `0` disables). Overridable via `MEMORIAHUB_HEAP_RESTART_FRACTION`.
+   * Should sit above `warnFraction` so a warn is logged before the critical
+   * action. This is the trigger for the supervised drain-and-restart safety
+   * valve — see the caller in `node start`.
+   */
+  restartFraction?: number;
+  /**
+   * Invoked at most ONCE, the first sample whose `heapUsedFraction` reaches
+   * `restartFraction`. The caller decides what to do (typically: drain
+   * in-flight jobs and exit for a supervised restart). Sampling continues after
+   * it fires (so the log keeps recording the climb) but it never fires twice.
+   */
+  onCritical?: (sample: MemorySample) => void;
 }
 
 const MB = 1024 * 1024;
@@ -76,14 +91,41 @@ export function startMemoryWatchdog(
 
   const intervalMs = Math.max(1000, opts.intervalMs ?? 60_000);
   const warnFraction = opts.warnFraction ?? 0.85;
+  const restartFraction = resolveRestartFraction(opts.restartFraction);
   const heapLimitBytes = v8.getHeapStatistics().heap_size_limit;
 
+  let criticalFired = false;
   const tick = (): void => {
     const s = sample(heapLimitBytes);
     emit(s.heapUsedFraction >= warnFraction ? 'warn' : 'info', s);
+    if (
+      !criticalFired &&
+      restartFraction > 0 &&
+      s.heapUsedFraction >= restartFraction &&
+      opts.onCritical
+    ) {
+      criticalFired = true;
+      opts.onCritical(s);
+    }
   };
 
   const timer = setInterval(tick, intervalMs);
   timer.unref?.();
   return () => clearInterval(timer);
+}
+
+/**
+ * Resolve the critical (drain-and-restart) heap fraction: the explicit option,
+ * else `MEMORIAHUB_HEAP_RESTART_FRACTION` (a value in (0,1]; `0` disables), else
+ * the 0.90 default. An out-of-range env value is ignored in favor of the option
+ * / default.
+ */
+export function resolveRestartFraction(explicit?: number): number {
+  if (explicit !== undefined) return explicit;
+  const env = process.env['MEMORIAHUB_HEAP_RESTART_FRACTION'];
+  if (env !== undefined && env.trim() !== '') {
+    const n = Number.parseFloat(env);
+    if (Number.isFinite(n) && n >= 0 && n <= 1) return n;
+  }
+  return 0.9;
 }
