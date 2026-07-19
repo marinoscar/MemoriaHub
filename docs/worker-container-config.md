@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.1 |
+| **Version** | 1.2 |
 | **Last Updated** | July 2026 |
 | **Status** | Implemented |
 
@@ -195,6 +195,8 @@ Set in `.env.worker`, passed to `docker-compose.worker.yml`. A container restart
 | `MEMORIAHUB_MAX_OLD_SPACE_MB` | *(auto — ~50% of physical RAM, clamped 4000–12000 MB; 8000 MB on a 16 GB baseline host)* | Overrides the worker's automatically-computed `--max-old-space-size` re-exec value (see §3.5); integer MB, or `0` to disable heap re-tuning entirely and keep Node's default ~2 GB ceiling. | Set explicitly on a memory-limited container where 50% of the *host's* RAM would exceed the container's own cgroup memory limit — see §3.5. |
 | `MEMORIAHUB_HEAP_SNAPSHOT` | `1` (enabled) | Whether the worker also passes `--heapsnapshot-near-heap-limit=1` alongside the raised heap ceiling, so a genuine near-OOM recurrence writes one heap snapshot (in the process's current working directory) pinpointing the retainer; `1` \| `0`. | Set `0` to suppress — a near-OOM snapshot of an 8 GB+ heap can be multi-GB on disk. |
 | `MEMORIAHUB_SHARP_CONCURRENCY` | *(auto — half the cores, clamped 1–4)* | Per-pipeline libvips thread cap sharp uses (integer, 1–4); bounds peak native memory so it doesn't scale with cores × in-flight jobs. Paired with disabling sharp's per-process operation cache (a worker sees only distinct images, so the cache never hits and only pins native memory). | Override if the auto-computed default doesn't fit the host's available cores/memory. |
+| `MEMORIAHUB_MEMWATCH` | `1` (enabled) | The memory watchdog samples `process.memoryUsage()` on an interval into the worker log (rss / heapUsed / heapTotal / external / arrayBuffers / heapLimit), escalating to `warn` past 85% of the ceiling so a slow climb is visible (see §3.5); `1` \| `0`. | Set `0` to silence the periodic sample line. |
+| `MEMORIAHUB_HEAP_RESTART_FRACTION` | `0.90` | heapUsed/heapLimit fraction at which the pre-OOM safety valve fires: `node start` drains in-flight jobs (bounded 60 s) and exits `75` for a supervised restart; the TUI dashboard stops its embedded engine instead (see §3.5). A fraction in (0,1]; `0` disables. | Lower (e.g. `0.85`) to recycle sooner on a tight box; `0` to opt out entirely. |
 | `FACE_MAX_IMAGE_DIM` | `2000` | Max long-edge pixels before downscaling for face detection. | Lower to 768–1024 on memory-constrained workers to shrink the per-job decoded-image buffer. |
 | `TAG_MAX_IMAGE_DIM` | `1568` | Max long-edge pixels before downscaling for the auto-tagging vision call. | Same rationale as above; 1568 matches Anthropic's own auto-downscale threshold. |
 
@@ -211,7 +213,21 @@ On startup the worker re-execs itself once with `--max-old-space-size` raised to
 
 **Memory-limited container caveat:** the auto-computed heap size is 50% of the *host's* physical RAM, which can exceed what a container's own cgroup memory limit allows when the container is capped well below the host total. In that case, set `MEMORIAHUB_MAX_OLD_SPACE_MB` explicitly to a value below the container's memory limit (or `0` to disable heap re-tuning and fall back to Node's default ceiling).
 
-See §3.3 above for the full env-var reference: `MEMORIAHUB_MAX_OLD_SPACE_MB`, `MEMORIAHUB_HEAP_SNAPSHOT`, `MEMORIAHUB_SHARP_CONCURRENCY`.
+**Raising the ceiling is necessary but not always sufficient.** A raised heap only buys time against a genuine (e.g. native-dependency) memory leak — the climb is slower but still terminal. Two runtime aids exist for exactly that case, plus a mitigation on the CLIP path:
+
+**Memory watchdog (`MEMORIAHUB_MEMWATCH`, default on).** The worker samples `process.memoryUsage()` on an interval (default 60 s) and writes one structured line per sample to the worker log — `rss`, `heapUsed`, `heapTotal`, `external`, `arrayBuffers`, `heapLimit` (MB) and the heapUsed fraction — escalating to a `warn` line past 85% of the ceiling. This makes a slow climb visible in `memoriahub node logs` and, crucially, tells you **which pool** is growing: `heapUsed` climbing → a JS-object/string/typed-array leak (V8-managed); `external`/`arrayBuffers` climbing → native buffers (sharp / onnxruntime / undici); `rss` ≫ `heapUsed` → off-heap/native allocator. Pair it with the heap snapshot (`MEMORIAHUB_HEAP_SNAPSHOT`): the log says which pool, the snapshot names the exact retainer.
+
+**Pre-OOM safety valve (`MEMORIAHUB_HEAP_RESTART_FRACTION`, default 0.90).** The first time `heapUsed` crosses this fraction of the ceiling, the worker pre-empts the OOM instead of crashing:
+- **`node start` (container / systemd / daemon):** drains in-flight jobs (bounded to 60 s so a stuck job can't wedge the exit) then exits with code `75`, so the supervisor starts a **fresh** process — the container's `restart: unless-stopped` restarts on any exit, and the `node service` systemd unit's `Restart=on-failure` restarts on the non-zero code. **No work is lost:** drained/expired job leases are re-queued server-side. This turns an OOM crash-loop into a clean pre-emptive recycle. It **requires a supervisor** — a bare, unsupervised foreground `node start` will exit and stay down, so run sustained imports via the container or the systemd service, not a raw foreground process.
+- **Tools > Worker Node TUI dashboard:** never kills the interactive session (and restarting only the in-process engine wouldn't free native singletons like the CLIP session), so it drains and stops the embedded engine and logs a message telling you to relaunch — ideally as a daemon/container for sustained loads.
+
+Set `MEMORIAHUB_HEAP_RESTART_FRACTION=0` to disable the valve.
+
+**CLIP-path mitigation.** The shared onnxruntime CLIP path (`duplicate_detection`) now disables the CPU mem arena / mem-pattern pools and disposes input/output tensors after each inference — parity-safe (the embedding is unchanged), reducing steady-state growth on that hot path. This lowers the likelihood of the leak; it is not a guaranteed cure, which is why the watchdog and safety valve exist.
+
+**Capturing a heap snapshot to pin a leak.** On any version, run the worker with `NODE_OPTIONS="--heapsnapshot-near-heap-limit=2"`; when it nears OOM Node writes a `Heap.*.heapsnapshot` file to the process's working directory. Open it in Chrome DevTools → Memory → **Load**, sort by **Retained Size**, and the top constructor names the retainer. (On this build the flag is already applied automatically unless `MEMORIAHUB_HEAP_SNAPSHOT=0`.)
+
+See §3.3 above for the full env-var reference: `MEMORIAHUB_MAX_OLD_SPACE_MB`, `MEMORIAHUB_HEAP_SNAPSHOT`, `MEMORIAHUB_SHARP_CONCURRENCY`, `MEMORIAHUB_MEMWATCH`, `MEMORIAHUB_HEAP_RESTART_FRACTION`.
 
 ---
 
@@ -331,3 +347,4 @@ Give the worker container an explicit memory limit and a matching heap cap using
 |---------|------|--------|---------|
 | 1.0 | July 2026 | AI Assistant | Initial consolidated operator reference for the worker-container architecture: API-side env vars, worker-container env vars, CompreFace sizing, credentials, four recommended presets, and fleet-health verification steps. |
 | 1.1 | July 2026 | AI Assistant | Documented worker-node memory/OOM hardening (`apps/cli/src/node/runtime-tuning.ts`): new §3.5, the three new env vars (`MEMORIAHUB_MAX_OLD_SPACE_MB`, `MEMORIAHUB_HEAP_SNAPSHOT`, `MEMORIAHUB_SHARP_CONCURRENCY`), and the core/RAM-aware `MEMORIAHUB_CONCURRENCY` default. |
+| 1.2 | July 2026 | AI Assistant | Documented the memory watchdog (`MEMORIAHUB_MEMWATCH`), the pre-OOM drain-and-restart safety valve (`MEMORIAHUB_HEAP_RESTART_FRACTION`), the CLIP-path onnxruntime mitigation, and the heap-snapshot capture recipe in §3.5 + §3.3. Companion to the leak investigation (issue #156). |
