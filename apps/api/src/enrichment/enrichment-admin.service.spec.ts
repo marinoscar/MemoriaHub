@@ -1374,4 +1374,137 @@ describe('EnrichmentAdminService', () => {
         .toBe(countWhere.OR[0].finishedAt.gte.getTime());
     });
   });
+
+  // =========================================================================
+  // getStats — TTL cache (issue #135)
+  //
+  // 91aa065 added a 2 s in-process cache (`statsCache` / `STATS_CACHE_TTL_MS`)
+  // around getStats() so the admin Job Queue dashboard's 5 s poll (possibly
+  // from multiple tabs) reuses one computed result instead of re-running the
+  // full-table groupBy aggregates on every request. These tests cover: a
+  // cache hit collapsing repeated Prisma calls within the TTL window, cache
+  // expiry after the TTL forcing a fresh query, and that the cache is a
+  // genuine per-instance field (not a module-level/static singleton shared
+  // across service instances).
+  // =========================================================================
+
+  describe('getStats — TTL cache', () => {
+    // Mirrors STATS_CACHE_TTL_MS in enrichment-admin.service.ts (not exported).
+    const CACHE_TTL_MS = 2000;
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('reuses the cached result on a second call within the TTL window, without re-querying Prisma', async () => {
+      (mockPrisma.enrichmentJob.groupBy as jest.Mock)
+        .mockResolvedValueOnce([{ status: JobStatus.pending, _count: { id: 5 } }]) // statusGroups
+        .mockResolvedValueOnce([]); // typeStatusGroups
+      (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
+
+      const first = await service.getStats();
+      const second = await service.getStats();
+
+      // Same cached object returned — not just structurally equal.
+      expect(second).toBe(first);
+      expect(second.byStatus.pending).toBe(5);
+
+      // Only the first call's two groupBy + two count queries were issued.
+      expect(mockPrisma.enrichmentJob.groupBy).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.enrichmentJob.count).toHaveBeenCalledTimes(2);
+    });
+
+    it('a third call still inside the TTL window keeps reusing the same cached value', async () => {
+      (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
+
+      const first = await service.getStats();
+      await service.getStats();
+      const third = await service.getStats();
+
+      expect(third).toBe(first);
+      expect(mockPrisma.enrichmentJob.groupBy).toHaveBeenCalledTimes(2);
+    });
+
+    it('expires the cache after the TTL elapses and recomputes from a fresh Prisma query', async () => {
+      jest.useFakeTimers();
+
+      const firstStatusGroups = [{ status: JobStatus.pending, _count: { id: 1 } }];
+      const secondStatusGroups = [{ status: JobStatus.pending, _count: { id: 9 } }];
+
+      (mockPrisma.enrichmentJob.groupBy as jest.Mock)
+        .mockResolvedValueOnce(firstStatusGroups) // call 1: statusGroups
+        .mockResolvedValueOnce([]) // call 1: typeStatusGroups
+        .mockResolvedValueOnce(secondStatusGroups) // call 2: statusGroups
+        .mockResolvedValueOnce([]); // call 2: typeStatusGroups
+      (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
+
+      const first = await service.getStats();
+      expect(first.byStatus.pending).toBe(1);
+
+      // Still within the TTL — would return the cached value if queried here.
+      jest.advanceTimersByTime(CACHE_TTL_MS - 1);
+
+      // Advance past the TTL boundary.
+      jest.advanceTimersByTime(2);
+
+      const second = await service.getStats();
+
+      expect(second.byStatus.pending).toBe(9);
+      expect(second).not.toBe(first);
+      expect(mockPrisma.enrichmentJob.groupBy).toHaveBeenCalledTimes(4);
+      expect(mockPrisma.enrichmentJob.count).toHaveBeenCalledTimes(4);
+    });
+
+    it('a call still inside the TTL window does not hit Prisma again (fake-timer control case)', async () => {
+      jest.useFakeTimers();
+
+      (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
+
+      await service.getStats();
+      jest.advanceTimersByTime(CACHE_TTL_MS - 1);
+      await service.getStats();
+
+      // Second call landed just before expiry — still served from cache.
+      expect(mockPrisma.enrichmentJob.groupBy).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not share the cache across separate service instances (per-instance field, not a static/module-level singleton)', async () => {
+      const mockPrismaB = createMockPrismaService();
+      const mockSettingsServiceB = {
+        getSettings: jest.fn().mockResolvedValue({
+          jobs: { stuckThresholdMinutes: SETTINGS_STUCK_THRESHOLD_MINUTES },
+        }),
+      };
+
+      const moduleB: TestingModule = await Test.createTestingModule({
+        providers: [
+          EnrichmentAdminService,
+          { provide: PrismaService, useValue: mockPrismaB },
+          { provide: SystemSettingsService, useValue: mockSettingsServiceB },
+        ],
+      }).compile();
+      const serviceB = moduleB.get<EnrichmentAdminService>(EnrichmentAdminService);
+
+      (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
+      (mockPrismaB.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([]);
+      (mockPrismaB.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
+
+      // Warm instance A's cache.
+      await service.getStats();
+      expect(mockPrisma.enrichmentJob.groupBy).toHaveBeenCalledTimes(2);
+
+      // A fresh instance B must issue its own Prisma queries — if the cache
+      // were a static/module-level variable, this call would be served from
+      // instance A's cache and mockPrismaB.groupBy would never be called.
+      await serviceB.getStats();
+      expect(mockPrismaB.enrichmentJob.groupBy).toHaveBeenCalledTimes(2);
+
+      // instance A's own cache is unaffected by instance B's call.
+      await service.getStats();
+      expect(mockPrisma.enrichmentJob.groupBy).toHaveBeenCalledTimes(2);
+    });
+  });
 });
