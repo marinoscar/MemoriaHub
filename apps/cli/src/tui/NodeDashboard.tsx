@@ -37,6 +37,8 @@ import { ComputeDispatcher, NODE_JOB_TYPES } from '../node/capabilities.js';
 import { NodeEngine, type NodeEngineOptions } from '../node/node-engine.js';
 import { NODE_EV } from '../node/node-events.js';
 import { ensureModels } from '../node/models.js';
+import { configureSharpRuntime } from '../node/runtime-tuning.js';
+import { startMemoryWatchdog } from '../node/memory-watchdog.js';
 import { isDaemonRunning } from '../node/ipc-client.js';
 import { readPidFile } from '../node/daemon.js';
 import { BOX_BORDER } from './theme.js';
@@ -187,6 +189,7 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
   const [doctorSweep, setDoctorSweep] = useState<DoctorSweepState | null>(null);
 
   const mountedRef = useRef<boolean>(true);
+  const stopMemWatchRef = useRef<(() => void) | null>(null);
 
   const pushLog = useCallback((level: 'error' | 'warn' | 'info', msg: string): void => {
     setDash((prev) => appendLogLines(prev, [{ level, msg }]));
@@ -200,6 +203,8 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
       const src = sourceRef.current;
       if (src instanceof EmbeddedDashboardSource) src.releaseEngine();
       engineRef.current = null;
+      stopMemWatchRef.current?.();
+      stopMemWatchRef.current = null;
       setEngineState('stopped');
     }
   }, []);
@@ -259,6 +264,8 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
       sourceRef.current?.close();
       sourceRef.current = null;
       engineRef.current = null;
+      stopMemWatchRef.current?.();
+      stopMemWatchRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -314,6 +321,40 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
         modelStatus: `Model manifest unavailable: ${err instanceof Error ? err.message : String(err)}`,
       }));
     }
+
+    // Bound libvips/sharp once before the embedded engine claims image work,
+    // so peak native memory doesn't scale with cores × in-flight jobs (the
+    // launchTui guard already raised the V8 heap ceiling for this process).
+    await configureSharpRuntime();
+
+    // Surface memory pressure in the dashboard log so a slow climb is visible
+    // (heapUsed vs external/arrayBuffers vs rss). Stopped when the engine stops.
+    //
+    // Safety valve (TUI): unlike `node start` — which drains and exits for a
+    // supervised restart — we must NOT kill an interactive session, and
+    // restarting just the in-process engine wouldn't free native singletons
+    // (the CLIP session, sharp) held for the TUI's lifetime. So on critical
+    // pressure we drain and STOP the embedded engine to halt further growth,
+    // and tell the operator to relaunch (ideally as a daemon/container for
+    // sustained loads).
+    stopMemWatchRef.current?.();
+    stopMemWatchRef.current = startMemoryWatchdog(
+      (level, s) =>
+        pushLog(
+          level,
+          `memory rss=${s.rssMb}MB heapUsed=${s.heapUsedMb}/${s.heapLimitMb}MB external=${s.externalMb}MB arrayBuffers=${s.arrayBuffersMb}MB`,
+        ),
+      {
+        onCritical: (s) => {
+          pushLog(
+            'error',
+            `heap at ${Math.round(s.heapUsedFraction * 100)}% of ceiling — stopping the embedded worker to pre-empt an out-of-memory crash. ` +
+              'Relaunch it (press s), or run it as a daemon/container (auto-restarts) for sustained loads.',
+          );
+          void engineRef.current?.stop('memory-pressure', { deregister: false });
+        },
+      },
+    );
 
     const engine = new NodeEngine({
       api,

@@ -42,6 +42,7 @@ import {
   createClipSession,
   embedImageWithSession,
   looksLikeOnnxModel,
+  DEFAULT_CLIP_RECYCLE_AFTER,
   VISUAL_EMBEDDING_MODEL_TAG,
 } from '@memoriahub/enrichment-compute/clip';
 import { PrismaService } from '../prisma/prisma.service';
@@ -86,6 +87,14 @@ export class VisualEmbeddingService implements OnApplicationBootstrap, OnModuleD
   private idleTimer: NodeJS.Timeout | null = null;
   private degraded = false;
   private degradedWarned = false;
+
+  // Bounded-lifetime recycling: release + recreate the ONNX session every N
+  // embeds so any native memory it accumulates across run() calls over a
+  // long-running import is periodically reclaimed. `inFlightEmbeds` guards the
+  // release so a session is never torn down mid-run() (enrichment worker
+  // concurrency can be >1). `CLIP_SESSION_RECYCLE_AFTER` overrides; 0 disables.
+  private embedsSinceLoad = 0;
+  private inFlightEmbeds = 0;
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -215,6 +224,7 @@ export class VisualEmbeddingService implements OnApplicationBootstrap, OnModuleD
       const modelPath = await this.ensureModel();
       const session = await createClipSession(modelPath);
       this.session = session;
+      this.embedsSinceLoad = 0;
       this.resetIdleTimer();
       return session;
     } catch (err) {
@@ -260,11 +270,42 @@ export class VisualEmbeddingService implements OnApplicationBootstrap, OnModuleD
       return null;
     }
 
+    this.inFlightEmbeds += 1;
     try {
       return await embedImageWithSession(session, buffer);
     } catch (err) {
       this.logger.warn(`embedImage failed: ${err instanceof Error ? err.message : String(err)}`);
       return null;
+    } finally {
+      this.inFlightEmbeds -= 1;
+      this.embedsSinceLoad += 1;
+      this.maybeRecycleSession();
+    }
+  }
+
+  /** Env-resolved embed count before a session recycle (0 disables). */
+  private resolveRecycleAfter(): number {
+    const env = process.env['CLIP_SESSION_RECYCLE_AFTER'];
+    if (env !== undefined && env.trim() !== '') {
+      const n = Number.parseInt(env, 10);
+      if (Number.isFinite(n) && n >= 0) return n;
+    }
+    return DEFAULT_CLIP_RECYCLE_AFTER;
+  }
+
+  /**
+   * Recycle the session once it has served `recycleAfter` embeds — but only
+   * when no embed is in flight, so `release()` never tears down a session a
+   * concurrent `run()` is still using. `releaseSession()` nulls `this.session`;
+   * the next `getSession()` reloads a fresh one (which resets the counter).
+   */
+  private maybeRecycleSession(): void {
+    const recycleAfter = this.resolveRecycleAfter();
+    if (recycleAfter <= 0) return;
+    if (this.embedsSinceLoad >= recycleAfter && this.inFlightEmbeds === 0 && this.session) {
+      this.logger.debug(`Recycling CLIP ONNX session after ${this.embedsSinceLoad} embeds`);
+      this.releaseSession();
+      this.embedsSinceLoad = 0;
     }
   }
 
