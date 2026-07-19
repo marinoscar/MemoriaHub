@@ -2,8 +2,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
-| **Last Updated** | June 2026 |
+| **Version** | 1.1 |
+| **Last Updated** | July 2026 |
 | **Status** | Implemented |
 
 ---
@@ -65,6 +65,18 @@ Each request runs two categories of SQL:
 - `COUNT(*) FILTER (WHERE finishedAt >= now() - interval '1 hour') / 60.0` — throughput per minute (succeeded in last 60 minutes / 60)
 
 The duration window (`windowDays`) prevents the aggregate from scanning the entire history table on instances with millions of succeeded rows. The default of 7 days captures recent performance without including data from before the last tuning change.
+
+### `getStats()` Supporting Indexes and Caching (issue #135)
+
+`getInsights()`'s `live` block is produced by calling `EnrichmentAdminService.getStats()` internally (also the backing query for the standalone `GET /api/admin/jobs/stats`, polled every 5s by the Job Queue dashboard). `getStats()` runs two full-table `groupBy` aggregates — `by: ['status']` and `by: ['type', 'status']` — with no `WHERE` clause. Migration `20260719010000_enrichment_jobs_stats_perf_indexes` adds three indexes to cut the cost of these and of the duration/retry aggregates above:
+
+- `enrichment_jobs_status_type_id_idx` on `(status, type, id)` — a single covering index answering both unconditional `groupBy` calls via Index-Only Scan (the leading `status` key serves the plain status groupBy, the trailing `type` key serves the `(type, status)` groupBy, and `id` is included so `COUNT(id)` never touches the heap).
+- `enrichment_jobs_attempts_gt1_idx`, partial on `WHERE attempts > 1` — speeds up the `retried` count (Section 4) since only a small fraction of rows match.
+- `enrichment_jobs_succeeded_duration_idx`, partial on `WHERE status='succeeded' AND started_at IS NOT NULL AND finished_at IS NOT NULL`, keyed `(finished_at, started_at, type)` — serves the windowed duration aggregates above plus the un-windowed lifetime duration query in Section 7.
+
+`getStats()` additionally caches its result in-process for 2s (`STATS_CACHE_TTL_MS`), shorter than the dashboard's 5s poll interval so a single tab never visibly observes stale data. This collapses concurrent/rapid callers — multiple admin tabs polling, or `getInsights()` invoking `getStats()` moments after a plain stats poll — into one computed result instead of re-running the aggregates per call. There is no invalidation hook: mutation endpoints (retry, resetStuck, delete, ...) rely on the frontend's own `refresh()` call in `useJobs.ts` to pick up fresh data, the same passive-staleness tradeoff `SystemSettingsService.getSettings()`'s cache already makes elsewhere in the codebase.
+
+**Deliberately not time-windowed.** Issue #135 itself proposed scoping `getStats()`'s `byStatus`/`byType` counts to a recent activity window instead of (or in addition to) indexing, to bound the aggregate's row count directly. This was investigated and rejected: `apps/web/src/pages/Admin/JobsPage.tsx` uses `stats.byStatus.failed === 0` to gate the "Retry all failed" button, and renders `stats.total` / `byStatus.*` / `byType[].total` as plain, unlabeled all-time counts. Windowing would silently break that button's correctness and put the stats cards out of sync with the jobs table's own all-time total (`meta.totalItems` from `listJobs`, which defaults to `processedWithin: 'all'`). The shipped fix is index-and-cache only — `getStats()`'s return shape and all-time semantics are unchanged. Do not reintroduce windowing here without also updating `JobsPage.tsx`'s consumption of these fields.
 
 ---
 
@@ -472,3 +484,4 @@ The 5 000-row batch DELETE uses a single statement with a `LIMIT`. Each batch ho
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | June 2026 | AI Assistant | Initial specification |
+| 1.1 | July 2026 | AI Assistant | Document `getStats()` supporting indexes and 2s TTL cache (issue #135), and the rejected time-windowing alternative |
