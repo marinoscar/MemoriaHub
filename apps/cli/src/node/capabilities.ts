@@ -136,6 +136,13 @@ async function probeCompreface(baseUrl: string): Promise<CapabilityStatus> {
 // `thumbnail_regen` type is node-runnable (same compute module server-side).
 // `face_auto_archive_sweep` and `location_inference` sweeps are server-only
 // for the same reason.
+//
+// `workflow_execute_batch` (issue #144) IS node-runnable: it needs no media
+// bytes (inputUrl is null) and no models/native deps — the node runs a pure-JS
+// pass over the frozen action list to declare per-item intended outcomes, and
+// the API's persistNodeResult re-does all authoritative DB work server-side.
+// The three workflow SWEEP/SQL types (`workflow_evaluate`,
+// `workflow_evaluate_item`, `workflow_history_purge`) stay server-only.
 export const NODE_JOB_TYPES = [
   'face_detection',
   'video_face_detection',
@@ -145,6 +152,7 @@ export const NODE_JOB_TYPES = [
   'thumbnail_regen',
   'auto_tagging',
   'geocode',
+  'workflow_execute_batch',
 ] as const;
 
 export type NodeJobType = (typeof NODE_JOB_TYPES)[number];
@@ -169,6 +177,8 @@ export const JOB_TYPE_REQUIREMENTS: Record<NodeJobType, string[]> = {
   thumbnail_regen: ['sharp', 'ffmpeg'],
   auto_tagging: ['sharp'],
   geocode: [],
+  // Pure-JS declaration pass — no native libs, no model files, no ffmpeg.
+  workflow_execute_batch: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -434,6 +444,10 @@ export class ComputeDispatcher {
       thumbnail_regen: lazy(() => import('./compute/thumbnail.js'), 'thumbnail_regen'),
       auto_tagging: lazy(() => import('./compute/auto-tagging.js'), 'auto_tagging'),
       geocode: lazy(() => import('./compute/geocode.js'), 'geocode'),
+      workflow_execute_batch: lazy(
+        () => import('./compute/workflow-execute-batch.js'),
+        'workflow_execute_batch',
+      ),
     };
   }
 
