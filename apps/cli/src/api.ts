@@ -26,6 +26,31 @@ export interface Circle {
   // other fields may be present but we only need these
 }
 
+/** Minimal Media Workflow Automation summary (issue #144 — thin CLI surface). */
+export interface WorkflowSummary {
+  id: string;
+  name: string;
+  subjectType: string;
+  enabled: boolean;
+  trigger: string;
+  createdAt: string;
+  // other fields may be present but we only need these
+}
+
+/** Minimal workflow run summary for `workflow run`/`workflow runs`. */
+export interface WorkflowRunSummary {
+  id: string;
+  status: string;
+  triggerType: string;
+  matchedCount: number;
+  processedCount: number;
+  succeededCount: number;
+  failedCount: number;
+  skippedCount: number;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
 export interface BackupRunResult {
   runId: string;
   scope: string;
@@ -382,6 +407,38 @@ export class ApiClient {
     // parseOk() unwraps `data`, leaving the pagination object — so pull `items`.
     // Tolerate a bare array too, in case the endpoint is ever simplified.
     const res = await this.get<Circle[] | { items?: Circle[] }>('/api/circles');
+    if (Array.isArray(res)) return res;
+    return res?.items ?? [];
+  }
+
+  // -------------------------------------------------------------------------
+  // Media Workflow Automation (issue #144) — thin, PAT-authed, circle-scoped.
+  // The web UI is the primary surface; these mirror listCircles' envelope
+  // unwrapping (parseOk strips { data }, leaving the paginated { items, meta }).
+  // -------------------------------------------------------------------------
+
+  async listWorkflows(circleId: string): Promise<WorkflowSummary[]> {
+    const res = await this.get<WorkflowSummary[] | { items?: WorkflowSummary[] }>(
+      `/api/workflows?circleId=${encodeURIComponent(circleId)}`,
+    );
+    if (Array.isArray(res)) return res;
+    return res?.items ?? [];
+  }
+
+  async runWorkflow(
+    workflowId: string,
+    body: { maxItems?: number } = {},
+  ): Promise<{ runId: string; status: string }> {
+    return this.post<{ runId: string; status: string }>(
+      `/api/workflows/${encodeURIComponent(workflowId)}/run`,
+      body,
+    );
+  }
+
+  async listWorkflowRuns(workflowId: string): Promise<WorkflowRunSummary[]> {
+    const res = await this.get<WorkflowRunSummary[] | { items?: WorkflowRunSummary[] }>(
+      `/api/workflows/${encodeURIComponent(workflowId)}/runs`,
+    );
     if (Array.isArray(res)) return res;
     return res?.items ?? [];
   }

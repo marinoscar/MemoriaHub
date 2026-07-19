@@ -1,5 +1,6 @@
 /**
- * Unit tests for WorkflowExecuteBatchHandler (issue #140).
+ * Unit tests for WorkflowExecuteBatchHandler (issue #140; extended for the
+ * node-execution compute/persist split in issue #144).
  *
  * Covers:
  *   - Per-item idempotency: only 'matched' items are claimed; an already-
@@ -12,6 +13,11 @@
  *   - Run finalize: completed vs completed_with_errors, and the race-safe
  *     conditional updateMany (only fires the audit/cache-clear once).
  *   - Cooperative cancellation mid-batch (checked every 25 items).
+ *   - (#144) workflowExecuteBatchResultSchema (nodeResultSchema) validation.
+ *   - (#144) persistNodeResult: re-runs the SAME executeBatch pipeline as
+ *     process() from the TRUSTED job.payload — idempotency, drift
+ *     re-validation, and per-item status semantics all hold identically,
+ *     and the node's advisory `result.items` are proven to be ignored.
  *
  * No database required -- PrismaService, WorkflowConditionCompiler, and
  * WorkflowActionExecutor are mocked; revalidateItemMatches is jest.mock'd as a
@@ -20,6 +26,7 @@
 
 import { EnrichmentJob, WorkflowRunItemStatus, WorkflowRunStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { workflowExecuteBatchResultSchema } from '@memoriahub/enrichment-compute/dto';
 import { WorkflowExecuteBatchHandler } from './workflow-execute-batch.handler';
 import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -387,6 +394,293 @@ describe('WorkflowExecuteBatchHandler', () => {
       expect(executor.execute).toHaveBeenCalledTimes(25);
       // The run bails out before ever reaching maybeFinalizeRun.
       expect(prisma.workflowRun.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  // ===========================================================================
+  // (#144) workflowExecuteBatchResultSchema (nodeResultSchema) validation
+  // ===========================================================================
+
+  describe('workflowExecuteBatchResultSchema (nodeResultSchema)', () => {
+    it('accepts a well-formed per-item outcome list', () => {
+      const result = {
+        runId: RUN_ID,
+        items: [
+          {
+            mediaItemId: 'item-1',
+            actionResults: [{ type: 'add_tags', status: 'applied' }],
+          },
+          {
+            mediaItemId: 'item-2',
+            actionResults: [{ type: 'move_to_trash' }], // status is optional
+          },
+          { mediaItemId: 'item-3' }, // actionResults itself is optional
+        ],
+      };
+      expect(() => workflowExecuteBatchResultSchema.parse(result)).not.toThrow();
+    });
+
+    it('accepts an empty items array', () => {
+      expect(() =>
+        workflowExecuteBatchResultSchema.parse({ runId: RUN_ID, items: [] }),
+      ).not.toThrow();
+    });
+
+    it('rejects a payload missing runId', () => {
+      expect(() =>
+        workflowExecuteBatchResultSchema.parse({ items: [] }),
+      ).toThrow();
+    });
+
+    it('rejects a payload with a non-empty-string runId violated', () => {
+      expect(() =>
+        workflowExecuteBatchResultSchema.parse({ runId: '', items: [] }),
+      ).toThrow();
+    });
+
+    it('rejects a payload missing items', () => {
+      expect(() =>
+        workflowExecuteBatchResultSchema.parse({ runId: RUN_ID }),
+      ).toThrow();
+    });
+
+    it('rejects an item missing mediaItemId', () => {
+      expect(() =>
+        workflowExecuteBatchResultSchema.parse({
+          runId: RUN_ID,
+          items: [{ actionResults: [] }],
+        }),
+      ).toThrow();
+    });
+
+    it('rejects an actionResults entry with an invalid status enum value', () => {
+      expect(() =>
+        workflowExecuteBatchResultSchema.parse({
+          runId: RUN_ID,
+          items: [
+            {
+              mediaItemId: 'item-1',
+              actionResults: [{ type: 'add_tags', status: 'not-a-real-status' }],
+            },
+          ],
+        }),
+      ).toThrow();
+    });
+
+    it('rejects an actionResults entry missing type', () => {
+      expect(() =>
+        workflowExecuteBatchResultSchema.parse({
+          runId: RUN_ID,
+          items: [{ mediaItemId: 'item-1', actionResults: [{ status: 'applied' }] }],
+        }),
+      ).toThrow();
+    });
+
+    it('rejects a completely malformed payload (items not an array)', () => {
+      expect(() =>
+        workflowExecuteBatchResultSchema.parse({ runId: RUN_ID, items: 'not-an-array' }),
+      ).toThrow();
+    });
+  });
+
+  // ===========================================================================
+  // (#144) persistNodeResult — the persist half of the compute/persist split
+  // ===========================================================================
+
+  describe('persistNodeResult', () => {
+    /** A node-submitted result already validated against the schema above. */
+    function makeNodeResult(overrides: Record<string, unknown> = {}) {
+      return {
+        runId: RUN_ID,
+        items: [{ mediaItemId: 'item-1', actionResults: [{ type: 'add_tags', status: 'applied' }] }],
+        ...overrides,
+      };
+    }
+
+    it('is a no-op when the job payload is missing runId/itemIds', async () => {
+      await handler.persistNodeResult(
+        makeJob({ notARealField: true }),
+        makeNodeResult(),
+      );
+      expect(executor.execute).not.toHaveBeenCalled();
+      expect(prisma.workflowRun.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op when the run is gone', async () => {
+      prisma.workflowRun.findUnique.mockResolvedValue(null);
+      await handler.persistNodeResult(
+        makeJob({ runId: RUN_ID, itemIds: ['item-1'] }),
+        makeNodeResult(),
+      );
+      expect(executor.execute).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op when the run is cancelled', async () => {
+      prisma.workflowRun.findUnique.mockResolvedValue(
+        makeRun({ status: WorkflowRunStatus.cancelled }) as any,
+      );
+      await handler.persistNodeResult(
+        makeJob({ runId: RUN_ID, itemIds: ['item-1'] }),
+        makeNodeResult(),
+      );
+      expect(executor.execute).not.toHaveBeenCalled();
+    });
+
+    it('re-runs the SAME pipeline as process(): executes actions from the TRUSTED job.payload itemIds, not from the node result', async () => {
+      // The node result declares an outcome for a DIFFERENT item ('item-99')
+      // than the one actually listed in job.payload ('item-1') — proving the
+      // server drives execution off job.payload, never off result.items.
+      await handler.persistNodeResult(
+        makeJob({ runId: RUN_ID, itemIds: ['item-1'] }),
+        makeNodeResult({ items: [{ mediaItemId: 'item-99', actionResults: [] }] }),
+      );
+
+      expect(executor.execute).toHaveBeenCalledTimes(1);
+      expect(executor.execute).toHaveBeenCalledWith(
+        expect.anything(),
+        { id: 'item-1' }, // job.payload's item, not the node's advisory 'item-99'
+        expect.anything(),
+      );
+    });
+
+    describe('per-item idempotency', () => {
+      it('skips an already-terminal item (claim count 0) without calling the executor or incrementing counters, even when the node declared it applied', async () => {
+        prisma.workflowRunItem.updateMany.mockResolvedValueOnce({ count: 0 } as any); // claim fails
+
+        await handler.persistNodeResult(
+          makeJob({ runId: RUN_ID, itemIds: ['item-1'] }),
+          makeNodeResult({
+            items: [{ mediaItemId: 'item-1', actionResults: [{ type: 'add_tags', status: 'applied' }] }],
+          }),
+        );
+
+        expect(executor.execute).not.toHaveBeenCalled();
+        const counterUpdate = (prisma.workflowRun.update as jest.Mock).mock.calls.find(
+          (c) => c[0].data?.processedCount,
+        );
+        expect(counterUpdate).toBeUndefined();
+      });
+
+      it('processes an item that is still matched (claim succeeds)', async () => {
+        await handler.persistNodeResult(
+          makeJob({ runId: RUN_ID, itemIds: ['item-1'] }),
+          makeNodeResult(),
+        );
+        expect(executor.execute).toHaveBeenCalledTimes(1);
+        const counterUpdate = (prisma.workflowRun.update as jest.Mock).mock.calls.find(
+          (c) => c[0].data?.processedCount,
+        );
+        expect(counterUpdate).toBeDefined();
+      });
+    });
+
+    describe('drift re-validation', () => {
+      it('finalizes an item as skipped WITHOUT calling the executor when it no longer matches, even when the node declared it applied', async () => {
+        mockRevalidate.mockResolvedValueOnce(false);
+
+        await handler.persistNodeResult(
+          makeJob({ runId: RUN_ID, itemIds: ['item-1'] }),
+          makeNodeResult({
+            items: [{ mediaItemId: 'item-1', actionResults: [{ type: 'add_tags', status: 'applied' }] }],
+          }),
+        );
+
+        expect(executor.execute).not.toHaveBeenCalled();
+        const finalize = (prisma.workflowRunItem.updateMany as jest.Mock).mock.calls.find(
+          (c) => c[0].data?.status === WorkflowRunItemStatus.skipped,
+        );
+        expect(finalize).toBeDefined();
+      });
+    });
+
+    describe("the node's advisory result.items are ignored — the server recomputes the true outcome", () => {
+      it('finalizes with the REAL executor-derived status even when the node advisory claims a different outcome', async () => {
+        // Node claims 'skipped', but the REAL (mocked) executor reports 'applied'.
+        executor.execute.mockResolvedValue({ status: 'applied' });
+
+        await handler.persistNodeResult(
+          makeJob({ runId: RUN_ID, itemIds: ['item-1'] }),
+          makeNodeResult({
+            items: [{ mediaItemId: 'item-1', actionResults: [{ type: 'add_tags', status: 'skipped' }] }],
+          }),
+        );
+
+        const finalize = (prisma.workflowRunItem.updateMany as jest.Mock).mock.calls.find(
+          (c) => c[0].data?.status,
+        );
+        expect(finalize[0].data.status).toBe(WorkflowRunItemStatus.applied);
+      });
+
+      it('finalizes with the REAL executor-derived failure even when the node advisory claims success', async () => {
+        executor.execute.mockResolvedValue({ status: 'failed', detail: 'server disagrees' });
+
+        await handler.persistNodeResult(
+          makeJob({ runId: RUN_ID, itemIds: ['item-1'] }),
+          makeNodeResult({
+            items: [{ mediaItemId: 'item-1', actionResults: [{ type: 'add_tags', status: 'applied' }] }],
+          }),
+        );
+
+        const finalize = (prisma.workflowRunItem.updateMany as jest.Mock).mock.calls.find(
+          (c) => c[0].data?.status,
+        );
+        expect(finalize[0].data.status).toBe(WorkflowRunItemStatus.failed);
+      });
+    });
+
+    describe('move_to_circle re-verification at persist', () => {
+      it('runs move_to_circle through the SAME executor.execute path as process() — the cross-circle dedup/permission re-check happens inside the (real) executor, unaffected by which caller invoked the pipeline', async () => {
+        const targetCircleId = randomUUID();
+        prisma.workflowRun.findUnique.mockResolvedValue(
+          makeRun({
+            definitionSnapshot: {
+              version: 1,
+              subject: 'media_item',
+              match: 'all',
+              conditions: [],
+              actions: [{ type: 'move_to_circle', targetCircleId }],
+            },
+          }) as any,
+        );
+        executor.execute.mockResolvedValue({ status: 'applied' });
+
+        await handler.persistNodeResult(
+          makeJob({ runId: RUN_ID, itemIds: ['item-1'] }),
+          makeNodeResult(),
+        );
+
+        // Same executor.execute(action, item, ctx) call shape process() would
+        // make — persistNodeResult does not special-case move_to_circle at all;
+        // WorkflowActionExecutor.moveToCircle owns the actual both-circle
+        // permission + dedup re-verification (see workflow-action.executor.ts),
+        // and it runs identically regardless of which entrypoint called it.
+        expect(executor.execute).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: 'move_to_circle',
+            params: expect.objectContaining({ targetCircleId }),
+          }),
+          { id: 'item-1' },
+          expect.anything(),
+        );
+      });
+    });
+
+    describe('run finalize (identical to process())', () => {
+      it('finalizes completed_with_errors when a failure occurs, exactly as process() would', async () => {
+        executor.execute.mockResolvedValue({ status: 'failed', detail: 'boom' });
+        prisma.workflowRunItem.count.mockResolvedValue(0);
+        (prisma.workflowRunItem.groupBy as jest.Mock).mockResolvedValue([
+          { status: WorkflowRunItemStatus.failed, _count: { _all: 1 } },
+        ]);
+
+        await handler.persistNodeResult(
+          makeJob({ runId: RUN_ID, itemIds: ['item-1'] }),
+          makeNodeResult(),
+        );
+
+        const finalize = (prisma.workflowRun.updateMany as jest.Mock).mock.calls[0];
+        expect(finalize[0].data.status).toBe(WorkflowRunStatus.completed_with_errors);
+      });
     });
   });
 });

@@ -293,6 +293,31 @@ export class NodesService {
    * the returned params, preserving any existing job.payload fields.
    */
   private async resolveJobParams(job: EnrichmentJob): Promise<unknown> {
+    // workflow_execute_batch (issue #144): the node needs the frozen action list
+    // (types + params) to build its per-item intended-outcome declaration. It
+    // lives on the run's definitionSnapshot, not the job payload, so fold it in
+    // here. The per-item drift re-validation stays SERVER-ONLY (its compiled
+    // predicates are JS functions, not serializable, and require DB access), so
+    // it is NOT sent to the node — the server re-validates authoritatively in
+    // persistNodeResult. A best-effort read; a missing run yields no actions.
+    if (job.type === 'workflow_execute_batch') {
+      const basePayload =
+        job.payload && typeof job.payload === 'object' && !Array.isArray(job.payload)
+          ? (job.payload as Record<string, unknown>)
+          : {};
+      const runId = typeof basePayload['runId'] === 'string' ? basePayload['runId'] : null;
+      let actions: unknown[] = [];
+      if (runId) {
+        const run = await this.prisma.workflowRun.findUnique({
+          where: { id: runId },
+          select: { definitionSnapshot: true },
+        });
+        const snapshot = run?.definitionSnapshot as { actions?: unknown[] } | null | undefined;
+        if (snapshot && Array.isArray(snapshot.actions)) actions = snapshot.actions;
+      }
+      return { ...basePayload, actions };
+    }
+
     if (job.type !== 'video_face_detection') {
       return job.payload ?? null;
     }

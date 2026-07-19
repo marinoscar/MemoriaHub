@@ -212,3 +212,45 @@ export const geocodeResultSchema = z.object({
   source: z.string(),
 });
 export type GeocodeResult = z.infer<typeof geocodeResultSchema>;
+
+// ---------------------------------------------------------------------------
+// workflow_execute_batch (Media Workflow Automation — issue #144)
+// ---------------------------------------------------------------------------
+
+/**
+ * The node-submitted result for a `workflow_execute_batch` job.
+ *
+ * IMPORTANT — this is a DECLARATION OF INTENDED OUTCOMES, not authoritative
+ * state. Unlike every other node-result DTO in this file (where the node does
+ * the numeric compute and the server merely persists it), a workflow batch is
+ * DB-bound: there is no CPU-heavy compute to offload. The node produces this
+ * per-item intent list from the frozen action list carried in the claim
+ * `params`, but the API's `persistNodeResult` re-does ALL authoritative work
+ * server-side (per-item idempotent claim, drift re-validation, action
+ * execution, counters) from the TRUSTED `job.payload` — it does not trust these
+ * `items` to decide what to mutate. A stale/forged node result therefore can
+ * never bypass the per-item guard or act on items outside the batch. Node
+ * eligibility here is about POSTURE COMPLETENESS: an `ENRICHMENT_WORKER_MODE=off`
+ * (fleet-only) deployment must still be able to execute workflows.
+ */
+export const workflowExecuteBatchResultSchema = z.object({
+  /** The run this batch belongs to (echoed from the claim params for cross-checking). */
+  runId: z.string().min(1),
+  /** Per-item intended outcomes the node computed from the frozen action list. */
+  items: z.array(
+    z.object({
+      mediaItemId: z.string().min(1),
+      /** The ordered actions the node intended to apply (type only — the server owns the real result). */
+      actionResults: z
+        .array(
+          z.object({
+            type: z.string().min(1),
+            /** Node-declared intent; the server recomputes the true status, so this is advisory only. */
+            status: z.enum(['pending', 'applied', 'skipped', 'failed']).optional(),
+          }),
+        )
+        .optional(),
+    }),
+  ),
+});
+export type WorkflowExecuteBatchResult = z.infer<typeof workflowExecuteBatchResultSchema>;

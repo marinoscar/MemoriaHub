@@ -240,9 +240,11 @@ describe('registerWorkerNode', () => {
       { detectFn, saveConfigFn, hostnameFn: () => 'box42' },
     );
 
-    // With no capabilities available, only geocode (no requirements) survives.
-    expect(registerCalls[0]?.eligibleTypes).toEqual(['geocode']);
-    expect(res.eligibleTypes).toEqual(['geocode']);
+    // With no capabilities available, only the two job types with no
+    // requirements survive: geocode and workflow_execute_batch (pure-JS
+    // declaration pass, no native libs — see NODE_JOB_TYPES ordering).
+    expect(registerCalls[0]?.eligibleTypes).toEqual(['geocode', 'workflow_execute_batch']);
+    expect(res.eligibleTypes).toEqual(['geocode', 'workflow_execute_batch']);
   });
 
   it('preserves an existing configured poll interval', async () => {
