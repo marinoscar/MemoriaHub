@@ -127,6 +127,7 @@ export class WorkflowRunService {
       skipDedup: true,
     });
 
+    this.logTransition(run, run.status, 'run_started', { actorUserId: user.id });
     await this.audit(user.id, 'workflow_run:started', run.id, {
       workflowId: workflow.id,
       circleId: workflow.circleId,
@@ -203,6 +204,9 @@ export class WorkflowRunService {
       skipDedup: true,
     });
 
+    this.logTransition(run, run.status, 'run_started_unattended', {
+      actorUserId: creatorUserId,
+    });
     await this.audit(creatorUserId, 'workflow_run:started', run.id, {
       workflowId: workflow.id,
       circleId: workflow.circleId,
@@ -287,6 +291,10 @@ export class WorkflowRunService {
 
     await this.enqueueExecuteBatches(updated, definition, settings);
 
+    this.logTransition(updated, WorkflowRunStatus.running, 'run_approved', {
+      actorUserId: user.id,
+      remainingMatched,
+    });
     await this.audit(user.id, 'workflow_run:approved', run.id, {
       remainingMatched,
       excluded: excluded.length,
@@ -320,7 +328,42 @@ export class WorkflowRunService {
       data: { status: WorkflowRunStatus.cancelled, finishedAt: new Date() },
     });
 
+    this.logTransition(run, WorkflowRunStatus.cancelled, 'run_cancelled', {
+      actorUserId: user.id,
+    });
     await this.audit(user.id, 'workflow_run:cancelled', run.id, {});
+
+    return { runId: run.id, status: WorkflowRunStatus.cancelled };
+  }
+
+  /**
+   * Admin override cancel — stops a runaway run app-wide WITHOUT a per-circle
+   * membership check (the caller is gated by Admin role + jobs:write at the
+   * controller). Same terminal-state guard and cancellation write as the
+   * circle-scoped cancelRun; audited as `workflow_run:admin_cancelled`.
+   */
+  async adminCancelRun(
+    runId: string,
+    actorUserId: string,
+  ): Promise<{ runId: string; status: WorkflowRunStatus }> {
+    await this.assertFeatureEnabled();
+
+    const run = await this.prisma.workflowRun.findUnique({ where: { id: runId } });
+    if (!run) throw new NotFoundException(`Workflow run ${runId} not found`);
+
+    if (TERMINAL_RUN_STATUSES.includes(run.status)) {
+      throw new BadRequestException('Run already finished');
+    }
+
+    await this.prisma.workflowRun.update({
+      where: { id: run.id },
+      data: { status: WorkflowRunStatus.cancelled, finishedAt: new Date() },
+    });
+
+    this.logTransition(run, WorkflowRunStatus.cancelled, 'run_admin_cancelled', {
+      actorUserId,
+    });
+    await this.audit(actorUserId, 'workflow_run:admin_cancelled', run.id, {});
 
     return { runId: run.id, status: WorkflowRunStatus.cancelled };
   }
@@ -745,6 +788,28 @@ export class WorkflowRunService {
       throw new NotFoundException('Workflows feature is not enabled');
     }
     return settings;
+  }
+
+  /**
+   * Structured Pino log line for a run-state transition, always tagged with
+   * runId / workflowId / circleId so a run's lifecycle can be traced in the
+   * logs. Best-effort — never throws.
+   */
+  private logTransition(
+    run: Pick<WorkflowRun, 'id' | 'workflowId' | 'circleId' | 'triggerType'>,
+    toStatus: WorkflowRunStatus,
+    event: string,
+    extra: Record<string, unknown> = {},
+  ): void {
+    this.logger.log({
+      event: `workflow_run.${event}`,
+      runId: run.id,
+      workflowId: run.workflowId,
+      circleId: run.circleId,
+      triggerType: run.triggerType,
+      status: toStatus,
+      ...extra,
+    });
   }
 
   private async audit(

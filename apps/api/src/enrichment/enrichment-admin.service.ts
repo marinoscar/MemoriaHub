@@ -12,6 +12,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { defaultStuckThresholdMinutes } from '../common/types/settings.types';
 import { ENRICHMENT_MAX_ATTEMPTS } from './enrichment-job.worker';
+import { jobTypeLabel } from './job-type-labels';
 
 /** Default rolling window (days) for the duration-history aggregate. */
 export const INSIGHTS_WINDOW_DAYS = 7;
@@ -25,6 +26,8 @@ const ETA_FALLBACK_MS = 5000;
 
 export interface JobStatsByType {
   type: string;
+  /** Human-readable display name for the job type (see JOB_TYPE_LABELS). */
+  label: string;
   pending: number;
   running: number;
   succeeded: number;
@@ -271,7 +274,15 @@ export class EnrichmentAdminService {
       const count = row._count.id;
 
       if (!typeMap.has(type)) {
-        typeMap.set(type, { type, pending: 0, running: 0, succeeded: 0, failed: 0, total: 0 });
+        typeMap.set(type, {
+          type,
+          label: jobTypeLabel(type),
+          pending: 0,
+          running: 0,
+          succeeded: 0,
+          failed: 0,
+          total: 0,
+        });
       }
 
       const entry = typeMap.get(type)!;

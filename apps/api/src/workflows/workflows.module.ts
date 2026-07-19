@@ -23,6 +23,8 @@ import { WorkflowScheduleTask } from './runs/workflow-schedule.task';
 import { WorkflowEvaluateItemHandler } from './runs/workflow-evaluate-item.handler';
 import { WorkflowMicroRunFinalizeTask } from './runs/workflow-micro-run-finalize.task';
 import { WorkflowTriggerListener } from './runs/workflow-trigger.listener';
+import { WorkflowsAdminController } from './admin/workflows-admin.controller';
+import { WorkflowsAdminService } from './admin/workflows-admin.service';
 
 /**
  * Media Workflow Automation — Phase 2 action library (issue #140).
@@ -54,9 +56,10 @@ import { WorkflowTriggerListener } from './runs/workflow-trigger.listener';
     LocationInferenceModule,
     EnrichmentModule,
   ],
-  controllers: [WorkflowsController, WorkflowRunsController],
+  controllers: [WorkflowsController, WorkflowRunsController, WorkflowsAdminController],
   providers: [
     WorkflowsService,
+    WorkflowsAdminService,
     WorkflowDefinitionValidator,
     WorkflowConditionCompiler,
     WorkflowActionExecutor,

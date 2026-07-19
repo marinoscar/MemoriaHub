@@ -29,6 +29,7 @@ import {
   Movie as MovieIcon,
   Hub as HubIcon,
   Email as EmailIcon,
+  AccountTree as AccountTreeIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 
@@ -212,6 +213,13 @@ export default function SettingsHubPage() {
           icon: <PublicIcon sx={{ fontSize: 40 }} color="primary" />,
           path: '/admin/settings/sharing',
           permission: 'shares:manage_any',
+        },
+        {
+          title: 'Workflow Automation',
+          description: 'Control workflow blast radius, throughput, and safety; oversee runs across all circles.',
+          icon: <AccountTreeIcon sx={{ fontSize: 40 }} color="primary" />,
+          path: '/admin/settings/workflows',
+          permission: 'system_settings:read',
         },
         {
           title: 'Doctor',

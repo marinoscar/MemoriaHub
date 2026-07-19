@@ -94,6 +94,21 @@ export interface SystemSettings {
     /** Size fallback (bytes) used only when the duration is unknown. */
     maxSizeBytes?: number;
   };
+  workflows?: {
+    maxItemsPerRun?: number;
+    batchSize?: number;
+    maxConcurrentRuns?: number;
+    requirePreview?: boolean;
+    allowHardDelete?: boolean;
+    maxWorkflowsPerCircle?: number;
+    previewTtlHours?: number;
+    runHistoryRetentionDays?: number;
+    triggers?: {
+      onEnrichment?: boolean;
+      scheduled?: boolean;
+    };
+    scheduleMinIntervalMinutes?: number;
+  };
   updatedAt: string;
   updatedBy: { id: string; email: string } | null;
   version: number;

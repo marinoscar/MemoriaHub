@@ -9,6 +9,7 @@
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
+import { WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   SystemSettingsService,
@@ -51,6 +52,15 @@ interface SectionDef {
 
 /** Per-check timeout — a hung provider call must not hang the whole sweep. */
 const CHECK_TIMEOUT_MS = 10_000;
+
+/**
+ * How long a workflow run may sit non-terminal (running/evaluating) without any
+ * counter progress before it's flagged as stuck. Deliberately generous — a
+ * single run can legitimately churn through 150k+ items across many
+ * `workflow_execute_batch` jobs — so this is well above the (default 3-minute)
+ * enrichment stuck threshold to avoid false positives.
+ */
+const WORKFLOW_STUCK_MINUTES = 30;
 
 /** Sentinel thrown by the timeout race branch; never surfaced to callers. */
 const TIMEOUT_SENTINEL = Symbol('doctor-check-timeout');
@@ -158,6 +168,12 @@ export class DoctorService {
         label: 'Node capability health',
         fn: () => this.checkNodesCapabilityHealth(),
       },
+      // Workflows (Media Workflow Automation)
+      {
+        key: 'workflows.state',
+        label: 'Workflow engine state',
+        fn: () => this.checkWorkflowsState(settings),
+      },
     ];
 
     const settled = await Promise.allSettled(defs.map((def) => this.runCheck(def)));
@@ -229,6 +245,11 @@ export class DoctorService {
           'nodes.staleLeases',
           'nodes.capabilityHealth',
         ],
+      },
+      {
+        key: 'workflows',
+        label: 'Workflows',
+        checkKeys: ['workflows.state'],
       },
     ];
 
@@ -1009,6 +1030,102 @@ export class DoctorService {
       status: 'ok',
       message: 'Burst detection enabled (no provider required; depends on the enrichment worker).',
     };
+  }
+
+  // ===========================================================================
+  // Workflows check (Media Workflow Automation)
+  //
+  // Pure DB reads only. Surfaces operational inconsistencies an admin should act
+  // on: an env kill-switch overriding the feature flag; runs stuck non-terminal
+  // with no counter progress; awaiting_approval runs past their TTL that the
+  // purge task should have expired; and scheduled workflows that will never fire
+  // because the scheduled-trigger master switch is off.
+  // ===========================================================================
+
+  private async checkWorkflowsState(settings: ResolvedSettings): Promise<CheckOutcome> {
+    if (settings.features?.['workflows'] !== true) {
+      return { status: 'skipped', message: 'Workflows feature is disabled.' };
+    }
+
+    const warnings: string[] = [];
+    const actions: string[] = [];
+
+    // (a) Env kill-switch overriding the feature flag.
+    if (process.env['WORKFLOWS_ENABLED'] === 'false') {
+      warnings.push(
+        'Feature enabled in settings but WORKFLOWS_ENABLED=false overrides it — no workflows run.',
+      );
+      actions.push('Remove or set WORKFLOWS_ENABLED=true.');
+    }
+
+    const now = Date.now();
+    const stuckCutoff = new Date(now - WORKFLOW_STUCK_MINUTES * 60_000);
+    const previewTtlHours = settings.workflows?.previewTtlHours ?? 24;
+    const approvalCutoff = new Date(now - previewTtlHours * 3_600_000);
+    const scheduledTriggerOn = settings.workflows?.triggers?.scheduled !== false;
+
+    const [stuckRuns, staleApprovalRuns, scheduledWorkflows] = await Promise.all([
+      // (b) Runs non-terminal past the stuck window (no counter progress since
+      //     updatedAt bumps on every counter write) — served by (status, updatedAt).
+      this.prisma.workflowRun.count({
+        where: {
+          status: { in: [WorkflowRunStatus.running, WorkflowRunStatus.evaluating] },
+          updatedAt: { lt: stuckCutoff },
+        },
+      }),
+      // (c) awaiting_approval runs past their TTL that were never expired — the
+      //     history-purge task mirrors this exact predicate.
+      this.prisma.workflowRun.count({
+        where: {
+          status: WorkflowRunStatus.awaiting_approval,
+          updatedAt: { lt: approvalCutoff },
+        },
+      }),
+      // (d) Enabled scheduled workflows that will never fire while the master
+      //     scheduled-trigger switch is off. Only relevant when the switch is off.
+      scheduledTriggerOn
+        ? Promise.resolve(0)
+        : this.prisma.workflow.count({
+            where: { enabled: true, trigger: WorkflowTrigger.scheduled },
+          }),
+    ]);
+
+    if (stuckRuns > 0) {
+      warnings.push(
+        `${stuckRuns} workflow run(s) stuck non-terminal with no progress for over ${WORKFLOW_STUCK_MINUTES} min.`,
+      );
+      actions.push(
+        'Cancel the stuck run(s) from Admin → Workflows and check the enrichment worker/queue for wedged workflow jobs.',
+      );
+    }
+
+    if (staleApprovalRuns > 0) {
+      warnings.push(
+        `${staleApprovalRuns} awaiting-approval run(s) are past their ${previewTtlHours}h TTL but not expired — the history-purge task may not be running.`,
+      );
+      actions.push(
+        'Verify the workflow_history_purge cron/job is running so stale approval runs expire.',
+      );
+    }
+
+    if (scheduledWorkflows > 0) {
+      warnings.push(
+        `${scheduledWorkflows} enabled scheduled workflow(s) exist but the scheduled trigger is turned off — they will never run.`,
+      );
+      actions.push(
+        'Enable workflows.triggers.scheduled in Admin → Workflows, or disable the scheduled workflows.',
+      );
+    }
+
+    if (warnings.length > 0) {
+      return {
+        status: 'warning',
+        message: warnings.join(' '),
+        actionItem: actions.join(' '),
+      };
+    }
+
+    return { status: 'ok', message: 'Workflows enabled; no stuck, stale, or misconfigured runs.' };
   }
 
   // ===========================================================================

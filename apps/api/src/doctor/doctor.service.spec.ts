@@ -13,6 +13,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
+import { WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
 import { DoctorService } from './doctor.service';
 import { DoctorCheck, DoctorReport } from './doctor.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -229,7 +230,7 @@ describe('DoctorService', () => {
       mockNoWorkerNodes(mockPrisma);
     });
 
-    it('returns sections in the documented order: core, auth, storage, ai, face, geo, jobs, nodes', async () => {
+    it('returns sections in the documented order: core, auth, storage, ai, face, geo, jobs, nodes, workflows', async () => {
       const report = await service.runDiagnostics();
 
       expect(report.sections.map((s) => s.key)).toEqual([
@@ -241,6 +242,7 @@ describe('DoctorService', () => {
         'geo',
         'jobs',
         'nodes',
+        'workflows',
       ]);
     });
 
@@ -276,7 +278,7 @@ describe('DoctorService', () => {
       }
     });
 
-    it('includes all 27 documented checks across the 8 sections', async () => {
+    it('includes all 28 documented checks across the 9 sections', async () => {
       const report = await service.runDiagnostics();
 
       const allKeys = report.sections.flatMap((s) => s.checks.map((c) => c.key));
@@ -309,6 +311,7 @@ describe('DoctorService', () => {
         'nodes.heartbeatFreshness',
         'nodes.staleLeases',
         'nodes.capabilityHealth',
+        'workflows.state',
       ]);
     });
   });
@@ -352,7 +355,7 @@ describe('DoctorService', () => {
       // Unrelated checks are unaffected.
       expect(findCheck(report, 'core.database').status).toBe('ok');
       expect(findCheck(report, 'ai.search').status).toBe('ok');
-      expect(report.summary.total).toBe(28);
+      expect(report.summary.total).toBe(29);
     });
   });
 
@@ -392,7 +395,7 @@ describe('DoctorService', () => {
         // The rest of the report still completed normally.
         expect(findCheck(report, 'core.database').status).toBe('ok');
         expect(findCheck(report, 'ai.search').status).toBe('ok');
-        expect(report.summary.total).toBe(28);
+        expect(report.summary.total).toBe(29);
       } finally {
         jest.useRealTimers();
       }
@@ -1230,6 +1233,173 @@ describe('DoctorService', () => {
       const check = findCheck(report, 'nodes.capabilityHealth');
 
       expect(check.status).toBe('skipped');
+    });
+  });
+
+  // =========================================================================
+  // 12. workflows.state — Media Workflow Automation (issue #143)
+  // =========================================================================
+
+  describe('workflows.state', () => {
+    /**
+     * Routes the two distinct `workflowRun.count` calls the check makes
+     * (stuck non-terminal runs vs. stale awaiting_approval runs) to separate
+     * canned values by inspecting the `status.in` filter, since both share the
+     * same mocked method.
+     */
+    function mockWorkflowRunCounts(opts: { stuck?: number; staleApproval?: number } = {}): void {
+      (mockPrisma.workflowRun.count as jest.Mock).mockImplementation((args: any) => {
+        const status = args?.where?.status;
+        const statusIn: string[] | undefined = status?.in;
+        if (statusIn?.includes(WorkflowRunStatus.running)) {
+          return Promise.resolve(opts.stuck ?? 0);
+        }
+        if (status === WorkflowRunStatus.awaiting_approval) {
+          return Promise.resolve(opts.staleApproval ?? 0);
+        }
+        return Promise.resolve(0);
+      });
+    }
+
+    beforeEach(() => {
+      process.env = healthyEnv();
+      mockQueryRawByText(mockPrisma, healthyQueryRawHandlers());
+      (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
+        provider: 's3',
+        enabled: true,
+      });
+      mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
+      mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
+      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
+      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
+      mockNoWorkerNodes(mockPrisma);
+      mockWorkflowRunCounts();
+      (mockPrisma.workflow.count as jest.Mock).mockResolvedValue(0);
+    });
+
+    it('is status:skipped when the workflows feature flag is off', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(makeSettings()); // features.workflows absent/false
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'workflows.state');
+
+      expect(check.status).toBe('skipped');
+      expect(check.message).toContain('disabled');
+      // Feature is off — the check must not touch workflowRun/workflow at all.
+      expect(mockPrisma.workflowRun.count).not.toHaveBeenCalled();
+      expect(mockPrisma.workflow.count).not.toHaveBeenCalled();
+    });
+
+    it('is status:ok when the feature is on and no runs are stuck, stale, or misconfigured', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeHealthySettings({ features: { autoTagging: false, faceRecognition: false, burstDetection: false, workflows: true } as any }),
+      );
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'workflows.state');
+
+      expect(check.status).toBe('ok');
+      expect(check.message).toContain('no stuck, stale, or misconfigured runs');
+    });
+
+    it('is status:warning when WORKFLOWS_ENABLED=false overrides the enabled feature flag (env kill-switch)', async () => {
+      process.env = healthyEnv({ WORKFLOWS_ENABLED: 'false' });
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeHealthySettings({ features: { autoTagging: false, faceRecognition: false, burstDetection: false, workflows: true } as any }),
+      );
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'workflows.state');
+
+      expect(check.status).toBe('warning');
+      expect(check.message).toContain('WORKFLOWS_ENABLED=false');
+      expect(check.actionItem).toContain('WORKFLOWS_ENABLED=true');
+    });
+
+    it('is status:warning when runs are stuck non-terminal past the stuck window with no progress', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeHealthySettings({ features: { autoTagging: false, faceRecognition: false, burstDetection: false, workflows: true } as any }),
+      );
+      mockWorkflowRunCounts({ stuck: 2 });
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'workflows.state');
+
+      expect(check.status).toBe('warning');
+      expect(check.message).toContain('2 workflow run(s) stuck non-terminal');
+      expect(check.actionItem).toContain('Cancel the stuck run(s)');
+    });
+
+    it('is status:warning when awaiting_approval runs are past their previewTtlHours TTL but not expired', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeHealthySettings({
+          features: { autoTagging: false, faceRecognition: false, burstDetection: false, workflows: true } as any,
+          workflows: { previewTtlHours: 12 } as any,
+        }),
+      );
+      mockWorkflowRunCounts({ staleApproval: 3 });
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'workflows.state');
+
+      expect(check.status).toBe('warning');
+      expect(check.message).toContain('3 awaiting-approval run(s)');
+      expect(check.message).toContain('12h TTL');
+      expect(check.actionItem).toContain('workflow_history_purge');
+    });
+
+    it('is status:warning when enabled scheduled workflows exist but workflows.triggers.scheduled is off', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeHealthySettings({
+          features: { autoTagging: false, faceRecognition: false, burstDetection: false, workflows: true } as any,
+          workflows: { triggers: { scheduled: false } } as any,
+        }),
+      );
+      (mockPrisma.workflow.count as jest.Mock).mockResolvedValue(4);
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'workflows.state');
+
+      expect(check.status).toBe('warning');
+      expect(check.message).toContain('4 enabled scheduled workflow(s)');
+      expect(check.actionItem).toContain('workflows.triggers.scheduled');
+      // Confirms the check only queries workflow.count when the scheduled
+      // trigger is off — never when it's on (see the other tests here).
+      expect(mockPrisma.workflow.count).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { enabled: true, trigger: WorkflowTrigger.scheduled } }),
+      );
+    });
+
+    it('does not query workflow.count for scheduled workflows when the scheduled trigger is on', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeHealthySettings({ features: { autoTagging: false, faceRecognition: false, burstDetection: false, workflows: true } as any }),
+      );
+
+      await service.runDiagnostics();
+
+      expect(mockPrisma.workflow.count).not.toHaveBeenCalled();
+    });
+
+    it('combines multiple simultaneous warnings into one message', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeHealthySettings({
+          features: { autoTagging: false, faceRecognition: false, burstDetection: false, workflows: true } as any,
+          workflows: { triggers: { scheduled: false } } as any,
+        }),
+      );
+      mockWorkflowRunCounts({ stuck: 1, staleApproval: 1 });
+      (mockPrisma.workflow.count as jest.Mock).mockResolvedValue(1);
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'workflows.state');
+
+      expect(check.status).toBe('warning');
+      expect(check.message).toContain('stuck non-terminal');
+      expect(check.message).toContain('awaiting-approval');
+      expect(check.message).toContain('enabled scheduled workflow(s)');
     });
   });
 });
