@@ -88,10 +88,15 @@ export function isEnrichmentWorkerEnabled(env: NodeJS.ProcessEnv = process.env):
  * The claim-eligibility set for `'system'` mode: every server-only type
  * (handlers WITHOUT the nodeResultSchema/persistNodeResult pair — they can
  * only ever run in-process, see EnrichmentHandlerRegistry.serverOnlyTypes)
- * PLUS `'thumbnail_repair'`, added explicitly because its handler DOES carry a
- * nodeResultSchema (interface parity with `thumbnail_regen`) but the job is a
- * global sweep (`mediaItemId: null`) that is not end-to-end node-claimable —
- * deriving the set purely from the schema pair would strand it entirely.
+ * PLUS `'thumbnail_repair'` and `'workflow_execute_batch'`, added explicitly
+ * because both handlers DO carry a nodeResultSchema yet must remain
+ * server-claimable in system mode. `thumbnail_repair` is a global sweep
+ * (`mediaItemId: null`) not end-to-end node-claimable; `workflow_execute_batch`
+ * (issue #144) is genuinely node-eligible but is a DB-bound batch that must
+ * still execute when no fleet exists — keeping it in the system set lets a
+ * `system`-mode deployment run workflows without a node (both server and node
+ * can claim; `FOR UPDATE SKIP LOCKED` makes that safe). Deriving the set purely
+ * from the schema pair would strand both types.
  *
  * `ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES` (comma-separated) is an operator escape
  * hatch to pin additional types to the server in system mode. Entries that are
@@ -105,6 +110,7 @@ export function systemModeEligibleTypes(
 ): string[] {
   const eligible = new Set(registry.serverOnlyTypes());
   eligible.add('thumbnail_repair');
+  eligible.add('workflow_execute_batch');
 
   const registered = new Set(registry.types());
   const extras = (env['ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES'] ?? '')

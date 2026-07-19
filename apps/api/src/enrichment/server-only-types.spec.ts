@@ -37,6 +37,9 @@ import { ThumbnailRegenHandler } from '../media/thumbnail-regen.handler';
 import { ThumbnailRepairHandler } from '../media/thumbnail-repair.handler';
 import { TrashPurgeHandler } from '../media/trash-purge.handler';
 import { WorkflowEvaluateItemHandler } from '../workflows/runs/workflow-evaluate-item.handler';
+import { WorkflowEvaluateHandler } from '../workflows/runs/workflow-evaluate.handler';
+import { WorkflowExecuteBatchHandler } from '../workflows/runs/workflow-execute-batch.handler';
+import { WorkflowHistoryPurgeHandler } from '../workflows/runs/workflow-history-purge.handler';
 
 /** Every registered enrichment handler class (keep in sync with the modules). */
 const ALL_HANDLER_CLASSES = [
@@ -58,6 +61,9 @@ const ALL_HANDLER_CLASSES = [
   ThumbnailRepairHandler,
   TrashPurgeHandler,
   WorkflowEvaluateItemHandler,
+  WorkflowEvaluateHandler,
+  WorkflowExecuteBatchHandler,
+  WorkflowHistoryPurgeHandler,
 ];
 
 /**
@@ -73,11 +79,23 @@ const DOCUMENTED_SERVER_ONLY_TYPES = [
   'storage_insights',
   'storage_migration',
   'trash_purge',
+  'workflow_evaluate',
   'workflow_evaluate_item',
+  'workflow_history_purge',
 ];
 
-/** Documented system-mode claim set = server-only + explicit thumbnail_repair. */
-const DOCUMENTED_SYSTEM_MODE_TYPES = [...DOCUMENTED_SERVER_ONLY_TYPES, 'thumbnail_repair'].sort();
+/**
+ * Documented system-mode claim set = server-only PLUS the two explicitly-pinned
+ * node-schema-bearing types (`thumbnail_repair` — global sweep; and
+ * `workflow_execute_batch` — issue #144, node-eligible but must stay
+ * server-claimable so a `system`-mode deployment can run workflows without a
+ * fleet). See systemModeEligibleTypes().
+ */
+const DOCUMENTED_SYSTEM_MODE_TYPES = [
+  ...DOCUMENTED_SERVER_ONLY_TYPES,
+  'thumbnail_repair',
+  'workflow_execute_batch',
+].sort();
 
 describe('server-only type derivation (drift guard)', () => {
   let registry: EnrichmentHandlerRegistry;
@@ -92,7 +110,7 @@ describe('server-only type derivation (drift guard)', () => {
     }
   });
 
-  it('registers all 18 known handler types', () => {
+  it('registers all known handler types', () => {
     expect(registry.types()).toHaveLength(ALL_HANDLER_CLASSES.length);
   });
 
@@ -100,7 +118,7 @@ describe('server-only type derivation (drift guard)', () => {
     expect(registry.serverOnlyTypes().sort()).toEqual(DOCUMENTED_SERVER_ONLY_TYPES);
   });
 
-  it('systemModeEligibleTypes = documented server-only set + thumbnail_repair', () => {
+  it('systemModeEligibleTypes = documented server-only set + thumbnail_repair + workflow_execute_batch', () => {
     expect(systemModeEligibleTypes(registry, {}).sort()).toEqual(DOCUMENTED_SYSTEM_MODE_TYPES);
   });
 
@@ -110,6 +128,15 @@ describe('server-only type derivation (drift guard)', () => {
     // explicit add becomes a harmless no-op.
     expect(registry.serverOnlyTypes()).not.toContain('thumbnail_repair');
     expect(systemModeEligibleTypes(registry, {})).toContain('thumbnail_repair');
+  });
+
+  it('workflow_execute_batch is node-eligible (has the node-result pair) yet still in the system-mode set', () => {
+    // Issue #144: the batch handler carries nodeResultSchema/persistNodeResult
+    // so a node can claim it, so serverOnlyTypes() must NOT list it — but it is
+    // explicitly pinned into the system-mode set so a `system`-mode deployment
+    // can execute workflows without a fleet.
+    expect(registry.serverOnlyTypes()).not.toContain('workflow_execute_batch');
+    expect(systemModeEligibleTypes(registry, {})).toContain('workflow_execute_batch');
   });
 
   it('every node-eligible media compute type is EXCLUDED from the system-mode set', () => {
