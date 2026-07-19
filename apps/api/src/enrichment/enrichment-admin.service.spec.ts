@@ -179,6 +179,25 @@ describe('EnrichmentAdminService', () => {
       expect(stats.byType[1].total).toBe(4);
     });
 
+    it('attaches a friendly label to each byType entry, including a workflow job type (#143)', async () => {
+      const statusGroups = [{ status: JobStatus.succeeded, _count: { id: 3 } }];
+      const typeStatusGroups = [
+        { type: 'face_detection', status: JobStatus.succeeded, _count: { id: 2 } },
+        { type: 'workflow_execute_batch', status: JobStatus.succeeded, _count: { id: 1 } },
+      ];
+
+      (mockPrisma.enrichmentJob.groupBy as jest.Mock)
+        .mockResolvedValueOnce(statusGroups)
+        .mockResolvedValueOnce(typeStatusGroups);
+      (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
+
+      const stats = await service.getStats();
+
+      const byType = Object.fromEntries(stats.byType.map((bt) => [bt.type, bt]));
+      expect(byType['face_detection'].label).toBe('Face detection');
+      expect(byType['workflow_execute_batch'].label).toBe('Workflow execute batch');
+    });
+
     it('accumulates multiple statuses per type into the same byType entry', async () => {
       const statusGroups = [
         { status: JobStatus.pending, _count: { id: 3 } },
