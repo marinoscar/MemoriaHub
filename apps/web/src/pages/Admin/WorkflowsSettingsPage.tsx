@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Navigate, Link as RouterLink } from 'react-router-dom';
 import {
   Container,
@@ -15,20 +15,38 @@ import {
   Snackbar,
   Link,
   Divider,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
 } from '@mui/material';
 import { AccountTree as AccountTreeIcon } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import type { SystemSettings } from '../../types';
 import { WorkflowsDangerCard } from '../../components/workflows/admin/WorkflowsDangerCard';
+import { WorkflowsKpiStrip } from '../../components/workflows/admin/WorkflowsKpiStrip';
+import { WorkflowsOversightTable } from '../../components/workflows/admin/WorkflowsOversightTable';
+import { WorkflowRunsDrawer } from '../../components/workflows/admin/WorkflowRunsDrawer';
+import {
+  getAdminWorkflowStats,
+  listAdminWorkflows,
+  listAdminWorkflowRuns,
+  disableAdminWorkflow,
+  cancelAdminWorkflowRun,
+  type AdminWorkflowStats,
+  type AdminWorkflowListItem,
+  type AdminWorkflowRun,
+} from '../../services/adminWorkflows';
 
 // ---------------------------------------------------------------------------
 // Media Workflow Automation — admin settings & oversight (issue #143).
 //
 // Sub-page of the Settings hub (Operations group). Feature/trigger toggles and
-// engine limits saved via PATCH /api/system-settings, a hard-delete danger
-// card, plus (Phase 5 checkpoint 3) a KPI strip and cross-circle oversight
-// table.
+// engine limits (PATCH /api/system-settings), a hard-delete danger card, a KPI
+// strip, and a cross-circle oversight table with disable / view-runs / cancel
+// row actions.
 // ---------------------------------------------------------------------------
 
 /** Defaults mirror the Phase 1 `workflows.*` Zod schema (issue #143 table). */
@@ -48,6 +66,10 @@ const DEFAULTS = {
 
 function WorkflowsSettingsContent() {
   const { settings, isSaving, updateSettings, error } = useSystemSettings();
+  const { hasPermission } = usePermissions();
+
+  const canManage = hasPermission('system_settings:write');
+  const canCancel = hasPermission('jobs:write');
 
   // Numeric limit fields (edited locally, saved via the "Save limits" button)
   const [maxItemsPerRun, setMaxItemsPerRun] = useState('');
@@ -59,8 +81,30 @@ function WorkflowsSettingsContent() {
   const [scheduleMinIntervalMinutes, setScheduleMinIntervalMinutes] = useState('');
   const [limitsSaving, setLimitsSaving] = useState(false);
 
+  // Feedback
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+
+  // Oversight data
+  const [stats, setStats] = useState<AdminWorkflowStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [workflows, setWorkflows] = useState<AdminWorkflowListItem[]>([]);
+  const [listLoading, setListLoading] = useState(true);
+  const [totalItems, setTotalItems] = useState(0);
+  const [page, setPage] = useState(0); // zero-based (MUI)
+  const [pageSize, setPageSize] = useState(25);
+
+  // Disable confirm
+  const [disableTarget, setDisableTarget] = useState<AdminWorkflowListItem | null>(null);
+  const [disabling, setDisabling] = useState(false);
+
+  // Runs drawer
+  const [runsWorkflow, setRunsWorkflow] = useState<AdminWorkflowListItem | null>(null);
+  const [runs, setRuns] = useState<AdminWorkflowRun[]>([]);
+  const [runsLoading, setRunsLoading] = useState(false);
+  const [runsError, setRunsError] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<AdminWorkflowRun | null>(null);
+  const [cancellingRunId, setCancellingRunId] = useState<string | null>(null);
 
   const wf = settings?.workflows;
 
@@ -80,6 +124,61 @@ function WorkflowsSettingsContent() {
       String(wf?.scheduleMinIntervalMinutes ?? DEFAULTS.scheduleMinIntervalMinutes),
     );
   }, [settings, wf]);
+
+  // -------------------------------------------------------------------------
+  // Oversight fetching
+  // -------------------------------------------------------------------------
+
+  const fetchStats = useCallback(async () => {
+    setStatsLoading(true);
+    try {
+      setStats(await getAdminWorkflowStats());
+    } catch {
+      setStats(null);
+    } finally {
+      setStatsLoading(false);
+    }
+  }, []);
+
+  const fetchWorkflows = useCallback(async () => {
+    setListLoading(true);
+    try {
+      const res = await listAdminWorkflows({ page: page + 1, pageSize });
+      setWorkflows(res.items);
+      setTotalItems(res.meta.totalItems);
+    } catch (err) {
+      setLocalError(
+        err instanceof Error ? err.message : 'Failed to load workflows',
+      );
+    } finally {
+      setListLoading(false);
+    }
+  }, [page, pageSize]);
+
+  useEffect(() => {
+    void fetchStats();
+  }, [fetchStats]);
+
+  useEffect(() => {
+    void fetchWorkflows();
+  }, [fetchWorkflows]);
+
+  const fetchRuns = useCallback(async (workflowId: string) => {
+    setRunsLoading(true);
+    setRunsError(null);
+    try {
+      const res = await listAdminWorkflowRuns({ workflowId, pageSize: 25 });
+      setRuns(res.items);
+    } catch (err) {
+      setRunsError(err instanceof Error ? err.message : 'Failed to load runs');
+    } finally {
+      setRunsLoading(false);
+    }
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Settings save helpers
+  // -------------------------------------------------------------------------
 
   const patch = (updates: Partial<SystemSettings>, successText?: string) =>
     updateSettings(updates)
@@ -132,6 +231,50 @@ function WorkflowsSettingsContent() {
       .finally(() => setLimitsSaving(false));
   };
 
+  // -------------------------------------------------------------------------
+  // Row action handlers
+  // -------------------------------------------------------------------------
+
+  const handleViewRuns = (item: AdminWorkflowListItem) => {
+    setRunsWorkflow(item);
+    setRuns([]);
+    void fetchRuns(item.id);
+  };
+
+  const handleConfirmDisable = () => {
+    if (!disableTarget) return;
+    setDisabling(true);
+    disableAdminWorkflow(disableTarget.id)
+      .then(() => {
+        setSuccessMessage(`Disabled "${disableTarget.name}"`);
+        setDisableTarget(null);
+        void fetchWorkflows();
+        void fetchStats();
+      })
+      .catch((err: unknown) => {
+        setLocalError(err instanceof Error ? err.message : 'Failed to disable workflow');
+      })
+      .finally(() => setDisabling(false));
+  };
+
+  const handleConfirmCancel = () => {
+    if (!cancelTarget) return;
+    const runId = cancelTarget.id;
+    setCancellingRunId(runId);
+    cancelAdminWorkflowRun(runId)
+      .then(() => {
+        setSuccessMessage('Run cancelled');
+        setCancelTarget(null);
+        if (runsWorkflow) void fetchRuns(runsWorkflow.id);
+        void fetchWorkflows();
+        void fetchStats();
+      })
+      .catch((err: unknown) => {
+        setLocalError(err instanceof Error ? err.message : 'Failed to cancel run');
+      })
+      .finally(() => setCancellingRunId(null));
+  };
+
   if (!settings && !error) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
@@ -173,6 +316,11 @@ function WorkflowsSettingsContent() {
           Control the blast radius, throughput, and safety of automated media
           workflows across every circle.
         </Typography>
+
+        {/* KPI strip */}
+        <Box sx={{ mb: 3 }}>
+          <WorkflowsKpiStrip stats={stats} loading={statsLoading} />
+        </Box>
 
         {/* Global feature toggle */}
         <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
@@ -351,7 +499,7 @@ function WorkflowsSettingsContent() {
         </Paper>
 
         {/* Danger card */}
-        <Box sx={{ mb: 2 }}>
+        <Box sx={{ mb: 3 }}>
           <WorkflowsDangerCard
             allowHardDelete={wf?.allowHardDelete ?? DEFAULTS.allowHardDelete}
             saving={isSaving}
@@ -359,7 +507,89 @@ function WorkflowsSettingsContent() {
             onToggle={handleAllowHardDeleteToggle}
           />
         </Box>
+
+        {/* Oversight table */}
+        <WorkflowsOversightTable
+          items={workflows}
+          loading={listLoading}
+          totalItems={totalItems}
+          page={page}
+          pageSize={pageSize}
+          canManage={canManage}
+          onPageChange={setPage}
+          onPageSizeChange={(next) => {
+            setPageSize(next);
+            setPage(0);
+          }}
+          onDisable={setDisableTarget}
+          onViewRuns={handleViewRuns}
+        />
       </Box>
+
+      {/* Runs drawer */}
+      <WorkflowRunsDrawer
+        open={!!runsWorkflow}
+        workflowName={runsWorkflow?.name ?? null}
+        runs={runs}
+        loading={runsLoading}
+        error={runsError}
+        canCancel={canCancel}
+        cancellingRunId={cancellingRunId}
+        onCancel={setCancelTarget}
+        onClose={() => setRunsWorkflow(null)}
+      />
+
+      {/* Disable confirm */}
+      <Dialog open={!!disableTarget} onClose={() => (disabling ? undefined : setDisableTarget(null))}>
+        <DialogTitle>Disable workflow?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Force-disable &quot;{disableTarget?.name}&quot; in{' '}
+            {disableTarget?.circle?.name ?? 'its circle'}? It will stop triggering and
+            can be re-enabled by a circle admin. This does not delete the workflow or
+            any media.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDisableTarget(null)} disabled={disabling}>
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={handleConfirmDisable}
+            disabled={disabling}
+            startIcon={disabling ? <CircularProgress size={16} /> : undefined}
+          >
+            Disable
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Cancel-run confirm */}
+      <Dialog open={!!cancelTarget} onClose={() => (cancellingRunId ? undefined : setCancelTarget(null))}>
+        <DialogTitle>Cancel this run?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Cancel the in-progress run for &quot;{runsWorkflow?.name}&quot;? Items already
+            actioned are not reverted, but no further items will be processed.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCancelTarget(null)} disabled={!!cancellingRunId}>
+            Keep running
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={handleConfirmCancel}
+            disabled={!!cancellingRunId}
+            startIcon={cancellingRunId ? <CircularProgress size={16} /> : undefined}
+          >
+            Cancel run
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={!!successMessage}
