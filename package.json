@@ -26,6 +26,6 @@
     "tesseract.js": "7.0.0"
   },
   "dependencies": {
-    "ink": "^6.8.0"
+    "ink": "^7.1.0"
   }
 }
