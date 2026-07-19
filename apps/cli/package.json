@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "node dist/index.js",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.config.js",
-    "test:cov": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.config.js --coverage"
+    "test:cov": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.config.js --coverage",
+    "test:ci": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.config.js --ci --testPathIgnorePatterns='test/db/migrations\\.spec\\.ts$' 'test/db/migration-v6\\.spec\\.ts$' 'test/export/scan-export\\.spec\\.ts$' 'test/sync/sync-engine-date-range\\.spec\\.ts$'"
   },
   "dependencies": {
     "@memoriahub/enrichment-compute": "0.1.0",

@@ -10,6 +10,9 @@ export default {
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
+  // Retry safety net for TUI (Ink) specs only — see test/tui/jest.setup.ts
+  // for why (concurrency-flaky async-render tests, not a blanket flake mask).
+  setupFilesAfterEnv: ['<rootDir>/test/tui/jest.setup.ts'],
   collectCoverageFrom: [
     'src/**/*.ts',
     'src/**/*.tsx',

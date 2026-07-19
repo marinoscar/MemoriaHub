@@ -29,6 +29,7 @@ import {
   breadcrumb,
   type MenuNode,
 } from '../../src/tui/menu-config.js';
+import { waitForFrame } from './wait-for.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -37,10 +38,6 @@ import {
 function stripAnsi(str: string): string {
   // eslint-disable-next-line no-control-regex
   return str.replace(/\x1B\[[0-9;]*m/g, '');
-}
-
-function flushAsync(ms = 30): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 const FAKE_CONFIG = { serverUrl: 'http://test.local', pat: 'tok-test' };
@@ -131,13 +128,33 @@ describe('menu navigation stack: root -> Sync -> back', () => {
   it('navigates into the Sync submenu and shows its breadcrumb + child label', async () => {
     const { lastFrame, stdin } = render(<NavHarness />);
 
-    // Move down from Login to Sync, then select it.
-    stdin.write('\x1B[B'); // down arrow
-    await flushAsync();
-    stdin.write('\r'); // Enter
-    await flushAsync();
+    // Move down from Login to Sync, and wait for the highlight to actually
+    // move before pressing Enter — ink-select-input tracks its own selected
+    // index internally, so sending Enter before that update (and the
+    // useInput re-subscription that follows it) has committed can be
+    // processed against the PREVIOUS selection instead of Sync. We detect
+    // "moved" by diffing the Sync row against its unselected baseline rather
+    // than matching a specific pointer glyph — ink-select-input's default
+    // indicator character varies by environment (Unicode-support detection),
+    // so a hardcoded glyph like '>' or '❯' is not portable across machines/CI
+    // (this is what broke this test in GitHub Actions CI despite passing
+    // locally). Diffing the raw (non-stripped) line also catches a
+    // color-only change, not just a glyph change.
+    const syncLineBaseline = (lastFrame() ?? '')
+      .split('\n')
+      .find((l) => l.includes('Sync ▸'));
 
-    const plain = stripAnsi(lastFrame()!);
+    stdin.write('\x1B[B'); // down arrow
+    await waitForFrame(lastFrame, (f) => {
+      const line = f.split('\n').find((l) => l.includes('Sync ▸'));
+      return !!line && line !== syncLineBaseline;
+    });
+
+    stdin.write('\r'); // Enter
+    const plain = await waitForFrame(lastFrame, (f) =>
+      stripAnsi(f).includes('Menu › Sync'),
+    ).then(stripAnsi);
+
     expect(plain).toContain('Menu › Sync');
     expect(plain).toContain('Sync all folders');
     expect(plain).toContain('Sync selected folders');
@@ -147,18 +164,24 @@ describe('menu navigation stack: root -> Sync -> back', () => {
   it('returns to the root menu after pressing Esc from the Sync submenu', async () => {
     const { lastFrame, stdin } = render(<NavHarness />);
 
-    stdin.write('\x1B[B');
-    await flushAsync();
-    stdin.write('\r');
-    await flushAsync();
+    const syncLineBaseline = (lastFrame() ?? '')
+      .split('\n')
+      .find((l) => l.includes('Sync ▸'));
 
-    // Confirm we're in the submenu first.
-    expect(stripAnsi(lastFrame()!)).toContain('Menu › Sync');
+    stdin.write('\x1B[B');
+    await waitForFrame(lastFrame, (f) => {
+      const line = f.split('\n').find((l) => l.includes('Sync ▸'));
+      return !!line && line !== syncLineBaseline;
+    });
+    stdin.write('\r');
+    await waitForFrame(lastFrame, (f) => stripAnsi(f).includes('Menu › Sync'));
 
     stdin.write('\x1B'); // Esc
-    await flushAsync();
+    const plain = await waitForFrame(lastFrame, (f) => {
+      const p = stripAnsi(f);
+      return p.includes('MemoriaHub') && !p.includes('Sync all folders');
+    }).then(stripAnsi);
 
-    const plain = stripAnsi(lastFrame()!);
     expect(plain).toContain('MemoriaHub');
     expect(plain).toContain('Sync ▸');
     expect(plain).not.toContain('Sync all folders');
