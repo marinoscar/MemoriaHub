@@ -37,6 +37,7 @@ import { ComputeDispatcher, NODE_JOB_TYPES } from '../node/capabilities.js';
 import { NodeEngine, type NodeEngineOptions } from '../node/node-engine.js';
 import { NODE_EV } from '../node/node-events.js';
 import { ensureModels } from '../node/models.js';
+import { configureSharpRuntime } from '../node/runtime-tuning.js';
 import { isDaemonRunning } from '../node/ipc-client.js';
 import { readPidFile } from '../node/daemon.js';
 import { BOX_BORDER } from './theme.js';
@@ -314,6 +315,11 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
         modelStatus: `Model manifest unavailable: ${err instanceof Error ? err.message : String(err)}`,
       }));
     }
+
+    // Bound libvips/sharp once before the embedded engine claims image work,
+    // so peak native memory doesn't scale with cores × in-flight jobs (the
+    // launchTui guard already raised the V8 heap ceiling for this process).
+    await configureSharpRuntime();
 
     const engine = new NodeEngine({
       api,

@@ -16,6 +16,7 @@ import React, { useState, useEffect } from 'react';
 import { Box, Text, render, useApp, useInput } from 'ink';
 
 import { loadConfig, type CliConfig } from '../config.js';
+import { maybeReexecWithHeapLimit } from '../node/runtime-tuning.js';
 import { openDb } from '../db/database.js';
 import { ApiClient, type Circle } from '../api.js';
 import { factoryReset } from '../reset.js';
@@ -788,6 +789,13 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
 // ---------------------------------------------------------------------------
 
 export async function launchTui(opts?: { currentVersion?: string }): Promise<void> {
+  // The Tools › Worker Node dashboard can own an in-process engine that runs
+  // for hours under sustained load — the same OOM exposure as `node start`.
+  // Raise V8's old-space ceiling to a RAM-aware value before Ink renders (see
+  // runtime-tuning.ts). Re-execs once; when it returns true this process is now
+  // a transparent signal-forwarding shim and must not render the UI.
+  if (maybeReexecWithHeapLimit()) return;
+
   if (!process.stdout.isTTY) {
     process.stdout.write(
       'The interactive UI needs a real terminal. ' +

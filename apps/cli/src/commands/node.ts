@@ -84,6 +84,13 @@ import { startDaemonHost, readPidFile, isPidAlive } from '../node/daemon.js';
 import { connectToDaemon, isDaemonRunning, type DaemonMessage } from '../node/ipc-client.js';
 import { checkNodeAlreadyRunning } from '../node/daemon-launch.js';
 import {
+  maybeReexecWithHeapLimit,
+  configureSharpRuntime,
+  heapNodeFlags,
+  tunedChildEnv,
+  resolveDefaultConcurrency,
+} from '../node/runtime-tuning.js';
+import {
   detectLinuxDistro,
   ensureNpmNativeDeps,
   ensureFfmpeg,
@@ -108,8 +115,12 @@ function cliVersion(): string {
   }
 }
 
-/** Default worker concurrency. */
-const DEFAULT_CONCURRENCY = 1;
+/**
+ * Default worker concurrency — core/RAM-aware, tuned for the assumed ≥16 GB /
+ * ≥8-core baseline (see runtime-tuning.ts). Still overridable per node via
+ * `--concurrency`, `MEMORIAHUB_CONCURRENCY`, or the persisted node config.
+ */
+const DEFAULT_CONCURRENCY = resolveDefaultConcurrency();
 
 /** Parse a comma-separated list of job types, validating each against the set. */
 function parseTypes(csv?: string): string[] {
@@ -389,6 +400,14 @@ function startCmd(): Command {
         faceProvider?: string;
         comprefaceUrl?: string;
       }) => {
+        // Harden the worker's memory posture before doing anything else: raise
+        // V8's old-space ceiling to a RAM-aware value so a long-running worker
+        // no longer OOMs at Node's ~2 GB default under sustained image load
+        // (assumes ≥16 GB RAM). This can only be set as a launch flag, so we
+        // re-exec once; when it returns true this process is now a
+        // signal-forwarding shim and must not continue.
+        if (maybeReexecWithHeapLimit()) return;
+
         const cfg = requireConfig();
         const headless = resolveHeadless(opts);
         // Headless/container mode may self-register below (config is already
@@ -452,9 +471,14 @@ function startCmd(): Command {
           const outPath = path.join(logsDir(), 'node.out.log');
           const logFd = fs.openSync(outPath, 'a');
           const args = process.argv.slice(2).filter((a) => a !== '--daemon');
-          const child = spawn(process.execPath, [process.argv[1], ...args], {
+          // Launch the detached worker already carrying the RAM-aware heap
+          // flags (and mark its env tuned) so it never re-execs itself — the
+          // detached child's stdio is a log file, not a tty, so a re-exec there
+          // would be needlessly opaque.
+          const child = spawn(process.execPath, [...heapNodeFlags(), process.argv[1], ...args], {
             detached: true,
             stdio: ['ignore', logFd, logFd],
+            env: tunedChildEnv(),
           });
           child.unref();
           fs.closeSync(logFd);
@@ -678,6 +702,12 @@ function startCmd(): Command {
         );
         ui.dim(`Log: ${logger.logPath}`);
         ui.dim(`IPC: ${host.socketPath}`);
+
+        // Bound libvips/sharp once (disable the useless-for-a-worker op cache,
+        // cap per-pipeline concurrency) so peak native memory doesn't scale
+        // with core count × in-flight jobs. Best-effort — no-op if sharp isn't
+        // installed on this node.
+        await configureSharpRuntime();
 
         await engine.start();
       },
