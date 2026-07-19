@@ -1227,10 +1227,15 @@ describe('systemModeEligibleTypes', () => {
     ],
   };
 
-  it("returns the server-only set plus the explicit 'thumbnail_repair' addition", () => {
+  it("returns the server-only set plus the explicit 'thumbnail_repair' and 'workflow_execute_batch' additions", () => {
     const types = systemModeEligibleTypes(registry, {});
 
-    expect(types.sort()).toEqual(['burst_detection', 'thumbnail_repair', 'trash_purge']);
+    expect(types.sort()).toEqual([
+      'burst_detection',
+      'thumbnail_repair',
+      'trash_purge',
+      'workflow_execute_batch',
+    ]);
   });
 
   it('excludes node-eligible media compute types', () => {
@@ -1251,6 +1256,7 @@ describe('systemModeEligibleTypes', () => {
       'face_detection',
       'thumbnail_repair',
       'trash_purge',
+      'workflow_execute_batch',
     ]);
   });
 
@@ -1337,7 +1343,7 @@ describe('EnrichmentJobWorker — system-mode claim eligibility', () => {
     return { worker: module.get<EnrichmentJobWorker>(EnrichmentJobWorker), mockClaim };
   }
 
-  it('system mode claims ONLY the server-only set plus thumbnail_repair', async () => {
+  it('system mode claims ONLY the server-only set plus thumbnail_repair and workflow_execute_batch', async () => {
     process.env['ENRICHMENT_WORKER_MODE'] = 'system';
     delete process.env['ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES'];
     const { worker, mockClaim } = await buildWorkerNoBootstrap();
@@ -1350,6 +1356,7 @@ describe('EnrichmentJobWorker — system-mode claim eligibility', () => {
       'burst_detection',
       'thumbnail_repair',
       'trash_purge',
+      'workflow_execute_batch',
     ]);
     // Still the server plane.
     expect(args.nodeId).toBeNull();
@@ -1369,6 +1376,7 @@ describe('EnrichmentJobWorker — system-mode claim eligibility', () => {
       'burst_detection',
       'thumbnail_repair',
       'trash_purge',
+      'workflow_execute_batch',
     ]);
   });
 

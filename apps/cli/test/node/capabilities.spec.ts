@@ -47,6 +47,7 @@ describe('NODE_JOB_TYPES', () => {
       'thumbnail_regen',
       'auto_tagging',
       'geocode',
+      'workflow_execute_batch',
     ]);
   });
 });
