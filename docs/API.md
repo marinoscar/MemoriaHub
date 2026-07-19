@@ -4565,3 +4565,190 @@ SSE event types:
 **Error Cases:**
 - 400 — AI not configured, invalid input, or last message is not `role: 'user'`
 - 403 — Not a member of the circle or insufficient permissions
+
+## Media Workflow Automation (media:read / media:write / media:delete + per-circle roles)
+
+Rule-based automation on a **Subject · Trigger · If · Then** model (v1 Subject: Media Item). Feature-gated by `features.workflows` (default off) + the `WORKFLOWS_ENABLED` env kill-switch — every endpoint below returns `404` when the feature is disabled. No new RBAC permission was introduced; every endpoint reuses `media:read`/`media:write`/`media:delete` plus per-circle `viewer`/`collaborator` roles. For the full condition/action catalog, run-lifecycle state machine, trigger semantics, and node-execution model, see [docs/specs/workflows.md](specs/workflows.md).
+
+### POST /workflows
+
+**Permissions:** `media:write` + circle `collaborator`
+
+Create a workflow. Validates the definition against the per-Subject registry (unknown/cross-Subject fields, operators, or actions are rejected) and enforces `workflows.maxWorkflowsPerCircle`.
+
+**Request Body:**
+```json
+{
+  "circleId": "uuid",
+  "name": "Clean up screenshots",
+  "description": "Move obvious screenshots to Trash",
+  "enabled": true,
+  "trigger": "manual",
+  "cronExpression": null,
+  "definition": {
+    "version": 1,
+    "subject": "media_item",
+    "match": "any",
+    "conditions": [
+      { "field": "filename", "op": "contains", "value": "screenshot" },
+      {
+        "match": "all",
+        "conditions": [
+          { "field": "mimeType", "op": "equals", "value": "image/png" },
+          { "field": "missingCamera", "op": "is", "value": true },
+          { "field": "missingCapturedAt", "op": "is", "value": true }
+        ]
+      }
+    ],
+    "actions": [ { "type": "move_to_trash" } ],
+    "options": { "maxItems": 5000, "requirePreview": true }
+  }
+}
+```
+
+**Response:** `201 Created` — the created workflow, including a derived `dependencies[]` array (which enrichment outputs its conditions read).
+
+**Error Cases:**
+- 400 — invalid definition (unregistered subject/field/operator/action, bad nesting depth, operator/value-type mismatch), `hard_delete` on a non-manual trigger, or the circle's `workflows.maxWorkflowsPerCircle` cap reached
+- 404 — feature disabled
+
+### GET /workflows
+
+**Permissions:** `media:read` + circle `viewer`
+
+Paginated list of workflows in a circle.
+
+**Query Parameters:** `circleId` (required, uuid), `page`, `pageSize`
+
+### GET /workflows/subjects
+
+**Permissions:** `media:read`
+
+Return the full per-Subject registry driving the builder's dynamic form: available Subjects and, per Subject, its field catalog (key/label/group/type/operators/valueType/enumValues?/dependency), its action catalog (type/label/destructive?), and its valid triggers. v1 returns a single Subject, `media_item`.
+
+### POST /workflows/preview
+
+**Permissions:** `media:read` + circle `viewer`
+
+**Stateless** builder feedback — no rows are persisted. Compiles the supplied definition on the fly and probes the match set.
+
+**Request Body:** `{ circleId, definition }` — same `definition` shape as `POST /workflows`.
+
+**Response:** `200 OK`
+```json
+{
+  "matchedCount": 2481,
+  "capped": false,
+  "sample": [
+    { "id": "uuid", "type": "photo", "capturedAt": "2024-03-01T10:00:00Z", "filename": "IMG_1234.png", "width": 1170, "height": 2532, "thumbnailUrl": "https://..." }
+  ]
+}
+```
+`matchedCount` is bounded by `LIMIT (cap + 1)` — never a full `COUNT(*)`; when the probe fills, `capped: true` and the UI shows "10,000+". `sample` holds up to 12 items.
+
+### GET /workflows/:id / PATCH /workflows/:id / DELETE /workflows/:id
+
+**Permissions:** `media:read` + viewer (GET); `media:write` + collaborator (PATCH/DELETE)
+
+`PATCH` accepts a partial update (`name`, `description`, `enabled`, `trigger`, `cronExpression`, `definition`) and re-validates trigger/action compatibility against the *resulting* post-patch definition+trigger. `DELETE` cascades the workflow's runs and run items (204 No Content).
+
+### POST /workflows/:id/run
+
+**Permissions:** `media:write` + circle `collaborator`
+
+Start a run.
+
+**Request Body:** `{ "maxItems": 5000 }` (optional per-run override; the effective cap is `min(this, definition.options.maxItems, workflows.maxItemsPerRun)`)
+
+**Response:** `200 OK` `{ "runId": "uuid", "status": "evaluating" }`
+
+**Error Cases:**
+- 409 — `workflows.maxConcurrentRuns` already reached app-wide
+- 404 — workflow not found or feature disabled
+
+### GET /workflows/:id/runs
+
+**Permissions:** `media:read` + viewer
+
+Paginated run history for one workflow. **Query Parameters:** `page`, `pageSize`.
+
+### GET /workflow-runs/:id
+
+**Permissions:** `media:read` + viewer
+
+Run detail: counts (`matchedCount`, `processedCount`, `succeededCount`, `failedCount`, `skippedCount`, `truncated`), an `itemStatusCounts` per-status tally, and a bounded (5,000-row-scanned) `actionSummary` — a best-effort per-action-type `{ applied, failed, skipped }` rollup, flagged `partial: true` if the scan cap was hit.
+
+### GET /workflow-runs/:id/items
+
+**Permissions:** `media:read` + viewer
+
+Paginated run items with batched signed thumbnails. **Query Parameters:** `status` (`matched`\|`excluded`\|`applied`\|`partially_applied`\|`failed`\|`skipped`), `page`, `pageSize`.
+
+### POST /workflow-runs/:id/approve
+
+**Permissions:** `media:write` + circle `collaborator`
+
+Approve an `awaiting_approval` run, transitioning it to `running` and enqueueing its execution batches.
+
+**Request Body:**
+```json
+{
+  "excludedItemIds": ["uuid", "uuid"],
+  "confirmation": "DELETE 2481"
+}
+```
+`excludedItemIds` (optional, ≤500) flips the selected still-`matched` items to `excluded`. `confirmation` is **required, and must equal the literal string `"DELETE {matchedCount}"`**, when the run's definition contains a `hard_delete` action.
+
+**Response:** `200 OK` `{ "runId": "uuid", "status": "running" }`
+
+**Error Cases:**
+- 400 — run is not `awaiting_approval`, more than 500 exclusions, or a missing/incorrect `hard_delete` confirmation string
+- 404 — run not found or feature disabled
+
+### POST /workflow-runs/:id/cancel
+
+**Permissions:** `media:write` + circle `collaborator`
+
+Cancel a non-terminal run (`evaluating` \| `awaiting_approval` \| `running`). In-flight `workflow_execute_batch` jobs detect the cancellation and stop.
+
+**Error Cases:**
+- 400 — run already in a terminal state
+- 404 — run not found or feature disabled
+
+### Admin: Workflow Oversight
+
+All endpoints below require the global **Admin** role, in addition to the noted permission, and are **not** scoped to circle membership.
+
+#### GET /admin/workflows/stats
+
+**Permissions:** Admin + `system_settings:read`
+
+7-day KPI aggregate for the admin dashboard strip: `{ "windowDays": 7, "runsLast7Days": 42, "itemsActioned": 8103, "failures": 1, "currentlyRunning": 0 }`.
+
+#### GET /admin/workflows
+
+**Permissions:** Admin + `system_settings:read`
+
+List every workflow across every circle. **Query Parameters:** `page`, `pageSize`, `circleId`, `trigger`, `enabled`. Each item includes circle/creator info, a `lastRun` summary, and lifetime `totals: { runs, matched, actioned }` (bounded, indexed aggregates — never an unbounded scan of run items).
+
+#### GET /admin/workflow-runs
+
+**Permissions:** Admin + `jobs:read`
+
+List every workflow run across every circle. **Query Parameters:** `status`, `page`, `pageSize`, `circleId`, `workflowId`.
+
+#### POST /admin/workflows/:id/disable
+
+**Permissions:** Admin + `system_settings:write`
+
+Force-disable a workflow regardless of circle membership (an admin override independent of the owning circle's own toggle). **Response:** `200 OK` `{ "id": "uuid", "enabled": false }`.
+
+#### POST /admin/workflow-runs/:id/cancel
+
+**Permissions:** Admin + `jobs:write`
+
+Cancel a runaway run app-wide, bypassing the circle-membership check the non-admin cancel endpoint requires.
+
+**Error Cases (all admin endpoints):**
+- 403 — missing Admin role or the named permission
+- 404 — target not found, or feature disabled
