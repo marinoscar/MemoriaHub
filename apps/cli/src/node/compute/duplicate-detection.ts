@@ -19,6 +19,8 @@ import path from 'node:path';
 import {
   createClipSession,
   embedImageWithSession,
+  releaseClipSession,
+  DEFAULT_CLIP_RECYCLE_AFTER,
   VISUAL_EMBEDDING_MODEL_TAG,
 } from '@memoriahub/enrichment-compute/clip';
 import { computeDHash } from '@memoriahub/enrichment-compute/dhash';
@@ -32,16 +34,41 @@ const CLIP_MODEL_FILENAME = 'clip-vit-b32-vision-quantized.onnx';
 type ClipSession = Awaited<ReturnType<typeof createClipSession>>;
 
 /**
- * Module-level lazy singleton for the ONNX InferenceSession — creating a
- * session costs ~220ms, so it is cached across jobs for the lifetime of the
- * worker process. The promise (not the session) is cached so concurrent jobs
- * share a single in-flight initialization; a failed init clears the cache so
- * the next job can retry.
+ * Number of embeds after which the CLIP session is recycled (released +
+ * recreated) to bound any native memory onnxruntime accumulates across
+ * `run()` calls over a multi-hour import. `MEMORIAHUB_CLIP_RECYCLE_AFTER`
+ * overrides; `0` disables. See `DEFAULT_CLIP_RECYCLE_AFTER`.
  */
-let sessionPromise: Promise<ClipSession> | null = null;
+function resolveRecycleAfter(): number {
+  const env = process.env['MEMORIAHUB_CLIP_RECYCLE_AFTER'];
+  if (env !== undefined && env.trim() !== '') {
+    const n = Number.parseInt(env, 10);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return DEFAULT_CLIP_RECYCLE_AFTER;
+}
 
-function getClipSession(): Promise<ClipSession> {
-  if (!sessionPromise) {
+/**
+ * A CLIP session plus its per-session lifetime counters. Counters live on the
+ * holder (not module-level) so a retired session and its replacement never
+ * share state — retirement detaches the holder, and concurrent in-flight
+ * embeds on the old session drain against ITS own counter before it is
+ * released. Creating a session costs ~220 ms, so it is reused across jobs.
+ */
+interface SessionHolder {
+  session: ClipSession;
+  useCount: number;
+  inFlight: number;
+  retiring: boolean;
+  released: boolean;
+}
+
+let currentHolder: SessionHolder | null = null;
+let holderLoadPromise: Promise<SessionHolder> | null = null;
+
+function getHolder(): Promise<SessionHolder> {
+  if (currentHolder) return Promise.resolve(currentHolder);
+  if (!holderLoadPromise) {
     const modelPath = path.join(process.env.MODELS_DIR ?? modelsDir(), CLIP_MODEL_FILENAME);
     if (!fs.existsSync(modelPath)) {
       throw new CapabilityUnavailableError(
@@ -49,12 +76,56 @@ function getClipSession(): Promise<ClipSession> {
         'onnxruntime',
       );
     }
-    sessionPromise = createClipSession(modelPath).catch((err: unknown) => {
-      sessionPromise = null; // allow retry on a later job
-      throw err;
-    });
+    holderLoadPromise = createClipSession(modelPath)
+      .then((session): SessionHolder => {
+        const holder: SessionHolder = {
+          session,
+          useCount: 0,
+          inFlight: 0,
+          retiring: false,
+          released: false,
+        };
+        currentHolder = holder;
+        holderLoadPromise = null;
+        return holder;
+      })
+      .catch((err: unknown) => {
+        holderLoadPromise = null; // allow retry on a later job
+        throw err;
+      });
   }
-  return sessionPromise;
+  return holderLoadPromise;
+}
+
+/**
+ * Recycle the current session once it has served `recycleAfter` embeds:
+ * detach it so no NEW embed is routed to it (the next `getHolder()` builds a
+ * fresh one), and release its native resources once its own in-flight embeds
+ * have drained to zero.
+ */
+function maybeRetire(holder: SessionHolder, recycleAfter: number): void {
+  if (recycleAfter <= 0) return;
+  if (!holder.retiring && holder.useCount >= recycleAfter) {
+    holder.retiring = true;
+    if (currentHolder === holder) currentHolder = null;
+  }
+  if (holder.retiring && holder.inFlight === 0 && !holder.released) {
+    holder.released = true;
+    void releaseClipSession(holder.session);
+  }
+}
+
+async function embedWithRecycling(buffer: Buffer): Promise<number[] | null> {
+  const recycleAfter = resolveRecycleAfter();
+  const holder = await getHolder();
+  holder.inFlight += 1;
+  try {
+    return await embedImageWithSession(holder.session, buffer);
+  } finally {
+    holder.inFlight -= 1;
+    holder.useCount += 1;
+    maybeRetire(holder, recycleAfter);
+  }
 }
 
 const computeDuplicateDetection: ComputeFn = async (inputPath, _params) => {
@@ -68,8 +139,7 @@ const computeDuplicateDetection: ComputeFn = async (inputPath, _params) => {
     throw new Error('duplicate_detection: image could not be decoded for dHash');
   }
 
-  const session = await getClipSession();
-  const embedding = await embedImageWithSession(session, buffer);
+  const embedding = await embedWithRecycling(buffer);
   if (embedding === null) {
     throw new Error('duplicate_detection: CLIP embedding failed (image not embeddable)');
   }

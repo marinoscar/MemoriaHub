@@ -130,6 +130,37 @@ export async function createClipSession(modelPath: string): Promise<InferenceSes
 }
 
 /**
+ * Default number of embeds after which a host should recycle (release +
+ * recreate) its CLIP `InferenceSession`, bounding any native memory the session
+ * accumulates across `run()` calls over a multi-hour import. Recreating a
+ * session costs ~200 ms, so amortized over this many jobs the overhead is
+ * negligible. Hosts read their own env override (`MEMORIAHUB_CLIP_RECYCLE_AFTER`
+ * on the worker, `CLIP_SESSION_RECYCLE_AFTER` on the API) and fall back to this;
+ * `0` disables recycling.
+ */
+export const DEFAULT_CLIP_RECYCLE_AFTER = 1000;
+
+/**
+ * Best-effort release of a CLIP `InferenceSession`'s NATIVE resources.
+ * `InferenceSession.release()` (present in the pinned onnxruntime-node) frees
+ * the native session and its allocator; unlike a CPU `Tensor.dispose()` (which
+ * is a GPU/WebNN no-op), this actually reclaims memory. The host owns *when* to
+ * call it (bounded-lifetime recycling / shutdown); this helper just
+ * encapsulates the version-specific call so both hosts stay in sync. Swallows
+ * errors — a failed release must never fail a job.
+ */
+export async function releaseClipSession(session: InferenceSession): Promise<void> {
+  const release = (session as { release?: unknown }).release;
+  if (typeof release === 'function') {
+    try {
+      await (release as () => Promise<void>).call(session);
+    } catch {
+      /* best-effort — GC reclaims it eventually */
+    }
+  }
+}
+
+/**
  * Compute an L2-normalized 512-d CLIP image embedding for the given bytes
  * using an already-created session.
  *
