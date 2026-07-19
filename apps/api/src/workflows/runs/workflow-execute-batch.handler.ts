@@ -6,6 +6,7 @@ import {
   WorkflowRunItemStatus,
   WorkflowRunStatus,
 } from '@prisma/client';
+import { workflowExecuteBatchResultSchema } from '@memoriahub/enrichment-compute/dto';
 import { EnrichmentHandler } from '../../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -53,11 +54,29 @@ const tracer = trace.getTracer('workflows');
  * once the run drains (no 'matched' items left), finalizes it to completed /
  * completed_with_errors.
  *
- * Server-only (no nodeResultSchema/persistNodeResult).
+ * NODE-ELIGIBLE (issue #144): this handler carries the nodeResultSchema /
+ * persistNodeResult pair so a distributed worker node can CLAIM a batch and
+ * submit a result — but the compute/persist split is deliberately thin. A
+ * workflow batch is DB-bound (no CPU-heavy compute to offload), so the node
+ * only produces a per-item "intended outcome" declaration from the frozen
+ * action list in its claim params; `persistNodeResult` then re-runs the FULL
+ * authoritative pipeline (`executeBatch`) server-side from the trusted
+ * `job.payload`, exactly as `process()` does. The point is posture completeness
+ * (an `ENRICHMENT_WORKER_MODE=off` fleet-only deployment must still execute
+ * workflows), not CPU offload. The type is ALSO kept server-claimable in
+ * `system` mode (see systemModeEligibleTypes) so a `system`-mode deployment
+ * keeps working; `FOR UPDATE SKIP LOCKED` makes both claim paths safe.
  */
 @Injectable()
 export class WorkflowExecuteBatchHandler implements EnrichmentHandler, OnModuleInit {
   readonly type = 'workflow_execute_batch';
+
+  /**
+   * Node-eligibility (distributed workers): the shape a node submits via
+   * POST /api/nodes/:id/jobs/:jobId/result for this job type. Advisory only —
+   * `persistNodeResult` re-does the authoritative work from `job.payload`.
+   */
+  readonly nodeResultSchema = workflowExecuteBatchResultSchema;
 
   private readonly logger = new Logger(WorkflowExecuteBatchHandler.name);
 
@@ -78,10 +97,45 @@ export class WorkflowExecuteBatchHandler implements EnrichmentHandler, OnModuleI
       this.logger.warn(`workflow_execute_batch job ${job.id} missing payload; skipping`);
       return;
     }
+    await this.runBatchSpan('workflow.execute_batch', payload);
+  }
 
-    // OTEL span around the batch, tagged with run/workflow/circle + batch size.
+  /**
+   * Persist a node-computed result (issue #144 — the persist half of the
+   * compute/persist split).
+   *
+   * SECURITY: the node's `result` is IGNORED as a source of truth. The
+   * authoritative item set comes from the TRUSTED `job.payload` (`runId`,
+   * `itemIds`), and this method re-runs the identical `executeBatch` pipeline
+   * `process()` runs — per-item idempotent claim, drift re-validation (so a
+   * stale node result can never bypass the guard), `move_to_circle`'s
+   * cross-circle dedup + both-circle permission checks, counters, and run
+   * finalization. Late submissions after lease expiry are already 409-rejected
+   * by the shared job-scoped guard in NodesService.assertJobHeldByNode, so no
+   * extra staleness check is needed here. A throw routes the job through the
+   * shared failure/retry state machine, exactly as an in-process throw would.
+   */
+  async persistNodeResult(job: EnrichmentJob, _result: unknown): Promise<void> {
+    const payload = job.payload as unknown as WorkflowExecuteBatchPayload | null;
+    if (!payload?.runId || !Array.isArray(payload.itemIds)) {
+      this.logger.warn(
+        `workflow_execute_batch job ${job.id} missing payload; skipping node persist`,
+      );
+      return;
+    }
+    // The submitted result was already validated against nodeResultSchema by the
+    // ingestion endpoint; we deliberately do not read `items` from it — the
+    // server re-does the authoritative work from job.payload.
+    await this.runBatchSpan('workflow.execute_batch.persist_node_result', payload);
+  }
+
+  /** OTEL-wrapped batch execution shared by process() and persistNodeResult(). */
+  private async runBatchSpan(
+    spanName: string,
+    payload: WorkflowExecuteBatchPayload,
+  ): Promise<void> {
     await tracer.startActiveSpan(
-      'workflow.execute_batch',
+      spanName,
       {
         kind: SpanKind.INTERNAL,
         attributes: {
