@@ -871,6 +871,34 @@ model EnrichmentJob {
   //   without it.
   @@index([claimedByNodeId])
   @@index([createdAt(sort: Desc)])
+  // Admin stats/insights perf (issue #135, migration
+  // 20260719010000_enrichment_jobs_stats_perf_indexes):
+  // - (status, type, id): getStats() (polled every 5s) runs two UNCONDITIONAL
+  //   aggregates — groupBy(['status']) and groupBy(['type','status']), both
+  //   _count:{id:true} — with no WHERE clause at all. This single narrow
+  //   covering index lets Postgres answer both via one Index-Only Scan
+  //   instead of a full heap seq scan: `status` serves the plain groupBy,
+  //   trailing `type` serves the (type,status) groupBy (order doesn't need
+  //   to match index key order for an unconditional full-scan
+  //   HashAggregate), and `id` is included so COUNT(id) never touches the
+  //   heap. Deliberately distinct from the existing (type,status) index
+  //   (different leading column; that one serves exact-match WHERE lookups
+  //   elsewhere, this one serves the two full-table admin counts).
+  @@index([status, type, id])
+  // Two more indexes support getInsights()'s `attempts > 1` retried-jobs
+  // count and its succeeded-job duration SUM/AVG/PERCENTILE_CONT queries
+  // (both the windowed and the deliberately un-windowed lifetime variant —
+  // see enrichment-admin.service.ts). Both are PARTIAL indexes (WHERE
+  // clause), which Prisma's @@index() DSL cannot express — same limitation
+  // as media_items_map_locations_idx and faces_embedding_vec_archive_hnsw_idx
+  // above — so they exist only as raw SQL in migration
+  // 20260719010000_enrichment_jobs_stats_perf_indexes, not as a directive
+  // here:
+  //   enrichment_jobs_attempts_gt1_idx ON (attempts) WHERE attempts > 1
+  //   enrichment_jobs_succeeded_duration_idx ON
+  //     (finished_at, started_at, type)
+  //     WHERE status = 'succeeded' AND started_at IS NOT NULL
+  //       AND finished_at IS NOT NULL
   @@map("enrichment_jobs")
 }
 

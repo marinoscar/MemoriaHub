@@ -1,0 +1,77 @@
+-- Supporting indexes for the admin Job Queue dashboard's aggregate queries
+-- (GitHub issue #135), which run several unindexed/weakly-indexed
+-- aggregates over enrichment_jobs on every poll:
+--
+--   1. status_type_id — enrichment-admin.service.ts getStats() (polled every
+--      5s by the Admin Job Queue dashboard) runs TWO unconditional
+--      aggregates with no WHERE clause at all:
+--        groupBy(['status'])        _count: { id: true }
+--        groupBy(['type','status']) _count: { id: true }
+--      Since neither query filters any rows, every existing index that
+--      leads with status (status,priority,createdAt /
+--      status,scheduledFor,priority,createdAt / status,leaseExpiresAt) or
+--      with type (type,status) still forces a heap fetch for every row to
+--      read `id` for the count, which is no cheaper than a sequential scan.
+--      A single narrow covering index on (status, type, id) lets Postgres
+--      answer BOTH aggregates via one Index-Only Scan (assuming vacuum
+--      keeps the visibility map current): the leading `status` key serves
+--      the plain status groupBy, the trailing `type` key serves the
+--      (type,status) groupBy (grouping order doesn't need to match index
+--      key order for a HashAggregate — only coverage matters for an
+--      unconditional full scan), and `id` is included so COUNT(id) never
+--      touches the heap. Deliberately NOT a duplicate of the existing
+--      (type,status) index (different leading column, and this one
+--      specifically serves the two full-table admin counts, not the
+--      exact-match WHERE lookups the (type,status) index serves elsewhere).
+--
+--   2. attempts_gt1 (partial) — getInsights() counts
+--      `WHERE attempts > 1` as its "retried jobs" metric. `attempts` is
+--      charged at claim time and most jobs succeed on the first attempt
+--      (see the enrichment_jobs table comment in schema.prisma), so this
+--      partial index covers only a small fraction of the table's rows and
+--      turns the count into a fast Index-Only Scan instead of a seq scan.
+--
+--   3. succeeded_duration (partial) — getInsights() computes duration
+--      SUM/AVG/PERCENTILE_CONT over
+--      `WHERE status = 'succeeded' AND started_at IS NOT NULL AND
+--       finished_at IS NOT NULL` at THREE call sites: a windowed by-type
+--      GROUP BY, a windowed overall aggregate (both filtered further by
+--      `finished_at >= NOW() - windowDays`), and a deliberately
+--      un-windowed by-type variant that merges with the job_stats_rollup
+--      lifetime table for already-purged history (see that query's own
+--      comment in enrichment-admin.service.ts — it must keep scanning all
+--      live succeeded rows, so it is intentionally NOT given a time-bound
+--      WHERE clause here). A single partial index scoped to the exact
+--      three-way predicate above, keyed by (finished_at, started_at, type),
+--      serves all three: the two windowed queries get an efficient range
+--      scan on the leading finished_at key, and the un-windowed query gets
+--      a full but much-narrower-than-the-full-table partial-index scan
+--      (excludes every pending/running/failed row) — both index-only,
+--      since started_at and type are covered as trailing key columns for
+--      the EXTRACT(...) computation and the GROUP BY type output.
+--
+-- Neither partial index is representable in schema.prisma's @@index() DSL
+-- (no WHERE-clause support — see the media_items_map_locations_idx and
+-- faces_embedding_vec_archive_hnsw_idx precedents for the same limitation),
+-- so they exist only as raw SQL here, documented by comment in
+-- schema.prisma next to the EnrichmentJob model.
+--
+-- Plain CREATE INDEX (not CONCURRENTLY): Prisma migrations run inside a
+-- transaction (CONCURRENTLY is not allowed there), and the table stays
+-- bounded by the nightly job_history_purge, so the brief write lock at
+-- deploy time is acceptable — same precedent as migration
+-- 20260718000000_enrichment_jobs_admin_indexes.
+--
+-- DOWN DIRECTION:
+--   DROP INDEX "enrichment_jobs_status_type_id_idx";
+--   DROP INDEX "enrichment_jobs_attempts_gt1_idx";
+--   DROP INDEX "enrichment_jobs_succeeded_duration_idx";
+
+-- CreateIndex
+CREATE INDEX "enrichment_jobs_status_type_id_idx" ON "enrichment_jobs"("status", "type", "id");
+
+-- CreateIndex (partial — not representable in schema.prisma's @@index() DSL)
+CREATE INDEX "enrichment_jobs_attempts_gt1_idx" ON "enrichment_jobs"("attempts") WHERE "attempts" > 1;
+
+-- CreateIndex (partial — not representable in schema.prisma's @@index() DSL)
+CREATE INDEX "enrichment_jobs_succeeded_duration_idx" ON "enrichment_jobs"("finished_at", "started_at", "type") WHERE "status" = 'succeeded' AND "started_at" IS NOT NULL AND "finished_at" IS NOT NULL;
