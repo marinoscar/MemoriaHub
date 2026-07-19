@@ -20,6 +20,17 @@ export const INSIGHTS_WINDOW_DAYS = 7;
 /** Fallback per-job duration (ms) used for ETA when no history exists at all. */
 const ETA_FALLBACK_MS = 5000;
 
+/**
+ * TTL for the in-memory getStats() cache in milliseconds. 2 seconds —
+ * shorter than the frontend's 5-second poll interval
+ * (apps/web/src/hooks/useJobs.ts, POLL_INTERVAL_MS) so a single-tab
+ * dashboard never visibly sees stale data between polls, but long enough
+ * to collapse the realistic concurrency case this targets: multiple admin
+ * tabs polling concurrently, or a poll landing within a couple seconds of
+ * a mutation-triggered refresh() call in useJobs.ts.
+ */
+const STATS_CACHE_TTL_MS = 2000;
+
 // ---------------------------------------------------------------------------
 // Return shape interfaces
 // ---------------------------------------------------------------------------
@@ -168,6 +179,9 @@ export interface ListJobsFilter {
 export class EnrichmentAdminService {
   private readonly logger = new Logger(EnrichmentAdminService.name);
 
+  /** In-process TTL cache for getStats() — see STATS_CACHE_TTL_MS. */
+  private statsCache: { value: JobStats; cachedAt: number } | null = null;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly settingsService: SystemSettingsService,
@@ -219,7 +233,29 @@ export class EnrichmentAdminService {
   // getStats
   // -------------------------------------------------------------------------
 
+  /**
+   * Get all-time (unwindowed) job queue stats: total, byStatus, byType,
+   * stuckRunning, and scheduled counts. Results are cached in-process for
+   * STATS_CACHE_TTL_MS (2 s) so the admin Job Queue dashboard's 5-second
+   * poll — possibly from multiple tabs — reuses one computed result
+   * instead of re-running the two full-table groupBy aggregates + two
+   * count() calls on every request.
+   *
+   * Deliberately has NO invalidation hook: unlike SystemSettingsService's
+   * cache, no mutation path here clears it early. Mutations (retry,
+   * resetStuck, delete, ...) surface via the frontend's own refresh() call
+   * in useJobs.ts, and a couple of seconds of staleness on a monitoring
+   * dashboard is an accepted tradeoff — the same tradeoff
+   * SystemSettingsService's cache already makes. The 2 s TTL was picked
+   * specifically shorter than the 5 s frontend poll interval so a
+   * single-tab dashboard never visibly observes stale data between polls.
+   */
   async getStats(): Promise<JobStats> {
+    const cacheCheckAt = Date.now();
+    if (this.statsCache && cacheCheckAt - this.statsCache.cachedAt < STATS_CACHE_TTL_MS) {
+      return this.statsCache.value;
+    }
+
     const stuckThresholdMinutes = await this.getStuckThresholdMinutes();
     const stuckThreshold = new Date(Date.now() - stuckThresholdMinutes * 60 * 1000);
 
@@ -295,7 +331,7 @@ export class EnrichmentAdminService {
 
     const byType = Array.from(typeMap.values()).sort((a, b) => a.type.localeCompare(b.type));
 
-    return {
+    const result: JobStats = {
       total,
       byStatus,
       byType,
@@ -303,6 +339,11 @@ export class EnrichmentAdminService {
       stuckThresholdMinutes,
       scheduled: scheduledCount,
     };
+
+    // Store in cache for fast subsequent reads within the TTL window.
+    this.statsCache = { value: result, cachedAt: Date.now() };
+
+    return result;
   }
 
   // -------------------------------------------------------------------------
