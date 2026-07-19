@@ -21,7 +21,7 @@
  */
 
 import { jest } from '@jest/globals';
-import { startMemoryWatchdog } from '../../src/node/memory-watchdog.js';
+import { startMemoryWatchdog, resolveRestartFraction } from '../../src/node/memory-watchdog.js';
 import type { MemoryWatchdogLevel, MemorySample } from '../../src/node/memory-watchdog.js';
 
 describe('startMemoryWatchdog', () => {
@@ -139,6 +139,104 @@ describe('startMemoryWatchdog', () => {
 
     jest.advanceTimersByTime(1);
     expect(emit).toHaveBeenCalledTimes(1);
+
+    stop();
+  });
+});
+
+describe('resolveRestartFraction', () => {
+  let savedRestartFraction: string | undefined;
+
+  beforeEach(() => {
+    savedRestartFraction = process.env['MEMORIAHUB_HEAP_RESTART_FRACTION'];
+    delete process.env['MEMORIAHUB_HEAP_RESTART_FRACTION'];
+  });
+
+  afterEach(() => {
+    if (savedRestartFraction === undefined) delete process.env['MEMORIAHUB_HEAP_RESTART_FRACTION'];
+    else process.env['MEMORIAHUB_HEAP_RESTART_FRACTION'] = savedRestartFraction;
+  });
+
+  it('returns the explicit arg when provided, ignoring env entirely', () => {
+    process.env['MEMORIAHUB_HEAP_RESTART_FRACTION'] = '0.2';
+    expect(resolveRestartFraction(0.5)).toBe(0.5);
+  });
+
+  it('defaults to 0.9 when no explicit arg is given and the env var is unset', () => {
+    expect(resolveRestartFraction()).toBe(0.9);
+  });
+
+  it.each([
+    ['0.75', 0.75],
+    ['0', 0],
+  ])('reads a valid env value %s -> %d', (envVal, expected) => {
+    process.env['MEMORIAHUB_HEAP_RESTART_FRACTION'] = envVal;
+    expect(resolveRestartFraction()).toBe(expected);
+  });
+
+  it.each(['1.5', '-0.2', 'abc', ''])(
+    'ignores an out-of-range/garbage env value (%j) and falls back to 0.9',
+    (envVal) => {
+      process.env['MEMORIAHUB_HEAP_RESTART_FRACTION'] = envVal;
+      expect(resolveRestartFraction()).toBe(0.9);
+    },
+  );
+});
+
+describe('startMemoryWatchdog onCritical', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('never calls onCritical when restartFraction is 0 (disabled), even after many ticks', () => {
+    const emit = jest.fn();
+    const onCritical = jest.fn();
+    const stop = startMemoryWatchdog(emit, {
+      intervalMs: 1000,
+      restartFraction: 0,
+      onCritical,
+    });
+
+    jest.advanceTimersByTime(5000);
+    expect(emit).toHaveBeenCalledTimes(5);
+    expect(onCritical).not.toHaveBeenCalled();
+
+    stop();
+  });
+
+  it('fires onCritical exactly once when restartFraction is effectively always-true, and emit keeps firing every tick afterward', () => {
+    const emit = jest.fn();
+    const onCritical = jest.fn();
+    const stop = startMemoryWatchdog(emit, {
+      intervalMs: 1000,
+      restartFraction: 0.0001,
+      onCritical,
+    });
+
+    jest.advanceTimersByTime(5000);
+
+    expect(emit).toHaveBeenCalledTimes(5);
+    expect(onCritical).toHaveBeenCalledTimes(1);
+
+    const [sample]: [MemorySample] = onCritical.mock.calls[0];
+    expect(typeof sample.heapUsedFraction).toBe('number');
+
+    stop();
+  });
+
+  it('does not throw when onCritical is omitted and restartFraction is low (sampling continues normally)', () => {
+    const emit = jest.fn();
+    const stop = startMemoryWatchdog(emit, {
+      intervalMs: 1000,
+      restartFraction: 0.0001,
+    });
+
+    expect(() => jest.advanceTimersByTime(5000)).not.toThrow();
+    expect(emit).toHaveBeenCalledTimes(5);
 
     stop();
   });
