@@ -90,6 +90,7 @@ import {
   tunedChildEnv,
   resolveDefaultConcurrency,
 } from '../node/runtime-tuning.js';
+import { startMemoryWatchdog } from '../node/memory-watchdog.js';
 import {
   detectLinuxDistro,
   ensureNpmNativeDeps,
@@ -708,6 +709,12 @@ function startCmd(): Command {
         // with core count × in-flight jobs. Best-effort — no-op if sharp isn't
         // installed on this node.
         await configureSharpRuntime();
+
+        // Sample memory on an interval into the structured log so a slow climb
+        // under sustained load is VISIBLE (and a post-mortem can tell which
+        // pool grew: heapUsed vs external/arrayBuffers vs rss). Disable with
+        // MEMORIAHUB_MEMWATCH=0.
+        startMemoryWatchdog((level, s) => logger.log(level, { ev: 'memory', ...s }));
 
         await engine.start();
       },
