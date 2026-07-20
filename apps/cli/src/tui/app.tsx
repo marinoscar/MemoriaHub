@@ -13,7 +13,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Box, Text, render, useApp, useInput } from 'ink';
+import { Box, Text, useApp, useInput } from 'ink';
 
 import { loadConfig, type CliConfig } from '../config.js';
 import { maybeReexecWithHeapLimit } from '../node/runtime-tuning.js';
@@ -23,6 +23,7 @@ import { factoryReset } from '../reset.js';
 import { resolveUpdateStatus } from '../version-check.js';
 import type BetterSqlite3 from 'better-sqlite3';
 
+import { renderTui } from './raw-mode.js';
 import { HomeMenu } from './HomeMenu.js';
 import { Menu } from './Menu.js';
 import { LoginScreen } from './LoginScreen.js';
@@ -796,14 +797,5 @@ export async function launchTui(opts?: { currentVersion?: string }): Promise<voi
   // a transparent signal-forwarding shim and must not render the UI.
   if (maybeReexecWithHeapLimit()) return;
 
-  if (!process.stdout.isTTY) {
-    process.stdout.write(
-      'The interactive UI needs a real terminal. ' +
-      'Use `memoriahub sync --all` or `memoriahub --help`.\n',
-    );
-    return;
-  }
-
-  const { waitUntilExit } = render(<App currentVersion={opts?.currentVersion ?? '0.0.0'} />);
-  await waitUntilExit();
+  await renderTui(<App currentVersion={opts?.currentVersion ?? '0.0.0'} />);
 }

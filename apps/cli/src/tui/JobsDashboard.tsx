@@ -10,12 +10,13 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Box, Text, render, useApp, useInput } from 'ink';
+import { Box, Text, useApp, useInput } from 'ink';
 import Spinner from 'ink-spinner';
 
 import type { ApiClient, JobInsights } from '../api.js';
 import { formatDuration } from '../format-duration.js';
 import { BOX_BORDER } from './theme.js';
+import { renderTui } from './raw-mode.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -39,8 +40,7 @@ export interface JobsDashboardProps {
 // ---------------------------------------------------------------------------
 
 export async function renderJobsDashboard(props: JobsDashboardProps): Promise<void> {
-  const { waitUntilExit } = render(<JobsDashboard {...props} />);
-  await waitUntilExit();
+  await renderTui(<JobsDashboard {...props} />);
 }
 
 // ---------------------------------------------------------------------------
