@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
+| **Version** | 1.2 |
 | **Last Updated** | July 2026 |
 | **Status** | Implemented |
 
@@ -170,7 +170,7 @@ Set in `.env.worker`, passed to `docker-compose.worker.yml`. A container restart
 | `MEMORIAHUB_TOKEN` | *(required)* | `nod_...` or `pat_...` | Bearer credential. A `nod_` node credential (minted at `/admin/settings/nodes`) is preferred — least-privilege, `/api/nodes/*`-only, non-expiring, individually revocable. A PAT also works for back-compat. | Always set; prefer `nod_` for any long-running/unattended worker. |
 | `MEMORIAHUB_NODE_NAME` | `worker` (compose default) | string | Display name for this host/replica. Registration is idempotent per `(owner, name)` — a restart re-attaches to the same node record. | **Must be unique per host/replica** — two containers sharing a name fight over job leases (`job not owned by this node`). |
 | `MEMORIAHUB_NODE_ID` | *(unset)* | UUID | Resume an existing node registration explicitly. | Normally left unset; register-or-reattach resolves it via `MEMORIAHUB_NODE_NAME`. |
-| `MEMORIAHUB_CONCURRENCY` | `2` (bundle default in `docker-compose.worker.yml`); CLI-native default is `1` | integer ≥ 1 | Jobs this replica processes simultaneously. | Keep at 1–2 on memory-constrained hosts / AI-bound work; raise on beefier machines (see §6d). |
+| `MEMORIAHUB_CONCURRENCY` | `2` (bundle default in `docker-compose.worker.yml`); CLI-native default is now core/RAM-aware (2–4 on a capable host) instead of a flat `1`, when neither this env var, `--concurrency`, nor persisted node config set an explicit value | integer ≥ 1 | Jobs this replica processes simultaneously. | Keep at 1–2 on memory-constrained hosts / AI-bound work; raise on beefier machines (see §6d). |
 | `MEMORIAHUB_ELIGIBLE_TYPES` | *(unset — advertises everything the local capability probe supports)* | CSV of job-type names | Restricts which job types this node claims. | Narrow if you want a worker dedicated to one job type (e.g. only `face_detection`). |
 | `MEMORIAHUB_POLL_INTERVAL_MS` | `5000` | ms | Claim-loop poll interval when idle. | Rarely changed. |
 | `MEMORIAHUB_FACE_PROVIDER` | `human` (CLI-native); the bundle sets `compreface` | `human` \| `compreface` | Which face-detection provider this node uses locally. | Set to `compreface` whenever the server's active face provider (`PUT /api/face/features/detection`) is `compreface` — mismatched providers land in different embedding spaces (§4). The bundle already does this. |
@@ -191,7 +191,12 @@ Set in `.env.worker`, passed to `docker-compose.worker.yml`. A container restart
 
 | Setting | Default | What it controls | When to change |
 |---|---|---|---|
-| `NODE_OPTIONS=--max-old-space-size=<MB>` | *(unset — Node default)* | V8 old-space heap cap for the worker's Node process. | Set explicitly on a memory-constrained worker host, same two-regime sizing logic as the API (§6, [bulk-upload-vps-tuning.md §3](specs/bulk-upload-vps-tuning.md#3-the-levers-in-priority-order)) — leave ~1 GB headroom above the cap for off-heap decode/inference buffers on a larger box, or size to ~55% of a small container's limit. |
+| `NODE_OPTIONS=--max-old-space-size=<MB>` | *(unset — Node default)* | V8 old-space heap cap for the worker's Node process. | Set explicitly on a memory-constrained worker host, same two-regime sizing logic as the API (§6, [bulk-upload-vps-tuning.md §3](specs/bulk-upload-vps-tuning.md#3-the-levers-in-priority-order)) — leave ~1 GB headroom above the cap for off-heap decode/inference buffers on a larger box, or size to ~55% of a small container's limit. Superseded in practice by `MEMORIAHUB_MAX_OLD_SPACE_MB` below — the worker node now sets its own heap ceiling automatically at startup unless that variable is set to `0`. |
+| `MEMORIAHUB_MAX_OLD_SPACE_MB` | *(auto — ~50% of physical RAM, clamped 4000–12000 MB; 8000 MB on a 16 GB baseline host)* | Overrides the worker's automatically-computed `--max-old-space-size` re-exec value (see §3.5); integer MB, or `0` to disable heap re-tuning entirely and keep Node's default ~2 GB ceiling. | Set explicitly on a memory-limited container where 50% of the *host's* RAM would exceed the container's own cgroup memory limit — see §3.5. |
+| `MEMORIAHUB_HEAP_SNAPSHOT` | `1` (enabled) | Whether the worker also passes `--heapsnapshot-near-heap-limit=1` alongside the raised heap ceiling, so a genuine near-OOM recurrence writes one heap snapshot (in the process's current working directory) pinpointing the retainer; `1` \| `0`. | Set `0` to suppress — a near-OOM snapshot of an 8 GB+ heap can be multi-GB on disk. |
+| `MEMORIAHUB_SHARP_CONCURRENCY` | *(auto — half the cores, clamped 1–4)* | Per-pipeline libvips thread cap sharp uses (integer, 1–4); bounds peak native memory so it doesn't scale with cores × in-flight jobs. Paired with disabling sharp's per-process operation cache (a worker sees only distinct images, so the cache never hits and only pins native memory). | Override if the auto-computed default doesn't fit the host's available cores/memory. |
+| `MEMORIAHUB_MEMWATCH` | `1` (enabled) | The memory watchdog samples `process.memoryUsage()` on an interval into the worker log (rss / heapUsed / heapTotal / external / arrayBuffers / heapLimit), escalating to `warn` past 85% of the ceiling so a slow climb is visible (see §3.5); `1` \| `0`. | Set `0` to silence the periodic sample line. |
+| `MEMORIAHUB_HEAP_RESTART_FRACTION` | `0.90` | heapUsed/heapLimit fraction at which the pre-OOM safety valve fires: `node start` drains in-flight jobs (bounded 60 s) and exits `75` for a supervised restart; the TUI dashboard stops its embedded engine instead (see §3.5). A fraction in (0,1]; `0` disables. | Lower (e.g. `0.85`) to recycle sooner on a tight box; `0` to opt out entirely. |
 | `FACE_MAX_IMAGE_DIM` | `2000` | Max long-edge pixels before downscaling for face detection. | Lower to 768–1024 on memory-constrained workers to shrink the per-job decoded-image buffer. |
 | `TAG_MAX_IMAGE_DIM` | `1568` | Max long-edge pixels before downscaling for the auto-tagging vision call. | Same rationale as above; 1568 matches Anthropic's own auto-downscale threshold. |
 
@@ -199,6 +204,30 @@ Set in `.env.worker`, passed to `docker-compose.worker.yml`. A container restart
 
 - **Every replica needs a distinct `MEMORIAHUB_NODE_NAME`.** Whether scaled via `--scale memoriahub-worker=N` or run on separate machines, two containers sharing an identity fight over job leases (`job not owned by this node`).
 - **Never share the `/data` state volume between replicas.** It holds a pidfile and a Unix-domain-socket IPC channel that assume a single running instance.
+
+### 3.5 Memory & OOM hardening
+
+The worker node (`apps/cli/src/node/runtime-tuning.ts`) hardens its own memory posture for sustained multi-hour image-upload load, assuming a worker host has at least **16 GB RAM and 8 cores**. Previously a long-running worker slowly climbed V8's old-space heap and eventually crashed with "Ineffective mark-compacts near heap limit — JavaScript heap out of memory" at Node's ~2 GB default ceiling, even on a 32 GB machine.
+
+On startup the worker re-execs itself once with `--max-old-space-size` raised to ~50% of physical RAM (clamped 4–12 GB; 8 GB on the 16 GB baseline), giving the same slow climb many more hours of headroom, plus `--heapsnapshot-near-heap-limit=1` so a genuine recurrence writes a single heap snapshot — **landing in the process's current working directory** — pinpointing the retainer. This applies to `node start` (foreground, `--daemon`, the systemd unit, and the container image entrypoint) and to the interactive Tools > Worker Node dashboard's embedded engine. Alongside the heap ceiling, sharp's per-process operation cache is disabled and per-pipeline libvips concurrency is capped so peak native memory doesn't scale with cores × in-flight jobs, and `MEMORIAHUB_CONCURRENCY`'s default is now core/RAM-aware (2–4) instead of a flat `1` (§3.1).
+
+**Memory-limited container caveat:** the auto-computed heap size is 50% of the *host's* physical RAM, which can exceed what a container's own cgroup memory limit allows when the container is capped well below the host total. In that case, set `MEMORIAHUB_MAX_OLD_SPACE_MB` explicitly to a value below the container's memory limit (or `0` to disable heap re-tuning and fall back to Node's default ceiling).
+
+**Raising the ceiling is necessary but not always sufficient.** A raised heap only buys time against a genuine (e.g. native-dependency) memory leak — the climb is slower but still terminal. Two runtime aids exist for exactly that case, plus a mitigation on the CLIP path:
+
+**Memory watchdog (`MEMORIAHUB_MEMWATCH`, default on).** The worker samples `process.memoryUsage()` on an interval (default 60 s) and writes one structured line per sample to the worker log — `rss`, `heapUsed`, `heapTotal`, `external`, `arrayBuffers`, `heapLimit` (MB) and the heapUsed fraction — escalating to a `warn` line past 85% of the ceiling. This makes a slow climb visible in `memoriahub node logs` and, crucially, tells you **which pool** is growing: `heapUsed` climbing → a JS-object/string/typed-array leak (V8-managed); `external`/`arrayBuffers` climbing → native buffers (sharp / onnxruntime / undici); `rss` ≫ `heapUsed` → off-heap/native allocator. Pair it with the heap snapshot (`MEMORIAHUB_HEAP_SNAPSHOT`): the log says which pool, the snapshot names the exact retainer.
+
+**Pre-OOM safety valve (`MEMORIAHUB_HEAP_RESTART_FRACTION`, default 0.90).** The first time `heapUsed` crosses this fraction of the ceiling, the worker pre-empts the OOM instead of crashing:
+- **`node start` (container / systemd / daemon):** drains in-flight jobs (bounded to 60 s so a stuck job can't wedge the exit) then exits with code `75`, so the supervisor starts a **fresh** process — the container's `restart: unless-stopped` restarts on any exit, and the `node service` systemd unit's `Restart=on-failure` restarts on the non-zero code. **No work is lost:** drained/expired job leases are re-queued server-side. This turns an OOM crash-loop into a clean pre-emptive recycle. It **requires a supervisor** — a bare, unsupervised foreground `node start` will exit and stay down, so run sustained imports via the container or the systemd service, not a raw foreground process.
+- **Tools > Worker Node TUI dashboard:** never kills the interactive session (and restarting only the in-process engine wouldn't free native singletons like the CLIP session), so it drains and stops the embedded engine and logs a message telling you to relaunch — ideally as a daemon/container for sustained loads.
+
+Set `MEMORIAHUB_HEAP_RESTART_FRACTION=0` to disable the valve.
+
+**CLIP-path mitigation.** The shared onnxruntime CLIP path (`duplicate_detection` — the *only* onnxruntime user in the app) now: disables the CPU mem arena / mem-pattern pools, disposes input/output tensors after each inference, and **recycles the `InferenceSession` every N embeds** (release + recreate) so any native memory the session accumulates across `run()` calls is periodically reclaimed rather than pinned for the process lifetime. All parity-safe (the embedding is unchanged). The recycle cadence is `MEMORIAHUB_CLIP_RECYCLE_AFTER` on the worker and `CLIP_SESSION_RECYCLE_AFTER` on the API (both default `1000`; `0` disables). Recreating a session costs ~200 ms, negligible amortized over 1000 jobs. This lowers the likelihood/rate of the leak; it is not a guaranteed cure, which is why the watchdog and safety valve exist — and since `duplicate_detection` is the sole onnxruntime path, excluding that job type from a worker (or turning off `features.duplicateDetection`) sidesteps it entirely while the root cause is confirmed.
+
+**Capturing a heap snapshot to pin a leak.** On any version, run the worker with `NODE_OPTIONS="--heapsnapshot-near-heap-limit=2"`; when it nears OOM Node writes a `Heap.*.heapsnapshot` file to the process's working directory. Open it in Chrome DevTools → Memory → **Load**, sort by **Retained Size**, and the top constructor names the retainer. (On this build the flag is already applied automatically unless `MEMORIAHUB_HEAP_SNAPSHOT=0`.)
+
+See §3.3 above for the full env-var reference: `MEMORIAHUB_MAX_OLD_SPACE_MB`, `MEMORIAHUB_HEAP_SNAPSHOT`, `MEMORIAHUB_SHARP_CONCURRENCY`, `MEMORIAHUB_MEMWATCH`, `MEMORIAHUB_HEAP_RESTART_FRACTION`.
 
 ---
 
@@ -317,3 +346,5 @@ Give the worker container an explicit memory limit and a matching heap cap using
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | July 2026 | AI Assistant | Initial consolidated operator reference for the worker-container architecture: API-side env vars, worker-container env vars, CompreFace sizing, credentials, four recommended presets, and fleet-health verification steps. |
+| 1.1 | July 2026 | AI Assistant | Documented worker-node memory/OOM hardening (`apps/cli/src/node/runtime-tuning.ts`): new §3.5, the three new env vars (`MEMORIAHUB_MAX_OLD_SPACE_MB`, `MEMORIAHUB_HEAP_SNAPSHOT`, `MEMORIAHUB_SHARP_CONCURRENCY`), and the core/RAM-aware `MEMORIAHUB_CONCURRENCY` default. |
+| 1.2 | July 2026 | AI Assistant | Documented the memory watchdog (`MEMORIAHUB_MEMWATCH`), the pre-OOM drain-and-restart safety valve (`MEMORIAHUB_HEAP_RESTART_FRACTION`), the CLIP-path onnxruntime mitigation, and the heap-snapshot capture recipe in §3.5 + §3.3. Companion to the leak investigation (issue #156). |

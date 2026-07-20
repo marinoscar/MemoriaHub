@@ -27,9 +27,17 @@
 const mockOrtInferenceSessionCreate = jest.fn();
 const mockOrtTensor = jest.fn().mockImplementation((type, data, dims) => ({ type, data, dims }));
 
+// `Tensor` must be usable with `new` (embedImageWithSession does
+// `new ort.Tensor(...)`) — a regular `function` works with `new` because
+// returning an object from a constructor call overrides the implicit `this`,
+// unlike an arrow function which cannot be a constructor at all.
+function MockOrtTensor(...args: unknown[]) {
+  return mockOrtTensor(...args);
+}
+
 jest.mock('onnxruntime-node', () => ({
   InferenceSession: { create: (...args: unknown[]) => mockOrtInferenceSessionCreate(...args) },
-  Tensor: (...args: unknown[]) => mockOrtTensor(...args),
+  Tensor: MockOrtTensor,
 }));
 
 const mockSharpToBuffer = jest.fn();
@@ -423,9 +431,132 @@ describe('VisualEmbeddingService — onApplicationBootstrap', () => {
       jest.resetModules();
       jest.doMock('onnxruntime-node', () => ({
         InferenceSession: { create: (...args: unknown[]) => mockOrtInferenceSessionCreate(...args) },
-        Tensor: (...args: unknown[]) => mockOrtTensor(...args),
+        Tensor: MockOrtTensor,
       }));
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section B.3: bounded-lifetime session recycling (CLIP_SESSION_RECYCLE_AFTER)
+//
+// embedImage() increments embedsSinceLoad/inFlightEmbeds and calls
+// maybeRecycleSession() in a finally block. Once embedsSinceLoad >=
+// resolveRecycleAfter() (env CLIP_SESSION_RECYCLE_AFTER, default
+// DEFAULT_CLIP_RECYCLE_AFTER=1000, 0 disables) and no embed is in flight, the
+// session is released (nulled + session.release() called) and the counter
+// reset. The next embedImage call reloads a fresh session via getSession() ->
+// loadSession(), which itself resets embedsSinceLoad to 0.
+// ---------------------------------------------------------------------------
+
+describe('VisualEmbeddingService — session recycling (CLIP_SESSION_RECYCLE_AFTER)', () => {
+  let service: VisualEmbeddingService;
+  let mockPrisma: MockPrismaService;
+  const ORIGINAL_RECYCLE_ENV = process.env['CLIP_SESSION_RECYCLE_AFTER'];
+
+  // A fresh mock InferenceSession per creation, each with its own `release`
+  // spy, so assertions can distinguish "session #1 released" from "session #2
+  // never released".
+  function makeMockSession() {
+    return {
+      inputNames: ['pixel_values'],
+      outputNames: ['image_embeds'],
+      release: jest.fn().mockResolvedValue(undefined),
+      run: jest.fn().mockResolvedValue({
+        image_embeds: { data: new Float32Array([3, 4]) }, // l2Normalize -> [0.6, 0.8]
+      }),
+    };
+  }
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    mockPrisma = createMockPrismaService();
+    (prepareImageForProcessing as jest.Mock).mockResolvedValue({
+      buffer: Buffer.from('prepared'),
+      width: 224,
+      height: 224,
+    });
+    // preprocessImageForClip needs a decodable buffer of the right length to
+    // avoid returning null (which would short-circuit embedImageWithSession
+    // before the mocked ONNX session's `run` is ever invoked).
+    mockSharpToBuffer.mockResolvedValue({
+      data: new Uint8Array(3 * CLIP_IMAGE_SIZE * CLIP_IMAGE_SIZE),
+      info: { width: CLIP_IMAGE_SIZE, height: CLIP_IMAGE_SIZE },
+    });
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [VisualEmbeddingService, { provide: PrismaService, useValue: mockPrisma }],
+    }).compile();
+
+    service = module.get<VisualEmbeddingService>(VisualEmbeddingService);
+  });
+
+  afterEach(() => {
+    service.onModuleDestroy();
+    if (ORIGINAL_RECYCLE_ENV === undefined) {
+      delete process.env['CLIP_SESSION_RECYCLE_AFTER'];
+    } else {
+      process.env['CLIP_SESSION_RECYCLE_AFTER'] = ORIGINAL_RECYCLE_ENV;
+    }
+  });
+
+  it('releases the session after CLIP_SESSION_RECYCLE_AFTER embeds and creates a fresh one on the next embed', async () => {
+    process.env['CLIP_SESSION_RECYCLE_AFTER'] = '3';
+
+    const session1 = makeMockSession();
+    const session2 = makeMockSession();
+    mockOrtInferenceSessionCreate.mockResolvedValueOnce(session1).mockResolvedValueOnce(session2);
+
+    const r1 = await service.embedImage(Buffer.from('a'));
+    const r2 = await service.embedImage(Buffer.from('b'));
+    const r3 = await service.embedImage(Buffer.from('c'));
+
+    // All three embeds returned the expected l2-normalized vector.
+    expect(r1).toEqual([0.6, 0.8]);
+    expect(r2).toEqual([0.6, 0.8]);
+    expect(r3).toEqual([0.6, 0.8]);
+
+    // Only one session created so far; the 3rd embed's finally-block recycle
+    // releases it but does not eagerly create a replacement.
+    expect(mockOrtInferenceSessionCreate).toHaveBeenCalledTimes(1);
+    expect(session1.release).toHaveBeenCalledTimes(1);
+    expect(session2.release).not.toHaveBeenCalled();
+
+    // A 4th embed must reload — a brand new session is created.
+    const r4 = await service.embedImage(Buffer.from('d'));
+    expect(r4).toEqual([0.6, 0.8]);
+    expect(mockOrtInferenceSessionCreate).toHaveBeenCalledTimes(2);
+    // The new session has not itself been recycled yet (only 1 embed served).
+    expect(session2.release).not.toHaveBeenCalled();
+  });
+
+  it('never recycles when CLIP_SESSION_RECYCLE_AFTER=0 (disabled)', async () => {
+    process.env['CLIP_SESSION_RECYCLE_AFTER'] = '0';
+
+    const session = makeMockSession();
+    mockOrtInferenceSessionCreate.mockResolvedValue(session);
+
+    for (let i = 0; i < 5; i++) {
+      const result = await service.embedImage(Buffer.from(`img-${i}`));
+      expect(result).toEqual([0.6, 0.8]);
+    }
+
+    expect(mockOrtInferenceSessionCreate).toHaveBeenCalledTimes(1);
+    expect(session.release).not.toHaveBeenCalled();
+  });
+
+  it('does not recycle under the default threshold (env unset) for fewer than 1000 embeds — session created once', async () => {
+    delete process.env['CLIP_SESSION_RECYCLE_AFTER'];
+
+    const session = makeMockSession();
+    mockOrtInferenceSessionCreate.mockResolvedValue(session);
+
+    await service.embedImage(Buffer.from('a'));
+    await service.embedImage(Buffer.from('b'));
+    await service.embedImage(Buffer.from('c'));
+
+    expect(mockOrtInferenceSessionCreate).toHaveBeenCalledTimes(1);
+    expect(session.release).not.toHaveBeenCalled();
   });
 });
 

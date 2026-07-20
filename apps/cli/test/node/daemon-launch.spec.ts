@@ -85,17 +85,29 @@ function fakeChild(pid = 4242): FakeChild {
 
 describe('spawnNodeStartDaemon', () => {
   let tmpDir: string;
+  // Snapshot/restore MEMORIAHUB_MAX_OLD_SPACE_MB around each test so
+  // heapNodeFlags() (see runtime-tuning.ts) stays deterministic — forced to
+  // '0' here so it returns [] and the pre-existing argv assertions below
+  // (which predate the RAM-aware heap-flag prepend) keep passing unchanged.
+  let savedMaxOldSpaceMb: string | undefined;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(actualOs.tmpdir(), 'mh-daemon-launch-'));
     fakeHome = tmpDir;
     spawnMock.mockReset();
     spawnMock.mockReturnValue(fakeChild());
+    savedMaxOldSpaceMb = process.env['MEMORIAHUB_MAX_OLD_SPACE_MB'];
+    process.env['MEMORIAHUB_MAX_OLD_SPACE_MB'] = '0';
   });
 
   afterEach(() => {
     fakeHome = '';
     fs.rmSync(tmpDir, { recursive: true, force: true });
+    if (savedMaxOldSpaceMb !== undefined) {
+      process.env['MEMORIAHUB_MAX_OLD_SPACE_MB'] = savedMaxOldSpaceMb;
+    } else {
+      delete process.env['MEMORIAHUB_MAX_OLD_SPACE_MB'];
+    }
     jest.clearAllMocks();
   });
 
@@ -146,6 +158,24 @@ describe('spawnNodeStartDaemon', () => {
       '--poll',
       '5000',
     ]);
+  });
+
+  it('prepends RAM-aware heap flags and tunes the child env when heap tuning is enabled', () => {
+    const savedHeapSnapshot = process.env['MEMORIAHUB_HEAP_SNAPSHOT'];
+    process.env['MEMORIAHUB_MAX_OLD_SPACE_MB'] = '8192';
+    process.env['MEMORIAHUB_HEAP_SNAPSHOT'] = '0';
+    try {
+      spawnNodeStartDaemon({});
+      const [, argv, opts] = spawnMock.mock.calls[0] as [string, string[], Record<string, unknown>];
+      expect(argv).toEqual(['--max-old-space-size=8192', process.argv[1], 'node', 'start']);
+      expect((opts['env'] as NodeJS.ProcessEnv)['MEMORIAHUB_HEAP_TUNED']).toBe('1');
+    } finally {
+      if (savedHeapSnapshot !== undefined) {
+        process.env['MEMORIAHUB_HEAP_SNAPSHOT'] = savedHeapSnapshot;
+      } else {
+        delete process.env['MEMORIAHUB_HEAP_SNAPSHOT'];
+      }
+    }
   });
 
   it('calls child.unref()', () => {

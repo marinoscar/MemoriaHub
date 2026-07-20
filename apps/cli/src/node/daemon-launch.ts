@@ -25,6 +25,7 @@ import { logsDir } from '../paths.js';
 import { nodeLogPath } from './logger.js';
 import { readPidFile, isPidAlive } from './daemon.js';
 import { isDaemonRunning } from './ipc-client.js';
+import { heapNodeFlags, tunedChildEnv } from './runtime-tuning.js';
 
 export interface SpawnDaemonOptions {
   /** Forwarded as `--concurrency <n>` when set. */
@@ -66,9 +67,13 @@ export function spawnNodeStartDaemon(opts: SpawnDaemonOptions = {}): SpawnedDaem
     args.push('--poll', String(opts.poll));
   }
 
-  const child = spawn(process.execPath, [process.argv[1], ...args], {
+  // Launch already carrying the RAM-aware heap flags (and mark the env tuned)
+  // so the detached worker never OOMs at Node's ~2 GB default and never
+  // re-execs itself — see runtime-tuning.ts.
+  const child = spawn(process.execPath, [...heapNodeFlags(), process.argv[1], ...args], {
     detached: true,
     stdio: ['ignore', logFd, logFd],
+    env: tunedChildEnv(),
   });
   child.unref();
   fs.closeSync(logFd);

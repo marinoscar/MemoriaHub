@@ -13,7 +13,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Box, Text, render, useApp, useInput } from 'ink';
+import { Box, Text, useApp, useInput } from 'ink';
 
 import { loadConfig, type CliConfig } from '../config.js';
 import { openDb } from '../db/database.js';
@@ -22,6 +22,7 @@ import { factoryReset } from '../reset.js';
 import { resolveUpdateStatus } from '../version-check.js';
 import type BetterSqlite3 from 'better-sqlite3';
 
+import { renderTui } from './raw-mode.js';
 import { HomeMenu } from './HomeMenu.js';
 import { Menu } from './Menu.js';
 import { LoginScreen } from './LoginScreen.js';
@@ -788,14 +789,12 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
 // ---------------------------------------------------------------------------
 
 export async function launchTui(opts?: { currentVersion?: string }): Promise<void> {
-  if (!process.stdout.isTTY) {
-    process.stdout.write(
-      'The interactive UI needs a real terminal. ' +
-      'Use `memoriahub sync --all` or `memoriahub --help`.\n',
-    );
-    return;
-  }
-
-  const { waitUntilExit } = render(<App currentVersion={opts?.currentVersion ?? '0.0.0'} />);
-  await waitUntilExit();
+  // NOTE: do NOT re-exec here to raise the V8 heap ceiling. A re-exec turns
+  // this process into a signal-forwarding shim whose child loses interactive
+  // raw-mode control of the terminal (setRawMode EIO), which breaks the TUI on
+  // machines where the re-exec fires. Sustained/high-memory worker load has its
+  // own tuned, non-interactive path (`memoriahub node start` / the daemon the
+  // Worker Node dashboard attaches to), so the lightweight interactive menu
+  // stays in-process and untuned.
+  await renderTui(<App currentVersion={opts?.currentVersion ?? '0.0.0'} />);
 }

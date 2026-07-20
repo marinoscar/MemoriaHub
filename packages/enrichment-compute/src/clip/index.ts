@@ -114,7 +114,50 @@ export async function createClipSession(modelPath: string): Promise<InferenceSes
   const ort = await loadOrt();
   return ort.InferenceSession.create(modelPath, {
     intraOpNumThreads: 2,
+    // Memory-stability options for a long-lived worker running sustained
+    // inference (hours of bulk-import image jobs). Both are PARITY-SAFE — they
+    // change only onnxruntime's internal memory management, never the computed
+    // embedding, so a node stays numerically identical to the server:
+    //   - enableCpuMemArena: the CPU arena allocator grows to an inference's
+    //     high-water mark and holds it; disabling trades a little per-call
+    //     allocation cost for not pinning that peak for the process lifetime.
+    //   - enableMemPattern: pre-planned reuse buffers, another retained pool.
+    // "Slow but alive" is the queue's design goal, so we favor lower steady-
+    // state memory over marginal throughput here.
+    enableCpuMemArena: false,
+    enableMemPattern: false,
   });
+}
+
+/**
+ * Default number of embeds after which a host should recycle (release +
+ * recreate) its CLIP `InferenceSession`, bounding any native memory the session
+ * accumulates across `run()` calls over a multi-hour import. Recreating a
+ * session costs ~200 ms, so amortized over this many jobs the overhead is
+ * negligible. Hosts read their own env override (`MEMORIAHUB_CLIP_RECYCLE_AFTER`
+ * on the worker, `CLIP_SESSION_RECYCLE_AFTER` on the API) and fall back to this;
+ * `0` disables recycling.
+ */
+export const DEFAULT_CLIP_RECYCLE_AFTER = 1000;
+
+/**
+ * Best-effort release of a CLIP `InferenceSession`'s NATIVE resources.
+ * `InferenceSession.release()` (present in the pinned onnxruntime-node) frees
+ * the native session and its allocator; unlike a CPU `Tensor.dispose()` (which
+ * is a GPU/WebNN no-op), this actually reclaims memory. The host owns *when* to
+ * call it (bounded-lifetime recycling / shutdown); this helper just
+ * encapsulates the version-specific call so both hosts stay in sync. Swallows
+ * errors — a failed release must never fail a job.
+ */
+export async function releaseClipSession(session: InferenceSession): Promise<void> {
+  const release = (session as { release?: unknown }).release;
+  if (typeof release === 'function') {
+    try {
+      await (release as () => Promise<void>).call(session);
+    } catch {
+      /* best-effort — GC reclaims it eventually */
+    }
+  }
 }
 
 /**
@@ -143,9 +186,26 @@ export async function embedImageWithSession(
   const outputs = await session.run({ [inputName]: tensor });
   const raw = outputs[outputName]?.data as Float32Array | undefined;
 
-  if (!raw || raw.length === 0) {
-    return null;
-  }
+  // Copy out what we need, then promptly release the input + output tensors'
+  // native backing rather than waiting on V8 GC / finalizers to catch up — a
+  // long-lived worker running sustained inference must not accumulate one
+  // undisposed OrtValue per image. `dispose()` exists on onnxruntime-node's
+  // Tensor in recent versions; guard so older versions (no-op) still work.
+  const result = raw && raw.length > 0 ? l2Normalize(Array.from(raw)) : null;
+  disposeTensor(tensor);
+  for (const key of Object.keys(outputs)) disposeTensor(outputs[key]);
 
-  return l2Normalize(Array.from(raw));
+  return result;
+}
+
+/** Best-effort release of an onnxruntime tensor's native backing (version-guarded). */
+function disposeTensor(t: unknown): void {
+  const d = (t as { dispose?: unknown } | null | undefined)?.dispose;
+  if (typeof d === 'function') {
+    try {
+      (d as () => void).call(t);
+    } catch {
+      /* older onnxruntime-node: no-op / not disposable — GC will reclaim it */
+    }
+  }
 }

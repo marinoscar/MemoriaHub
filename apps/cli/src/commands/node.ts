@@ -84,6 +84,14 @@ import { startDaemonHost, readPidFile, isPidAlive } from '../node/daemon.js';
 import { connectToDaemon, isDaemonRunning, type DaemonMessage } from '../node/ipc-client.js';
 import { checkNodeAlreadyRunning } from '../node/daemon-launch.js';
 import {
+  maybeReexecWithHeapLimit,
+  configureSharpRuntime,
+  heapNodeFlags,
+  tunedChildEnv,
+  resolveDefaultConcurrency,
+} from '../node/runtime-tuning.js';
+import { startMemoryWatchdog } from '../node/memory-watchdog.js';
+import {
   detectLinuxDistro,
   ensureNpmNativeDeps,
   ensureFfmpeg,
@@ -108,8 +116,22 @@ function cliVersion(): string {
   }
 }
 
-/** Default worker concurrency. */
-const DEFAULT_CONCURRENCY = 1;
+/**
+ * Default worker concurrency — core/RAM-aware, tuned for the assumed ≥16 GB /
+ * ≥8-core baseline (see runtime-tuning.ts). Still overridable per node via
+ * `--concurrency`, `MEMORIAHUB_CONCURRENCY`, or the persisted node config.
+ */
+const DEFAULT_CONCURRENCY = resolveDefaultConcurrency();
+
+/**
+ * Exit code used when the memory safety valve drains and exits so a supervisor
+ * restarts the worker fresh. Non-zero so systemd `Restart=on-failure` fires;
+ * container `restart: unless-stopped` restarts on any exit. 75 = EX_TEMPFAIL.
+ */
+const EXIT_MEMORY_RESTART = 75;
+
+/** Max time to wait for in-flight jobs to drain before the safety valve force-exits. */
+const MEMORY_RESTART_DRAIN_MS = 60_000;
 
 /** Parse a comma-separated list of job types, validating each against the set. */
 function parseTypes(csv?: string): string[] {
@@ -389,6 +411,14 @@ function startCmd(): Command {
         faceProvider?: string;
         comprefaceUrl?: string;
       }) => {
+        // Harden the worker's memory posture before doing anything else: raise
+        // V8's old-space ceiling to a RAM-aware value so a long-running worker
+        // no longer OOMs at Node's ~2 GB default under sustained image load
+        // (assumes ≥16 GB RAM). This can only be set as a launch flag, so we
+        // re-exec once; when it returns true this process is now a
+        // signal-forwarding shim and must not continue.
+        if (maybeReexecWithHeapLimit()) return;
+
         const cfg = requireConfig();
         const headless = resolveHeadless(opts);
         // Headless/container mode may self-register below (config is already
@@ -452,9 +482,14 @@ function startCmd(): Command {
           const outPath = path.join(logsDir(), 'node.out.log');
           const logFd = fs.openSync(outPath, 'a');
           const args = process.argv.slice(2).filter((a) => a !== '--daemon');
-          const child = spawn(process.execPath, [process.argv[1], ...args], {
+          // Launch the detached worker already carrying the RAM-aware heap
+          // flags (and mark its env tuned) so it never re-execs itself — the
+          // detached child's stdio is a log file, not a tty, so a re-exec there
+          // would be needlessly opaque.
+          const child = spawn(process.execPath, [...heapNodeFlags(), process.argv[1], ...args], {
             detached: true,
             stdio: ['ignore', logFd, logFd],
+            env: tunedChildEnv(),
           });
           child.unref();
           fs.closeSync(logFd);
@@ -678,6 +713,47 @@ function startCmd(): Command {
         );
         ui.dim(`Log: ${logger.logPath}`);
         ui.dim(`IPC: ${host.socketPath}`);
+
+        // Bound libvips/sharp once (disable the useless-for-a-worker op cache,
+        // cap per-pipeline concurrency) so peak native memory doesn't scale
+        // with core count × in-flight jobs. Best-effort — no-op if sharp isn't
+        // installed on this node.
+        await configureSharpRuntime();
+
+        // Sample memory on an interval into the structured log so a slow climb
+        // under sustained load is VISIBLE (and a post-mortem can tell which
+        // pool grew: heapUsed vs external/arrayBuffers vs rss). Disable with
+        // MEMORIAHUB_MEMWATCH=0.
+        //
+        // Safety valve: if heapUsed crosses ~90% of the ceiling, drain in-flight
+        // jobs and exit non-zero so the supervisor (container `restart:
+        // unless-stopped`, systemd `Restart=on-failure`) starts a FRESH process
+        // — pre-empting an OOM crash-loop while a slow leak is still being root-
+        // caused. No work is lost: drained/expired job leases are re-queued
+        // server-side. Drain is bounded so a stuck job can't wedge the exit.
+        // Disable with MEMORIAHUB_HEAP_RESTART_FRACTION=0.
+        let memoryRestarting = false;
+        startMemoryWatchdog((level, s) => logger.log(level, { ev: 'memory', ...s }), {
+          onCritical: (s) => {
+            if (memoryRestarting) return;
+            memoryRestarting = true;
+            logger.log('error', {
+              ev: 'memory-restart',
+              msg: 'heapUsed crossed the restart threshold — draining and exiting for a supervised restart',
+              ...s,
+            });
+            ui.warn(
+              `Heap at ${Math.round(s.heapUsedFraction * 100)}% of ceiling — draining in-flight jobs and ` +
+                'restarting to pre-empt an out-of-memory crash (no work lost; the server re-queues in-flight jobs).',
+            );
+            const drain = engine.stop('memory-pressure', { deregister: false });
+            const bounded = Promise.race([
+              drain,
+              new Promise<void>((resolve) => setTimeout(resolve, MEMORY_RESTART_DRAIN_MS).unref?.()),
+            ]);
+            void bounded.finally(() => process.exit(EXIT_MEMORY_RESTART));
+          },
+        });
 
         await engine.start();
       },
