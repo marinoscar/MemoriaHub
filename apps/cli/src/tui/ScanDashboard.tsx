@@ -11,12 +11,13 @@
  */
 
 import React from 'react';
-import { Box, Text, render, useApp, useInput } from 'ink';
+import { Box, Text, useApp, useInput } from 'ink';
 
 import type { ScanReport } from '../scan/report.js';
 import { formatBytes } from '../format-bytes.js';
 import { formatDuration } from '../format-duration.js';
 import { BOX_BORDER, METER } from './theme.js';
+import { renderTui } from './raw-mode.js';
 
 export interface ScanDashboardProps {
   report: ScanReport;
@@ -28,8 +29,7 @@ export interface ScanDashboardProps {
 // ---------------------------------------------------------------------------
 
 export async function renderScanDashboard(props: ScanDashboardProps): Promise<void> {
-  const { waitUntilExit } = render(<ScanDashboard {...props} />);
-  await waitUntilExit();
+  await renderTui(<ScanDashboard {...props} />);
 }
 
 // ---------------------------------------------------------------------------
