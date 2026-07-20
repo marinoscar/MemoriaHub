@@ -49,6 +49,17 @@ Web Application Foundation with React UI + Node API + PostgreSQL. Production-gra
   tests/e2e/                # Optional E2E tests
 ```
 
+## MANDATORY: Issue-Driven Development (Traceability)
+
+Every feature and bug fix MUST be tracked by a GitHub issue, filed **before** implementation planning is finalized (for features) or the fix starts (for bugs). This applies before any worktree or branch is created — traceability starts at the issue, not the code. Running `gh issue create` from inside the repo infers the target repository from the git remote automatically, so no repo owner/URL needs to be specified.
+
+- **New feature**: Before finalizing an implementation plan, create (or confirm an existing) issue with `gh issue create --template feature_request.yml`. Fill in the real problem statement, proposed solution, affected component, and priority — not placeholder text.
+- **Larger initiative**: If the work will span multiple features or sessions, file an Epic instead with `gh issue create --template epic.yml`. Child feature issues must reference the epic number in their body or task list.
+- **Bug fix**: Before starting the fix, create (or confirm an existing) issue with `gh issue create --template bug_report.yml`. Fill in the description, reproduction steps, expected vs. actual behavior, component, and environment/logs if known. Do not file a duplicate if one already exists for the same bug — reuse it.
+- **Link the work**: Reference the issue number in commit messages and/or the PR description (`Fixes #123` / `Relates to #123`), per the `.github/pull_request_template.md` convention.
+- **Keep it current**: Update or close the issue as the corresponding PR resolves it, so issue state reflects real progress.
+- **Scope**: This applies to feature and bug work specifically. Routine `chore`/`docs`/`refactor` commits don't each need their own tracking issue.
+
 ## MANDATORY: Worktree-Based Feature Development
 
 Every feature or fix MUST be developed in a Git worktree. The main checkout stays on `main` at all times.
@@ -61,6 +72,7 @@ Every feature or fix MUST be developed in a Git worktree. The main checkout stay
 ### Workflow (Claude MUST follow)
 
 **Starting feature work:**
+0. Ensure a tracking issue exists, per [MANDATORY: Issue-Driven Development (Traceability)](#mandatory-issue-driven-development-traceability) above.
 1. From the main checkout, create the worktree:
    ```bash
    git worktree add worktrees/<short-name> -b <type>/<short-name>
