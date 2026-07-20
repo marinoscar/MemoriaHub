@@ -16,7 +16,6 @@ import React, { useState, useEffect } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 
 import { loadConfig, type CliConfig } from '../config.js';
-import { maybeReexecWithHeapLimit } from '../node/runtime-tuning.js';
 import { openDb } from '../db/database.js';
 import { ApiClient, type Circle } from '../api.js';
 import { factoryReset } from '../reset.js';
@@ -790,12 +789,12 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
 // ---------------------------------------------------------------------------
 
 export async function launchTui(opts?: { currentVersion?: string }): Promise<void> {
-  // The Tools › Worker Node dashboard can own an in-process engine that runs
-  // for hours under sustained load — the same OOM exposure as `node start`.
-  // Raise V8's old-space ceiling to a RAM-aware value before Ink renders (see
-  // runtime-tuning.ts). Re-execs once; when it returns true this process is now
-  // a transparent signal-forwarding shim and must not render the UI.
-  if (maybeReexecWithHeapLimit()) return;
-
+  // NOTE: do NOT re-exec here to raise the V8 heap ceiling. A re-exec turns
+  // this process into a signal-forwarding shim whose child loses interactive
+  // raw-mode control of the terminal (setRawMode EIO), which breaks the TUI on
+  // machines where the re-exec fires. Sustained/high-memory worker load has its
+  // own tuned, non-interactive path (`memoriahub node start` / the daemon the
+  // Worker Node dashboard attaches to), so the lightweight interactive menu
+  // stays in-process and untuned.
   await renderTui(<App currentVersion={opts?.currentVersion ?? '0.0.0'} />);
 }
