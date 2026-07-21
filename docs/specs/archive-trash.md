@@ -310,6 +310,10 @@ Every caller that should hide archived items must explicitly pass `excludeArchiv
 
 Reducing `storage.trash.retentionDays` takes effect on the next purge run. Items whose `deleted_at` is now past the new cutoff will be purged on the next cron tick. This is by design — the cutoff is always computed fresh from the current setting.
 
+### Archive/Trash UI surfaces burst/duplicate group origin (issue #163)
+
+The Archive/Trash gallery (`MediaGallery`) and item detail drawer (`MediaDetailDrawer`, both in `apps/web`) show an origin badge/link when an item retains a `burstGroupId`/`duplicateGroupId` from a *resolved* (not dismissed) burst/duplicate review group — resolve does not clear these columns, only dismiss does (see [burst-detection.md §7.2](burst-detection.md#72-group-actions) / [duplicate-detection.md §9.3](duplicate-detection.md#93-post-apimediaduplicatesidresolve)). This lets a user confirm a kept duplicate/best-shot exists before choosing "Delete forever". Trashed-item caveat: because `BurstService.getBurstGroup`'s member sub-query filters by `deletedAt: null` (not `archivedAt`), a trashed item will not itself appear in its own linked burst group's member list even though the group and its other members remain visible.
+
 ---
 
 ## Document History
@@ -317,3 +321,4 @@ Reducing `storage.trash.retentionDays` takes effect on the next purge run. Items
 | Version | Date | Author | Changes |
 |---|---|---|---|
 | 1.0 | June 2026 | AI Assistant | Initial specification matching shipped implementation |
+| 1.1 | July 2026 | AI Assistant | Document Archive/Trash UI origin badge/link for items retaining a resolved (not dismissed) burst/duplicate group id (§11, issue #163) |

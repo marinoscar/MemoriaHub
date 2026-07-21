@@ -447,6 +447,8 @@ Keep selected members; archive or trash the rest.
 - **Response `404`:** group not found.
 - Runs in a single `$transaction`: bulk `archivedAt`/`deletedAt` update on the removed members plus the group's `status = resolved` update (recording `resolutionAction`, `keptCount`, `removedCount` — see §5.1) succeed or fail together. Writes an `audit_events` row (`duplicate_group:resolved`).
 
+**Resolve does not clear `duplicateGroupId`.** As with burst detection's resolve (see [burst-detection.md §7.2](burst-detection.md#72-group-actions)), no member — kept or removed — has `duplicateGroupId` unset by this endpoint; only `POST /api/media/duplicates/:id/dismiss` (§9.5 below, `duplicateGroupId = null`) does. An item archived or trashed via resolve therefore retains a pointer to its (now `resolved`) duplicate group. The Archive/Trash UI surfaces this via an origin badge/link back to `/duplicates/:id` (issue #163).
+
 ### 9.4 `POST /api/media/duplicates/bulk/resolve`
 
 Resolve multiple pending duplicate groups in a single call, always keeping each group's `suggestedBestItemId` and archiving/trashing the rest — the exact same shape and semantics as [burst detection's bulk resolve](burst-detection.md#72-group-actions) (`POST /api/media/bursts/bulk/resolve`), applied to `DuplicateGroup` rows instead.

@@ -87,6 +87,8 @@ export interface MediaItem {
   updatedAt: string;
   deletedAt: string | null;
   archivedAt: string | null;
+  burstGroupId: string | null;
+  duplicateGroupId: string | null;
   metadata: Record<string, unknown> | null;
   // Enriched fields from thumbnail processing
   thumbnailUrl: string | null;
