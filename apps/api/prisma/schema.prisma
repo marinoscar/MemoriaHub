@@ -529,9 +529,17 @@ model MediaItem {
   burstUuid      String? @map("burst_uuid") // Apple EXIF MakerNote BurstUUID
   burstScore     Float?  @map("burst_score") // best-shot quality score
   burstGroupId   String? @map("burst_group_id") @db.Uuid
+  // Provenance-only: set once at resolve time, NEVER cleared afterward (unlike burstGroupId,
+  // which is nulled on resolution). Lets an archived/trashed item retain traceability to the
+  // burst group it originated from. See issue #163.
+  originBurstGroupId String? @map("origin_burst_group_id") @db.Uuid
 
   // --- Duplicate Detection ---
   duplicateGroupId String? @map("duplicate_group_id") @db.Uuid
+  // Provenance-only: set once at resolve time, NEVER cleared afterward (unlike duplicateGroupId,
+  // which is nulled on resolution). Lets an archived/trashed item retain traceability to the
+  // duplicate group it originated from. See issue #163.
+  originDuplicateGroupId String? @map("origin_duplicate_group_id") @db.Uuid
 
   // --- Relations ---
   albumItems             AlbumItem[]
@@ -552,9 +560,11 @@ model MediaItem {
   // Burst Detection relations
   burstGroup             BurstGroup?          @relation("BurstGroupItems", fields: [burstGroupId], references: [id], onDelete: SetNull)
   suggestedForBursts     BurstGroup[]         @relation("BurstGroupSuggestedBest")
+  originBurstGroup       BurstGroup?          @relation("BurstGroupOriginItems", fields: [originBurstGroupId], references: [id], onDelete: SetNull)
   // Duplicate Detection relations
   duplicateGroup         DuplicateGroup?      @relation("DuplicateGroupItems", fields: [duplicateGroupId], references: [id], onDelete: SetNull)
   suggestedForDuplicates DuplicateGroup[]     @relation("DuplicateGroupSuggestedBest")
+  originDuplicateGroup   DuplicateGroup?      @relation("DuplicateGroupOriginItems", fields: [originDuplicateGroupId], references: [id], onDelete: SetNull)
   // Media Sharing relations
   shares                 MediaShare[]
   // Location Inference relations
@@ -584,6 +594,8 @@ model MediaItem {
   @@index([burstUuid])
   @@index([burstGroupId])
   @@index([duplicateGroupId])
+  @@index([originBurstGroupId])
+  @@index([originDuplicateGroupId])
   @@index([circleId, perceptualHash])
   // NOTE: a hand-authored partial composite index "media_items_map_locations_idx"
   // ON (circle_id, captured_at DESC, taken_lat, taken_lng) WHERE deleted_at IS NULL
@@ -1068,6 +1080,9 @@ model BurstGroup {
   suggestedBestItem MediaItem?  @relation("BurstGroupSuggestedBest", fields: [suggestedBestItemId], references: [id], onDelete: SetNull)
   resolvedBy        User?       @relation("BurstGroupResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
   items             MediaItem[] @relation("BurstGroupItems")
+  // Provenance-only inverse relation: items whose origin (never cleared) points at this group,
+  // distinct from `items` above which tracks CURRENT membership (cleared on resolve). See #163.
+  originForItems    MediaItem[] @relation("BurstGroupOriginItems")
 
   @@index([circleId, status])
   @@index([capturedAt])
@@ -1105,6 +1120,9 @@ model DuplicateGroup {
   suggestedBestItem MediaItem?  @relation("DuplicateGroupSuggestedBest", fields: [suggestedBestItemId], references: [id], onDelete: SetNull)
   resolvedBy        User?       @relation("DuplicateGroupResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
   items             MediaItem[] @relation("DuplicateGroupItems")
+  // Provenance-only inverse relation: items whose origin (never cleared) points at this group,
+  // distinct from `items` above which tracks CURRENT membership (cleared on resolve). See #163.
+  originForItems    MediaItem[] @relation("DuplicateGroupOriginItems")
 
   @@index([circleId, status])
   @@index([circleId, status, resolutionAction])
