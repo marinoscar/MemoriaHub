@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Drawer,
   Box,
@@ -39,6 +40,8 @@ import {
   Undo as UndoIcon,
   MyLocation as MyLocationIcon,
   AutoFixHigh as AutoFixHighIcon,
+  BurstMode as BurstModeIcon,
+  ContentCopy as ContentCopyIcon,
 } from '@mui/icons-material';
 import { SharePanel } from '../share/SharePanel';
 import { useTheme } from '@mui/material/styles';
@@ -183,6 +186,7 @@ export function MediaDetailDrawer({
 }: MediaDetailDrawerProps) {
   const theme = useTheme();
   const isSmall = useMediaQuery(theme.breakpoints.down('sm'));
+  const navigate = useNavigate();
 
   // Full item fetched from GET /api/media/:id (has downloadUrl)
   const [fullItem, setFullItem] = useState<MediaItem | null>(null);
@@ -1111,6 +1115,64 @@ export function MediaDetailDrawer({
         {thumbnailRerunError && (
           <Alert severity="error" sx={{ mb: 1 }}>{thumbnailRerunError}</Alert>
         )}
+
+        {/* Origin — only meaningful for an archived/trashed item that still
+            carries a burstGroupId/duplicateGroupId from the review group it
+            was resolved out of (resolve doesn't clear these fields, only
+            dismiss does). Links out to the group detail page; burst takes
+            precedence if somehow both are set. */}
+        {(displayItem.burstGroupId !== null || displayItem.duplicateGroupId !== null) &&
+          (displayItem.archivedAt !== null || displayItem.deletedAt !== null) && (
+            <>
+              <Divider sx={{ my: 1.5 }} />
+              <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                Origin
+              </Typography>
+              <Box
+                sx={{
+                  display: 'flex',
+                  flexDirection: { xs: 'column', sm: 'row' },
+                  alignItems: { sm: 'center' },
+                  gap: { xs: 0, sm: 1 },
+                  py: 0.25,
+                }}
+              >
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ minWidth: { sm: 120 }, fontWeight: 500 }}
+                >
+                  {displayItem.burstGroupId !== null ? 'Burst review' : 'Duplicate review'}
+                </Typography>
+                <Button
+                  size="small"
+                  variant="text"
+                  startIcon={
+                    displayItem.burstGroupId !== null ? (
+                      <BurstModeIcon fontSize="small" />
+                    ) : (
+                      <ContentCopyIcon fontSize="small" />
+                    )
+                  }
+                  onClick={() =>
+                    navigate(
+                      displayItem.burstGroupId !== null
+                        ? `/bursts/${displayItem.burstGroupId}`
+                        : `/duplicates/${displayItem.duplicateGroupId}`,
+                    )
+                  }
+                  sx={{ minHeight: 32, px: 1, justifyContent: 'flex-start' }}
+                >
+                  View group
+                </Button>
+              </Box>
+              {displayItem.deletedAt !== null && displayItem.burstGroupId !== null && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
+                  Trashed items are excluded from the burst group&apos;s member list, so this item may not appear there.
+                </Typography>
+              )}
+            </>
+          )}
 
         {/* Timestamps */}
         <Divider sx={{ my: 1.5 }} />
