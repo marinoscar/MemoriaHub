@@ -192,7 +192,7 @@ One row per detected burst group.
 | `sharpnessScore` | Float? | Variance-of-Laplacian; null until the `visual-hash` processor runs |
 | `burstUuid` | String? | Apple BurstUUID from EXIF MakerNote; null for non-Apple cameras or manual-burst photos |
 | `burstScore` | Float? | Composite quality score within the group; null when item is not in a group |
-| `burstGroupId` | String? | FK → `burst_groups` (SetNull on delete); null when not assigned to a group |
+| `burstGroupId` | String? | FK → `burst_groups` (SetNull on delete); null when not assigned to a group; survives group resolve (only `dismiss` clears it — see §7.2) |
 
 **Storage rationale for `perceptualHash` — lessons learned:**
 
@@ -421,6 +421,8 @@ Get full detail for a single burst group: all members in capture order, each wit
 Mark a burst group resolved. Applies either **archive** or **trash** to all members whose IDs are not in `keepIds`, then records `resolvedById`, `resolvedAt`, `resolutionAction`, `keptCount`, and `removedCount`.
 
 Archive sets `archivedAt` on the non-kept members (reversible, hides them from browse surfaces). Trash sets `deletedAt` (reuses the existing Trash lifecycle — see [Archive & Trash Bin](archive-trash.md) — recoverable for `storage.trash.retentionDays` days before automatic purge). The operation runs in a single database transaction: either all member updates and the group status update succeed together, or the whole operation rolls back. A successful resolve writes an `AuditEvent` (`burst_group:resolved`) recording the actor, `keepIds`, and `action`.
+
+**Resolve does not clear `burstGroupId`.** Neither kept nor removed members have `burstGroupId` unset by this endpoint — only `POST /api/media/bursts/:id/dismiss` below does. An item archived or trashed via resolve therefore retains a pointer to its (now `resolved`) burst group, preserving traceability to any kept copy. The Archive/Trash UI surfaces this via an origin badge/link back to `/bursts/:id` (issue #163).
 
 - **Auth:** `media:write` + per-circle `collaborator` role. `action: 'trash'` additionally requires `media:delete` — a collaborator without delete rights can archive a group but not trash it.
 - **Request body:**
