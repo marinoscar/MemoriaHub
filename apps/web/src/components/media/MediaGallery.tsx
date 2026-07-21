@@ -34,8 +34,11 @@ import {
   PlayCircleOutlined as PlayCircleOutlinedIcon,
   Star as StarIcon,
   StarBorder as StarBorderIcon,
+  BurstMode as BurstModeIcon,
+  ContentCopy as ContentCopyIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
+import { useNavigate } from 'react-router-dom';
 import { useInfiniteMedia } from '../../hooks/useInfiniteMedia';
 import type { InfiniteMediaFetcher } from '../../hooks/useInfiniteMedia';
 import { useIntersectionObserver } from '../../hooks/useIntersectionObserver';
@@ -79,6 +82,14 @@ interface GalleryTileProps {
   anySelected: boolean;
   onToggleSelect: (id: string) => void;
   selectionMode: boolean;
+  /**
+   * Show the burst/duplicate "origin" badge — only meaningful on the
+   * Archive/Trash surfaces, where a resolved review group's non-kept
+   * members still carry a stale burstGroupId/duplicateGroupId. Active-item
+   * surfaces (home/album/search) never render this; a "kept" survivor can
+   * carry a stale id there too and the badge would just be noise.
+   */
+  showOriginBadge: boolean;
 }
 
 const GalleryTile = memo(function GalleryTile({
@@ -89,11 +100,22 @@ const GalleryTile = memo(function GalleryTile({
   anySelected,
   onToggleSelect,
   selectionMode,
+  showOriginBadge,
 }: GalleryTileProps) {
   const theme = useTheme();
   const isMobileDevice = useMediaQuery(theme.breakpoints.down('sm'));
   const [imgError, setImgError] = useState(false);
   const { getPreview } = useMediaPreview();
+  const navigate = useNavigate();
+
+  // Burst takes precedence over duplicate when (defensively) both are set —
+  // never render two origin badges on one tile.
+  const originType: 'burst' | 'duplicate' | null = item.burstGroupId
+    ? 'burst'
+    : item.duplicateGroupId
+      ? 'duplicate'
+      : null;
+  const showBadge = showOriginBadge && originType !== null;
 
   // Instant local upload preview (object URL) shown while the server thumbnail
   // is still being generated. Only consulted when there is no server thumbnail
@@ -277,6 +299,41 @@ const GalleryTile = memo(function GalleryTile({
         position="top"
         actionPosition="right"
       />
+
+      {/* Origin badge — Archive/Trash only; links to the resolved burst or
+          duplicate review group this item's non-kept copy came from. */}
+      {showBadge && (
+        <Tooltip title={originType === 'burst' ? 'View burst group' : 'View duplicate group'}>
+          <IconButton
+            size="small"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(
+                originType === 'burst'
+                  ? `/bursts/${item.burstGroupId}`
+                  : `/duplicates/${item.duplicateGroupId}`,
+              );
+            }}
+            aria-label={originType === 'burst' ? 'View burst group' : 'View duplicate group'}
+            sx={{
+              position: 'absolute',
+              bottom: 4,
+              left: 4,
+              zIndex: 2,
+              backgroundColor: 'rgba(0,0,0,0.55)',
+              color: 'white',
+              p: { xs: 1, sm: 0.5 },
+              '&:hover': { backgroundColor: 'rgba(0,0,0,0.75)' },
+            }}
+          >
+            {originType === 'burst' ? (
+              <BurstModeIcon fontSize="small" />
+            ) : (
+              <ContentCopyIcon fontSize="small" />
+            )}
+          </IconButton>
+        </Tooltip>
+      )}
     </ImageListItem>
   );
 });
@@ -830,6 +887,7 @@ export function MediaGallery({
                     anySelected={selected.size > 0}
                     onToggleSelect={handleToggleSelect}
                     selectionMode={selectionMode}
+                    showOriginBadge={mode === 'archive' || mode === 'trash'}
                   />
                 ))}
               </Box>
