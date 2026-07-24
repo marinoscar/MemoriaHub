@@ -58,6 +58,7 @@ const LocationSuggestionsPage = lazy(() => import('./pages/LocationSuggestions/L
 const ReviewInsightsPage = lazy(() => import('./pages/Insights/ReviewInsightsPage'));
 const ArchivePage = lazy(() => import('./pages/Archive/ArchivePage'));
 const TrashPage = lazy(() => import('./pages/Trash/TrashPage'));
+const TrashEmptyRunPage = lazy(() => import('./pages/Trash/TrashEmptyRunPage'));
 const PublicSharePage = lazy(() => import('./pages/Public/PublicSharePage'));
 const PublicSharesPage = lazy(() => import('./pages/Admin/PublicSharesPage'));
 const WorkflowListPage = lazy(() => import('./pages/Workflows/WorkflowListPage'));
@@ -153,6 +154,7 @@ function AppRoutes() {
                 <Route path="/location-suggestions" element={<LocationSuggestionsPage />} />
                 <Route path="/archive" element={<ArchivePage />} />
                 <Route path="/trash" element={<TrashPage />} />
+                <Route path="/trash/runs/:runId" element={<TrashEmptyRunPage />} />
               </Route>
 
               {/* Full-bleed layout — map owns the entire content area (no padding) */}
