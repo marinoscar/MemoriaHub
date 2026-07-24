@@ -112,6 +112,23 @@ export interface StorageProvider {
   delete(key: string): Promise<void>;
 
   /**
+   * Batched, best-effort delete of many files in as few round-trips as
+   * possible (e.g. S3's native `DeleteObjects`, up to 1000 keys per call).
+   *
+   * This method NEVER throws for individual key failures — any per-key or
+   * per-chunk error is collected into the returned `errors` array so a caller
+   * purging thousands of objects can continue past isolated failures. An empty
+   * `keys` input returns `{ deleted: 0, errors: [] }` without any round-trip.
+   *
+   * @param keys - Storage keys to delete
+   * @returns The count of successfully-deleted keys plus a list of the keys
+   *   that failed, each with its failure message
+   */
+  deleteMany(
+    keys: string[],
+  ): Promise<{ deleted: number; errors: { key: string; message: string }[] }>;
+
+  /**
    * Get file metadata
    *
    * @param key - Unique identifier for the file in storage

@@ -70,6 +70,8 @@ model User {
   workflowsCreated            Workflow[]                  @relation("WorkflowCreatedBy")
   workflowRunsStarted         WorkflowRun[]               @relation("WorkflowRunStartedBy")
   workflowRunsApproved        WorkflowRun[]               @relation("WorkflowRunApprovedBy")
+  // Empty Trash at Scale relations
+  trashEmptyRunsStarted       TrashEmptyRun[]             @relation("TrashEmptyRunStartedBy")
 
   @@map("users")
 }
@@ -401,6 +403,8 @@ model Circle {
   // Workflow Automation relations
   workflows             Workflow[]
   workflowRuns          WorkflowRun[]
+  // Empty Trash at Scale relations
+  trashEmptyRuns        TrashEmptyRun[]
 
   @@index([ownerId])
   @@map("circles")
@@ -568,6 +572,8 @@ model MediaItem {
   enhancementsAsResult   MediaEnhancement[]   @relation("MediaEnhancementResult")
   // Workflow Automation relations
   workflowRunItems       WorkflowRunItem[]
+  // Empty Trash at Scale relations
+  trashEmptyRunItems     TrashEmptyRunItem[]
 
   @@index([circleId])
   @@index([addedById])
@@ -1610,4 +1616,83 @@ model WorkflowRunItem {
   @@unique([runId, mediaItemId])
   @@index([runId, status])
   @@map("workflow_run_items")
+}
+
+// =============================================================================
+// Empty Trash at Scale
+// =============================================================================
+
+// TrashEmptyRun is a strict simplification of a WorkflowRun: no conditions, no
+// action list, no approval gate — every matched (trashed) media item in one
+// circle is hard-deleted. Mirrors the WorkflowRun/WorkflowRunItem run-record
+// pattern (see Media Workflow Automation above) so the empty-trash feature
+// runs asynchronously through the enrichment queue with chunked batch jobs
+// and live progress, instead of a single synchronous request.
+enum TrashEmptyRunStatus {
+  evaluating
+  running
+  completed
+  completed_with_errors
+  failed
+  cancelled
+}
+
+enum TrashEmptyRunItemStatus {
+  matched
+  deleted
+  failed
+  skipped
+}
+
+// One row per "empty trash" run for a circle. matchedCount is the number of
+// trashed media items discovered when the run was evaluated; processedCount/
+// succeededCount/failedCount/skippedCount track progress as chunked batch
+// jobs work through the matched set.
+model TrashEmptyRun {
+  id              String              @id @default(uuid()) @db.Uuid
+  circleId        String              @map("circle_id") @db.Uuid
+  status          TrashEmptyRunStatus @default(evaluating)
+  matchedCount    Int                 @default(0) @map("matched_count")
+  processedCount  Int                 @default(0) @map("processed_count")
+  succeededCount  Int                 @default(0) @map("succeeded_count")
+  failedCount     Int                 @default(0) @map("failed_count")
+  skippedCount    Int                 @default(0) @map("skipped_count")
+  startedById     String?             @map("started_by_id") @db.Uuid
+  lastError       String?             @map("last_error")
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+  startedAt       DateTime?           @map("started_at") @db.Timestamptz
+  finishedAt      DateTime?           @map("finished_at") @db.Timestamptz
+
+  // Relations
+  circle    Circle               @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  startedBy User?                @relation("TrashEmptyRunStartedBy", fields: [startedById], references: [id], onDelete: SetNull)
+  items     TrashEmptyRunItem[]
+
+  @@index([circleId, status])
+  @@index([status, updatedAt])
+  @@map("trash_empty_runs")
+}
+
+// Per-media-item outcome row within a TrashEmptyRun. @@unique([runId,
+// mediaItemId]) is the idempotency anchor for batch retries, mirroring the
+// workflow_run_items / storage_migration_items precedent. mediaItemId cascades
+// on delete because a successful purge deletes the MediaItem itself and must
+// cascade-remove this row along with it.
+model TrashEmptyRunItem {
+  id          String                   @id @default(uuid()) @db.Uuid
+  runId       String                   @map("run_id") @db.Uuid
+  mediaItemId String                   @map("media_item_id") @db.Uuid
+  status      TrashEmptyRunItemStatus  @default(matched)
+  error       String?
+  createdAt   DateTime                 @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime                 @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  run       TrashEmptyRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  mediaItem MediaItem     @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, mediaItemId])
+  @@index([runId, status])
+  @@map("trash_empty_run_items")
 }

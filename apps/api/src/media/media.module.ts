@@ -26,6 +26,10 @@ import { MediaEnrichmentEnqueueListener } from './enrichment/media-enrichment-en
 import { MediaThumbnailService } from './media-thumbnail.service';
 import { ThumbnailRegenHandler } from './thumbnail-regen.handler';
 import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
+import { TrashEmptyRunService } from './trash-empty/trash-empty-run.service';
+import { TrashEmptyRunsController } from './trash-empty/trash-empty-runs.controller';
+import { TrashEmptyEvaluateHandler } from './trash-empty/trash-empty-evaluate.handler';
+import { TrashEmptyExecuteBatchHandler } from './trash-empty/trash-empty-execute-batch.handler';
 
 /**
  * MediaModule
@@ -78,6 +82,7 @@ import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
     MediaReprocessController,
     MediaThumbnailRerunController,
     MediaOrientationEditController,
+    TrashEmptyRunsController,
   ],
   providers: [
     MediaService,
@@ -96,7 +101,10 @@ import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
     MediaOrientationEditService,
     ThumbnailRegenHandler,
     ThumbnailNodePersistService,
+    TrashEmptyRunService,
+    TrashEmptyEvaluateHandler,
+    TrashEmptyExecuteBatchHandler,
   ],
-  exports: [MediaService, MediaReprocessService, MediaMetadataSyncService, MediaEnrichmentService, MediaThumbnailService],
+  exports: [MediaService, MediaReprocessService, MediaMetadataSyncService, MediaEnrichmentService, MediaThumbnailService, TrashEmptyRunService],
 })
 export class MediaModule {}

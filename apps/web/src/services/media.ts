@@ -1,4 +1,6 @@
 import { api } from './api';
+import { createTrashEmptyRun } from './trashEmptyRuns';
+import type { CreateTrashEmptyRunResponse } from '../types/trashEmptyRuns';
 import type {
   MediaItem,
   MediaListResponse,
@@ -426,8 +428,15 @@ export async function deleteForever(dto: DeleteForeverDto): Promise<{ deleted: n
   return api.post<{ deleted: number }>('/media/trash/delete-forever', dto);
 }
 
-export async function emptyTrash(dto: EmptyTrashDto): Promise<{ deleted: number }> {
-  return api.post<{ deleted: number }>('/media/trash/empty', dto);
+/**
+ * Empty trash — start an async purge run (issue #165). No longer synchronous:
+ * returns the created run id + matched count; poll GET /trash-empty-runs/:id
+ * for progress. Delegates to the canonical trash-empty-runs service.
+ */
+export async function emptyTrash(
+  dto: EmptyTrashDto,
+): Promise<CreateTrashEmptyRunResponse> {
+  return createTrashEmptyRun(dto);
 }
 
 // ---------------------------------------------------------------------------

@@ -36,6 +36,21 @@ describe('job-type-labels', () => {
     });
   });
 
+  describe('trash-empty job types (issue #165)', () => {
+    it('labels trash_empty_evaluate', () => {
+      expect(jobTypeLabel('trash_empty_evaluate')).toBe('Empty trash evaluate');
+    });
+
+    it('labels trash_empty_execute_batch', () => {
+      expect(jobTypeLabel('trash_empty_execute_batch')).toBe('Empty trash execute batch');
+    });
+
+    it('includes both trash-empty types in the JOB_TYPE_LABELS map directly', () => {
+      expect(JOB_TYPE_LABELS['trash_empty_evaluate']).toBe('Empty trash evaluate');
+      expect(JOB_TYPE_LABELS['trash_empty_execute_batch']).toBe('Empty trash execute batch');
+    });
+  });
+
   describe('pre-existing job types (regression guard)', () => {
     it.each([
       ['face_detection', 'Face detection'],

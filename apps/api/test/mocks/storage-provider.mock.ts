@@ -46,6 +46,8 @@ export const createMockStorageProvider = (): jest.Mocked<StorageProvider> => ({
 
   delete: jest.fn().mockResolvedValue(undefined),
 
+  deleteMany: jest.fn().mockResolvedValue({ deleted: 0, errors: [] }),
+
   getMetadata: jest
     .fn()
     .mockResolvedValue({ 'x-custom': 'value' } as Record<string, string>),

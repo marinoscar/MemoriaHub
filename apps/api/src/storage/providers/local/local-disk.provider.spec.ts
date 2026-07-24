@@ -148,6 +148,57 @@ describe('LocalDiskStorageProvider', () => {
     });
   });
 
+  describe('deleteMany()', () => {
+    it('returns { deleted: 0, errors: [] } for an empty keys array', async () => {
+      const result = await provider.deleteMany([]);
+      expect(result).toEqual({ deleted: 0, errors: [] });
+    });
+
+    it('deletes every uploaded key (file + sidecar) and reports deleted = N', async () => {
+      const keys = ['a.txt', 'b.txt', 'c.txt'];
+      for (const key of keys) {
+        await provider.upload(key, Readable.from(['data']), { mimeType: 'text/plain' });
+      }
+
+      const result = await provider.deleteMany(keys);
+
+      expect(result).toEqual({ deleted: 3, errors: [] });
+      for (const key of keys) {
+        expect(await provider.exists(key)).toBe(false);
+        expect(fs.existsSync(path.join(tmpDir, `${key}.meta.json`))).toBe(false);
+      }
+    });
+
+    it('treats a missing file (ENOENT) as a success, matching idempotent-delete semantics', async () => {
+      const result = await provider.deleteMany(['never-uploaded.txt']);
+      expect(result).toEqual({ deleted: 1, errors: [] });
+    });
+
+    it('a mix of existing and missing keys: all count as deleted (missing = idempotent success)', async () => {
+      await provider.upload('real.txt', Readable.from(['data']), { mimeType: 'text/plain' });
+
+      const result = await provider.deleteMany(['real.txt', 'ghost.txt']);
+
+      expect(result).toEqual({ deleted: 2, errors: [] });
+      expect(await provider.exists('real.txt')).toBe(false);
+    });
+
+    it('collects a per-file error without aborting the rest of the batch', async () => {
+      await provider.upload('good.txt', Readable.from(['data']), { mimeType: 'text/plain' });
+      // Make "bad.txt" a DIRECTORY, not a file — fs.unlinkSync throws a real
+      // EISDIR/EPERM error on a directory, giving us a genuine per-key failure
+      // without needing to mock the fs module (unlinkSync isn't spy-able here).
+      fs.mkdirSync(path.join(tmpDir, 'bad.txt'));
+
+      const result = await provider.deleteMany(['good.txt', 'bad.txt']);
+
+      expect(result.deleted).toBe(1);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].key).toBe('bad.txt');
+      expect(result.errors[0].message).toMatch(/EISDIR|EPERM|directory/i);
+    });
+  });
+
   describe('getMetadata()', () => {
     it('returns the metadata stored during upload', async () => {
       const key = 'meta-read.txt';

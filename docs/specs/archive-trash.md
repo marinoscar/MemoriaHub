@@ -2,8 +2,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
-| **Last Updated** | June 2026 |
+| **Version** | 1.2 |
+| **Last Updated** | July 2026 |
 | **Status** | Implemented |
 
 ---
@@ -19,8 +19,9 @@
 7. [System Setting — retentionDays](#7-system-setting--retentiondays)
 8. [Dedup-on-Restore](#8-dedup-on-restore)
 9. [Manual Purge from the Trash Page](#9-manual-purge-from-the-trash-page)
-10. [Security and RBAC](#10-security-and-rbac)
-11. [Gotchas and Implementation Notes](#11-gotchas-and-implementation-notes)
+10. [Empty Trash at Scale (Async Run Model)](#10-empty-trash-at-scale-async-run-model)
+11. [Security and RBAC](#11-security-and-rbac)
+12. [Gotchas and Implementation Notes](#12-gotchas-and-implementation-notes)
 
 ---
 
@@ -154,11 +155,13 @@ All endpoints are mounted under `/api/media` and require a valid JWT. See [CLAUD
 | `GET` | `/api/media/trash` | `?circleId=&page=&pageSize=` | paginated MediaItem list | viewer |
 | `POST` | `/api/media/trash/restore` | `{ circleId, ids[] }` (1–500 UUIDs) | `{ restored: number, conflicts: string[] }` | collaborator |
 | `POST` | `/api/media/trash/delete-forever` | `{ circleId, ids[] }` (1–500 UUIDs) | `{ deleted: number }` | collaborator |
-| `POST` | `/api/media/trash/empty` | `{ circleId }` | `{ deleted: number }` | circle_admin |
+| `POST` | `/api/media/trash/empty` | `{ circleId }` | `{ runId, status, matchedCount }` (async — see §10) | circle_admin |
 
 `listTrash` queries `where { circleId, deletedAt: { not: null } }` and does **not** filter on `archivedAt`, so items trashed while archived appear in the Trash page.
 
-`deleteForever` and `emptyTrash` call `MediaService.purgeMediaItems`, which hard-deletes DB rows and S3 blobs. This is irreversible.
+`deleteForever` calls `MediaService.purgeMediaItemsBatched`, which hard-deletes DB rows and S3 blobs in batches (see §10 for why this replaced the older per-item `purgeMediaItems` on the hot paths). This is irreversible.
+
+**`emptyTrash` is asynchronous (issue #165).** Unlike `deleteForever`, `POST /api/media/trash/empty` no longer purges anything synchronously in the request — it starts a background run and returns immediately. See [§10 — Empty Trash at Scale](#10-empty-trash-at-scale-async-run-model) for the full run lifecycle, job types, and progress-polling endpoints.
 
 Permission note: both `delete-forever` and `empty` require the `media:delete` system permission in addition to the per-circle role check.
 
@@ -265,15 +268,110 @@ The loop does not wrap all items in a single transaction. A conflict on one item
 
 Users do not have to wait for the automated purge. The Trash page exposes two manual operations:
 
-**Delete forever (collaborator):** Selects one or more items from the Trash page and calls `POST /api/media/trash/delete-forever`. Only items with `deletedAt IS NOT NULL` and in the specified circle are eligible. Returns `{ deleted: number }`.
+**Delete forever (collaborator):** Selects one or more items from the Trash page and calls `POST /api/media/trash/delete-forever`. Only items with `deletedAt IS NOT NULL` and in the specified circle are eligible. Returns `{ deleted: number }`. This call is still synchronous — it operates on a caller-selected, bounded set (1–500 UUIDs), which is small enough that a single request never approaches the timeout that motivated §10 below.
 
-**Empty trash (circle_admin):** Empties the entire trash for a circle via `POST /api/media/trash/empty`. The circle_admin restriction prevents collaborators from accidentally destroying other members' trashed items. Returns `{ deleted: number }`.
+**Empty trash (circle_admin):** Empties the *entire* trash for a circle via `POST /api/media/trash/empty`. The circle_admin restriction prevents collaborators from accidentally destroying other members' trashed items. Unlike "Delete forever", this operation has no caller-supplied bound — a circle's trash can hold thousands of items — so as of issue #165 it runs asynchronously as a background run rather than in the HTTP request. See §10.
 
-Both operations call `MediaService.purgeMediaItems` and are irreversible.
+Both operations are irreversible and ultimately hard-delete DB rows and S3 blobs via the shared `MediaService.purgeMediaItemsBatched` helper (§10).
 
 ---
 
-## 10. Security and RBAC
+## 10. Empty Trash at Scale (Async Run Model)
+
+### 10.1 Why this changed (issue #165)
+
+The original "Empty trash" implementation was a single synchronous call: `POST /api/media/trash/empty` loaded every trashed item in the circle and hard-deleted them one at a time in-request via `MediaService.emptyTrash`. Past roughly 2,000 trashed items this routinely exceeded the HTTP timeout, leaving the client with an error even though the server-side purge was still (partially) running. There was also no way to see progress or cancel a purge already in flight.
+
+The fix rebuilds "Empty trash" on the same **run-record + chunked-job + progress-polling** pattern already proven by Media Workflow Automation (`workflow_runs`/`workflow_run_items`, see [Workflow Automation spec](workflows.md)) — deliberately stripped down, since empty-trash has no conditions, no action list, and no approval gate: every trashed item in the circle is simply hard-deleted.
+
+### 10.2 Data model
+
+Two new tables (migration `20260724000000_trash_empty_runs`):
+
+**`trash_empty_runs`** — one row per "empty trash" run for a circle.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | |
+| `circle_id` | UUID | FK → `circles`, cascade delete |
+| `status` | `TrashEmptyRunStatus` | `evaluating` \| `running` \| `completed` \| `completed_with_errors` \| `failed` \| `cancelled` |
+| `matched_count` | Int, default 0 | Trashed items discovered when the run was evaluated |
+| `processed_count` | Int, default 0 | Items a batch job has attempted (success or failure) |
+| `succeeded_count` | Int, default 0 | Items successfully hard-deleted |
+| `failed_count` | Int, default 0 | Items whose hard-delete failed (item still exists) |
+| `skipped_count` | Int, default 0 | Reserved for parity with the workflow run shape; not currently incremented by the empty-trash handlers |
+| `started_by_id` | UUID? | FK → `users`, `SetNull` |
+| `last_error` | String? | Set when the run transitions to `failed` |
+| `created_at` / `updated_at` / `started_at` / `finished_at` | Timestamptz | |
+
+Indexes: `(circle_id, status)` (serves the per-circle concurrency guard and the Trash page's "resume run" lookup) and `(status, updated_at)`.
+
+**`trash_empty_run_items`** — one row per matched (trashed) media item within a run.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | |
+| `run_id` | UUID | FK → `trash_empty_runs`, cascade delete |
+| `media_item_id` | UUID | FK → `media_items`, **cascade delete** — a successful purge deletes the `MediaItem` row, which cascades away this run-item row too |
+| `status` | `TrashEmptyRunItemStatus` | `matched` \| `deleted` \| `failed` \| `skipped` |
+| `error` | String? | Set when `status='failed'` |
+| `created_at` / `updated_at` | Timestamptz | |
+
+`@@unique([runId, mediaItemId])` is the idempotency anchor for batch retries — the same pattern used by `workflow_run_items` and `storage_migration_items`. A retried batch job's `updateMany` only claims rows still at `status='matched'`, so a crash-and-retry never double-counts or double-deletes.
+
+### 10.3 Job types (both server-only)
+
+Two new `enrichment_jobs` types drive the run, mirroring the workflow evaluate/execute-batch split:
+
+- **`trash_empty_evaluate`** (`mediaItemId: null`, `circleId` set, priority 20, payload `{ runId }`) — keyset-paginates every trashed item in the circle (`deletedAt IS NOT NULL`) into `trash_empty_run_items` at `status='matched'`, 1,000 rows per page, ordered `(capturedAt DESC NULLS LAST, id DESC)` — the same ordering as the gallery keyset scan. Sets `matchedCount`, then transitions the run: `matchedCount === 0` → `completed` immediately; otherwise → `running` and fans out `trash_empty_execute_batch` jobs via `TrashEmptyRunService.enqueueExecuteBatches`.
+- **`trash_empty_execute_batch`** (`mediaItemId: null`, `circleId` set, priority 100, payload `{ runId, itemIds[] }`, `skipDedup: true`) — one job per 200-item chunk (a local constant, not a system setting — empty-trash has no user-tunable batch size). Each job: (1) bails immediately if the run was cancelled (cooperative cancellation), (2) atomically claims its still-`matched` rows to `deleted` via a single `updateMany` (so a crashed-and-retried job only re-claims what it didn't already own), (3) hard-deletes the claimed items via `MediaService.purgeMediaItemsBatched`, flipping any that fail back to `status='failed'` with an `error` message, (4) increments the run's atomic counters, and (5) attempts to finalize the run — a race-safe conditional `updateMany` on `status='running'` so only the last batch to drain the queue actually transitions the run to `completed` (no failures) or `completed_with_errors` (`failedCount > 0`).
+
+Both job types are **server-only** — they deliberately do not implement the `nodeResultSchema`/`persistNodeResult` node pair, since purging requires storage credentials a distributed worker node never holds. This mirrors the existing `location_inference`/`face_auto_archive_sweep`/`trash_purge` precedent: `EnrichmentHandlerRegistry.serverOnlyTypes()` auto-classifies a handler without a node pair as server-only, and `systemModeEligibleTypes()` auto-includes it in `ENRICHMENT_WORKER_MODE=system`, so no `enrichment-job.worker.ts` edit was needed to make the feature fleet-safe (a deployment running `ENRICHMENT_WORKER_MODE=system` with a node fleet still executes empty-trash runs on the API's own in-process worker).
+
+### 10.4 Batched purge: `purgeMediaItemsBatched`
+
+The new `MediaService.purgeMediaItemsBatched(ids)` collapses what was previously ~3 round-trips *per item* (one `MediaItem` delete, one blob delete, one `StorageObject` delete) into a handful of calls for the whole batch:
+
+1. One `mediaItem.deleteMany` for the batch, falling back to per-item deletes only if the batch call itself throws (so one bad row can't strand the rest, and the caller still learns exactly which IDs failed via `failedIds`).
+2. Best-effort blob deletes grouped by `(storageProvider, bucket)`, one `provider.deleteMany(keys)` call per group. The new `StorageProvider.deleteMany` uses each provider's native batch API — S3's `DeleteObjectsCommand`, chunked at 1,000 keys per call (the S3 API limit). Blob-delete failures are logged but non-fatal, matching the older `purgeMediaItems` semantics: an item still counts as deleted even if its blob delete failed.
+3. One `storageObject.deleteMany` for the objects belonging to the successfully-deleted `MediaItem` rows.
+
+`purgeMediaItemsBatched` is now the **shared purge path** for three callers: the manual "Delete forever" flow (`deleteForever`), the `trash_purge` cron handler (§6), and the new `trash_empty_execute_batch` handler (§10.3). The older, per-item `purgeMediaItems` method still exists in the codebase but is no longer used by any of these hot paths.
+
+### 10.5 Per-circle concurrency guard
+
+`TrashEmptyRunService.createRun` counts existing runs for the circle in `evaluating` or `running` status; if one is already active, the request is rejected with `409 Conflict` ("A trash-empty run is already in progress for this circle"). This prevents two concurrent empty-trash runs for the same circle from racing to claim the same trashed items.
+
+### 10.6 API — run inspection and cancellation
+
+| Method | Path | Response | Min per-circle role |
+|---|---|---|---|
+| `GET` | `/api/trash-empty-runs/:id` | Run detail: counters (`matchedCount`, `processedCount`, `succeededCount`, `failedCount`, `skippedCount`) plus `itemStatusCounts` (a live tally grouped by `trash_empty_run_items.status`) | viewer (media:read) |
+| `GET` | `/api/trash-empty-runs/:id/items` | `?status=&page=&pageSize=` — paginated run items with batched signed thumbnails; `status` filters to `matched`\|`deleted`\|`failed`\|`skipped` | viewer (media:read) |
+| `POST` | `/api/trash-empty-runs/:id/cancel` | Cancel a non-terminal run; `400` if the run has already reached a terminal status | circle_admin (media:delete) |
+
+Reads use `media:read` + the circle's `viewer` role; starting and cancelling a run both require `media:delete` + `circle_admin`, matching the RBAC that already gated the synchronous "Empty trash" button.
+
+**Cancellation semantics:** cancelling sets `status='cancelled'` immediately. This is *cooperative* — any `trash_empty_execute_batch` job already claimed by the worker checks the run's status before doing any work and bails out if it sees `cancelled`, but it does not (and cannot) recall a batch mid-purge. Items already hard-deleted before the cancel took effect remain deleted; items not yet claimed by a batch are simply never processed.
+
+### 10.7 Frontend — progress page
+
+Starting an empty-trash run from the Trash page (`TrashPage.tsx`) navigates to `/trash/runs/:runId` (`TrashEmptyRunPage.tsx`), which polls `GET /api/trash-empty-runs/:id` every 2 seconds while the run is non-terminal (`evaluating` or `running`) and stops polling once it reaches a terminal status. The page shows:
+- A prominent total (`matchedCount`) — "how many items are in this run", the detail users most wanted visibility into.
+- An indeterminate progress bar while `evaluating` ("Preparing…", finding every trashed item), and a determinate bar (`processedCount / matchedCount`) while `running`.
+- A terminal summary banner (success/warning/error) plus a count-tile row (Total/Processed/Deleted/Failed/Skipped).
+- A paginated table of failed items (fetched via `GET /api/trash-empty-runs/:id/items?status=failed`) once the run finishes with `failedCount > 0`, each row linking to the media item.
+- A "Cancel run" button, shown only to a `circle_admin` while the run is non-terminal.
+
+### 10.8 Failure handling
+
+If `trash_empty_evaluate` itself throws (e.g. a transient DB error) partway through paginating, the run is left in `evaluating` and the job retries through the normal enrichment backoff path — `createMany({ skipDuplicates: true })` makes re-materializing the matched set idempotent on retry. Only once the job has exhausted `ENRICHMENT_MAX_ATTEMPTS` does the handler mark the run terminally `failed` (with `lastError` set) before rethrowing so the job itself also fails.
+
+If a `trash_empty_execute_batch` job crashes mid-batch after claiming rows (flipping them to `deleted`) but before calling `purgeMediaItemsBatched`, a retry of that job re-reads every row already at `status='deleted'` for its `itemIds` (not just the ones it newly claimed this attempt) and re-attempts the purge — safe because `purgeMediaItemsBatched` is a no-op for IDs whose `MediaItem` row is already gone.
+
+---
+
+## 11. Security and RBAC
 
 | Operation | System permission | Min per-circle role |
 |---|---|---|
@@ -282,13 +380,15 @@ Both operations call `MediaService.purgeMediaItems` and are irreversible.
 | Archive / unarchive items | `media:write` | `collaborator` |
 | Restore from trash | `media:write` | `collaborator` |
 | Delete forever (selected items) | `media:delete` | `collaborator` |
-| Empty trash (entire circle) | `media:delete` | `circle_admin` |
+| Empty trash (start run, entire circle) | `media:delete` | `circle_admin` |
+| Cancel an empty-trash run | `media:delete` | `circle_admin` |
+| View an empty-trash run / its items | `media:read` | `viewer` |
 
 Admins holding `circles:manage_any` bypass the per-circle role check and can perform all operations on any circle.
 
 ---
 
-## 11. Gotchas and Implementation Notes
+## 12. Gotchas and Implementation Notes
 
 ### `listTrash` does not filter by `archivedAt`
 
@@ -298,13 +398,13 @@ Items trashed while archived (`deletedAt IS NOT NULL AND archivedAt IS NOT NULL`
 
 Every caller that should hide archived items must explicitly pass `excludeArchived: true` to `buildMediaWhere`. If a new browse surface is added without this flag, archived items will appear in it. The flag is not the default to preserve backward compatibility with all existing callers.
 
-### `purgeMediaItems` is shared
+### `purgeMediaItemsBatched` is shared
 
-`MediaService.purgeMediaItems(ids)` is the single path for all permanent deletion: "Delete forever", "Empty trash", and the `TrashPurgeHandler`. Any changes to purge behavior (e.g. emitting an event, updating a counter) should be made in that method.
+`MediaService.purgeMediaItemsBatched(ids)` (§10.4) is the single path for all permanent deletion at scale: "Delete forever", the `TrashPurgeHandler`'s automatic purge, and the `trash_empty_execute_batch` handler (§10.3) all call it. Any changes to purge behavior (e.g. emitting an event, updating a counter) should be made in that one method rather than duplicated across callers. The older per-item `purgeMediaItems` still exists but is no longer used by these hot paths as of issue #165.
 
 ### S3 blob deletion is best-effort
 
-`purgeMediaItems` deletes S3 blobs and DB rows. If the S3 delete call fails, the error is logged but the DB row is still deleted. This means the S3 bucket may retain orphan blobs after a failed purge run. The enrichment worker will retry the job, which will attempt to delete the same item IDs again; if the DB rows are gone, the `findMany` that precedes purge will return an empty list and no S3 calls will be made. Orphan blobs can be cleaned up by a separate S3 lifecycle rule or a manual reconciliation script.
+`purgeMediaItemsBatched` deletes S3 blobs (via the provider's batched `deleteMany`) and DB rows. If a blob-delete call fails, the error is logged but the DB row is still deleted. This means the S3 bucket may retain orphan blobs after a failed purge run. A retried purge attempt (e.g. a retried `trash_empty_execute_batch` job, or the next `trash_purge` cron tick) will attempt to delete the same item IDs again; if the DB rows are gone, the `findMany` that precedes purge will return an empty list and no S3 calls will be made. Orphan blobs can be cleaned up by a separate S3 lifecycle rule or a manual reconciliation script.
 
 ### Retention setting change is not retroactive on existing rows
 
@@ -322,3 +422,4 @@ The Archive/Trash gallery (`MediaGallery`) and item detail drawer (`MediaDetailD
 |---|---|---|---|
 | 1.0 | June 2026 | AI Assistant | Initial specification matching shipped implementation |
 | 1.1 | July 2026 | AI Assistant | Document Archive/Trash UI origin badge/link for items retaining a resolved (not dismissed) burst/duplicate group id (§11, issue #163) |
+| 1.2 | July 2026 | AI Assistant | Document the async run-based "Empty Trash at Scale" rebuild (§10, issue #165): `trash_empty_runs`/`trash_empty_run_items` data model, `trash_empty_evaluate`/`trash_empty_execute_batch` server-only job types, the shared batched `purgeMediaItemsBatched` purge path, per-circle concurrency guard, run inspection/cancel API, and the progress-polling UI |

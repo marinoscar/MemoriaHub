@@ -36,6 +36,8 @@ import { AutoTaggingHandler } from '../tagging/auto-tagging.handler';
 import { ThumbnailRegenHandler } from '../media/thumbnail-regen.handler';
 import { ThumbnailRepairHandler } from '../media/thumbnail-repair.handler';
 import { TrashPurgeHandler } from '../media/trash-purge.handler';
+import { TrashEmptyEvaluateHandler } from '../media/trash-empty/trash-empty-evaluate.handler';
+import { TrashEmptyExecuteBatchHandler } from '../media/trash-empty/trash-empty-execute-batch.handler';
 import { WorkflowEvaluateItemHandler } from '../workflows/runs/workflow-evaluate-item.handler';
 import { WorkflowEvaluateHandler } from '../workflows/runs/workflow-evaluate.handler';
 import { WorkflowExecuteBatchHandler } from '../workflows/runs/workflow-execute-batch.handler';
@@ -60,6 +62,8 @@ const ALL_HANDLER_CLASSES = [
   ThumbnailRegenHandler,
   ThumbnailRepairHandler,
   TrashPurgeHandler,
+  TrashEmptyEvaluateHandler,
+  TrashEmptyExecuteBatchHandler,
   WorkflowEvaluateItemHandler,
   WorkflowEvaluateHandler,
   WorkflowExecuteBatchHandler,
@@ -79,6 +83,8 @@ const DOCUMENTED_SERVER_ONLY_TYPES = [
   'storage_insights',
   'storage_migration',
   'trash_purge',
+  'trash_empty_evaluate',
+  'trash_empty_execute_batch',
   'workflow_evaluate',
   'workflow_evaluate_item',
   'workflow_history_purge',
@@ -153,5 +159,24 @@ describe('server-only type derivation (drift guard)', () => {
     ]) {
       expect(systemSet.has(nodeType)).toBe(false);
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // Empty-Trash at scale (issue #165): both new handlers omit the node-result
+  // pair by design — purging requires storage credentials a distributed
+  // worker node never holds — so both fall out of serverOnlyTypes()
+  // naturally, with no explicit pinning needed (unlike thumbnail_repair /
+  // workflow_execute_batch above).
+  // -------------------------------------------------------------------------
+  describe('trash_empty_evaluate / trash_empty_execute_batch (issue #165)', () => {
+    it('trash_empty_evaluate is server-only and system-mode eligible', () => {
+      expect(registry.serverOnlyTypes()).toContain('trash_empty_evaluate');
+      expect(systemModeEligibleTypes(registry, {})).toContain('trash_empty_evaluate');
+    });
+
+    it('trash_empty_execute_batch is server-only and system-mode eligible', () => {
+      expect(registry.serverOnlyTypes()).toContain('trash_empty_execute_batch');
+      expect(systemModeEligibleTypes(registry, {})).toContain('trash_empty_execute_batch');
+    });
   });
 });

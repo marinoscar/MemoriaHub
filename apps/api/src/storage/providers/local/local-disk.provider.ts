@@ -94,6 +94,38 @@ export class LocalDiskStorageProvider implements StorageProvider {
     }
   }
 
+  /**
+   * Batched, best-effort delete. Loops the keys, unlinking each (and its
+   * sidecar) via the same path resolution `delete` uses. Never throws for
+   * individual failures — a missing file (ENOENT) counts as a success to
+   * match idempotent-delete semantics; any other per-file error is collected
+   * into `errors`.
+   */
+  async deleteMany(
+    keys: string[],
+  ): Promise<{ deleted: number; errors: { key: string; message: string }[] }> {
+    if (keys.length === 0) {
+      return { deleted: 0, errors: [] };
+    }
+
+    let deleted = 0;
+    const errors: { key: string; message: string }[] = [];
+
+    for (const key of keys) {
+      try {
+        // Reuse the existing single-delete path-resolution + sidecar cleanup;
+        // it is already a no-op when the file is absent (idempotent).
+        await this.delete(key);
+        deleted += 1;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push({ key, message });
+      }
+    }
+
+    return { deleted, errors };
+  }
+
   async getMetadata(key: string): Promise<Record<string, string> | null> {
     const fullPath = this.resolvePath(key);
     const sidecar = this.sidecarPath(fullPath);

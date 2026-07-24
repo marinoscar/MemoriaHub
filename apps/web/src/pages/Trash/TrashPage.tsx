@@ -12,16 +12,22 @@ import {
   CircularProgress,
 } from '@mui/material';
 import { DeleteOutlined as TrashIcon } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { MediaGallery } from '../../components/media/MediaGallery';
-import { listTrash, emptyTrash } from '../../services/media';
+import { listTrash } from '../../services/media';
+import { createTrashEmptyRun } from '../../services/trashEmptyRuns';
+import { ApiError } from '../../services/api';
 
 const RETENTION_DAYS = 30;
 
 export default function TrashPage() {
   const { activeCircleId, activeCircleRole } = useCircle();
+  const navigate = useNavigate();
 
-  const [refreshToken, setRefreshToken] = useState(0);
+  // Stable query key; the empty-trash action now navigates to a run page rather
+  // than refreshing this gallery in place.
+  const [refreshToken] = useState(0);
 
   // Empty Trash dialog + snackbar
   const [emptyConfirmOpen, setEmptyConfirmOpen] = useState(false);
@@ -44,19 +50,25 @@ export default function TrashPage() {
   const handleEmptyTrash = async () => {
     setEmptyLoading(true);
     try {
-      const result = await emptyTrash({ circleId });
+      const result = await createTrashEmptyRun({ circleId });
       setEmptyConfirmOpen(false);
-      setSnackbar({
-        message: `Permanently deleted ${result.deleted} item${result.deleted !== 1 ? 's' : ''}`,
-        severity: 'success',
-      });
-      setRefreshToken((t) => t + 1);
+      // Purge is now async: hand the user off to the run progress page.
+      navigate(`/trash/runs/${result.runId}`);
     } catch (err) {
       setEmptyConfirmOpen(false);
-      setSnackbar({
-        message: err instanceof Error ? err.message : 'Failed to empty trash',
-        severity: 'error',
-      });
+      // 409: a run is already in progress for this circle. The conflict does not
+      // carry a runId, so just inform the user.
+      if (err instanceof ApiError && err.status === 409) {
+        setSnackbar({
+          message: 'An empty-trash run is already in progress for this circle.',
+          severity: 'error',
+        });
+      } else {
+        setSnackbar({
+          message: err instanceof Error ? err.message : 'Failed to empty trash',
+          severity: 'error',
+        });
+      }
     } finally {
       setEmptyLoading(false);
     }
