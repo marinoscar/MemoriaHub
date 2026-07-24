@@ -11,7 +11,6 @@ import { applyLocation } from '../media/geo/apply-location.util';
 import { GEO_CLEAR_COLUMNS } from '../media/geo/geo-result.mapper';
 import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto';
 import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dto';
-import { BulkAcceptLocationSuggestionsDto } from './dto/bulk-accept-location-suggestions.dto';
 
 @Injectable()
 export class LocationSuggestionService {
@@ -224,48 +223,6 @@ export class LocationSuggestionService {
     this.logger.log(`Location suggestion ${id} reverted by user ${userId}`);
 
     return { data: { id, status: 'reverted' } };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Bulk accept
-  // ---------------------------------------------------------------------------
-
-  async bulkAcceptSuggestions(dto: BulkAcceptLocationSuggestionsDto, userId: string, perms: string[]) {
-    await this.membership.assertCircleAccess(userId, dto.circleId, perms, CircleRole.collaborator);
-
-    const suggestions = await this.prisma.locationSuggestion.findMany({
-      where: {
-        circleId: dto.circleId,
-        status: LocationSuggestionStatus.pending,
-        confidence: { gte: dto.minConfidence },
-      },
-    });
-
-    let accepted = 0;
-    for (const s of suggestions) {
-      // Bulk-accept never carries a per-item lat/lng override, so coords are
-      // always unmodified -> coordSource='inferred'.
-      const patch = await applyLocation(this.geoProvider, s.lat, s.lng, null, 'inferred');
-      await this.prisma.$transaction([
-        this.prisma.mediaItem.update({ where: { id: s.mediaItemId }, data: patch }),
-        this.prisma.locationSuggestion.update({
-          where: { id: s.id },
-          data: { status: LocationSuggestionStatus.accepted, resolvedById: userId, resolvedAt: new Date() },
-        }),
-      ]);
-      accepted++;
-    }
-
-    await this.createAuditEvent(userId, 'location_suggestion:bulk_accepted', dto.circleId, {
-      count: accepted,
-      minConfidence: dto.minConfidence,
-    });
-
-    this.logger.log(
-      `Bulk-accepted ${accepted} location suggestion(s) in circle ${dto.circleId} by user ${userId} (minConfidence=${dto.minConfidence})`,
-    );
-
-    return { data: { accepted } };
   }
 
   // ---------------------------------------------------------------------------

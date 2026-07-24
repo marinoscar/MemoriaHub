@@ -12,6 +12,10 @@ import { AdminLocationInferenceController } from './admin-location-inference.con
 import { LocationInferenceService } from './location-inference.service';
 import { LocationInferenceHandler } from './location-inference.handler';
 import { LocationInferenceBackfillService } from './location-inference-backfill.service';
+import { LocationSuggestionRunService } from './runs/location-suggestion-run.service';
+import { LocationSuggestionRunsController } from './runs/location-suggestion-runs.controller';
+import { LocationSuggestionRunEvaluateHandler } from './runs/location-suggestion-run-evaluate.handler';
+import { LocationSuggestionRunExecuteBatchHandler } from './runs/location-suggestion-run-execute-batch.handler';
 
 /**
  * LocationInferenceModule
@@ -24,13 +28,20 @@ import { LocationInferenceBackfillService } from './location-inference-backfill.
  */
 @Module({
   imports: [EnrichmentModule, StorageProvidersModule, PrismaModule, CirclesModule, SettingsModule, GeoLocationModule, MediaModule],
-  controllers: [LocationSuggestionController, AdminLocationInferenceController],
+  controllers: [
+    LocationSuggestionController,
+    AdminLocationInferenceController,
+    LocationSuggestionRunsController,
+  ],
   providers: [
     LocationInferenceService,
     LocationInferenceHandler,
     LocationInferenceBackfillService,
     LocationSuggestionService,
+    LocationSuggestionRunService,
+    LocationSuggestionRunEvaluateHandler,
+    LocationSuggestionRunExecuteBatchHandler,
   ],
-  exports: [LocationSuggestionService],
+  exports: [LocationSuggestionService, LocationSuggestionRunService],
 })
 export class LocationInferenceModule {}

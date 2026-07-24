@@ -10,20 +10,25 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { LocationSuggestionRunAction } from '@prisma/client';
 import { LocationSuggestionService } from './location-suggestion.service';
+import { LocationSuggestionRunService } from './runs/location-suggestion-run.service';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto';
 import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dto';
-import { BulkAcceptLocationSuggestionsDto } from './dto/bulk-accept-location-suggestions.dto';
+import { BulkResolveLocationSuggestionsDto } from './dto/bulk-resolve-location-suggestions.dto';
 
 @ApiTags('Location Inference')
 @ApiBearerAuth()
 @Controller('media')
 export class LocationSuggestionController {
-  constructor(private readonly locationSuggestionService: LocationSuggestionService) {}
+  constructor(
+    private readonly locationSuggestionService: LocationSuggestionService,
+    private readonly runService: LocationSuggestionRunService,
+  ) {}
 
   /**
    * GET /api/media/location-suggestions
@@ -49,18 +54,53 @@ export class LocationSuggestionController {
 
   /**
    * POST /api/media/location-suggestions/bulk-accept
-   * Accept all pending suggestions in a circle at or above a confidence floor.
+   * Start an async run that accepts every pending suggestion in a circle at or
+   * above a confidence threshold (0-100). Returns immediately; matchedCount is 0
+   * at creation and reflects the real total once the run is evaluated.
    */
   @Post('location-suggestions/bulk-accept')
   @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Bulk-accept pending location suggestions above a confidence threshold' })
-  @ApiResponse({ status: 200, description: 'Suggestions accepted' })
+  @ApiOperation({ summary: 'Start an async bulk-accept run for pending location suggestions above a threshold' })
+  @ApiResponse({ status: 200, description: 'Bulk-accept run started' })
+  @ApiResponse({ status: 409, description: 'A run is already in progress for this circle' })
   async bulkAcceptSuggestions(
-    @Body() dto: BulkAcceptLocationSuggestionsDto,
+    @Body() dto: BulkResolveLocationSuggestionsDto,
     @CurrentUser() user: RequestUser,
   ) {
-    return this.locationSuggestionService.bulkAcceptSuggestions(dto, user.id, user.permissions);
+    const run = await this.runService.createRun(
+      dto.circleId,
+      LocationSuggestionRunAction.accept,
+      dto.threshold,
+      user.id,
+      user.permissions,
+    );
+    return { data: { runId: run.id, status: run.status, matchedCount: run.matchedCount } };
+  }
+
+  /**
+   * POST /api/media/location-suggestions/bulk-reject
+   * Start an async run that rejects every pending suggestion in a circle at or
+   * above a confidence threshold (0-100).
+   */
+  @Post('location-suggestions/bulk-reject')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Start an async bulk-reject run for pending location suggestions above a threshold' })
+  @ApiResponse({ status: 200, description: 'Bulk-reject run started' })
+  @ApiResponse({ status: 409, description: 'A run is already in progress for this circle' })
+  async bulkRejectSuggestions(
+    @Body() dto: BulkResolveLocationSuggestionsDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    const run = await this.runService.createRun(
+      dto.circleId,
+      LocationSuggestionRunAction.reject,
+      dto.threshold,
+      user.id,
+      user.permissions,
+    );
+    return { data: { runId: run.id, status: run.status, matchedCount: run.matchedCount } };
   }
 
   /**

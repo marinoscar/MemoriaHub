@@ -22,6 +22,8 @@ export const JOB_TYPE_LABELS: Record<string, string> = {
   metadata_extraction: 'Metadata extraction',
   social_media_detection: 'Social media detection',
   location_inference: 'Location inference',
+  location_suggestion_run_evaluate: 'Location suggestion run evaluate',
+  location_suggestion_run_execute_batch: 'Location suggestion run execute batch',
   face_auto_archive_sweep: 'Face auto-archive sweep',
   burst_detection: 'Burst detection',
   picture_enhancement: 'AI picture enhancer',
