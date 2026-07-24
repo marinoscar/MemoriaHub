@@ -133,8 +133,14 @@ export async function listMediaLocations(
 
 export interface MapAggregateFilters {
   circleId?: string;
-  /** Grid precision (0–5); coarser at low zoom, finer at high zoom. */
+  /**
+   * Grid precision (0–5); coarser at low zoom, finer at high zoom. Kept for
+   * back-compat; the backend derives precision from `zoom` when it is supplied
+   * and falls back to `precision` otherwise.
+   */
   precision?: number;
+  /** Raw map zoom (int 0–22); the backend derives grid precision from it. */
+  zoom?: number;
   /** Viewport bounding box: `minLng,minLat,maxLng,maxLat`. */
   bbox?: string;
   type?: 'photo' | 'video';
@@ -148,6 +154,7 @@ export async function aggregateLocations(
   const searchParams = new URLSearchParams();
   if (filters?.circleId) searchParams.set('circleId', filters.circleId);
   if (filters?.precision !== undefined) searchParams.set('precision', String(filters.precision));
+  if (filters?.zoom !== undefined) searchParams.set('zoom', String(filters.zoom));
   if (filters?.bbox) searchParams.set('bbox', filters.bbox);
   if (filters?.type) searchParams.set('type', filters.type);
   if (filters?.capturedAtFrom) searchParams.set('capturedAtFrom', filters.capturedAtFrom);

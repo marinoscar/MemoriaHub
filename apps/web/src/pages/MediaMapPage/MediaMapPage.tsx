@@ -12,7 +12,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import {
   Box,
@@ -29,7 +29,6 @@ import {
 } from '@mui/material';
 import { Close as CloseIcon, Map as MapIcon } from '@mui/icons-material';
 import '../../lib/leaflet-setup';
-import { defaultIcon } from '../../lib/leaflet-setup';
 import {
   aggregateLocations,
   listMediaLocations,
@@ -37,6 +36,7 @@ import {
   getMedia,
   getLocationExtent,
 } from '../../services/media';
+import { AggregateClusterLayer } from '../../components/map/AggregateClusterLayer';
 import { useCircle } from '../../hooks/useCircle';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSearch } from '../../contexts/SearchContext';
@@ -74,58 +74,6 @@ const VIEWPORT_DEBOUNCE_MS = 250;
  * and the "Show all" button drills into search for the complete set.
  */
 const CLUSTER_THUMB_LIMIT = 24;
-
-// ---------------------------------------------------------------------------
-// Zoom → grid precision. Coarser cells at low zoom keep bucket counts bounded.
-// ---------------------------------------------------------------------------
-
-function precisionForZoom(zoom: number): number {
-  if (zoom <= 3) return 0;
-  if (zoom <= 5) return 1;
-  if (zoom <= 8) return 2;
-  if (zoom <= 11) return 3;
-  if (zoom <= 14) return 4;
-  return 5;
-}
-
-// ---------------------------------------------------------------------------
-// Cluster count-badge divIcon (styled like leaflet.markercluster defaults).
-// ---------------------------------------------------------------------------
-
-(function injectClusterIconStyles() {
-  if (typeof document === 'undefined') return; // SSR guard
-  const id = 'mh-cluster-icon-styles';
-  if (document.getElementById(id)) return;
-  const style = document.createElement('style');
-  style.id = id;
-  style.textContent = [
-    '.mh-cluster-icon { background: transparent !important; border: none !important; }',
-    '.mh-cluster-icon > div {',
-    '  width: 100%; height: 100%; border-radius: 50%;',
-    '  display: flex; align-items: center; justify-content: center;',
-    '  font: 600 12px/1 system-ui, sans-serif; color: #fff;',
-    '  background: rgba(25, 118, 210, 0.85);',
-    '  box-shadow: 0 0 0 4px rgba(25, 118, 210, 0.35);',
-    '}',
-  ].join('\n');
-  document.head.appendChild(style);
-})();
-
-function clusterLabel(count: number): string {
-  if (count < 1000) return String(count);
-  if (count < 10000) return `${Math.floor(count / 100) / 10}k`;
-  return `${Math.floor(count / 1000)}k`;
-}
-
-function clusterIcon(count: number): L.DivIcon {
-  const size = count < 10 ? 34 : count < 100 ? 40 : count < 1000 ? 48 : 56;
-  return L.divIcon({
-    className: 'mh-cluster-icon',
-    html: `<div>${clusterLabel(count)}</div>`,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
-  });
-}
 
 // ---------------------------------------------------------------------------
 // ViewportWatcher — reports the current bbox + zoom on mount and (debounced)
@@ -274,51 +222,6 @@ function AlbumTile({ point, onClick }: AlbumTileProps) {
 }
 
 // ---------------------------------------------------------------------------
-// ClusterLayer — renders one Leaflet marker per aggregate cluster and handles
-// clicks: single-item cells open the media drawer, and any multi-item cluster
-// opens the "Photos here" drawer.
-// ---------------------------------------------------------------------------
-
-interface ClusterLayerProps {
-  clusters: MapCluster[];
-  onOpenItem: (id: string) => void;
-  onOpenCluster: (cluster: MapCluster, precision: number) => void;
-}
-
-function ClusterLayer({ clusters, onOpenItem, onOpenCluster }: ClusterLayerProps) {
-  const map = useMap();
-
-  const handleClick = useCallback(
-    (cluster: MapCluster) => {
-      if (cluster.count === 1) {
-        onOpenItem(cluster.sampleId);
-        return;
-      }
-      // Any multi-item cluster opens the "Photos here" drawer. A cluster that
-      // cannot split further (e.g. every item at the same point) previously
-      // dead-ended on a programmatic fly-in that did nothing; the drawer always
-      // gives the user a way in. Native Leaflet scroll/double-click zoom is
-      // unaffected.
-      onOpenCluster(cluster, precisionForZoom(map.getZoom()));
-    },
-    [map, onOpenItem, onOpenCluster],
-  );
-
-  return (
-    <>
-      {clusters.map((cluster) => (
-        <Marker
-          key={cluster.sampleId}
-          position={[cluster.lat, cluster.lng]}
-          icon={cluster.count > 1 ? clusterIcon(cluster.count) : defaultIcon}
-          eventHandlers={{ click: () => handleClick(cluster) }}
-        />
-      ))}
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Main page component
 // ---------------------------------------------------------------------------
 
@@ -361,7 +264,7 @@ export default function MediaMapPage() {
 
     aggregateLocations({
       circleId: activeCircle.id,
-      precision: precisionForZoom(viewport.zoom),
+      zoom: Math.round(viewport.zoom),
       bbox: viewport.bbox,
       capturedAtFrom: timeRange.from ?? undefined,
       capturedAtTo: timeRange.to ?? undefined,
@@ -425,21 +328,22 @@ export default function MediaMapPage() {
   const [clusterDrawer, setClusterDrawer] = useState<ClusterDrawerState | null>(null);
   const albumReqRef = useRef(0);
 
-  const handleOpenCluster = useCallback(
-    (cluster: MapCluster, precision: number) => {
+  const handleOpenClusterBbox = useCallback(
+    ({ bbox, lat, lng }: { bbox: string; lat: number; lng: number; total: number }) => {
       if (!activeCircle) return;
       const reqId = ++albumReqRef.current;
       const circleId = activeCircle.id;
 
-      // Cell bounds: half a grid cell each way around the cluster centroid.
-      const half = 0.5 * Math.pow(10, -precision);
-      const bbox = `${cluster.lng - half},${cluster.lat - half},${cluster.lng + half},${cluster.lat + half}`;
-
-      // Derive a "near" radius from the grid cell so "Show all" searches the
-      // same area the drawer previews. Half a cell in degrees → km (~111.32
-      // km/deg of latitude), widened 1.5× for margin, floored at 0.5 km.
-      const radiusKm = Math.max(0.5, half * 111.32 * 1.5);
-      const near = { lat: cluster.lat, lng: cluster.lng, radiusKm };
+      // Derive a "near" radius from the bbox diagonal so "Show all" searches the
+      // same area the drawer previews. bbox is `minLng,minLat,maxLng,maxLat`.
+      // Convert the lat/lng spans to km (~111.32 km/deg of latitude, longitude
+      // scaled by cos(centerLat)), take half the diagonal, floored at 0.5 km.
+      const [w, s, e, n] = bbox.split(',').map(Number);
+      const latKm = (n - s) * 111.32;
+      const lngKm = (e - w) * 111.32 * Math.cos((lat * Math.PI) / 180);
+      const diagonalKm = Math.hypot(latKm, lngKm);
+      const radiusKm = Math.max(0.5, diagonalKm / 2);
+      const near = { lat, lng, radiusKm };
 
       // Open immediately in the loading state.
       setClusterDrawer({ status: 'loading', points: [], total: 0, near });
@@ -659,11 +563,13 @@ export default function MediaMapPage() {
         {/* Fit to the circle's true photo extent */}
         <FitToExtent extent={extent} />
 
-        {/* Cluster markers */}
-        <ClusterLayer
+        {/* Cluster markers — weighted markercluster layer (pixel-radius
+            de-collision + animated re-cluster on zoom) */}
+        <AggregateClusterLayer
           clusters={clusters}
+          themeMode={theme.palette.mode}
           onOpenItem={handleMarkerOpen}
-          onOpenCluster={handleOpenCluster}
+          onOpenClusterBbox={handleOpenClusterBbox}
         />
       </MapContainer>
 

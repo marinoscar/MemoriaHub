@@ -23,13 +23,21 @@
  * test for that bug.
  *
  * Heavy dependencies are mocked:
- *   - react-leaflet: MapContainer/TileLayer/Marker replaced with lightweight
- *     stubs; useMap/useMapEvents replaced with a shared fake map object so
- *     the page's internal ViewportWatcher/FitToExtent/ClusterLayer helper
- *     components run their real logic against fake Leaflet primitives. The
- *     TileLayer stub also mirrors the `url` prop onto a `data-url` attribute
- *     so the "theme-aware basemap" tests below can assert which CARTO tile
- *     URL (dark_all vs light_all) the page selected for the active theme.
+ *   - react-leaflet: MapContainer/TileLayer replaced with lightweight stubs;
+ *     useMap/useMapEvents replaced with a shared fake map object so the
+ *     page's internal ViewportWatcher/FitToExtent helper components run
+ *     their real logic against fake Leaflet primitives. The TileLayer stub
+ *     also mirrors the `url` prop onto a `data-url` attribute so the
+ *     "theme-aware basemap" tests below can assert which CARTO tile URL
+ *     (dark_all vs light_all) the page selected for the active theme.
+ *   - ../../components/map/AggregateClusterLayer: clustering is now an
+ *     imperative leaflet.markercluster layer (no <Marker> JSX for the real
+ *     test tree to inspect), so it's replaced with a stub that renders one
+ *     `<button data-testid="marker" data-count data-sample-id>` per
+ *     `clusters` entry and reproduces its real click contract: count===1
+ *     calls `onOpenItem(sampleId)`, otherwise `onOpenClusterBbox({bbox, lat,
+ *     lng, total})` with a small epsilon bbox around the cell (mirrors
+ *     `bboxForCell` in the real component).
  *   - leaflet: stubs for L.latLngBounds / L.divIcon / L.Icon.Default.
  *   - ../../lib/leaflet-setup: replaced (avoids inline-SVG icon + CSS import).
  *   - services/media: aggregateLocations / listMediaLocations / getThumbnails
@@ -119,19 +127,52 @@ vi.mock('react-leaflet', () => {
     <div data-testid="map-container">{children}</div>
   );
   const TileLayer = (props: any) => <div data-testid="tile-layer" data-url={props.url} />;
-  const Marker = (props: any) => (
-    <button
-      type="button"
-      data-testid="marker"
-      data-lat={props.position?.[0]}
-      data-lng={props.position?.[1]}
-      onClick={() => props.eventHandlers?.click?.()}
-    />
-  );
   const useMap = () => mockMapMethods;
   const useMapEvents = () => undefined;
-  return { MapContainer, TileLayer, Marker, useMap, useMapEvents };
+  return { MapContainer, TileLayer, useMap, useMapEvents };
 });
+
+// ---------------------------------------------------------------------------
+// Mock AggregateClusterLayer — clustering is now an imperative
+// leaflet.markercluster layer with no <Marker> JSX for RTL to see, so we
+// stand in a stub that renders one button per cluster cell and reproduces
+// the real component's click contract: count===1 → onOpenItem(sampleId),
+// otherwise → onOpenClusterBbox({bbox, lat, lng, total}) with a small
+// epsilon bbox around the cell (mirrors `bboxForCell` in the real
+// component, close enough for the "near" radius math in the page to run
+// without producing NaN/degenerate values).
+// ---------------------------------------------------------------------------
+
+vi.mock('../../components/map/AggregateClusterLayer', () => ({
+  AggregateClusterLayer: ({ clusters, onOpenItem, onOpenClusterBbox }: any) => (
+    <>
+      {clusters.map((c: any, i: number) => (
+        <button
+          key={`${c.sampleId}-${i}`}
+          type="button"
+          data-testid="marker"
+          data-count={c.count}
+          data-sample-id={c.sampleId}
+          data-lat={c.lat}
+          data-lng={c.lng}
+          onClick={() => {
+            if (c.count === 1) {
+              onOpenItem(c.sampleId);
+            } else {
+              const eps = 0.001;
+              onOpenClusterBbox({
+                bbox: `${c.lng - eps},${c.lat - eps},${c.lng + eps},${c.lat + eps}`,
+                lat: c.lat,
+                lng: c.lng,
+                total: c.count,
+              });
+            }
+          }}
+        />
+      ))}
+    </>
+  ),
+}));
 
 // ---------------------------------------------------------------------------
 // Mock MediaDetailDrawer — show selected item id for assertion
@@ -336,6 +377,18 @@ describe('MediaMapPage', () => {
       expect(mockAggregateLocations).toHaveBeenCalledWith(
         expect.objectContaining({ circleId: 'circle-1' }),
       );
+    });
+
+    it('sends zoom (rounded from the map viewport) instead of a precision value', async () => {
+      // mockMapMethods.getZoom() is stubbed to 10 (an already-integer zoom);
+      // the page passes Math.round(viewport.zoom) through as `zoom`.
+      render(<MediaMapPage />);
+
+      await waitFor(() => {
+        expect(mockAggregateLocations).toHaveBeenCalledWith(
+          expect.objectContaining({ circleId: 'circle-1', zoom: 10 }),
+        );
+      });
     });
 
     it('shows a loading indicator while the initial aggregate fetch is pending', async () => {

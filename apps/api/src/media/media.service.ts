@@ -60,6 +60,13 @@ export interface MediaLocation {
   geoLocality: string | null;
 }
 
+/**
+ * Web-Mercator pixel-grid cell size (in map tile pixels) used by the
+ * zoom-keyed clustering path in aggregateLocations(). A larger value produces
+ * fewer, coarser clusters; 64 px matches typical marker-cluster spacing.
+ */
+const CLUSTER_CELL_PX = 64;
+
 @Injectable()
 export class MediaService {
   private readonly logger = new Logger(MediaService.name);
@@ -589,15 +596,25 @@ export class MediaService {
    * one cluster per occupied cell with a representative sample id.
    *
    * Optional filters (date range, type, viewport bbox) narrow the set before
-   * grouping. All user input is parameterized; `precision` is a validated
-   * integer (0–5) and is the only value embedded as a numeric literal.
+   * grouping. All user input is parameterized; the only values embedded as
+   * numeric literals are the validated integers `precision` (legacy grid) or
+   * `zoom` (mercator grid) plus the code constant CLUSTER_CELL_PX.
+   *
+   * Two grid modes:
+   *  - `zoom` omitted (legacy): equirectangular grid via round(lat/lng, precision).
+   *    Cells shrink toward the poles because a degree of longitude covers less
+   *    ground at high latitude — kept for back-compat.
+   *  - `zoom` provided: Web-Mercator PIXEL-uniform grid. Points are projected to
+   *    the tile-pixel plane at the given zoom, then bucketed into
+   *    CLUSTER_CELL_PX-sized cells, so clusters are uniformly spaced on screen at
+   *    every latitude.
    */
   async aggregateLocations(
     query: MediaLocationsAggregateQueryDto,
     userId: string,
     userPermissions: string[],
   ): Promise<Array<{ lat: number; lng: number; count: number; sampleId: string }>> {
-    const { circleId, precision, bbox, capturedAtFrom, capturedAtTo, type } = query;
+    const { circleId, precision, zoom, bbox, capturedAtFrom, capturedAtTo, type } = query;
 
     await this.circleMembershipService.assertCircleAccess(
       userId,
@@ -616,30 +633,50 @@ export class MediaService {
         : Prisma.empty,
     ];
 
-    // `precision` is a validated integer 0–5 — safe to embed as a numeric literal.
-    const rows = await this.prisma.$queryRaw<
-      Array<{
-        gy: string | number;
-        gx: string | number;
-        n: number;
-        lat: string | number;
-        lng: string | number;
-        sample_id: string;
-      }>
-    >(Prisma.sql`
+    // Choose the SELECT/GROUP BY grid. Both share the WHERE clause + fragments +
+    // return mapping below. `precision` (0–5), `zoom` (0–22), and CLUSTER_CELL_PX
+    // are validated ints / a code constant — safe to embed as numeric literals;
+    // everything else stays a bound parameter.
+    const legacyGrid = Prisma.sql`
       SELECT round(taken_lat::numeric, ${Prisma.raw(String(precision))}) AS gy,
              round(taken_lng::numeric, ${Prisma.raw(String(precision))}) AS gx,
              count(*)::int AS n,
              avg(taken_lat) AS lat,
              avg(taken_lng) AS lng,
              min(id::text) AS sample_id
+    `;
+
+    const mercatorGrid = Prisma.sql`
+      SELECT floor( ((taken_lng + 180) / 360) * (256 * pow(2, ${Prisma.raw(String(zoom))})) / ${Prisma.raw(String(CLUSTER_CELL_PX))} ) AS cx,
+             floor( ( (1 - ln( tan(radians( least(greatest(taken_lat, -85.05112878), 85.05112878) ))
+                              + 1 / cos(radians( least(greatest(taken_lat, -85.05112878), 85.05112878) )) ) / pi()
+                     ) / 2 ) * (256 * pow(2, ${Prisma.raw(String(zoom))})) / ${Prisma.raw(String(CLUSTER_CELL_PX))} ) AS cy,
+             count(*)::int AS n,
+             avg(taken_lat) AS lat,
+             avg(taken_lng) AS lng,
+             min(id::text) AS sample_id
+    `;
+
+    const isMercator = zoom !== undefined;
+    const selectGrid = isMercator ? mercatorGrid : legacyGrid;
+    const groupBy = isMercator ? Prisma.sql`GROUP BY cx, cy` : Prisma.sql`GROUP BY gy, gx`;
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        n: number;
+        lat: string | number;
+        lng: string | number;
+        sample_id: string;
+      }>
+    >(Prisma.sql`
+      ${selectGrid}
       FROM media_items
       WHERE circle_id = ${circleId}::uuid
         AND deleted_at IS NULL AND archived_at IS NULL
         AND taken_lat IS NOT NULL AND taken_lng IS NOT NULL
         AND NOT (taken_lat = 0 AND taken_lng = 0)
         ${Prisma.join(fragments, ' ')}
-      GROUP BY gy, gx
+      ${groupBy}
     `);
 
     return rows.map((row) => ({
