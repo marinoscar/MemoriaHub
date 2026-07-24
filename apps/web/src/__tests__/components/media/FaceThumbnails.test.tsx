@@ -16,7 +16,7 @@
  *   - Shows error alert when error is set
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
 import { FaceThumbnails } from '../../../components/media/FaceThumbnails';
@@ -30,9 +30,35 @@ vi.mock('../../../hooks/useMediaFaces', () => ({
   useMediaFaces: vi.fn(),
 }));
 
+// Mock face service — listPeople, assignFaces, unassignFace, createPerson,
+// purgeFaces (the shared AssignFaceDialog's dependencies).
+vi.mock('../../../services/face', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../services/face')>();
+  return {
+    ...original,
+    listPeople: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+    assignFaces: vi.fn().mockResolvedValue({ personId: 'p1', assignedCount: 1 }),
+    unassignFace: vi.fn().mockResolvedValue(undefined),
+    createPerson: vi.fn().mockResolvedValue({ id: 'p-new', name: 'New Person', circleId: 'circle-1' }),
+    purgeFaces: vi.fn().mockResolvedValue({ deleted: 1 }),
+  };
+});
+
 import { useMediaFaces } from '../../../hooks/useMediaFaces';
+import {
+  listPeople,
+  assignFaces,
+  unassignFace,
+  createPerson,
+  purgeFaces,
+} from '../../../services/face';
 
 const mockUseMediaFaces = vi.mocked(useMediaFaces);
+const mockListPeople = vi.mocked(listPeople);
+const mockAssignFaces = vi.mocked(assignFaces);
+const mockUnassignFace = vi.mocked(unassignFace);
+const mockCreatePerson = vi.mocked(createPerson);
+const mockPurgeFaces = vi.mocked(purgeFaces);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -87,6 +113,7 @@ describe('FaceThumbnails', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseMediaFaces.mockReturnValue(defaultHookReturn());
+    mockListPeople.mockResolvedValue({ items: [], total: 0 });
   });
 
   // -------------------------------------------------------------------------
@@ -302,6 +329,135 @@ describe('FaceThumbnails', () => {
       render(<FaceThumbnails mediaId="media-1" />);
 
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Assign / reassign / unassign / create via the shared AssignFaceDialog
+  // (issue #119 — AssignFaceDialog was extracted out of this component)
+  // -------------------------------------------------------------------------
+  describe('face assignment via AssignFaceDialog', () => {
+    it('calls assignFaces(personId, [face.id]) when assigning an unassigned face to an existing person', async () => {
+      const user = userEvent.setup();
+      const face = makeFace('face-1', { personId: null, personName: null });
+      mockUseMediaFaces.mockReturnValue(defaultHookReturn({ faces: [face] }));
+      mockListPeople.mockResolvedValue({
+        items: [
+          {
+            id: 'p1',
+            name: 'Alice',
+            isUnlabeled: false,
+            faceCount: 0,
+            coverFace: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            favorite: false,
+          },
+        ],
+        total: 1,
+      });
+
+      render(
+        <FaceThumbnails
+          mediaId="media-1"
+          circleId="circle-1"
+          thumbnailUrl="https://example.com/thumb.jpg"
+        />,
+      );
+
+      await user.click(screen.getByText('Unassigned'));
+
+      const dialog = await screen.findByRole('dialog');
+      const combobox = within(dialog).getByRole('combobox');
+      await user.click(combobox);
+      const aliceOption = await screen.findByRole('option', { name: /alice/i });
+      await user.click(aliceOption);
+      await user.click(within(dialog).getByRole('button', { name: /^assign$/i }));
+
+      await waitFor(() => {
+        expect(mockAssignFaces).toHaveBeenCalledWith('p1', ['face-1']);
+      });
+    });
+
+    it('calls unassignFace(personId, face.id) when unassigning an already-assigned face', async () => {
+      const user = userEvent.setup();
+      const face = makeFace('face-1', { personId: 'p1', personName: 'Alice' });
+      mockUseMediaFaces.mockReturnValue(defaultHookReturn({ faces: [face] }));
+
+      render(
+        <FaceThumbnails
+          mediaId="media-1"
+          circleId="circle-1"
+          thumbnailUrl="https://example.com/thumb.jpg"
+        />,
+      );
+
+      await user.click(screen.getByText('Alice'));
+
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /unassign/i }));
+
+      await waitFor(() => {
+        expect(mockUnassignFace).toHaveBeenCalledWith('p1', 'face-1');
+      });
+    });
+
+    it('calls createPerson({..., faceIds:[face.id]}) when creating a new person for an unassigned face', async () => {
+      const user = userEvent.setup();
+      const face = makeFace('face-1', { personId: null, personName: null });
+      mockUseMediaFaces.mockReturnValue(defaultHookReturn({ faces: [face] }));
+
+      render(
+        <FaceThumbnails
+          mediaId="media-1"
+          circleId="circle-1"
+          thumbnailUrl="https://example.com/thumb.jpg"
+        />,
+      );
+
+      await user.click(screen.getByText('Unassigned'));
+
+      const dialog = await screen.findByRole('dialog');
+      await user.type(within(dialog).getByLabelText(/person name/i), 'Charlie');
+      await user.click(within(dialog).getByRole('button', { name: /create person/i }));
+
+      await waitFor(() => {
+        expect(mockCreatePerson).toHaveBeenCalledWith({
+          circleId: 'circle-1',
+          name: 'Charlie',
+          faceIds: ['face-1'],
+        });
+      });
+    });
+
+    it('calls purgeFaces(circleId, [face.id]) when confirming "Delete detection permanently"', async () => {
+      const user = userEvent.setup();
+      const face = makeFace('face-1', { personId: null, personName: null });
+      mockUseMediaFaces.mockReturnValue(defaultHookReturn({ faces: [face] }));
+
+      render(
+        <FaceThumbnails
+          mediaId="media-1"
+          circleId="circle-1"
+          thumbnailUrl="https://example.com/thumb.jpg"
+        />,
+      );
+
+      await user.click(screen.getByText('Unassigned'));
+
+      const editDialog = await screen.findByRole('dialog');
+      await user.click(
+        within(editDialog).getByRole('button', { name: /delete detection permanently/i }),
+      );
+
+      const purgeDialog = await screen.findByRole('dialog', { name: /delete permanently\?/i });
+      await user.click(
+        within(purgeDialog).getByRole('button', { name: /^delete permanently$/i }),
+      );
+
+      await waitFor(() => {
+        expect(mockPurgeFaces).toHaveBeenCalledWith('circle-1', ['face-1']);
+      });
     });
   });
 });
