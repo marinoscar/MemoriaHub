@@ -2,9 +2,16 @@
  * Unit tests for LocationSuggestionsPage.
  *
  * Mocking strategy:
- *   - useCircle and useLocationSuggestions are module-mocked directly
- *     (mirrors DuplicatesPage.test.tsx — reaching one level above the
- *     service layer rather than mocking services/locationSuggestions here).
+ *   - useCircle, usePermissions, useSystemSettings, and useLocationSuggestions
+ *     are module-mocked directly (mirrors BurstsPage.test.tsx / DuplicatesPage.test.tsx
+ *     — reaching one level above the service layer rather than mocking
+ *     services/locationSuggestions here).
+ *   - services/locationSuggestionRuns's startLocationAcceptRun /
+ *     startLocationRejectRun are mocked directly since the bulk accept/reject
+ *     flow now starts an async run (issue mirrors trash-empty-at-scale) rather
+ *     than calling a synchronous bulkAccept on the hook.
+ *   - react-router-dom's useNavigate is mocked so the post-start navigation to
+ *     /location-suggestion-runs/:runId can be asserted.
  *   - LocationMiniMap and LocationPickerMap are mocked to lightweight stubs
  *     (avoids react-leaflet dependency), matching the pattern used in
  *     MediaDetailDrawer.test.tsx / BulkLocationDialog.test.tsx.
@@ -25,8 +32,14 @@
  *  - Reject button calls reject(id)
  *  - Adjust dialog opens seeded at the suggestion's coords; accept-with-
  *    adjusted-coords path via the LocationPickerMap stub
- *  - Bulk "Accept all >= 80% confidence" flow: confirm dialog, bulkAccept call,
- *    toolbar button disabled states
+ *  - Threshold: reads default from useSystemSettings' locationInference.bulkAcceptThreshold
+ *    (falls back to 80 when unset), inline TextField overrides it, clamped 0-100
+ *  - Admin-only gear icon linking to /admin/settings/location-inference
+ *  - Bulk "Accept all >= N%" flow: confirm dialog, startLocationAcceptRun call,
+ *    navigation to the new run page, toolbar button disabled states
+ *  - Bulk "Reject all < N%" flow: confirm dialog, startLocationRejectRun call,
+ *    navigation to the new run page
+ *  - Error from starting a bulk run surfaces an action-error alert
  *  - Empty state text when items is empty
  */
 
@@ -43,8 +56,21 @@ vi.mock('../../hooks/useCircle', () => ({
   useCircle: vi.fn(),
 }));
 
+vi.mock('../../hooks/usePermissions', () => ({
+  usePermissions: vi.fn(),
+}));
+
+vi.mock('../../hooks/useSystemSettings', () => ({
+  useSystemSettings: vi.fn(),
+}));
+
 vi.mock('../../hooks/useLocationSuggestions', () => ({
   useLocationSuggestions: vi.fn(),
+}));
+
+vi.mock('../../services/locationSuggestionRuns', () => ({
+  startLocationAcceptRun: vi.fn(),
+  startLocationRejectRun: vi.fn(),
 }));
 
 vi.mock('../../components/media/LocationMiniMap', () => ({
@@ -85,19 +111,35 @@ vi.mock('../../services/locationSuggestions', async () => {
   };
 });
 
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
+
 // ---------------------------------------------------------------------------
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
 import LocationSuggestionsPage from '../../pages/LocationSuggestions/LocationSuggestionsPage';
 import { useCircle } from '../../hooks/useCircle';
+import { usePermissions } from '../../hooks/usePermissions';
+import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { useLocationSuggestions } from '../../hooks/useLocationSuggestions';
+import { startLocationAcceptRun, startLocationRejectRun } from '../../services/locationSuggestionRuns';
 import { searchPlaces, reverseGeocode } from '../../services/media';
 import { acceptLocationSuggestion } from '../../services/locationSuggestions';
 import type { LocationSuggestionSummary } from '../../services/locationSuggestions';
 
 const mockUseCircle = vi.mocked(useCircle);
+const mockUsePermissions = vi.mocked(usePermissions);
+const mockUseSystemSettings = vi.mocked(useSystemSettings);
 const mockUseLocationSuggestions = vi.mocked(useLocationSuggestions);
+const mockStartLocationAcceptRun = vi.mocked(startLocationAcceptRun);
+const mockStartLocationRejectRun = vi.mocked(startLocationRejectRun);
 const mockSearchPlaces = vi.mocked(searchPlaces);
 const mockReverseGeocode = vi.mocked(reverseGeocode);
 const mockAcceptLocationSuggestion = vi.mocked(acceptLocationSuggestion);
@@ -133,6 +175,41 @@ function makeCircleContext(overrides: Partial<ReturnType<typeof useCircle>> = {}
   } as unknown as ReturnType<typeof useCircle>;
 }
 
+function makePermissions(isAdmin = false) {
+  return {
+    permissions: new Set<string>(['media:read', 'media:write']),
+    roles: new Set<string>(isAdmin ? ['admin'] : ['viewer']),
+    hasPermission: vi.fn().mockReturnValue(true),
+    hasAnyPermission: vi.fn().mockReturnValue(true),
+    hasAllPermissions: vi.fn().mockReturnValue(true),
+    hasRole: vi.fn().mockReturnValue(isAdmin),
+    hasAnyRole: vi.fn().mockReturnValue(isAdmin),
+    isAdmin,
+  } as unknown as ReturnType<typeof usePermissions>;
+}
+
+function makeSystemSettingsHook(
+  bulkAcceptThreshold: number | undefined = 80,
+): ReturnType<typeof useSystemSettings> {
+  return {
+    settings: {
+      ui: { allowUserThemeOverride: true },
+      features: {},
+      locationInference:
+        bulkAcceptThreshold === undefined ? undefined : { bulkAcceptThreshold },
+      updatedAt: new Date().toISOString(),
+      updatedBy: null,
+      version: 1,
+    } as any,
+    isLoading: false,
+    isSaving: false,
+    error: null,
+    updateSettings: vi.fn().mockResolvedValue(undefined),
+    replaceSettings: vi.fn().mockResolvedValue(undefined),
+    refresh: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
 function makeLocationSuggestionsHook(
   overrides: Partial<ReturnType<typeof useLocationSuggestions>> = {},
 ): ReturnType<typeof useLocationSuggestions> {
@@ -145,11 +222,9 @@ function makeLocationSuggestionsHook(
     accept: vi.fn().mockResolvedValue({ id: 's-1', status: 'accepted', lat: 0, lng: 0, coordSource: 'inferred' }),
     reject: vi.fn().mockResolvedValue({ id: 's-1', status: 'rejected' }),
     revert: vi.fn().mockResolvedValue({ id: 's-1', status: 'reverted' }),
-    bulkAccept: vi.fn().mockResolvedValue({ accepted: 0 }),
     actingIds: new Set<string>(),
-    bulkAccepting: false,
     ...overrides,
-  };
+  } as unknown as ReturnType<typeof useLocationSuggestions>;
 }
 
 function makeSuggestion(overrides: Partial<LocationSuggestionSummary> = {}): LocationSuggestionSummary {
@@ -183,6 +258,8 @@ describe('LocationSuggestionsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseCircle.mockReturnValue(makeCircleContext());
+    mockUsePermissions.mockReturnValue(makePermissions(false));
+    mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook());
     mockUseLocationSuggestions.mockReturnValue(makeLocationSuggestionsHook());
     mockSearchPlaces.mockResolvedValue([]);
     mockReverseGeocode.mockResolvedValue({
@@ -199,6 +276,16 @@ describe('LocationSuggestionsPage', () => {
       lat: 9.9281,
       lng: -84.0907,
       coordSource: 'manual',
+    });
+    mockStartLocationAcceptRun.mockResolvedValue({
+      runId: 'run-1',
+      status: 'evaluating',
+      matchedCount: 0,
+    });
+    mockStartLocationRejectRun.mockResolvedValue({
+      runId: 'run-2',
+      status: 'evaluating',
+      matchedCount: 0,
     });
   });
 
@@ -459,7 +546,7 @@ describe('LocationSuggestionsPage', () => {
 
       render(<LocationSuggestionsPage />);
 
-      await user.click(screen.getByRole('button', { name: /reject/i }));
+      await user.click(screen.getByRole('button', { name: /^reject$/i }));
 
       await waitFor(() => {
         expect(reject).toHaveBeenCalledWith('suggestion-1');
@@ -474,7 +561,7 @@ describe('LocationSuggestionsPage', () => {
 
       render(<LocationSuggestionsPage />);
 
-      await user.click(screen.getByRole('button', { name: /reject/i }));
+      await user.click(screen.getByRole('button', { name: /^reject$/i }));
 
       await waitFor(() => {
         expect(screen.getByText('Suggestion rejected')).toBeInTheDocument();
@@ -567,36 +654,84 @@ describe('LocationSuggestionsPage', () => {
     });
   });
 
-  describe('bulk accept flow', () => {
-    it('toolbar button is disabled when there are no items', () => {
+  describe('threshold default from system settings', () => {
+    it('uses locationInference.bulkAcceptThreshold from system settings for both toolbar buttons', () => {
+      mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(65));
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.getByRole('button', { name: /accept all.*65%/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /reject all.*65%/i })).toBeInTheDocument();
+    });
+
+    it('falls back to a threshold of 80 when locationInference.bulkAcceptThreshold is unset', () => {
+      mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(undefined));
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.getByRole('button', { name: /accept all.*80%/i })).toBeInTheDocument();
+    });
+
+    it('the inline Threshold % field overrides the confirm-dialog wording', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      const field = screen.getByLabelText(/threshold %/i);
+      await user.clear(field);
+      await user.type(field, '55');
+
+      expect(screen.getByRole('button', { name: /accept all.*55%/i })).toBeInTheDocument();
+    });
+  });
+
+  describe('admin-only location inference settings gear icon', () => {
+    it('renders the gear icon linking to /admin/settings/location-inference for an admin', () => {
+      mockUsePermissions.mockReturnValue(makePermissions(true));
+
+      render(<LocationSuggestionsPage />);
+
+      const gear = screen.getByRole('link', { name: /location inference settings/i });
+      expect(gear).toBeInTheDocument();
+      expect(gear).toHaveAttribute('href', '/admin/settings/location-inference');
+    });
+
+    it('does not render the gear icon for a non-admin', () => {
+      mockUsePermissions.mockReturnValue(makePermissions(false));
+
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.queryByRole('link', { name: /location inference settings/i })).toBeNull();
+    });
+  });
+
+  describe('bulk accept run flow', () => {
+    it('the "Accept all" toolbar button is disabled when there are no items', () => {
       mockUseLocationSuggestions.mockReturnValue(makeLocationSuggestionsHook({ items: [] }));
 
       render(<LocationSuggestionsPage />);
 
-      expect(screen.getByRole('button', { name: /accept all.*confidence/i })).toBeDisabled();
+      expect(screen.getByRole('button', { name: /accept all.*80%/i })).toBeDisabled();
     });
 
-    it('toolbar button is disabled while bulkAccepting is true', () => {
-      mockUseLocationSuggestions.mockReturnValue(
-        makeLocationSuggestionsHook({ items: [makeSuggestion()], bulkAccepting: true }),
-      );
+    it('the "Reject all" toolbar button is disabled when there are no items', () => {
+      mockUseLocationSuggestions.mockReturnValue(makeLocationSuggestionsHook({ items: [] }));
 
       render(<LocationSuggestionsPage />);
 
-      expect(screen.getByRole('button', { name: /accept all.*confidence/i })).toBeDisabled();
+      expect(screen.getByRole('button', { name: /reject all.*80%/i })).toBeDisabled();
     });
 
-    it('toolbar button is enabled when items exist and not bulk-accepting', () => {
-      mockUseLocationSuggestions.mockReturnValue(
-        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
-      );
-
-      render(<LocationSuggestionsPage />);
-
-      expect(screen.getByRole('button', { name: /accept all.*confidence/i })).not.toBeDisabled();
-    });
-
-    it('opens a confirm dialog when the toolbar button is clicked', async () => {
+    it('opens a confirm dialog when "Accept all" is clicked', async () => {
       mockUseLocationSuggestions.mockReturnValue(
         makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
       );
@@ -604,70 +739,136 @@ describe('LocationSuggestionsPage', () => {
 
       render(<LocationSuggestionsPage />);
 
-      await user.click(screen.getByRole('button', { name: /accept all.*confidence/i }));
+      await user.click(screen.getByRole('button', { name: /accept all.*80%/i }));
 
       await waitFor(() => {
-        expect(screen.getByText('Accept high-confidence suggestions')).toBeInTheDocument();
+        expect(screen.getByText('Accept suggestions ≥ 80%?')).toBeInTheDocument();
       });
     });
 
-    it('calls bulkAccept(activeCircleId, 0.8) when "Accept all" is confirmed', async () => {
-      const bulkAccept = vi.fn().mockResolvedValue({ accepted: 4 });
+    it('confirming "Accept all" calls startLocationAcceptRun({ circleId, threshold }) and navigates to the run page', async () => {
       mockUseLocationSuggestions.mockReturnValue(
-        makeLocationSuggestionsHook({ items: [makeSuggestion()], bulkAccept }),
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+      mockStartLocationAcceptRun.mockResolvedValue({
+        runId: 'run-accept-1',
+        status: 'evaluating',
+        matchedCount: 0,
+      });
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /accept all.*80%/i }));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /^accept all$/i }));
+
+      await waitFor(() => {
+        expect(mockStartLocationAcceptRun).toHaveBeenCalledWith({ circleId: CIRCLE_ID, threshold: 80 });
+      });
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/location-suggestion-runs/run-accept-1');
+      });
+    });
+
+    it('opens a confirm dialog when "Reject all" is clicked', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
       );
       const user = userEvent.setup();
 
       render(<LocationSuggestionsPage />);
 
-      await user.click(screen.getByRole('button', { name: /accept all.*confidence/i }));
-      const dialog = await screen.findByRole('dialog');
-
-      await user.click(within(dialog).getByRole('button', { name: /^accept all$/i }));
+      await user.click(screen.getByRole('button', { name: /reject all.*80%/i }));
 
       await waitFor(() => {
-        expect(bulkAccept).toHaveBeenCalledWith(CIRCLE_ID, 0.8);
+        expect(screen.getByText('Reject suggestions below 80%?')).toBeInTheDocument();
       });
     });
 
-    it('shows a success snackbar with the accepted count after a successful bulk accept', async () => {
+    it('confirming "Reject all" calls startLocationRejectRun({ circleId, threshold }) and navigates to the run page', async () => {
       mockUseLocationSuggestions.mockReturnValue(
-        makeLocationSuggestionsHook({
-          items: [makeSuggestion()],
-          bulkAccept: vi.fn().mockResolvedValue({ accepted: 4 }),
-        }),
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+      mockStartLocationRejectRun.mockResolvedValue({
+        runId: 'run-reject-1',
+        status: 'evaluating',
+        matchedCount: 0,
+      });
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /reject all.*80%/i }));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /^reject all$/i }));
+
+      await waitFor(() => {
+        expect(mockStartLocationRejectRun).toHaveBeenCalledWith({ circleId: CIRCLE_ID, threshold: 80 });
+      });
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/location-suggestion-runs/run-reject-1');
+      });
+    });
+
+    it('shows an action-error alert and does not navigate when startLocationAcceptRun rejects (e.g. 409 already in progress)', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+      mockStartLocationAcceptRun.mockRejectedValue(
+        new Error('A location-suggestion run is already in progress for this circle'),
       );
       const user = userEvent.setup();
 
       render(<LocationSuggestionsPage />);
 
-      await user.click(screen.getByRole('button', { name: /accept all.*confidence/i }));
+      await user.click(screen.getByRole('button', { name: /accept all.*80%/i }));
       const dialog = await screen.findByRole('dialog');
       await user.click(within(dialog).getByRole('button', { name: /^accept all$/i }));
 
       await waitFor(() => {
-        expect(screen.getByText('Accepted 4 suggestions')).toBeInTheDocument();
+        expect(
+          screen.getByText('A location-suggestion run is already in progress for this circle'),
+        ).toBeInTheDocument();
       });
+      expect(mockNavigate).not.toHaveBeenCalled();
     });
 
-    it('shows an error alert when bulkAccept rejects', async () => {
+    it('shows an action-error alert when startLocationRejectRun rejects', async () => {
       mockUseLocationSuggestions.mockReturnValue(
-        makeLocationSuggestionsHook({
-          items: [makeSuggestion()],
-          bulkAccept: vi.fn().mockRejectedValue(new Error('Bulk accept failed')),
-        }),
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+      mockStartLocationRejectRun.mockRejectedValue(new Error('Failed to start run'));
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /reject all.*80%/i }));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /^reject all$/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Failed to start run')).toBeInTheDocument();
+      });
+      expect(mockNavigate).not.toHaveBeenCalled();
+    });
+
+    it('closing the confirm dialog without confirming does not start a run', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
       );
       const user = userEvent.setup();
 
       render(<LocationSuggestionsPage />);
 
-      await user.click(screen.getByRole('button', { name: /accept all.*confidence/i }));
+      await user.click(screen.getByRole('button', { name: /accept all.*80%/i }));
       const dialog = await screen.findByRole('dialog');
-      await user.click(within(dialog).getByRole('button', { name: /^accept all$/i }));
+      await user.click(within(dialog).getByRole('button', { name: /^cancel$/i }));
 
       await waitFor(() => {
-        expect(screen.getByText('Bulk accept failed')).toBeInTheDocument();
+        expect(screen.queryByText('Accept suggestions ≥ 80%?')).not.toBeInTheDocument();
       });
+      expect(mockStartLocationAcceptRun).not.toHaveBeenCalled();
     });
   });
 });

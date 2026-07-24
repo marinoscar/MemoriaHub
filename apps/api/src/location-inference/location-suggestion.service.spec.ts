@@ -30,7 +30,11 @@ import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto';
 import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dto';
-import { BulkAcceptLocationSuggestionsDto } from './dto/bulk-accept-location-suggestions.dto';
+// NOTE (backend-dev): the synchronous `bulkAcceptSuggestions` method and its DTO
+// were removed in favour of the async run-based engine
+// (LocationSuggestionRunService). The former `describe('bulkAcceptSuggestions')`
+// block was deleted to keep this spec compiling. The testing agent should add
+// coverage for LocationSuggestionRunService / the run handlers instead.
 
 const USER_ID = 'user-1';
 const CIRCLE_ID = 'circle-1';
@@ -415,71 +419,10 @@ describe('LocationSuggestionService', () => {
   });
 
   // -------------------------------------------------------------------------
-  // bulkAcceptSuggestions
+  // bulkAcceptSuggestions — REMOVED (replaced by the async run-based engine).
+  // See the note near the imports; coverage now belongs to
+  // LocationSuggestionRunService and the run evaluate/execute-batch handlers.
   // -------------------------------------------------------------------------
-
-  describe('bulkAcceptSuggestions', () => {
-    function makeDto(overrides: Partial<BulkAcceptLocationSuggestionsDto> = {}): BulkAcceptLocationSuggestionsDto {
-      return { circleId: CIRCLE_ID, minConfidence: 0.7, ...overrides } as BulkAcceptLocationSuggestionsDto;
-    }
-
-    it('checks circle access at the collaborator level', async () => {
-      (mockPrisma.locationSuggestion.findMany as jest.Mock).mockResolvedValue([]);
-
-      await service.bulkAcceptSuggestions(makeDto(), USER_ID, PERMS);
-
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
-        USER_ID,
-        CIRCLE_ID,
-        PERMS,
-        CircleRole.collaborator,
-      );
-    });
-
-    it('queries pending suggestions with confidence >= minConfidence', async () => {
-      (mockPrisma.locationSuggestion.findMany as jest.Mock).mockResolvedValue([]);
-
-      await service.bulkAcceptSuggestions(makeDto({ minConfidence: 0.85 }), USER_ID, PERMS);
-
-      expect(mockPrisma.locationSuggestion.findMany).toHaveBeenCalledWith({
-        where: {
-          circleId: CIRCLE_ID,
-          status: LocationSuggestionStatus.pending,
-          confidence: { gte: 0.85 },
-        },
-      });
-    });
-
-    it('applies each suggestion via applyLocation(..., "inferred") — never a per-item override', async () => {
-      const suggestions = [makeSuggestion({ id: 's1', mediaItemId: 'm1' }), makeSuggestion({ id: 's2', mediaItemId: 'm2' })];
-      (mockPrisma.locationSuggestion.findMany as jest.Mock).mockResolvedValue(suggestions);
-
-      const result = await service.bulkAcceptSuggestions(makeDto(), USER_ID, PERMS);
-
-      expect(result.data.accepted).toBe(2);
-      expect(mockPrisma.mediaItem.update).toHaveBeenCalledTimes(2);
-      for (const call of (mockPrisma.mediaItem.update as jest.Mock).mock.calls) {
-        expect(call[0].data.coordSource).toBe('inferred');
-      }
-      expect(mockPrisma.locationSuggestion.update).toHaveBeenCalledTimes(2);
-    });
-
-    it('writes an audit event with count and minConfidence', async () => {
-      const suggestions = [makeSuggestion()];
-      (mockPrisma.locationSuggestion.findMany as jest.Mock).mockResolvedValue(suggestions);
-
-      await service.bulkAcceptSuggestions(makeDto({ minConfidence: 0.6 }), USER_ID, PERMS);
-
-      expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            action: 'location_suggestion:bulk_accepted',
-            meta: expect.objectContaining({ count: 1, minConfidence: 0.6 }),
-          }),
-        }),
-      );
-    });
-  });
 
   // -------------------------------------------------------------------------
   // inferLocation

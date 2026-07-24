@@ -333,6 +333,10 @@ export class SystemSettingsService {
           (dto as any).locationInference?.maxImpliedSpeedKmh ??
           (current as any).locationInference?.maxImpliedSpeedKmh ??
           150,
+        bulkAcceptThreshold:
+          (dto as any).locationInference?.bulkAcceptThreshold ??
+          (current as any).locationInference?.bulkAcceptThreshold ??
+          80,
       },
       socialMedia: {
         ocrEnabled:

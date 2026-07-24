@@ -107,6 +107,7 @@ export interface SystemSettingsValue {
     requireSameDevice: boolean;
     maxAnchorDistanceKm: number;
     maxImpliedSpeedKmh: number;
+    bulkAcceptThreshold: number;
   };
   socialMedia?: {
     ocrEnabled: boolean;
@@ -348,6 +349,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     requireSameDevice: true,
     maxAnchorDistanceKm: 2,
     maxImpliedSpeedKmh: 150,
+    bulkAcceptThreshold: 80,
   },
   socialMedia: {
     ocrEnabled: true,

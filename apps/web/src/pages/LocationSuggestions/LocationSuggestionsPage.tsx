@@ -16,6 +16,9 @@ import {
   DialogContentText,
   DialogActions,
   Snackbar,
+  IconButton,
+  Tooltip,
+  TextField,
 } from '@mui/material';
 import {
   MyLocation as MyLocationIcon,
@@ -23,14 +26,20 @@ import {
   Check as CheckIcon,
   EditLocationAlt as EditLocationAltIcon,
   Close as CloseIcon,
+  Settings as SettingsIcon,
 } from '@mui/icons-material';
+import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
+import { usePermissions } from '../../hooks/usePermissions';
+import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { useLocationSuggestions } from '../../hooks/useLocationSuggestions';
+import {
+  startLocationAcceptRun,
+  startLocationRejectRun,
+} from '../../services/locationSuggestionRuns';
 import { LocationMiniMap } from '../../components/media/LocationMiniMap';
 import { AdjustLocationDialog } from './AdjustLocationDialog';
 import type { LocationSuggestionSummary } from '../../services/locationSuggestions';
-
-const BULK_ACCEPT_THRESHOLD = 0.8;
 
 function confidenceChipColor(confidence: number): 'success' | 'warning' | 'default' {
   if (confidence >= 0.8) return 'success';
@@ -191,14 +200,27 @@ function SuggestionRow({ suggestion, acting, onAccept, onReject, onAdjust }: Sug
 }
 
 export default function LocationSuggestionsPage() {
+  const navigate = useNavigate();
   const { activeCircle, activeCircleId } = useCircle();
-  const { items, meta, isLoading, error, fetchSuggestions, accept, reject, bulkAccept, actingIds, bulkAccepting } =
+  const { isAdmin } = usePermissions();
+  const { settings } = useSystemSettings();
+  const { items, meta, isLoading, error, fetchSuggestions, accept, reject, actingIds } =
     useLocationSuggestions();
   const [page, setPage] = useState(1);
   const [adjustTarget, setAdjustTarget] = useState<LocationSuggestionSummary | null>(null);
-  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+  const [bulkAction, setBulkAction] = useState<'accept' | 'reject' | null>(null);
+  const [bulkStarting, setBulkStarting] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Persisted default confidence floor (0–100 int); user can adjust inline.
+  const persisted = settings?.locationInference?.bulkAcceptThreshold ?? 80;
+  const [thresholdPct, setThresholdPct] = useState(persisted);
+
+  // Re-sync the inline threshold whenever the persisted default loads/changes.
+  useEffect(() => {
+    setThresholdPct(persisted);
+  }, [persisted]);
 
   const refresh = useCallback(() => {
     if (!activeCircleId) return;
@@ -235,16 +257,21 @@ export default function LocationSuggestionsPage() {
     }
   };
 
-  const handleBulkAcceptConfirm = async () => {
-    setBulkConfirmOpen(false);
-    if (!activeCircleId) return;
+  const handleBulkConfirm = async () => {
+    const action = bulkAction;
+    setBulkAction(null);
+    if (!action || !activeCircleId) return;
     setActionError(null);
+    setBulkStarting(true);
     try {
-      const result = await bulkAccept(activeCircleId, BULK_ACCEPT_THRESHOLD);
-      setSuccessMsg(`Accepted ${result.accepted} suggestion${result.accepted !== 1 ? 's' : ''}`);
-      refresh();
+      const res =
+        action === 'accept'
+          ? await startLocationAcceptRun({ circleId: activeCircleId, threshold: thresholdPct })
+          : await startLocationRejectRun({ circleId: activeCircleId, threshold: thresholdPct });
+      navigate(`/location-suggestion-runs/${res.runId}`);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to bulk-accept suggestions');
+      setActionError(err instanceof Error ? err.message : 'Failed to start bulk run');
+      setBulkStarting(false);
     }
   };
 
@@ -261,21 +288,67 @@ export default function LocationSuggestionsPage() {
   return (
     <Box sx={{ p: { xs: 2, md: 3 } }}>
       {/* Header */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3, flexWrap: 'wrap', gap: 1 }}>
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          mb: 3,
+          flexWrap: 'wrap',
+          gap: 1,
+        }}
+      >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <MyLocationIcon color="primary" />
           <Typography variant="h5" component="h1">
             Location Suggestions
           </Typography>
+          {isAdmin && (
+            <Tooltip title="Location inference settings">
+              <IconButton
+                component={RouterLink}
+                to="/admin/settings/location-inference"
+                aria-label="Location inference settings"
+                size="small"
+              >
+                <SettingsIcon />
+              </IconButton>
+            </Tooltip>
+          )}
         </Box>
-        <Button
-          variant="outlined"
-          disabled={items.length === 0 || bulkAccepting}
-          startIcon={bulkAccepting ? <CircularProgress size={16} /> : undefined}
-          onClick={() => setBulkConfirmOpen(true)}
-        >
-          Accept all &ge; 80% confidence
-        </Button>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+          <TextField
+            label="Threshold %"
+            type="number"
+            size="small"
+            value={thresholdPct}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isNaN(n)) return;
+              setThresholdPct(Math.max(0, Math.min(100, Math.round(n))));
+            }}
+            slotProps={{ htmlInput: { min: 0, max: 100, step: 1 } }}
+            sx={{ width: 120 }}
+          />
+          <Button
+            variant="outlined"
+            color="success"
+            disabled={items.length === 0 || bulkStarting}
+            startIcon={bulkStarting ? <CircularProgress size={16} /> : undefined}
+            onClick={() => setBulkAction('accept')}
+          >
+            Accept all &ge; {thresholdPct}%
+          </Button>
+          <Button
+            variant="outlined"
+            color="warning"
+            disabled={items.length === 0 || bulkStarting}
+            startIcon={bulkStarting ? <CircularProgress size={16} /> : undefined}
+            onClick={() => setBulkAction('reject')}
+          >
+            Reject all &lt; {thresholdPct}%
+          </Button>
+        </Box>
       </Box>
 
       {actionError && (
@@ -344,20 +417,43 @@ export default function LocationSuggestionsPage() {
         />
       )}
 
-      {/* Bulk accept confirm dialog */}
-      <Dialog open={bulkConfirmOpen} onClose={() => setBulkConfirmOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Accept high-confidence suggestions</DialogTitle>
+      {/* Bulk accept/reject confirm dialog */}
+      <Dialog
+        open={Boolean(bulkAction)}
+        onClose={() => setBulkAction(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>
+          {bulkAction === 'reject'
+            ? `Reject suggestions below ${thresholdPct}%?`
+            : `Accept suggestions ≥ ${thresholdPct}%?`}
+        </DialogTitle>
         <DialogContent>
           <DialogContentText>
-            All pending suggestions in this circle with confidence &ge; {Math.round(BULK_ACCEPT_THRESHOLD * 100)}%
-            will be accepted as-is (unmodified coordinates). This cannot be bulk-undone, though each item can still
-            be individually reverted afterward.
+            {bulkAction === 'reject' ? (
+              <>
+                This starts a background run that rejects every pending suggestion below{' '}
+                {thresholdPct}% confidence and shows live progress. Large backlogs are processed in
+                the background.
+              </>
+            ) : (
+              <>
+                This starts a background run that accepts every pending suggestion at/above{' '}
+                {thresholdPct}% confidence and shows live progress. Large backlogs are processed in
+                the background.
+              </>
+            )}
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setBulkConfirmOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={() => void handleBulkAcceptConfirm()}>
-            Accept all
+          <Button onClick={() => setBulkAction(null)}>Cancel</Button>
+          <Button
+            variant="contained"
+            color={bulkAction === 'reject' ? 'warning' : 'success'}
+            onClick={() => void handleBulkConfirm()}
+          >
+            {bulkAction === 'reject' ? 'Reject all' : 'Accept all'}
           </Button>
         </DialogActions>
       </Dialog>

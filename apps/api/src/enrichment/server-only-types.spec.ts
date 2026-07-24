@@ -38,6 +38,8 @@ import { ThumbnailRepairHandler } from '../media/thumbnail-repair.handler';
 import { TrashPurgeHandler } from '../media/trash-purge.handler';
 import { TrashEmptyEvaluateHandler } from '../media/trash-empty/trash-empty-evaluate.handler';
 import { TrashEmptyExecuteBatchHandler } from '../media/trash-empty/trash-empty-execute-batch.handler';
+import { LocationSuggestionRunEvaluateHandler } from '../location-inference/runs/location-suggestion-run-evaluate.handler';
+import { LocationSuggestionRunExecuteBatchHandler } from '../location-inference/runs/location-suggestion-run-execute-batch.handler';
 import { WorkflowEvaluateItemHandler } from '../workflows/runs/workflow-evaluate-item.handler';
 import { WorkflowEvaluateHandler } from '../workflows/runs/workflow-evaluate.handler';
 import { WorkflowExecuteBatchHandler } from '../workflows/runs/workflow-execute-batch.handler';
@@ -64,6 +66,8 @@ const ALL_HANDLER_CLASSES = [
   TrashPurgeHandler,
   TrashEmptyEvaluateHandler,
   TrashEmptyExecuteBatchHandler,
+  LocationSuggestionRunEvaluateHandler,
+  LocationSuggestionRunExecuteBatchHandler,
   WorkflowEvaluateItemHandler,
   WorkflowEvaluateHandler,
   WorkflowExecuteBatchHandler,
@@ -80,6 +84,8 @@ const DOCUMENTED_SERVER_ONLY_TYPES = [
   'face_auto_archive_sweep',
   'job_history_purge',
   'location_inference',
+  'location_suggestion_run_evaluate',
+  'location_suggestion_run_execute_batch',
   'storage_insights',
   'storage_migration',
   'trash_empty_evaluate',
@@ -177,6 +183,27 @@ describe('server-only type derivation (drift guard)', () => {
     it('trash_empty_execute_batch is server-only and system-mode eligible', () => {
       expect(registry.serverOnlyTypes()).toContain('trash_empty_execute_batch');
       expect(systemModeEligibleTypes(registry, {})).toContain('trash_empty_execute_batch');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Location-suggestion bulk accept/reject async run (mirrors trash-empty at
+  // scale): both new handlers likewise omit the node-result pair — accepting
+  // writes a MediaItem coord/coordSource column directly, which is server-side
+  // authoritative state a distributed worker node never touches — so both fall
+  // out of serverOnlyTypes() naturally, with no explicit pinning needed.
+  // -------------------------------------------------------------------------
+  describe('location_suggestion_run_evaluate / location_suggestion_run_execute_batch', () => {
+    it('location_suggestion_run_evaluate is server-only and system-mode eligible', () => {
+      expect(registry.serverOnlyTypes()).toContain('location_suggestion_run_evaluate');
+      expect(systemModeEligibleTypes(registry, {})).toContain('location_suggestion_run_evaluate');
+    });
+
+    it('location_suggestion_run_execute_batch is server-only and system-mode eligible', () => {
+      expect(registry.serverOnlyTypes()).toContain('location_suggestion_run_execute_batch');
+      expect(systemModeEligibleTypes(registry, {})).toContain(
+        'location_suggestion_run_execute_batch',
+      );
     });
   });
 });

@@ -51,6 +51,29 @@ describe('job-type-labels', () => {
     });
   });
 
+  describe('location-suggestion bulk accept/reject run job types', () => {
+    it('labels location_suggestion_run_evaluate', () => {
+      expect(jobTypeLabel('location_suggestion_run_evaluate')).toBe(
+        'Location suggestion run evaluate',
+      );
+    });
+
+    it('labels location_suggestion_run_execute_batch', () => {
+      expect(jobTypeLabel('location_suggestion_run_execute_batch')).toBe(
+        'Location suggestion run execute batch',
+      );
+    });
+
+    it('includes both types in the JOB_TYPE_LABELS map directly', () => {
+      expect(JOB_TYPE_LABELS['location_suggestion_run_evaluate']).toBe(
+        'Location suggestion run evaluate',
+      );
+      expect(JOB_TYPE_LABELS['location_suggestion_run_execute_batch']).toBe(
+        'Location suggestion run execute batch',
+      );
+    });
+  });
+
   describe('pre-existing job types (regression guard)', () => {
     it.each([
       ['face_detection', 'Face detection'],

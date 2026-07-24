@@ -112,6 +112,7 @@ export const systemSettingsSchema = z.object({
     requireSameDevice: z.boolean().default(true),
     maxAnchorDistanceKm: z.number().min(0.1).max(100).default(2),
     maxImpliedSpeedKmh: z.number().min(10).max(1000).default(150),
+    bulkAcceptThreshold: z.number().int().min(0).max(100).default(80),
   }).optional().default({
     maxGapMinutes: 30,
     maxExtrapolationGapMinutes: 10,
@@ -119,6 +120,7 @@ export const systemSettingsSchema = z.object({
     requireSameDevice: true,
     maxAnchorDistanceKm: 2,
     maxImpliedSpeedKmh: 150,
+    bulkAcceptThreshold: 80,
   }),
   socialMedia: z.object({
     ocrEnabled: z.boolean().default(true),
@@ -295,6 +297,7 @@ export const systemSettingsPatchSchema = z.object({
     requireSameDevice: z.boolean().optional(),
     maxAnchorDistanceKm: z.number().min(0.1).max(100).optional(),
     maxImpliedSpeedKmh: z.number().min(10).max(1000).optional(),
+    bulkAcceptThreshold: z.number().int().min(0).max(100).optional(),
   }).optional(),
   socialMedia: z.object({
     ocrEnabled: z.boolean().optional(),

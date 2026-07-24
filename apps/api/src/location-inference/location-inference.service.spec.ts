@@ -40,6 +40,7 @@ const DEFAULT_CFG: LocationInferenceConfig = {
   requireSameDevice: true,
   maxAnchorDistanceKm: 2,
   maxImpliedSpeedKmh: 150,
+  bulkAcceptThreshold: 80,
 };
 
 function makeCfg(overrides: Partial<LocationInferenceConfig> = {}): LocationInferenceConfig {
