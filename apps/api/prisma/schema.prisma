@@ -26,52 +26,54 @@ model User {
   updatedAt               DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  identities                  UserIdentity[]
-  userRoles                   UserRole[]
-  userSettings                UserSettings?
-  auditEvents                 AuditEvent[]                @relation("ActorEvents")
-  settingsUpdates             SystemSettings[]            @relation("SettingsUpdater")
-  refreshTokens               RefreshToken[]              @relation("UserRefreshTokens")
-  allowlistEntriesAdded       AllowedEmail[]              @relation("AllowlistAddedBy")
-  allowlistEntry              AllowedEmail?               @relation("AllowlistClaimedBy")
-  deviceCodes                 DeviceCode[]                @relation("UserDeviceCodes")
-  storageObjects              StorageObject[]             @relation("UserStorageObjects")
-  personalAccessTokens        PersonalAccessToken[]       @relation("UserPersonalAccessTokens")
-  mediaItems                  MediaItem[]                 @relation("MediaAddedBy")
-  albums                      Album[]                     @relation("AlbumAddedBy")
-  tags                        Tag[]                       @relation("TagAddedBy")
+  identities                    UserIdentity[]
+  userRoles                     UserRole[]
+  userSettings                  UserSettings?
+  auditEvents                   AuditEvent[]                @relation("ActorEvents")
+  settingsUpdates               SystemSettings[]            @relation("SettingsUpdater")
+  refreshTokens                 RefreshToken[]              @relation("UserRefreshTokens")
+  allowlistEntriesAdded         AllowedEmail[]              @relation("AllowlistAddedBy")
+  allowlistEntry                AllowedEmail?               @relation("AllowlistClaimedBy")
+  deviceCodes                   DeviceCode[]                @relation("UserDeviceCodes")
+  storageObjects                StorageObject[]             @relation("UserStorageObjects")
+  personalAccessTokens          PersonalAccessToken[]       @relation("UserPersonalAccessTokens")
+  mediaItems                    MediaItem[]                 @relation("MediaAddedBy")
+  albums                        Album[]                     @relation("AlbumAddedBy")
+  tags                          Tag[]                       @relation("TagAddedBy")
   // Circle relations
-  ownedCircles                Circle[]                    @relation("CircleOwner")
-  circleMemberships           CircleMember[]
-  circleInvitesAdded          CircleInvite[]              @relation("CircleInviteAddedBy")
-  circleInvitesClaimed        CircleInvite[]              @relation("CircleInviteClaimedBy")
+  ownedCircles                  Circle[]                    @relation("CircleOwner")
+  circleMemberships             CircleMember[]
+  circleInvitesAdded            CircleInvite[]              @relation("CircleInviteAddedBy")
+  circleInvitesClaimed          CircleInvite[]              @relation("CircleInviteClaimedBy")
   // AI Search relations
-  aiCredentialsUpdated        AiProviderCredential[]      @relation("AiCredentialUpdater")
+  aiCredentialsUpdated          AiProviderCredential[]      @relation("AiCredentialUpdater")
   // Face Recognition relations
-  faceCredentialsUpdated      FaceProviderCredential[]    @relation("FaceCredentialUpdater")
+  faceCredentialsUpdated        FaceProviderCredential[]    @relation("FaceCredentialUpdater")
   // Storage Provider relations
-  storageCredentialsUpdated   StorageProviderCredential[] @relation("StorageCredentialUpdater")
-  peopleAdded                 Person[]                    @relation("PersonAddedBy")
-  resolvedBursts              BurstGroup[]                @relation("BurstGroupResolvedBy")
+  storageCredentialsUpdated     StorageProviderCredential[] @relation("StorageCredentialUpdater")
+  peopleAdded                   Person[]                    @relation("PersonAddedBy")
+  resolvedBursts                BurstGroup[]                @relation("BurstGroupResolvedBy")
   // Duplicate Detection relations
-  resolvedDuplicates          DuplicateGroup[]            @relation("DuplicateGroupResolvedBy")
+  resolvedDuplicates            DuplicateGroup[]            @relation("DuplicateGroupResolvedBy")
   // Geo Provider relations
-  geoCredentialsUpdated       GeoProviderCredential[]     @relation("GeoCredentialUpdater")
+  geoCredentialsUpdated         GeoProviderCredential[]     @relation("GeoCredentialUpdater")
   // Media Sharing relations
-  mediaShares                 MediaShare[]                @relation("MediaShareCreatedBy")
+  mediaShares                   MediaShare[]                @relation("MediaShareCreatedBy")
   // Location Inference relations
-  resolvedLocationSuggestions LocationSuggestion[]        @relation("LocationSuggestionResolvedBy")
+  resolvedLocationSuggestions   LocationSuggestion[]        @relation("LocationSuggestionResolvedBy")
   // Distributed Worker Node relations
-  workerNodes                 WorkerNode[]
-  nodeCredentials             NodeCredential[]            @relation("UserNodeCredentials")
+  workerNodes                   WorkerNode[]
+  nodeCredentials               NodeCredential[]            @relation("UserNodeCredentials")
   // AI Picture Enhancer relations
-  mediaEnhancementsCreated    MediaEnhancement[]          @relation("MediaEnhancementCreatedBy")
+  mediaEnhancementsCreated      MediaEnhancement[]          @relation("MediaEnhancementCreatedBy")
   // Workflow Automation relations
-  workflowsCreated            Workflow[]                  @relation("WorkflowCreatedBy")
-  workflowRunsStarted         WorkflowRun[]               @relation("WorkflowRunStartedBy")
-  workflowRunsApproved        WorkflowRun[]               @relation("WorkflowRunApprovedBy")
+  workflowsCreated              Workflow[]                  @relation("WorkflowCreatedBy")
+  workflowRunsStarted           WorkflowRun[]               @relation("WorkflowRunStartedBy")
+  workflowRunsApproved          WorkflowRun[]               @relation("WorkflowRunApprovedBy")
   // Empty Trash at Scale relations
-  trashEmptyRunsStarted       TrashEmptyRun[]             @relation("TrashEmptyRunStartedBy")
+  trashEmptyRunsStarted         TrashEmptyRun[]             @relation("TrashEmptyRunStartedBy")
+  // Location Suggestion Bulk Accept/Reject relations
+  locationSuggestionRunsStarted LocationSuggestionRun[]     @relation("LocationSuggestionRunStartedBy")
 
   @@map("users")
 }
@@ -374,37 +376,39 @@ model Circle {
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  owner                 User                  @relation("CircleOwner", fields: [ownerId], references: [id], onDelete: Restrict)
-  members               CircleMember[]
-  invites               CircleInvite[]
-  mediaItems            MediaItem[]
-  albums                Album[]
-  tags                  Tag[]
+  owner                  User                    @relation("CircleOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  members                CircleMember[]
+  invites                CircleInvite[]
+  mediaItems             MediaItem[]
+  albums                 Album[]
+  tags                   Tag[]
   // Face Recognition relations
-  people                Person[]
-  faces                 Face[]
-  enrichmentJobs        EnrichmentJob[]
+  people                 Person[]
+  faces                  Face[]
+  enrichmentJobs         EnrichmentJob[]
   // Auto-Tagging relations
-  mediaTagStatuses      MediaTagStatus[]
+  mediaTagStatuses       MediaTagStatus[]
   // Metadata Re-run relations
-  mediaMetadataStatuses MediaMetadataStatus[]
+  mediaMetadataStatuses  MediaMetadataStatus[]
   // Geocode Status relations
-  mediaGeocodeStatuses  MediaGeocodeStatus[]
+  mediaGeocodeStatuses   MediaGeocodeStatus[]
   // Burst Detection relations
-  bursts                BurstGroup[]
+  bursts                 BurstGroup[]
   // Duplicate Detection relations
-  duplicateGroups       DuplicateGroup[]
+  duplicateGroups        DuplicateGroup[]
   // Media Sharing relations
-  mediaShares           MediaShare[]
+  mediaShares            MediaShare[]
   // Location Inference relations
-  locationSuggestions   LocationSuggestion[]
+  locationSuggestions    LocationSuggestion[]
   // AI Picture Enhancer relations
-  mediaEnhancements     MediaEnhancement[]
+  mediaEnhancements      MediaEnhancement[]
   // Workflow Automation relations
-  workflows             Workflow[]
-  workflowRuns          WorkflowRun[]
+  workflows              Workflow[]
+  workflowRuns           WorkflowRun[]
   // Empty Trash at Scale relations
-  trashEmptyRuns        TrashEmptyRun[]
+  trashEmptyRuns         TrashEmptyRun[]
+  // Location Suggestion Bulk Accept/Reject relations
+  locationSuggestionRuns LocationSuggestionRun[]
 
   @@index([ownerId])
   @@map("circles")
@@ -1156,9 +1160,10 @@ model LocationSuggestion {
   updatedAt        DateTime                 @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  mediaItem  MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
-  circle     Circle    @relation(fields: [circleId], references: [id], onDelete: Cascade)
-  resolvedBy User?     @relation("LocationSuggestionResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  mediaItem  MediaItem                   @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  circle     Circle                      @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  resolvedBy User?                       @relation("LocationSuggestionResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  runItems   LocationSuggestionRunItem[]
 
   @@index([circleId, status])
   @@map("location_suggestions")
@@ -1563,33 +1568,33 @@ model Workflow {
 // queries without a join, mirroring the media_visual_embedding.circleId /
 // media_tag_status.circleId precedent elsewhere in this schema.
 model WorkflowRun {
-  id                  String            @id @default(uuid()) @db.Uuid
-  workflowId          String            @map("workflow_id") @db.Uuid
-  circleId            String            @map("circle_id") @db.Uuid
-  status              WorkflowRunStatus
-  triggerType         WorkflowTrigger   @map("trigger_type")
-  definitionSnapshot  Json              @map("definition_snapshot")
-  matchedCount        Int               @default(0) @map("matched_count")
-  truncated           Boolean           @default(false)
-  processedCount      Int               @default(0) @map("processed_count")
-  succeededCount      Int               @default(0) @map("succeeded_count")
-  failedCount         Int               @default(0) @map("failed_count")
-  skippedCount        Int               @default(0) @map("skipped_count")
-  startedById         String?           @map("started_by_id") @db.Uuid
-  approvedById        String?           @map("approved_by_id") @db.Uuid
-  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt           DateTime          @updatedAt @map("updated_at") @db.Timestamptz
-  approvedAt          DateTime?         @map("approved_at") @db.Timestamptz
-  startedAt           DateTime?         @map("started_at") @db.Timestamptz
-  finishedAt          DateTime?         @map("finished_at") @db.Timestamptz
-  lastError           String?           @map("last_error")
+  id                 String            @id @default(uuid()) @db.Uuid
+  workflowId         String            @map("workflow_id") @db.Uuid
+  circleId           String            @map("circle_id") @db.Uuid
+  status             WorkflowRunStatus
+  triggerType        WorkflowTrigger   @map("trigger_type")
+  definitionSnapshot Json              @map("definition_snapshot")
+  matchedCount       Int               @default(0) @map("matched_count")
+  truncated          Boolean           @default(false)
+  processedCount     Int               @default(0) @map("processed_count")
+  succeededCount     Int               @default(0) @map("succeeded_count")
+  failedCount        Int               @default(0) @map("failed_count")
+  skippedCount       Int               @default(0) @map("skipped_count")
+  startedById        String?           @map("started_by_id") @db.Uuid
+  approvedById       String?           @map("approved_by_id") @db.Uuid
+  createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+  approvedAt         DateTime?         @map("approved_at") @db.Timestamptz
+  startedAt          DateTime?         @map("started_at") @db.Timestamptz
+  finishedAt         DateTime?         @map("finished_at") @db.Timestamptz
+  lastError          String?           @map("last_error")
 
   // Relations
-  workflow    Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  circle      Circle            @relation(fields: [circleId], references: [id], onDelete: Cascade)
-  startedBy   User?             @relation("WorkflowRunStartedBy", fields: [startedById], references: [id], onDelete: SetNull)
-  approvedBy  User?             @relation("WorkflowRunApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
-  items       WorkflowRunItem[]
+  workflow   Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  circle     Circle            @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  startedBy  User?             @relation("WorkflowRunStartedBy", fields: [startedById], references: [id], onDelete: SetNull)
+  approvedBy User?             @relation("WorkflowRunApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  items      WorkflowRunItem[]
 
   @@index([workflowId, createdAt])
   @@index([circleId, status])
@@ -1601,13 +1606,13 @@ model WorkflowRun {
 // is the idempotency anchor for batch retries, mirroring the
 // storage_migration_items @@unique([runId, objectId]) precedent.
 model WorkflowRunItem {
-  id            String                 @id @default(uuid()) @db.Uuid
-  runId         String                 @map("run_id") @db.Uuid
-  mediaItemId   String                 @map("media_item_id") @db.Uuid
+  id            String                @id @default(uuid()) @db.Uuid
+  runId         String                @map("run_id") @db.Uuid
+  mediaItemId   String                @map("media_item_id") @db.Uuid
   status        WorkflowRunItemStatus
-  actionResults Json?                  @map("action_results")
+  actionResults Json?                 @map("action_results")
   error         String?
-  updatedAt     DateTime               @updatedAt @map("updated_at") @db.Timestamptz
+  updatedAt     DateTime              @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
   run       WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
@@ -1649,24 +1654,24 @@ enum TrashEmptyRunItemStatus {
 // succeededCount/failedCount/skippedCount track progress as chunked batch
 // jobs work through the matched set.
 model TrashEmptyRun {
-  id              String              @id @default(uuid()) @db.Uuid
-  circleId        String              @map("circle_id") @db.Uuid
-  status          TrashEmptyRunStatus @default(evaluating)
-  matchedCount    Int                 @default(0) @map("matched_count")
-  processedCount  Int                 @default(0) @map("processed_count")
-  succeededCount  Int                 @default(0) @map("succeeded_count")
-  failedCount     Int                 @default(0) @map("failed_count")
-  skippedCount    Int                 @default(0) @map("skipped_count")
-  startedById     String?             @map("started_by_id") @db.Uuid
-  lastError       String?             @map("last_error")
-  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamptz
-  startedAt       DateTime?           @map("started_at") @db.Timestamptz
-  finishedAt      DateTime?           @map("finished_at") @db.Timestamptz
+  id             String              @id @default(uuid()) @db.Uuid
+  circleId       String              @map("circle_id") @db.Uuid
+  status         TrashEmptyRunStatus @default(evaluating)
+  matchedCount   Int                 @default(0) @map("matched_count")
+  processedCount Int                 @default(0) @map("processed_count")
+  succeededCount Int                 @default(0) @map("succeeded_count")
+  failedCount    Int                 @default(0) @map("failed_count")
+  skippedCount   Int                 @default(0) @map("skipped_count")
+  startedById    String?             @map("started_by_id") @db.Uuid
+  lastError      String?             @map("last_error")
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+  startedAt      DateTime?           @map("started_at") @db.Timestamptz
+  finishedAt     DateTime?           @map("finished_at") @db.Timestamptz
 
   // Relations
-  circle    Circle               @relation(fields: [circleId], references: [id], onDelete: Cascade)
-  startedBy User?                @relation("TrashEmptyRunStartedBy", fields: [startedById], references: [id], onDelete: SetNull)
+  circle    Circle              @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  startedBy User?               @relation("TrashEmptyRunStartedBy", fields: [startedById], references: [id], onDelete: SetNull)
   items     TrashEmptyRunItem[]
 
   @@index([circleId, status])
@@ -1680,13 +1685,13 @@ model TrashEmptyRun {
 // on delete because a successful purge deletes the MediaItem itself and must
 // cascade-remove this row along with it.
 model TrashEmptyRunItem {
-  id          String                   @id @default(uuid()) @db.Uuid
-  runId       String                   @map("run_id") @db.Uuid
-  mediaItemId String                   @map("media_item_id") @db.Uuid
-  status      TrashEmptyRunItemStatus  @default(matched)
+  id          String                  @id @default(uuid()) @db.Uuid
+  runId       String                  @map("run_id") @db.Uuid
+  mediaItemId String                  @map("media_item_id") @db.Uuid
+  status      TrashEmptyRunItemStatus @default(matched)
   error       String?
-  createdAt   DateTime                 @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime                 @updatedAt @map("updated_at") @db.Timestamptz
+  createdAt   DateTime                @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime                @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
   run       TrashEmptyRun @relation(fields: [runId], references: [id], onDelete: Cascade)
@@ -1695,4 +1700,100 @@ model TrashEmptyRunItem {
   @@unique([runId, mediaItemId])
   @@index([runId, status])
   @@map("trash_empty_run_items")
+}
+
+// =============================================================================
+// Location Suggestion Bulk Accept/Reject at Scale
+// =============================================================================
+
+// LocationSuggestionRun mirrors TrashEmptyRun: an async, run-based bulk
+// accept/reject engine for the Location Inference review queue. No
+// conditions, no action list, no approval gate — every pending
+// LocationSuggestion in a circle at/above the snapshotted confidence
+// threshold is either accepted (unmodified, coordSource='inferred') or
+// rejected, driven through the enrichment queue with chunked batch jobs and
+// live progress, instead of a single synchronous request.
+enum LocationSuggestionRunAction {
+  accept
+  reject
+}
+
+enum LocationSuggestionRunStatus {
+  evaluating
+  running
+  completed
+  completed_with_errors
+  failed
+  cancelled
+}
+
+enum LocationSuggestionRunItemStatus {
+  matched
+  processing
+  applied
+  failed
+  skipped
+}
+
+// One row per bulk accept/reject run for a circle. threshold is a snapshot
+// of the confidence threshold (0-100) used when the run was evaluated.
+// matchedCount is the number of pending suggestions discovered at
+// evaluation time; processedCount/succeededCount/failedCount/skippedCount
+// track progress as chunked batch jobs work through the matched set.
+model LocationSuggestionRun {
+  id             String                      @id @default(uuid()) @db.Uuid
+  circleId       String                      @map("circle_id") @db.Uuid
+  action         LocationSuggestionRunAction
+  threshold      Int
+  status         LocationSuggestionRunStatus @default(evaluating)
+  matchedCount   Int                         @default(0) @map("matched_count")
+  processedCount Int                         @default(0) @map("processed_count")
+  succeededCount Int                         @default(0) @map("succeeded_count")
+  failedCount    Int                         @default(0) @map("failed_count")
+  skippedCount   Int                         @default(0) @map("skipped_count")
+  startedById    String?                     @map("started_by_id") @db.Uuid
+  lastError      String?                     @map("last_error")
+  createdAt      DateTime                    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime                    @updatedAt @map("updated_at") @db.Timestamptz
+  startedAt      DateTime?                   @map("started_at") @db.Timestamptz
+  finishedAt     DateTime?                   @map("finished_at") @db.Timestamptz
+
+  // Relations
+  circle    Circle                      @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  startedBy User?                       @relation("LocationSuggestionRunStartedBy", fields: [startedById], references: [id], onDelete: SetNull)
+  items     LocationSuggestionRunItem[]
+
+  @@index([circleId, status])
+  @@index([status, updatedAt])
+  @@map("location_suggestion_runs")
+}
+
+// Per-suggestion outcome row within a LocationSuggestionRun. @@unique([runId,
+// suggestionId]) is the idempotency anchor for batch retries, mirroring the
+// trash_empty_run_items / workflow_run_items precedent. suggestionId cascades
+// on delete so a deleted LocationSuggestion removes its run-item rows too.
+// Unlike trash_empty_run_items (where a successful purge cascade-deletes the
+// row, so 'deleted' doubles as both claim-marker and terminal-success), an
+// accept/reject leaves the row in place: the execute-batch handler
+// atomically claims matched -> processing (updateMany), does the per-item
+// work, then transitions to a terminal applied (success) / skipped
+// (suggestion no longer pending) / failed. processing is the transient
+// in-flight/claim marker that makes retries crash-safe without
+// double-counting.
+model LocationSuggestionRunItem {
+  id           String                          @id @default(uuid()) @db.Uuid
+  runId        String                          @map("run_id") @db.Uuid
+  suggestionId String                          @map("suggestion_id") @db.Uuid
+  status       LocationSuggestionRunItemStatus @default(matched)
+  error        String?
+  createdAt    DateTime                        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime                        @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  run        LocationSuggestionRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  suggestion LocationSuggestion    @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, suggestionId])
+  @@index([runId, status])
+  @@map("location_suggestion_run_items")
 }
