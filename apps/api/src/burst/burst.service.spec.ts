@@ -30,6 +30,7 @@ import { BurstQueryDto } from './dto/burst-query.dto';
 import { ResolveBurstDto } from './dto/resolve-burst.dto';
 import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';
 import { BulkResolveBurstThresholdDto } from './dto/bulk-resolve-burst-threshold.dto';
+import { BulkDismissBurstThresholdDto } from './dto/bulk-dismiss-burst-threshold.dto';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -74,6 +75,13 @@ function makeBulkResolveThresholdDto(
   circleId: string = CIRCLE_ID,
 ): BulkResolveBurstThresholdDto {
   return { circleId, threshold, action } as BulkResolveBurstThresholdDto;
+}
+
+function makeBulkDismissThresholdDto(
+  threshold: number,
+  circleId: string = CIRCLE_ID,
+): BulkDismissBurstThresholdDto {
+  return { circleId, threshold } as BulkDismissBurstThresholdDto;
 }
 
 function makeBurstGroupRow(overrides: Partial<{
@@ -1043,6 +1051,183 @@ describe('BurstService', () => {
       expect(result.data.resolvedGroups).toBe(2);
       expect(result.data.errors).toBe(1);
       expect(result.data.skipped).toBe(0);
+      expect(mockPrisma.burstGroup.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'group-c' } }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // bulkDismissBurstGroupsByThreshold
+  // -------------------------------------------------------------------------
+
+  describe('bulkDismissBurstGroupsByThreshold', () => {
+    function makeThresholdGroup(overrides: Partial<{
+      id: string;
+      circleId: string;
+      status: BurstGroupStatus;
+      items: Array<{ id: string }>;
+    }> = {}) {
+      return {
+        id: 'group-1',
+        circleId: CIRCLE_ID,
+        status: BurstGroupStatus.pending,
+        items: [{ id: 'media-1' }, { id: 'media-2' }, { id: 'media-3' }],
+        ...overrides,
+      };
+    }
+
+    function setupThresholdGroups(groups: ReturnType<typeof makeThresholdGroup>[]) {
+      (mockPrisma.burstGroup.findMany as jest.Mock).mockResolvedValue(groups);
+      (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+      (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
+    }
+
+    it('calls assertCircleAccess with collaborator role', async () => {
+      const group = makeThresholdGroup();
+      setupThresholdGroups([group]);
+
+      await service.bulkDismissBurstGroupsByThreshold(
+        makeBulkDismissThresholdDto(60),
+        USER_ID,
+        PERMS_MEDIA_WRITE,
+      );
+
+      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+        USER_ID,
+        CIRCLE_ID,
+        PERMS_MEDIA_WRITE,
+        CircleRole.collaborator,
+      );
+    });
+
+    it('queries only pending groups in the circle with confidence < threshold/100, capped at 500', async () => {
+      setupThresholdGroups([]);
+
+      await service.bulkDismissBurstGroupsByThreshold(
+        makeBulkDismissThresholdDto(60),
+        USER_ID,
+        PERMS_MEDIA_WRITE,
+      );
+
+      const findManyCall = (mockPrisma.burstGroup.findMany as jest.Mock).mock.calls[0][0];
+      expect(findManyCall.where).toMatchObject({
+        circleId: CIRCLE_ID,
+        status: BurstGroupStatus.pending,
+        confidence: { lt: 0.6 },
+      });
+      expect(findManyCall.take).toBe(500);
+    });
+
+    it('happy path: dismisses all groups returned by the query, ungrouping every member', async () => {
+      const groupA = makeThresholdGroup({
+        id: 'group-a',
+        items: [{ id: 'media-1' }, { id: 'media-2' }, { id: 'media-3' }],
+      });
+      const groupB = makeThresholdGroup({
+        id: 'group-b',
+        items: [{ id: 'media-10' }, { id: 'media-11' }],
+      });
+      setupThresholdGroups([groupA, groupB]);
+
+      const result = await service.bulkDismissBurstGroupsByThreshold(
+        makeBulkDismissThresholdDto(60),
+        USER_ID,
+        PERMS_MEDIA_WRITE,
+      );
+
+      expect(result.data).toMatchObject({
+        dismissedGroups: 2,
+        ungroupedCount: 5,
+        skipped: 0,
+        errors: 0,
+      });
+      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { burstGroupId: 'group-a' },
+          data: { burstGroupId: null, burstScore: null },
+        }),
+      );
+      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { burstGroupId: 'group-b' },
+          data: { burstGroupId: null, burstScore: null },
+        }),
+      );
+      expect(mockPrisma.burstGroup.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'group-a' },
+          data: expect.objectContaining({
+            status: BurstGroupStatus.dismissed,
+            resolvedById: USER_ID,
+            resolvedAt: expect.any(Date),
+          }),
+        }),
+      );
+      expect(mockPrisma.burstGroup.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'group-b' },
+          data: expect.objectContaining({ status: BurstGroupStatus.dismissed }),
+        }),
+      );
+    });
+
+    it('re-enqueues duplicate detection for the ungrouped members when the feature is on', async () => {
+      const group = makeThresholdGroup({ items: [{ id: 'media-1' }, { id: 'media-2' }] });
+      setupThresholdGroups([group]);
+      mockSystemSettings.isFeatureEnabled.mockResolvedValueOnce(true);
+
+      await service.bulkDismissBurstGroupsByThreshold(
+        makeBulkDismissThresholdDto(60),
+        USER_ID,
+        PERMS_MEDIA_WRITE,
+      );
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'duplicate_detection', mediaItemId: 'media-1', circleId: CIRCLE_ID }),
+      );
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'duplicate_detection', mediaItemId: 'media-2', circleId: CIRCLE_ID }),
+      );
+    });
+
+    it('skips a group whose status is no longer pending (counted in skipped)', async () => {
+      const group = makeThresholdGroup({ status: BurstGroupStatus.resolved });
+      setupThresholdGroups([group]);
+
+      const result = await service.bulkDismissBurstGroupsByThreshold(
+        makeBulkDismissThresholdDto(60),
+        USER_ID,
+        PERMS_MEDIA_WRITE,
+      );
+
+      expect(result.data.dismissedGroups).toBe(0);
+      expect(result.data.skipped).toBe(1);
+      expect(mockPrisma.mediaItem.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.burstGroup.update).not.toHaveBeenCalled();
+    });
+
+    it('increments errors and continues processing when one group fails mid-loop', async () => {
+      const groupA = makeThresholdGroup({ id: 'group-a', items: [{ id: 'media-1' }, { id: 'media-2' }] });
+      const groupB = makeThresholdGroup({ id: 'group-b', items: [{ id: 'media-10' }, { id: 'media-11' }] });
+      const groupC = makeThresholdGroup({ id: 'group-c', items: [{ id: 'media-20' }, { id: 'media-21' }] });
+      setupThresholdGroups([groupA, groupB, groupC]);
+
+      (mockPrisma.mediaItem.updateMany as jest.Mock)
+        .mockResolvedValueOnce({ count: 1 }) // group-a
+        .mockRejectedValueOnce(new Error('db boom')) // group-b
+        .mockResolvedValueOnce({ count: 1 }); // group-c
+
+      const result = await service.bulkDismissBurstGroupsByThreshold(
+        makeBulkDismissThresholdDto(60),
+        USER_ID,
+        PERMS_MEDIA_WRITE,
+      );
+
+      expect(result.data.dismissedGroups).toBe(2);
+      expect(result.data.errors).toBe(1);
+      expect(result.data.skipped).toBe(0);
+      // The loop must still process group-c after group-b's failure
       expect(mockPrisma.burstGroup.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'group-c' } }),
       );
