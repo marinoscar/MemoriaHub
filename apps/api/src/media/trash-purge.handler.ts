@@ -57,7 +57,7 @@ export class TrashPurgeHandler implements EnrichmentHandler, OnModuleInit {
     }
 
     const ids = items.map((i) => i.id);
-    const purged = await this.mediaService.purgeMediaItems(ids);
+    const { deleted: purged } = await this.mediaService.purgeMediaItemsBatched(ids);
 
     this.logger.log(
       `trash_purge: purged ${purged} of ${ids.length} items past cutoff`,

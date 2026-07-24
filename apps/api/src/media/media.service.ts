@@ -2129,6 +2129,123 @@ export class MediaService {
     return purged;
   }
 
+  /**
+   * Batched hard-delete of many MediaItem IDs — the efficiency-oriented
+   * counterpart to `purgeMediaItems` (which does one round-trip PER item).
+   *
+   * Round-trips collapse from ~3N (one MediaItem delete + one blob delete + one
+   * StorageObject delete per item) to a handful:
+   *   1. A single `mediaItem.deleteMany` for the whole batch (with a per-item
+   *      fallback ONLY if the batch delete throws, so one bad row can't strand
+   *      the rest and we can report precisely which ids failed).
+   *   2. Best-effort blob deletes grouped by `(storageProvider, bucket)` — one
+   *      `provider.deleteMany(keys)` per distinct group (S3 batches up to 1000
+   *      keys per call). Blob-delete failures are non-fatal (warn only), matching
+   *      `purgeMediaItems` semantics — an item still counts as deleted.
+   *   3. A single `storageObject.deleteMany` for the objects of the rows that
+   *      were actually deleted (skipping any whose MediaItem delete failed, since
+   *      that row's FK still references the StorageObject).
+   *
+   * @returns `deleted` = count of MediaItem rows actually removed from the DB;
+   *   `failedIds` = ids whose row delete genuinely failed (still present).
+   */
+  async purgeMediaItemsBatched(
+    ids: string[],
+  ): Promise<{ deleted: number; failedIds: string[] }> {
+    if (ids.length === 0) return { deleted: 0, failedIds: [] };
+
+    const items = await this.prisma.mediaItem.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        storageObjectId: true,
+        storageObject: {
+          select: { id: true, storageKey: true, storageProvider: true, bucket: true },
+        },
+      },
+    });
+    if (items.length === 0) return { deleted: 0, failedIds: [] };
+
+    const itemIds = items.map((i) => i.id);
+    const failedIds: string[] = [];
+    let deleted = 0;
+
+    // 1. Delete the MediaItem rows. Fast path: one deleteMany. On failure, fall
+    //    back to per-item deletes so a single bad row doesn't strand the batch
+    //    and we can report exactly which ids failed.
+    try {
+      const res = await this.prisma.mediaItem.deleteMany({ where: { id: { in: itemIds } } });
+      deleted = res.count;
+    } catch (batchErr) {
+      const batchMsg = batchErr instanceof Error ? batchErr.message : String(batchErr);
+      this.logger.warn(
+        `purgeMediaItemsBatched: batch delete of ${itemIds.length} items failed (${batchMsg}); falling back to per-item`,
+      );
+      for (const id of itemIds) {
+        try {
+          await this.prisma.mediaItem.delete({ where: { id } });
+          deleted++;
+        } catch (perErr) {
+          const msg = perErr instanceof Error ? perErr.message : String(perErr);
+          this.logger.warn(`purgeMediaItemsBatched: failed to purge item ${id}: ${msg}`);
+          failedIds.push(id);
+        }
+      }
+    }
+
+    // 2. Best-effort blob deletes, grouped by (storageProvider, bucket) so each
+    //    provider's native batched delete is used. Skip rows whose MediaItem
+    //    delete failed (their StorageObject must survive — the FK still points at it).
+    const failedSet = new Set(failedIds);
+    const groups = new Map<
+      string,
+      { provider: string; bucket: string | null; keys: string[] }
+    >();
+    const storageObjectIds: string[] = [];
+    for (const item of items) {
+      if (failedSet.has(item.id)) continue;
+      const so = item.storageObject;
+      if (item.storageObjectId) storageObjectIds.push(item.storageObjectId);
+      if (!so?.storageKey) continue;
+      const groupKey = `${so.storageProvider} ${so.bucket ?? ''}`;
+      let group = groups.get(groupKey);
+      if (!group) {
+        group = { provider: so.storageProvider, bucket: so.bucket, keys: [] };
+        groups.set(groupKey, group);
+      }
+      group.keys.push(so.storageKey);
+    }
+
+    for (const group of groups.values()) {
+      try {
+        const provider = await this.resolver.getProviderFor(group.provider, group.bucket);
+        const result = await provider.deleteMany(group.keys);
+        if (result.errors.length > 0) {
+          this.logger.warn(
+            `purgeMediaItemsBatched: ${result.errors.length}/${group.keys.length} blob deletes failed for provider=${group.provider} bucket=${group.bucket ?? 'default'}`,
+          );
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `purgeMediaItemsBatched: blob delete group failed for provider=${group.provider} bucket=${group.bucket ?? 'default'}: ${msg}`,
+        );
+      }
+    }
+
+    // 3. Delete the StorageObject rows for the successfully-deleted items.
+    if (storageObjectIds.length > 0) {
+      try {
+        await this.prisma.storageObject.deleteMany({ where: { id: { in: storageObjectIds } } });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`purgeMediaItemsBatched: StorageObject batch delete failed: ${msg}`);
+      }
+    }
+
+    return { deleted, failedIds };
+  }
+
   async deleteForever(
     dto: DeleteForeverDto,
     userId: string,
@@ -2141,7 +2258,7 @@ export class MediaService {
       select: { id: true },
     });
 
-    const deleted = await this.purgeMediaItems(items.map((i) => i.id));
+    const { deleted } = await this.purgeMediaItemsBatched(items.map((i) => i.id));
     this.logger.log(`deleteForever: purged ${deleted} items in circle ${dto.circleId} by user ${userId}`);
     return { deleted };
   }
