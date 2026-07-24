@@ -53,6 +53,7 @@ jest.mock('@aws-sdk/lib-storage', () => ({
 // Import AFTER mocking
 import { S3StorageProvider, S3ProviderConfig } from './s3-storage.provider';
 import { Readable } from 'stream';
+import { DeleteObjectsCommand } from '@aws-sdk/client-s3';
 
 // ---------------------------------------------------------------------------
 // Helper: build a ConfigService mock that returns specific values for known
@@ -382,5 +383,131 @@ describe('S3StorageProvider — upload() cacheControl passthrough', () => {
     const uploadArg = mockUploadConstructor.mock.calls[0][0] as { params: Record<string, unknown> };
     expect(uploadArg.params.CacheControl).toBeUndefined();
     expect('CacheControl' in uploadArg.params).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deleteMany() — batched, best-effort delete (issue #165 — Empty Trash at scale)
+//
+// S3's DeleteObjects accepts at most 1000 keys per call, so deleteMany chunks
+// the input; a whole-chunk failure (network/auth/etc.) must not abort the
+// rest — every key in that chunk is recorded as an error and the loop
+// continues to the next chunk.
+// ---------------------------------------------------------------------------
+
+describe('S3StorageProvider — deleteMany()', () => {
+  const explicitConfig: S3ProviderConfig = {
+    region: 'us-east-1',
+    accessKeyId: 'key',
+    secretAccessKey: 'secret',
+    bucket: 'test-bucket',
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('returns { deleted: 0, errors: [] } for an empty keys array without calling the SDK', async () => {
+    const mockConfig = buildConfigMock();
+    const provider = new S3StorageProvider(mockConfig as unknown as ConfigService, explicitConfig);
+
+    const result = await provider.deleteMany([]);
+
+    expect(result).toEqual({ deleted: 0, errors: [] });
+    expect(mockS3Send).not.toHaveBeenCalled();
+  });
+
+  it('issues a single DeleteObjectsCommand for a batch under 1000 keys', async () => {
+    const mockConfig = buildConfigMock();
+    const provider = new S3StorageProvider(mockConfig as unknown as ConfigService, explicitConfig);
+    mockS3Send.mockResolvedValue({ Deleted: [{ Key: 'a.jpg' }, { Key: 'b.jpg' }], Errors: [] });
+
+    const result = await provider.deleteMany(['a.jpg', 'b.jpg']);
+
+    expect(mockS3Send).toHaveBeenCalledTimes(1);
+    const command = mockS3Send.mock.calls[0][0] as DeleteObjectsCommand;
+    expect(command.input.Bucket).toBe('test-bucket');
+    expect(command.input.Delete?.Objects).toEqual([{ Key: 'a.jpg' }, { Key: 'b.jpg' }]);
+    expect(result).toEqual({ deleted: 2, errors: [] });
+  });
+
+  it('chunks a batch of more than 1000 keys into multiple DeleteObjectsCommand calls (max 1000/call)', async () => {
+    const mockConfig = buildConfigMock();
+    const provider = new S3StorageProvider(mockConfig as unknown as ConfigService, explicitConfig);
+    const keys = Array.from({ length: 1500 }, (_, i) => `key-${i}.jpg`);
+    mockS3Send.mockImplementation(async (command: DeleteObjectsCommand) => ({
+      Deleted: command.input.Delete?.Objects?.map((o) => ({ Key: o.Key })) ?? [],
+      Errors: [],
+    }));
+
+    const result = await provider.deleteMany(keys);
+
+    expect(mockS3Send).toHaveBeenCalledTimes(2);
+    const firstChunk = (mockS3Send.mock.calls[0][0] as DeleteObjectsCommand).input.Delete?.Objects;
+    const secondChunk = (mockS3Send.mock.calls[1][0] as DeleteObjectsCommand).input.Delete?.Objects;
+    expect(firstChunk).toHaveLength(1000);
+    expect(secondChunk).toHaveLength(500);
+    expect(result.deleted).toBe(1500);
+    expect(result.errors).toEqual([]);
+  });
+
+  it('maps per-key partial errors reported by S3 (Quiet: false) into the errors array', async () => {
+    const mockConfig = buildConfigMock();
+    const provider = new S3StorageProvider(mockConfig as unknown as ConfigService, explicitConfig);
+    mockS3Send.mockResolvedValue({
+      Deleted: [{ Key: 'a.jpg' }],
+      Errors: [{ Key: 'b.jpg', Code: 'AccessDenied', Message: 'Access Denied' }],
+    });
+
+    const result = await provider.deleteMany(['a.jpg', 'b.jpg']);
+
+    expect(result.deleted).toBe(1);
+    expect(result.errors).toEqual([{ key: 'b.jpg', message: 'Access Denied' }]);
+  });
+
+  it('falls back to Code when an S3 error entry has no Message', async () => {
+    const mockConfig = buildConfigMock();
+    const provider = new S3StorageProvider(mockConfig as unknown as ConfigService, explicitConfig);
+    mockS3Send.mockResolvedValue({
+      Deleted: [],
+      Errors: [{ Key: 'c.jpg', Code: 'InternalError' }],
+    });
+
+    const result = await provider.deleteMany(['c.jpg']);
+
+    expect(result.errors).toEqual([{ key: 'c.jpg', message: 'InternalError' }]);
+  });
+
+  it('a whole-chunk failure (e.g. network/auth error) does not abort the rest — every key in that chunk is recorded as an error and later chunks still run', async () => {
+    const mockConfig = buildConfigMock();
+    const provider = new S3StorageProvider(mockConfig as unknown as ConfigService, explicitConfig);
+    const keys = Array.from({ length: 1200 }, (_, i) => `key-${i}.jpg`);
+    mockS3Send
+      .mockRejectedValueOnce(new Error('network timeout')) // whole first chunk fails
+      .mockResolvedValueOnce({
+        Deleted: Array.from({ length: 200 }, (_, i) => ({ Key: `key-${1000 + i}.jpg` })),
+        Errors: [],
+      });
+
+    const result = await provider.deleteMany(keys);
+
+    expect(mockS3Send).toHaveBeenCalledTimes(2);
+    expect(result.deleted).toBe(200); // only the second chunk's 200 keys succeeded
+    expect(result.errors).toHaveLength(1000); // every key in the failed first chunk
+    expect(result.errors[0].message).toBe('network timeout');
+  });
+
+  it('the deleted count is unaffected when errors are present — deleted + errors can both be non-zero', async () => {
+    const mockConfig = buildConfigMock();
+    const provider = new S3StorageProvider(mockConfig as unknown as ConfigService, explicitConfig);
+    mockS3Send.mockResolvedValue({
+      Deleted: [{ Key: 'a.jpg' }, { Key: 'b.jpg' }],
+      Errors: [{ Key: 'c.jpg', Code: 'AccessDenied', Message: 'Access Denied' }],
+    });
+
+    const result = await provider.deleteMany(['a.jpg', 'b.jpg', 'c.jpg']);
+
+    expect(result.deleted).toBe(2);
+    expect(result.errors).toHaveLength(1);
   });
 });

@@ -3,7 +3,19 @@
  *
  * Tests: bulkArchive, bulkUnarchive, listArchived, listTrash,
  *        restoreFromTrash (happy path + P2002 conflict), purgeMediaItems,
- *        deleteForever, emptyTrash.
+ *        purgeMediaItemsBatched, deleteForever, emptyTrash (legacy/unrouted).
+ *
+ * NOTE (issue #165 — Empty Trash at scale): `POST /api/media/trash/empty` no
+ * longer calls the legacy synchronous `emptyTrash` below — the controller now
+ * routes through `TrashEmptyRunService.createRun`, which starts an async run
+ * via the enrichment queue (see trash-empty-run.service.spec.ts,
+ * trash-empty-evaluate.handler.spec.ts, and
+ * trash-empty-execute-batch.handler.spec.ts for that real, routed coverage).
+ * `emptyTrash` is retained on MediaService only for backward compatibility /
+ * as a fallback and is exercised here purely so its behavior doesn't silently
+ * rot; `deleteForever` now shares the batched `purgeMediaItemsBatched` path
+ * with the new trash-empty execute-batch handler, which is why that method
+ * gets its own dedicated describe block below.
  *
  * No database required — PrismaService and the storage provider are fully mocked.
  */
@@ -127,6 +139,7 @@ describe('MediaService — archive & trash methods', () => {
   let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
   let mockGeoProvider: { reverseGeocode: jest.Mock };
   let mockForwardGeocodeService: { searchPlaces: jest.Mock };
+  let mockResolver: { getProviderFor: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -155,6 +168,7 @@ describe('MediaService — archive & trash methods', () => {
     };
     mockGeoProvider = { reverseGeocode: jest.fn().mockResolvedValue(null) };
     mockForwardGeocodeService = { searchPlaces: jest.fn().mockResolvedValue([]) };
+    mockResolver = { getProviderFor: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -168,7 +182,7 @@ describe('MediaService — archive & trash methods', () => {
         { provide: CircleMembershipService, useValue: mockCircleMembershipService },
         { provide: GEO_LOCATION_PROVIDER, useValue: mockGeoProvider },
         { provide: ForwardGeocodeService, useValue: mockForwardGeocodeService },
-        { provide: StorageProviderResolver, useValue: { getProviderFor: jest.fn() } },
+        { provide: StorageProviderResolver, useValue: mockResolver },
         {
           provide: MediaEnrichmentService,
           useValue: { enqueueUploadEnrichment: jest.fn().mockResolvedValue(undefined), enqueueForStorageObject: jest.fn().mockResolvedValue(undefined) },
@@ -510,6 +524,142 @@ describe('MediaService — archive & trash methods', () => {
       const result = await service.purgeMediaItems(['item-1', 'item-2']);
 
       expect(result).toBe(2);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // purgeMediaItemsBatched (issue #165 — Empty Trash at scale)
+  // -------------------------------------------------------------------------
+
+  describe('purgeMediaItemsBatched', () => {
+    it('returns { deleted: 0, failedIds: [] } for an empty ids array without any DB round-trip', async () => {
+      const result = await service.purgeMediaItemsBatched([]);
+
+      expect(result).toEqual({ deleted: 0, failedIds: [] });
+      expect(mockPrisma.mediaItem.findMany).not.toHaveBeenCalled();
+    });
+
+    it('returns { deleted: 0, failedIds: [] } when none of the ids resolve to a MediaItem row', async () => {
+      mockPrisma.mediaItem.findMany.mockResolvedValue([]);
+
+      const result = await service.purgeMediaItemsBatched(['ghost-1']);
+
+      expect(result).toEqual({ deleted: 0, failedIds: [] });
+      expect(mockPrisma.mediaItem.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('deletes all MediaItem rows in ONE deleteMany call and reports deleted = count', async () => {
+      const so = makeStorageObject({ storageKey: 'uploads/a.jpg', storageProvider: 's3', bucket: 'bucket-a' });
+      const item = makeMediaItem({ id: 'item-1', storageObjectId: so.id, storageObject: so });
+      mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
+      mockPrisma.mediaItem.deleteMany.mockResolvedValue({ count: 1 } as any);
+      mockResolver.getProviderFor.mockResolvedValue({
+        deleteMany: jest.fn().mockResolvedValue({ deleted: 1, errors: [] }),
+      });
+
+      const result = await service.purgeMediaItemsBatched(['item-1']);
+
+      expect(mockPrisma.mediaItem.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['item-1'] } } });
+      expect(result).toEqual({ deleted: 1, failedIds: [] });
+    });
+
+    it('groups blob deletes by (storageProvider, bucket) and calls each resolved provider\'s deleteMany once per group', async () => {
+      const soA1 = makeStorageObject({ storageKey: 'a1.jpg', storageProvider: 's3', bucket: 'bucket-a' });
+      const soA2 = makeStorageObject({ storageKey: 'a2.jpg', storageProvider: 's3', bucket: 'bucket-a' });
+      const soB1 = makeStorageObject({ storageKey: 'b1.jpg', storageProvider: 'r2', bucket: 'bucket-b' });
+      const item1 = makeMediaItem({ id: 'item-1', storageObjectId: soA1.id, storageObject: soA1 });
+      const item2 = makeMediaItem({ id: 'item-2', storageObjectId: soA2.id, storageObject: soA2 });
+      const item3 = makeMediaItem({ id: 'item-3', storageObjectId: soB1.id, storageObject: soB1 });
+      mockPrisma.mediaItem.findMany.mockResolvedValue([item1, item2, item3] as any);
+      mockPrisma.mediaItem.deleteMany.mockResolvedValue({ count: 3 } as any);
+
+      const providerA = { deleteMany: jest.fn().mockResolvedValue({ deleted: 2, errors: [] }) };
+      const providerB = { deleteMany: jest.fn().mockResolvedValue({ deleted: 1, errors: [] }) };
+      mockResolver.getProviderFor.mockImplementation(async (provider: string) =>
+        provider === 's3' ? providerA : providerB,
+      );
+
+      const result = await service.purgeMediaItemsBatched(['item-1', 'item-2', 'item-3']);
+
+      expect(mockResolver.getProviderFor).toHaveBeenCalledWith('s3', 'bucket-a');
+      expect(mockResolver.getProviderFor).toHaveBeenCalledWith('r2', 'bucket-b');
+      expect(mockResolver.getProviderFor).toHaveBeenCalledTimes(2);
+      expect(providerA.deleteMany).toHaveBeenCalledWith(['a1.jpg', 'a2.jpg']);
+      expect(providerB.deleteMany).toHaveBeenCalledWith(['b1.jpg']);
+      expect(result).toEqual({ deleted: 3, failedIds: [] });
+    });
+
+    it('deletes the StorageObject rows for the successfully-deleted items in one deleteMany call', async () => {
+      const so = makeStorageObject({ storageKey: 'a.jpg', storageProvider: 's3', bucket: 'bucket-a' });
+      const item = makeMediaItem({ id: 'item-1', storageObjectId: so.id, storageObject: so });
+      mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
+      mockPrisma.mediaItem.deleteMany.mockResolvedValue({ count: 1 } as any);
+      mockResolver.getProviderFor.mockResolvedValue({
+        deleteMany: jest.fn().mockResolvedValue({ deleted: 1, errors: [] }),
+      });
+
+      await service.purgeMediaItemsBatched(['item-1']);
+
+      expect(mockPrisma.storageObject.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: [so.id] } },
+      });
+    });
+
+    it('a blob-delete failure is non-fatal — the item is still counted deleted', async () => {
+      const so = makeStorageObject({ storageKey: 'a.jpg', storageProvider: 's3', bucket: 'bucket-a' });
+      const item = makeMediaItem({ id: 'item-1', storageObjectId: so.id, storageObject: so });
+      mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
+      mockPrisma.mediaItem.deleteMany.mockResolvedValue({ count: 1 } as any);
+      mockResolver.getProviderFor.mockRejectedValue(new Error('provider unreachable'));
+
+      const result = await service.purgeMediaItemsBatched(['item-1']);
+
+      expect(result).toEqual({ deleted: 1, failedIds: [] });
+      // The StorageObject row is still cleaned up even though the blob delete failed.
+      expect(mockPrisma.storageObject.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: [so.id] } },
+      });
+    });
+
+    it('falls back to per-item deletes and reports precisely which ids failed when the batch deleteMany throws', async () => {
+      const so1 = makeStorageObject({ storageKey: 'a.jpg', storageProvider: 's3', bucket: 'bucket-a' });
+      const so2 = makeStorageObject({ storageKey: 'b.jpg', storageProvider: 's3', bucket: 'bucket-a' });
+      const item1 = makeMediaItem({ id: 'item-1', storageObjectId: so1.id, storageObject: so1 });
+      const item2 = makeMediaItem({ id: 'item-2', storageObjectId: so2.id, storageObject: so2 });
+      mockPrisma.mediaItem.findMany.mockResolvedValue([item1, item2] as any);
+      mockPrisma.mediaItem.deleteMany.mockRejectedValue(new Error('FK constraint on the whole batch'));
+      mockPrisma.mediaItem.delete
+        .mockResolvedValueOnce(item1 as any) // item-1 succeeds per-item
+        .mockRejectedValueOnce(new Error('item-2 still referenced')); // item-2 fails
+      mockResolver.getProviderFor.mockResolvedValue({
+        deleteMany: jest.fn().mockResolvedValue({ deleted: 1, errors: [] }),
+      });
+
+      const result = await service.purgeMediaItemsBatched(['item-1', 'item-2']);
+
+      expect(result).toEqual({ deleted: 1, failedIds: ['item-2'] });
+      // The failed item's StorageObject must survive — its blob key is
+      // excluded from the blob-delete groups and its StorageObject id is
+      // excluded from the final storageObject.deleteMany call.
+      expect(mockPrisma.storageObject.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: [so1.id] } },
+      });
+    });
+
+    it('returns correct deleted/failedIds and does not throw when the storageObject.deleteMany call itself fails', async () => {
+      const so = makeStorageObject({ storageKey: 'a.jpg', storageProvider: 's3', bucket: 'bucket-a' });
+      const item = makeMediaItem({ id: 'item-1', storageObjectId: so.id, storageObject: so });
+      mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
+      mockPrisma.mediaItem.deleteMany.mockResolvedValue({ count: 1 } as any);
+      mockResolver.getProviderFor.mockResolvedValue({
+        deleteMany: jest.fn().mockResolvedValue({ deleted: 1, errors: [] }),
+      });
+      mockPrisma.storageObject.deleteMany.mockRejectedValue(new Error('DB unavailable'));
+
+      await expect(service.purgeMediaItemsBatched(['item-1'])).resolves.toEqual({
+        deleted: 1,
+        failedIds: [],
+      });
     });
   });
 

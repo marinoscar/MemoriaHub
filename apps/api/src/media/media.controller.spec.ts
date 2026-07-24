@@ -16,6 +16,7 @@ import { ExecutionContext, CanActivate } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
+import { TrashEmptyRunService } from './trash-empty/trash-empty-run.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -91,6 +92,17 @@ const mockMediaService = {
 };
 
 // ---------------------------------------------------------------------------
+// Mock TrashEmptyRunService (issue #165) — MediaController's emptyTrash
+// handler now delegates to this service instead of MediaService directly.
+// Not exercised by the tests in this file, but the controller's constructor
+// requires it for DI resolution.
+// ---------------------------------------------------------------------------
+
+const mockTrashEmptyRunService = {
+  createRun: jest.fn(),
+};
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -104,6 +116,7 @@ describe('MediaController', () => {
       controllers: [MediaController],
       providers: [
         { provide: MediaService, useValue: mockMediaService },
+        { provide: TrashEmptyRunService, useValue: mockTrashEmptyRunService },
         { provide: Reflector, useValue: new Reflector() },
       ],
     })

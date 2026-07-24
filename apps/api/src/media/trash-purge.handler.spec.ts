@@ -3,7 +3,11 @@
  *
  * Verifies: handler type constant; onModuleInit registers with the registry;
  * process() reads retentionDays from settings, computes the cutoff, finds
- * expired items, and calls mediaService.purgeMediaItems().
+ * expired items, and calls mediaService.purgeMediaItemsBatched() (issue #165
+ * — Empty Trash at scale switched this handler from the old per-item
+ * purgeMediaItems to the batched purgeMediaItemsBatched, shared with the new
+ * trash-empty execute-batch handler; see purgeMediaItemsBatched's own
+ * coverage in archive-trash.service.spec.ts).
  *
  * No database required — all dependencies are fully mocked.
  */
@@ -55,7 +59,7 @@ describe('TrashPurgeHandler', () => {
   let handler: TrashPurgeHandler;
   let mockRegistry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
   let mockSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettingValue'>>;
-  let mockMediaService: jest.Mocked<Pick<MediaService, 'purgeMediaItems'>>;
+  let mockMediaService: jest.Mocked<Pick<MediaService, 'purgeMediaItemsBatched'>>;
   let mockPrisma: MockPrismaService;
 
   beforeEach(async () => {
@@ -68,7 +72,7 @@ describe('TrashPurgeHandler', () => {
     };
 
     mockMediaService = {
-      purgeMediaItems: jest.fn().mockResolvedValue(0),
+      purgeMediaItemsBatched: jest.fn().mockResolvedValue({ deleted: 0, failedIds: [] }),
     };
 
     mockPrisma = createMockPrismaService();
@@ -134,7 +138,7 @@ describe('TrashPurgeHandler', () => {
       mockSettings.getSettingValue.mockResolvedValue(undefined);
       mockPrisma.mediaItem.findMany.mockResolvedValue([]);
 
-      // Should not throw; purgeMediaItems should NOT be called (no items)
+      // Should not throw; purgeMediaItemsBatched should NOT be called (no items)
       await expect(handler.process(makeJob())).resolves.toBeUndefined();
 
       expect(mockPrisma.mediaItem.findMany).toHaveBeenCalledWith(
@@ -168,34 +172,34 @@ describe('TrashPurgeHandler', () => {
       expect(cutoff.getTime()).toBeLessThan(after - thirtyDaysMs + 5000);
     });
 
-    it('does NOT call purgeMediaItems when no expired items are found', async () => {
+    it('does NOT call purgeMediaItemsBatched when no expired items are found', async () => {
       mockPrisma.mediaItem.findMany.mockResolvedValue([]);
 
       await handler.process(makeJob());
 
-      expect(mockMediaService.purgeMediaItems).not.toHaveBeenCalled();
+      expect(mockMediaService.purgeMediaItemsBatched).not.toHaveBeenCalled();
     });
 
-    it('calls purgeMediaItems with the ids of expired items', async () => {
+    it('calls purgeMediaItemsBatched with the ids of expired items', async () => {
       const expiredItems = [{ id: 'item-old-1' }, { id: 'item-old-2' }];
       mockPrisma.mediaItem.findMany.mockResolvedValue(expiredItems as any);
-      mockMediaService.purgeMediaItems.mockResolvedValue(2);
+      mockMediaService.purgeMediaItemsBatched.mockResolvedValue({ deleted: 2, failedIds: [] });
 
       await handler.process(makeJob());
 
-      expect(mockMediaService.purgeMediaItems).toHaveBeenCalledWith(['item-old-1', 'item-old-2']);
+      expect(mockMediaService.purgeMediaItemsBatched).toHaveBeenCalledWith(['item-old-1', 'item-old-2']);
     });
 
-    it('resolves without throwing when purgeMediaItems succeeds', async () => {
+    it('resolves without throwing when purgeMediaItemsBatched succeeds', async () => {
       mockPrisma.mediaItem.findMany.mockResolvedValue([{ id: 'item-1' }] as any);
-      mockMediaService.purgeMediaItems.mockResolvedValue(1);
+      mockMediaService.purgeMediaItemsBatched.mockResolvedValue({ deleted: 1, failedIds: [] });
 
       await expect(handler.process(makeJob())).resolves.toBeUndefined();
     });
 
-    it('propagates errors thrown by purgeMediaItems (worker records lastError and retries)', async () => {
+    it('propagates errors thrown by purgeMediaItemsBatched (worker records lastError and retries)', async () => {
       mockPrisma.mediaItem.findMany.mockResolvedValue([{ id: 'item-1' }] as any);
-      mockMediaService.purgeMediaItems.mockRejectedValue(new Error('S3 unavailable'));
+      mockMediaService.purgeMediaItemsBatched.mockRejectedValue(new Error('S3 unavailable'));
 
       await expect(handler.process(makeJob())).rejects.toThrow('S3 unavailable');
     });
