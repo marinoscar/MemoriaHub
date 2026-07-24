@@ -44,9 +44,11 @@ const BATCH_SIZE = 200;
  * Location-suggestion bulk accept/reject — run lifecycle service.
  *
  * Mirrors TrashEmptyRunService: an async, run-based bulk resolve engine for the
- * Location Inference review queue. Every pending LocationSuggestion in a circle
- * at/above a snapshotted confidence threshold is accepted (coords written,
- * coordSource='inferred', geocode job enqueued) or rejected — driven through the
+ * Location Inference review queue. The snapshotted confidence threshold
+ * partitions the pending queue by action: an accept run accepts every pending
+ * LocationSuggestion AT/ABOVE the threshold (coords written,
+ * coordSource='inferred', geocode job enqueued), while a reject run rejects
+ * every pending LocationSuggestion BELOW the threshold — driven through the
  * enrichment queue via a run record (evaluate → chunked execute-batch jobs →
  * race-safe finalize) instead of a single synchronous O(N) request.
  *

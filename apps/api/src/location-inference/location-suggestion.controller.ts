@@ -80,13 +80,13 @@ export class LocationSuggestionController {
 
   /**
    * POST /api/media/location-suggestions/bulk-reject
-   * Start an async run that rejects every pending suggestion in a circle at or
-   * above a confidence threshold (0-100).
+   * Start an async run that rejects every pending suggestion in a circle BELOW a
+   * confidence threshold (0-100) — the low-confidence noise.
    */
   @Post('location-suggestions/bulk-reject')
   @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Start an async bulk-reject run for pending location suggestions above a threshold' })
+  @ApiOperation({ summary: 'Start an async bulk-reject run for pending location suggestions below a threshold' })
   @ApiResponse({ status: 200, description: 'Bulk-reject run started' })
   @ApiResponse({ status: 409, description: 'A run is already in progress for this circle' })
   async bulkRejectSuggestions(

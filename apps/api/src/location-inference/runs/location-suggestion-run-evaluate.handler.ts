@@ -3,6 +3,7 @@ import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import {
   EnrichmentJob,
   LocationSuggestionRun,
+  LocationSuggestionRunAction,
   LocationSuggestionRunItemStatus,
   LocationSuggestionRunStatus,
   LocationSuggestionStatus,
@@ -27,11 +28,14 @@ const tracer = trace.getTracer('location-suggestion-run');
 /**
  * Location-suggestion bulk accept/reject — evaluation handler.
  *
- * Mirrors TrashEmptyEvaluateHandler: materializes a run's matched set (every
- * pending LocationSuggestion in the circle at/above the run's snapshotted
- * confidence threshold) into location_suggestion_run_items (status 'matched')
- * via constant-memory keyset pagination over (createdAt DESC, id DESC),
- * streaming each page straight into the DB. Then transitions the run:
+ * Mirrors TrashEmptyEvaluateHandler: materializes a run's matched set into
+ * location_suggestion_run_items (status 'matched') via constant-memory keyset
+ * pagination over (createdAt DESC, id DESC), streaming each page straight into
+ * the DB. The confidence filter partitions the pending queue at the threshold
+ * by the run's action: an ACCEPT run matches pending suggestions AT/ABOVE the
+ * threshold (accept the high-confidence ones), a REJECT run matches pending
+ * suggestions BELOW the threshold (reject the low-confidence noise). Then
+ * transitions the run:
  *   - 0 matches → completed
  *   - otherwise → running (+ enqueues chunked execute-batch jobs)
  *
@@ -100,10 +104,16 @@ export class LocationSuggestionRunEvaluateHandler
 
   private async runEvaluation(job: EnrichmentJob, run: LocationSuggestionRun): Promise<void> {
     const runId = run.id;
-    // 0-100 run threshold → 0-1 confidence floor. Null-confidence legacy
-    // suggestions never match `confidence >= floor`, so they are excluded —
-    // mirroring the burst/duplicate threshold-resolve precedent.
+    // 0-100 run threshold → 0-1 confidence floor. The comparison direction
+    // depends on the action: accept matches AT/ABOVE the floor (high-confidence
+    // suggestions), reject matches BELOW the floor (low-confidence noise).
+    // LocationSuggestion.confidence is a non-nullable Float, so (unlike the
+    // burst/duplicate Float? columns) there are no NULL rows to exclude.
     const confidenceFloor = run.threshold / 100;
+    const confidenceFilter: Prisma.FloatFilter =
+      run.action === LocationSuggestionRunAction.accept
+        ? { gte: confidenceFloor }
+        : { lt: confidenceFloor };
 
     try {
       const orderBy: Prisma.LocationSuggestionOrderByWithRelationInput[] = [
@@ -118,7 +128,7 @@ export class LocationSuggestionRunEvaluateHandler
         const baseWhere: Prisma.LocationSuggestionWhereInput = {
           circleId: run.circleId,
           status: LocationSuggestionStatus.pending,
-          confidence: { gte: confidenceFloor },
+          confidence: confidenceFilter,
         };
         const where: Prisma.LocationSuggestionWhereInput = cursor
           ? { AND: [baseWhere, this.buildAfterCursor(cursor)] }
