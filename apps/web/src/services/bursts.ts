@@ -75,6 +75,14 @@ export interface GroupBulkResolveResult {
   errors: string[];
 }
 
+/** Result of a bulk dismiss-by-threshold across many groups (shared shape with duplicates). */
+export interface GroupBulkDismissResult {
+  dismissedGroups: number;
+  ungroupedCount: number;
+  skipped: number;
+  errors: number;
+}
+
 export async function listBurstGroups(params: {
   circleId: string;
   status?: BurstGroupStatus;
@@ -115,6 +123,13 @@ export async function bulkResolveBurstGroupsByThreshold(params: {
   action: GroupResolveAction;
 }): Promise<GroupBulkResolveResult> {
   return api.post<GroupBulkResolveResult>('/media/bursts/bulk/resolve-by-threshold', params);
+}
+
+export async function bulkDismissBurstGroupsByThreshold(params: {
+  circleId: string;
+  threshold: number;
+}): Promise<GroupBulkDismissResult> {
+  return api.post<GroupBulkDismissResult>('/media/bursts/bulk/dismiss-by-threshold', params);
 }
 
 export async function dismissBurstGroup(id: string): Promise<BurstDismissResult> {

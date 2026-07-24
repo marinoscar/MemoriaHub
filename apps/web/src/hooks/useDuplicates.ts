@@ -5,6 +5,7 @@ import {
   resolveDuplicateGroup,
   bulkResolveDuplicateGroups,
   bulkResolveDuplicateGroupsByThreshold,
+  bulkDismissDuplicateGroupsByThreshold,
   dismissDuplicateGroup,
 } from '../services/duplicates';
 import type {
@@ -17,7 +18,7 @@ import type {
   DuplicateResolveResult,
   DuplicateDismissResult,
 } from '../services/duplicates';
-import type { GroupBulkResolveResult } from '../services/bursts';
+import type { GroupBulkResolveResult, GroupBulkDismissResult } from '../services/bursts';
 
 interface FetchDuplicateGroupsParams {
   circleId: string;
@@ -37,6 +38,7 @@ interface UseDuplicateGroupsResult {
     threshold: number,
     action: DuplicateResolveAction,
   ) => Promise<GroupBulkResolveResult>;
+  dismissByThreshold: (threshold: number) => Promise<GroupBulkDismissResult>;
 }
 
 export function useDuplicateGroups(): UseDuplicateGroupsResult {
@@ -93,7 +95,31 @@ export function useDuplicateGroups(): UseDuplicateGroupsResult {
     [fetchGroups],
   );
 
-  return { items, meta, isLoading, error, fetchGroups, bulkResolve, bulkResolveByThreshold };
+  const dismissByThreshold = useCallback(
+    async (threshold: number) => {
+      const circleId = lastParamsRef.current?.circleId;
+      if (!circleId) {
+        throw new Error('No active circle to dismiss duplicate groups');
+      }
+      const result = await bulkDismissDuplicateGroupsByThreshold({ circleId, threshold });
+      if (lastParamsRef.current) {
+        await fetchGroups(lastParamsRef.current);
+      }
+      return result;
+    },
+    [fetchGroups],
+  );
+
+  return {
+    items,
+    meta,
+    isLoading,
+    error,
+    fetchGroups,
+    bulkResolve,
+    bulkResolveByThreshold,
+    dismissByThreshold,
+  };
 }
 
 interface UseDuplicateGroupDetailResult {

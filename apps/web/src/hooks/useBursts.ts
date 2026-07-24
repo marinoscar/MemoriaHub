@@ -5,6 +5,7 @@ import {
   resolveBurstGroup,
   bulkResolveBurstGroups,
   bulkResolveBurstGroupsByThreshold,
+  bulkDismissBurstGroupsByThreshold,
   dismissBurstGroup,
 } from '../services/bursts';
 import type {
@@ -15,6 +16,7 @@ import type {
   BurstResolveResult,
   GroupResolveAction,
   GroupBulkResolveResult,
+  GroupBulkDismissResult,
 } from '../services/bursts';
 
 interface FetchBurstGroupsParams {
@@ -34,6 +36,7 @@ interface UseBurstGroupsResult {
     threshold: number,
     action: GroupResolveAction,
   ) => Promise<GroupBulkResolveResult>;
+  dismissByThreshold: (threshold: number) => Promise<GroupBulkDismissResult>;
 }
 
 export function useBurstGroups(): UseBurstGroupsResult {
@@ -90,7 +93,31 @@ export function useBurstGroups(): UseBurstGroupsResult {
     [fetchGroups],
   );
 
-  return { items, meta, isLoading, error, fetchGroups, bulkResolve, bulkResolveByThreshold };
+  const dismissByThreshold = useCallback(
+    async (threshold: number) => {
+      const circleId = lastParamsRef.current?.circleId;
+      if (!circleId) {
+        throw new Error('No active circle to dismiss burst groups');
+      }
+      const result = await bulkDismissBurstGroupsByThreshold({ circleId, threshold });
+      if (lastParamsRef.current) {
+        await fetchGroups(lastParamsRef.current);
+      }
+      return result;
+    },
+    [fetchGroups],
+  );
+
+  return {
+    items,
+    meta,
+    isLoading,
+    error,
+    fetchGroups,
+    bulkResolve,
+    bulkResolveByThreshold,
+    dismissByThreshold,
+  };
 }
 
 interface UseBurstGroupDetailResult {
