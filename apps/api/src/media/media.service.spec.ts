@@ -2277,6 +2277,110 @@ describe('MediaService', () => {
       expect(mockPrisma.mediaItem.findMany).not.toHaveBeenCalled();
       expect(mockPrisma.storageObject.findMany).not.toHaveBeenCalled();
     });
+
+    // -----------------------------------------------------------------------
+    // Web-Mercator pixel grid (issue #166) — selected whenever `zoom` is
+    // supplied. Byte-for-byte legacy behavior (asserted above via `baseQuery`,
+    // which omits `zoom`) must be untouched; these cases cover the new branch
+    // and its coexistence with the existing filter fragments / return mapping.
+    // -----------------------------------------------------------------------
+
+    describe('mercator grid (zoom provided)', () => {
+      const zoomQuery = { ...baseQuery, zoom: 5 } as any;
+
+      it('calls assertCircleAccess with (userId, circleId, userPermissions, "viewer") before querying', async () => {
+        await service.aggregateLocations(zoomQuery, 'user-1', ownPerms);
+        expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+          'user-1',
+          CIRCLE_ID,
+          ownPerms,
+          'viewer',
+        );
+      });
+
+      it('groups by the Web-Mercator pixel grid (cx/cy) and omits the legacy equirectangular grid', async () => {
+        await service.aggregateLocations(zoomQuery, 'user-1', ownPerms);
+        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+
+        expect(sqlObj.text).toContain('AS cx');
+        expect(sqlObj.text).toContain('AS cy');
+        expect(sqlObj.text).toContain('GROUP BY cx, cy');
+        expect(sqlObj.text).toContain('pow(2, 5)');
+        expect(sqlObj.text).toContain('85.05112878');
+        expect(sqlObj.text).not.toContain('round(taken_lat');
+        expect(sqlObj.text).not.toContain('GROUP BY gy, gx');
+      });
+
+      it('embeds zoom and CLUSTER_CELL_PX as raw numeric literals, never as bound parameters', async () => {
+        await service.aggregateLocations(zoomQuery, 'user-1', ownPerms);
+        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+
+        // Only circleId is bound when no optional filter is supplied — zoom (5)
+        // and the CLUSTER_CELL_PX constant (64) are raw literals in sqlObj.text,
+        // not parameters.
+        expect(sqlObj.values).toEqual([CIRCLE_ID]);
+        expect(sqlObj.values).not.toContain(5);
+        expect(sqlObj.values).not.toContain(64);
+      });
+
+      it('maps rows into the same { lat, lng, count, sampleId } shape as the legacy grid', async () => {
+        const row = mockRawRow();
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([row]);
+
+        const results = await service.aggregateLocations(zoomQuery, 'user-1', ownPerms);
+
+        expect(results).toEqual([{ lat: 9.928, lng: -84.09, count: 3, sampleId: row.sample_id }]);
+        expect(typeof results[0].lat).toBe('number');
+        expect(typeof results[0].lng).toBe('number');
+      });
+
+      it('still binds filter values (bbox) as parameters while using the mercator grid', async () => {
+        const bbox = { minLat: 9, minLng: -85, maxLat: 10, maxLng: -84 };
+        await service.aggregateLocations({ ...zoomQuery, bbox }, 'user-1', ownPerms);
+        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+
+        expect(sqlObj.text).toContain('AND taken_lat BETWEEN');
+        expect(sqlObj.text).toContain('GROUP BY cx, cy');
+        expect(sqlObj.values).toEqual(
+          expect.arrayContaining([CIRCLE_ID, bbox.minLat, bbox.maxLat, bbox.minLng, bbox.maxLng]),
+        );
+      });
+
+      it('always excludes exact (0,0) Null Island coordinates in the mercator branch too', async () => {
+        await service.aggregateLocations(zoomQuery, 'user-1', ownPerms);
+        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+
+        expect(sqlObj.text).toContain('NOT (taken_lat = 0 AND taken_lng = 0)');
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // Legacy equirectangular grid (zoom omitted) — must remain byte-for-byte
+    // unchanged now that a second grid mode exists alongside it.
+    // -----------------------------------------------------------------------
+
+    describe('legacy grid (zoom omitted)', () => {
+      it('groups by round(taken_lat/lng::numeric, precision) and never emits mercator markers', async () => {
+        await service.aggregateLocations(baseQuery, 'user-1', ownPerms);
+        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+
+        expect(sqlObj.text).toContain('round(taken_lat::numeric, 3)');
+        expect(sqlObj.text).toContain('round(taken_lng::numeric, 3)');
+        expect(sqlObj.text).toContain('GROUP BY gy, gx');
+        expect(sqlObj.text).not.toContain('AS cx');
+        expect(sqlObj.text).not.toContain('AS cy');
+        expect(sqlObj.text).not.toContain('pow(2,');
+        expect(sqlObj.text).not.toContain('85.05112878');
+      });
+
+      it('does not bind precision as a parameter (raw literal only)', async () => {
+        await service.aggregateLocations(baseQuery, 'user-1', ownPerms);
+        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+
+        expect(sqlObj.values).toEqual([CIRCLE_ID]);
+        expect(sqlObj.values).not.toContain(3);
+      });
+    });
   });
 
   // -------------------------------------------------------------------------
