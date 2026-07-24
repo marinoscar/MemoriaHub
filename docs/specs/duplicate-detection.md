@@ -476,6 +476,20 @@ Unlike the equivalent [burst-detection endpoint](burst-detection.md#72-group-act
 
 `dedup.autoResolveThreshold` (§8.1) is the system-setting default that pre-fills the duplicate review page's "Archive above N" / "Delete above N" buttons; it does not gate or auto-fire this endpoint on its own.
 
+### 9.4b `POST /api/media/duplicates/bulk/dismiss-by-threshold`
+
+Dismiss every **pending** duplicate group whose read-time confidence (`maxSim`, §3.5) is **below** a caller-supplied score threshold — the mirror-image counterpart to `POST /api/media/duplicates/bulk/resolve-by-threshold` (§9.4a) above. Manual trigger only: there is no cron and nothing dismisses a group unless this endpoint (or the per-group dismiss endpoint, §9.5) is called.
+
+One threshold partitions the pending review queue between the two endpoints: groups scoring `>= N%` are resolved (keep-best, archive/trash the rest), groups scoring `< N%` are dismissed (marked "not duplicates," ungrouped, nothing deleted) — the same one-threshold-two-buckets model as burst detection's dismiss-by-threshold ([burst-detection.md §7.2](burst-detection.md#72-group-actions)), which itself mirrors the accept/reject split added for Location Suggestions in issue #126 ([location-inference.md §7](location-inference.md#7-configuration)). As with §9.4a, confidence here is **not persisted**: this endpoint loads candidate pending groups for the circle (capped at 500, same `MAX_THRESHOLD_RESOLVE` cap), then computes each group's `maxSim` via `computeGroupKind` (§3.4) and filters against the threshold in application code.
+
+- **Auth:** `media:write` + per-circle `collaborator` role.
+- **Request body:** `{ "circleId": "uuid", "threshold": 25 }`. `threshold` is an integer `0`–`100`, compared against the computed `maxSim` (a `[0, 1]` value) as `maxSim < threshold / 100`.
+- **Behavior:** for each loaded pending group scoring below the threshold, ungroups all members (`duplicateGroupId = null`) and sets `status = dismissed`, exactly as `POST /api/media/duplicates/:id/dismiss` does, but only for groups meeting the threshold.
+  - A group whose `maxSim` cannot be computed — fewer than two members carry a `media_visual_embedding` row, or the embedding lookup fails — is **excluded from matching** and counted in `skipped`, the same bucket as a group that computed a similarity at or above the threshold. There is no separate "unscoreable" counter; both cases are indistinguishable from the caller's point of view.
+  - A group that is eligible but fails during its own transaction is counted in `errors` without blocking the rest.
+- **Response `200`:** `{ "data": { "dismissedGroups": 3, "ungroupedCount": 9, "skipped": 5, "errors": 0 } }`.
+- **Response `400`:** `threshold` is out of range, or more than 500 pending groups exist in the circle.
+
 ### 9.5 `POST /api/media/duplicates/:id/dismiss`
 
 Mark a group as not actually duplicates; ungroups all members (`duplicateGroupId = null`) without deleting anything.

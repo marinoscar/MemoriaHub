@@ -512,6 +512,35 @@ Resolve every **pending** burst group whose detection-time `confidence` (§3.5) 
 
 `burst.autoResolveThreshold` (§6.1) is the system-setting default that pre-fills the "Archive above N" / "Delete above N" buttons' threshold value on the review queue page; it does not gate or auto-fire this endpoint on its own.
 
+#### `POST /api/media/bursts/bulk/dismiss-by-threshold`
+
+Dismiss every **pending** burst group whose detection-time `confidence` (§3.5) is **below** a caller-supplied score threshold — the mirror-image counterpart to `POST /api/media/bursts/bulk/resolve-by-threshold` above. Manual trigger only: there is no cron and nothing dismisses a group unless this endpoint (or the per-group dismiss endpoint) is called.
+
+One threshold partitions the pending review queue between the two endpoints: groups scoring `>= N%` are resolved (keep-best, archive/trash the rest), groups scoring `< N%` are dismissed (marked "not a burst," ungrouped, nothing deleted). This mirrors the accept/reject split added for Location Suggestions in issue #126 ([location-inference.md §7 "One setting, one number, partitions the pending queue"](location-inference.md#7-configuration)).
+
+- **Auth:** `media:write` + per-circle `collaborator` role.
+- **Request body:**
+  ```json
+  { "circleId": "uuid", "threshold": 25 }
+  ```
+  `threshold` is an integer `0`–`100`, expressed as a percentage; it is compared against the persisted `BurstGroup.confidence` (a `[0, 1]` float) as `confidence < threshold / 100`.
+- **Behavior:** loads pending groups for the circle, capped at 500 per call (`MAX_THRESHOLD_RESOLVE`, same cap as the resolve endpoint), and dismisses every group scoring below the threshold — ungrouping all members (`burstGroupId`/`burstScore` cleared) and setting `status = dismissed`, exactly as `POST /api/media/bursts/:id/dismiss` does, each in its own transaction.
+  - Groups with `confidence = null` — legacy groups created before the confidence column existed, or otherwise not yet scored — are **excluded** from threshold matching regardless of the threshold value; they are never auto-dismissed by this endpoint and must be dismissed individually via `POST /api/media/bursts/:id/dismiss`.
+  - A group at or above the threshold is skipped (counted in `skipped`).
+  - A group that is eligible but fails during its own transaction is counted in `errors` and does not block the remaining groups.
+- **Response `200`:**
+  ```json
+  {
+    "data": {
+      "dismissedGroups": 4,
+      "ungroupedCount": 17,
+      "skipped": 2,
+      "errors": 0
+    }
+  }
+  ```
+- **Response `400`:** `threshold` is out of range, or more than 500 pending groups exist in the circle (narrow the scope by resolving/dismissing in batches, or use the by-id endpoints above).
+
 ### 7.3 Global Backfill (Admin)
 
 #### `POST /api/admin/bursts/backfill`
