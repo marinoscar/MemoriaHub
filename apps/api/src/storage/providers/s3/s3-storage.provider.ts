@@ -5,6 +5,7 @@ import {
   GetObjectCommand,
   PutObjectCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   HeadObjectCommand,
   CopyObjectCommand,
   CreateMultipartUploadCommand,
@@ -444,6 +445,66 @@ export class S3StorageProvider implements StorageProvider {
       );
       throw error;
     }
+  }
+
+  /**
+   * Batched, best-effort delete using S3's native DeleteObjects operation
+   * (up to 1000 keys per request). Never throws for individual key failures —
+   * per-key `Errors[]` returned by S3 and whole-chunk exceptions are collected
+   * into the returned `errors` array so one bad chunk never aborts the rest.
+   */
+  async deleteMany(
+    keys: string[],
+  ): Promise<{ deleted: number; errors: { key: string; message: string }[] }> {
+    if (keys.length === 0) {
+      return { deleted: 0, errors: [] };
+    }
+
+    // S3 DeleteObjects accepts at most 1000 keys per call.
+    const CHUNK_SIZE = 1000;
+    let deleted = 0;
+    const errors: { key: string; message: string }[] = [];
+
+    for (let i = 0; i < keys.length; i += CHUNK_SIZE) {
+      const chunk = keys.slice(i, i + CHUNK_SIZE);
+
+      try {
+        const command = new DeleteObjectsCommand({
+          Bucket: this.bucket,
+          Delete: {
+            Objects: chunk.map((k) => ({ Key: k })),
+            Quiet: false,
+          },
+        });
+
+        const result = await this.s3Client.send(command);
+
+        deleted += result.Deleted?.length ?? 0;
+
+        for (const err of result.Errors ?? []) {
+          errors.push({
+            key: err.Key ?? '(unknown)',
+            message: err.Message || err.Code || 'Unknown delete error',
+          });
+        }
+      } catch (error) {
+        // A whole-chunk failure (network/auth/etc.) must not abort the rest —
+        // record every key in this chunk as an error and continue.
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          `Batch delete failed for chunk of ${chunk.length} keys: ${message}`,
+        );
+        for (const k of chunk) {
+          errors.push({ key: k, message });
+        }
+      }
+    }
+
+    this.logger.log(
+      `Batch delete completed: ${deleted} deleted, ${errors.length} errors (of ${keys.length} keys)`,
+    );
+
+    return { deleted, errors };
   }
 
   /**
