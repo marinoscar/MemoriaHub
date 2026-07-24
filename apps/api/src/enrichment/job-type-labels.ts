@@ -32,6 +32,8 @@ export const JOB_TYPE_LABELS: Record<string, string> = {
   storage_insights: 'Storage insights',
   storage_migration: 'Storage migration',
   trash_purge: 'Trash purge',
+  trash_empty_evaluate: 'Empty trash evaluate',
+  trash_empty_execute_batch: 'Empty trash execute batch',
   job_history_purge: 'Job history purge',
   // Media Workflow Automation (issue #143)
   workflow_evaluate: 'Workflow evaluate',
