@@ -26,6 +26,7 @@ import { DuplicateQueryDto } from './dto/duplicate-query.dto';
 import { ResolveDuplicateDto } from './dto/resolve-duplicate.dto';
 import { BulkResolveDuplicateDto } from './dto/bulk-resolve-duplicate.dto';
 import { BulkResolveDuplicateThresholdDto } from './dto/bulk-resolve-duplicate-threshold.dto';
+import { BulkDismissDuplicateThresholdDto } from './dto/bulk-dismiss-duplicate-threshold.dto';
 
 @ApiTags('Duplicates')
 @ApiBearerAuth()
@@ -118,6 +119,38 @@ export class DuplicateController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.duplicateService.bulkResolveDuplicateGroupsByThreshold(dto, user.id, user.permissions);
+  }
+
+  /**
+   * POST /api/media/duplicates/bulk/dismiss-by-threshold
+   * Bulk-dismiss every pending duplicate group whose read-time confidence is
+   * strictly below the given threshold (0–100), ungrouping members without
+   * archiving/trashing.
+   *
+   * IMPORTANT: declared BEFORE `duplicates/:id` routes so the static `bulk`
+   * segment is not captured by the `:id` param.
+   */
+  @Post('duplicates/bulk/dismiss-by-threshold')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Bulk-dismiss duplicate groups below a confidence threshold',
+    description:
+      'Dismisses every pending duplicate group in the circle whose read-time ' +
+      'confidence (tightest-pair CLIP similarity, 0–1) is strictly below ' +
+      '`threshold / 100`, up to a hard cap of 500 groups. Each eligible group is ' +
+      'ungrouped (members return to the pool) and marked dismissed — nothing is ' +
+      'archived or trashed, so this never requires media:delete. Groups whose ' +
+      'confidence cannot be computed are skipped. Requires media:write.',
+  })
+  @ApiResponse({ status: 200, description: 'Bulk threshold dismiss completed' })
+  @ApiResponse({ status: 400, description: 'Invalid body' })
+  @ApiResponse({ status: 404, description: 'Circle not found or access denied' })
+  async bulkDismissDuplicateGroupsByThreshold(
+    @Body() dto: BulkDismissDuplicateThresholdDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.duplicateService.bulkDismissDuplicateGroupsByThreshold(dto, user.id, user.permissions);
   }
 
   /**
