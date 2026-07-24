@@ -25,6 +25,7 @@ import {
   Settings as SettingsIcon,
   Archive as ArchiveIcon,
   Delete as DeleteIcon,
+  Block as BlockIcon,
 } from '@mui/icons-material';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
@@ -121,14 +122,24 @@ export default function BurstsPage() {
   const { activeCircle, activeCircleId } = useCircle();
   const { hasPermission, isAdmin } = usePermissions();
   const { settings } = useSystemSettings();
-  const { items, meta, isLoading, error, fetchGroups, bulkResolve, bulkResolveByThreshold } =
-    useBurstGroups();
+  const {
+    items,
+    meta,
+    isLoading,
+    error,
+    fetchGroups,
+    bulkResolve,
+    bulkResolveByThreshold,
+    dismissByThreshold,
+  } = useBurstGroups();
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [thresholdAction, setThresholdAction] = useState<GroupResolveAction | null>(null);
   const [thresholdLoading, setThresholdLoading] = useState(false);
+  const [dismissDialogOpen, setDismissDialogOpen] = useState(false);
+  const [dismissLoading, setDismissLoading] = useState(false);
 
   const canTrash = hasPermission('media:delete');
   const threshold = settings?.burst?.autoResolveThreshold ?? 60;
@@ -195,6 +206,25 @@ export default function BurstsPage() {
     }
   };
 
+  const handleDismissConfirm = async () => {
+    setDismissDialogOpen(false);
+    if (!activeCircleId) return;
+    setActionError(null);
+    setDismissLoading(true);
+    try {
+      const result = await dismissByThreshold(threshold);
+      setSelected(new Set());
+      const skippedNote = result.skipped > 0 ? ` (${result.skipped} skipped)` : '';
+      setSuccessMsg(
+        `Dismissed ${result.dismissedGroups} group${result.dismissedGroups !== 1 ? 's' : ''}${skippedNote}.`,
+      );
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to dismiss burst groups');
+    } finally {
+      setDismissLoading(false);
+    }
+  };
+
   if (!activeCircle) {
     return (
       <Box sx={{ p: { xs: 2, md: 3 } }}>
@@ -258,6 +288,15 @@ export default function BurstsPage() {
               Delete above {threshold}
             </Button>
           )}
+          <Button
+            variant="outlined"
+            color="warning"
+            startIcon={<BlockIcon />}
+            disabled={dismissLoading || !activeCircleId}
+            onClick={() => setDismissDialogOpen(true)}
+          >
+            Reject below {threshold}
+          </Button>
         </Box>
       )}
 
@@ -357,6 +396,29 @@ export default function BurstsPage() {
             onClick={() => void handleThresholdConfirm()}
           >
             {thresholdAction === 'trash' ? 'Move to Trash' : 'Archive'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Dismiss-below-threshold confirm dialog */}
+      <Dialog
+        open={dismissDialogOpen}
+        onClose={() => setDismissDialogOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Dismiss burst groups below {threshold}%?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Every pending burst group with a cohesion score below <strong>{threshold}</strong> will
+            be marked <strong>&ldquo;not a burst&rdquo;</strong> and ungrouped. Nothing is archived
+            or deleted.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDismissDialogOpen(false)}>Cancel</Button>
+          <Button variant="contained" color="warning" onClick={() => void handleDismissConfirm()}>
+            Reject all
           </Button>
         </DialogActions>
       </Dialog>

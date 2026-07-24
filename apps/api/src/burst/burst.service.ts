@@ -23,6 +23,7 @@ import { BurstQueryDto } from './dto/burst-query.dto';
 import { ResolveBurstDto } from './dto/resolve-burst.dto';
 import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';
 import { BulkResolveBurstThresholdDto } from './dto/bulk-resolve-burst-threshold.dto';
+import { BulkDismissBurstThresholdDto } from './dto/bulk-dismiss-burst-threshold.dto';
 
 /** Hard cap on the number of groups a single threshold-based bulk resolve touches. */
 const MAX_THRESHOLD_RESOLVE = 500;
@@ -571,17 +572,38 @@ export class BurstService {
       );
     }
 
+    const memberCount = await this.dismissOneBurstGroup(group, userId);
+
+    return {
+      data: {
+        groupStatus: 'dismissed',
+        ungrouped: memberCount,
+      },
+    };
+  }
+
+  /**
+   * Core dismiss primitive shared by the single-group and threshold-bulk paths.
+   * Ungroups every member (clears `burstGroupId`/`burstScore`), marks the group
+   * `dismissed`, then re-enqueues duplicate detection so the freed members can
+   * compete for duplicate matches. Returns the ungrouped member count. Callers
+   * are responsible for their own access / pending-status guards.
+   */
+  private async dismissOneBurstGroup(
+    group: { id: string; circleId: string; items: { id: string }[] },
+    userId: string,
+  ): Promise<number> {
     const memberCount = group.items.length;
 
     await this.prisma.$transaction([
       // Clear burstGroupId and burstScore on all members
       this.prisma.mediaItem.updateMany({
-        where: { burstGroupId: id },
+        where: { burstGroupId: group.id },
         data: { burstGroupId: null, burstScore: null },
       }),
       // Mark group dismissed
       this.prisma.burstGroup.update({
-        where: { id },
+        where: { id: group.id },
         data: {
           status: BurstGroupStatus.dismissed,
           resolvedById: userId,
@@ -590,16 +612,82 @@ export class BurstService {
       }),
     ]);
 
-    this.logger.log(`Burst group ${id} dismissed by user ${userId}: ungrouped ${memberCount} items`);
+    this.logger.log(
+      `Burst group ${group.id} dismissed by user ${userId}: ungrouped ${memberCount} items`,
+    );
 
     // All members are ungrouped (none deleted) — let them compete for
     // duplicate matches now that the burst group is no longer pending.
-    await this.reenqueueDuplicateDetection(group.circleId, group.items.map((i) => i.id));
+    await this.reenqueueDuplicateDetection(
+      group.circleId,
+      group.items.map((i) => i.id),
+    );
+
+    return memberCount;
+  }
+
+  /**
+   * Bulk-dismiss every pending burst group in a circle whose persisted
+   * `confidence` (0–1) is strictly below `threshold / 100`. For each eligible
+   * group, ungroups its members and marks it dismissed (no items are archived
+   * or trashed — dismiss is non-destructive), so dismiss never requires
+   * media:delete.
+   *
+   * Confidence is a persisted Float? column, so the eligibility filter runs in
+   * SQL. The `lt` naturally excludes null-confidence legacy groups — the mirror
+   * image of resolve's `gte`, which likewise excludes them. Bounded to
+   * MAX_THRESHOLD_RESOLVE groups per call.
+   */
+  async bulkDismissBurstGroupsByThreshold(
+    dto: BulkDismissBurstThresholdDto,
+    userId: string,
+    perms: string[],
+  ) {
+    await this.membership.assertCircleAccess(userId, dto.circleId, perms, CircleRole.collaborator);
+
+    const groups = await this.prisma.burstGroup.findMany({
+      where: {
+        circleId: dto.circleId,
+        status: BurstGroupStatus.pending,
+        confidence: { lt: dto.threshold / 100 },
+      },
+      take: MAX_THRESHOLD_RESOLVE,
+      select: {
+        id: true,
+        circleId: true,
+        status: true,
+        items: { select: { id: true } },
+      },
+    });
+
+    let skipped = 0;
+    let errors = 0;
+    let dismissedGroups = 0;
+    let ungroupedCount = 0;
+
+    for (const group of groups) {
+      if (group.status !== BurstGroupStatus.pending) {
+        skipped++;
+        continue;
+      }
+
+      try {
+        ungroupedCount += await this.dismissOneBurstGroup(group, userId);
+        dismissedGroups++;
+      } catch (err) {
+        this.logger.warn(
+          `Failed to dismiss burst group ${group.id} in threshold bulk operation: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        errors++;
+      }
+    }
 
     return {
       data: {
-        groupStatus: 'dismissed',
-        ungrouped: memberCount,
+        dismissedGroups,
+        ungroupedCount,
+        skipped,
+        errors,
       },
     };
   }

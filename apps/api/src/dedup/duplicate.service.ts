@@ -21,6 +21,7 @@ import { DuplicateQueryDto } from './dto/duplicate-query.dto';
 import { ResolveDuplicateDto } from './dto/resolve-duplicate.dto';
 import { BulkResolveDuplicateDto } from './dto/bulk-resolve-duplicate.dto';
 import { BulkResolveDuplicateThresholdDto } from './dto/bulk-resolve-duplicate-threshold.dto';
+import { BulkDismissDuplicateThresholdDto } from './dto/bulk-dismiss-duplicate-threshold.dto';
 
 /** Hard cap on the number of groups a single threshold-based bulk resolve touches. */
 const MAX_THRESHOLD_RESOLVE = 500;
@@ -706,15 +707,36 @@ export class DuplicateService {
       );
     }
 
+    const memberCount = await this.dismissOneDuplicateGroup(group, userId);
+
+    return {
+      data: {
+        groupStatus: 'dismissed',
+        ungrouped: memberCount,
+      },
+    };
+  }
+
+  /**
+   * Core dismiss primitive shared by the single-group and threshold-bulk paths.
+   * Ungroups every member (clears `duplicateGroupId`), marks the group
+   * `dismissed`, and writes the `duplicate_group:dismissed` audit event. Returns
+   * the ungrouped member count. Callers are responsible for their own access /
+   * pending-status guards. Unlike burst dismiss, no dedup re-enqueue happens.
+   */
+  private async dismissOneDuplicateGroup(
+    group: { id: string; items: { id: string }[] },
+    userId: string,
+  ): Promise<number> {
     const memberCount = group.items.length;
 
     await this.prisma.$transaction([
       this.prisma.mediaItem.updateMany({
-        where: { duplicateGroupId: id },
+        where: { duplicateGroupId: group.id },
         data: { duplicateGroupId: null },
       }),
       this.prisma.duplicateGroup.update({
-        where: { id },
+        where: { id: group.id },
         data: {
           status: DuplicateGroupStatus.dismissed,
           resolvedById: userId,
@@ -723,16 +745,94 @@ export class DuplicateService {
       }),
     ]);
 
-    await this.createAuditEvent(userId, 'duplicate_group:dismissed', id, {
+    await this.createAuditEvent(userId, 'duplicate_group:dismissed', group.id, {
       ungrouped: memberCount,
     });
 
-    this.logger.log(`Duplicate group ${id} dismissed by user ${userId}: ungrouped ${memberCount} items`);
+    this.logger.log(
+      `Duplicate group ${group.id} dismissed by user ${userId}: ungrouped ${memberCount} items`,
+    );
+
+    return memberCount;
+  }
+
+  /**
+   * Bulk-dismiss every pending duplicate group in a circle whose read-time
+   * confidence (tightest-pair CLIP similarity from computeGroupKind) is strictly
+   * below `threshold / 100`. Each eligible group is ungrouped and marked
+   * dismissed — nothing is archived or trashed, so dismiss never requires
+   * media:delete.
+   *
+   * Unlike burst confidence, duplicate confidence is NOT a persisted column — it
+   * is computed at read time via computeGroupKind(members). The candidate set is
+   * therefore CAPPED to MAX_THRESHOLD_RESOLVE groups first; the per-group
+   * computeGroupKind cost (one pairwise SQL query each) is bounded by that cap.
+   * Groups whose maxSim cannot be computed (null) AND groups at/above the floor
+   * are both skipped — only maxSim strictly below the floor is dismissed, the
+   * mirror image of resolve's `maxSim >= floor` gate.
+   */
+  async bulkDismissDuplicateGroupsByThreshold(
+    dto: BulkDismissDuplicateThresholdDto,
+    userId: string,
+    perms: string[],
+  ) {
+    await this.membership.assertCircleAccess(userId, dto.circleId, perms, CircleRole.collaborator);
+
+    const groups = await this.prisma.duplicateGroup.findMany({
+      where: { circleId: dto.circleId, status: DuplicateGroupStatus.pending },
+      take: MAX_THRESHOLD_RESOLVE,
+      select: {
+        id: true,
+        circleId: true,
+        status: true,
+        items: {
+          where: { deletedAt: null, archivedAt: null },
+          select: this.MEMBER_SELECT,
+        },
+      },
+    });
+
+    const maxSimFloor = dto.threshold / 100;
+
+    let skipped = 0;
+    let errors = 0;
+    let dismissedGroups = 0;
+    let ungroupedCount = 0;
+
+    for (const group of groups) {
+      // Read-time confidence gate: dismiss only groups strictly below the floor.
+      // Null/uncomputable maxSim and high-confidence groups are both skipped.
+      const { maxSim } = await this.computeGroupKind(group.items);
+      if (maxSim == null || maxSim >= maxSimFloor) {
+        skipped++;
+        continue;
+      }
+
+      if (group.status !== DuplicateGroupStatus.pending) {
+        skipped++;
+        continue;
+      }
+
+      try {
+        ungroupedCount += await this.dismissOneDuplicateGroup(
+          { id: group.id, items: group.items.map((i) => ({ id: i.id })) },
+          userId,
+        );
+        dismissedGroups++;
+      } catch (err) {
+        this.logger.warn(
+          `Failed to dismiss duplicate group ${group.id} in threshold bulk operation: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        errors++;
+      }
+    }
 
     return {
       data: {
-        groupStatus: 'dismissed',
-        ungrouped: memberCount,
+        dismissedGroups,
+        ungroupedCount,
+        skipped,
+        errors,
       },
     };
   }

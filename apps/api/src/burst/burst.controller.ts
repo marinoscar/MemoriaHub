@@ -26,6 +26,7 @@ import { BurstQueryDto } from './dto/burst-query.dto';
 import { ResolveBurstDto } from './dto/resolve-burst.dto';
 import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';
 import { BulkResolveBurstThresholdDto } from './dto/bulk-resolve-burst-threshold.dto';
+import { BulkDismissBurstThresholdDto } from './dto/bulk-dismiss-burst-threshold.dto';
 
 @ApiTags('Bursts')
 @ApiBearerAuth()
@@ -117,6 +118,36 @@ export class BurstController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.burstService.bulkResolveBurstGroupsByThreshold(dto, user.id, user.permissions);
+  }
+
+  /**
+   * POST /api/media/bursts/bulk/dismiss-by-threshold
+   * Bulk-dismiss every pending burst group whose confidence is strictly below
+   * the given threshold (0–100), ungrouping members without archiving/trashing.
+   *
+   * IMPORTANT: declared BEFORE `bursts/:id` routes so the static `bulk` segment
+   * is not captured by the `:id` param.
+   */
+  @Post('bursts/bulk/dismiss-by-threshold')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Bulk-dismiss burst groups below a confidence threshold',
+    description:
+      'Dismisses every pending burst group in the circle whose `confidence` (0–1) ' +
+      'is strictly below `threshold / 100`, up to a hard cap of 500 groups. Each ' +
+      'eligible group is ungrouped (members return to the pool) and marked ' +
+      'dismissed — nothing is archived or trashed, so this never requires ' +
+      'media:delete. Legacy groups with null confidence are excluded. Requires media:write.',
+  })
+  @ApiResponse({ status: 200, description: 'Bulk threshold dismiss completed' })
+  @ApiResponse({ status: 400, description: 'Invalid body' })
+  @ApiResponse({ status: 404, description: 'Circle not found or access denied' })
+  async bulkDismissBurstGroupsByThreshold(
+    @Body() dto: BulkDismissBurstThresholdDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.burstService.bulkDismissBurstGroupsByThreshold(dto, user.id, user.permissions);
   }
 
   /**

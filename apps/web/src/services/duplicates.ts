@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { GroupBulkResolveResult } from './bursts';
+import type { GroupBulkResolveResult, GroupBulkDismissResult } from './bursts';
 
 export type DuplicateGroupStatus = 'pending' | 'resolved' | 'dismissed';
 export type DuplicateGroupKind = 'exact_variant' | 'edited' | 'similar';
@@ -118,6 +118,13 @@ export async function bulkResolveDuplicateGroupsByThreshold(params: {
   action: DuplicateResolveAction;
 }): Promise<GroupBulkResolveResult> {
   return api.post<GroupBulkResolveResult>('/media/duplicates/bulk/resolve-by-threshold', params);
+}
+
+export async function bulkDismissDuplicateGroupsByThreshold(params: {
+  circleId: string;
+  threshold: number;
+}): Promise<GroupBulkDismissResult> {
+  return api.post<GroupBulkDismissResult>('/media/duplicates/bulk/dismiss-by-threshold', params);
 }
 
 export async function dismissDuplicateGroup(id: string): Promise<DuplicateDismissResult> {
