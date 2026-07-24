@@ -68,6 +68,7 @@ export interface SystemSettings {
     requireSameDevice?: boolean;
     maxAnchorDistanceKm?: number;
     maxImpliedSpeedKmh?: number;
+    bulkAcceptThreshold?: number;
   };
   geo?: {
     reverseProvider?: 'offline' | 'nominatim' | 'google';

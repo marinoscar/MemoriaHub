@@ -4,7 +4,6 @@ import {
   acceptLocationSuggestion,
   rejectLocationSuggestion,
   revertLocationSuggestion,
-  bulkAcceptLocationSuggestions,
   inferLocation,
 } from '../services/locationSuggestions';
 import type {
@@ -13,7 +12,6 @@ import type {
   LocationSuggestionListMeta,
   AcceptLocationSuggestionResult,
   RejectRevertResult,
-  BulkAcceptResult,
 } from '../services/locationSuggestions';
 import { getMedia } from '../services/media';
 
@@ -30,9 +28,7 @@ interface UseLocationSuggestionsResult {
   accept: (id: string, lat?: number, lng?: number) => Promise<AcceptLocationSuggestionResult>;
   reject: (id: string) => Promise<RejectRevertResult>;
   revert: (id: string) => Promise<RejectRevertResult>;
-  bulkAccept: (circleId: string, minConfidence: number) => Promise<BulkAcceptResult>;
   actingIds: Set<string>;
-  bulkAccepting: boolean;
 }
 
 export function useLocationSuggestions(): UseLocationSuggestionsResult {
@@ -41,7 +37,6 @@ export function useLocationSuggestions(): UseLocationSuggestionsResult {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actingIds, setActingIds] = useState<Set<string>>(new Set());
-  const [bulkAccepting, setBulkAccepting] = useState(false);
 
   const fetchSuggestions = useCallback(
     async (params: { circleId: string; status?: LocationSuggestionStatus; page?: number }) => {
@@ -82,15 +77,6 @@ export function useLocationSuggestions(): UseLocationSuggestionsResult {
 
   const revert = useCallback((id: string) => withActing(id, () => revertLocationSuggestion(id)), [withActing]);
 
-  const bulkAccept = useCallback(async (circleId: string, minConfidence: number) => {
-    setBulkAccepting(true);
-    try {
-      return await bulkAcceptLocationSuggestions(circleId, minConfidence);
-    } finally {
-      setBulkAccepting(false);
-    }
-  }, []);
-
   return {
     items,
     meta,
@@ -100,9 +86,7 @@ export function useLocationSuggestions(): UseLocationSuggestionsResult {
     accept,
     reject,
     revert,
-    bulkAccept,
     actingIds,
-    bulkAccepting,
   };
 }
 

@@ -33,6 +33,7 @@ function LocationInferenceSettingsContent() {
   const [requireSameDevice, setRequireSameDevice] = useState(true);
   const [maxAnchorDistanceKm, setMaxAnchorDistanceKm] = useState(2);
   const [maxImpliedSpeedKmh, setMaxImpliedSpeedKmh] = useState(150);
+  const [bulkAcceptThreshold, setBulkAcceptThreshold] = useState(80);
   const [paramSaving, setParamSaving] = useState(false);
 
   // Backfill state
@@ -56,6 +57,7 @@ function LocationInferenceSettingsContent() {
     setRequireSameDevice(settings.locationInference?.requireSameDevice ?? true);
     setMaxAnchorDistanceKm(settings.locationInference?.maxAnchorDistanceKm ?? 2);
     setMaxImpliedSpeedKmh(settings.locationInference?.maxImpliedSpeedKmh ?? 150);
+    setBulkAcceptThreshold(settings.locationInference?.bulkAcceptThreshold ?? 80);
   }, [settings]);
 
   const handleGlobalToggle = (checked: boolean) => {
@@ -76,6 +78,7 @@ function LocationInferenceSettingsContent() {
         requireSameDevice,
         maxAnchorDistanceKm,
         maxImpliedSpeedKmh,
+        bulkAcceptThreshold,
       },
     })
       .then(() => setSuccessMessage('Location inference parameters saved'))
@@ -262,6 +265,25 @@ function LocationInferenceSettingsContent() {
                 Speed gate (10–1000 km/h): if the distance and time between anchors imply a faster
                 speed than this, the subject was likely traveling — the result is never auto-applied
                 and its confidence is capped, regardless of how close the anchors are in time.
+              </Typography>
+            </Box>
+
+            <Box>
+              <Typography gutterBottom>
+                Bulk-accept confidence threshold: <strong>{bulkAcceptThreshold}</strong>
+              </Typography>
+              <Slider
+                value={bulkAcceptThreshold}
+                onChange={(_, value) => setBulkAcceptThreshold(value as number)}
+                min={0}
+                max={100}
+                step={1}
+                valueLabelDisplay="auto"
+              />
+              <Typography variant="caption" color="text.secondary">
+                Score 0–100 (default 80). The default confidence floor for the "Accept all
+                &ge; N%" (high-confidence) and "Reject all &lt; N%" (low-confidence) bulk actions
+                on the Location Suggestions review page.
               </Typography>
             </Box>
 

@@ -47,10 +47,6 @@ export interface RejectRevertResult {
   status: string;
 }
 
-export interface BulkAcceptResult {
-  accepted: number;
-}
-
 export interface InferLocationResult {
   jobId: string;
   status: string;
@@ -89,13 +85,6 @@ export async function rejectLocationSuggestion(id: string): Promise<RejectRevert
 
 export async function revertLocationSuggestion(id: string): Promise<RejectRevertResult> {
   return api.post<RejectRevertResult>(`/media/location-suggestions/${id}/revert`);
-}
-
-export async function bulkAcceptLocationSuggestions(
-  circleId: string,
-  minConfidence: number,
-): Promise<BulkAcceptResult> {
-  return api.post<BulkAcceptResult>('/media/location-suggestions/bulk-accept', { circleId, minConfidence });
 }
 
 export async function inferLocation(mediaItemId: string): Promise<InferLocationResult> {
