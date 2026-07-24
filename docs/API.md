@@ -4119,7 +4119,7 @@ Get OCR (Tier 2) model availability and effective configuration — the social-m
 
 ## Location Inference (media:read / media:write + per-circle roles)
 
-Location inference is a global feature toggle (`features.locationInference`, default off) — see [docs/specs/location-inference.md](specs/location-inference.md) for the full algorithm design. It fills in missing GPS coordinates on GPS-less photos by interpolating (two anchors) or extrapolating (one anchor) from chronologically-nearby, same-device photos that already have coordinates. High-confidence two-anchor inferences are auto-applied immediately (`coordSource: 'inferred'`, revertible); everything else is queued as a `pending` `LocationSuggestion` for a human to confirm, adjust, or reject. `GET /api/media/dashboard` gains a `pendingLocationSuggestions` count that contributes to the review-queue section of the dashboard UI.
+Location inference is a global feature toggle (`features.locationInference`, default off) — see [docs/specs/location-inference.md](specs/location-inference.md) for the full algorithm design. It fills in missing GPS coordinates on GPS-less photos by interpolating (two anchors) or extrapolating (one anchor) from chronologically-nearby, same-device photos that already have coordinates. High-confidence two-anchor inferences are auto-applied immediately (`coordSource: 'inferred'`, revertible); everything else is queued as a `pending` `LocationSuggestion` for a human to confirm, adjust, or reject. `GET /api/media/dashboard` gains a `pendingLocationSuggestions` count that contributes to the review-queue section of the dashboard UI. The review queue's bulk actions (`bulk-accept`/`bulk-reject`) run asynchronously through a dedicated run engine (`location-suggestion-runs`, below) — see [docs/specs/location-inference.md §9](specs/location-inference.md#9-bulk-acceptreject-at-scale).
 
 No new RBAC permissions are introduced — the feature reuses `media:read` and `media:write` combined with the existing per-circle viewer / collaborator roles, plus `system_settings:write` for the admin backfill endpoint.
 
@@ -4252,19 +4252,131 @@ Undo an auto-applied inference: clears `takenLat`/`takenLng`, all geo columns, a
 
 **Permissions:** `media:write` + circle collaborator role
 
-Accept every `pending` suggestion in a circle at or above a confidence floor, in one call. Every accepted suggestion is applied **unmodified** — there is no per-item coordinate override in the bulk path — so every accepted item receives `coordSource: 'inferred'`.
+**Rewritten (issue #125):** starts an **asynchronous run** that accepts every `pending` suggestion in a circle at or above a confidence floor, instead of accepting them synchronously in-request. Every accepted suggestion is applied **unmodified** — there is no per-item coordinate override in the bulk path — so every accepted item receives `coordSource: 'inferred'`, and reverse-geocoding for each accepted item is decoupled into a standard `geocode` enrichment job (async, not performed inline) rather than the synchronous geocode the single-item `accept` endpoint above performs. See [docs/specs/location-inference.md §9](specs/location-inference.md#9-bulk-acceptreject-at-scale) for the full run architecture.
 
 **Request Body:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `circleId` | UUID | Yes | Circle to operate on |
-| `minConfidence` | number (0-1) | Yes | Minimum `confidence` for a suggestion to be included |
+| `threshold` | integer (0-100) | Yes | Confidence floor as a percent; matched suggestions have `confidence >= threshold / 100`. Note the scale change from the removed `minConfidence` (0-1 float) field — `threshold` matches the `burst.autoResolveThreshold`/`dedup.autoResolveThreshold` convention. |
 
 **Response:** 200 OK
 ```json
-{ "data": { "accepted": 14 } }
+{ "data": { "runId": "uuid", "status": "evaluating", "matchedCount": 0 } }
 ```
+`matchedCount` is always `0` at creation — poll `GET /location-suggestion-runs/:id` below for the real total once the run has evaluated.
+
+**Error Cases:**
+- 409 — A location-suggestion run is already in progress (`evaluating` or `running`) for this circle
+
+---
+
+### POST /media/location-suggestions/bulk-reject
+
+**Permissions:** `media:write` + circle collaborator role
+
+New in issue #125 — the mirror-image of `bulk-accept` above: starts an asynchronous run that rejects every `pending` suggestion in a circle **below** a confidence floor (clearing out low-confidence noise in bulk). No coordinates are written and no `geocode` job is enqueued for rejected suggestions.
+
+**Request Body:** identical shape to `bulk-accept` — `{ circleId, threshold }` (threshold 0-100 integer; matched suggestions have `confidence < threshold / 100`).
+
+**Response:** 200 OK
+```json
+{ "data": { "runId": "uuid", "status": "evaluating", "matchedCount": 0 } }
+```
+
+**Error Cases:**
+- 409 — A location-suggestion run (accept OR reject) is already in progress for this circle — the concurrency guard is shared across both actions
+
+---
+
+### GET /location-suggestion-runs/:id
+
+**Permissions:** `media:read` + circle viewer role
+
+Get a bulk accept/reject run's counters and a live per-item-status tally.
+
+**Response:** 200 OK
+```json
+{
+  "id": "uuid",
+  "circleId": "uuid",
+  "action": "accept",
+  "threshold": 80,
+  "status": "running",
+  "matchedCount": 240,
+  "processedCount": 120,
+  "succeededCount": 118,
+  "failedCount": 2,
+  "skippedCount": 0,
+  "startedById": "uuid",
+  "createdAt": "2026-07-24T10:00:00.000Z",
+  "updatedAt": "2026-07-24T10:00:12.000Z",
+  "startedAt": "2026-07-24T10:00:01.000Z",
+  "finishedAt": null,
+  "lastError": null,
+  "itemStatusCounts": { "processing": 40, "applied": 118, "failed": 2, "matched": 80 }
+}
+```
+`action` is `"accept"` or `"reject"`; `status` is `evaluating` \| `running` \| `completed` \| `completed_with_errors` \| `failed` \| `cancelled`.
+
+**Error Cases:**
+- 404 — Run not found
+
+---
+
+### GET /location-suggestion-runs/:id/items
+
+**Permissions:** `media:read` + circle viewer role
+
+Paginated run items with batched signed thumbnails.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `status` | enum | — | `matched` \| `processing` \| `applied` \| `failed` \| `skipped` |
+| `page` | number | 1 | Page number (1-indexed) |
+| `pageSize` | number | 50 | Items per page (max 100) |
+
+**Response:** 200 OK
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "suggestionId": "uuid",
+      "mediaItemId": "uuid",
+      "status": "applied",
+      "error": null,
+      "updatedAt": "2026-07-24T10:00:05.000Z",
+      "lat": 9.9333,
+      "lng": -84.0833,
+      "confidence": 0.91,
+      "media": { "type": "photo", "capturedAt": "2026-06-15T14:32:01.234Z", "filename": "IMG_0142.jpg", "width": 4032, "height": 3024 },
+      "thumbnailUrl": "https://..."
+    }
+  ],
+  "meta": { "page": 1, "pageSize": 50, "totalItems": 240, "totalPages": 5 }
+}
+```
+
+---
+
+### POST /location-suggestion-runs/:id/cancel
+
+**Permissions:** `media:write` + circle collaborator role
+
+Cancel a non-terminal run. Cooperative: a batch job already claimed by the worker checks the run's status before doing any work and bails out if cancelled, but a batch already mid-processing cannot be recalled. Suggestions already resolved before the cancel keep their outcome; unclaimed suggestions remain `pending`.
+
+**Response:** 200 OK
+```json
+{ "runId": "uuid", "status": "cancelled" }
+```
+
+**Error Cases:**
+- 400 — Run has already reached a terminal status
+- 404 — Run not found
 
 ---
 
