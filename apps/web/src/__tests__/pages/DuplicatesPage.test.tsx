@@ -120,6 +120,12 @@ function makeDuplicateGroupsHook(
       skipped: 0,
       errors: 0,
     }),
+    dismissByThreshold: vi.fn().mockResolvedValue({
+      dismissedGroups: 1,
+      ungroupedCount: 2,
+      skipped: 0,
+      errors: 0,
+    }),
     ...overrides,
   };
 }
@@ -535,6 +541,110 @@ describe('DuplicatesPage', () => {
 
       await waitFor(() => {
         expect(bulkResolveByThreshold).toHaveBeenCalledWith(60, 'trash');
+      });
+    });
+  });
+
+  describe('reject-below-threshold actions', () => {
+    it('renders "Reject below N" using the threshold from system settings', async () => {
+      mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(80));
+      mockUseDuplicateGroups.mockReturnValue(makeDuplicateGroupsHook({ items: [makeSummary('g-1')] }));
+
+      render(<DuplicatesPage />);
+
+      expect(await screen.findByRole('button', { name: 'Reject below 80' })).toBeInTheDocument();
+    });
+
+    it('falls back to a threshold of 60 when system settings has no dedup.autoResolveThreshold', async () => {
+      mockUseSystemSettings.mockReturnValue({
+        settings: { ui: { allowUserThemeOverride: true }, features: {} } as any,
+        isLoading: false,
+        isSaving: false,
+        error: null,
+        updateSettings: vi.fn(),
+        replaceSettings: vi.fn(),
+        refresh: vi.fn(),
+      });
+      mockUseDuplicateGroups.mockReturnValue(makeDuplicateGroupsHook({ items: [makeSummary('g-1')] }));
+
+      render(<DuplicatesPage />);
+
+      expect(await screen.findByRole('button', { name: 'Reject below 60' })).toBeInTheDocument();
+    });
+
+    it('clicking "Reject below N" opens a confirm dialog and does not call dismissByThreshold before confirming', async () => {
+      const user = userEvent.setup();
+      const dismissByThreshold = vi.fn().mockResolvedValue({
+        dismissedGroups: 3,
+        ungroupedCount: 6,
+        skipped: 0,
+        errors: 0,
+      });
+      mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(60));
+      mockUseDuplicateGroups.mockReturnValue(
+        makeDuplicateGroupsHook({ items: [makeSummary('g-1')], dismissByThreshold }),
+      );
+
+      render(<DuplicatesPage />);
+
+      await user.click(await screen.findByRole('button', { name: 'Reject below 60' }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+      });
+      expect(dismissByThreshold).not.toHaveBeenCalled();
+    });
+
+    it('confirming calls dismissByThreshold(threshold) and shows a success message with the dismissed count', async () => {
+      const user = userEvent.setup();
+      const dismissByThreshold = vi.fn().mockResolvedValue({
+        dismissedGroups: 3,
+        ungroupedCount: 6,
+        skipped: 0,
+        errors: 0,
+      });
+      mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(60));
+      mockUseDuplicateGroups.mockReturnValue(
+        makeDuplicateGroupsHook({ items: [makeSummary('g-1')], dismissByThreshold }),
+      );
+
+      render(<DuplicatesPage />);
+
+      await user.click(await screen.findByRole('button', { name: 'Reject below 60' }));
+      await waitFor(() => {
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole('button', { name: /reject all/i }));
+
+      await waitFor(() => {
+        expect(dismissByThreshold).toHaveBeenCalledWith(60);
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/dismissed 3 groups\./i)).toBeInTheDocument();
+      });
+    });
+
+    it('shows a skipped note in the success message when groups were skipped', async () => {
+      const user = userEvent.setup();
+      const dismissByThreshold = vi.fn().mockResolvedValue({
+        dismissedGroups: 2,
+        ungroupedCount: 4,
+        skipped: 1,
+        errors: 0,
+      });
+      mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(60));
+      mockUseDuplicateGroups.mockReturnValue(
+        makeDuplicateGroupsHook({ items: [makeSummary('g-1')], dismissByThreshold }),
+      );
+
+      render(<DuplicatesPage />);
+
+      await user.click(await screen.findByRole('button', { name: 'Reject below 60' }));
+      await user.click(await screen.findByRole('button', { name: /reject all/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/dismissed 2 groups \(1 skipped\)\./i)).toBeInTheDocument();
       });
     });
   });
