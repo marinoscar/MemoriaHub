@@ -53,12 +53,16 @@ import { EmptyTrashDto } from './dto/empty-trash.dto';
 import { ReverseGeocodeQueryDto } from './dto/reverse-geocode-query.dto';
 import { GeoSearchQueryDto } from './dto/geo-search-query.dto';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
+import { TrashEmptyRunService } from './trash-empty/trash-empty-run.service';
 
 @ApiTags('Media')
 @ApiBearerAuth('JWT-auth')
 @Controller('media')
 export class MediaController {
-  constructor(private readonly mediaService: MediaService) {}
+  constructor(
+    private readonly mediaService: MediaService,
+    private readonly trashEmptyRunService: TrashEmptyRunService,
+  ) {}
 
   // ---------------------------------------------------------------------------
   // Static sub-routes MUST come before /:id to avoid route shadowing
@@ -661,18 +665,29 @@ export class MediaController {
 
   /**
    * POST /api/media/trash/empty
-   * Hard-delete all trashed items in a circle (circle_admin only).
+   * Start an asynchronous "empty trash" run for a circle (circle_admin only).
+   *
+   * Rebuilt for scale (issue #165): instead of synchronously purging every
+   * trashed item in one HTTP request (which timed out past ~2000 items), this
+   * creates a TrashEmptyRun and enqueues a chunked, queue-driven purge. Returns
+   * immediately with the run id; poll GET /api/trash-empty-runs/:id for progress.
    */
   @Post('trash/empty')
   @Auth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Empty trash (hard delete all trashed items, circle_admin only)' })
-  @ApiResponse({ status: 200, description: 'All trashed items permanently deleted' })
+  @ApiOperation({ summary: 'Empty trash — start an async purge run (circle_admin only)' })
+  @ApiResponse({ status: 200, description: 'Empty-trash run started' })
+  @ApiResponse({ status: 409, description: 'A trash-empty run is already in progress' })
   async emptyTrash(
     @Body() dto: EmptyTrashDto,
     @CurrentUser() user: RequestUser,
   ) {
-    return this.mediaService.emptyTrash(dto, user.id, user.permissions);
+    const run = await this.trashEmptyRunService.createRun(
+      dto.circleId,
+      user.id,
+      user.permissions,
+    );
+    return { runId: run.id, status: run.status, matchedCount: run.matchedCount };
   }
 
   /**
