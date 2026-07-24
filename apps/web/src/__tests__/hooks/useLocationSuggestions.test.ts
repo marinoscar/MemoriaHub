@@ -4,12 +4,18 @@
  *
  * Covers:
  *  useLocationSuggestions:
- *   - Initial state (empty items, null meta, not loading, no error, empty actingIds, bulkAccepting=false)
+ *   - Initial state (empty items, null meta, not loading, no error, empty actingIds)
  *   - fetchSuggestions: loading -> success (calls listLocationSuggestions with params, populates items/meta)
  *   - fetchSuggestions: error handling (Error instance and non-Error throw fallback message)
  *   - accept/reject/revert: route through the acting-ids Set (added before call, removed in finally)
  *   - accept/reject/revert: error path rethrows and still clears the acting id
- *   - bulkAccept: toggles bulkAccepting true/false around the call; error path rethrows and resets flag
+ *
+ *  NOTE: the former synchronous `bulkAccept` (and its underlying
+ *  `bulkAcceptLocationSuggestions` service call) was replaced by the async,
+ *  run-based bulk accept/reject engine (LocationSuggestionRunService,
+ *  mirroring "Empty Trash at Scale") — see
+ *  `services/locationSuggestionRuns.ts` and `LocationSuggestionsPage.test.tsx`
+ *  for its coverage. This hook no longer exposes bulkAccept/bulkAccepting.
  *
  *  useSuggestLocation:
  *   - suggest() calls inferLocation(mediaId) then polls getMedia every 2s
@@ -41,7 +47,6 @@ vi.mock('../../services/locationSuggestions', () => ({
   acceptLocationSuggestion: vi.fn(),
   rejectLocationSuggestion: vi.fn(),
   revertLocationSuggestion: vi.fn(),
-  bulkAcceptLocationSuggestions: vi.fn(),
   inferLocation: vi.fn(),
 }));
 
@@ -54,7 +59,6 @@ import {
   acceptLocationSuggestion,
   rejectLocationSuggestion,
   revertLocationSuggestion,
-  bulkAcceptLocationSuggestions,
   inferLocation,
 } from '../../services/locationSuggestions';
 import { getMedia } from '../../services/media';
@@ -68,7 +72,6 @@ const mockListLocationSuggestions = vi.mocked(listLocationSuggestions);
 const mockAcceptLocationSuggestion = vi.mocked(acceptLocationSuggestion);
 const mockRejectLocationSuggestion = vi.mocked(rejectLocationSuggestion);
 const mockRevertLocationSuggestion = vi.mocked(revertLocationSuggestion);
-const mockBulkAcceptLocationSuggestions = vi.mocked(bulkAcceptLocationSuggestions);
 const mockInferLocation = vi.mocked(inferLocation);
 const mockGetMedia = vi.mocked(getMedia);
 
@@ -125,7 +128,7 @@ describe('useLocationSuggestions', () => {
   });
 
   describe('initial state', () => {
-    it('starts with empty items, null meta, not loading, no error, empty actingIds, bulkAccepting=false', () => {
+    it('starts with empty items, null meta, not loading, no error, empty actingIds', () => {
       const { result } = renderHook(() => useLocationSuggestions());
 
       expect(result.current.items).toEqual([]);
@@ -133,7 +136,8 @@ describe('useLocationSuggestions', () => {
       expect(result.current.isLoading).toBe(false);
       expect(result.current.error).toBeNull();
       expect(result.current.actingIds.size).toBe(0);
-      expect(result.current.bulkAccepting).toBe(false);
+      expect(result.current).not.toHaveProperty('bulkAccept');
+      expect(result.current).not.toHaveProperty('bulkAccepting');
     });
   });
 
@@ -415,68 +419,6 @@ describe('useLocationSuggestions', () => {
     });
   });
 
-  describe('bulkAccept', () => {
-    it('calls bulkAcceptLocationSuggestions with (circleId, minConfidence)', async () => {
-      mockBulkAcceptLocationSuggestions.mockResolvedValue({ accepted: 5 });
-
-      const { result } = renderHook(() => useLocationSuggestions());
-
-      await act(async () => {
-        await result.current.bulkAccept('circle-1', 0.8);
-      });
-
-      expect(mockBulkAcceptLocationSuggestions).toHaveBeenCalledWith('circle-1', 0.8);
-    });
-
-    it('returns the result to the caller', async () => {
-      mockBulkAcceptLocationSuggestions.mockResolvedValue({ accepted: 3 });
-
-      const { result } = renderHook(() => useLocationSuggestions());
-
-      let returned: unknown;
-      await act(async () => {
-        returned = await result.current.bulkAccept('circle-1', 0.8);
-      });
-
-      expect(returned).toEqual({ accepted: 3 });
-    });
-
-    it('sets bulkAccepting=true during the call and false after resolution', async () => {
-      let resolveFn!: (v: { accepted: number }) => void;
-      const promise = new Promise<{ accepted: number }>((res) => {
-        resolveFn = res;
-      });
-      mockBulkAcceptLocationSuggestions.mockReturnValue(promise);
-
-      const { result } = renderHook(() => useLocationSuggestions());
-
-      let callPromise!: Promise<unknown>;
-      act(() => {
-        callPromise = result.current.bulkAccept('circle-1', 0.8);
-      });
-
-      await waitFor(() => expect(result.current.bulkAccepting).toBe(true));
-
-      await act(async () => {
-        resolveFn({ accepted: 5 });
-        await callPromise;
-      });
-
-      expect(result.current.bulkAccepting).toBe(false);
-    });
-
-    it('resets bulkAccepting=false and rethrows when bulkAcceptLocationSuggestions rejects', async () => {
-      mockBulkAcceptLocationSuggestions.mockRejectedValue(new Error('Bulk accept failed'));
-
-      const { result } = renderHook(() => useLocationSuggestions());
-
-      await act(async () => {
-        await expect(result.current.bulkAccept('circle-1', 0.8)).rejects.toThrow('Bulk accept failed');
-      });
-
-      expect(result.current.bulkAccepting).toBe(false);
-    });
-  });
 });
 
 // ---------------------------------------------------------------------------
