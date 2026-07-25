@@ -15,7 +15,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, fireEvent } from '@testing-library/react';
+import { screen, waitFor, fireEvent, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
 import { VideoFacePanel } from '../../../components/media/VideoFacePanel';
 import type { DetectedFaceDto, MediaFaceStatusDto } from '../../../services/face';
@@ -28,7 +29,8 @@ vi.mock('../../../hooks/useMediaFaces', () => ({
   useMediaFaces: vi.fn(),
 }));
 
-// Mock face service — listPeople, addPersonToMedia, removePersonFromMedia
+// Mock face service — listPeople, addPersonToMedia, removePersonFromMedia,
+// assignFaces, unassignFace, createPerson, purgeFaces (AssignFaceDialog deps)
 vi.mock('../../../services/face', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../../services/face')>();
   return {
@@ -36,11 +38,25 @@ vi.mock('../../../services/face', async (importOriginal) => {
     listPeople: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     addPersonToMedia: vi.fn().mockResolvedValue({ personId: 'p1', personName: 'Alice', faceId: 'f1', mediaItemId: 'm1' }),
     removePersonFromMedia: vi.fn().mockResolvedValue(undefined),
+    assignFaces: vi.fn().mockResolvedValue({ personId: 'p1', assignedCount: 1 }),
+    unassignFace: vi.fn().mockResolvedValue(undefined),
+    createPerson: vi.fn().mockResolvedValue({ id: 'p-new', name: 'New Person', circleId: 'circle-1' }),
+    purgeFaces: vi.fn().mockResolvedValue({ deleted: 1 }),
   };
 });
 
 import { useMediaFaces } from '../../../hooks/useMediaFaces';
+import {
+  listPeople,
+  assignFaces,
+  unassignFace,
+  purgeFaces,
+} from '../../../services/face';
 const mockUseMediaFaces = vi.mocked(useMediaFaces);
+const mockListPeople = vi.mocked(listPeople);
+const mockAssignFaces = vi.mocked(assignFaces);
+const mockUnassignFace = vi.mocked(unassignFace);
+const mockPurgeFaces = vi.mocked(purgeFaces);
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -116,6 +132,7 @@ describe('VideoFacePanel', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockListPeople.mockResolvedValue({ items: [], total: 0 });
   });
 
   // -------------------------------------------------------------------------
@@ -323,6 +340,181 @@ describe('VideoFacePanel', () => {
     it('disables the button while rerunLoading=true', () => {
       renderPanel({}, { rerunLoading: true });
       expect(screen.getByRole('button', { name: /re-run face detection/i })).toBeDisabled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Edit face icon button (issue #119 — AssignFaceDialog integration)
+  // -------------------------------------------------------------------------
+  describe('edit face icon button', () => {
+    it('renders the "Edit face" icon button on a detected row when circleId is provided', () => {
+      const face = makeFace('f1', {
+        personId: 'p1',
+        personName: 'Alice',
+        faceThumbnailUrl: 'https://cdn.example.com/f1.jpg',
+      });
+      renderPanel({ circleId: 'circle-1' }, { faces: [face] });
+
+      expect(screen.getByRole('button', { name: /edit face/i })).toBeInTheDocument();
+    });
+
+    it('does not render the "Edit face" icon button when circleId is undefined', () => {
+      const face = makeFace('f1', {
+        personId: 'p1',
+        personName: 'Alice',
+        faceThumbnailUrl: 'https://cdn.example.com/f1.jpg',
+      });
+      renderPanel({ circleId: undefined }, { faces: [face] });
+
+      expect(screen.queryByRole('button', { name: /edit face/i })).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // AssignFaceDialog preview (video uses the Avatar thumbnail, not FaceCrop)
+  // -------------------------------------------------------------------------
+  describe('edit face dialog preview', () => {
+    it('shows the representative-frame Avatar (not FaceCrop) when faceThumbnailUrl is set', async () => {
+      const face = makeFace('f1', {
+        personId: 'p1',
+        personName: 'Alice',
+        faceThumbnailUrl: 'https://cdn.example.com/frame.jpg',
+      });
+      renderPanel({ circleId: 'circle-1' }, { faces: [face] });
+
+      fireEvent.click(screen.getByRole('button', { name: /edit face/i }));
+
+      const dialog = await screen.findByRole('dialog');
+      const img = dialog.querySelector('img');
+      expect(img).toHaveAttribute('src', 'https://cdn.example.com/frame.jpg');
+      // FaceCrop renders role="img" aria-label="Face crop" — must NOT be present
+      // for the video path (no imageUrl is passed to AssignFaceDialog).
+      expect(within(dialog).queryByRole('img', { name: 'Face crop' })).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Reassign flow — operates on every detected face id for the person
+  // -------------------------------------------------------------------------
+  describe('reassign flow (edit dialog)', () => {
+    it('calls assignFaces with all detected face ids belonging to the person, and refreshes', async () => {
+      const user = userEvent.setup();
+      const face1 = makeFace('f1', { personId: 'p1', personName: 'Alice', videoTimestampMs: 5000 });
+      const face2 = makeFace('f2', { personId: 'p1', personName: 'Alice', videoTimestampMs: 10000 });
+      mockListPeople.mockResolvedValue({
+        items: [
+          {
+            id: 'p2',
+            name: 'Bob',
+            isUnlabeled: false,
+            faceCount: 0,
+            coverFace: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            favorite: false,
+          },
+        ],
+        total: 1,
+      });
+      const onFacesChanged = vi.fn();
+      const refresh = vi.fn().mockResolvedValue(undefined);
+      renderPanel(
+        { circleId: 'circle-1', onFacesChanged },
+        { faces: [face1, face2], refresh },
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /edit face/i }));
+
+      const dialog = await screen.findByRole('dialog');
+      const combobox = within(dialog).getByRole('combobox');
+      await user.click(combobox);
+      const bobOption = await screen.findByRole('option', { name: /bob/i });
+      await user.click(bobOption);
+      await user.click(within(dialog).getByRole('button', { name: /^reassign$/i }));
+
+      await waitFor(() => {
+        expect(mockAssignFaces).toHaveBeenCalledTimes(1);
+      });
+      const [calledPersonId, calledFaceIds] = mockAssignFaces.mock.calls[0];
+      expect(calledPersonId).toBe('p2');
+      expect([...calledFaceIds].sort()).toEqual(['f1', 'f2']);
+
+      await waitFor(() => {
+        expect(refresh).toHaveBeenCalledTimes(1);
+        expect(onFacesChanged).toHaveBeenCalledTimes(1);
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Unassign flow — one unassignFace call per detected face id
+  // -------------------------------------------------------------------------
+  describe('unassign flow (edit dialog)', () => {
+    it('calls unassignFace once per detected face id belonging to the person, and refreshes', async () => {
+      const face1 = makeFace('f1', { personId: 'p1', personName: 'Alice', videoTimestampMs: 5000 });
+      const face2 = makeFace('f2', { personId: 'p1', personName: 'Alice', videoTimestampMs: 10000 });
+      const onFacesChanged = vi.fn();
+      const refresh = vi.fn().mockResolvedValue(undefined);
+      renderPanel(
+        { circleId: 'circle-1', onFacesChanged },
+        { faces: [face1, face2], refresh },
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /edit face/i }));
+
+      const dialog = await screen.findByRole('dialog');
+      fireEvent.click(within(dialog).getByRole('button', { name: /unassign/i }));
+
+      await waitFor(() => {
+        expect(mockUnassignFace).toHaveBeenCalledTimes(2);
+      });
+      expect(mockUnassignFace).toHaveBeenCalledWith('p1', 'f1');
+      expect(mockUnassignFace).toHaveBeenCalledWith('p1', 'f2');
+
+      await waitFor(() => {
+        expect(refresh).toHaveBeenCalledTimes(1);
+        expect(onFacesChanged).toHaveBeenCalledTimes(1);
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Permanent delete flow — purgeFaces via the nested PurgeFacesDialog confirm
+  // -------------------------------------------------------------------------
+  describe('permanent delete flow (edit dialog)', () => {
+    it('calls purgeFaces with all detected face ids after confirming, and refreshes', async () => {
+      const face1 = makeFace('f1', { personId: 'p1', personName: 'Alice', videoTimestampMs: 5000 });
+      const face2 = makeFace('f2', { personId: 'p1', personName: 'Alice', videoTimestampMs: 10000 });
+      const onFacesChanged = vi.fn();
+      const refresh = vi.fn().mockResolvedValue(undefined);
+      renderPanel(
+        { circleId: 'circle-1', onFacesChanged },
+        { faces: [face1, face2], refresh },
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /edit face/i }));
+
+      const editDialog = await screen.findByRole('dialog');
+      fireEvent.click(
+        within(editDialog).getByRole('button', { name: /delete detection permanently/i }),
+      );
+
+      const purgeDialog = await screen.findByRole('dialog', { name: /delete permanently\?/i });
+      fireEvent.click(
+        within(purgeDialog).getByRole('button', { name: /^delete permanently$/i }),
+      );
+
+      await waitFor(() => {
+        expect(mockPurgeFaces).toHaveBeenCalledTimes(1);
+      });
+      const [calledCircleId, calledFaceIds] = mockPurgeFaces.mock.calls[0];
+      expect(calledCircleId).toBe('circle-1');
+      expect([...calledFaceIds].sort()).toEqual(['f1', 'f2']);
+
+      await waitFor(() => {
+        expect(refresh).toHaveBeenCalledTimes(1);
+        expect(onFacesChanged).toHaveBeenCalledTimes(1);
+      });
     });
   });
 });

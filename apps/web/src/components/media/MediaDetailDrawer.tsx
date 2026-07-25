@@ -951,6 +951,7 @@ export function MediaDetailDrawer({
             onSeek={handleSeek}
             selectedFaceId={selectedFaceId}
             onSelectFace={setSelectedFaceId}
+            onFacesChanged={() => void videoFacesResult.refresh()}
           />
         ) : (
           <FaceThumbnails

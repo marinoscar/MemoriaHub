@@ -32,6 +32,7 @@ import {
   Refresh as RefreshIcon,
   AccessTime as AccessTimeIcon,
   Person as PersonIcon,
+  Edit as EditIcon,
 } from '@mui/icons-material';
 import { useMediaFaces } from '../../hooks/useMediaFaces';
 import type { MediaFaceStatusType, DetectedFaceDto } from '../../services/face';
@@ -42,6 +43,7 @@ import {
 } from '../../services/face';
 import type { PersonListItem } from '../../services/face';
 import { PersonAvatar } from '../people/PersonAvatar';
+import { AssignFaceDialog } from './AssignFaceDialog';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -112,6 +114,26 @@ function deduplicateFaces(faces: DetectedFaceDto[]): DetectedFaceDto[] {
   return [...byPerson.values(), ...unassigned];
 }
 
+/**
+ * Builds a map of personId → all detected face IDs for that person, from the
+ * pre-dedup detected-face array. Used so an edit action on a representative row
+ * can operate on every detected face of that person (a person may be observed
+ * across many sampled frames, each a separate Face row).
+ */
+function buildPersonFaceIds(faces: DetectedFaceDto[]): Map<string, string[]> {
+  const byPerson = new Map<string, string[]>();
+  for (const face of faces) {
+    if (face.personId === null) continue;
+    const existing = byPerson.get(face.personId);
+    if (existing) {
+      existing.push(face.id);
+    } else {
+      byPerson.set(face.personId, [face.id]);
+    }
+  }
+  return byPerson;
+}
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -126,6 +148,9 @@ interface VideoFacePanelProps {
   /** ID of the currently selected face row (for highlight). */
   selectedFaceId?: string | null;
   onSelectFace?: (faceId: string | null) => void;
+  /** Called after any face mutation so an external face consumer (e.g. the
+   *  marker strip) can refresh its own copy of the faces. */
+  onFacesChanged?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +163,7 @@ export function VideoFacePanel({
   onSeek,
   selectedFaceId,
   onSelectFace,
+  onFacesChanged,
 }: VideoFacePanelProps) {
   const { faces, status, loading, error, rerun, rerunLoading, refresh } =
     useMediaFaces(mediaId);
@@ -148,6 +174,9 @@ export function VideoFacePanel({
   const [removingPersonId, setRemovingPersonId] = useState<string | null>(null);
   const [manualPeopleError, setManualPeopleError] = useState<string | null>(null);
   const [personInputValue, setPersonInputValue] = useState('');
+
+  // Edit-face dialog (assign / reassign / unassign / delete a detected face)
+  const [editFace, setEditFace] = useState<DetectedFaceDto | null>(null);
 
   const canAssign = Boolean(circleId);
 
@@ -167,6 +196,7 @@ export function VideoFacePanel({
       await addPersonToMedia(mediaId, personId ? { personId } : { name: name!.trim() });
       setPersonInputValue('');
       void refresh();
+      onFacesChanged?.();
     } catch (err) {
       setManualPeopleError(err instanceof Error ? err.message : 'Failed to add person');
     } finally {
@@ -180,6 +210,7 @@ export function VideoFacePanel({
     try {
       await removePersonFromMedia(mediaId, personId);
       void refresh();
+      onFacesChanged?.();
     } catch (err) {
       setManualPeopleError(err instanceof Error ? err.message : 'Failed to remove person');
     } finally {
@@ -207,6 +238,12 @@ export function VideoFacePanel({
   const manualFaces = faces.filter((f) => f.providerKey === 'manual');
   const detectedFaces = faces.filter((f) => f.providerKey !== 'manual');
   const dedupedFaces = deduplicateFaces(detectedFaces);
+  const personFaceIds = buildPersonFaceIds(detectedFaces);
+
+  // Resolve every detected face ID a representative row stands for: for an
+  // unassigned face just the face itself, otherwise all of its person's faces.
+  const resolvedFaceIdsFor = (face: DetectedFaceDto): string[] =>
+    face.personId === null ? [face.id] : personFaceIds.get(face.personId) ?? [face.id];
 
   return (
     <Box>
@@ -301,6 +338,22 @@ export function VideoFacePanel({
                       </Typography>
                     )}
                   </Box>
+
+                  {/* Edit face — assign / reassign / unassign / delete */}
+                  {canAssign && (
+                    <Tooltip title="Edit face">
+                      <IconButton
+                        size="small"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditFace(face);
+                        }}
+                        aria-label="Edit face"
+                      >
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
 
                   {/* Jump-to-timestamp button */}
                   {hasTimestamp && onSeek && (
@@ -424,6 +477,22 @@ export function VideoFacePanel({
             </Alert>
           )}
         </Box>
+      )}
+
+      {/* Edit-face dialog — video faces use the representative-frame thumbnail
+          preview (no imageUrl passed). */}
+      {circleId && (
+        <AssignFaceDialog
+          open={editFace !== null}
+          face={editFace}
+          circleId={circleId}
+          faceIds={editFace ? resolvedFaceIdsFor(editFace) : []}
+          onClose={() => setEditFace(null)}
+          onSuccess={() => {
+            void refresh();
+            onFacesChanged?.();
+          }}
+        />
       )}
     </Box>
   );

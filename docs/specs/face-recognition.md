@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 3.6 |
+| **Version** | 3.7 |
 | **Last Updated** | July 2026 |
 | **Status** | All phases implemented |
 
@@ -338,6 +338,19 @@ For each cluster's representative frame, the handler:
 `GET /api/media/:id/faces` signs `frameThumbnailKey` via `MediaThumbnailService.signThumb` and returns it as `faceThumbnailUrl`.
 
 Thumbnail upload failure is non-fatal: the `Face` row is created without `frameThumbnailKey`, and `faceThumbnailUrl` is `null` in the API response.
+
+### Manual Correction (Photo/Video Parity, Issue #119)
+
+Detected faces on a video can now be corrected from the UI exactly like faces on a photo — unassign, reassign, create a new person, or permanently delete. Before this, `VideoFacePanel`'s "People in this video" rows were read-only: clicking a row only highlighted/seeked the video, with no way to fix a wrong assignment or remove a false-positive detection. This was frontend-only work — no backend or schema change — reusing the pre-existing generic Face endpoints unchanged:
+
+- **Unassign** a face, returning it to the unknown pool — `DELETE /api/people/:id/faces/:faceId`.
+- **Reassign** to an existing person — `POST /api/people/:id/faces`.
+- **Create a new person** and assign to them — `POST /api/people` (optionally with initial `faceIds`).
+- **Permanently delete** a spurious/false-positive detection — `POST /api/people/faces/bulk/purge`; requires `media:delete` + collaborator role, confirmed through a `PurgeFacesDialog` step.
+
+`AssignFaceDialog` — previously used only by `FaceThumbnails` on the photo detail view — is now a shared component used by both `FaceThumbnails` (photos) and `VideoFacePanel` (videos). Each detected-face row in `VideoFacePanel` gained an "Edit face" action that opens the same dialog. For video faces, the dialog's preview uses the representative-frame thumbnail (`faceThumbnailUrl`, see [Frame Thumbnail Storage](#frame-thumbnail-storage) above) rather than the bounding-box crop over the original image that photos use (see [Face-Crop Previews](#face-crop-previews)).
+
+**Per-person, not per-frame, semantics.** A person can be sampled across many frames of the same video — see [Cross-Frame Deduplication](#cross-frame-deduplication) above — and while dedup consolidates similar detections into one cluster per pass, distinct clusters within the same video can still independently match to the same `Person` (see [Face-to-Person Matching](#face-to-person-matching)), so one person's row in `VideoFacePanel` can correspond to more than one `Face` row for that video. An action taken from a person's row — unassign, reassign, or delete — applies to **all** of that person's detected `Face` rows in the video, not just the single representative face/frame the row displays.
 
 ### Settings
 
@@ -1118,3 +1131,4 @@ A job stuck in `running` status indicates the worker crashed or the container re
 | 3.4 | June 2026 | AI Assistant | Added Hide/Purge subsection in §8: `Person.hiddenAt` column (migration `20260628000000_person_hidden_at`), bulk hide/unhide/purge endpoints, search-inclusion asymmetry, audit events, and frontend People/Hidden tab integration |
 | 3.5 | July 2026 | AI Assistant | Added Individual Face Archive and Purge subsection in §8: `Face.hiddenAt` column and `(circleId, hiddenAt)` indexes on both `faces` and `people` (migration `20260704000000_add_face_hidden_at`), `PATCH /api/people/faces/bulk/hide`/`unhide` and `POST /api/people/faces/bulk/purge` endpoints scoped to unassigned (`personId=null`) faces, `archived` param on `GET /api/people/unassigned`, clustering-exclusion behavior, and archive-first permanent-delete UX |
 | 3.6 | July 2026 | AI Assistant | Added Auto-Archive on Match subsection in §8: `features.faceAutoArchive` + `face.autoArchive.matchThreshold` settings, `Face.hiddenReason` provenance column (migration `20260712000000_add_face_hidden_reason`), `FACE_ARCHIVE_MATCH_THRESHOLD`/`FACE_ARCHIVE_MAX_CANDIDATES`/`FACE_AUTO_ARCHIVE` env vars, the three trigger paths (detection-time, archive-time retroactive sweep, admin backfill), the server-only `face_auto_archive_sweep` job type and node-parity note, and `POST /api/admin/face/auto-archive/backfill` |
+| 3.7 | July 2026 | AI Assistant | Added Manual Correction (Photo/Video Parity, Issue #119) subsection in §6: `AssignFaceDialog` is now shared between `FaceThumbnails` (photos) and `VideoFacePanel` (videos), a new "Edit face" row action in `VideoFacePanel`, per-person (not per-frame) action semantics, the `faceThumbnailUrl` preview for video faces, and confirmation that this was frontend-only — no backend/schema change, reusing the pre-existing unassign/reassign/create-person/purge Face endpoints |
