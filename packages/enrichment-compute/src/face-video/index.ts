@@ -120,25 +120,14 @@ export function bestMatchAgainstSet(
  *       (isBetterRepresentative below).
  *     - Otherwise, start a new singleton cluster.
  *
- * Providers without per-detection embeddings (e.g. Rekognition delegated
- * recognition, isDelegated=true): skip clustering entirely — every detection
- * becomes its own cluster. Detections with an empty embedding array are also
- * always singletons, regardless of isDelegated.
+ * Detections with an empty embedding array cannot be compared and are always
+ * emitted as their own singleton cluster.
  */
 export function clusterFaceDetections<T>(
   detections: ClusterableDetection<T>[],
   clusterThreshold: number,
-  isDelegated: boolean,
 ): FaceCluster<T>[] {
   if (detections.length === 0) return [];
-
-  // Delegated providers have no embeddings — skip dedup, one cluster per detection.
-  if (isDelegated) {
-    return detections.map((d) => ({
-      representative: d,
-      allTimestampsMs: [d.timestampMs],
-    }));
-  }
 
   const clusters: FaceCluster<T>[] = [];
 

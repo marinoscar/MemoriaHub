@@ -32,7 +32,13 @@ export type DuplicateDetectionResult = z.infer<typeof duplicateDetectionResultSc
 
 export const faceDetectionResultSchema = z.object({
   modelVersion: z.string().min(1),
-  providerKey: z.string().min(1),
+  /**
+   * CompreFace is the ONLY face provider a worker node runs (issue #113).
+   * Pinning the literal here makes a stale node advertising a removed
+   * provider fail with a clean 400 at the result-ingestion boundary rather
+   * than throwing out of the server-side provider registry.
+   */
+  providerKey: z.literal('compreface'),
   /** Decoded/prepared (post prepareImageForProcessing) pixel dimensions. */
   imageWidth: z.number().int().positive(),
   imageHeight: z.number().int().positive(),
@@ -52,27 +58,16 @@ export const faceDetectionResultSchema = z.object({
       }),
       confidence: z.number().optional(),
       /**
-       * Face embedding. Dimensionality is provider-dependent (1024-d for the
-       * Human provider, 128-d for CompreFace mobilenet), so no hard length
-       * is pinned here — the server-side persist half validates against the
-       * active provider's expected dimensions.
+       * Face embedding — 128-d for the CompreFace mobilenet model. No hard
+       * length is pinned here; the server-side persist half validates against
+       * the active provider's expected dimensions.
        */
       embedding: z.array(z.number()).min(1),
       /**
-       * Provider-specific landmark data (e.g. CompreFace facial landmarks).
-       * Opaque passthrough — persisted verbatim, never interpreted by the
-       * compute/persist split. Absent for providers that don't report
-       * landmarks (e.g. the node's Human provider).
+       * CompreFace facial-landmark data. Opaque passthrough — persisted
+       * verbatim, never interpreted by the compute/persist split.
        */
       landmarks: z.unknown().optional(),
-      /**
-       * Provider-assigned face ID for delegated-recognition providers (e.g.
-       * AWS Rekognition collections). Absent for keyless/embedding-based
-       * providers (Human, CompreFace) and for every node-computed result — a
-       * distributed worker node always runs the keyless Human provider, never
-       * a delegated one.
-       */
-      externalFaceId: z.string().optional(),
     }),
   ),
 });
@@ -90,7 +85,8 @@ export type FaceDetectionResult = z.infer<typeof faceDetectionResultSchema>;
  */
 export const videoFaceDetectionResultSchema = z.object({
   modelVersion: z.string().min(1),
-  providerKey: z.string().min(1),
+  /** CompreFace-only, same rationale as faceDetectionResultSchema. */
+  providerKey: z.literal('compreface'),
   clusters: z.array(
     z.object({
       /** PIXEL bounding box relative to this cluster's own imageWidth/imageHeight. */
@@ -103,7 +99,7 @@ export const videoFaceDetectionResultSchema = z.object({
       imageWidth: z.number().int().positive(),
       imageHeight: z.number().int().positive(),
       confidence: z.number().optional(),
-      /** Provider-dependent dimensionality, same rationale as faceDetectionResultSchema. */
+      /** 128-d CompreFace embedding, same rationale as faceDetectionResultSchema. */
       embedding: z.array(z.number()).min(1),
       /** Opaque passthrough, same rationale as faceDetectionResultSchema. */
       landmarks: z.unknown().optional(),
