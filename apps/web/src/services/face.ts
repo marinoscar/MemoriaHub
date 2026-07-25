@@ -7,11 +7,10 @@ import { api } from './api';
 export interface FaceCapabilities {
   detect: boolean;
   embed: boolean;
-  delegatedRecognize: boolean;
 }
 
 export interface FaceProvider {
-  provider: string; // 'compreface' | 'rekognition' | 'human'
+  provider: string; // 'compreface'
   configured: boolean;
   enabled: boolean;
   requiresCredentials?: boolean;
