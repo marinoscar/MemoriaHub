@@ -5,7 +5,18 @@
       "Bash(then ls \"c:\\\\git\\\\EnterpriseAppBase\\\\apps\\\\web\\\\src\\\\hooks\")",
       "Bash(else echo \"Directory does not exist\")",
       "Bash(fi)",
-      "Bash(docker compose:*)"
+      "Bash(docker compose:*)",
+      "Bash(echo \"--- exit $? ---\")",
+      "Bash(grep -nE \"^#{2,4} \" docs/worker-node-setup.md)",
+      "Bash(grep -nviE \"^$\" src/__tests__/pages/FaceSettingsVideoCard.test.tsx)",
+      "Bash(awk 'NR>=3034 && NR<=3056 || NR>=3070 && NR<=3080 {printf \"%d: %s\\\\n\", NR, $0}' docs/API.md)",
+      "Bash(awk 'NR>=2224 && NR<=2240 {printf \"%d: %s\\\\n\", NR, $0}' docs/ARCHITECTURE.md)",
+      "Bash(awk 'NR>=1102 && NR<=1120 {printf \"%d: %s\\\\n\", NR, $0}' docs/specs/face-recognition.md)",
+      "Bash(awk 'NR>=1074 && NR<=1090 {printf \"%d: %s\\\\n\", NR, $0}' docs/specs/face-recognition.md)",
+      "Bash(awk 'NR>=412 && NR<=424 {printf \"%d: %s\\\\n\", NR, $0}' docs/specs/face-recognition.md)",
+      "Bash(awk 'NR>=1023 && NR<=1027 {printf \"%d: %s\\\\n\", NR, $0}' docs/specs/face-recognition.md)",
+      "Bash(awk 'NR>=383 && NR<=390 {printf \"%d: %s\\\\n\", NR, $0}' docs/specs/face-recognition.md)",
+      "Bash(awk 'NR>=152 && NR<=160 {printf \"%d: %s\\\\n\", NR, $0}' docs/specs/face-recognition.md)"
     ]
   }
 }
