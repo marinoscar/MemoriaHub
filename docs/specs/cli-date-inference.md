@@ -138,7 +138,7 @@ Every per-file write goes through `writeCapturedDate`, which never throws — an
 
 ### Placement rationale
 
-`exiftool-vendored` sits in `optionalDependencies` alongside the CLI's other heavy, not-always-needed native/runtime pieces (`sharp`, `onnxruntime-node`, `@vladmandic/human`, `tesseract.js`). Only the `apply` phase needs it — `diagnose` is fully read-only and never imports it. `exif-writer.ts` dynamically `import()`s the package lazily and memoizes the result, so a lean CLI install (`npm install --no-optional`, or an environment where the optional install step failed) doesn't force this dependency onto every user, and the read-only `diagnose` path is completely unaffected either way.
+`exiftool-vendored` sits in `optionalDependencies` alongside the CLI's other heavy, not-always-needed native/runtime pieces (`sharp`, `onnxruntime-node`, `tesseract.js`). Only the `apply` phase needs it — `diagnose` is fully read-only and never imports it. `exif-writer.ts` dynamically `import()`s the package lazily and memoizes the result, so a lean CLI install (`npm install --no-optional`, or an environment where the optional install step failed) doesn't force this dependency onto every user, and the read-only `diagnose` path is completely unaffected either way.
 
 ### Detection and failure UX
 

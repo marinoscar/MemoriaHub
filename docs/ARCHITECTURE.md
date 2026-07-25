@@ -2227,13 +2227,12 @@ FaceDetectionService.processMediaItem()
 
 ### Embedding Storage and Matching
 
-- **Default backend (`FACE_VECTOR_BACKEND=app`):** Embeddings stored in a `Float[]` column. Cosine similarity computed in-process as `1 - (A·B)` where A and B are L2-normalized vectors. Dimension depends on provider: 128-d for `compreface` (mobilenet build), 1024-d for `human` WASM.
-- **pgvector backend (`FACE_VECTOR_BACKEND=pgvector`):** Requires the `vector` PostgreSQL extension. An optional follow-up migration converts the column to a native pgvector type and adds an `hnsw vector_cosine_ops` index. The declared dimension must match the active provider. Matching uses the `<=>` operator for native accelerated similarity search.
-- **Provider embedding space isolation:** CompreFace (128-d ArcFace mobilenet), `human` (1024-d WASM), and Rekognition embeddings are not cross-compatible. A circle must use one provider consistently. Switching providers requires re-processing all photos.
+- **Default backend (`FACE_VECTOR_BACKEND=pgvector`):** Requires the `vector` PostgreSQL extension. Embeddings are stored in a `Float[]` column and mirrored into a derived `vector(128)` column (`faces.embedding_vec`, auto-maintained by a database trigger) indexed with HNSW (`vector_cosine_ops`) for accelerated KNN candidate selection via the `<=>` operator; the final accept/reject decision still recomputes exact cosine similarity in-app for parity. CompreFace is the sole face-recognition provider (issue #113 removed `human` and `rekognition`), so the embedding dimension is always 128-d.
+- **`app` backend (`FACE_VECTOR_BACKEND=app`, rollback path):** Skips the pgvector column entirely; cosine similarity is computed in-process as `1 - (A·B)` where A and B are L2-normalized vectors, scanning the `Float[]` column directly.
 
-### Rekognition Delegated Path
+### Removed: Delegated Matching (AWS Rekognition)
 
-When the active provider is `rekognition`, the app stores only an `externalFaceId` per face (from `IndexFaces`). Matching is delegated to the AWS collection via `SearchFacesByImage`; the app maps the returned external ID back to a `Person` record. No embedding vectors are stored in-app on this path.
+Earlier releases also shipped an AWS Rekognition provider that stored only an `externalFaceId` per face and delegated matching to an AWS collection via `SearchFacesByImage`. Issue #113 removed this provider (and the in-process `human` WASM provider) in favor of standardizing on CompreFace as the sole provider; the `externalFaceId` column and its index were dropped from `faces` in the same migration. See [docs/specs/face-recognition.md](specs/face-recognition.md) for the current single-provider model.
 
 ### Biometric Privacy
 

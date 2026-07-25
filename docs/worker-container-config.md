@@ -173,11 +173,10 @@ Set in `.env.worker`, passed to `docker-compose.worker.yml`. A container restart
 | `MEMORIAHUB_CONCURRENCY` | `2` (bundle default in `docker-compose.worker.yml`); CLI-native default is now core/RAM-aware (2–4 on a capable host) instead of a flat `1`, when neither this env var, `--concurrency`, nor persisted node config set an explicit value | integer ≥ 1 | Jobs this replica processes simultaneously. | Keep at 1–2 on memory-constrained hosts / AI-bound work; raise on beefier machines (see §6d). |
 | `MEMORIAHUB_ELIGIBLE_TYPES` | *(unset — advertises everything the local capability probe supports)* | CSV of job-type names | Restricts which job types this node claims. | Narrow if you want a worker dedicated to one job type (e.g. only `face_detection`). |
 | `MEMORIAHUB_POLL_INTERVAL_MS` | `5000` | ms | Claim-loop poll interval when idle. | Rarely changed. |
-| `MEMORIAHUB_FACE_PROVIDER` | `human` (CLI-native); the bundle sets `compreface` | `human` \| `compreface` | Which face-detection provider this node uses locally. | Set to `compreface` whenever the server's active face provider (`PUT /api/face/features/detection`) is `compreface` — mismatched providers land in different embedding spaces (§4). The bundle already does this. |
-| `MEMORIAHUB_COMPREFACE_URL` | `http://localhost:3000` (CLI-native); the bundle sets `http://compreface-core:3000` | URL | Base URL of the node's own local CompreFace sidecar; only consulted when `MEMORIAHUB_FACE_PROVIDER=compreface`. | Only if you point at a non-default port or a remote sidecar. |
+| `MEMORIAHUB_COMPREFACE_URL` | `http://localhost:3000` (CLI-native); the bundle sets `http://compreface-core:3000` | URL | Base URL of the node's own local CompreFace sidecar — the only face-detection provider a node uses (issue #113 removed the `human`/`rekognition` alternatives). | Only if you point at a non-default port or a remote sidecar. |
 | `MEMORIAHUB_STATE_DIR` | `~/.memoriahub` | path | Relocates the state directory (config, pidfile, IPC socket, logs, models); the bundle maps this to the `/data` volume. | Only for custom volume layouts. |
 | `MEMORIAHUB_HEADLESS` | *(image entrypoint always headless regardless)* | `1` | Implies `--headless`: drains in-flight jobs and exits WITHOUT deregistering on `SIGTERM` (so a restart re-attaches instead of accumulating a new node record). | N/A for the published image; relevant only for a custom entrypoint. |
-| `MODELS_DIR` | `~/.memoriahub/models` (CLI-native; the image already bakes models at `/app/models`, distinct from the API-side `MODELS_DIR` default of `./data/models` used for its own CLIP model copy) | path | Overrides where model resolution looks for CLIP/Human files. | Only to point at a different/mounted model directory (e.g. an air-gapped install). |
+| `MODELS_DIR` | `~/.memoriahub/models` (CLI-native; the image already bakes models at `/app/models`, distinct from the API-side `MODELS_DIR` default of `./data/models` used for its own CLIP model copy) | path | Overrides where model resolution looks for the CLIP model file. | Only to point at a different/mounted model directory (e.g. an air-gapped install). |
 
 ### 3.2 Bundle/compose knobs (`docker-compose.worker.yml` / `.env.worker`)
 
@@ -233,16 +232,16 @@ See §3.3 above for the full env-var reference: `MEMORIAHUB_MAX_OLD_SPACE_MB`, `
 
 ## 4. CompreFace
 
-The bundled `compreface-core` sidecar (`exadel/compreface-core:1.2.0-mobilenet`) produces 128-dimensional ArcFace/MobileFaceNet embeddings — the codebase is **committed to CompreFace** as its face-embedding space (all existing production face rows live in it), so a worker container defaults `MEMORIAHUB_FACE_PROVIDER=compreface` rather than the CLI's native default (`human`, 1024-d). Running Human on a node while the server is configured for CompreFace lands that node's faces in a different, non-comparable embedding space — person-matching cosine similarity silently produces false negatives or spurious matches. See [Worker Node Setup & Troubleshooting §5](worker-node-setup.md#5-matching-the-servers-face-detection-provider-compreface) for the full rationale and the native (non-container) setup path.
+The bundled `compreface-core` sidecar (`exadel/compreface-core:1.2.0-mobilenet`) produces 128-dimensional ArcFace/MobileFaceNet embeddings — the codebase is **committed to CompreFace** as its only face-embedding space (issue #113 removed the earlier `human` and `rekognition` providers, both on the server and on nodes). A worker container therefore always runs face detection through this sidecar; there is no provider to select. See [Worker Node Setup & Troubleshooting §5](worker-node-setup.md#5-running-the-compreface-sidecar) for the full rationale and the native (non-container) setup path.
 
 | Setting | Default | What it controls |
 |---|---|---|
 | `UWSGI_PROCESSES` | `${COMPREFACE_PROCESSES:-2}` | Parallel inference processes — CompreFace serves one request per uwsgi worker process, so this is the real parallelism knob (threads alone contend on Python's GIL and don't help). |
 | `UWSGI_THREADS` | `1` | Left at 1 always — see above. |
 
-**Health gating, not silent fallback.** The worker's `depends_on: compreface-core: condition: service_healthy` orders container startup, but the real guarantee against a silent fallback to Human is the worker's own start-time `verifyCompreface` gate: when `MEMORIAHUB_FACE_PROVIDER=compreface` and the node's eligible types include a face job, `node start` blocks on a bounded ~40s wait polling CompreFace's `/status` endpoint before claiming any jobs, and **fails outright** (not falling back to Human) if the sidecar never reports healthy. This matters because CompreFace takes ~15–30s to load its model on (re)create.
+**Health gating, and hard-fail with no fallback.** The worker's `depends_on: compreface-core: condition: service_healthy` orders container startup, but the real guarantee is the worker's own start-time `verifyCompreface` gate: when the node's eligible types include a face job, `node start` blocks on a bounded ~40s wait polling CompreFace's `/status` endpoint before claiming any jobs, and **fails outright** if the sidecar never reports healthy. There is no other provider to fall back to. This matters because CompreFace takes ~15–30s to load its model on (re)create.
 
-**Why not just use Human on the node?** The committed-to-CompreFace decision means every face row across the whole deployment must stay in one 128-d space for cosine-similarity person matching to work at all. Human's 1024-d space is not comparable, so it is never an acceptable substitute once CompreFace is the server's active provider — regardless of Human's lower operational overhead (it needs no sidecar container).
+A node whose sidecar is unreachable simply stops advertising `face_detection`/`video_face_detection` as eligible job types — the same capability gating described in [Worker Node Setup & Troubleshooting §5.4](worker-node-setup.md#54-hard-fail-behavior--no-fallback-to-another-provider) — rather than falling back to any local in-process alternative, since none exists anymore.
 
 See [Worker Node Setup & Troubleshooting §5.2](worker-node-setup.md#52-prerequisite-run-your-own-local-compreface-sidecar) for the equivalent core-aware sizing guidance on a native (non-container) install.
 
@@ -280,7 +279,7 @@ MEMORIAHUB_TOKEN=nod_...
 MEMORIAHUB_NODE_NAME=home-laptop
 MEMORIAHUB_CONCURRENCY=2
 ```
-The node adds opportunistic capacity on top of the API's own worker; both share the queue safely via `FOR UPDATE SKIP LOCKED` claiming — no coordination needed between them. **Face-provider parity matters:** if the server's active face provider is `compreface`, the node must also run `MEMORIAHUB_FACE_PROVIDER=compreface` (the container bundle default) or its face rows will land in a different, non-comparable embedding space.
+The node adds opportunistic capacity on top of the API's own worker; both share the queue safely via `FOR UPDATE SKIP LOCKED` claiming — no coordination needed between them. **Face capability depends on the sidecar, not a setting:** the node always uses CompreFace for face detection, so it needs its own reachable `compreface-core` sidecar (§4) to advertise `face_detection`/`video_face_detection` as eligible — without one it simply stops advertising those job types, no other configuration required.
 
 ### (c) Control-plane VPS + worker fleet
 

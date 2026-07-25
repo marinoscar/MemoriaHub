@@ -32,6 +32,16 @@
 >    embedded-vs-attached dashboard source split — see
 >    [distributed-nodes.md §9.3](distributed-nodes.md#93-worker-daemon-systemd-service-and-tui-attach).
 >
+> **Face detection has since changed again (issue #113).** Everything below describing a
+> node's face compute — the `@vladmandic/human` + TensorFlow.js WASM stack, the
+> `blazeface-back.json`/`faceres.json` model files, `FACE_HUMAN_MODEL_PATH`, the fs-backed
+> IOHandler and `patchFaceresEmbeddingOutput` hacks, and the 1024-d `providerKey='human'` /
+> `modelVersion='human-faceres-1024'` result shape — describes a provider that no longer
+> exists. MemoriaHub standardized on CompreFace as its only face provider: a node now runs
+> face detection against a local `compreface-core` sidecar, producing 128-d embeddings, and
+> the Human model files were removed from the model manifest. Read
+> [face-recognition.md](face-recognition.md) for the current model.
+>
 > Everything else below (the claim/lease model, the compute/persist split shape, the
 > parity-package concept, the job-type eligibility reasoning) held up largely as planned —
 > see distributed-nodes.md for the corrected specifics (exact endpoint paths, exact DTO
