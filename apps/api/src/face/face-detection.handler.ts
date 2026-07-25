@@ -12,11 +12,9 @@ export class FaceDetectionHandler implements EnrichmentHandler, OnModuleInit {
   /**
    * Node-eligibility (distributed workers): the payload a node submits via
    * POST /api/nodes/:id/jobs/:jobId/result for this job type — the shared
-   * contract from @memoriahub/enrichment-compute/dto. A node always computes
-   * with the keyless Human provider (1024-d); see
-   * FaceDetectionService.warnOnProviderMismatch for the cross-provider
-   * embedding-space caveat this implies when the server's active provider
-   * differs.
+   * contract from @memoriahub/enrichment-compute/dto. A node computes with the
+   * same keyless CompreFace sidecar the server uses, so the embeddings it
+   * submits live in the identical 128-d space as server-computed ones.
    */
   readonly nodeResultSchema = faceDetectionResultSchema;
 

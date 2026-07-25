@@ -7,7 +7,7 @@
 //
 // Responsibilities:
 //   - resolveProviderAndCreds()   — load active detection config + credentials
-//   - detectWithThrottleMapping() — wrap provider.detect + Rekognition throttle mapping
+//   - detectWithThrottleMapping() — thin wrapper around provider.detect
 //   - normalizeFace()             — bbox normalization + L2 embedding normalization
 //   - persistAndMatchFaces()      — create Face rows + run person-matching loop
 //   - markStatus() / markFailed() — MediaFaceStatus upsert helpers
@@ -24,7 +24,6 @@ import {
   FaceProviderCredentials,
 } from './providers/face-provider.interface';
 import { FaceMatchingService } from './face-matching.service';
-import { RateLimitError } from '../enrichment/rate-limit.error';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 
 // ---------------------------------------------------------------------------
@@ -117,41 +116,20 @@ export class FaceDetectionCore {
   // ---------------------------------------------------------------------------
 
   /**
-   * Call provider.detect() and map Rekognition throttle errors to RateLimitError
-   * so the enrichment worker routes them through the rate-limit deferral path.
-   * Keyless providers (human, compreface) have no remote rate limit.
+   * Thin pass-through to provider.detect().
+   *
+   * This used to translate AWS Rekognition throttle errors into RateLimitError
+   * so the enrichment worker would route them through the rate-limit deferral
+   * path. CompreFace is the only face provider now, and it is a keyless local
+   * sidecar with no remote quota, so there is nothing left to map — the wrapper
+   * is kept as the single seam both the photo and video paths call through.
    */
   async detectWithThrottleMapping(
     provider: FaceProvider,
     creds: FaceProviderCredentials,
     buffer: Buffer,
-    providerKey: string,
   ): Promise<DetectedFace[]> {
-    try {
-      return await provider.detect(creds, buffer);
-    } catch (detectErr) {
-      if (providerKey === 'rekognition') {
-        const e = detectErr as Record<string, unknown> | null;
-        const name = typeof e?.['name'] === 'string' ? e['name'] : undefined;
-        const awsThrottleNames = new Set([
-          'ThrottlingException',
-          'ProvisionedThroughputExceededException',
-          'TooManyRequestsException',
-          'RequestLimitExceeded',
-          'SlowDown',
-        ]);
-        if (name && awsThrottleNames.has(name)) {
-          throw new RateLimitError(
-            typeof e?.['message'] === 'string'
-              ? e['message']
-              : `Rekognition throttled: ${name}`,
-            undefined,
-            providerKey,
-          );
-        }
-      }
-      throw detectErr;
-    }
+    return provider.detect(creds, buffer);
   }
 
   // ---------------------------------------------------------------------------
@@ -239,12 +217,9 @@ export class FaceDetectionCore {
       autoArchiveOn = false;
     }
 
-    const provider = this.registry.get(providerKey);
-
     const createdFaces: Array<{
       id: string;
       embedding: number[];
-      externalFaceId: string | null;
     }> = [];
 
     for (const face of faces) {
@@ -266,22 +241,21 @@ export class FaceDetectionCore {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           landmarks: (face.landmarks ?? null) as any,
           embedding: face.embedding ?? [],
-          externalFaceId: face.externalFaceId ?? null,
           providerKey,
           modelVersion,
           manuallyAssigned: false,
           ...videoFields,
         },
-        select: { id: true, embedding: true, externalFaceId: true },
+        select: { id: true, embedding: true },
       });
       createdFaces.push(created);
     }
 
-    // Lazily-loaded archived-face candidate pool — FALLBACK path only (app
-    // backend / non-128-d probes; populated at most once per job, only when
-    // the first unmatched face needs it). On the pgvector backend each probe
-    // is a single indexed KNN and this pool is never loaded. Also the batch of
-    // newly created faces to auto-archive after the loop completes.
+    // Lazily-loaded archived-face candidate pool — FALLBACK path only (the
+    // FACE_VECTOR_BACKEND='app' rollback path; populated at most once per job,
+    // only when the first unmatched face needs it). On the pgvector backend
+    // each probe is a single indexed KNN and this pool is never loaded. Also
+    // the batch of newly created faces to auto-archive after the loop completes.
     let archivedCandidates: Array<{ id: string; embedding: number[] }> | null =
       null;
     const toArchive: string[] = [];
@@ -291,12 +265,7 @@ export class FaceDetectionCore {
       try {
         let matchResult: { personId: string } | null = null;
 
-        if (face.externalFaceId && provider.capabilities.delegatedRecognize) {
-          matchResult = await this.matchingService.matchFaceByExternalId(
-            circleId,
-            face.externalFaceId,
-          );
-        } else if (face.embedding.length > 0) {
+        if (face.embedding.length > 0) {
           matchResult = await this.matchingService.matchFaceToPerson(
             circleId,
             face.embedding,
@@ -321,9 +290,9 @@ export class FaceDetectionCore {
           // Faces archived by this same job are batch-applied after the loop,
           // so neither path below sees them mid-loop — unchanged behavior.
           if (this.matchingService.usesPgvectorFor(face.embedding)) {
-            // pgvector backend + 128-d probe: one indexed KNN against the
-            // partial archive HNSW index per face. Skipping the preload avoids
-            // reading up to archiveMaxCandidates (5000) rows per job.
+            // pgvector backend: one indexed KNN against the partial archive
+            // HNSW index per face. Skipping the preload avoids reading up to
+            // archiveMaxCandidates (5000) rows per job.
             const archMatch = await this.matchingService.matchFaceToArchived(
               circleId,
               face.embedding,
@@ -336,8 +305,8 @@ export class FaceDetectionCore {
               );
             }
           } else {
-            // App backend / non-128-d probe: preload the archived reference
-            // set once per job and reuse it for every probe (in-loop reuse —
+            // App backend (FACE_VECTOR_BACKEND='app'): preload the archived
+            // reference set once per job and reuse it for every probe (in-loop —
             // candidates short-circuit matchFaceToArchived to the in-JS scan).
             if (archivedCandidates === null) {
               archivedCandidates = await this.prisma.face.findMany({

@@ -112,9 +112,9 @@ export class FaceDetectionService {
   // pre-split code.
   //
   // This is the SERVER-side compute half, used for the in-process path. A
-  // distributed worker node runs the equivalent compute locally (always via
-  // the keyless Human provider — see warnOnProviderMismatch below) and
-  // submits the same DTO shape directly, bypassing this method.
+  // distributed worker node runs the equivalent compute locally (via the same
+  // keyless CompreFace sidecar, so both sides produce embeddings in the same
+  // 128-d space) and submits the same DTO shape directly, bypassing this method.
   // ---------------------------------------------------------------------------
 
   async computeFaces(
@@ -143,12 +143,15 @@ export class FaceDetectionService {
       resolved.provider,
       resolved.creds,
       uprightBuffer,
-      resolved.providerKey,
     );
 
     return {
       modelVersion: resolved.modelVersion,
-      providerKey: resolved.providerKey,
+      // The shared DTO narrows providerKey to the literal 'compreface' now that
+      // CompreFace is the only face provider. resolveProviderAndCreds() routes
+      // through FaceProviderRegistry.get(), which throws for any other key, so
+      // this is the only value that can reach here.
+      providerKey: resolved.providerKey as 'compreface',
       imageWidth: uprightWidth,
       imageHeight: uprightHeight,
       faces: detectedFaces.map((face) => ({
@@ -163,7 +166,6 @@ export class FaceDetectionService {
         confidence: face.confidence,
         landmarks: face.landmarks,
         embedding: face.embedding && face.embedding.length > 0 ? face.embedding : [],
-        externalFaceId: face.externalFaceId,
       })),
     };
   }
@@ -185,8 +187,6 @@ export class FaceDetectionService {
       throw new Error('face_detection job missing circleId');
     }
 
-    await this.warnOnProviderMismatch(job.id, result.providerKey);
-
     // Delete existing non-manual Face rows (idempotency) — unconditional, even
     // when zero faces are in the result, so a rerun that now finds nothing
     // still clears stale detections.
@@ -207,7 +207,6 @@ export class FaceDetectionService {
           confidence: face.confidence,
           landmarks: face.landmarks,
           embedding: face.embedding,
-          externalFaceId: face.externalFaceId,
         };
         return this.core.normalizeFace(asDetected, result.imageWidth, result.imageHeight, logCtx);
       });
@@ -234,37 +233,6 @@ export class FaceDetectionService {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // warnOnProviderMismatch
-  //
-  // A distributed worker node ALWAYS computes with the keyless Human provider
-  // (1024-d embeddings); the server's ACTIVE provider (system settings
-  // face.features.detection) might be compreface (128-d) or a delegated
-  // provider like rekognition. persistFaces trusts the DTO's own
-  // providerKey/modelVersion to tag the created Face rows — but person-
-  // matching cosine similarity only works within ONE embedding space, so if a
-  // node-computed 1024-d result lands in a circle whose existing faces are
-  // 128-d compreface vectors, the new faces will silently cluster separately
-  // rather than matching existing People (same class of silent-degradation
-  // risk the distributed-nodes spec §7 accepts for embedding parity in
-  // general). This warning is operator visibility only — it never blocks
-  // persistence, and a resolution failure here is swallowed.
-  // ---------------------------------------------------------------------------
-
-  private async warnOnProviderMismatch(jobId: string, resultProviderKey: string): Promise<void> {
-    try {
-      const active = await this.core.resolveProviderAndCreds();
-      if (active.providerKey !== resultProviderKey) {
-        this.logger.warn(
-          `FaceJob ${jobId}: result providerKey="${resultProviderKey}" differs from the currently-active ` +
-            `server provider "${active.providerKey}" — person-matching cosine similarity operates in a ` +
-            `different embedding space than the circle's existing faces (silent match degradation risk)`,
-        );
-      }
-    } catch {
-      // Best-effort only — a provider-resolution failure here must never block persistence.
-    }
-  }
 }
 
 // ---------------------------------------------------------------------------

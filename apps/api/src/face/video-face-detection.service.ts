@@ -364,7 +364,11 @@ export class VideoFaceDetectionService {
 
       const result: VideoFaceDetectionResult = {
         modelVersion,
-        providerKey,
+        // The shared DTO narrows providerKey to the literal 'compreface' now
+        // that CompreFace is the only face provider; resolveProviderAndCreds()
+        // routes through FaceProviderRegistry.get(), which throws for any other
+        // key, so this is the only value that can reach here.
+        providerKey: providerKey as 'compreface',
         clusters,
       };
 
@@ -391,8 +395,8 @@ export class VideoFaceDetectionService {
   // needs storage credentials only the server has).
   //
   // This is the SERVER-side compute half, used for the in-process path. A
-  // distributed worker node runs the equivalent compute locally (always via
-  // the keyless Human provider) and submits a VideoFaceDetectionResult
+  // distributed worker node runs the equivalent compute locally (via the same
+  // keyless CompreFace sidecar) and submits a VideoFaceDetectionResult
   // directly (after uploading its own thumbnails via a presigned URL),
   // bypassing this method.
   // ---------------------------------------------------------------------------
@@ -404,7 +408,7 @@ export class VideoFaceDetectionService {
     resolved: ResolvedProvider,
     logJobId: string,
   ): Promise<ComputedVideoFaceCluster[]> {
-    const { provider, creds, providerKey } = resolved;
+    const { provider, creds } = resolved;
 
     const fileExt = extname(tmpVideoPath) || '.mp4';
 
@@ -436,7 +440,6 @@ export class VideoFaceDetectionService {
         provider,
         creds,
         frameBuf,
-        providerKey,
       );
 
       const logCtx = `VideoFaceJob ${logJobId} frame@${frame.timestampMs}ms`;
@@ -460,7 +463,6 @@ export class VideoFaceDetectionService {
     const clusters = clusterFaceDetections(
       allDetections,
       this.matchingService.clusterThreshold,
-      provider.capabilities.delegatedRecognize,
     );
 
     this.logger.log(

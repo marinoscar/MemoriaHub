@@ -141,7 +141,8 @@ export class FaceSettingsService {
     dto: UpsertFaceCredentialsDto,
     userId: string,
   ) {
-    // apiKey is optional (Rekognition uses env-level AWS creds)
+    // apiKey is optional — CompreFace is keyless and a credential row only ever
+    // needs to carry an optional baseUrl override.
     const rawKey = dto.apiKey ?? '';
     const last4 = rawKey ? rawKey.slice(-4) : '';
     const encryptedKey = encryptSecret(rawKey);
@@ -153,7 +154,6 @@ export class FaceSettingsService {
         encryptedKey,
         last4,
         baseUrl: dto.baseUrl ?? null,
-        region: dto.region ?? null,
         enabled: dto.enabled ?? true,
         updatedByUserId: userId,
       },
@@ -161,7 +161,6 @@ export class FaceSettingsService {
         encryptedKey,
         last4,
         baseUrl: dto.baseUrl ?? null,
-        region: dto.region ?? null,
         ...(dto.enabled !== undefined && { enabled: dto.enabled }),
         updatedByUserId: userId,
       },
@@ -231,11 +230,10 @@ export class FaceSettingsService {
       creds = {
         apiKey: decryptSecret(cred.encryptedKey),
         baseUrl: cred.baseUrl ?? undefined,
-        region: cred.region ?? undefined,
       };
     } else if (cred) {
       // Row exists but provider is disabled — pass empty key
-      creds = { apiKey: '', baseUrl: cred.baseUrl ?? undefined, region: cred.region ?? undefined };
+      creds = { apiKey: '', baseUrl: cred.baseUrl ?? undefined };
     } else {
       // No credential row — use static list without key
       creds = { apiKey: '' };
@@ -271,50 +269,29 @@ export class FaceSettingsService {
    * Resolve decrypted credentials for a face provider.
    * For internal use only — never returns keys to HTTP callers.
    *
-   * For providers with requiresCredentials === false (e.g. compreface, human):
+   * CompreFace — the only face provider — is keyless
+   * (requiresCredentials === false):
    *   - Check DB for an optional credential row that stores a custom baseUrl.
    *   - If a row exists and is enabled, return its baseUrl (no apiKey needed).
    *   - If no row exists, return an empty object — the provider will fall back
    *     to FACE_COMPREFACE_URL or its hard-coded docker-network default.
    *   - Never throw "not configured" for keyless providers.
    *
-   * For providers with requiresCredentials === true (e.g. rekognition):
-   *   - A DB credential row MUST exist and be enabled.
+   * A keyed provider path used to exist here for AWS Rekognition; it was
+   * removed along with the provider itself.
    */
   async resolveCredentials(providerKey: string): Promise<FaceProviderCredentials> {
     // Validate that the provider key is known — registry.get throws for unknown keys.
-    const provider = this.registry.get(providerKey);
+    this.registry.get(providerKey);
 
-    if (!provider.requiresCredentials) {
-      // Keyless provider: optionally read a stored baseUrl override from DB.
-      const cred = await this.prisma.faceProviderCredential.findUnique({
-        where: { provider: providerKey },
-      });
-      if (cred && cred.enabled && cred.baseUrl) {
-        return { baseUrl: cred.baseUrl };
-      }
-      // No row or no custom baseUrl — provider uses env/default fallback.
-      return {};
-    }
-
+    // Keyless provider: optionally read a stored baseUrl override from DB.
     const cred = await this.prisma.faceProviderCredential.findUnique({
       where: { provider: providerKey },
     });
-    if (!cred) {
-      throw new BadRequestException(
-        `Face provider "${providerKey}" is not configured`,
-      );
+    if (cred && cred.enabled && cred.baseUrl) {
+      return { baseUrl: cred.baseUrl };
     }
-    if (!cred.enabled) {
-      throw new BadRequestException(
-        `Face provider "${providerKey}" is disabled`,
-      );
-    }
-    const apiKey = decryptSecret(cred.encryptedKey);
-    return {
-      apiKey,
-      baseUrl: cred.baseUrl ?? undefined,
-      region: cred.region ?? undefined,
-    };
+    // No row or no custom baseUrl — provider uses env/default fallback.
+    return {};
   }
 }

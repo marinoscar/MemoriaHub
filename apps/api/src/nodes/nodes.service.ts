@@ -886,6 +886,14 @@ export class NodesService {
    * enrichment output matches the server. Structure matters more than exact
    * values here.
    *
+   * The manifest currently holds ONE entry: the CLIP ViT-B/32 ONNX vision
+   * model used by duplicate detection. Face detection needs no downloadable
+   * model — CompreFace, the only face provider, ships its weights inside the
+   * `compreface-core` sidecar container, so a node running face detection
+   * points at that sidecar rather than fetching model files. (The four Human
+   * WASM face-model entries that used to live here were removed with the
+   * `human` provider.)
+   *
    * Returns a BARE ARRAY (not `{ models: [...] }`): the CLI's
    * `ApiClient.getModelManifest(): Promise<ModelManifestEntry[]>` unwraps the
    * global `{ data }` envelope and then iterates the result directly.
@@ -916,34 +924,6 @@ export class NodesService {
         // non-empty subdir here previously caused a double-nested download
         // path invisible to the code that consumes the file.
         targetSubdir: '',
-      },
-      {
-        name: 'blazeface-back.json',
-        url: 'https://github.com/vladmandic/human-models/raw/main/models/blazeface-back.json',
-        sha256: 'a765f7b2a6c1d841ecc0b0686e5f51b141b39b7bcdf2888542dc9d9fc4384a87',
-        bytes: 79043,
-        targetSubdir: 'human',
-      },
-      {
-        name: 'blazeface-back.bin',
-        url: 'https://github.com/vladmandic/human-models/raw/main/models/blazeface-back.bin',
-        sha256: 'dc9a97fdc50bc43216554bdd69aa3e7b9361a519ee7bdd996a2f69a98a6f9b72',
-        bytes: 538928,
-        targetSubdir: 'human',
-      },
-      {
-        name: 'faceres.json',
-        url: 'https://github.com/vladmandic/human-models/raw/main/models/faceres.json',
-        sha256: '5b83d49c0385d2e68a05122441b94226313677cae9fcc40b9587ad50079eb4df',
-        bytes: 71432,
-        targetSubdir: 'human',
-      },
-      {
-        name: 'faceres.bin',
-        url: 'https://github.com/vladmandic/human-models/raw/main/models/faceres.bin',
-        sha256: '2c7d2d62b76c97528b736527aa09d310ea71743c9e3e79fb6c62d4b2d73af79b',
-        bytes: 6978814,
-        targetSubdir: 'human',
       },
     ];
   }

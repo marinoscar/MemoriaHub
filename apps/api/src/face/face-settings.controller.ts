@@ -64,7 +64,7 @@ export class FaceSettingsController {
   @ApiOperation({ summary: 'Configure face provider credentials (Admin)' })
   @ApiParam({
     name: 'provider',
-    description: 'Provider key: compreface | rekognition',
+    description: 'Provider key: compreface',
     example: 'compreface',
   })
   @ApiResponse({ status: 200, description: 'Credential saved (masked, no plaintext key returned)' })
@@ -118,7 +118,7 @@ export class FaceSettingsController {
   @ApiQuery({
     name: 'provider',
     required: true,
-    description: 'Provider key (compreface | rekognition)',
+    description: 'Provider key (compreface)',
   })
   @ApiResponse({ status: 200, description: 'List of model version strings' })
   async listModels(@Query('provider') provider: string) {
