@@ -147,11 +147,7 @@ export class FaceDetectionService {
 
     return {
       modelVersion: resolved.modelVersion,
-      // The shared DTO narrows providerKey to the literal 'compreface' now that
-      // CompreFace is the only face provider. resolveProviderAndCreds() routes
-      // through FaceProviderRegistry.get(), which throws for any other key, so
-      // this is the only value that can reach here.
-      providerKey: resolved.providerKey as 'compreface',
+      providerKey: resolved.providerKey,
       imageWidth: uprightWidth,
       imageHeight: uprightHeight,
       faces: detectedFaces.map((face) => ({

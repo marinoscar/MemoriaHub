@@ -33,7 +33,14 @@ import { SystemSettingsService } from '../settings/system-settings/system-settin
 export interface ResolvedProvider {
   provider: FaceProvider;
   creds: FaceProviderCredentials;
-  providerKey: string;
+  /**
+   * Narrowed to the one registered provider (issue #113). This is what lets the
+   * compute halves build a `faceDetectionResultSchema` payload — whose
+   * `providerKey` is `z.literal('compreface')` — without casting at each call
+   * site. The narrowing is earned in `resolveProviderAndCreds()`, where
+   * `registry.get()` has already rejected anything else.
+   */
+  providerKey: 'compreface';
   modelVersion: string;
 }
 
@@ -106,9 +113,16 @@ export class FaceDetectionCore {
     }
 
     const creds = await this.faceSettingsService.resolveCredentials(providerKey);
+    // Throws for any key that is not registered, so past this line the stored
+    // setting is known to name the only provider that exists.
     const provider = this.registry.get(providerKey);
 
-    return { provider, creds, providerKey, modelVersion };
+    return {
+      provider,
+      creds,
+      providerKey: providerKey as 'compreface',
+      modelVersion,
+    };
   }
 
   // ---------------------------------------------------------------------------

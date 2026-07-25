@@ -143,7 +143,7 @@ export class VideoFaceDetectionService {
     await this.core.markProcessing(job.mediaItemId);
 
     // --- 2. Resolve provider + creds ---
-    let providerKey: string;
+    let providerKey: ResolvedProvider['providerKey'];
     let modelVersion: string;
     let resolved: ResolvedProvider;
 
@@ -364,11 +364,7 @@ export class VideoFaceDetectionService {
 
       const result: VideoFaceDetectionResult = {
         modelVersion,
-        // The shared DTO narrows providerKey to the literal 'compreface' now
-        // that CompreFace is the only face provider; resolveProviderAndCreds()
-        // routes through FaceProviderRegistry.get(), which throws for any other
-        // key, so this is the only value that can reach here.
-        providerKey: providerKey as 'compreface',
+        providerKey,
         clusters,
       };
 
