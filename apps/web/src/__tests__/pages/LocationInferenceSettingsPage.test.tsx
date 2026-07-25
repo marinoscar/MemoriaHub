@@ -106,6 +106,7 @@ function makeSystemSettingsMock(locationInference = false) {
         requireSameDevice: true,
         maxAnchorDistanceKm: 2,
         maxImpliedSpeedKmh: 150,
+        bulkAcceptThreshold: 80,
       },
       ui: { allowUserThemeOverride: true },
       updatedAt: new Date().toISOString(),
@@ -271,6 +272,14 @@ describe('LocationInferenceSettingsPage', () => {
       expect(sliders.find((s) => s.getAttribute('aria-valuenow') === '150')).toBeTruthy();
     });
 
+    it('renders the bulk-accept confidence threshold slider with the value from settings', () => {
+      render(<LocationInferenceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByText(/bulk-accept confidence threshold/i)).toBeInTheDocument();
+      const sliders = screen.getAllByRole('slider');
+      expect(sliders.find((s) => s.getAttribute('aria-valuenow') === '80')).toBeTruthy();
+    });
+
     it('renders the "Require matching camera make/model between anchors" switch, checked by default', () => {
       render(<LocationInferenceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
 
@@ -305,6 +314,7 @@ describe('LocationInferenceSettingsPage', () => {
             requireSameDevice: expect.any(Boolean),
             maxAnchorDistanceKm: expect.any(Number),
             maxImpliedSpeedKmh: expect.any(Number),
+            bulkAcceptThreshold: expect.any(Number),
           },
         });
       });
