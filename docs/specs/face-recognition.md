@@ -2,9 +2,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 3.7 |
+| **Version** | 3.8 |
 | **Last Updated** | July 2026 |
 | **Status** | All phases implemented |
+
+> **Issue #113 — CompreFace-only.** This spec now describes a CompreFace-only system. The Human WASM (in-process, keyless, 1024-d) and AWS Rekognition (delegated, cloud) providers were removed entirely — CompreFace is the sole, default face-recognition provider everywhere: the only registry entry, the only thing the Face Settings admin UI shows, and the only embedding dimensionality (128-d) any `Face` row can have. A migration dropped `Face.externalFaceId` (existed only for Rekognition's delegated matching, zero production rows) and hard-deleted the legacy `providerKey='human'` 1024-d rows, which were permanently incompatible with the compreface-only 128-d pgvector world. Use `POST /api/admin/face/backfill` to regenerate face detection for any media affected by that cleanup.
 
 ---
 
@@ -90,7 +92,7 @@ All providers implement the `FaceProvider` interface defined in `apps/api/src/fa
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `key` | `string` | Registry identifier (e.g. `'compreface'`) |
+| `key` | `string` | Registry identifier — `'compreface'`, the only registered provider |
 | `capabilities` | `FaceCapabilities` | What this provider can do |
 | `modelVersion` | `string` | Human-readable model descriptor |
 | `requiresCredentials` | `boolean` | Whether an API key is required |
@@ -101,7 +103,6 @@ All providers implement the `FaceProvider` interface defined in `apps/api/src/fa
 interface FaceCapabilities {
   detect: boolean;            // Can detect face bounding boxes
   embed: boolean;             // Can generate embedding vectors
-  delegatedRecognize: boolean; // Uses external collection for matching (Rekognition)
 }
 ```
 
@@ -113,7 +114,6 @@ interface DetectedFace {
   confidence?: number;
   landmarks?: unknown;
   embedding?: number[];
-  externalFaceId?: string;
 }
 ```
 
@@ -123,28 +123,26 @@ interface DetectedFace {
 |--------|----------|-------------|
 | `detect(creds, imageBuffer)` | Yes | Returns array of DetectedFace |
 | `embed(creds, imageBuffer)` | No | Returns embedding for first face |
-| `enroll(creds, imageBuffer, faceId)` | No | Adds face to external collection |
-| `recognize(creds, imageBuffer, circleId)` | No | Searches external collection |
 | `listModels(creds)` | No | Returns available models |
 | `testConnection(creds)` | No | Validates connectivity |
 
-### Provider Comparison
+### The CompreFace Provider
 
-| Property | `human` | `compreface` | `rekognition` |
-|----------|---------|--------------|---------------|
-| `key` | `human` | `compreface` | `rekognition` |
-| `modelVersion` | `human-faceres-1024` | `compreface-arcface-mobilefacenet-128` | `rekognition-2023` |
-| Embedding dimensions | 1024 | 128 | None (delegated) |
-| `requiresCredentials` | `false` | `false` | `true` |
-| `detect` | Yes | Yes | Yes |
-| `embed` | Yes | Yes | No |
-| `delegatedRecognize` | No | No | Yes |
-| Infrastructure | In-process WASM | `compreface-core` sidecar | AWS cloud API |
-| Data leaves server | No | No | Yes |
-| Cost | Free | Free | Per-image (AWS pricing) |
-| When to use | Privacy-first, no containers | Recommended default, balanced accuracy | Highest accuracy, cloud, cost |
+CompreFace (`exadel/compreface-core`, RetinaFace detector + ArcFace MobileFaceNet calculator) is the sole face-recognition provider (issue #113 removed the Human WASM and AWS Rekognition alternatives that previously existed alongside it).
 
-**Recommended default:** `compreface`. It requires no API key, runs as a stateless sidecar on the same Docker network, produces 128-d ArcFace MobileFaceNet embeddings stored in the application's own database, and keeps all photo data and biometric vectors on-premise.
+| Property | Value |
+|----------|-------|
+| `key` | `compreface` |
+| `modelVersion` | `compreface-arcface-mobilefacenet-128` |
+| Embedding dimensions | 128 |
+| `requiresCredentials` | `false` |
+| `detect` | Yes |
+| `embed` | Yes |
+| Infrastructure | `compreface-core` sidecar (stateless, no API key, no admin UI) |
+| Data leaves server | No |
+| Cost | Free |
+
+It requires no API key, runs as a stateless sidecar on the same Docker network, produces 128-d ArcFace MobileFaceNet embeddings stored in the application's own database, and keeps all photo data and biometric vectors on-premise.
 
 ### Provider Registry
 
@@ -153,8 +151,6 @@ interface DetectedFace {
 ```typescript
 new Map([
   ['compreface', new ComprefaceProvider()],
-  ['rekognition', new RekognitionProvider()],
-  ['human', new HumanProvider()],
 ])
 ```
 
@@ -182,9 +178,9 @@ API keys are encrypted with AES-256-GCM using `SECRETS_ENCRYPTION_KEY` (a base64
 
 Generate a key: `openssl rand -base64 32`
 
-### Keyless Providers
+### Keyless Provider
 
-`human` and `compreface` have `requiresCredentials: false`. No API key is needed. A credential row for these providers, if present, stores only an optional `baseUrl` override — useful when the CompreFace sidecar runs at a non-default address. No key is set or required.
+CompreFace has `requiresCredentials: false`. No API key is needed. A credential row for it, if present, stores only an optional `baseUrl` override — useful when the CompreFace sidecar runs at a non-default address. No key is set or required.
 
 ### Active Detection Feature
 
@@ -239,7 +235,7 @@ For queue mechanics (worker polling, atomic claim, retry, concurrency), see **[d
 
 **Step 7.** Delete all existing `Face` rows for this `mediaItemId` where `manuallyAssigned=false`. This makes reruns idempotent without disturbing faces the user has manually assigned.
 
-**Step 8.** Normalize bounding boxes. If any of `x`, `y`, `w`, or `h` in the returned bounding box is greater than 1.0, the box is in absolute pixel coordinates — divide by `uprightWidth` and `uprightHeight` to get fractions in 0–1. If all values are already ≤ 1.0, use them as-is. Note: the CompreFace provider returns absolute pixel coordinates from the sidecar; the Human provider returns normalized fractions directly. Normalization is always applied in the service, not the provider.
+**Step 8.** Normalize bounding boxes. If any of `x`, `y`, `w`, or `h` in the returned bounding box is greater than 1.0, the box is in absolute pixel coordinates — divide by `uprightWidth` and `uprightHeight` to get fractions in 0–1. If all values are already ≤ 1.0, use them as-is. The CompreFace provider always returns absolute pixel coordinates from the sidecar, so this branch is always taken in practice; the guard is kept defensive rather than assumed. Normalization is always applied in the service, not the provider.
 
 **Step 9.** L2-normalize embeddings (belt-and-suspenders pass; providers already normalize internally).
 
@@ -326,8 +322,6 @@ For each frame detection (in order):
 
 Detections with empty embeddings (rare edge case) become singleton clusters.
 
-**Rekognition (delegated path):** Rekognition does not return per-face embeddings — recognition is delegated to AWS collections. Cross-frame clustering is skipped; every detection becomes its own cluster. Each `Face` row still records `videoTimestampMs`.
-
 ### Frame Thumbnail Storage
 
 For each cluster's representative frame, the handler:
@@ -378,15 +372,13 @@ This is a known v1 limitation. A future improvement would register frame thumbna
 
 All embedding vectors are L2-normalized to unit length before storage. Normalization is applied in the provider and again in the detection service. For L2-normalized unit vectors, cosine similarity reduces to the dot product: `similarity = A · B`.
 
-Embedding dimensions are provider-specific and not cross-compatible:
+CompreFace is the only provider, so embedding dimensions are fixed:
 
 | Provider | Dimensions | Algorithm |
 |----------|-----------|-----------|
 | `compreface` | 128 | ArcFace MobileFaceNet |
-| `human` | 1024 | FaceRes (WASM) |
-| `rekognition` | None stored | Delegated to AWS collection |
 
-Never compare embeddings from different providers or different model versions. Switching providers requires re-processing all photos from the original S3 blobs.
+Never compare embeddings from different model versions. Switching the CompreFace image tag/model build (e.g. `1.2.0-mobilenet` → a different build with a different embedding dimension) requires re-processing all photos from the original S3 blobs.
 
 ### Per-Person Centroids
 
@@ -412,14 +404,6 @@ Centroids are computed on demand inside `FaceMatchingService.computePersonCentro
 
 `FACE_VECTOR_BACKEND=pgvector` is now the default backend; see [Face Matching Backend: pgvector KNN](#face-matching-backend-pgvector-knn) below for the indexed KNN candidate-selection path that replaces steps 1–3 above. The accept/reject decision (steps 4–6) is unchanged — pgvector only accelerates which persons are worth scoring, never the final match decision.
 
-### Delegated Matching (Rekognition)
-
-When the active provider is `rekognition`, embeddings are not stored in the application database. Instead:
-
-- `provider.detect()` calls `DetectFacesCommand` for bounding boxes.
-- `provider.enroll()` calls `IndexFacesCommand` and returns an AWS FaceId stored as `Face.externalFaceId`.
-- `FaceMatchingService.matchFaceByExternalId(circleId, externalFaceId)` finds an existing `Face` row in the circle sharing that `externalFaceId` and returns the associated `Person`.
-
 ### Face Matching Backend: pgvector KNN
 
 **Why:** the original in-app path was an O(N) full scan — load every active `Person`'s centroid (or every archived face) into the process and cosine-score in JS. On the production API this pinned a Prisma connection and a CPU core per lookup and caused brownouts under load: `face_detection` job lifetime was ~14s normally but climbed to ~90s under bulk-upload load, because per-face matching serialized behind the scan. `FACE_VECTOR_BACKEND=pgvector` (default `DEFAULT_FACE_VECTOR_BACKEND = 'pgvector'`) delegates candidate selection to a Postgres HNSW index instead of scanning in the application process.
@@ -428,7 +412,7 @@ When the active provider is `rekognition`, embeddings are not stored in the appl
 - `faces_sync_embedding_vec_insert_trigger` — `BEFORE INSERT`, unconditional.
 - `faces_sync_embedding_vec_update_trigger` — `BEFORE UPDATE`, `WHEN (NEW.embedding IS DISTINCT FROM OLD.embedding)`, so the frequent person-assignment / hide-unhide updates that never touch `embedding` skip the recompute.
 
-`embedding_vec` is `NULL` for the `human` provider's 1024-d embeddings and for empty-array rows (e.g. manual `providerKey='manual'` associations). A one-shot backfill (`UPDATE faces SET embedding_vec = face_embedding_to_vector(embedding) WHERE array_length(embedding,1)=128`) populated existing rows before the indexes were built — index-after-backfill is deliberate, giving one clean index build instead of many incremental ones.
+`embedding_vec` is `NULL` for empty-array rows (e.g. manual `providerKey='manual'` associations, which carry no embedding by design). A one-shot backfill (`UPDATE faces SET embedding_vec = face_embedding_to_vector(embedding) WHERE array_length(embedding,1)=128`) populated existing rows before the indexes were built — index-after-backfill is deliberate, giving one clean index build instead of many incremental ones. The issue #113 migration also hard-deleted the legacy `providerKey='human'` 1024-d rows that previously would have left `embedding_vec` NULL for a non-empty-embedding reason.
 
 **The three HNSW indexes** (cosine ops, `m=16, ef_construction=64`, matching the other HNSW indexes in the codebase):
 - `faces_embedding_vec_hnsw_idx` — full-table index.
@@ -439,7 +423,7 @@ When the active provider is `rekognition`, embeddings are not stored in the appl
 
 **Archive-match algorithm** (`matchFaceToArchived` → private `matchFaceToArchivedPgvector`): KNN against the partial archive index, single nearest archived face accepted if its cosine similarity meets `FACE_ARCHIVE_MATCH_THRESHOLD` (`0.45`). When the caller supplies a pre-loaded reference set (`opts.candidates` — the in-loop reuse case where `face-detection-core` probes many faces against one already-loaded archived set), the method **always** uses the in-app path regardless of `FACE_VECTOR_BACKEND`, since a per-probe KNN round-trip would be strictly worse there.
 
-**Dimension guard.** The pgvector path is taken only when the probe embedding is exactly 128-d (`PGVECTOR_EMBEDDING_DIM = 128`, the `compreface` mobilenet provider's dimensionality). A 1024-d `human`-provider probe, or an empty embedding, falls back to the in-app cosine path automatically — a `vector(128)` cast would otherwise raise a dimensionality error. This guard becomes moot once the sibling `human`-provider removal (issue #113) lands, since only 128-d embeddings will exist at that point.
+**Dimension guard.** The pgvector path is taken only when the probe embedding is exactly 128-d (`PGVECTOR_EMBEDDING_DIM = 128`, the `compreface` mobilenet provider's dimensionality). Since CompreFace is now the only provider (issue #113 removed the Human WASM provider that previously produced 1024-d embeddings), essentially every non-empty embedding satisfies this guard; it remains in place as a defensive check that still correctly routes an empty embedding (e.g. a manual `providerKey='manual'` association) to the in-app cosine path — a `vector(128)` cast would otherwise raise a dimensionality error.
 
 **Correctness note.** HNSW is an *approximate* nearest-neighbor index — a borderline match could in principle be missed if it falls just outside the K-nearest candidates returned. This is a soft, recoverable failure mode: worst case, a face that should match a person stays unassigned and gets another chance on a future detection or rerun. It is mitigated by the `ef_search` floor and a generous default K (`40`).
 
@@ -682,7 +666,7 @@ The runtime value is `face.autoArchive.matchThreshold` (system setting, 0.30–0
 
 "Archived" here means the same `Face.hiddenAt IS NOT NULL` state used by the manual per-face archive above — specifically the subset with `personId IS NULL` (unassigned). This pool is the reference set every incoming or existing face is compared against. It is loaded via `FaceMatchingService.matchFaceToArchived` (one embedding vs. the pool) and `FaceMatchingService.findLiveMatchesAgainstArchived` (the inverse: the whole live unassigned pool vs. the reference set), both in `apps/api/src/face/face-matching.service.ts`. The pool is capped at `FACE_ARCHIVE_MAX_CANDIDATES` (default `5000`) per circle, ordered most-recently-hidden first, so a truncated scan favors the freshest archive decisions. Both methods are read-only and accept a pre-loaded `candidates`/`archivedCandidates` array so callers that already queried the pool once per job don't pay for it twice.
 
-**Memory bound:** holding the full candidate set in memory costs `candidates × embeddingDim × 8 bytes` (float64 JS numbers) — at the default cap of 5000 and the largest supported embedding (Human, 1024-d), that's `5000 × 1024 × 8 ≈ 41 MB` per job, comfortably inside a worker's heap even on a constrained VPS. Lower `FACE_ARCHIVE_MAX_CANDIDATES` on memory-constrained deployments with very large archived pools.
+**Memory bound:** holding the full candidate set in memory costs `candidates × embeddingDim × 8 bytes` (float64 JS numbers) — at the default cap of 5000 and CompreFace's fixed 128-d embedding, that's `5000 × 128 × 8 ≈ 5 MB` per job, comfortably inside a worker's heap even on a constrained VPS. Lower `FACE_ARCHIVE_MAX_CANDIDATES` on memory-constrained deployments with very large archived pools.
 
 pgvector seam: like `matchFaceToPerson`, both methods currently fall through to in-app cosine regardless of `FACE_VECTOR_BACKEND`; a native `<=>` KNN query is a future optimization.
 
@@ -841,8 +825,7 @@ One row per detected face in a media item.
 | `boundingBox` | Json | `{ x, y, w, h }` as fractions of image dimensions (0–1) |
 | `confidence` | Float? | Detection confidence score |
 | `landmarks` | Json? | Facial landmark coordinates |
-| `embedding` | Float[] | L2-normalized embedding vector (128-d for compreface, 1024-d for human, empty for rekognition) |
-| `externalFaceId` | String? | AWS Rekognition FaceId (rekognition path only) |
+| `embedding` | Float[] | L2-normalized embedding vector; 128-d for CompreFace (the only provider), empty for manual (`providerKey='manual'`) associations |
 | `providerKey` | String | Provider that produced this face |
 | `modelVersion` | String | Model version that produced this face |
 | `manuallyAssigned` | Boolean | `true` = user-assigned; protected from re-clustering and reruns |
@@ -853,7 +836,7 @@ One row per detected face in a media item.
 | `hiddenReason` | String? | Provenance of a hide: `null` = manual archive via `PATCH /api/people/faces/bulk/hide`; `'auto_archive_match'` = one of the auto-archive trigger paths hid this face because it matched the circle's archived reference pool. Added in migration `20260712000000_add_face_hidden_reason`. See [Auto-Archive on Match](#auto-archive-on-match). |
 | `createdAt` | DateTime | |
 
-Indices: `circleId`, `mediaItemId`, `personId`, `externalFaceId`, `(circleId, hiddenAt)` (added alongside `people(circleId, hiddenAt)` in migration `20260704000000_add_face_hidden_at`).
+Indices: `circleId`, `mediaItemId`, `personId`, `(circleId, hiddenAt)` (added alongside `people(circleId, hiddenAt)` in migration `20260704000000_add_face_hidden_at`). The `externalFaceId` column and its index existed only for AWS Rekognition's delegated matching (zero production rows) and were dropped by the issue #113 migration.
 
 ### people
 
@@ -883,11 +866,10 @@ One row per configured provider.
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | UUID | Primary key |
-| `provider` | String (unique) | Provider key: `human`, `compreface`, or `rekognition` |
-| `encryptedKey` | String | AES-256-GCM encrypted API key (empty for keyless providers) |
-| `baseUrl` | String? | URL override (CompreFace only) |
-| `region` | String? | AWS region (Rekognition only) |
-| `last4` | String | Last 4 chars of plaintext key (display only; not applicable for keyless providers) |
+| `provider` | String (unique) | Provider key — `compreface`, the only value used today |
+| `encryptedKey` | String | AES-256-GCM encrypted API key (empty for the keyless `compreface` provider) |
+| `baseUrl` | String? | URL override for the CompreFace sidecar |
+| `last4` | String | Last 4 chars of plaintext key (display only; not applicable for the keyless provider) |
 | `enabled` | Boolean (default true) | Whether this provider row is active |
 | `updatedByUserId` | UUID? | FK to `users` |
 | `createdAt` | DateTime | |
@@ -1022,7 +1004,6 @@ The `noFaces` filter is also available in `POST /api/search` (as the `noFaces: t
 | `FACE_CLUSTER_MIN_SIZE` | `2` | Minimum faces in a cluster to create a provisional Person. Singletons remain unknown. |
 | `FACE_VECTOR_BACKEND` | `'pgvector'` | `'pgvector'` (default) = indexed KNN candidate selection via `faces.embedding_vec` HNSW index, centroid parity accept/reject. `'app'` = Float[] column + in-process cosine (one-release rollback). |
 | `FACE_MATCH_KNN_CANDIDATES` | `40` | Number of nearest-neighbor candidate faces fetched from the pgvector HNSW index before centroid recompute / nearest-archive pick. `hnsw.ef_search` is raised to `max(100, this value)` per query to protect recall. |
-| `FACE_HUMAN_MODEL_PATH` | `'/app/models/human'` | Directory containing `blazeface-back.json` and `faceres.json` model files for the Human provider. |
 | `FACE_AUTO_ARCHIVE` | `'true'` | Kill-switch for the auto-archive-on-match feature (see [Auto-Archive on Match](#auto-archive-on-match)). `'false'` disables it regardless of `features.faceAutoArchive`. |
 | `FACE_ARCHIVE_MATCH_THRESHOLD` | `0.45` | Cosine-similarity threshold for auto-archiving a face against the archived (hidden, unassigned) pool. Seeds `face.autoArchive.matchThreshold`'s default. |
 | `FACE_ARCHIVE_MAX_CANDIDATES` | `5000` | Max archived faces loaded per circle as the reference set for archive matching; bounds memory to `cap × embeddingDim × 8 bytes`. |
@@ -1073,17 +1054,13 @@ A job stuck in `running` status indicates the worker crashed or the container re
 
 **CompreFace HTTP 400 = no face found, not an error.** When the CompreFace sidecar receives an image with no detectable faces, it responds with HTTP 400 and a body matching `/no face/i`. The provider catches this and returns `{ result: [] }` (empty detections). The detection service then sets `MediaFaceStatus` to `no_faces`. This is expected behavior, not a configuration error.
 
-**Human provider: Alpine/musl and WASM backend.** The `human` provider uses `@vladmandic/human` with the WASM backend rather than `tfjs-node`. The tfjs-node package requires glibc bindings unavailable on Alpine Linux (musl libc). Two additional quirks:
-- Node's built-in `fetch` (undici) does not support `file://` URLs. The Human provider registers a custom filesystem-backed IOHandler on `h.tf.io` (Human's own bundled TensorFlow instance, not the umbrella `@tensorflow/tfjs`) to load model files from disk.
-- `faceres.json` only declares two outputs (gender, age) in its manifest. The 1024-dimensional face embedding lives at the internal `global_pooling/Mean` node. After `h.load()`, the provider patches `executor._outputs` to include that node before calling `h.detect()`.
-
 **system_settings 'face' block must exist.** The active detection feature is persisted at `system_settings['global'].face.features.detection`. If no `system_settings` row with key `'global'` exists, or if the `face` block has never been written, `PUT /api/face/features/detection` creates the path via a JSONB patch. However, `GET /api/face/settings` will return null for the active feature until the first write occurs.
 
-**Bounding box normalization is in FaceDetectionService, not the provider.** The CompreFace provider returns absolute pixel coordinates from the sidecar API (`x_min, y_min, x_max, y_max`). The `human` provider returns normalized fractions. The detection service inspects the values and normalizes whichever format it receives. Provider authors do not need to normalize; they should return what the underlying API gives them.
+**Bounding box normalization is in FaceDetectionService, not the provider.** The CompreFace provider returns absolute pixel coordinates from the sidecar API (`x_min, y_min, x_max, y_max`). The detection service inspects the values and normalizes them to 0–1 fractions. Provider authors do not need to normalize; they should return what the underlying API gives them.
 
 **`FACE_VECTOR_BACKEND=pgvector` is a future TODO.** Setting this variable currently logs a debug message and falls through to in-process cosine similarity. Native pgvector `<=>` operator matching is not yet active. The Float[] column and in-app cosine remain the only active path.
 
-**Model-specific embeddings are not cross-comparable.** CompreFace 128-d and Human 1024-d embeddings live in entirely different vector spaces. Rekognition embeddings are not stored at all. A circle must use one provider consistently. Switching providers requires erasing existing face data (`DELETE /api/face/biometrics`) and re-running detection.
+**Model-specific embeddings are not cross-comparable.** CompreFace is the only provider, so this is now purely a model-version concern: switching the CompreFace container's model build (e.g. away from the pinned `1.2.0-mobilenet` tag) changes the embedding space, and stored embeddings from the prior build become incomparable. Switching model builds requires erasing existing face data (`DELETE /api/face/biometrics`) and re-running detection.
 
 **Video frame thumbnails are not registered as StorageObject rows (v1 limitation).** Frame thumbnail JPEGs (`video-faces/{mediaItemId}/{uuid}.jpg`) are uploaded to the active storage provider but no `StorageObject` row is created for them. `signThumb` therefore falls back to the default/static (env-configured) provider when signing. On a single-provider deployment this is correct; on a multi-provider setup where the active upload provider differs from the env default, the signed URL may target the wrong provider and the thumbnail will 404. A future improvement would register frame thumbnails as lightweight `StorageObject` rows so per-object provider routing applies.
 
@@ -1102,20 +1079,6 @@ A job stuck in `running` status indicates the worker crashed or the container re
 - **VPS tuning (x86/AVX2, CPU-only):** `UWSGI_PROCESSES=1`, `UWSGI_THREADS=1` to limit memory and CPU on a shared VPS. Swap is recommended to handle peak inference load.
 - **Image tag pinning:** Do not change the image tag without verifying the embedding dimension and API contract. The `1.2.0-mobilenet` build produces 128-d embeddings. The `r100` build produces 512-d embeddings and is not compatible with stored data from the mobilenet build.
 
-### Human Provider (in-process)
-
-- The `human` provider runs entirely inside the API process. No external container or network call is required.
-- Model files (`blazeface-back.json`, `faceres.json`) must be present at `FACE_HUMAN_MODEL_PATH` (default `/app/models/human`) at API startup.
-- The provider is available immediately when the API starts.
-
-### AWS Rekognition
-
-- Cloud API. No local infrastructure.
-- Credentials via the standard AWS credential chain (environment variables, instance role, etc.).
-- Uses collection ID `'default'` for `IndexFaces` and `SearchFacesByImage` operations.
-- Region defaults to `'us-east-1'` if not specified in the credential row.
-- Photos are sent to AWS for processing. Operators must comply with applicable biometric data regulations.
-
 ---
 
 ## Document History
@@ -1132,3 +1095,4 @@ A job stuck in `running` status indicates the worker crashed or the container re
 | 3.5 | July 2026 | AI Assistant | Added Individual Face Archive and Purge subsection in §8: `Face.hiddenAt` column and `(circleId, hiddenAt)` indexes on both `faces` and `people` (migration `20260704000000_add_face_hidden_at`), `PATCH /api/people/faces/bulk/hide`/`unhide` and `POST /api/people/faces/bulk/purge` endpoints scoped to unassigned (`personId=null`) faces, `archived` param on `GET /api/people/unassigned`, clustering-exclusion behavior, and archive-first permanent-delete UX |
 | 3.6 | July 2026 | AI Assistant | Added Auto-Archive on Match subsection in §8: `features.faceAutoArchive` + `face.autoArchive.matchThreshold` settings, `Face.hiddenReason` provenance column (migration `20260712000000_add_face_hidden_reason`), `FACE_ARCHIVE_MATCH_THRESHOLD`/`FACE_ARCHIVE_MAX_CANDIDATES`/`FACE_AUTO_ARCHIVE` env vars, the three trigger paths (detection-time, archive-time retroactive sweep, admin backfill), the server-only `face_auto_archive_sweep` job type and node-parity note, and `POST /api/admin/face/auto-archive/backfill` |
 | 3.7 | July 2026 | AI Assistant | Added Manual Correction (Photo/Video Parity, Issue #119) subsection in §6: `AssignFaceDialog` is now shared between `FaceThumbnails` (photos) and `VideoFacePanel` (videos), a new "Edit face" row action in `VideoFacePanel`, per-person (not per-frame) action semantics, the `faceThumbnailUrl` preview for video faces, and confirmation that this was frontend-only — no backend/schema change, reusing the pre-existing unassign/reassign/create-person/purge Face endpoints |
+| 3.8 | July 2026 | AI Assistant | Issue #113: standardized on CompreFace as the sole face-recognition provider — removed the Human WASM and AWS Rekognition providers, the delegated-recognition matching path, and the `Face.externalFaceId` column; simplified the provider comparison, embedding-dimension, and credentials sections to a single 128-d CompreFace model; removed the Human-provider and Rekognition operational subsections in §17 |

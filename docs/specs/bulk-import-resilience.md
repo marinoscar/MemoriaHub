@@ -142,9 +142,7 @@ The `classifyRateLimit` function in `rate-limit.error.ts` is the fallback classi
 | Google Geocoding | HTTP 429, HTTP 5xx, API-level status `OVER_QUERY_LIMIT` or `RESOURCE_EXHAUSTED` | Yes | Provider now throws `RateLimitError` (previously returned `null`); job deferred, `geocode` gate tripped; `media_geocode_status` stays `pending` not `processed` |
 | Nominatim | HTTP 429, HTTP 5xx | Yes | Provider now throws `RateLimitError` (previously returned `null`); same deferral behavior |
 | S3 / Cloudflare R2 | AWS SDK v3 detects `503 SlowDown` / HTTP 429; error names `SlowDown`, `TooManyRequestsException`, `ProvisionedThroughputExceededException`, `RequestLimitExceeded`, `ThrottlingException` | Yes | AWS SDK adaptive retry handles internally (`S3_RETRY_MODE=adaptive`); if exhausted, `classifyRateLimit` catches the error name |
-| AWS Rekognition | `ThrottlingException`, `ProvisionedThroughputExceededException`, `RequestLimitExceeded`, `TooManyRequestsException` | Yes | Classified by `classifyRateLimit` via error name; job deferred, `face` gate tripped |
-| CompreFace (local sidecar) | HTTP 429 or 5xx from sidecar | Classified if present | Rarely trips in practice; no external quota |
-| `human` (in-process WASM) | Not applicable — no network call | No | Never throttled; `face` gate never trips for this provider |
+| CompreFace (local sidecar, the sole face-detection provider since issue #113) | HTTP 429 or 5xx from sidecar | Classified if present | Rarely trips in practice; no external quota — CompreFace runs on the same Docker network with no rate limit of its own |
 
 ### Key behavior changes for geocoding
 

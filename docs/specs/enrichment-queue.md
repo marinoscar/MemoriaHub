@@ -416,7 +416,7 @@ Rate-limit backoff uses the same equal-jitter formula with longer base and cap v
 
 **Rate-limit detection:**
 
-Handlers throw `RateLimitError` directly for known provider responses (auto-tagging handler → Anthropic/OpenAI HTTP 429; face detection handler → AWS Rekognition throttling exceptions). The worker also calls `classifyRateLimit(err)` as a fallback, which detects HTTP 429 via `err.status`, `err.response.status`, or `err.$metadata.httpStatusCode`, and AWS throttling by error name (`ThrottlingException`, `TooManyRequestsException`, `ProvisionedThroughputExceededException`, `RequestLimitExceeded`, `SlowDown`).
+Handlers throw `RateLimitError` directly for known provider responses (auto-tagging handler → Anthropic/OpenAI HTTP 429). The worker also calls `classifyRateLimit(err)` as a fallback, which detects HTTP 429 via `err.status`, `err.response.status`, or `err.$metadata.httpStatusCode`, and AWS throttling by error name (`ThrottlingException`, `TooManyRequestsException`, `ProvisionedThroughputExceededException`, `RequestLimitExceeded`, `SlowDown`) — a generic classifier still useful for other AWS-backed integrations (e.g. S3/SES), though CompreFace, the sole face-detection provider since issue #113, is a local sidecar with no external quota and is not expected to trigger it.
 
 Unknown handler types fail immediately without retry. This prevents an infinite retry loop for jobs created before a handler was removed.
 
