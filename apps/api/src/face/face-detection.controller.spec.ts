@@ -15,6 +15,8 @@ import { FaceDetectionController } from './face-detection.controller';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { PeopleService } from './people.service';
+import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { JobReason, JobStatus, MediaFaceStatusType, MediaType } from '@prisma/client';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
@@ -29,6 +31,15 @@ const mockCircleMembershipService = {
 
 const mockEnrichmentJobService = {
   enqueue: jest.fn(),
+};
+
+const mockPeopleService = {
+  addPersonToMedia: jest.fn(),
+  removePersonFromMedia: jest.fn(),
+};
+
+const mockMediaThumbnailService = {
+  signThumb: jest.fn(),
 };
 
 // ---------------------------------------------------------------------------
@@ -88,6 +99,8 @@ describe('FaceDetectionController', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CircleMembershipService, useValue: mockCircleMembershipService },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
+        { provide: PeopleService, useValue: mockPeopleService },
+        { provide: MediaThumbnailService, useValue: mockMediaThumbnailService },
       ],
     })
       .overrideGuard(require('../auth/guards/jwt-auth.guard').JwtAuthGuard ?? Object)
@@ -109,7 +122,6 @@ describe('FaceDetectionController', () => {
           boundingBox: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
           confidence: 0.9,
           landmarks: null,
-          externalFaceId: null,
           providerKey: 'compreface',
           modelVersion: 'arcface-r100-v1',
           manuallyAssigned: false,
@@ -130,7 +142,6 @@ describe('FaceDetectionController', () => {
         boundingBox: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
         confidence: 0.9,
         landmarks: null,
-        externalFaceId: null,
         providerKey: 'compreface',
         modelVersion: 'arcface-r100-v1',
         manuallyAssigned: false,
@@ -175,7 +186,6 @@ describe('FaceDetectionController', () => {
           boundingBox: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
           confidence: 0.9,
           landmarks: null,
-          externalFaceId: null,
           providerKey: 'compreface',
           modelVersion: 'arcface-r100-v1',
           manuallyAssigned: true,
@@ -200,7 +210,6 @@ describe('FaceDetectionController', () => {
           boundingBox: { x: 0.3, y: 0.3, w: 0.1, h: 0.1 },
           confidence: 0.75,
           landmarks: null,
-          externalFaceId: null,
           providerKey: 'compreface',
           modelVersion: 'arcface-r100-v1',
           manuallyAssigned: false,

@@ -184,11 +184,6 @@ describe('FaceMatchingService', () => {
       expect(s.usesPgvectorFor(vec(128))).toBe(false);
     });
 
-    it('returns false for a 1024-d ("human") embedding even on the pgvector backend', async () => {
-      const s = await makeService('pgvector');
-      expect(s.usesPgvectorFor(vec(1024))).toBe(false);
-    });
-
     it('returns false for an empty embedding on the pgvector backend', async () => {
       const s = await makeService('pgvector');
       expect(s.usesPgvectorFor([])).toBe(false);
@@ -415,57 +410,6 @@ describe('FaceMatchingService', () => {
   });
 
   // -------------------------------------------------------------------------
-  // matchFaceByExternalId
-  // -------------------------------------------------------------------------
-
-  describe('matchFaceByExternalId', () => {
-    it('returns personId when face with matching externalFaceId is found', async () => {
-      (mockPrisma.face.findFirst as jest.Mock).mockResolvedValue({
-        personId: 'person-delegated',
-      });
-
-      const result = await service.matchFaceByExternalId('circle-1', 'ext-abc');
-
-      expect(result).toEqual({ personId: 'person-delegated' });
-    });
-
-    it('returns null when no face with that externalFaceId exists in the circle', async () => {
-      (mockPrisma.face.findFirst as jest.Mock).mockResolvedValue(null);
-
-      const result = await service.matchFaceByExternalId('circle-1', 'ext-notfound');
-
-      expect(result).toBeNull();
-    });
-
-    it('returns null when the matching face has no personId', async () => {
-      (mockPrisma.face.findFirst as jest.Mock).mockResolvedValue({ personId: null });
-
-      const result = await service.matchFaceByExternalId('circle-1', 'ext-orphan');
-
-      expect(result).toBeNull();
-    });
-
-    it('queries face with circle scoping and active person filter', async () => {
-      (mockPrisma.face.findFirst as jest.Mock).mockResolvedValue(null);
-
-      await service.matchFaceByExternalId('circle-xyz', 'ext-123');
-
-      expect(mockPrisma.face.findFirst).toHaveBeenCalledWith({
-        where: {
-          circleId: 'circle-xyz',
-          externalFaceId: 'ext-123',
-          personId: { not: null },
-          person: {
-            deletedAt: null,
-            mergedIntoId: null,
-          },
-        },
-        select: { personId: true },
-      });
-    });
-  });
-
-  // -------------------------------------------------------------------------
   // matchFaceToArchived
   // -------------------------------------------------------------------------
 
@@ -592,10 +536,6 @@ describe('FaceMatchingService', () => {
       return new Array(128).fill(0).map((_, idx) => (idx === i ? 1 : 0));
     }
 
-    function oneHot1024(i: number): number[] {
-      return new Array(1024).fill(0).map((_, idx) => (idx === i ? 1 : 0));
-    }
-
     // -----------------------------------------------------------------------
     // matchFaceToPerson pgvector routing
     // -----------------------------------------------------------------------
@@ -676,7 +616,7 @@ describe('FaceMatchingService', () => {
         expect(result).toBeNull();
       });
 
-      it('falls back to the in-app path for a 1024-d ("human") embedding even with pgvector configured', async () => {
+      it('falls back to the in-app path for an empty-embedding probe (the one remaining non-128-d case) even with pgvector configured', async () => {
         const pgvectorConfig = makeConfigService({ FACE_VECTOR_BACKEND: 'pgvector' });
         const module: TestingModule = await Test.createTestingModule({
           providers: [
@@ -687,16 +627,18 @@ describe('FaceMatchingService', () => {
         }).compile();
         const customService = module.get<FaceMatchingService>(FaceMatchingService);
 
-        const probe = oneHot1024(0);
+        const probe: number[] = [];
         (mockPrisma.person.findMany as jest.Mock).mockResolvedValue([{ id: 'person-a' }]);
-        (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([{ embedding: oneHot1024(0) }]);
+        (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([{ embedding: oneHot128(0) }]);
 
         const result = await customService.matchFaceToPerson('circle-1', probe);
 
+        // The dimension guard routes the empty probe to the in-app path; an
+        // empty probe can never match any centroid (cosineSimilarity returns 0
+        // for mismatched lengths), so the result is null.
         expect(mockPrisma.person.findMany).toHaveBeenCalled();
         expect(mockPrisma.$transaction).not.toHaveBeenCalled();
-        expect(result).not.toBeNull();
-        expect(result!.personId).toBe('person-a');
+        expect(result).toBeNull();
       });
 
       it('uses the in-app path when the backend is explicitly "app", regardless of a 128-d embedding', async () => {
@@ -808,29 +750,14 @@ describe('FaceMatchingService', () => {
         expect(result).toBeNull();
       });
 
-      it('falls back to the in-app query path for a 1024-d probe with no candidates', async () => {
-        const pgvectorConfig = makeConfigService({ FACE_VECTOR_BACKEND: 'pgvector' });
-        const module: TestingModule = await Test.createTestingModule({
-          providers: [
-            FaceMatchingService,
-            { provide: PrismaService, useValue: mockPrisma },
-            { provide: ConfigService, useValue: pgvectorConfig },
-          ],
-        }).compile();
-        const customService = module.get<FaceMatchingService>(FaceMatchingService);
-
-        const probe = oneHot1024(0);
-        (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
-          { id: 'f1', embedding: oneHot1024(0) },
-        ]);
-
-        const result = await customService.matchFaceToArchived('circle-1', probe);
-
-        expect(mockPrisma.face.findMany).toHaveBeenCalled();
-        expect(mockPrisma.$transaction).not.toHaveBeenCalled();
-        expect(result).not.toBeNull();
-        expect(result!.faceId).toBe('f1');
-      });
+      // NOTE: matchFaceToArchived returns null immediately for an empty
+      // embedding (the only remaining non-128-d case) BEFORE reaching the
+      // pgvector dimension guard — see the "returns null immediately for an
+      // empty embedding without querying prisma" test above, which already
+      // covers this short-circuit. There is no longer a non-128-d, non-empty
+      // embedding shape in the system (the 1024-d "human" provider was
+      // removed), so there is nothing left for a dimension-guard fallback
+      // test to exercise here.
     });
   });
 

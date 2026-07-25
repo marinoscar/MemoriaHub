@@ -17,7 +17,6 @@
  *
  *   For each detection in order:
  *     - No embedding → singleton cluster
- *     - Delegated (isDelegated=true) → one cluster per detection (skip dedup)
  *     - Compare embedding to each cluster representative's embedding
  *     - If best similarity >= clusterThreshold → assign; update rep if better
  *     - Else → new cluster
@@ -82,16 +81,8 @@ function isBetterRepresentative(
 function clusterDetections(
   detections: FrameDetectionStub[],
   clusterThreshold: number,
-  isDelegated: boolean,
 ): FaceClusterStub[] {
   if (detections.length === 0) return [];
-
-  if (isDelegated) {
-    return detections.map((d) => ({
-      representative: d,
-      allTimestampsMs: [d.timestampMs],
-    }));
-  }
 
   const clusters: FaceClusterStub[] = [];
 
@@ -176,39 +167,36 @@ describe('cross-frame deduplication (clusterDetections)', () => {
   // -----------------------------------------------------------------------
   describe('empty input', () => {
     it('returns [] when detections list is empty', () => {
-      expect(clusterDetections([], THRESHOLD, false)).toEqual([]);
-    });
-
-    it('returns [] when delegated and detections list is empty', () => {
-      expect(clusterDetections([], THRESHOLD, true)).toEqual([]);
+      expect(clusterDetections([], THRESHOLD)).toEqual([]);
     });
   });
 
   // -----------------------------------------------------------------------
-  // Delegated provider path (Rekognition) — skip dedup
+  // Embedding-less detections — the only remaining always-singleton case
+  //
+  // The `isDelegated` short-circuit (AWS Rekognition, which returned no
+  // embeddings at all) was removed with that provider in issue #113. What
+  // survives is the per-detection guard: a detection carrying an empty
+  // embedding cannot be compared to anything, so it always stands alone.
   // -----------------------------------------------------------------------
-  describe('delegated provider (isDelegated=true)', () => {
-    it('produces one cluster per detection regardless of embedding similarity', () => {
-      const identical = l2normalize([1, 0]);
-      const d1 = makeDetection(identical, 1000);
-      const d2 = makeDetection(identical, 2000);
-      const d3 = makeDetection(identical, 3000);
+  describe('detections with an empty embedding', () => {
+    it('produces one cluster per detection, never merging them', () => {
+      const d1 = makeDetection([], 1000);
+      const d2 = makeDetection([], 2000);
+      const d3 = makeDetection([], 3000);
 
-      const clusters = clusterDetections([d1, d2, d3], THRESHOLD, true);
+      const clusters = clusterDetections([d1, d2, d3], THRESHOLD);
       expect(clusters).toHaveLength(3);
     });
 
-    it('each cluster has exactly one timestamp', () => {
-      const d1 = makeDetection([1, 0], 5000);
-      const d2 = makeDetection([1, 0], 10000);
-      const clusters = clusterDetections([d1, d2], THRESHOLD, true);
+    it('each such cluster has exactly one timestamp and keeps its own representative', () => {
+      const d1 = makeDetection([], 5000);
+      const d2 = makeDetection([], 10000);
+
+      const clusters = clusterDetections([d1, d2], THRESHOLD);
+
       expect(clusters[0].allTimestampsMs).toEqual([5000]);
       expect(clusters[1].allTimestampsMs).toEqual([10000]);
-    });
-
-    it('representative equals the original detection', () => {
-      const d1 = makeDetection([1, 0], 5000);
-      const clusters = clusterDetections([d1], THRESHOLD, true);
       expect(clusters[0].representative).toBe(d1);
     });
   });
@@ -220,13 +208,13 @@ describe('cross-frame deduplication (clusterDetections)', () => {
     it('each no-embedding detection becomes its own cluster', () => {
       const d1 = makeNoEmbDetection(1000);
       const d2 = makeNoEmbDetection(2000);
-      const clusters = clusterDetections([d1, d2], THRESHOLD, false);
+      const clusters = clusterDetections([d1, d2], THRESHOLD);
       expect(clusters).toHaveLength(2);
     });
 
     it('no-embedding cluster has one timestamp', () => {
       const d1 = makeNoEmbDetection(3000);
-      const clusters = clusterDetections([d1], THRESHOLD, false);
+      const clusters = clusterDetections([d1], THRESHOLD);
       expect(clusters[0].allTimestampsMs).toEqual([3000]);
     });
   });
@@ -242,14 +230,14 @@ describe('cross-frame deduplication (clusterDetections)', () => {
     it('collapses two highly similar detections into one cluster', () => {
       const d1 = makeDetection(personA, 1000);
       const d2 = makeDetection(personASlightlyDifferent, 2000);
-      const clusters = clusterDetections([d1, d2], THRESHOLD, false);
+      const clusters = clusterDetections([d1, d2], THRESHOLD);
       expect(clusters).toHaveLength(1);
     });
 
     it('allTimestampsMs contains both timestamps', () => {
       const d1 = makeDetection(personA, 1000);
       const d2 = makeDetection(personASlightlyDifferent, 2000);
-      const clusters = clusterDetections([d1, d2], THRESHOLD, false);
+      const clusters = clusterDetections([d1, d2], THRESHOLD);
       expect(clusters[0].allTimestampsMs).toContain(1000);
       expect(clusters[0].allTimestampsMs).toContain(2000);
     });
@@ -258,7 +246,7 @@ describe('cross-frame deduplication (clusterDetections)', () => {
       const d1 = makeDetection(personA, 1000);
       const d2 = makeDetection(personASlightlyDifferent, 2000);
       const d3 = makeDetection(l2normalize([0.96, 0.12, 0.07]), 3000);
-      const clusters = clusterDetections([d1, d2, d3], THRESHOLD, false);
+      const clusters = clusterDetections([d1, d2, d3], THRESHOLD);
       expect(clusters).toHaveLength(1);
       expect(clusters[0].allTimestampsMs).toHaveLength(3);
     });
@@ -276,7 +264,7 @@ describe('cross-frame deduplication (clusterDetections)', () => {
     it('two distinct people produce two separate clusters', () => {
       const d1 = makeDetection(personA, 1000);
       const d2 = makeDetection(personB, 2000);
-      const clusters = clusterDetections([d1, d2], THRESHOLD, false);
+      const clusters = clusterDetections([d1, d2], THRESHOLD);
       expect(clusters).toHaveLength(2);
     });
 
@@ -284,14 +272,14 @@ describe('cross-frame deduplication (clusterDetections)', () => {
       const d1 = makeDetection(personA, 1000);
       const d2 = makeDetection(personB, 2000);
       const d3 = makeDetection(personC, 3000);
-      const clusters = clusterDetections([d1, d2, d3], THRESHOLD, false);
+      const clusters = clusterDetections([d1, d2, d3], THRESHOLD);
       expect(clusters).toHaveLength(3);
     });
 
     it('each cluster has exactly one timestamp when all detections are distinct', () => {
       const d1 = makeDetection(personA, 1000);
       const d2 = makeDetection(personB, 2000);
-      const clusters = clusterDetections([d1, d2], THRESHOLD, false);
+      const clusters = clusterDetections([d1, d2], THRESHOLD);
       expect(clusters[0].allTimestampsMs).toEqual([1000]);
       expect(clusters[1].allTimestampsMs).toEqual([2000]);
     });
@@ -314,7 +302,7 @@ describe('cross-frame deduplication (clusterDetections)', () => {
         makeDetection(l2normalize([0.01, 0.11, 0.89]), 3000),
       ];
 
-      const clusters = clusterDetections(detections, THRESHOLD, false);
+      const clusters = clusterDetections(detections, THRESHOLD);
       expect(clusters).toHaveLength(2);
     });
 
@@ -328,7 +316,7 @@ describe('cross-frame deduplication (clusterDetections)', () => {
         makeDetection(l2normalize([0.01, 0.11, 0.89]), 3000),
       ];
 
-      const clusters = clusterDetections(detections, THRESHOLD, false);
+      const clusters = clusterDetections(detections, THRESHOLD);
       const sizes = clusters.map((c) => c.allTimestampsMs.length).sort();
       expect(sizes).toEqual([3, 3]);
     });
@@ -343,7 +331,7 @@ describe('cross-frame deduplication (clusterDetections)', () => {
     it('updates representative when a higher-confidence detection arrives', () => {
       const d1 = makeDetection(emb, 1000, 0.7);
       const d2 = makeDetection(emb, 2000, 0.95);
-      const clusters = clusterDetections([d1, d2], THRESHOLD, false);
+      const clusters = clusterDetections([d1, d2], THRESHOLD);
       expect(clusters).toHaveLength(1);
       expect(clusters[0].representative.face.confidence).toBe(0.95);
       expect(clusters[0].representative.timestampMs).toBe(2000);
@@ -352,7 +340,7 @@ describe('cross-frame deduplication (clusterDetections)', () => {
     it('keeps original representative when second detection has lower confidence', () => {
       const d1 = makeDetection(emb, 1000, 0.95);
       const d2 = makeDetection(emb, 2000, 0.7);
-      const clusters = clusterDetections([d1, d2], THRESHOLD, false);
+      const clusters = clusterDetections([d1, d2], THRESHOLD);
       expect(clusters[0].representative.face.confidence).toBe(0.95);
       expect(clusters[0].representative.timestampMs).toBe(1000);
     });
@@ -371,7 +359,7 @@ describe('cross-frame deduplication (clusterDetections)', () => {
 
       const d1 = makeDetection(emb, 1000, conf, small);
       const d2 = makeDetection(emb, 2000, conf, large);
-      const clusters = clusterDetections([d1, d2], THRESHOLD, false);
+      const clusters = clusterDetections([d1, d2], THRESHOLD);
 
       expect(clusters[0].representative.normalizedFace.boundingBox).toEqual(large);
       expect(clusters[0].representative.timestampMs).toBe(2000);
@@ -383,7 +371,7 @@ describe('cross-frame deduplication (clusterDetections)', () => {
 
       const d1 = makeDetection(emb, 1000, conf, large);
       const d2 = makeDetection(emb, 2000, conf, small);
-      const clusters = clusterDetections([d1, d2], THRESHOLD, false);
+      const clusters = clusterDetections([d1, d2], THRESHOLD);
 
       expect(clusters[0].representative.normalizedFace.boundingBox).toEqual(large);
       expect(clusters[0].representative.timestampMs).toBe(1000);
@@ -404,7 +392,7 @@ describe('cross-frame deduplication (clusterDetections)', () => {
       const d1 = makeDetection(v1, 1000);
       const d2 = makeDetection(v2, 2000);
       // similarity ≥ threshold → same cluster
-      const clusters = clusterDetections([d1, d2], THRESHOLD, false);
+      const clusters = clusterDetections([d1, d2], THRESHOLD);
       expect(clusters).toHaveLength(1);
     });
 
@@ -416,7 +404,7 @@ describe('cross-frame deduplication (clusterDetections)', () => {
 
       const d1 = makeDetection(v1, 1000);
       const d2 = makeDetection(v2, 2000);
-      const clusters = clusterDetections([d1, d2], THRESHOLD, false);
+      const clusters = clusterDetections([d1, d2], THRESHOLD);
       expect(clusters).toHaveLength(2);
     });
   });
@@ -429,7 +417,7 @@ describe('cross-frame deduplication (clusterDetections)', () => {
       const emb = l2normalize([1, 0]);
       const d1 = makeDetection(emb, 5000);
       const d2 = makeDetection(emb, 10000);
-      const clusters = clusterDetections([d1, d2], THRESHOLD, false);
+      const clusters = clusterDetections([d1, d2], THRESHOLD);
       expect(clusters[0].allTimestampsMs).toContain(5000);
       expect(clusters[0].allTimestampsMs).toContain(10000);
     });
@@ -437,7 +425,7 @@ describe('cross-frame deduplication (clusterDetections)', () => {
     it('does not include timestamps from other clusters', () => {
       const d1 = makeDetection([1, 0, 0], 1000);
       const d2 = makeDetection([0, 1, 0], 2000);
-      const clusters = clusterDetections([d1, d2], THRESHOLD, false);
+      const clusters = clusterDetections([d1, d2], THRESHOLD);
       expect(clusters[0].allTimestampsMs).not.toContain(2000);
       expect(clusters[1].allTimestampsMs).not.toContain(1000);
     });

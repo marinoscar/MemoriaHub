@@ -503,10 +503,12 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
   // Empty-embedding / external-id-only face is skipped
   // -------------------------------------------------------------------------
 
-  it('skips matching entirely for a face with an empty embedding and no externalFaceId', async () => {
+  it('skips matching entirely for a face with an empty embedding', async () => {
     mockSystemSettings.getSettings.mockResolvedValue(makeSettings(true, 0.45));
 
-    const face = makeFace({ embedding: [], externalFaceId: undefined });
+    // An empty embedding is what a manual (providerKey='manual') association
+    // carries — there is nothing to compare, so no matching is attempted.
+    const face = makeFace({ embedding: [] });
 
     const count = await service.persistAndMatchFaces({
       mediaItemId: MEDIA_ID,

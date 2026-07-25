@@ -4,27 +4,11 @@
  * IMPORTANT: SECRETS_ENCRYPTION_KEY must be set for encrypt/decrypt to work.
  * We set it in beforeAll and clean up in afterAll.
  *
- * The face provider registry imports optional Docker-only packages
- * (@tensorflow/tfjs, @vladmandic/human). We stub them here so the test file
- * compiles and runs without those packages being installed locally.
+ * The `human` and `rekognition` face providers were removed (issue #113);
+ * `compreface` is now the only registered face provider. The Docker-only
+ * `@tensorflow/tfjs` / `@vladmandic/human` jest mocks that used to stub the
+ * `human` provider's optional deps are no longer needed.
  */
-
-// Stub Docker-only optional packages before the registry module loads them.
-// { virtual: true } is required for packages not installed locally.
-jest.mock('@tensorflow/tfjs', () => ({
-  setBackend: jest.fn().mockResolvedValue(undefined),
-  ready: jest.fn().mockResolvedValue(undefined),
-  tensor3d: jest.fn().mockReturnValue({ dispose: jest.fn() }),
-}), { virtual: true });
-jest.mock('@tensorflow/tfjs-backend-wasm', () => ({}), { virtual: true });
-jest.mock('@vladmandic/human/dist/human.node-wasm.js', () => ({
-  Human: jest.fn().mockImplementation(() => ({
-    load: jest.fn().mockResolvedValue(undefined),
-    warmup: jest.fn().mockResolvedValue(undefined),
-    detect: jest.fn().mockResolvedValue({ face: [] }),
-  })),
-  default: jest.fn(),
-}), { virtual: true });
 jest.mock('sharp', () =>
   jest.fn().mockReturnValue({
     ensureAlpha: jest.fn().mockReturnThis(),
@@ -34,7 +18,7 @@ jest.mock('sharp', () =>
 );
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { FaceSettingsService } from './face-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { FaceProviderRegistry } from './providers/face-provider.registry';
@@ -68,7 +52,7 @@ describe('FaceSettingsService', () => {
     mockPrisma = createMockPrismaService();
     mockRegistry = {
       get: jest.fn(),
-      keys: jest.fn().mockReturnValue(['compreface', 'rekognition', 'human']),
+      keys: jest.fn().mockReturnValue(['compreface']),
     };
     mockSystemSettings = {
       getSettings: jest.fn(),
@@ -176,30 +160,6 @@ describe('FaceSettingsService', () => {
       expect(upsertCall.create.baseUrl).toBe('http://compreface:8000');
     });
 
-    it('passes region through to the upsert', async () => {
-      mockPrisma.faceProviderCredential.upsert.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'rekognition',
-        encryptedKey: 'cipher',
-        last4: '',
-        baseUrl: null,
-        region: 'us-west-2',
-        enabled: true,
-        updatedByUserId: 'user-1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      await service.upsertCredential(
-        'rekognition',
-        { region: 'us-west-2' },
-        'user-1',
-      );
-
-      const upsertCall = mockPrisma.faceProviderCredential.upsert.mock.calls[0][0];
-      expect(upsertCall.create.region).toBe('us-west-2');
-    });
-
     it('works with baseUrl only and no apiKey (compreface keyless case)', async () => {
       mockPrisma.faceProviderCredential.upsert.mockResolvedValue({
         id: 'cred-1',
@@ -227,31 +187,6 @@ describe('FaceSettingsService', () => {
       expect(result.provider).toBe('compreface');
       expect(result.configured).toBe(true);
       expect(result.baseUrl).toBe('http://compreface-core:3000');
-    });
-
-    it('works with no apiKey (Rekognition case): rawKey empty, last4 empty', async () => {
-      mockPrisma.faceProviderCredential.upsert.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'rekognition',
-        encryptedKey: 'cipher',
-        last4: '',
-        baseUrl: null,
-        region: 'us-east-1',
-        enabled: true,
-        updatedByUserId: 'user-1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      const result = await service.upsertCredential(
-        'rekognition',
-        { region: 'us-east-1' },
-        'user-1',
-      );
-
-      const upsertCall = mockPrisma.faceProviderCredential.upsert.mock.calls[0][0];
-      expect(upsertCall.create.last4).toBe('');
-      expect(result.last4).toBeNull(); // empty string is coerced to null in the return
     });
 
     it('returns object WITHOUT encryptedKey property', async () => {
@@ -559,8 +494,10 @@ describe('FaceSettingsService', () => {
       const result = await service.testProvider({ provider: 'compreface' });
 
       expect(mockRegistry.get).toHaveBeenCalledWith('compreface');
+      // resolveCredentials never decrypts/returns an apiKey any more (issue #113) —
+      // it surfaces only an optional stored baseUrl override.
       expect(mockTestConnection).toHaveBeenCalledWith(
-        expect.objectContaining({ apiKey: realKey }),
+        expect.objectContaining({ baseUrl: 'http://cf:8000' }),
       );
       expect(result).toEqual({ ok: true });
     });
@@ -609,13 +546,15 @@ describe('FaceSettingsService', () => {
       expect(result).toEqual({ ok: false, error: 'Unauthorized' });
     });
 
-    it('throws when resolveCredentials throws (unconfigured provider)', async () => {
+    it('succeeds (does not throw) when no credential row exists — CompreFace is keyless (issue #113)', async () => {
       mockPrisma.faceProviderCredential.findUnique.mockResolvedValue(null);
-      mockRegistry.get.mockReturnValue({ requiresCredentials: true, testConnection: jest.fn() });
+      const mockTestConnection = jest.fn().mockResolvedValue({ ok: true });
+      mockRegistry.get.mockReturnValue({ requiresCredentials: true, testConnection: mockTestConnection });
 
-      await expect(
-        service.testProvider({ provider: 'compreface' }),
-      ).rejects.toThrow(BadRequestException);
+      const result = await service.testProvider({ provider: 'compreface' });
+
+      expect(mockTestConnection).toHaveBeenCalledWith({});
+      expect(result).toEqual({ ok: true });
     });
   });
 
@@ -673,28 +612,6 @@ describe('FaceSettingsService', () => {
       mockRegistry.get.mockReturnValue({ requiresCredentials: true });
     });
 
-    it('decrypts the stored key correctly (round-trip)', async () => {
-      const realPlaintext = 'real-face-api-key-for-test';
-      const encryptedValue = encryptSecret(realPlaintext);
-
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: encryptedValue,
-        last4: 'test',
-        baseUrl: null,
-        region: null,
-        enabled: true,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      const creds = await service.resolveCredentials('compreface');
-
-      expect(creds.apiKey).toBe(realPlaintext);
-    });
-
     it('returns baseUrl when configured', async () => {
       const encryptedValue = encryptSecret('any-key');
 
@@ -716,46 +633,37 @@ describe('FaceSettingsService', () => {
       expect(creds.baseUrl).toBe('http://compreface:8000');
     });
 
-    it('returns region when configured', async () => {
-      const encryptedValue = encryptSecret('any-key');
+    it('throws for a provider key that is no longer registered', async () => {
+      // 'rekognition' and 'human' were removed in issue #113; the registry is
+      // the single gate, so resolveCredentials rejects them outright by way of
+      // registry.get() throwing for an unknown key.
+      mockRegistry.get.mockImplementation((key: string) => {
+        if (key !== 'compreface') {
+          throw new Error(`Unknown face provider: ${key}`);
+        }
+        return { requiresCredentials: true };
+      });
 
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'rekognition',
-        encryptedKey: encryptedValue,
-        last4: '',
-        baseUrl: null,
-        region: 'eu-west-1',
-        enabled: true,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      const creds = await service.resolveCredentials('rekognition');
-
-      expect(creds.region).toBe('eu-west-1');
+      await expect(service.resolveCredentials('rekognition')).rejects.toThrow(
+        /Unknown face provider/i,
+      );
     });
 
-    it('throws BadRequestException when provider is not configured', async () => {
+    it('returns {} when no credential row exists (never throws "not configured" — CompreFace is keyless)', async () => {
       mockPrisma.faceProviderCredential.findUnique.mockResolvedValue(null);
 
-      await expect(service.resolveCredentials('compreface')).rejects.toThrow(BadRequestException);
+      const result = await service.resolveCredentials('compreface');
+
+      expect(result).toEqual({});
     });
 
-    it('throws BadRequestException with provider name in message when not configured', async () => {
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue(null);
-
-      await expect(service.resolveCredentials('compreface')).rejects.toThrow(/compreface/i);
-    });
-
-    it('throws BadRequestException when provider is disabled', async () => {
+    it('returns {} (no baseUrl surfaced) when the stored credential row is disabled', async () => {
       mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
         id: 'cred-1',
         provider: 'compreface',
         encryptedKey: encryptSecret('some-key'),
         last4: 'test',
-        baseUrl: null,
+        baseUrl: 'http://compreface:8000',
         region: null,
         enabled: false,
         updatedByUserId: null,
@@ -763,24 +671,9 @@ describe('FaceSettingsService', () => {
         updatedAt: new Date(),
       } as any);
 
-      await expect(service.resolveCredentials('compreface')).rejects.toThrow(BadRequestException);
-    });
+      const result = await service.resolveCredentials('compreface');
 
-    it('throws BadRequestException mentioning disabled when provider is disabled', async () => {
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: encryptSecret('some-key'),
-        last4: 'test',
-        baseUrl: null,
-        region: null,
-        enabled: false,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      await expect(service.resolveCredentials('compreface')).rejects.toThrow(/disabled/i);
+      expect(result).toEqual({});
     });
 
     it('returns {} for keyless provider (human) when no DB row exists', async () => {

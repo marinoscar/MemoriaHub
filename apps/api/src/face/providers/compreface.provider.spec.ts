@@ -58,11 +58,10 @@ describe('ComprefaceProvider', () => {
   // capabilities
   // ---------------------------------------------------------------------------
   describe('capabilities', () => {
-    it('has detect:true, embed:true, delegatedRecognize:false', () => {
+    it('has detect:true, embed:true', () => {
       expect(provider.capabilities).toEqual({
         detect: true,
         embed: true,
-        delegatedRecognize: false,
       });
     });
   });

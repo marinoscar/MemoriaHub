@@ -45,11 +45,11 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
   };
 }
 
-/** Canned, schema-valid node result payload (Human provider, 4-d toy embedding). */
+/** Canned, schema-valid node result payload (CompreFace provider, 4-d toy embedding). */
 function makeNodeResult() {
   return {
-    modelVersion: 'human-faceres-1024',
-    providerKey: 'human',
+    modelVersion: 'compreface-arcface-mobilefacenet-128',
+    providerKey: 'compreface',
     imageWidth: 800,
     imageHeight: 600,
     faces: [

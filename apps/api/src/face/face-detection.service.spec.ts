@@ -51,6 +51,7 @@ import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interfac
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { EnrichmentJob, JobReason, JobStatus, MediaFaceStatusType } from '@prisma/client';
+import { faceDetectionResultSchema } from '@memoriahub/enrichment-compute/dto';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 
@@ -688,42 +689,6 @@ describe('FaceDetectionService', () => {
       expect(mockPrisma.face.update).not.toHaveBeenCalled();
     });
 
-    it('uses delegated path (matchFaceByExternalId) when provider.capabilities.delegatedRecognize is true', async () => {
-      // Override provider with delegatedRecognize=true
-      mockProvider.capabilities = { delegatedRecognize: true };
-
-      mockProvider.detect.mockResolvedValue([
-        {
-          boundingBox: { x: 0.1, y: 0.1, w: 0.1, h: 0.1 },
-          confidence: 0.9,
-          embedding: [],
-          landmarks: null,
-          externalFaceId: 'ext-123',
-        },
-      ]);
-
-      (mockPrisma.face.create as jest.Mock).mockResolvedValue({
-        id: 'face-1',
-        embedding: [],
-        externalFaceId: 'ext-123',
-      });
-
-      mockMatchingService.matchFaceByExternalId.mockResolvedValue({
-        personId: 'person-delegated',
-      });
-
-      await service.processMediaItem(makeJob());
-
-      expect(mockMatchingService.matchFaceByExternalId).toHaveBeenCalledWith(
-        'circle-1',
-        'ext-123',
-      );
-      expect(mockPrisma.face.update).toHaveBeenCalledWith({
-        where: { id: 'face-1' },
-        data: { personId: 'person-delegated' },
-      });
-    });
-
     it('matching failure is non-fatal — detection still completes', async () => {
       mockProvider.detect.mockResolvedValue([
         {
@@ -790,8 +755,8 @@ describe('FaceDetectionService', () => {
     /** Canned node-computed DTO: PIXEL boxes relative to 800x600. */
     function makeCannedResult() {
       return {
-        modelVersion: 'human-faceres-1024',
-        providerKey: 'human',
+        modelVersion: 'compreface-arcface-mobilefacenet-128',
+        providerKey: 'compreface' as const,
         imageWidth: 800,
         imageHeight: 600,
         faces: [
@@ -845,18 +810,20 @@ describe('FaceDetectionService', () => {
       expect(storedEmbedding[1]).toBeCloseTo(0.8, 5);
     });
 
-    it('persists using the DTO providerKey/modelVersion, not the currently-active provider', async () => {
-      // Active provider (per system settings mock) is compreface, but the DTO
-      // says human — persistFaces must trust the DTO, not re-resolve.
-      await service.persistFaces(makeJob(), makeCannedResult());
+    it('persists the DTO providerKey/modelVersion verbatim rather than re-resolving them', async () => {
+      // The node reports what it actually computed with; persistFaces records
+      // that, it does not re-read the active provider from system settings.
+      const dto = { ...makeCannedResult(), modelVersion: 'compreface-pinned-for-test' };
+
+      await service.persistFaces(makeJob(), dto);
 
       const createCall = (mockPrisma.face.create as jest.Mock).mock.calls[0][0];
-      expect(createCall.data.providerKey).toBe('human');
-      expect(createCall.data.modelVersion).toBe('human-faceres-1024');
+      expect(createCall.data.providerKey).toBe('compreface');
+      expect(createCall.data.modelVersion).toBe('compreface-pinned-for-test');
 
       const finalUpsert = (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mock.calls[0][0];
-      expect(finalUpsert.create.providerKey).toBe('human');
-      expect(finalUpsert.create.modelVersion).toBe('human-faceres-1024');
+      expect(finalUpsert.create.providerKey).toBe('compreface');
+      expect(finalUpsert.create.modelVersion).toBe('compreface-pinned-for-test');
     });
 
     it('upserts MediaFaceStatus to processed with the DTO face count', async () => {
@@ -878,37 +845,17 @@ describe('FaceDetectionService', () => {
       expect(finalUpsert.create.faceCount).toBe(0);
     });
 
-    it('logs a WARN when the DTO providerKey differs from the currently-active server provider', async () => {
-      const warnSpy = jest.spyOn((service as any).logger, 'warn');
+    // The provider-mismatch WARN tests that used to live here were removed with
+    // warnOnProviderMismatch itself (issue #113): a node and the server both run
+    // CompreFace now, so a mismatch is unreachable. The result schema pins
+    // providerKey to the 'compreface' literal, so anything else is rejected at
+    // the ingestion boundary rather than warned about after persisting.
+    it('rejects a node result naming a removed provider before it can be persisted', () => {
+      const stale = { ...makeCannedResult(), providerKey: 'human' };
 
-      // Active provider per system settings mock is 'compreface'; DTO says 'human'.
-      await service.persistFaces(makeJob(), makeCannedResult());
+      const parsed = faceDetectionResultSchema.safeParse(stale);
 
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('differs from the currently-active'),
-      );
-    });
-
-    it('does NOT log a provider-mismatch WARN when the DTO providerKey matches the active provider', async () => {
-      const warnSpy = jest.spyOn((service as any).logger, 'warn');
-
-      const matching = { ...makeCannedResult(), providerKey: 'compreface', modelVersion: 'arcface-r100-v1' };
-      await service.persistFaces(makeJob(), matching);
-
-      expect(warnSpy).not.toHaveBeenCalledWith(
-        expect.stringContaining('differs from the currently-active'),
-      );
-    });
-
-    it('does not throw when resolving the active provider fails during the mismatch check', async () => {
-      (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValueOnce(null);
-
-      await expect(
-        service.persistFaces(makeJob(), makeCannedResult()),
-      ).resolves.toBeUndefined();
-
-      // Persistence still completed despite the mismatch-check failure.
-      expect(mockPrisma.face.create).toHaveBeenCalledTimes(1);
+      expect(parsed.success).toBe(false);
     });
   });
 });
