@@ -7,17 +7,14 @@ import { api } from './api';
 export interface FaceCapabilities {
   detect: boolean;
   embed: boolean;
-  delegatedRecognize: boolean;
 }
 
 export interface FaceProvider {
-  provider: string; // 'compreface' | 'rekognition' | 'human'
+  provider: string; // 'compreface'
   configured: boolean;
   enabled: boolean;
-  requiresCredentials?: boolean;
   last4: string | null;
   baseUrl: string | null;
-  region: string | null;
   capabilities?: FaceCapabilities;
 }
 
@@ -44,7 +41,7 @@ export async function getFaceSettings(): Promise<FaceSettingsResponse> {
 
 export async function putFaceCredentials(
   provider: string,
-  body: { apiKey?: string; baseUrl?: string; region?: string; enabled?: boolean },
+  body: { apiKey?: string; baseUrl?: string; enabled?: boolean },
 ): Promise<void> {
   await api.put<void>(`/face/credentials/${provider}`, body);
 }

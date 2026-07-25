@@ -80,24 +80,12 @@ function defaultFaceSettingsMock() {
           provider: 'compreface',
           configured: true,
           enabled: true,
-          requiresCredentials: false,
           last4: null,
           baseUrl: 'http://compreface-core:3000',
-          region: null,
-          capabilities: { detect: true, embed: true, delegatedRecognize: false },
+          capabilities: { detect: true, embed: true },
         },
       ],
-      knownProviders: [
-        {
-          provider: 'rekognition',
-          configured: false,
-          enabled: false,
-          last4: null,
-          baseUrl: null,
-          region: null,
-          capabilities: { detect: true, embed: false, delegatedRecognize: true },
-        },
-      ],
+      knownProviders: [],
       features: {
         detection: { provider: 'compreface', model: 'arcface-r100-v1' },
       },
@@ -314,12 +302,6 @@ describe('FaceSettingsPage', () => {
       expect(elements.length).toBeGreaterThan(0);
     });
 
-    it('shows "AWS Rekognition" for rekognition provider', () => {
-      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      expect(screen.getByText('AWS Rekognition')).toBeInTheDocument();
-    });
-
     it('shows Enabled chip for enabled provider', () => {
       render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
 
@@ -346,10 +328,21 @@ describe('FaceSettingsPage', () => {
       expect(screen.getByText('Embed')).toBeInTheDocument();
     });
 
-    it('shows Delegated Recognize capability chip for rekognition', () => {
+    it('renders exactly one provider card, for CompreFace', () => {
       render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      expect(screen.getByText('Delegated Recognize')).toBeInTheDocument();
+      // The provider card heading plus its Service URL / Test connection controls
+      expect(screen.getByRole('heading', { name: 'CompreFace' })).toBeInTheDocument();
+      expect(screen.getByLabelText(/service url/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /test connection/i })).toBeInTheDocument();
+    });
+
+    it('does not render any API key input (CompreFace is keyless)', () => {
+      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.queryByLabelText(/api key/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/aws region/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^remove$/i })).not.toBeInTheDocument();
     });
   });
 
@@ -438,32 +431,6 @@ describe('FaceSettingsPage', () => {
       expect(saveButtons.length).toBeGreaterThan(0);
     });
 
-    it('renders a Remove button for configured credentialed providers', () => {
-      mockUseFaceSettings.mockReturnValue({
-        ...defaultFaceSettingsMock(),
-        settings: {
-          ...defaultFaceSettingsMock().settings,
-          providers: [
-            {
-              provider: 'rekognition',
-              configured: true,
-              enabled: true,
-              requiresCredentials: true,
-              last4: 'zxcv',
-              baseUrl: null,
-              region: 'us-east-1',
-              capabilities: { detect: true, embed: false, delegatedRecognize: true },
-            },
-          ],
-          knownProviders: [],
-        },
-      } as any);
-
-      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      expect(screen.getByRole('button', { name: /remove/i })).toBeInTheDocument();
-    });
-
     it('shows Service URL field for the compreface keyless provider', () => {
       render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
 
@@ -492,8 +459,7 @@ describe('FaceSettingsPage', () => {
               enabled: false,
               last4: null,
               baseUrl: null,
-              region: null,
-              capabilities: { detect: true, embed: true, delegatedRecognize: false },
+              capabilities: { detect: true, embed: true },
             },
           ],
           features: { detection: { provider: null, model: null } },
@@ -503,104 +469,6 @@ describe('FaceSettingsPage', () => {
       render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
 
       expect(screen.getByRole('heading', { name: /face settings/i })).toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  describe('Keyless provider (human)', () => {
-    const humanProvider = {
-      provider: 'human',
-      configured: true,
-      enabled: true,
-      requiresCredentials: false,
-      last4: null,
-      baseUrl: null,
-      region: null,
-      capabilities: { detect: true, embed: true, delegatedRecognize: false },
-    };
-
-    it('shows "No configuration required" alert and no API key input for keyless provider', () => {
-      mockUseFaceSettings.mockReturnValue({
-        ...defaultFaceSettingsMock(),
-        settings: {
-          ...defaultFaceSettingsMock().settings,
-          providers: [humanProvider],
-          knownProviders: [],
-        },
-      } as any);
-
-      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      expect(screen.getByText(/no configuration required/i)).toBeInTheDocument();
-      // The "New API Key" text field should NOT be rendered for a keyless provider
-      expect(screen.queryByLabelText(/new api key/i)).not.toBeInTheDocument();
-    });
-
-    it('does not render Remove credential button for keyless provider', () => {
-      mockUseFaceSettings.mockReturnValue({
-        ...defaultFaceSettingsMock(),
-        settings: {
-          ...defaultFaceSettingsMock().settings,
-          providers: [humanProvider],
-          knownProviders: [],
-          features: { detection: { provider: null, model: null } },
-        },
-      } as any);
-
-      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // The "Remove" button only appears for credentialed configured providers — not for keyless ones
-      expect(screen.queryByRole('button', { name: /remove/i })).not.toBeInTheDocument();
-      // The credential-section "New API Key" input should not exist
-      expect(screen.queryByLabelText(/new api key/i)).not.toBeInTheDocument();
-    });
-
-    it('shows "Human (in-process)" label for human provider in detection feature Select', async () => {
-      mockUseFaceSettings.mockReturnValue({
-        ...defaultFaceSettingsMock(),
-        settings: {
-          ...defaultFaceSettingsMock().settings,
-          providers: [humanProvider],
-          knownProviders: [],
-          features: { detection: { provider: null, model: null } },
-        },
-        getModels: vi.fn().mockResolvedValue(['human-faceres-1024']),
-      } as any);
-
-      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      expect(screen.getByText('Human (in-process)')).toBeInTheDocument();
-    });
-
-    it('credentialed providers (rekognition) still show their API key input', () => {
-      // Both human (keyless) and rekognition (credentialed) visible simultaneously
-      mockUseFaceSettings.mockReturnValue({
-        ...defaultFaceSettingsMock(),
-        settings: {
-          ...defaultFaceSettingsMock().settings,
-          providers: [
-            humanProvider,
-            {
-              provider: 'rekognition',
-              configured: true,
-              enabled: true,
-              requiresCredentials: true,
-              last4: 'zxcv',
-              baseUrl: null,
-              region: 'us-east-1',
-              capabilities: { detect: true, embed: false, delegatedRecognize: true },
-            },
-          ],
-          knownProviders: [],
-        },
-      } as any);
-
-      render(<FaceSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // Rekognition section still shows API key input
-      expect(screen.getByLabelText(/new api key/i)).toBeInTheDocument();
-      // Human section shows "no configuration required"
-      expect(screen.getByText(/no configuration required/i)).toBeInTheDocument();
     });
   });
 });

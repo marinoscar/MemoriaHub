@@ -44,21 +44,10 @@ const mockSettings: FaceSettingsResponse = {
       enabled: true,
       last4: 'abcd',
       baseUrl: 'http://cf:8000',
-      region: null,
-      capabilities: { detect: true, embed: true, delegatedRecognize: false },
+      capabilities: { detect: true, embed: true },
     },
   ],
-  knownProviders: [
-    {
-      provider: 'rekognition',
-      configured: false,
-      enabled: false,
-      last4: null,
-      baseUrl: null,
-      region: null,
-      capabilities: { detect: true, embed: false, delegatedRecognize: true },
-    },
-  ],
+  knownProviders: [],
   features: {
     detection: { provider: 'compreface', model: 'arcface-r100-v1' },
   },
@@ -217,18 +206,6 @@ describe('useFaceSettings', () => {
         apiKey: 'key',
         baseUrl: 'http://compreface:8000',
       });
-    });
-
-    it('forwards region when provided', async () => {
-      mockPutFaceCredentials.mockResolvedValue(undefined);
-
-      const { result } = renderHook(() => useFaceSettings());
-
-      await act(async () => {
-        await result.current.saveCredentials('rekognition', { region: 'us-west-2' });
-      });
-
-      expect(mockPutFaceCredentials).toHaveBeenCalledWith('rekognition', { region: 'us-west-2' });
     });
 
     it('propagates errors from putFaceCredentials', async () => {

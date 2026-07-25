@@ -55,9 +55,7 @@ function FaceSettingsContent() {
   const [globalBackfillLoading, setGlobalBackfillLoading] = useState(false);
 
   // Per-provider form state
-  const [providerKeys, setProviderKeys] = useState<Record<string, string>>({});
   const [providerBaseUrls, setProviderBaseUrls] = useState<Record<string, string>>({});
-  const [providerRegions, setProviderRegions] = useState<Record<string, string>>({});
   const [providerEnabled, setProviderEnabled] = useState<Record<string, boolean>>({});
 
   // Detection feature state
@@ -109,17 +107,12 @@ function FaceSettingsContent() {
     });
     setProviderBaseUrls(baseUrlMap);
 
-    const regionMap: Record<string, string> = {};
-    allProviders.forEach((p) => {
-      if (p.region) regionMap[p.provider] = p.region;
-    });
-    setProviderRegions(regionMap);
-
-    // Pre-populate detection feature selections
-    if (settings.features.detection) {
-      setDetectionProvider(settings.features.detection.provider ?? '');
-      setDetectionModel(settings.features.detection.model ?? '');
-    }
+    // Pre-populate detection feature selections. CompreFace is the only
+    // supported provider, so fall back to whatever provider the API reports.
+    setDetectionProvider(
+      settings.features.detection?.provider ?? allProviders[0]?.provider ?? 'compreface',
+    );
+    setDetectionModel(settings.features.detection?.model ?? '');
   }, [settings]);
 
   // Sync video face detection settings from sysSettings
@@ -145,18 +138,13 @@ function FaceSettingsContent() {
 
   const handleSaveCredentials = async (provider: string) => {
     try {
-      const apiKey = providerKeys[provider] ?? undefined;
       const baseUrl = providerBaseUrls[provider] ?? undefined;
-      const region = providerRegions[provider] ?? undefined;
       const enabled = providerEnabled[provider] ?? true;
       await saveCredentials(provider, {
-        ...(apiKey ? { apiKey } : {}),
         baseUrl: baseUrl || undefined,
-        region: region || undefined,
         enabled,
       });
-      setSuccessMessage(`${provider} credentials saved`);
-      setProviderKeys((prev) => ({ ...prev, [provider]: '' }));
+      setSuccessMessage(`${provider} settings saved`);
       await fetchSettings();
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : 'Failed to save credentials');
@@ -164,10 +152,15 @@ function FaceSettingsContent() {
   };
 
   const handleRemoveCredentials = async (provider: string) => {
-    if (!window.confirm(`Remove credentials for ${provider}? This will disable face detection using this provider.`)) return;
+    if (
+      !window.confirm(
+        `Reset ${provider} configuration to defaults? The service URL override will be discarded.`,
+      )
+    )
+      return;
     try {
       await removeCredentials(provider);
-      setSuccessMessage(`${provider} credentials removed`);
+      setSuccessMessage(`${provider} configuration reset to defaults`);
       await fetchSettings();
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : 'Failed to remove credentials');
@@ -388,15 +381,7 @@ function FaceSettingsContent() {
         {[...(settings?.providers ?? []), ...(settings?.knownProviders ?? [])].map((providerConfig) => (
           <Paper key={providerConfig.provider} variant="outlined" sx={{ p: 3, mb: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2, flexWrap: 'wrap' }}>
-              <Typography variant="h6">
-                {providerConfig.provider === 'compreface'
-                  ? 'CompreFace'
-                  : providerConfig.provider === 'rekognition'
-                  ? 'AWS Rekognition'
-                  : providerConfig.provider === 'human'
-                  ? 'Human (in-process)'
-                  : providerConfig.provider.toUpperCase()}
-              </Typography>
+              <Typography variant="h6">CompreFace</Typography>
               <Chip
                 label={providerConfig.enabled ? 'Enabled' : 'Disabled'}
                 color={providerConfig.enabled ? 'success' : 'default'}
@@ -413,232 +398,96 @@ function FaceSettingsContent() {
               {providerConfig.capabilities?.embed && (
                 <Chip label="Embed" size="small" color="info" variant="outlined" />
               )}
-              {providerConfig.capabilities?.delegatedRecognize && (
-                <Chip label="Delegated Recognize" size="small" color="info" variant="outlined" />
-              )}
             </Box>
 
-            {providerConfig.requiresCredentials === false ? (
-              /* Keyless provider */
-              providerConfig.provider === 'compreface' ? (
-                /* CompreFace: keyless but has an editable Service URL */
-                <Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Runs in the compreface-core container — no API key required.
-                  </Typography>
-                  <TextField
-                    label="Service URL"
-                    size="small"
-                    fullWidth
-                    value={providerBaseUrls[providerConfig.provider] ?? ''}
+            {/* CompreFace is keyless — the only configuration is the service URL. */}
+            <Box>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Runs in the compreface-core container — no API key required.
+              </Typography>
+              <TextField
+                label="Service URL"
+                size="small"
+                fullWidth
+                value={providerBaseUrls[providerConfig.provider] ?? ''}
+                onChange={(e) =>
+                  setProviderBaseUrls((prev) => ({
+                    ...prev,
+                    [providerConfig.provider]: e.target.value,
+                  }))
+                }
+                placeholder="http://compreface-core:3000"
+                helperText="Override the default service URL. Leave as-is if using the bundled container."
+                sx={{ mb: 2 }}
+              />
+
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={providerEnabled[providerConfig.provider] ?? providerConfig.enabled}
                     onChange={(e) =>
-                      setProviderBaseUrls((prev) => ({
+                      setProviderEnabled((prev) => ({
                         ...prev,
-                        [providerConfig.provider]: e.target.value,
+                        [providerConfig.provider]: e.target.checked,
                       }))
                     }
-                    placeholder="http://compreface-core:3000"
-                    helperText="Override the default service URL. Leave as-is if using the bundled container."
-                    sx={{ mb: 2 }}
                   />
-                  <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: 'center' }}>
-                    <Button
-                      variant="contained"
-                      size="small"
-                      onClick={() => void handleSaveCredentials(providerConfig.provider)}
-                    >
-                      Save
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      onClick={() => void handleRemoveCredentials(providerConfig.provider)}
-                    >
-                      Reset to default
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      disabled={perProviderTestLoading[providerConfig.provider]}
-                      startIcon={
-                        perProviderTestLoading[providerConfig.provider] ? (
-                          <CircularProgress size={14} />
-                        ) : undefined
-                      }
-                      onClick={() => void handleTestProviderCard(providerConfig.provider)}
-                    >
-                      Test connection
-                    </Button>
-                  </Stack>
-                  {perProviderTestResult[providerConfig.provider] != null && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 1 }}>
-                      {perProviderTestResult[providerConfig.provider]!.ok ? (
-                        <CheckCircleIcon color="success" fontSize="small" />
-                      ) : (
-                        <ErrorIcon color="error" fontSize="small" />
-                      )}
-                      <Typography
-                        variant="body2"
-                        color={
-                          perProviderTestResult[providerConfig.provider]!.ok
-                            ? 'success.main'
-                            : 'error.main'
-                        }
-                      >
-                        {perProviderTestResult[providerConfig.provider]!.ok
-                          ? 'Running'
-                          : (perProviderTestResult[providerConfig.provider]!.error ?? 'Test failed')}
-                      </Typography>
-                    </Box>
-                  )}
-                </Box>
-              ) : (
-                /* Other keyless providers (human): no config at all */
-                <Box>
-                  <Alert severity="info" icon={false} sx={{ py: 0.5, mb: 1 }}>
-                    No configuration required — runs in-process
-                  </Alert>
-                  <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: 'center' }}>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      disabled={perProviderTestLoading[providerConfig.provider]}
-                      startIcon={
-                        perProviderTestLoading[providerConfig.provider] ? (
-                          <CircularProgress size={14} />
-                        ) : undefined
-                      }
-                      onClick={() => void handleTestProviderCard(providerConfig.provider)}
-                    >
-                      Test connection
-                    </Button>
-                  </Stack>
-                  {perProviderTestResult[providerConfig.provider] != null && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 1 }}>
-                      {perProviderTestResult[providerConfig.provider]!.ok ? (
-                        <CheckCircleIcon color="success" fontSize="small" />
-                      ) : (
-                        <ErrorIcon color="error" fontSize="small" />
-                      )}
-                      <Typography
-                        variant="body2"
-                        color={
-                          perProviderTestResult[providerConfig.provider]!.ok
-                            ? 'success.main'
-                            : 'error.main'
-                        }
-                      >
-                        {perProviderTestResult[providerConfig.provider]!.ok
-                          ? 'Running'
-                          : (perProviderTestResult[providerConfig.provider]!.error ?? 'Test failed')}
-                      </Typography>
-                    </Box>
-                  )}
-                </Box>
-              )
-            ) : (
-              <>
-                {/* Current key (masked) */}
-                {providerConfig.configured && providerConfig.last4 && (
-                  <TextField
-                    label="Current API Key"
-                    value={`••••••••${providerConfig.last4}`}
-                    size="small"
-                    fullWidth
-                    disabled
-                    sx={{ mb: 2 }}
-                  />
-                )}
+                }
+                label="Enabled"
+                sx={{ mb: 2, display: 'block' }}
+              />
 
-                {/* New API key input */}
-                <TextField
-                  label="New API Key"
-                  type="password"
+              <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: 'center' }}>
+                <Button
+                  variant="contained"
                   size="small"
-                  fullWidth
-                  value={providerKeys[providerConfig.provider] ?? ''}
-                  onChange={(e) =>
-                    setProviderKeys((prev) => ({
-                      ...prev,
-                      [providerConfig.provider]: e.target.value,
-                    }))
+                  onClick={() => void handleSaveCredentials(providerConfig.provider)}
+                >
+                  Save
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => void handleRemoveCredentials(providerConfig.provider)}
+                >
+                  Reset to default
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={perProviderTestLoading[providerConfig.provider]}
+                  startIcon={
+                    perProviderTestLoading[providerConfig.provider] ? (
+                      <CircularProgress size={14} />
+                    ) : undefined
                   }
-                  placeholder={providerConfig.configured ? 'Leave blank to keep current key' : 'Enter API key'}
-                  sx={{ mb: 2 }}
-                />
-
-                {/* Base URL (CompreFace only) */}
-                {providerConfig.provider === 'compreface' && (
-                  <TextField
-                    label="Base URL"
-                    size="small"
-                    fullWidth
-                    value={providerBaseUrls[providerConfig.provider] ?? ''}
-                    onChange={(e) =>
-                      setProviderBaseUrls((prev) => ({
-                        ...prev,
-                        [providerConfig.provider]: e.target.value,
-                      }))
-                    }
-                    placeholder="http://compreface:8000"
-                    sx={{ mb: 2 }}
-                  />
-                )}
-
-                {/* Region (Rekognition only) */}
-                {providerConfig.provider === 'rekognition' && (
-                  <TextField
-                    label="AWS Region"
-                    size="small"
-                    fullWidth
-                    value={providerRegions[providerConfig.provider] ?? ''}
-                    onChange={(e) =>
-                      setProviderRegions((prev) => ({
-                        ...prev,
-                        [providerConfig.provider]: e.target.value,
-                      }))
-                    }
-                    placeholder="us-east-1"
-                    sx={{ mb: 2 }}
-                  />
-                )}
-
-                {/* Enabled toggle */}
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={providerEnabled[providerConfig.provider] ?? providerConfig.enabled}
-                      onChange={(e) =>
-                        setProviderEnabled((prev) => ({
-                          ...prev,
-                          [providerConfig.provider]: e.target.checked,
-                        }))
-                      }
-                    />
-                  }
-                  label="Enabled"
-                  sx={{ mb: 2, display: 'block' }}
-                />
-
-                <Stack direction="row" spacing={1}>
-                  <Button
-                    variant="contained"
-                    onClick={() => void handleSaveCredentials(providerConfig.provider)}
-                  >
-                    Save
-                  </Button>
-                  {providerConfig.configured && (
-                    <Button
-                      variant="outlined"
-                      color="error"
-                      onClick={() => void handleRemoveCredentials(providerConfig.provider)}
-                    >
-                      Remove
-                    </Button>
+                  onClick={() => void handleTestProviderCard(providerConfig.provider)}
+                >
+                  Test connection
+                </Button>
+              </Stack>
+              {perProviderTestResult[providerConfig.provider] != null && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 1 }}>
+                  {perProviderTestResult[providerConfig.provider]!.ok ? (
+                    <CheckCircleIcon color="success" fontSize="small" />
+                  ) : (
+                    <ErrorIcon color="error" fontSize="small" />
                   )}
-                </Stack>
-              </>
-            )}
+                  <Typography
+                    variant="body2"
+                    color={
+                      perProviderTestResult[providerConfig.provider]!.ok
+                        ? 'success.main'
+                        : 'error.main'
+                    }
+                  >
+                    {perProviderTestResult[providerConfig.provider]!.ok
+                      ? 'Running'
+                      : (perProviderTestResult[providerConfig.provider]!.error ?? 'Test failed')}
+                  </Typography>
+                </Box>
+              )}
+            </Box>
           </Paper>
         ))}
 
@@ -648,31 +497,17 @@ function FaceSettingsContent() {
             Detection Feature
           </Typography>
 
-          <FormControl size="small" fullWidth sx={{ mb: 2 }}>
-            <InputLabel>Provider</InputLabel>
-            <Select
-              label="Provider"
-              value={detectionProvider}
-              onChange={(e) => {
-                setDetectionProvider(e.target.value);
-                setDetectionModel('');
-                setTestResult(null);
-              }}
-            >
-              <MenuItem value="">Select provider</MenuItem>
-              {[...(settings?.providers ?? []), ...(settings?.knownProviders ?? [])].map((p) => (
-                <MenuItem key={p.provider} value={p.provider}>
-                  {p.provider === 'compreface'
-                    ? 'CompreFace'
-                    : p.provider === 'rekognition'
-                    ? 'AWS Rekognition'
-                    : p.provider === 'human'
-                    ? 'Human (in-process)'
-                    : p.provider.toUpperCase()}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          {/* CompreFace is the only supported provider — read-only, not a choice. */}
+          <TextField
+            label="Provider"
+            size="small"
+            fullWidth
+            value="CompreFace"
+            disabled
+            helperText="CompreFace is the only supported face detection provider."
+            slotProps={{ input: { readOnly: true } }}
+            sx={{ mb: 2 }}
+          />
 
           <FormControl size="small" fullWidth sx={{ mb: 2 }} disabled={!detectionProvider || modelsLoading}>
             <InputLabel>Model</InputLabel>
@@ -741,9 +576,8 @@ function FaceSettingsContent() {
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Configure how face detection runs on videos. Frames are sampled at regular intervals;
-            more frames increase recall but use more CPU — and, for AWS Rekognition, incur a
-            per-frame API cost. Example: a 1-hour video at a cap of 60 frames = one frame sampled
-            every ~60 s.
+            more frames increase recall but use more CPU. Example: a 1-hour video at a cap of 60
+            frames = one frame sampled every ~60 s.
           </Typography>
 
           <FormControlLabel

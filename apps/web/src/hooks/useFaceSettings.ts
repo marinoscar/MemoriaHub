@@ -30,7 +30,7 @@ export function useFaceSettings() {
   const saveCredentials = useCallback(
     async (
       provider: string,
-      body: { apiKey?: string; baseUrl?: string; region?: string; enabled?: boolean },
+      body: { apiKey?: string; baseUrl?: string; enabled?: boolean },
     ) => {
       await putFaceCredentials(provider, body);
     },
