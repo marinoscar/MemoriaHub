@@ -19,10 +19,10 @@
 
 services:
   # ---------------------------------------------------------------------------
-  # Local CompreFace face-detection core (128-d ArcFace/mobilenet embeddings).
-  # We are committed to CompreFace — all existing face embeddings live in this
-  # space. Multi-process (not the throttled UWSGI_PROCESSES=1 of the shared VPS
-  # api bundle); tune COMPREFACE_PROCESSES to ~cores-2 (cap ~6) per host.
+  # Local CompreFace face-detection core (128-d ArcFace/mobilenet embeddings) —
+  # the only face provider, so a worker must reach one to be face-capable.
+  # Multi-process (not the throttled UWSGI_PROCESSES=1 of the shared VPS api
+  # bundle); tune COMPREFACE_PROCESSES to ~cores-2 (cap ~6) per host.
   # ---------------------------------------------------------------------------
   compreface-core:
     image: exadel/compreface-core:1.2.0-mobilenet
@@ -32,9 +32,9 @@ services:
       - UWSGI_THREADS=1
     # /status is CompreFace's readiness endpoint. The image is python-based, so
     # a stdlib urllib probe needs no extra tooling (curl/wget may be absent).
-    # NOTE: the real guarantee against a silent Human fallback is the worker's
-    # own start-time verifyCompreface gate (it hard-exits if CompreFace is not
-    # healthy and compose restarts it); this healthcheck just orders startup.
+    # NOTE: the real readiness guarantee is the worker's own start-time
+    # verifyCompreface gate (it hard-exits if CompreFace is not healthy and
+    # compose restarts it); this healthcheck just orders startup.
     healthcheck:
       test:
         - CMD-SHELL
@@ -64,8 +64,7 @@ services:
       # --- identity / tuning ---
       - MEMORIAHUB_NODE_NAME=${MEMORIAHUB_NODE_NAME:-worker}
       - MEMORIAHUB_CONCURRENCY=${MEMORIAHUB_CONCURRENCY:-2}
-      # --- face provider: committed to CompreFace, pointed at the local core ---
-      - MEMORIAHUB_FACE_PROVIDER=compreface
+      # --- face detection: points the worker at the local CompreFace core ---
       - MEMORIAHUB_COMPREFACE_URL=http://compreface-core:3000
     # SIGTERM drains in-flight jobs (headless mode does NOT deregister, so the
     # node record persists and the replica re-attaches on restart). A job killed

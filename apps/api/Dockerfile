@@ -28,9 +28,10 @@
 FROM node:26-slim AS base
 WORKDIR /app
 # OpenSSL for Prisma; ffmpeg for video processing (and the HEIC transcode
-# fallback, retained as a safety net); wget + ca-certificates for the Human model
-# download below (busybox wget is builtin on Alpine but absent on Debian slim,
-# and HTTPS fetches need the CA bundle).
+# fallback, retained as a safety net); wget + ca-certificates for the container
+# health probe used by infra/deploy/{install,update}.sh and for HTTPS model
+# fetches at runtime (busybox wget is builtin on Alpine but absent on Debian
+# slim, and HTTPS fetches need the CA bundle).
 # libvips42t64 + libheif1 + libde265-0 + libheif-plugin-libde265: a HEIF-enabled
 #   system libvips so sharp (rebuilt from source against it in the deps stage via
 #   SHARP_FORCE_GLOBAL_LIBVIPS) decodes HEIC/HEIF NATIVELY instead of falling back
@@ -89,16 +90,6 @@ RUN npm run build -w @memoriahub/enrichment-compute
 
 # Set dummy DATABASE_URL for Prisma generate (actual connection not needed at build time)
 RUN cd apps/api && DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npx prisma generate
-
-# Download @vladmandic/human model files (blazeface-back detector + faceres
-# descriptor) for offline in-process face detection. The build FAILS if any
-# file is missing so we never ship an incomplete model set silently.
-ENV HUMAN_MODELS_BASE=https://vladmandic.github.io/human-models/models
-RUN mkdir -p /app/models/human && \
-    for f in blazeface-back.json blazeface-back.bin faceres.json faceres.bin; do \
-      wget -q -O "/app/models/human/$f" "$HUMAN_MODELS_BASE/$f" || { echo "FATAL: failed to download Human model $f"; exit 1; }; \
-    done && \
-    echo "Human models bundled:" && ls -la /app/models/human
 
 # -----------------------------------------------------------------------------
 # Development stage
