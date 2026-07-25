@@ -15,18 +15,17 @@
  *      settings — falling back to the server's own defaults (5s / 60 frames)
  *      for an older server that doesn't yet supply them.
  *   3. Per frame: EXIF-orient + downscale via `prepareImageForProcessing`
- *      (same `FACE_MAX_IMAGE_DIM` the photo path uses), then detect via the
- *      configured provider — the keyless Human WASM provider (1024-d
- *      embeddings, default) or, when this node's `faceProvider` config is
- *      `'compreface'`, a locally-running compreface-core sidecar (128-d
- *      embeddings). Same hard-fail philosophy as the photo path: an
- *      unreachable CompreFace sidecar is a hard compute error, never a
- *      silent fallback to Human.
+ *      (same `FACE_MAX_IMAGE_DIM` the photo path uses), then detect via a
+ *      locally-running compreface-core sidecar (128-d embeddings) —
+ *      CompreFace is the only supported face provider (Human and AWS
+ *      Rekognition were removed, issue #113). Same hard-fail philosophy as
+ *      the photo path: an unreachable CompreFace sidecar is a hard compute
+ *      error, never a silent fallback.
  *   4. Cluster all per-frame detections across the whole video by embedding
  *      cosine similarity (`clusterFaceDetections` from `/face-video`) —
- *      `isDelegated` is always `false` on a node, since both Human and
- *      CompreFace are keyless/embedding-based providers; a node never runs a
- *      delegated-recognition provider like Rekognition.
+ *      `isDelegated` is always `false` on a node, since CompreFace is a
+ *      keyless/embedding-based provider; a node never runs a
+ *      delegated-recognition provider.
  *   5. Per cluster: build a face-centered thumbnail crop of the
  *      representative detection's frame (`buildFaceCropThumbnail` from
  *      `/face-video`) and upload it via the node's generic per-job upload-URL
@@ -42,7 +41,7 @@
  * cluster's own imageWidth/imageHeight), imageWidth, imageHeight, confidence?,
  * embedding, landmarks?, videoTimestampMs, videoTimestamps, frameThumbnailKey? }] }`.
  *
- * Bounding-box space note: detector output (Human/CompreFace) is PIXEL-space
+ * Bounding-box space note: detector output (CompreFace) is PIXEL-space
  * relative to the specific frame it was detected on. Clustering itself
  * operates on NORMALIZED (0-1) boxes (`ClusterableDetection.boundingBox`) so
  * cosine-similarity-based identity matching is comparable across frames of
@@ -53,16 +52,9 @@
  * split exactly (see `VideoFaceDetectionService.computeVideoFaces`).
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 
 import { prepareImageForProcessing } from '@memoriahub/enrichment-compute/image';
-import {
-  createFaceDetector,
-  FACE_MODEL_VERSION,
-  FACE_PROVIDER_KEY,
-  type FaceDetector,
-} from '@memoriahub/enrichment-compute/face';
 import {
   detectComprefaceFaces,
   COMPREFACE_MODEL_VERSION,
@@ -78,9 +70,8 @@ import {
 } from '@memoriahub/enrichment-compute/face-video';
 
 import { loadConfig } from '../../config.js';
-import { modelsDir } from '../../paths.js';
 import { ApiClient } from '../../api.js';
-import { CapabilityUnavailableError, DEFAULT_COMPREFACE_URL, type ComputeFn } from '../capabilities.js';
+import { DEFAULT_COMPREFACE_URL, type ComputeFn } from '../capabilities.js';
 
 /**
  * Downscale ceiling before detection — MUST match the photo path's
@@ -95,37 +86,6 @@ const FACE_MAX_IMAGE_DIM = 2000;
 const DEFAULT_SAMPLE_INTERVAL_SECONDS = 5;
 /** Server default (`face.video.maxFramesPerVideo`) — fallback only. */
 const DEFAULT_MAX_FRAMES_PER_VIDEO = 60;
-
-/**
- * Module-level lazy singleton for the Human face detector — model load +
- * warmup costs real time, so it is cached across jobs for the lifetime of the
- * worker process. Shared instance/cache-key scheme mirrors ./face-detection.ts
- * exactly (same modelBasePath resolution, same singleton behavior).
- */
-let detectorPromise: Promise<FaceDetector> | null = null;
-
-function resolveModelBasePath(): string {
-  const override = process.env['FACE_HUMAN_MODEL_PATH'];
-  if (override) return override;
-  return path.join(process.env['MODELS_DIR'] ?? modelsDir(), 'human');
-}
-
-function getFaceDetector(): Promise<FaceDetector> {
-  if (!detectorPromise) {
-    const modelBasePath = resolveModelBasePath();
-    if (!fs.existsSync(modelBasePath)) {
-      throw new CapabilityUnavailableError(
-        `Human face model not present at ${modelBasePath} — run \`node doctor\`/\`node start\` to download models`,
-        'human',
-      );
-    }
-    detectorPromise = createFaceDetector({ modelBasePath }).catch((err: unknown) => {
-      detectorPromise = null; // allow retry on a later job
-      throw err;
-    });
-  }
-  return detectorPromise;
-}
 
 /**
  * Host-specific data carried through clustering for each detection, mirroring
@@ -158,7 +118,6 @@ const computeVideoFaceDetection: ComputeFn = async (inputPath, params, ctx) => {
   }
 
   const cfg = loadConfig();
-  const faceProvider = cfg?.node?.faceProvider ?? 'human';
   // Thumbnail upload is best-effort per cluster (see step 5 below) — a node
   // not logged in simply submits clusters without frameThumbnailKey rather
   // than failing the whole job.
@@ -194,62 +153,29 @@ const computeVideoFaceDetection: ComputeFn = async (inputPath, params, ctx) => {
     const prepared = await prepareImageForProcessing(frame.buffer, { maxDim: FACE_MAX_IMAGE_DIM });
     const frameBuffer = prepared.width > 0 && prepared.height > 0 ? prepared.buffer : frame.buffer;
 
-    if (faceProvider === 'compreface') {
-      const comprefaceUrl = cfg?.node?.comprefaceUrl ?? DEFAULT_COMPREFACE_URL;
-      // No catch-and-fallback here: an unreachable sidecar must surface as a
-      // normal compute error, routed through the engine's existing /failure +
-      // retry/backoff path — never a silent degrade to the Human provider
-      // (same hard-fail philosophy as ./face-detection.ts).
-      const faces = await detectComprefaceFaces(comprefaceUrl, frameBuffer);
+    const comprefaceUrl = cfg?.node?.comprefaceUrl ?? DEFAULT_COMPREFACE_URL;
+    // No catch-and-fallback here: an unreachable sidecar must surface as a
+    // normal compute error, routed through the engine's existing /failure +
+    // retry/backoff path — never a silent degrade to another provider
+    // (same hard-fail philosophy as ./face-detection.ts).
+    const faces = await detectComprefaceFaces(comprefaceUrl, frameBuffer);
 
-      let frameWidth = prepared.width;
-      let frameHeight = prepared.height;
-      if (frameWidth === 0 || frameHeight === 0) {
-        try {
-          const sharp = (await import('sharp')).default;
-          const meta = await sharp(frameBuffer).metadata();
-          frameWidth = meta.width ?? 0;
-          frameHeight = meta.height ?? 0;
-        } catch {
-          // leave at 0 — this frame's detections are skipped below.
-        }
+    let frameWidth = prepared.width;
+    let frameHeight = prepared.height;
+    if (frameWidth === 0 || frameHeight === 0) {
+      try {
+        const sharp = (await import('sharp')).default;
+        const meta = await sharp(frameBuffer).metadata();
+        frameWidth = meta.width ?? 0;
+        frameHeight = meta.height ?? 0;
+      } catch {
+        // leave at 0 — this frame's detections are skipped below.
       }
-      // Dimensions are required to normalize boxes for clustering; a frame
-      // whose dimensions can't be determined contributes no detections
-      // rather than corrupting the clustering input with divide-by-zero
-      // normalized boxes.
-      if (frameWidth === 0 || frameHeight === 0) continue;
-
-      for (const face of faces) {
-        allDetections.push({
-          embedding: face.embedding ?? [],
-          confidence: face.confidence,
-          boundingBox: {
-            x: face.boundingBox.x / frameWidth,
-            y: face.boundingBox.y / frameHeight,
-            w: face.boundingBox.w / frameWidth,
-            h: face.boundingBox.h / frameHeight,
-          },
-          timestampMs: frame.timestampMs,
-          payload: {
-            frameBuffer,
-            frameWidth,
-            frameHeight,
-            pixelBoundingBox: {
-              x: face.boundingBox.x,
-              y: face.boundingBox.y,
-              width: face.boundingBox.w,
-              height: face.boundingBox.h,
-            },
-            landmarks: face.landmarks,
-          },
-        });
-      }
-      continue;
     }
-
-    const detector = await getFaceDetector();
-    const { width: frameWidth, height: frameHeight, faces } = await detector.detect(frameBuffer);
+    // Dimensions are required to normalize boxes for clustering; a frame
+    // whose dimensions can't be determined contributes no detections
+    // rather than corrupting the clustering input with divide-by-zero
+    // normalized boxes.
     if (frameWidth === 0 || frameHeight === 0) continue;
 
     for (const face of faces) {
@@ -259,23 +185,27 @@ const computeVideoFaceDetection: ComputeFn = async (inputPath, params, ctx) => {
         boundingBox: {
           x: face.boundingBox.x / frameWidth,
           y: face.boundingBox.y / frameHeight,
-          w: face.boundingBox.width / frameWidth,
-          h: face.boundingBox.height / frameHeight,
+          w: face.boundingBox.w / frameWidth,
+          h: face.boundingBox.h / frameHeight,
         },
         timestampMs: frame.timestampMs,
         payload: {
           frameBuffer,
           frameWidth,
           frameHeight,
-          // ComputeDetectedFace.boundingBox is already { x, y, width, height }
-          // in PIXEL space — no remapping needed (unlike CompreFace's w/h).
-          pixelBoundingBox: face.boundingBox,
+          pixelBoundingBox: {
+            x: face.boundingBox.x,
+            y: face.boundingBox.y,
+            width: face.boundingBox.w,
+            height: face.boundingBox.h,
+          },
+          landmarks: face.landmarks,
         },
       });
     }
   }
 
-  // --- 4. Cluster across frames (isDelegated=false — both providers here are
+  // --- 4. Cluster across frames (isDelegated=false — CompreFace is
   //         keyless/embedding-based; a node never runs a delegated provider) ---
   const clusters = clusterFaceDetections(allDetections, DEFAULT_FACE_CLUSTER_THRESHOLD, false);
 
@@ -323,12 +253,9 @@ const computeVideoFaceDetection: ComputeFn = async (inputPath, params, ctx) => {
     });
   }
 
-  const modelVersion = faceProvider === 'compreface' ? COMPREFACE_MODEL_VERSION : FACE_MODEL_VERSION;
-  const providerKey = faceProvider === 'compreface' ? COMPREFACE_PROVIDER_KEY : FACE_PROVIDER_KEY;
-
   return {
-    modelVersion,
-    providerKey,
+    modelVersion: COMPREFACE_MODEL_VERSION,
+    providerKey: COMPREFACE_PROVIDER_KEY,
     clusters: resultClusters,
   };
 };

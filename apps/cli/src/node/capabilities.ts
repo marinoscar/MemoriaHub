@@ -3,8 +3,8 @@
  *
  * A worker node advertises which enrichment job types it can process. Whether a
  * type is processable depends on the runtime availability of heavy native model
- * libraries (onnxruntime-node, sharp, TensorFlow, Human, tesseract.js) and the
- * ffmpeg/ffprobe binaries on PATH.
+ * libraries (onnxruntime-node, sharp, tesseract.js), a reachable CompreFace
+ * core sidecar for face detection, and the ffmpeg/ffprobe binaries on PATH.
  *
  * CRITICAL: none of the native libraries are statically imported anywhere in the
  * CLI. They live in `optionalDependencies` and are loaded at RUNTIME via
@@ -50,9 +50,6 @@ export class CapabilityUnavailableError extends Error {
 export const NATIVE_MODULES: Record<string, string> = {
   onnxruntime: 'onnxruntime-node',
   sharp: 'sharp',
-  tfjs: '@tensorflow/tfjs',
-  tfjsWasm: '@tensorflow/tfjs-backend-wasm',
-  human: '@vladmandic/human',
   tesseract: 'tesseract.js',
 };
 
@@ -169,8 +166,8 @@ export function isNodeJobType(t: string): t is NodeJobType {
  * only errors when a listed requirement is missing.
  */
 export const JOB_TYPE_REQUIREMENTS: Record<NodeJobType, string[]> = {
-  face_detection: ['sharp', 'human'],
-  video_face_detection: ['sharp', 'human', 'ffmpeg'],
+  face_detection: ['sharp', 'compreface'],
+  video_face_detection: ['sharp', 'compreface', 'ffmpeg'],
   duplicate_detection: ['sharp'], // onnxruntime optional → dHash degraded mode
   metadata_extraction: ['sharp'],
   social_media_detection: ['ffprobe'], // tesseract optional → Tier-1-only mode
@@ -231,33 +228,32 @@ export async function detectCapabilities(opts?: {
 
 /**
  * Derive the effective capability requirements for a job type given the
- * node's configured face-detection provider. Identical to
- * `JOB_TYPE_REQUIREMENTS[jobType]` for every job type except
- * `face_detection`/`video_face_detection`, where the literal `'human'`
- * requirement is substituted for the configured provider. Pure derivation —
- * `JOB_TYPE_REQUIREMENTS` itself is never mutated and remains the source of
- * truth for the default (Human) case.
+ * node's configured face-detection provider. `JOB_TYPE_REQUIREMENTS` already
+ * lists `'compreface'` as the requirement for `face_detection`/
+ * `video_face_detection`, so this is currently an identity function over
+ * `JOB_TYPE_REQUIREMENTS[jobType]`. The `faceProvider` parameter is retained
+ * (rather than dropped) as a structural hook for a possible future face
+ * provider — CompreFace is the only accepted value today (Human and AWS
+ * Rekognition were removed, issue #113).
  */
 export function effectiveRequirements(
   jobType: NodeJobType,
-  faceProvider: 'human' | 'compreface' = 'human',
+  faceProvider: 'compreface' = 'compreface',
 ): string[] {
-  const required = JOB_TYPE_REQUIREMENTS[jobType] ?? [];
-  if (faceProvider === 'human') return required;
-  if (jobType !== 'face_detection' && jobType !== 'video_face_detection') return required;
-  return required.map((cap) => (cap === 'human' ? faceProvider : cap));
+  void faceProvider;
+  return JOB_TYPE_REQUIREMENTS[jobType] ?? [];
 }
 
 /**
  * Given a capability snapshot, return the required capability keys that are
  * missing for a job type. Empty array = fully supported. `faceProvider`
- * defaults to `'human'` so every existing 2-argument call site keeps
+ * defaults to `'compreface'` so every existing 2-argument call site keeps
  * compiling and behaves identically to today.
  */
 export function missingRequirements(
   jobType: NodeJobType,
   caps: Record<string, CapabilityStatus>,
-  faceProvider: 'human' | 'compreface' = 'human',
+  faceProvider: 'compreface' = 'compreface',
 ): string[] {
   const required = effectiveRequirements(jobType, faceProvider);
   return required.filter((cap) => !caps[cap]?.available);
@@ -303,7 +299,7 @@ export function evaluateStartupSelfTest(
   caps: Record<string, CapabilityStatus>,
   operationalResults: Record<string, CapabilityStatus>,
   eligibleTypes: string[],
-  faceProvider: 'human' | 'compreface' = 'human',
+  faceProvider: 'compreface' = 'compreface',
 ): StartupSelfTestEvaluation {
   const types = eligibleTypes.filter(isNodeJobType);
   const blockingFailures: StartupSelfTestBlocker[] = [];

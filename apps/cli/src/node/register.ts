@@ -73,7 +73,7 @@ export function defaultHeadlessNodeName(
 /** Job types whose required capabilities are all satisfied by `caps`. */
 export function supportedTypes(
   caps: Record<string, CapabilityStatus>,
-  faceProvider: 'human' | 'compreface' = 'human',
+  faceProvider: 'compreface' = 'compreface',
 ): NodeJobType[] {
   return NODE_JOB_TYPES.filter((t) => missingRequirements(t, caps, faceProvider).length === 0);
 }
@@ -85,7 +85,7 @@ export interface RegisterWorkerNodeInput {
   concurrency: number;
   /** Explicitly requested job types (already validated); empty = auto-detect. */
   requestedTypes: string[];
-  faceProvider: 'human' | 'compreface';
+  faceProvider: 'compreface';
   comprefaceUrl?: string;
   cliVersion: string;
 }

@@ -6,9 +6,8 @@
  * (streamed) to a temp path, optionally verified by size/sha256, then atomically
  * renamed into place. Existing valid files are left untouched.
  *
- * On success `process.env.MODELS_DIR` (and `FACE_HUMAN_MODEL_PATH`) are pointed
- * at the local directory so the compute libraries load models from disk rather
- * than re-downloading.
+ * On success `process.env.MODELS_DIR` is pointed at the local directory so the
+ * compute libraries load models from disk rather than re-downloading.
  */
 
 import * as fs from 'node:fs';
@@ -68,8 +67,8 @@ function resolveModelsDir(): string {
  * manifest supplies them (skips verification when null), and renames atomically.
  * Never throws for a single failed file — failures are collected in the result
  * so `node doctor` / `node start` can surface them. Honors an existing
- * MODELS_DIR env var as the default target directory, and sets MODELS_DIR and
- * FACE_HUMAN_MODEL_PATH env vars pointing at the local directory.
+ * MODELS_DIR env var as the default target directory, and sets the MODELS_DIR
+ * env var pointing at the local directory.
  */
 export async function ensureModels(
   manifest: ModelManifestEntry[],
@@ -140,13 +139,6 @@ export async function ensureModels(
 
   // Point the compute libraries at the local model directory.
   process.env['MODELS_DIR'] = targetDir;
-  // Human WASM face model path — best-effort hint; a missing entry is fine.
-  const humanEntry = manifest.find((e) => /human/i.test(e.name) || /human/i.test(e.targetSubdir));
-  if (humanEntry) {
-    process.env['FACE_HUMAN_MODEL_PATH'] = path.dirname(destFor(targetDir, humanEntry));
-  } else {
-    process.env['FACE_HUMAN_MODEL_PATH'] = targetDir;
-  }
 
   return result;
 }

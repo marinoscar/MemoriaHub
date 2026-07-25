@@ -32,9 +32,10 @@ services:
       - UWSGI_THREADS=1
     # /status is CompreFace's readiness endpoint. The image is python-based, so
     # a stdlib urllib probe needs no extra tooling (curl/wget may be absent).
-    # NOTE: the real guarantee against a silent Human fallback is the worker's
-    # own start-time verifyCompreface gate (it hard-exits if CompreFace is not
-    # healthy and compose restarts it); this healthcheck just orders startup.
+    # NOTE: the real guarantee against starting without a working face provider
+    # is the worker's own start-time verifyCompreface gate (it hard-exits if
+    # CompreFace is not healthy and compose restarts it); this healthcheck just
+    # orders startup.
     healthcheck:
       test:
         - CMD-SHELL

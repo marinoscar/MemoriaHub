@@ -120,10 +120,10 @@ export function bestMatchAgainstSet(
  *       (isBetterRepresentative below).
  *     - Otherwise, start a new singleton cluster.
  *
- * Providers without per-detection embeddings (e.g. Rekognition delegated
- * recognition, isDelegated=true): skip clustering entirely — every detection
- * becomes its own cluster. Detections with an empty embedding array are also
- * always singletons, regardless of isDelegated.
+ * Providers without per-detection embeddings (isDelegated=true): skip
+ * clustering entirely — every detection becomes its own cluster. Detections
+ * with an empty embedding array are also always singletons, regardless of
+ * isDelegated.
  */
 export function clusterFaceDetections<T>(
   detections: ClusterableDetection<T>[],
