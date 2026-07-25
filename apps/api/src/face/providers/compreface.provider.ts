@@ -42,7 +42,6 @@ export class ComprefaceProvider implements FaceProvider {
   readonly capabilities: FaceCapabilities = {
     detect: true,
     embed: true,
-    delegatedRecognize: false,
   };
 
   /**

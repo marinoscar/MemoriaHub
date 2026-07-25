@@ -51,7 +51,7 @@ export class RateLimitError extends Error {
     message: string,
     /** Provider's requested delay in milliseconds (from Retry-After header), if known. */
     public readonly retryAfterMs?: number,
-    /** Provider key (e.g. "anthropic", "openai", "rekognition") for logging. */
+    /** Provider key (e.g. "anthropic", "openai", "google") for logging. */
     public readonly providerKey?: string,
   ) {
     super(message);

@@ -745,7 +745,6 @@ model FaceProviderCredential {
   provider        String   @unique
   encryptedKey    String   @map("encrypted_key")
   baseUrl         String?  @map("base_url")
-  region          String?
   last4           String   @map("last4")
   enabled         Boolean  @default(true)
   updatedByUserId String?  @map("updated_by_user_id") @db.Uuid

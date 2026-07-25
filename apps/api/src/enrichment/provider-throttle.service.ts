@@ -10,7 +10,7 @@
 // Provider key mapping (coarse, by job type):
 //   auto_tagging   → 'tagging'   (single AI tagging provider configured at a time)
 //   geocode        → 'geocode'   (single reverse-geocode provider at a time)
-//   face_detection → 'face'      (rekognition / compreface / human — one active)
+//   face_detection → 'face'      (compreface — the only face provider)
 //   all others     → null        (not throttled: storage, insights, trash, etc.)
 //
 // The coarse mapping is intentional to avoid per-job DB reads to look up the

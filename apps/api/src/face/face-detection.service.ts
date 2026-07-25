@@ -112,9 +112,9 @@ export class FaceDetectionService {
   // pre-split code.
   //
   // This is the SERVER-side compute half, used for the in-process path. A
-  // distributed worker node runs the equivalent compute locally (always via
-  // the keyless Human provider — see warnOnProviderMismatch below) and
-  // submits the same DTO shape directly, bypassing this method.
+  // distributed worker node runs the equivalent compute locally (by default
+  // via the keyless CompreFace provider — see warnOnProviderMismatch below)
+  // and submits the same DTO shape directly, bypassing this method.
   // ---------------------------------------------------------------------------
 
   async computeFaces(
@@ -163,7 +163,6 @@ export class FaceDetectionService {
         confidence: face.confidence,
         landmarks: face.landmarks,
         embedding: face.embedding && face.embedding.length > 0 ? face.embedding : [],
-        externalFaceId: face.externalFaceId,
       })),
     };
   }
@@ -207,7 +206,6 @@ export class FaceDetectionService {
           confidence: face.confidence,
           landmarks: face.landmarks,
           embedding: face.embedding,
-          externalFaceId: face.externalFaceId,
         };
         return this.core.normalizeFace(asDetected, result.imageWidth, result.imageHeight, logCtx);
       });
@@ -237,18 +235,17 @@ export class FaceDetectionService {
   // ---------------------------------------------------------------------------
   // warnOnProviderMismatch
   //
-  // A distributed worker node ALWAYS computes with the keyless Human provider
-  // (1024-d embeddings); the server's ACTIVE provider (system settings
-  // face.features.detection) might be compreface (128-d) or a delegated
-  // provider like rekognition. persistFaces trusts the DTO's own
-  // providerKey/modelVersion to tag the created Face rows — but person-
-  // matching cosine similarity only works within ONE embedding space, so if a
-  // node-computed 1024-d result lands in a circle whose existing faces are
-  // 128-d compreface vectors, the new faces will silently cluster separately
-  // rather than matching existing People (same class of silent-degradation
-  // risk the distributed-nodes spec §7 accepts for embedding parity in
-  // general). This warning is operator visibility only — it never blocks
-  // persistence, and a resolution failure here is swallowed.
+  // A distributed worker node computes with the keyless CompreFace provider
+  // (128-d embeddings) by default, matching the server's default active
+  // provider — but the two can still drift out of sync (e.g. a
+  // misconfigured node, or a future second provider). persistFaces trusts
+  // the DTO's own providerKey/modelVersion to tag the created Face rows —
+  // but person-matching cosine similarity only works within ONE embedding
+  // space, so a mismatched result would silently cluster separately rather
+  // than matching existing People (same class of silent-degradation risk the
+  // distributed-nodes spec §7 accepts for embedding parity in general). This
+  // warning is operator visibility only — it never blocks persistence, and a
+  // resolution failure here is swallowed.
   // ---------------------------------------------------------------------------
 
   private async warnOnProviderMismatch(jobId: string, resultProviderKey: string): Promise<void> {

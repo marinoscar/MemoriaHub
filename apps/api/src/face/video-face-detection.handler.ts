@@ -22,12 +22,10 @@ export class VideoFaceDetectionHandler implements EnrichmentHandler, OnModuleIni
   /**
    * Node-eligibility (distributed workers): the payload a node submits via
    * POST /api/nodes/:id/jobs/:jobId/result for this job type — the shared
-   * contract from @memoriahub/enrichment-compute/dto. A node always computes
-   * with the keyless Human provider (never Rekognition's delegated
-   * recognition, which this schema does not carry an externalFaceId for —
-   * see VideoFaceDetectionService's module docstring / this PR's handoff
-   * notes for the resulting, pre-existing-but-untested gap on the
-   * in-process Rekognition-delegated video path).
+   * contract from @memoriahub/enrichment-compute/dto. A node computes with
+   * the keyless CompreFace provider by default, the same provider the
+   * server uses in-process — see VideoFaceDetectionService's module
+   * docstring for the compute/persist split this mirrors.
    */
   readonly nodeResultSchema = videoFaceDetectionResultSchema;
 

@@ -1349,7 +1349,6 @@ export class DoctorService {
 
     const capToJobTypes: Record<string, string[]> = {
       face: ['face_detection', 'video_face_detection'],
-      human: ['face_detection', 'video_face_detection'],
       compreface: ['face_detection', 'video_face_detection'],
       clip: ['duplicate_detection', 'duplicate_detection_batch'],
       onnxruntime: ['duplicate_detection', 'duplicate_detection_batch'],
