@@ -3,8 +3,8 @@
  *
  * detectComprefaceFaces / testComprefaceStatus are extracted VERBATIM from
  * apps/api/src/face/providers/compreface.provider.ts so the server's
- * ComprefaceProvider AND a worker node opting into CompreFace as its
- * face-detection provider send byte-identical HTTP requests and parse
+ * ComprefaceProvider AND a worker node — for which CompreFace is the ONLY
+ * face provider (issue #113) — send byte-identical HTTP requests and parse
  * responses identically. These tests stub `globalThis.fetch` — no real
  * network call is made.
  */
