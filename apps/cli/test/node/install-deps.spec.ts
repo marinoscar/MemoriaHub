@@ -112,9 +112,6 @@ jest.unstable_mockModule('../../src/node/capabilities.js', () => ({
   NATIVE_MODULES: {
     onnxruntime: 'onnxruntime-node',
     sharp: 'sharp',
-    tfjs: '@tensorflow/tfjs',
-    tfjsWasm: '@tensorflow/tfjs-backend-wasm',
-    human: '@vladmandic/human',
     tesseract: 'tesseract.js',
   },
   detectCapabilities: mockDetectCapabilities,
@@ -177,9 +174,6 @@ type CapabilityStatus = { available: boolean; detail?: string };
 const ALL_CAPS_PRESENT: Record<string, CapabilityStatus> = {
   onnxruntime: { available: true },
   sharp: { available: true },
-  tfjs: { available: true },
-  tfjsWasm: { available: true },
-  human: { available: true },
   tesseract: { available: true },
   ffmpeg: { available: true },
   ffprobe: { available: true },

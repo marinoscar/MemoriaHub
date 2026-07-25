@@ -8,7 +8,7 @@
  *   4. CSV parsing of MEMORIAHUB_ELIGIBLE_TYPES (trim, drop empties)
  *   5. Int parsing of MEMORIAHUB_CONCURRENCY / MEMORIAHUB_POLL_INTERVAL_MS
  *      (invalid values ignored with a warning)
- *   6. MEMORIAHUB_FACE_PROVIDER validation ('human' | 'compreface' only)
+ *   6. MEMORIAHUB_COMPREFACE_URL overlay
  *   7. envConfigComplete() helper
  *   8. saveConfig() best-effort persistence when config came from env
  *
@@ -68,7 +68,6 @@ const ENV_KEYS = [
   'MEMORIAHUB_CONCURRENCY',
   'MEMORIAHUB_ELIGIBLE_TYPES',
   'MEMORIAHUB_POLL_INTERVAL_MS',
-  'MEMORIAHUB_FACE_PROVIDER',
   'MEMORIAHUB_COMPREFACE_URL',
   'MEMORIAHUB_STATE_DIR',
 ] as const;
@@ -99,7 +98,7 @@ const FILE_CONFIG: CliConfig = {
     eligibleTypes: ['face_detection'],
     pollIntervalMs: 5000,
     name: 'file-node',
-    faceProvider: 'human',
+    comprefaceUrl: 'http://file-sidecar:3000',
   },
 };
 
@@ -162,7 +161,6 @@ describe('config env overlay', () => {
       process.env['MEMORIAHUB_CONCURRENCY'] = '3';
       process.env['MEMORIAHUB_ELIGIBLE_TYPES'] = 'face_detection,auto_tagging';
       process.env['MEMORIAHUB_POLL_INTERVAL_MS'] = '7000';
-      process.env['MEMORIAHUB_FACE_PROVIDER'] = 'compreface';
       process.env['MEMORIAHUB_COMPREFACE_URL'] = 'http://compreface:3000';
 
       const cfg = loadConfig();
@@ -173,7 +171,6 @@ describe('config env overlay', () => {
         concurrency: 3,
         eligibleTypes: ['face_detection', 'auto_tagging'],
         pollIntervalMs: 7000,
-        faceProvider: 'compreface',
         comprefaceUrl: 'http://compreface:3000',
       });
     });
@@ -240,20 +237,20 @@ describe('config env overlay', () => {
       expect(mockWarn).not.toHaveBeenCalled();
     });
 
-    it('should ignore an invalid MEMORIAHUB_FACE_PROVIDER with a warning', () => {
+    it('should keep the file comprefaceUrl when MEMORIAHUB_COMPREFACE_URL is unset', () => {
       writeConfigFile(FILE_CONFIG);
-      process.env['MEMORIAHUB_FACE_PROVIDER'] = 'rekognition';
 
       const cfg = loadConfig();
-      expect(cfg!.node!.faceProvider).toBe('human'); // file value preserved
-      expect(mockWarn).toHaveBeenCalledWith(expect.stringContaining('MEMORIAHUB_FACE_PROVIDER'));
+      expect(cfg!.node!.comprefaceUrl).toBe('http://file-sidecar:3000');
+      expect(mockWarn).not.toHaveBeenCalled();
     });
 
-    it('should accept a valid MEMORIAHUB_FACE_PROVIDER', () => {
-      process.env['MEMORIAHUB_FACE_PROVIDER'] = 'compreface';
+    it('should let MEMORIAHUB_COMPREFACE_URL override the file value', () => {
+      writeConfigFile(FILE_CONFIG);
+      process.env['MEMORIAHUB_COMPREFACE_URL'] = 'http://env-sidecar:3000';
 
       const cfg = loadConfig();
-      expect(cfg!.node!.faceProvider).toBe('compreface');
+      expect(cfg!.node!.comprefaceUrl).toBe('http://env-sidecar:3000');
       expect(mockWarn).not.toHaveBeenCalled();
     });
   });

@@ -151,14 +151,6 @@ function parseTypes(csv?: string): string[] {
   return parts;
 }
 
-/** Validate --face-provider, exiting with a clear error on an unknown value. */
-function parseFaceProvider(value: string | undefined): 'human' | 'compreface' | undefined {
-  if (value === undefined) return undefined;
-  if (value === 'human' || value === 'compreface') return value;
-  ui.error(`Unknown --face-provider value: ${value}. Valid values: human, compreface`);
-  process.exit(1);
-}
-
 /** Render a capability table to stdout. */
 function printCapabilityTable(caps: Record<string, CapabilityStatus>): void {
   const table = new Table({
@@ -229,17 +221,15 @@ function registerCmd(): Command {
     .option('--name <name>', 'Human-friendly node name (default: hostname)')
     .option('--concurrency <n>', 'Simultaneous jobs to process', String(DEFAULT_CONCURRENCY))
     .option('--types <csv>', 'Comma-separated job types (default: all supported)')
-    .option('--face-provider <human|compreface>', 'Face-detection provider this node uses (default: human)')
     .option(
       '--compreface-url <url>',
-      'Base URL of a locally-running compreface-core sidecar (only used with --face-provider compreface)',
+      `Base URL of the locally-running compreface-core sidecar used for face detection (default: ${DEFAULT_COMPREFACE_URL})`,
     )
     .action(
       async (opts: {
         name?: string;
         concurrency?: string;
         types?: string;
-        faceProvider?: string;
         comprefaceUrl?: string;
       }) => {
         const cfg = requireConfig();
@@ -247,7 +237,6 @@ function registerCmd(): Command {
 
         const name = opts.name ?? os.hostname();
         const concurrency = Math.max(1, parseInt(opts.concurrency ?? String(DEFAULT_CONCURRENCY), 10) || DEFAULT_CONCURRENCY);
-        const faceProvider = parseFaceProvider(opts.faceProvider) ?? 'human';
         const comprefaceUrl = opts.comprefaceUrl;
         const requested = parseTypes(opts.types);
 
@@ -259,7 +248,6 @@ function registerCmd(): Command {
             name,
             concurrency,
             requestedTypes: requested,
-            faceProvider,
             comprefaceUrl,
             cliVersion: cliVersion(),
           });
@@ -285,9 +273,7 @@ function registerCmd(): Command {
             : `Registered as worker node: ${name} (${reg.nodeId})`,
         );
         ui.dim(`Eligible types: ${reg.eligibleTypes.join(', ') || '(none)'}`);
-        if (faceProvider === 'compreface') {
-          ui.dim(`Face provider: compreface (${comprefaceUrl ?? DEFAULT_COMPREFACE_URL})`);
-        }
+        ui.dim(`Face provider: compreface (${comprefaceUrl ?? DEFAULT_COMPREFACE_URL})`);
         ui.dim('Run `memoriahub node start` to begin processing jobs.');
       },
     );
@@ -396,10 +382,9 @@ function startCmd(): Command {
         'deregistering on SIGTERM/SIGINT so the node re-attaches on restart ' +
         '(also implied by MEMORIAHUB_HEADLESS=1)',
     )
-    .option('--face-provider <human|compreface>', 'Set face-detection provider (persisted to config)')
     .option(
       '--compreface-url <url>',
-      'Set the compreface-core sidecar URL (persisted to config; only used with --face-provider compreface)',
+      'Set the compreface-core sidecar URL used for face detection (persisted to config)',
     )
     .action(
       async (opts: {
@@ -408,7 +393,6 @@ function startCmd(): Command {
         poll?: string;
         daemon?: boolean;
         headless?: boolean;
-        faceProvider?: string;
         comprefaceUrl?: string;
       }) => {
         // Harden the worker's memory posture before doing anything else: raise
@@ -453,24 +437,16 @@ function startCmd(): Command {
           parseInt(opts.concurrency ?? String(cfg.node?.concurrency ?? DEFAULT_CONCURRENCY), 10) ||
             DEFAULT_CONCURRENCY,
         );
-        const validatedFaceProvider = parseFaceProvider(opts.faceProvider);
-
-        // --concurrency / --face-provider / --compreface-url persist to
-        // NodeConfig so restarts (and the daemon child spawned below) pick
-        // them up. Only the fields actually passed on this invocation are
-        // written — an omitted flag must never clobber a previously-
-        // persisted value with undefined.
-        if (
-          opts.concurrency !== undefined ||
-          validatedFaceProvider !== undefined ||
-          opts.comprefaceUrl !== undefined
-        ) {
+        // --concurrency / --compreface-url persist to NodeConfig so restarts
+        // (and the daemon child spawned below) pick them up. Only the fields
+        // actually passed on this invocation are written — an omitted flag
+        // must never clobber a previously-persisted value with undefined.
+        if (opts.concurrency !== undefined || opts.comprefaceUrl !== undefined) {
           saveConfig({
             ...cfg,
             node: {
               ...cfg.node,
               ...(opts.concurrency !== undefined ? { concurrency } : {}),
-              ...(validatedFaceProvider !== undefined ? { faceProvider: validatedFaceProvider } : {}),
               ...(opts.comprefaceUrl !== undefined ? { comprefaceUrl: opts.comprefaceUrl } : {}),
             },
           });
@@ -506,15 +482,12 @@ function startCmd(): Command {
           parseInt(opts.poll ?? String(cfg.node?.pollIntervalMs ?? DEFAULT_POLL_MS), 10) ||
           DEFAULT_POLL_MS;
 
-        // Resolve the effective face provider (flag > persisted config > default)
-        // and, when it is CompreFace and this node claims face jobs, BLOCK until
-        // the sidecar's /status reports healthy before building the engine. This
-        // closes the warm-up race (issue #103): CompreFace takes ~15–30s to load
-        // its model, and claiming face jobs before then would run them on the
-        // wrong provider. We never silently fall back to Human — an unready
-        // sidecar is a hard start failure.
-        const resolvedFaceProvider: 'human' | 'compreface' =
-          validatedFaceProvider ?? cfg.node?.faceProvider ?? 'human';
+        // CompreFace is this node's only face provider (issue #113). When the
+        // node claims face jobs, BLOCK until the sidecar's /status reports
+        // healthy before building the engine. This closes the warm-up race
+        // (issue #103): CompreFace takes ~15–30s to load its model, and
+        // claiming face jobs before then would fail them. An unready sidecar
+        // is a hard start failure — there is no fallback provider.
         const resolvedComprefaceUrl =
           opts.comprefaceUrl ?? cfg.node?.comprefaceUrl ?? DEFAULT_COMPREFACE_URL;
 
@@ -537,7 +510,6 @@ function startCmd(): Command {
               // MEMORIAHUB_ELIGIBLE_TYPES into cfg.node.eligibleTypes); empty →
               // auto-detect from capabilities inside the helper.
               requestedTypes: requested.length > 0 ? requested : cfg.node?.eligibleTypes ?? [],
-              faceProvider: resolvedFaceProvider,
               comprefaceUrl: opts.comprefaceUrl ?? cfg.node?.comprefaceUrl,
               cliVersion: cliVersion(),
             });
@@ -558,9 +530,9 @@ function startCmd(): Command {
           eligibleTypes.includes('face_detection') ||
           eligibleTypes.includes('video_face_detection');
 
-        if (resolvedFaceProvider === 'compreface' && claimsFaceJobs) {
+        if (claimsFaceJobs) {
           ui.step(
-            `Face provider is 'compreface' — waiting for the sidecar at ${resolvedComprefaceUrl} ` +
+            `Waiting for the compreface-core sidecar at ${resolvedComprefaceUrl} ` +
               'to become healthy before claiming face jobs…',
           );
           // ~40s budget (20 × 2s) to cover CompreFace's cold-start model load.
@@ -571,18 +543,16 @@ function startCmd(): Command {
           if (health.status !== 'installed') {
             ui.error(
               `CompreFace at ${resolvedComprefaceUrl} did not become healthy: ${health.detail}\n` +
-                'Refusing to start rather than silently falling back to the Human provider. ' +
-                'Start/verify the sidecar (`memoriahub node install-deps`) and retry, ' +
-                'or start with `--face-provider human`.',
+                'CompreFace is the only face provider a worker node runs, so refusing to start. ' +
+                'Start the compreface-core sidecar (`memoriahub node install-deps`) and retry, ' +
+                'point --compreface-url / MEMORIAHUB_COMPREFACE_URL at a running instance, or ' +
+                're-register this node without the face_detection/video_face_detection types.',
             );
             process.exit(1);
           }
           ui.success(`CompreFace healthy at ${resolvedComprefaceUrl}.`);
         }
-        ui.info(
-          `Active face provider: ${resolvedFaceProvider}` +
-            (resolvedFaceProvider === 'compreface' ? ` (${resolvedComprefaceUrl})` : ''),
-        );
+        ui.info(`Active face provider: compreface (${resolvedComprefaceUrl})`);
 
         // 1. Ensure models are present before processing.
         try {
@@ -615,21 +585,17 @@ function startCmd(): Command {
         //      degradable capabilities (OCR Tier-2, CLIP dHash-fallback) never
         //      block. Default ON in headless/container mode; gated by
         //      MEMORIAHUB_STARTUP_SELFTEST. Runs AFTER the model-ensure above so
-        //      the CLIP/Human self-tests find their freshly-downloaded models.
+        //      the CLIP self-test finds its freshly-downloaded model.
         let operationalSnapshot: Record<string, CapabilityStatus> | undefined;
         if (resolveStartupSelfTest(headless)) {
           ui.step('Running startup operational self-tests…');
-          const selfTestComprefaceOpts =
-            resolvedFaceProvider === 'compreface'
-              ? { comprefaceUrl: resolvedComprefaceUrl }
-              : undefined;
+          const selfTestComprefaceOpts = { comprefaceUrl: resolvedComprefaceUrl };
           const selfTestCaps = await detectCapabilities(selfTestComprefaceOpts);
           operationalSnapshot = await runOperationalSelfTests(selfTestCaps, selfTestComprefaceOpts);
           const evaluation = evaluateStartupSelfTest(
             selfTestCaps,
             operationalSnapshot,
             eligibleTypes,
-            resolvedFaceProvider,
           );
           for (const d of evaluation.degraded) {
             ui.warn(
@@ -663,10 +629,7 @@ function startCmd(): Command {
           concurrency,
           eligibleTypes,
           pollIntervalMs,
-          faceProvider: resolvedFaceProvider,
-          ...(resolvedFaceProvider === 'compreface'
-            ? { comprefaceUrl: resolvedComprefaceUrl }
-            : {}),
+          comprefaceUrl: resolvedComprefaceUrl,
         };
         const engine = new NodeEngine({
           api,
@@ -890,10 +853,7 @@ function renderSnapshot(snap: EngineSnapshot): void {
       `${inFlight} in-flight, ${idle} idle`,
   );
   ui.line(`  Eligible types: ${snap.eligibleTypes.join(', ') || '(none)'}`);
-  ui.line(
-    `  Face provider : ${snap.faceProvider}` +
-      (snap.faceProvider === 'compreface' && snap.comprefaceUrl ? ` (${snap.comprefaceUrl})` : ''),
-  );
+  ui.line(`  Face provider : compreface (${snap.comprefaceUrl ?? DEFAULT_COMPREFACE_URL})`);
   ui.line(`  Last heartbeat: ${hbAge}`);
   ui.line(
     `  Jobs          : ${snap.counters.claimed} claimed, ` +
@@ -975,20 +935,14 @@ function statusCmd(): Command {
       ui.line(`  Concurrency   : ${cfg.node?.concurrency ?? DEFAULT_CONCURRENCY}`);
       ui.line(`  Poll interval : ${cfg.node?.pollIntervalMs ?? DEFAULT_POLL_MS}ms`);
       ui.line(`  Eligible types: ${cfg.node?.eligibleTypes?.join(', ') ?? chalk.dim('(all)')}`);
-      const cfgFaceProvider = cfg.node?.faceProvider ?? 'human';
       const cfgComprefaceUrl = cfg.node?.comprefaceUrl ?? DEFAULT_COMPREFACE_URL;
-      ui.line(
-        `  Face provider : ${cfgFaceProvider}` +
-          (cfgFaceProvider === 'compreface' ? ` (${cfgComprefaceUrl})` : ''),
-      );
+      ui.line(`  Face provider : compreface (${cfgComprefaceUrl})`);
       ui.blank();
 
       ui.step('Detected capabilities');
       // Probe the node's ACTUAL sidecar (not the localhost default) so the
       // compreface capability row reflects the configured URL.
-      const caps = await detectCapabilities(
-        cfgFaceProvider === 'compreface' ? { comprefaceUrl: cfgComprefaceUrl } : undefined,
-      );
+      const caps = await detectCapabilities({ comprefaceUrl: cfgComprefaceUrl });
       printCapabilityTable(caps);
 
       // Best-effort: fetch last-known server-side status if the API exposes it.
@@ -1327,7 +1281,6 @@ function doctorCmd(): Command {
       //    the self-test below) checks the operator's configured sidecar URL
       //    rather than always defaulting to localhost.
       ui.step('Capabilities (installed)');
-      const faceProvider = cfg.node?.faceProvider ?? 'human';
       const comprefaceUrl = cfg.node?.comprefaceUrl;
       const caps = await detectCapabilities({ comprefaceUrl });
 
@@ -1347,20 +1300,20 @@ function doctorCmd(): Command {
       // 4. Required-capability check for eligible types — gated on the
       //    OPERATIONAL result, not mere presence, so a node whose sharp binary
       //    resolves but crashes on first use (or whose models aren't
-      //    downloaded yet) is correctly reported as not-ready. `faceProvider`
-      //    is threaded through so face_detection/video_face_detection are
-      //    checked against the node's actually-configured provider instead of
-      //    always assuming Human.
+      //    downloaded yet) is correctly reported as not-ready. The two face
+      //    types are gated on the `compreface` capability — the sidecar
+      //    reachability probe — since CompreFace is the node's only face
+      //    provider.
       ui.step('Job-type readiness');
       const eligibleTypes =
         cfg.node?.eligibleTypes && cfg.node.eligibleTypes.length > 0
           ? cfg.node.eligibleTypes.filter(isNodeJobType)
-          : supportedTypes(operationalCaps, faceProvider);
+          : supportedTypes(operationalCaps);
       if (eligibleTypes.length === 0) {
         ui.warn('No eligible job types configured/supported on this machine.');
       }
       const jobReadinessRows = eligibleTypes.map((t) => {
-        const missing = missingRequirements(t, operationalCaps, faceProvider);
+        const missing = missingRequirements(t, operationalCaps);
         return { type: t, ready: missing.length === 0, missing };
       });
       const jobSummary = summarizeJobReadiness(jobReadinessRows);
@@ -1384,7 +1337,7 @@ function doctorCmd(): Command {
       //      render the shared summarizeStartupGate() output so they never drift.
       ui.step('Startup gate');
       const startupGate = summarizeStartupGate(
-        evaluateStartupSelfTest(caps, operationalCaps, eligibleTypes, faceProvider),
+        evaluateStartupSelfTest(caps, operationalCaps, eligibleTypes),
       );
       if (startupGate.ok) {
         ui.success('Startup gate: PASS — all required capabilities operational.');
@@ -1490,7 +1443,11 @@ function installDepsCmd(): Command {
         '(ffmpeg, native compute libraries, tesseract OCR data, Docker + compreface-core) — Linux only',
     )
     .option('--dry-run', 'Announce what would be installed/run without making any changes')
-    .option('--skip-compreface', 'Skip Docker and the compreface-core sidecar setup')
+    .option(
+      '--skip-compreface',
+      'Skip Docker and the compreface-core sidecar setup — this node will NOT be ' +
+        'face-capable (face_detection/video_face_detection cannot run without the sidecar)',
+    )
     .option(
       '--compreface-port <port>',
       'Port to expose the compreface-core sidecar on',

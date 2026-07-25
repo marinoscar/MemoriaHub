@@ -208,7 +208,7 @@ describe('NodeEngine heartbeat concurrency sync', () => {
   });
 });
 
-describe('NodeEngine heartbeat face-provider detectFn wiring', () => {
+describe('NodeEngine heartbeat compreface detectFn wiring', () => {
   it('invokes detectFn with the configured comprefaceUrl on every beat', async () => {
     const api = {
       claimNodeJobs: async () => ({ jobs: [] }),
@@ -234,7 +234,6 @@ describe('NodeEngine heartbeat face-provider detectFn wiring', () => {
         eligibleTypes: [],
         pollIntervalMs: 5,
         heartbeatIntervalMs: 60_000,
-        faceProvider: 'compreface',
         comprefaceUrl: 'http://localhost:4242',
       },
       detectFn,
@@ -252,7 +251,7 @@ describe('NodeEngine heartbeat face-provider detectFn wiring', () => {
     await engine.stop('test');
   });
 
-  it('invokes detectFn with an undefined comprefaceUrl when the node was not configured for compreface', async () => {
+  it('invokes detectFn with an undefined comprefaceUrl when no sidecar URL was configured', async () => {
     const api = {
       claimNodeJobs: async () => ({ jobs: [] }),
       heartbeatNode: async () => ({}),
@@ -277,7 +276,7 @@ describe('NodeEngine heartbeat face-provider detectFn wiring', () => {
         eligibleTypes: [],
         pollIntervalMs: 5,
         heartbeatIntervalMs: 60_000,
-        // faceProvider/comprefaceUrl intentionally omitted (default 'human').
+        // comprefaceUrl intentionally omitted → the probe falls back to the default.
       },
       detectFn,
     });

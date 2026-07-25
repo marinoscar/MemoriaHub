@@ -38,11 +38,9 @@ export interface NodeConfig {
   pollIntervalMs?: number;
   /** Human-friendly node name shown server-side. */
   name?: string;
-  /** Face-detection provider this node uses for local compute (default 'human'). */
-  faceProvider?: 'human' | 'compreface';
   /**
    * Base URL of a locally-running compreface-core sidecar this node calls for
-   * face detection. Only meaningful when faceProvider is 'compreface'.
+   * face detection — the ONLY face provider a worker node runs (issue #113).
    * Default: http://localhost:3000.
    */
   comprefaceUrl?: string;
@@ -133,18 +131,6 @@ function applyEnvOverlay(base: CliConfig | null): CliConfig | null {
   if (pollIntervalMs !== undefined) {
     node.pollIntervalMs = pollIntervalMs;
     nodeTouched = true;
-  }
-
-  const faceProvider = env['MEMORIAHUB_FACE_PROVIDER']?.trim();
-  if (faceProvider) {
-    if (faceProvider === 'human' || faceProvider === 'compreface') {
-      node.faceProvider = faceProvider;
-      nodeTouched = true;
-    } else {
-      ui.warn(
-        `Ignoring invalid MEMORIAHUB_FACE_PROVIDER="${faceProvider}" (expected 'human' or 'compreface').`,
-      );
-    }
   }
 
   const comprefaceUrl = env['MEMORIAHUB_COMPREFACE_URL']?.trim();

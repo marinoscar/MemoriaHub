@@ -2,11 +2,10 @@
  * test/tui/node-config.spec.tsx
  *
  * Tests for tui/NodeConfig.tsx — the "Worker Node — Configuration" post-
- * registration editor. Focus of this file: the face-detection provider
- * (human/compreface) menu row, which toggles in place with [space] or
- * [Enter] (no sub-screen, unlike the other fields), and the CompreFace
- * base-URL row that only appears — and is only editable — while the
- * provider is 'compreface'.
+ * registration editor. Focus of this file: the CompreFace base-URL row.
+ * CompreFace is the node's ONLY face provider since issue #113, so the old
+ * human/compreface toggle row is gone and the URL row is always present and
+ * always editable.
  *
  * node/ipc-client.js is mocked so `isDaemonRunning()` resolves false — no
  * daemon is running in these tests, so the concurrency-push-live path
@@ -80,101 +79,39 @@ afterEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('NodeConfig — face-detection provider field', () => {
-  it('shows the Face provider row defaulted to human and no CompreFace URL row', () => {
+describe('NodeConfig — CompreFace URL field', () => {
+  it('always shows the CompreFace URL row (defaulted) and no Face provider selector', () => {
     const { lastFrame } = render(
       <NodeConfig config={BASE_CONFIG} onBack={() => {}} />,
     );
 
     const plain = stripAnsi(lastFrame()!);
-    expect(plain).toContain('Face provider');
-    expect(plain).toContain('human');
-    expect(plain).not.toContain('CompreFace URL');
+    expect(plain).toContain('CompreFace URL');
+    expect(plain).toContain(DEFAULT_COMPREFACE_URL);
+    expect(plain).not.toContain('Face provider');
+    expect(plain).not.toContain('human');
   });
 
-  it('pre-fills the provider from an existing compreface config and shows the CompreFace URL row', () => {
+  it('pre-fills the CompreFace URL from an existing config', () => {
     const config: CliConfig = {
       ...BASE_CONFIG,
-      node: { ...BASE_CONFIG.node, faceProvider: 'compreface', comprefaceUrl: 'http://sidecar.local:9000' },
+      node: { ...BASE_CONFIG.node, comprefaceUrl: 'http://sidecar.local:9000' },
     };
     const { lastFrame } = render(<NodeConfig config={config} onBack={() => {}} />);
 
     const plain = stripAnsi(lastFrame()!);
-    expect(plain).toContain('Face provider');
-    expect(plain).toContain('compreface');
     expect(plain).toContain('CompreFace URL');
     expect(plain).toContain('http://sidecar.local:9000');
-  });
-
-  it('[space] toggles the highlighted Face provider row to compreface and reveals the URL row prefilled with the default', async () => {
-    const { lastFrame, stdin } = render(
-      <NodeConfig config={BASE_CONFIG} onBack={() => {}} />,
-    );
-
-    // Menu order: name(0), concurrency(1), poll(2), faceProvider(3).
-    stdin.write('\x1B[B');
-    await flushAsync();
-    stdin.write('\x1B[B');
-    await flushAsync();
-    stdin.write('\x1B[B');
-    await flushAsync();
-
-    stdin.write(' '); // toggle
-    await flushAsync();
-
-    const plain = stripAnsi(lastFrame()!);
-    expect(plain).toContain('compreface');
-    expect(plain).toContain('CompreFace URL');
-    expect(plain).toContain(DEFAULT_COMPREFACE_URL);
-  });
-
-  it('[space] toggle persists faceProvider=compreface with the default comprefaceUrl immediately', async () => {
-    const { stdin } = render(<NodeConfig config={BASE_CONFIG} onBack={() => {}} />);
-
-    stdin.write('\x1B[B');
-    await flushAsync();
-    stdin.write('\x1B[B');
-    await flushAsync();
-    stdin.write('\x1B[B');
-    await flushAsync();
-    stdin.write(' ');
-    await flushAsync();
-
-    expect(mockSaveConfig).toHaveBeenCalled();
-    const lastCall = mockSaveConfig.mock.calls[mockSaveConfig.mock.calls.length - 1][0] as CliConfig;
-    expect(lastCall.node?.faceProvider).toBe('compreface');
-    expect(lastCall.node?.comprefaceUrl).toBe(DEFAULT_COMPREFACE_URL);
-  });
-
-  it('pressing Enter on the Face provider row also toggles it (same effect as space)', async () => {
-    const { lastFrame, stdin } = render(
-      <NodeConfig config={BASE_CONFIG} onBack={() => {}} />,
-    );
-
-    stdin.write('\x1B[B');
-    await flushAsync();
-    stdin.write('\x1B[B');
-    await flushAsync();
-    stdin.write('\x1B[B');
-    await flushAsync();
-    stdin.write('\r'); // Enter, via SelectInput's onSelect -> handleSelect('faceProvider')
-    await flushAsync();
-
-    const plain = stripAnsi(lastFrame()!);
-    expect(plain).toContain('compreface');
-    expect(plain).toContain('CompreFace URL');
   });
 
   it('editing the CompreFace URL field persists the new value', async () => {
     const config: CliConfig = {
       ...BASE_CONFIG,
-      node: { ...BASE_CONFIG.node, faceProvider: 'compreface', comprefaceUrl: DEFAULT_COMPREFACE_URL },
+      node: { ...BASE_CONFIG.node, comprefaceUrl: DEFAULT_COMPREFACE_URL },
     };
     const { lastFrame, stdin } = render(<NodeConfig config={config} onBack={() => {}} />);
 
-    // Menu order now: name(0), concurrency(1), poll(2), faceProvider(3), comprefaceUrl(4).
-    stdin.write('\x1B[B');
-    await flushAsync();
+    // Menu order: name(0), concurrency(1), poll(2), comprefaceUrl(3).
     stdin.write('\x1B[B');
     await flushAsync();
     stdin.write('\x1B[B');
@@ -197,6 +134,7 @@ describe('NodeConfig — face-detection provider field', () => {
     expect(mockSaveConfig).toHaveBeenCalled();
     const lastCall = mockSaveConfig.mock.calls[mockSaveConfig.mock.calls.length - 1][0] as CliConfig;
     expect(lastCall.node?.comprefaceUrl).toBe('http://new-sidecar.local:4000');
+    expect(lastCall.node).not.toHaveProperty('faceProvider');
 
     const plain = stripAnsi(lastFrame()!);
     expect(plain).toContain('Saved CompreFace URL');
@@ -205,12 +143,10 @@ describe('NodeConfig — face-detection provider field', () => {
   it('rejects an empty CompreFace URL without persisting', async () => {
     const config: CliConfig = {
       ...BASE_CONFIG,
-      node: { ...BASE_CONFIG.node, faceProvider: 'compreface', comprefaceUrl: DEFAULT_COMPREFACE_URL },
+      node: { ...BASE_CONFIG.node, comprefaceUrl: DEFAULT_COMPREFACE_URL },
     };
     const { lastFrame, stdin } = render(<NodeConfig config={config} onBack={() => {}} />);
 
-    stdin.write('\x1B[B');
-    await flushAsync();
     stdin.write('\x1B[B');
     await flushAsync();
     stdin.write('\x1B[B');
@@ -232,28 +168,33 @@ describe('NodeConfig — face-detection provider field', () => {
     expect(mockSaveConfig).not.toHaveBeenCalled();
   });
 
-  it('toggling back to human removes the CompreFace URL row and persists comprefaceUrl=undefined', async () => {
+  it('rejects a malformed CompreFace URL without persisting', async () => {
     const config: CliConfig = {
       ...BASE_CONFIG,
-      node: { ...BASE_CONFIG.node, faceProvider: 'compreface', comprefaceUrl: 'http://sidecar.local:9000' },
+      node: { ...BASE_CONFIG.node, comprefaceUrl: DEFAULT_COMPREFACE_URL },
     };
     const { lastFrame, stdin } = render(<NodeConfig config={config} onBack={() => {}} />);
 
-    stdin.write('\x1B[B'); // -> concurrency
+    stdin.write('\x1B[B');
     await flushAsync();
-    stdin.write('\x1B[B'); // -> poll
+    stdin.write('\x1B[B');
     await flushAsync();
-    stdin.write('\x1B[B'); // -> faceProvider
+    stdin.write('\x1B[B');
     await flushAsync();
-    stdin.write(' '); // toggle -> human
+    stdin.write('\r');
+    await flushAsync();
+
+    for (let i = 0; i < DEFAULT_COMPREFACE_URL.length; i++) {
+      stdin.write('\x7f');
+      await flushAsync(20);
+    }
+    stdin.write('not-a-url');
+    await flushAsync();
+    stdin.write('\r');
     await flushAsync();
 
     const plain = stripAnsi(lastFrame()!);
-    expect(plain).not.toContain('CompreFace URL');
-
-    expect(mockSaveConfig).toHaveBeenCalled();
-    const lastCall = mockSaveConfig.mock.calls[mockSaveConfig.mock.calls.length - 1][0] as CliConfig;
-    expect(lastCall.node?.faceProvider).toBe('human');
-    expect(lastCall.node?.comprefaceUrl).toBeUndefined();
+    expect(plain).toContain('CompreFace URL must be a valid URL');
+    expect(mockSaveConfig).not.toHaveBeenCalled();
   });
 });

@@ -1,11 +1,11 @@
 /**
  * test/node/capabilities.spec.ts
  *
- * Unit tests for node/capabilities.ts's CompreFace-related additions:
+ * Unit tests for node/capabilities.ts's CompreFace-related surface:
  *   - detectCapabilities()'s bounded compreface-core /status probe
- *   - effectiveRequirements()'s provider substitution for
- *     face_detection/video_face_detection
- *   - missingRequirements()'s new third (faceProvider) parameter
+ *   - JOB_TYPE_REQUIREMENTS gating the two face job types on the `compreface`
+ *     sidecar capability (CompreFace is a node's only face provider — #113)
+ *   - missingRequirements()
  *
  * No real network calls are made: global.fetch is replaced with a jest.fn()
  * before each test and restored afterwards, matching the pattern used in
@@ -15,11 +15,11 @@
 import { jest } from '@jest/globals';
 import {
   detectCapabilities,
-  effectiveRequirements,
   missingRequirements,
   isNodeJobType,
   DEFAULT_COMPREFACE_URL,
   JOB_TYPE_REQUIREMENTS,
+  NATIVE_MODULES,
   NODE_JOB_TYPES,
   type CapabilityStatus,
 } from '../../src/node/capabilities.js';
@@ -49,6 +49,33 @@ describe('NODE_JOB_TYPES', () => {
       'geocode',
       'workflow_execute_batch',
     ]);
+  });
+});
+
+describe('NATIVE_MODULES', () => {
+  it('carries no Human/TensorFlow entries — the Human pipeline is gone (issue #113)', () => {
+    expect(Object.keys(NATIVE_MODULES).sort()).toEqual(['onnxruntime', 'sharp', 'tesseract']);
+    expect(Object.values(NATIVE_MODULES)).not.toContain('@vladmandic/human');
+  });
+
+  it('does not treat compreface as an npm module (it is an HTTP sidecar probe)', () => {
+    expect(NATIVE_MODULES).not.toHaveProperty('compreface');
+  });
+});
+
+describe('JOB_TYPE_REQUIREMENTS — face types', () => {
+  it('gates face_detection on sharp + the compreface sidecar', () => {
+    expect(JOB_TYPE_REQUIREMENTS.face_detection).toEqual(['sharp', 'compreface']);
+  });
+
+  it('gates video_face_detection on sharp + compreface + ffmpeg', () => {
+    expect(JOB_TYPE_REQUIREMENTS.video_face_detection).toEqual(['sharp', 'compreface', 'ffmpeg']);
+  });
+
+  it('never lists a human capability for any job type', () => {
+    for (const reqs of Object.values(JOB_TYPE_REQUIREMENTS)) {
+      expect(reqs).not.toContain('human');
+    }
   });
 });
 
@@ -110,94 +137,54 @@ describe('detectCapabilities — compreface probe', () => {
     const caps = await detectCapabilities();
 
     expect(caps['sharp']).toBeDefined();
-    expect(caps['human']).toBeDefined();
+    expect(caps['onnxruntime']).toBeDefined();
     expect(caps['ffmpeg']).toBeDefined();
     expect(caps['ffprobe']).toBeDefined();
     expect(caps['compreface']).toBeDefined();
+    expect(caps['human']).toBeUndefined();
   });
 });
 
-describe('effectiveRequirements', () => {
-  it('returns JOB_TYPE_REQUIREMENTS unchanged for every type when faceProvider is human (default)', () => {
-    for (const jobType of Object.keys(JOB_TYPE_REQUIREMENTS) as (keyof typeof JOB_TYPE_REQUIREMENTS)[]) {
-      expect(effectiveRequirements(jobType)).toEqual(JOB_TYPE_REQUIREMENTS[jobType]);
-      expect(effectiveRequirements(jobType, 'human')).toEqual(JOB_TYPE_REQUIREMENTS[jobType]);
-    }
-  });
-
-  it('substitutes human -> compreface for face_detection', () => {
-    expect(effectiveRequirements('face_detection', 'compreface')).toEqual(['sharp', 'compreface']);
-  });
-
-  it('substitutes human -> compreface for video_face_detection', () => {
-    expect(effectiveRequirements('video_face_detection', 'compreface')).toEqual([
-      'sharp',
-      'compreface',
-      'ffmpeg',
-    ]);
-  });
-
-  it('leaves every other job type unaffected by faceProvider=compreface', () => {
-    expect(effectiveRequirements('duplicate_detection', 'compreface')).toEqual(
-      JOB_TYPE_REQUIREMENTS.duplicate_detection,
-    );
-    expect(effectiveRequirements('geocode', 'compreface')).toEqual(JOB_TYPE_REQUIREMENTS.geocode);
-    expect(effectiveRequirements('auto_tagging', 'compreface')).toEqual(
-      JOB_TYPE_REQUIREMENTS.auto_tagging,
-    );
-  });
-
-  it('never mutates the JOB_TYPE_REQUIREMENTS source-of-truth map', () => {
-    const before = JSON.stringify(JOB_TYPE_REQUIREMENTS);
-    effectiveRequirements('face_detection', 'compreface');
-    effectiveRequirements('video_face_detection', 'compreface');
-    expect(JSON.stringify(JOB_TYPE_REQUIREMENTS)).toBe(before);
-  });
-});
-
-describe('missingRequirements — faceProvider parameter', () => {
-  it('defaults to human — a node with only sharp+compreface installed is NOT ready for face_detection', () => {
+describe('missingRequirements', () => {
+  it('is satisfied for face_detection when sharp + compreface are available', () => {
     const caps: Record<string, CapabilityStatus> = {
       sharp: { available: true },
-      human: { available: false, detail: 'not installed' },
       compreface: { available: true },
     };
-    expect(missingRequirements('face_detection', caps)).toEqual(['human']);
+    expect(missingRequirements('face_detection', caps)).toEqual([]);
   });
 
-  it('with faceProvider=compreface, is satisfied when sharp+compreface are available (human not required)', () => {
+  it('reports compreface missing when the sidecar is unreachable', () => {
     const caps: Record<string, CapabilityStatus> = {
       sharp: { available: true },
-      human: { available: false, detail: 'not installed' },
-      compreface: { available: true },
-    };
-    expect(missingRequirements('face_detection', caps, 'compreface')).toEqual([]);
-  });
-
-  it('with faceProvider=compreface, reports compreface missing when the sidecar is unreachable', () => {
-    const caps: Record<string, CapabilityStatus> = {
-      sharp: { available: true },
-      human: { available: true },
       compreface: { available: false, detail: 'not reachable' },
     };
-    expect(missingRequirements('face_detection', caps, 'compreface')).toEqual(['compreface']);
+    expect(missingRequirements('face_detection', caps)).toEqual(['compreface']);
   });
 
-  it('with faceProvider=compreface, applies the same substitution to video_face_detection', () => {
+  it('applies the same gating to video_face_detection', () => {
     const caps: Record<string, CapabilityStatus> = {
       sharp: { available: true },
-      human: { available: false, detail: 'not installed' },
       compreface: { available: true },
       ffmpeg: { available: true },
     };
-    expect(missingRequirements('video_face_detection', caps, 'compreface')).toEqual([]);
+    expect(missingRequirements('video_face_detection', caps)).toEqual([]);
+  });
+
+  it('reports every missing requirement for video_face_detection', () => {
+    const caps: Record<string, CapabilityStatus> = {
+      sharp: { available: true },
+      compreface: { available: false, detail: 'not reachable' },
+      ffmpeg: { available: false },
+    };
+    expect(missingRequirements('video_face_detection', caps)).toEqual(['compreface', 'ffmpeg']);
   });
 
   it('does not affect job types unrelated to face detection', () => {
     const caps: Record<string, CapabilityStatus> = {
       sharp: { available: true },
     };
-    expect(missingRequirements('metadata_extraction', caps, 'compreface')).toEqual([]);
-    expect(missingRequirements('geocode', caps, 'compreface')).toEqual([]);
+    expect(missingRequirements('metadata_extraction', caps)).toEqual([]);
+    expect(missingRequirements('geocode', caps)).toEqual([]);
   });
 });

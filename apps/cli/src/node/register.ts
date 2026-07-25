@@ -71,11 +71,8 @@ export function defaultHeadlessNodeName(
 }
 
 /** Job types whose required capabilities are all satisfied by `caps`. */
-export function supportedTypes(
-  caps: Record<string, CapabilityStatus>,
-  faceProvider: 'human' | 'compreface' = 'human',
-): NodeJobType[] {
-  return NODE_JOB_TYPES.filter((t) => missingRequirements(t, caps, faceProvider).length === 0);
+export function supportedTypes(caps: Record<string, CapabilityStatus>): NodeJobType[] {
+  return NODE_JOB_TYPES.filter((t) => missingRequirements(t, caps).length === 0);
 }
 
 export interface RegisterWorkerNodeInput {
@@ -85,7 +82,6 @@ export interface RegisterWorkerNodeInput {
   concurrency: number;
   /** Explicitly requested job types (already validated); empty = auto-detect. */
   requestedTypes: string[];
-  faceProvider: 'human' | 'compreface';
   comprefaceUrl?: string;
   cliVersion: string;
 }
@@ -126,7 +122,7 @@ export async function registerWorkerNode(
   const eligibleTypes =
     input.requestedTypes.length > 0
       ? input.requestedTypes
-      : supportedTypes(caps, input.faceProvider);
+      : supportedTypes(caps);
 
   const res = await input.api.registerNode({
     name: input.name,
@@ -142,7 +138,6 @@ export async function registerWorkerNode(
     concurrency: input.concurrency,
     eligibleTypes,
     pollIntervalMs: input.cfg.node?.pollIntervalMs ?? DEFAULT_NODE_POLL_MS,
-    faceProvider: input.faceProvider,
     comprefaceUrl: input.comprefaceUrl,
   };
   saveConfigFn({ ...input.cfg, nodeId: res.nodeId, node });

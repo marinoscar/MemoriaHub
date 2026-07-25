@@ -3,9 +3,9 @@
  *
  * A pre-set MODELS_DIR env var must win over the state-dir models path so a
  * container with baked models (e.g. /app/models) verifies them in place
- * instead of re-downloading. MODELS_DIR / FACE_HUMAN_MODEL_PATH /
- * MEMORIAHUB_STATE_DIR are saved/restored between tests (ensureModels itself
- * sets the first two on success).
+ * instead of re-downloading. MODELS_DIR / MEMORIAHUB_STATE_DIR are
+ * saved/restored between tests (ensureModels itself sets MODELS_DIR on
+ * success).
  */
 
 import * as fs from 'fs';
@@ -14,7 +14,7 @@ import * as path from 'path';
 import { ensureModels } from '../../src/node/models.js';
 import { modelsDir } from '../../src/paths.js';
 
-const ENV_KEYS = ['MODELS_DIR', 'FACE_HUMAN_MODEL_PATH', 'MEMORIAHUB_STATE_DIR'] as const;
+const ENV_KEYS = ['MODELS_DIR', 'MEMORIAHUB_STATE_DIR'] as const;
 
 describe('ensureModels — target directory resolution', () => {
   let tmpDir: string;

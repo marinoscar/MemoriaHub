@@ -72,13 +72,11 @@ export interface NodeEngineOptions {
   leaseMs?: number;
   /** Max jobs claimed per poll. Default = concurrency. */
   maxClaim?: number;
-  /** Face-detection provider this node runs face jobs on. Surfaced in status. */
-  faceProvider?: 'human' | 'compreface';
   /**
-   * Base URL of the local compreface-core sidecar (only meaningful when
-   * faceProvider === 'compreface'). Passed to the capability probe on every
-   * heartbeat so reported capabilities reflect the node's ACTUAL sidecar
-   * rather than the localhost default.
+   * Base URL of the local compreface-core sidecar — the node's only face
+   * provider. Passed to the capability probe on every heartbeat so reported
+   * capabilities reflect the node's ACTUAL sidecar rather than the localhost
+   * default.
    */
   comprefaceUrl?: string;
 }
@@ -128,9 +126,7 @@ export interface EngineSnapshot {
   /** Current live concurrency cap (see setConcurrency). */
   concurrency: number;
   eligibleTypes: string[];
-  /** Face-detection provider this node runs face jobs on ('human' | 'compreface'). */
-  faceProvider: 'human' | 'compreface';
-  /** Sidecar URL when faceProvider === 'compreface'; null otherwise. */
+  /** Base URL of the compreface-core sidecar this node uses for face jobs. */
   comprefaceUrl: string | null;
   activeJobs: ActiveJobInfo[];
   /** Last 50 completed/failed jobs, oldest first. */
@@ -247,11 +243,7 @@ export class NodeEngine extends NodeTypedEmitter {
       startedAt: this.startedAtIso,
       concurrency: this.concurrencyCap,
       eligibleTypes: [...this.opts.eligibleTypes],
-      faceProvider: this.opts.faceProvider ?? 'human',
-      comprefaceUrl:
-        (this.opts.faceProvider ?? 'human') === 'compreface'
-          ? this.opts.comprefaceUrl ?? null
-          : null,
+      comprefaceUrl: this.opts.comprefaceUrl ?? null,
       activeJobs: [...this.activeJobs.values()],
       history: [...this.history],
       counters: { ...this.counters },

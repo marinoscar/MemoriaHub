@@ -100,12 +100,12 @@ function healthyState(): DoctorSweepState {
     apiAccess: OK_ACCESS,
     caps: {
       sharp: cap(true, 'sharp'),
-      human: cap(true, '@vladmandic/human'),
+      compreface: cap(true, 'compreface-core reachable'),
       ffmpeg: cap(true, 'ffmpeg on PATH'),
     },
     operationalCaps: {
       sharp: cap(true, 'sharp'),
-      human: cap(true, '@vladmandic/human'),
+      compreface: cap(true, 'compreface-core reachable'),
       ffmpeg: cap(true, 'ffmpeg on PATH'),
     },
     jobReadiness: [
@@ -209,7 +209,7 @@ describe('NodeDoctor — one capability issue', () => {
     expect(plain).toContain('tesseract language data not present');
     // Healthy rows must not appear in the (now issue-only) table.
     expect(plain).not.toContain('sharp');
-    expect(plain).not.toContain('human');
+    expect(plain).not.toContain('compreface');
     expect(plain).not.toContain('ffmpeg');
     unmount();
   });
@@ -251,14 +251,16 @@ describe('NodeDoctor — startup gate', () => {
     const state = healthyState();
     state.startupGate = {
       ok: false,
-      blockingFailures: [{ capability: 'human', jobType: 'face_detection', detail: 'model missing' }],
+      blockingFailures: [
+        { capability: 'compreface', jobType: 'face_detection', detail: 'sidecar unreachable' },
+      ],
       degraded: [{ capability: 'tesseract', detail: 'OCR data not present' }],
     };
     state.hasError = true;
 
     const { plain, unmount } = renderDoctor(state);
     expect(plain).toContain('✖ Startup gate: BLOCKED');
-    expect(plain).toContain('human (required by face_detection)');
+    expect(plain).toContain('compreface (required by face_detection)');
     expect(plain).toContain('tesseract — degraded but non-blocking');
     // Top-checklist row reflects the error, not a plain check.
     expect(plain).toContain('✖ Startup gate');
@@ -293,7 +295,7 @@ describe('NodeDoctor — top checklist reflects actual health', () => {
 
   it('shows an error icon for a step with a real error (job-type readiness)', () => {
     const state = healthyState();
-    state.jobReadiness = [{ type: 'face_detection', ready: false, missing: ['human'] }];
+    state.jobReadiness = [{ type: 'face_detection', ready: false, missing: ['compreface'] }];
     state.hasError = true;
 
     const { plain, unmount } = renderDoctor(state);

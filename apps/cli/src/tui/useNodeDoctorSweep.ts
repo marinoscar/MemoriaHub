@@ -213,9 +213,8 @@ export async function runNodeDoctorSweep(
   if (!access.authOk) hasError = true;
   leaveStep('apiAccess', { apiAccess: access });
 
-  // 2. Capabilities (installed) — presence probe only, no side effects. When
-  //    the node is configured to use a CompreFace sidecar (faceProvider ===
-  //    'compreface'), thread its configured base URL through so the
+  // 2. Capabilities (installed) — presence probe only, no side effects. The
+  //    node's configured CompreFace base URL is threaded through so the
   //    'compreface' capability probes the operator's actual sidecar rather
   //    than the hardcoded default.
   enterStep('capabilities');
@@ -252,14 +251,13 @@ export async function runNodeDoctorSweep(
   //    presence, so a node whose sharp binary resolves but crashes on first
   //    use (or whose models aren't downloaded yet) is correctly not-ready.
   enterStep('jobReadiness');
-  const faceProvider = cfg.node?.faceProvider ?? 'human';
   const configuredTypes = (cfg.node?.eligibleTypes ?? []).filter(isNodeJobType);
   const eligibleTypes: NodeJobType[] =
     configuredTypes.length > 0
       ? configuredTypes
-      : NODE_JOB_TYPES.filter((t) => missingRequirements(t, operationalCaps, faceProvider).length === 0);
+      : NODE_JOB_TYPES.filter((t) => missingRequirements(t, operationalCaps).length === 0);
   const jobReadiness: JobReadinessRow[] = eligibleTypes.map((t) => {
-    const missing = missingRequirements(t, operationalCaps, faceProvider);
+    const missing = missingRequirements(t, operationalCaps);
     if (missing.length > 0) hasError = true;
     return { type: t, ready: missing.length === 0, missing };
   });
@@ -273,7 +271,7 @@ export async function runNodeDoctorSweep(
   //      Pure — never throws — so it needs no per-step try/catch (like the
   //      job-readiness step above).
   enterStep('startupGate');
-  const startupGate = evaluateStartupSelfTest(caps, operationalCaps, eligibleTypes, faceProvider);
+  const startupGate = evaluateStartupSelfTest(caps, operationalCaps, eligibleTypes);
   if (!startupGate.ok) hasError = true;
   leaveStep('startupGate', { startupGate });
 

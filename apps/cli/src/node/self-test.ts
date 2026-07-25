@@ -6,7 +6,7 @@
  * sufficient: a library can resolve and still fail at runtime (wrong native
  * binary for the platform/arch, corrupt install, missing shared libs) or be
  * installed-but-unusable because its model files haven't been downloaded yet
- * (CLIP/Human/tesseract are all model-driven).
+ * (CLIP/tesseract are both model-driven).
  *
  * This module takes a capability snapshot from `detectCapabilities()` and, for
  * every capability reported PRESENT, attempts a minimal real operation:
@@ -14,8 +14,10 @@
  *   - sharp:        decode+encode a tiny in-memory raw buffer.
  *   - onnxruntime:  load the CLIP session and embed a synthetic JPEG (only
  *                   when the model file has already been downloaded).
- *   - human:        load the face detector and run detection on a synthetic
- *                   JPEG (only when the Human model files are present).
+ *   - compreface:   real GET {baseUrl}/status against the local
+ *                   compreface-core sidecar — the node's only face provider,
+ *                   so this is what gates face_detection /
+ *                   video_face_detection readiness.
  *   - tesseract:    init + terminate an OCR worker (only when language data
  *                   is present).
  *   - ffmpeg/ffprobe: left as the existing binary `-version` presence probe
@@ -43,7 +45,6 @@ import {
   createClipSession,
   embedImageWithSession,
 } from '@memoriahub/enrichment-compute/clip';
-import { createFaceDetector } from '@memoriahub/enrichment-compute/face';
 import { createOcrEngine } from '@memoriahub/enrichment-compute/ocr';
 import { testComprefaceStatus } from '@memoriahub/enrichment-compute/face-compreface';
 
@@ -56,7 +57,6 @@ const CLIP_MODEL_FILENAME = 'clip-vit-b32-vision-quantized.onnx';
 /** Per-self-test timeout — generous enough for a cold model load, still bounded. */
 const SHARP_TIMEOUT_MS = 5_000;
 const CLIP_TIMEOUT_MS = 20_000;
-const HUMAN_TIMEOUT_MS = 25_000;
 const TESSERACT_TIMEOUT_MS = 20_000;
 const COMPREFACE_TIMEOUT_MS = 5_000;
 
@@ -173,49 +173,6 @@ export async function testClip(): Promise<CapabilityStatus> {
   }
 }
 
-/** Must match apps/cli/src/node/compute/face-detection.ts's resolveModelBasePath(). */
-function humanModelBasePath(): string {
-  const override = process.env['FACE_HUMAN_MODEL_PATH'];
-  if (override) return override;
-  return path.join(process.env['MODELS_DIR'] ?? modelsDir(), 'human');
-}
-
-/**
- * Human (face) self-test: only runs when the Human model directory is
- * already present. When present, loads the real detector and runs detection
- * on a synthetic (faceless) JPEG — an empty `faces` array is a PASS, since
- * this proves the pipeline runs end-to-end, not that it finds a face.
- */
-export async function testHuman(): Promise<CapabilityStatus> {
-  const modelBasePath = humanModelBasePath();
-  if (!fs.existsSync(modelBasePath)) {
-    return {
-      available: false,
-      detail:
-        `Human model files not present at ${modelBasePath} — models are fetched ` +
-        'automatically on `node start`; face_detection/video_face_detection are not yet ' +
-        'operational on this node.',
-    };
-  }
-  try {
-    return await withTimeout(
-      async () => {
-        const jpeg = await tinySyntheticJpeg();
-        const detector = await createFaceDetector({ modelBasePath });
-        const out = await detector.detect(jpeg);
-        return {
-          available: true,
-          detail: `Human detector ok — ran end-to-end (${out.faces.length} face(s) on synthetic image)`,
-        };
-      },
-      HUMAN_TIMEOUT_MS,
-      'Human face self-test',
-    );
-  } catch (err) {
-    return { available: false, detail: `Human self-test failed: ${errMsg(err)}` };
-  }
-}
-
 /**
  * Must match apps/cli/src/node/compute/social-media-detection.ts's tessDir().
  * Exported for reuse by node/install-deps.ts, which needs the exact same
@@ -316,19 +273,15 @@ export async function runOperationalSelfTests(
   if (caps['onnxruntime']?.available) {
     result['onnxruntime'] = await testClip();
   }
-  if (caps['human']?.available) {
-    result['human'] = await testHuman();
-  }
   if (caps['tesseract']?.available) {
     result['tesseract'] = await testTesseract();
   }
   if (caps['compreface']?.available) {
     result['compreface'] = await testCompreface(opts?.comprefaceUrl ?? DEFAULT_COMPREFACE_URL);
   }
-  // ffmpeg/ffprobe/tfjs/tfjsWasm: left as the presence-only probe — see the
-  // module docstring for tfjs/tfjsWasm (exercised transitively by testHuman)
-  // and ffmpeg/ffprobe (binary `-version` execution already proves the
-  // binary runs, unlike a require.resolve() check).
+  // ffmpeg/ffprobe: left as the presence-only probe — a binary `-version`
+  // execution already proves the binary runs, unlike a require.resolve()
+  // check. See the module docstring.
 
   return result;
 }

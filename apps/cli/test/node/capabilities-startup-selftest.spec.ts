@@ -22,11 +22,11 @@ describe('evaluateStartupSelfTest', () => {
   it('is ok with no blocking failures or degrades when every required capability passes its operational self-test', () => {
     const caps: Record<string, CapabilityStatus> = {
       sharp: { available: true, detail: 'sharp' },
-      human: { available: true, detail: '@vladmandic/human' },
+      compreface: { available: true, detail: 'compreface-core reachable' },
     };
     const operationalResults: Record<string, CapabilityStatus> = {
       sharp: { available: true, detail: 'roundtrip ok' },
-      human: { available: true, detail: 'ran end-to-end' },
+      compreface: { available: true, detail: '/status ok' },
     };
 
     const result = evaluateStartupSelfTest(caps, operationalResults, ['face_detection']);
@@ -39,11 +39,11 @@ describe('evaluateStartupSelfTest', () => {
   it('reports a non-empty blockingFailures and ok:false when a required capability fails its operational self-test', () => {
     const caps: Record<string, CapabilityStatus> = {
       sharp: { available: true, detail: 'sharp' },
-      human: { available: true, detail: '@vladmandic/human' },
+      compreface: { available: true, detail: 'compreface-core reachable' },
     };
     const operationalResults: Record<string, CapabilityStatus> = {
       sharp: { available: true, detail: 'roundtrip ok' },
-      human: { available: false, detail: 'Human self-test failed: model load error' },
+      compreface: { available: false, detail: 'compreface self-test failed: HTTP 503' },
     };
 
     const result = evaluateStartupSelfTest(caps, operationalResults, ['face_detection']);
@@ -51,9 +51,9 @@ describe('evaluateStartupSelfTest', () => {
     expect(result.ok).toBe(false);
     expect(result.blockingFailures).toEqual([
       {
-        capability: 'human',
+        capability: 'compreface',
         jobType: 'face_detection',
-        detail: 'Human self-test failed: model load error',
+        detail: 'compreface self-test failed: HTTP 503',
       },
     ]);
     expect(result.degraded).toEqual([]);
@@ -142,28 +142,25 @@ describe('evaluateStartupSelfTest', () => {
     expect(result.degraded).toEqual([{ capability: 'sharp', detail: 'sharp self-test failed' }]);
   });
 
-  it('substitutes the compreface capability for human when faceProvider=compreface', () => {
+  it('blocks video_face_detection on an unreachable compreface sidecar too', () => {
     const caps: Record<string, CapabilityStatus> = {
       sharp: { available: true },
+      ffmpeg: { available: true },
       compreface: { available: true },
     };
     const operationalResults: Record<string, CapabilityStatus> = {
       sharp: { available: true },
+      ffmpeg: { available: true },
       compreface: { available: false, detail: 'compreface self-test failed: HTTP 503' },
     };
 
-    const result = evaluateStartupSelfTest(
-      caps,
-      operationalResults,
-      ['face_detection'],
-      'compreface',
-    );
+    const result = evaluateStartupSelfTest(caps, operationalResults, ['video_face_detection']);
 
     expect(result.ok).toBe(false);
     expect(result.blockingFailures).toEqual([
       {
         capability: 'compreface',
-        jobType: 'face_detection',
+        jobType: 'video_face_detection',
         detail: 'compreface self-test failed: HTTP 503',
       },
     ]);
@@ -189,34 +186,34 @@ describe('mergeOperationalCapabilities', () => {
   it('leaves a presence entry unchanged (no operational field added) when no operational snapshot is supplied', () => {
     const presence: Record<string, CapabilityStatus> = {
       sharp: { available: true, detail: 'sharp' },
-      human: { available: false, detail: '@vladmandic/human not installed' },
+      compreface: { available: false, detail: 'compreface-core not reachable' },
     };
 
     const merged = mergeOperationalCapabilities(presence);
 
     expect(merged).toEqual({
       sharp: { available: true, detail: 'sharp' },
-      human: { available: false, detail: '@vladmandic/human not installed' },
+      compreface: { available: false, detail: 'compreface-core not reachable' },
     });
     expect(merged['sharp']).not.toHaveProperty('operational');
-    expect(merged['human']).not.toHaveProperty('operational');
+    expect(merged['compreface']).not.toHaveProperty('operational');
   });
 
   it('overlays operational:false plus operationalDetail onto a present capability', () => {
     const presence: Record<string, CapabilityStatus> = {
-      human: { available: true, detail: '@vladmandic/human' },
+      compreface: { available: true, detail: 'compreface-core reachable' },
     };
     const operational: Record<string, CapabilityStatus> = {
-      human: { available: false, detail: 'Human self-test failed: model load error' },
+      compreface: { available: false, detail: 'compreface self-test failed: HTTP 503' },
     };
 
     const merged = mergeOperationalCapabilities(presence, operational);
 
-    expect(merged['human']).toEqual({
+    expect(merged['compreface']).toEqual({
       available: true,
-      detail: '@vladmandic/human',
+      detail: 'compreface-core reachable',
       operational: false,
-      operationalDetail: 'Human self-test failed: model load error',
+      operationalDetail: 'compreface self-test failed: HTTP 503',
     });
   });
 
@@ -237,9 +234,9 @@ describe('mergeOperationalCapabilities', () => {
   it('leaves a capability unchanged when it is absent from the operational snapshot (partial/backward-compat snapshot)', () => {
     const presence: Record<string, CapabilityStatus> = {
       sharp: { available: true, detail: 'sharp' },
-      human: { available: true, detail: '@vladmandic/human' },
+      compreface: { available: true, detail: 'compreface-core reachable' },
     };
-    // Only sharp was operationally tested; human is absent (e.g. an older
+    // Only sharp was operationally tested; compreface is absent (e.g. an older
     // snapshot, or a capability the startup self-test never covers).
     const operational: Record<string, CapabilityStatus> = {
       sharp: { available: true, detail: 'roundtrip ok' },
@@ -253,28 +250,28 @@ describe('mergeOperationalCapabilities', () => {
       operational: true,
       operationalDetail: 'roundtrip ok',
     });
-    // human is passed through exactly as in presence — presence-only shape.
-    expect(merged['human']).toEqual({ available: true, detail: '@vladmandic/human' });
-    expect(merged['human']).not.toHaveProperty('operational');
+    // compreface is passed through exactly as in presence — presence-only shape.
+    expect(merged['compreface']).toEqual({ available: true, detail: 'compreface-core reachable' });
+    expect(merged['compreface']).not.toHaveProperty('operational');
   });
 
   it('never consults the operational snapshot for a capability whose presence is unavailable', () => {
     const presence: Record<string, CapabilityStatus> = {
-      human: { available: false, detail: '@vladmandic/human not installed' },
+      compreface: { available: false, detail: 'compreface-core not reachable' },
     };
     // Even if a (stale/nonsensical) operational entry exists for a
     // not-installed capability, it must not be applied.
     const operational: Record<string, CapabilityStatus> = {
-      human: { available: true, detail: 'ran end-to-end' },
+      compreface: { available: true, detail: '/status ok' },
     };
 
     const merged = mergeOperationalCapabilities(presence, operational);
 
-    expect(merged['human']).toEqual({
+    expect(merged['compreface']).toEqual({
       available: false,
-      detail: '@vladmandic/human not installed',
+      detail: 'compreface-core not reachable',
     });
-    expect(merged['human']).not.toHaveProperty('operational');
+    expect(merged['compreface']).not.toHaveProperty('operational');
   });
 
   it('returns an empty object for an empty presence map regardless of the operational snapshot', () => {

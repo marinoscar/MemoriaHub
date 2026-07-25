@@ -68,13 +68,13 @@ describe('summarizeCapabilities', () => {
   it('classifies a mixed set of capabilities into issues/okCount/totalCount', () => {
     const caps: Record<string, CapabilityStatus> = {
       sharp: status(true, 'sharp'),
-      human: status(true, '@vladmandic/human'),
+      compreface: status(true, 'compreface-core reachable'),
       onnxruntime: status(false, 'onnxruntime-node not installed'),
       ffmpeg: status(true, 'ffmpeg on PATH'),
     };
     const operational: Record<string, CapabilityStatus> = {
       sharp: status(true),
-      human: status(false, 'model not downloaded yet'),
+      compreface: status(false, 'compreface self-test failed: HTTP 503'),
       onnxruntime: status(false),
       ffmpeg: status(true),
     };
@@ -84,11 +84,16 @@ describe('summarizeCapabilities', () => {
     expect(summary.totalCount).toBe(4);
     expect(summary.okCount).toBe(2); // sharp, ffmpeg
     expect(summary.issues).toHaveLength(2);
-    expect(summary.issues.map((r) => r.key).sort()).toEqual(['human', 'onnxruntime']);
-    expect(summary.issues.find((r) => r.key === 'human')?.level).toBe('warn');
+    expect(summary.issues.map((r) => r.key).sort()).toEqual(['compreface', 'onnxruntime']);
+    expect(summary.issues.find((r) => r.key === 'compreface')?.level).toBe('warn');
     expect(summary.issues.find((r) => r.key === 'onnxruntime')?.level).toBe('error');
     // rows preserves input order and includes every capability
-    expect(summary.rows.map((r) => r.key)).toEqual(['sharp', 'human', 'onnxruntime', 'ffmpeg']);
+    expect(summary.rows.map((r) => r.key)).toEqual([
+      'sharp',
+      'compreface',
+      'onnxruntime',
+      'ffmpeg',
+    ]);
   });
 
   it('falls back to the presence status when a key is absent from operational (mirrors `operational[key] ?? status`)', () => {
@@ -182,7 +187,7 @@ describe('summarizeStartupGate', () => {
     const evaluation: StartupSelfTestEvaluation = {
       ok: false,
       blockingFailures: [
-        { capability: 'human', jobType: 'face_detection', detail: 'model missing' },
+        { capability: 'compreface', jobType: 'face_detection', detail: 'sidecar unreachable' },
         { capability: 'sharp', jobType: 'auto_tagging' },
       ],
       degraded: [],
@@ -191,7 +196,7 @@ describe('summarizeStartupGate', () => {
     expect(summary.ok).toBe(false);
     expect(summary.level).toBe('error');
     expect(summary.blockers).toEqual([
-      'human (required by face_detection): model missing',
+      'compreface (required by face_detection): sidecar unreachable',
       'sharp (required by auto_tagging)',
     ]);
     expect(summary.degrades).toEqual([]);

@@ -14,11 +14,9 @@
  *                  again REPLACES the current registration server-side and
  *                  locally, so this is a consequential action requiring a
  *                  y/n confirm (mirrors NodeDashboard's stop-daemon confirm)
- *   'form'       — wizard over: name, concurrency, face-detection provider
- *                  (human/compreface — [space] toggles, near the job-types
- *                  field since it changes which types are supported), a
- *                  CompreFace base-URL text field (only shown/focusable when
- *                  the provider is 'compreface'), and eligible types
+ *   'form'       — wizard over: name, concurrency, the compreface-core
+ *                  sidecar base URL (CompreFace is the node's only face
+ *                  provider — issue #113), and eligible types
  *                  (comma-separated). Tab/↓ moves focus forward, ↑ moves
  *                  back; Enter on scalar fields advances focus, Enter
  *                  on the last field (types) submits.
@@ -46,8 +44,6 @@ import {
 } from '../node/capabilities.js';
 import { BOX_BORDER } from './theme.js';
 
-type FaceProvider = 'human' | 'compreface';
-
 // ---------------------------------------------------------------------------
 // Defaults (mirror commands/node.ts)
 // ---------------------------------------------------------------------------
@@ -72,16 +68,10 @@ function cliVersion(): string {
   }
 }
 
-/** Job types whose required capabilities are all satisfied by `caps` for the
- *  given face-detection provider — mirrors the private `supportedTypes()`
- *  helper in commands/node.ts, extended to thread `faceProvider` through so
- *  the default selection reflects which provider (human/compreface) the
- *  node will actually run face_detection/video_face_detection against. */
-function supportedTypes(
-  caps: Record<string, CapabilityStatus>,
-  faceProvider: FaceProvider = 'human',
-): string[] {
-  return NODE_JOB_TYPES.filter((t) => missingRequirements(t, caps, faceProvider).length === 0);
+/** Job types whose required capabilities are all satisfied by `caps` —
+ *  mirrors the `supportedTypes()` helper in node/register.ts. */
+function supportedTypes(caps: Record<string, CapabilityStatus>): string[] {
+  return NODE_JOB_TYPES.filter((t) => missingRequirements(t, caps).length === 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -96,18 +86,9 @@ export interface NodeRegisterProps {
 }
 
 type Step = 'detecting' | 'confirm' | 'form' | 'submitting' | 'success' | 'error';
-type Field = 'name' | 'concurrency' | 'faceProvider' | 'comprefaceUrl' | 'types';
+type Field = 'name' | 'concurrency' | 'comprefaceUrl' | 'types';
 
-/**
- * Field order is dynamic: the CompreFace URL field only participates in
- * Tab/↑/↓ navigation when the face provider is 'compreface' — otherwise it
- * isn't rendered and shouldn't be a stop on the tour.
- */
-function fieldOrder(faceProvider: FaceProvider): Field[] {
-  return faceProvider === 'compreface'
-    ? ['name', 'concurrency', 'faceProvider', 'comprefaceUrl', 'types']
-    : ['name', 'concurrency', 'faceProvider', 'types'];
-}
+const FIELD_ORDER: Field[] = ['name', 'concurrency', 'comprefaceUrl', 'types'];
 
 // ---------------------------------------------------------------------------
 // Component
@@ -118,7 +99,6 @@ export function NodeRegister({ config, onRegistered, onBack }: NodeRegisterProps
 
   const [name, setName] = useState<string>('');
   const [concurrencyStr, setConcurrencyStr] = useState<string>(String(DEFAULT_CONCURRENCY));
-  const [faceProvider, setFaceProvider] = useState<FaceProvider>(config.node?.faceProvider ?? 'human');
   const [comprefaceUrl, setComprefaceUrl] = useState<string>(
     config.node?.comprefaceUrl ?? DEFAULT_COMPREFACE_URL,
   );
@@ -126,12 +106,7 @@ export function NodeRegister({ config, onRegistered, onBack }: NodeRegisterProps
   const [field, setField] = useState<Field>('name');
   const [fieldError, setFieldError] = useState<string>('');
 
-  // Capability snapshot from the last detection run, kept around so toggling
-  // the face-provider field can re-evaluate the default type selection
-  // without re-probing the machine.
-  const [caps, setCaps] = useState<Record<string, CapabilityStatus> | null>(null);
-  // True once the user has manually edited the Types field in this session —
-  // once touched, a face-provider toggle no longer overwrites their edits.
+  // True once the user has manually edited the Types field in this session.
   const typesTouchedRef = useRef(false);
 
   const [result, setResult] = useState<NodeRegisterResult | null>(null);
@@ -141,36 +116,20 @@ export function NodeRegister({ config, onRegistered, onBack }: NodeRegisterProps
   // ---- capability auto-detection on mount (also runs after a 'confirm' yes) ----
   const runDetection = useCallback((): void => {
     setStep('detecting');
-    void detectCapabilities().then((detected) => {
-      const initialFaceProvider = config.node?.faceProvider ?? 'human';
+    void detectCapabilities({ comprefaceUrl: config.node?.comprefaceUrl }).then((detected) => {
       setName(os.hostname());
       setConcurrencyStr(String(config.node?.concurrency ?? DEFAULT_CONCURRENCY));
-      setFaceProvider(initialFaceProvider);
       setComprefaceUrl(config.node?.comprefaceUrl ?? DEFAULT_COMPREFACE_URL);
-      setCaps(detected);
       typesTouchedRef.current = false;
       setTypesStr(
         config.node?.eligibleTypes && config.node.eligibleTypes.length > 0
           ? config.node.eligibleTypes.join(', ')
-          : supportedTypes(detected, initialFaceProvider).join(', '),
+          : supportedTypes(detected).join(', '),
       );
       setField('name');
       setStep('form');
     });
   }, [config.node]);
-
-  // ---- toggle the face-detection provider, re-evaluating the default type
-  // selection against the new provider unless the user has already hand-
-  // edited the Types field this session ----
-  const toggleFaceProvider = useCallback((): void => {
-    setFaceProvider((prev) => {
-      const next: FaceProvider = prev === 'human' ? 'compreface' : 'human';
-      if (caps && !typesTouchedRef.current) {
-        setTypesStr(supportedTypes(caps, next).join(', '));
-      }
-      return next;
-    });
-  }, [caps]);
 
   useEffect(() => {
     if (step === 'detecting') runDetection();
@@ -200,18 +159,17 @@ export function NodeRegister({ config, onRegistered, onBack }: NodeRegisterProps
           eligibleTypes: requested,
           concurrency,
         });
-        // faceProvider/comprefaceUrl are NODE-LOCAL config only — they are
-        // never sent to the server as part of the register payload above
-        // (only name/hostname/platform/cliVersion/eligibleTypes/concurrency
-        // are), so they're added to the local NodeConfig only, after the
-        // server call succeeds.
+        // comprefaceUrl is NODE-LOCAL config only — it is never sent to the
+        // server as part of the register payload above (only
+        // name/hostname/platform/cliVersion/eligibleTypes/concurrency are),
+        // so it's added to the local NodeConfig only, after the server call
+        // succeeds.
         const node: NodeConfig = {
           name: trimmedName,
           concurrency,
           eligibleTypes: requested,
           pollIntervalMs: config.node?.pollIntervalMs ?? DEFAULT_POLL_MS,
-          faceProvider,
-          comprefaceUrl: faceProvider === 'compreface' ? comprefaceUrl.trim() || DEFAULT_COMPREFACE_URL : undefined,
+          comprefaceUrl: comprefaceUrl.trim() || DEFAULT_COMPREFACE_URL,
         };
         const newConfig: CliConfig = { ...config, nodeId: res.nodeId, node };
         saveConfig(newConfig);
@@ -228,7 +186,7 @@ export function NodeRegister({ config, onRegistered, onBack }: NodeRegisterProps
         setStep('error');
       }
     })();
-  }, [name, concurrencyStr, faceProvider, comprefaceUrl, typesStr, config, onRegistered]);
+  }, [name, concurrencyStr, comprefaceUrl, typesStr, config, onRegistered]);
 
   // ---- validate + advance/submit on Enter, per field ----
   const advanceOrSubmit = useCallback((): void => {
@@ -244,18 +202,13 @@ export function NodeRegister({ config, onRegistered, onBack }: NodeRegisterProps
         return;
       }
       setFieldError('');
-      setField('faceProvider');
-      return;
-    }
-    if (field === 'faceProvider') {
-      setFieldError('');
-      setField(faceProvider === 'compreface' ? 'comprefaceUrl' : 'types');
+      setField('comprefaceUrl');
       return;
     }
     if (field === 'comprefaceUrl') {
       const trimmed = comprefaceUrl.trim();
       if (!trimmed) {
-        setFieldError('CompreFace URL is required when the compreface provider is selected.');
+        setFieldError("CompreFace URL is required — it is this node's only face provider.");
         return;
       }
       try {
@@ -283,7 +236,7 @@ export function NodeRegister({ config, onRegistered, onBack }: NodeRegisterProps
     }
     setFieldError('');
     submit();
-  }, [field, concurrencyStr, faceProvider, comprefaceUrl, typesStr, submit]);
+  }, [field, concurrencyStr, comprefaceUrl, typesStr, submit]);
 
   // ---- confirm step keys ----
   useInput((input, key) => {
@@ -295,16 +248,15 @@ export function NodeRegister({ config, onRegistered, onBack }: NodeRegisterProps
     }
   });
 
-  // ---- form step: Tab/arrows move focus; typing goes to the focused TextInput;
-  // [space] toggles the faceProvider field; [Enter] on faceProvider advances
-  // (mirrors TextInput's onSubmit for the scalar fields) ----
+  // ---- form step: Tab/arrows move focus; typing goes to the focused
+  // TextInput (which owns Enter via onSubmit) ----
   useInput((input, key) => {
     if (step !== 'form') return;
     if (key.escape || input === 'q') {
       onBack();
       return;
     }
-    const order = fieldOrder(faceProvider);
+    const order = FIELD_ORDER;
     if (key.tab || key.downArrow) {
       setFieldError('');
       setField((f) => order[(order.indexOf(f) + 1) % order.length]);
@@ -313,16 +265,6 @@ export function NodeRegister({ config, onRegistered, onBack }: NodeRegisterProps
     if (key.upArrow) {
       setFieldError('');
       setField((f) => order[(order.indexOf(f) - 1 + order.length) % order.length]);
-      return;
-    }
-    if (field === 'faceProvider') {
-      if (input === ' ') {
-        toggleFaceProvider();
-        return;
-      }
-      if (key.return) {
-        advanceOrSubmit();
-      }
     }
   });
 
@@ -444,31 +386,15 @@ export function NodeRegister({ config, onRegistered, onBack }: NodeRegisterProps
       </Box>
 
       <Box flexDirection="row" gap={1}>
-        <Text color={field === 'faceProvider' ? 'cyan' : undefined}>{field === 'faceProvider' ? '❯' : ' '}</Text>
-        <Text color={field === 'faceProvider' ? 'cyan' : undefined}>{'Face provider'.padEnd(12)}</Text>
-        <Text>
-          <Text color={faceProvider === 'human' ? 'green' : undefined} bold={faceProvider === 'human'}>
-            {faceProvider === 'human' ? '[human]' : ' human '}
-          </Text>
-          {'  '}
-          <Text color={faceProvider === 'compreface' ? 'green' : undefined} bold={faceProvider === 'compreface'}>
-            {faceProvider === 'compreface' ? '[compreface]' : ' compreface '}
-          </Text>
-        </Text>
+        <Text color={field === 'comprefaceUrl' ? 'cyan' : undefined}>{field === 'comprefaceUrl' ? '❯' : ' '}</Text>
+        <Text color={field === 'comprefaceUrl' ? 'cyan' : undefined}>{'CompreFace URL'.padEnd(12)}</Text>
+        <TextInput
+          value={comprefaceUrl}
+          onChange={setComprefaceUrl}
+          onSubmit={advanceOrSubmit}
+          focus={field === 'comprefaceUrl'}
+        />
       </Box>
-
-      {faceProvider === 'compreface' ? (
-        <Box flexDirection="row" gap={1}>
-          <Text color={field === 'comprefaceUrl' ? 'cyan' : undefined}>{field === 'comprefaceUrl' ? '❯' : ' '}</Text>
-          <Text color={field === 'comprefaceUrl' ? 'cyan' : undefined}>{'CompreFace URL'.padEnd(12)}</Text>
-          <TextInput
-            value={comprefaceUrl}
-            onChange={setComprefaceUrl}
-            onSubmit={advanceOrSubmit}
-            focus={field === 'comprefaceUrl'}
-          />
-        </Box>
-      ) : null}
 
       <Box flexDirection="row" gap={1}>
         <Text color={field === 'types' ? 'cyan' : undefined}>{field === 'types' ? '❯' : ' '}</Text>

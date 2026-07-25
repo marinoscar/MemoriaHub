@@ -83,7 +83,7 @@ COPY apps/cli/package.json ./apps/cli/package.json
 COPY packages/enrichment-compute ./packages/enrichment-compute/
 # Scripts ENABLED (unlike the API image): the worker needs the native binaries
 # actually built/downloaded — better-sqlite3 (node-gyp/prebuild), onnxruntime-node
-# (postinstall binary fetch, the CLIP runtime), sharp/@vladmandic/human/tesseract.
+# (postinstall binary fetch, the CLIP runtime), sharp/tesseract.
 # Under buildx the install runs on the target platform, so per-arch (amd64/arm64)
 # native binaries resolve automatically.
 RUN npm install
@@ -96,8 +96,8 @@ RUN npm run build -w @memoriahub/enrichment-compute
 # Models stage — bake parity models into the image (reproducible / air-gap)
 # -----------------------------------------------------------------------------
 # Values MUST match apps/api NodesService.getModelManifest() so a node's compute
-# is numerically identical to the server's. CLIP + Human are sha256-verified and
-# MANDATORY (build fails if a download is corrupt/missing). Tesseract eng data is
+# is numerically identical to the server's. CLIP is sha256-verified and
+# MANDATORY (build fails if the download is corrupt/missing). Tesseract eng data is
 # best-effort — a bad/absent bake only degrades social_media_detection to
 # Tier-1-only (the OCR path resolves to null and the job still runs), never fails.
 FROM base AS models
@@ -108,19 +108,6 @@ RUN mkdir -p /app/models && \
     wget -q -O /app/models/clip-vit-b32-vision-quantized.onnx "$CLIP_URL" && \
     echo "$CLIP_SHA256  /app/models/clip-vit-b32-vision-quantized.onnx" | sha256sum -c - \
       || { echo "FATAL: CLIP model download failed or hash mismatch"; exit 1; }
-# @vladmandic/human face models (blazeface-back detector + faceres descriptor) → models/human.
-RUN mkdir -p /app/models/human && cd /app/models/human && \
-    wget -q -O blazeface-back.json https://github.com/vladmandic/human-models/raw/main/models/blazeface-back.json && \
-    wget -q -O blazeface-back.bin  https://github.com/vladmandic/human-models/raw/main/models/blazeface-back.bin && \
-    wget -q -O faceres.json        https://github.com/vladmandic/human-models/raw/main/models/faceres.json && \
-    wget -q -O faceres.bin         https://github.com/vladmandic/human-models/raw/main/models/faceres.bin && \
-    printf '%s\n' \
-      'a765f7b2a6c1d841ecc0b0686e5f51b141b39b7bcdf2888542dc9d9fc4384a87  blazeface-back.json' \
-      'dc9a97fdc50bc43216554bdd69aa3e7b9361a519ee7bdd996a2f69a98a6f9b72  blazeface-back.bin' \
-      '5b83d49c0385d2e68a05122441b94226313677cae9fcc40b9587ad50079eb4df  faceres.json' \
-      '2c7d2d62b76c97528b736527aa09d310ea71743c9e3e79fb6c62d4b2d73af79b  faceres.bin' \
-      | sha256sum -c - \
-      || { echo "FATAL: Human model download failed or hash mismatch"; exit 1; }
 # Tesseract English traineddata (Tier-2 OCR for social_media_detection) →
 # models/tesseract, where createOcrEngine's langDir (MODELS_DIR/tesseract) reads it.
 # Best-effort: OCR degrades to Tier-1-only if this is missing.
@@ -158,15 +145,14 @@ COPY --from=models /app/models /app/models
 
 # Headless container config. MEMORIAHUB_STATE_DIR relocates the writable state
 # (pidfile/socket/logs/local sqlite) off the read-only image into a per-replica
-# dir; MODELS_DIR/FACE_HUMAN_MODEL_PATH point at the baked models so ensureModels
-# verifies them in place instead of re-downloading; MEMORIAHUB_HEADLESS makes
+# dir; MODELS_DIR points at the baked models so ensureModels verifies them in
+# place instead of re-downloading; MEMORIAHUB_HEADLESS makes
 # `node start` self-register and drain-without-deregister on SIGTERM.
 # SHARP_FORCE_GLOBAL_LIBVIPS: keep set at runtime too so sharp resolves the
 # system HEIF-enabled libvips (matches the deps stage that built its addon), and
 # any runtime `npm rebuild` keeps building against global libvips (issue #128).
 ENV MEMORIAHUB_STATE_DIR=/data \
     MODELS_DIR=/app/models \
-    FACE_HUMAN_MODEL_PATH=/app/models/human \
     MEMORIAHUB_HEADLESS=1 \
     NODE_ENV=production \
     SHARP_FORCE_GLOBAL_LIBVIPS=1

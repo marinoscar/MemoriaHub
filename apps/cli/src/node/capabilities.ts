@@ -3,8 +3,9 @@
  *
  * A worker node advertises which enrichment job types it can process. Whether a
  * type is processable depends on the runtime availability of heavy native model
- * libraries (onnxruntime-node, sharp, TensorFlow, Human, tesseract.js) and the
- * ffmpeg/ffprobe binaries on PATH.
+ * libraries (onnxruntime-node, sharp, tesseract.js), the ffmpeg/ffprobe binaries
+ * on PATH, and — for the two face job types — a reachable compreface-core
+ * sidecar (the sole face provider a node runs, issue #113).
  *
  * CRITICAL: none of the native libraries are statically imported anywhere in the
  * CLI. They live in `optionalDependencies` and are loaded at RUNTIME via
@@ -46,13 +47,16 @@ export class CapabilityUnavailableError extends Error {
 // Native module registry
 // ---------------------------------------------------------------------------
 
-/** Capability key → npm module specifier for the native libraries. */
+/**
+ * Capability key → npm module specifier for the native libraries.
+ *
+ * NOTE: `compreface` is deliberately NOT here — it is not an npm module but a
+ * locally-running HTTP sidecar, probed via `probeCompreface()` (a bounded
+ * GET {baseUrl}/status) rather than `require.resolve`.
+ */
 export const NATIVE_MODULES: Record<string, string> = {
   onnxruntime: 'onnxruntime-node',
   sharp: 'sharp',
-  tfjs: '@tensorflow/tfjs',
-  tfjsWasm: '@tensorflow/tfjs-backend-wasm',
-  human: '@vladmandic/human',
   tesseract: 'tesseract.js',
 };
 
@@ -169,8 +173,10 @@ export function isNodeJobType(t: string): t is NodeJobType {
  * only errors when a listed requirement is missing.
  */
 export const JOB_TYPE_REQUIREMENTS: Record<NodeJobType, string[]> = {
-  face_detection: ['sharp', 'human'],
-  video_face_detection: ['sharp', 'human', 'ffmpeg'],
+  // `compreface` is a reachable-sidecar capability, not an npm module — see
+  // NATIVE_MODULES/probeCompreface. A node has no other face provider.
+  face_detection: ['sharp', 'compreface'],
+  video_face_detection: ['sharp', 'compreface', 'ffmpeg'],
   duplicate_detection: ['sharp'], // onnxruntime optional → dHash degraded mode
   metadata_extraction: ['sharp'],
   social_media_detection: ['ffprobe'], // tesseract optional → Tier-1-only mode
@@ -193,12 +199,12 @@ export interface CapabilityStatus {
 /**
  * Runtime-probe every capability: each native library (presence only, no
  * side-effects) plus the ffmpeg/ffprobe binaries plus a bounded reachability
- * probe of a CompreFace core sidecar. Never throws — an unavailable
+ * probe of a CompreFace core sidecar — the node's only face provider, so its
+ * reachability gates both face job types. Never throws — an unavailable
  * capability is reported with `available: false`.
  *
- * `opts.comprefaceUrl` overrides the probed URL; a node NOT using CompreFace
- * still runs this probe by default every time capabilities are detected, so
- * it is bounded (~3s) and never hangs the sweep.
+ * `opts.comprefaceUrl` overrides the probed URL; the probe runs on every
+ * capability detection, so it is bounded (~3s) and never hangs the sweep.
  */
 export async function detectCapabilities(opts?: {
   comprefaceUrl?: string;
@@ -230,36 +236,14 @@ export async function detectCapabilities(opts?: {
 }
 
 /**
- * Derive the effective capability requirements for a job type given the
- * node's configured face-detection provider. Identical to
- * `JOB_TYPE_REQUIREMENTS[jobType]` for every job type except
- * `face_detection`/`video_face_detection`, where the literal `'human'`
- * requirement is substituted for the configured provider. Pure derivation —
- * `JOB_TYPE_REQUIREMENTS` itself is never mutated and remains the source of
- * truth for the default (Human) case.
- */
-export function effectiveRequirements(
-  jobType: NodeJobType,
-  faceProvider: 'human' | 'compreface' = 'human',
-): string[] {
-  const required = JOB_TYPE_REQUIREMENTS[jobType] ?? [];
-  if (faceProvider === 'human') return required;
-  if (jobType !== 'face_detection' && jobType !== 'video_face_detection') return required;
-  return required.map((cap) => (cap === 'human' ? faceProvider : cap));
-}
-
-/**
  * Given a capability snapshot, return the required capability keys that are
- * missing for a job type. Empty array = fully supported. `faceProvider`
- * defaults to `'human'` so every existing 2-argument call site keeps
- * compiling and behaves identically to today.
+ * missing for a job type. Empty array = fully supported.
  */
 export function missingRequirements(
   jobType: NodeJobType,
   caps: Record<string, CapabilityStatus>,
-  faceProvider: 'human' | 'compreface' = 'human',
 ): string[] {
-  const required = effectiveRequirements(jobType, faceProvider);
+  const required = JOB_TYPE_REQUIREMENTS[jobType] ?? [];
   return required.filter((cap) => !caps[cap]?.available);
 }
 
@@ -303,13 +287,12 @@ export function evaluateStartupSelfTest(
   caps: Record<string, CapabilityStatus>,
   operationalResults: Record<string, CapabilityStatus>,
   eligibleTypes: string[],
-  faceProvider: 'human' | 'compreface' = 'human',
 ): StartupSelfTestEvaluation {
   const types = eligibleTypes.filter(isNodeJobType);
   const blockingFailures: StartupSelfTestBlocker[] = [];
   const blockingCaps = new Set<string>();
   for (const t of types) {
-    for (const cap of missingRequirements(t, operationalResults, faceProvider)) {
+    for (const cap of missingRequirements(t, operationalResults)) {
       blockingFailures.push({
         capability: cap,
         jobType: t,
