@@ -8,13 +8,16 @@
  *   4. CSV parsing of MEMORIAHUB_ELIGIBLE_TYPES (trim, drop empties)
  *   5. Int parsing of MEMORIAHUB_CONCURRENCY / MEMORIAHUB_POLL_INTERVAL_MS
  *      (invalid values ignored with a warning)
- *   6. MEMORIAHUB_FACE_PROVIDER validation ('human' | 'compreface' only)
+ *   6. MEMORIAHUB_FACE_PROVIDER validation ('compreface' is the only accepted
+ *      value post-#113 — Human/Rekognition were removed; any other value is a
+ *      hard failure via ui.error + process.exit(1), not a warn-and-ignore)
  *   7. envConfigComplete() helper
  *   8. saveConfig() best-effort persistence when config came from env
  *
  * Config isolation: we redirect os.homedir() to a temp directory via
  * jest.unstable_mockModule so the tests never touch ~/.memoriahub. The ui
- * module is mocked so warnings can be asserted without terminal noise.
+ * module is mocked so warnings/errors can be asserted without terminal noise.
+ * process.exit is spied on to throw instead of actually exiting Jest.
  * All MEMORIAHUB_* env vars are saved/restored between tests.
  */
 
@@ -34,14 +37,22 @@ jest.unstable_mockModule('os', () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Mock ui so warnings are capturable and silent
+// Capture process.exit calls so Jest doesn't actually exit
+// ---------------------------------------------------------------------------
+const mockExit = jest.spyOn(process, 'exit').mockImplementation((_code?: number) => {
+  throw new Error(`process.exit(${_code})`);
+});
+
+// ---------------------------------------------------------------------------
+// Mock ui so warnings/errors are capturable and silent
 // ---------------------------------------------------------------------------
 const mockWarn = jest.fn();
+const mockError = jest.fn();
 
 jest.unstable_mockModule('../src/ui.js', () => ({
   ui: {
     success: jest.fn(),
-    error: jest.fn(),
+    error: mockError,
     warn: mockWarn,
     info: jest.fn(),
     dim: jest.fn(),
@@ -99,7 +110,7 @@ const FILE_CONFIG: CliConfig = {
     eligibleTypes: ['face_detection'],
     pollIntervalMs: 5000,
     name: 'file-node',
-    faceProvider: 'human',
+    faceProvider: 'compreface',
   },
 };
 
@@ -117,6 +128,8 @@ describe('config env overlay', () => {
     for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
     clearMemoriahubEnv();
     mockWarn.mockClear();
+    mockError.mockClear();
+    mockExit.mockClear();
   });
 
   afterEach(() => {
@@ -240,13 +253,25 @@ describe('config env overlay', () => {
       expect(mockWarn).not.toHaveBeenCalled();
     });
 
-    it('should ignore an invalid MEMORIAHUB_FACE_PROVIDER with a warning', () => {
+    it('should hard-fail (ui.error + process.exit(1)) on an invalid MEMORIAHUB_FACE_PROVIDER', () => {
+      // Post-#113, 'compreface' is the only accepted value — Human/Rekognition
+      // were removed entirely. A stale/invalid value must not be silently
+      // dropped; it must abort with a clear error so an operator running a
+      // stale env override notices immediately.
       writeConfigFile(FILE_CONFIG);
       process.env['MEMORIAHUB_FACE_PROVIDER'] = 'rekognition';
 
-      const cfg = loadConfig();
-      expect(cfg!.node!.faceProvider).toBe('human'); // file value preserved
-      expect(mockWarn).toHaveBeenCalledWith(expect.stringContaining('MEMORIAHUB_FACE_PROVIDER'));
+      expect(() => loadConfig()).toThrow('process.exit(1)');
+      expect(mockError).toHaveBeenCalledWith(expect.stringContaining('MEMORIAHUB_FACE_PROVIDER'));
+      expect(mockExit).toHaveBeenCalledWith(1);
+    });
+
+    it('should also hard-fail on the removed "human" value specifically', () => {
+      writeConfigFile(FILE_CONFIG);
+      process.env['MEMORIAHUB_FACE_PROVIDER'] = 'human';
+
+      expect(() => loadConfig()).toThrow('process.exit(1)');
+      expect(mockError).toHaveBeenCalledWith(expect.stringContaining('MEMORIAHUB_FACE_PROVIDER'));
     });
 
     it('should accept a valid MEMORIAHUB_FACE_PROVIDER', () => {

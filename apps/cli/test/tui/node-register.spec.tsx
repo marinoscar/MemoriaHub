@@ -2,15 +2,18 @@
  * test/tui/node-register.spec.tsx
  *
  * Tests for tui/NodeRegister.tsx — the "Worker Node — Register" Ink wizard.
- * Focus of this file: the face-detection provider (human/compreface) toggle
- * field added alongside name/concurrency/eligible-types, and its two ripple
- * effects —
  *
- *   1. selecting 'compreface' reveals a CompreFace base-URL text field
- *      prefilled with DEFAULT_COMPREFACE_URL;
- *   2. the auto-detected default eligible-types selection re-evaluates
- *      against whichever provider is currently selected (missingRequirements
- *      is threaded a 3rd `faceProvider` argument).
+ * NOTE (issue #113): Human and AWS Rekognition were removed — CompreFace is
+ * the only supported face-detection provider. There is no longer a
+ * faceProvider toggle field in the wizard: "Face provider" is now a static,
+ * non-focusable display line ("compreface (fixed — the only supported
+ * provider)"), and the "CompreFace URL" field is now ALWAYS part of the tab
+ * order (FIELD_ORDER = ['name', 'concurrency', 'comprefaceUrl', 'types']) —
+ * previously it only appeared after toggling the provider to 'compreface'.
+ * The auto-detected default eligible-types selection is still computed from
+ * `missingRequirements(type, caps, 'compreface')` (the fixed provider), so
+ * whether face_detection appears in the default set still depends on the
+ * capability snapshot — just without a UI toggle driving it.
  *
  * All collaborators (api.js, config.js, node/capabilities.js) are mocked via
  * jest.unstable_mockModule so the test controls exactly what capability
@@ -91,14 +94,14 @@ const BASE_CONFIG = {
 beforeEach(() => {
   mockDetectCapabilities.mockReset().mockResolvedValue({
     sharp: { available: true, detail: 'sharp' },
-    human: { available: true, detail: '@vladmandic/human' },
+    compreface: { available: true, detail: 'compreface-core reachable' },
   });
-  // Default mock: face_detection is ready under 'human' but NOT under
-  // 'compreface' (simulates the sidecar not being reachable/configured yet);
-  // auto_tagging is always ready regardless of provider. This gives every
-  // test a concrete, provider-dependent difference to assert against.
-  mockMissingRequirements.mockReset().mockImplementation((t: string, _caps: unknown, faceProvider = 'human') => {
-    if (t === 'face_detection' && faceProvider === 'compreface') return ['compreface'];
+  // Default mock: both face_detection (needs compreface) and auto_tagging
+  // (no requirements) are ready — compreface is reachable per the snapshot
+  // above. faceProvider is always 'compreface' now; the 3rd arg is accepted
+  // for signature parity but not branched on.
+  mockMissingRequirements.mockReset().mockImplementation((t: string, caps: Record<string, { available: boolean }>) => {
+    if (t === 'face_detection' && !caps['compreface']?.available) return ['compreface'];
     return [];
   });
   mockRegisterNode.mockReset().mockResolvedValue({ nodeId: 'node-abc' });
@@ -115,7 +118,7 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('NodeRegister — face-detection provider field', () => {
-  it('defaults to the human provider and does not show the CompreFace URL field', async () => {
+  it('shows the Face provider row as a fixed compreface display, and always shows the CompreFace URL field', async () => {
     const { lastFrame } = render(
       <NodeRegister config={BASE_CONFIG as never} onBack={() => {}} />,
     );
@@ -123,11 +126,12 @@ describe('NodeRegister — face-detection provider field', () => {
 
     const plain = stripAnsi(lastFrame()!);
     expect(plain).toContain('Face provider');
-    expect(plain).toContain('[human]');
-    expect(plain).not.toContain('CompreFace URL');
+    expect(plain).toContain('compreface (fixed — the only supported provider)');
+    expect(plain).toContain('CompreFace URL');
+    expect(plain).toContain(DEFAULT_COMPREFACE_URL);
   });
 
-  it('auto-detects both job types as eligible under the default human provider', async () => {
+  it('auto-detects both job types as eligible when compreface is reachable', async () => {
     const { lastFrame } = render(
       <NodeRegister config={BASE_CONFIG as never} onBack={() => {}} />,
     );
@@ -137,52 +141,42 @@ describe('NodeRegister — face-detection provider field', () => {
     expect(plain).toContain('face_detection, auto_tagging');
   });
 
-  it('toggling to compreface with [space] reveals the CompreFace URL field prefilled with the default', async () => {
-    const { lastFrame, stdin } = render(
+  it('auto-detects only auto_tagging when compreface is not reachable', async () => {
+    mockDetectCapabilities.mockReset().mockResolvedValue({
+      sharp: { available: true, detail: 'sharp' },
+      compreface: { available: false, detail: 'compreface-core not reachable' },
+    });
+
+    const { lastFrame } = render(
       <NodeRegister config={BASE_CONFIG as never} onBack={() => {}} />,
     );
     await flushAsync(100);
 
-    // Tab twice: name -> concurrency -> faceProvider
-    stdin.write('\t');
-    await flushAsync();
-    stdin.write('\t');
-    await flushAsync();
-
-    // Toggle the highlighted faceProvider field to 'compreface'.
-    stdin.write(' ');
-    await flushAsync();
-
-    const plain = stripAnsi(lastFrame()!);
-    expect(plain).toContain('[compreface]');
-    expect(plain).toContain('CompreFace URL');
-    expect(plain).toContain(DEFAULT_COMPREFACE_URL);
-  });
-
-  it('re-evaluates the auto-detected default types against the newly-selected provider', async () => {
-    const { lastFrame, stdin } = render(
-      <NodeRegister config={BASE_CONFIG as never} onBack={() => {}} />,
-    );
-    await flushAsync(100);
-
-    // Before toggling: both types are the auto-detected default.
-    expect(stripAnsi(lastFrame()!)).toContain('face_detection, auto_tagging');
-
-    stdin.write('\t'); // -> concurrency
-    await flushAsync();
-    stdin.write('\t'); // -> faceProvider
-    await flushAsync();
-    stdin.write(' '); // toggle -> compreface
-    await flushAsync();
-
-    // face_detection is no longer supported under compreface per the mock,
-    // so the recomputed default should drop it, leaving only auto_tagging.
     const plain = stripAnsi(lastFrame()!);
     expect(plain).toMatch(/Types\s+auto_tagging(?!\s*,)/);
     expect(plain).not.toContain('face_detection, auto_tagging');
   });
 
-  it('does NOT overwrite a manually-edited Types field when the provider is toggled', async () => {
+  it('the static Face provider row does not react to [space] (not a focusable field)', async () => {
+    const { lastFrame, stdin } = render(
+      <NodeRegister config={BASE_CONFIG as never} onBack={() => {}} />,
+    );
+    await flushAsync(100);
+
+    // Tab twice: name -> concurrency -> comprefaceUrl (Face provider is not
+    // in FIELD_ORDER at all, so it can never receive focus).
+    stdin.write('\t');
+    await flushAsync();
+    stdin.write('\t');
+    await flushAsync();
+    stdin.write(' '); // no-op on the comprefaceUrl TextInput other than typing a space
+    await flushAsync();
+
+    const plain = stripAnsi(lastFrame()!);
+    expect(plain).toContain('compreface (fixed — the only supported provider)');
+  });
+
+  it('does NOT lose a manually-edited Types field when navigating away and back', async () => {
     const { lastFrame, stdin } = render(
       <NodeRegister config={BASE_CONFIG as never} onBack={() => {}} />,
     );
@@ -191,21 +185,21 @@ describe('NodeRegister — face-detection provider field', () => {
     // Navigate all the way to the Types field and hand-edit it.
     stdin.write('\t'); // -> concurrency
     await flushAsync();
-    stdin.write('\t'); // -> faceProvider
+    stdin.write('\t'); // -> comprefaceUrl
     await flushAsync();
-    stdin.write('\t'); // -> types (still human, comprefaceUrl not in the tour)
+    stdin.write('\t'); // -> types
     await flushAsync();
     stdin.write('x'); // hand-edit marker appended
     await flushAsync();
 
-    // Now go back up to faceProvider and toggle it.
-    stdin.write('\x1B[A'); // upArrow -> back to faceProvider
+    // Navigate away and back.
+    stdin.write('\x1B[A'); // upArrow -> back to comprefaceUrl
     await flushAsync();
-    stdin.write(' '); // toggle -> compreface
+    stdin.write('\x1B[B'); // downArrow -> forward to types again
     await flushAsync();
 
     const plain = stripAnsi(lastFrame()!);
-    // The hand-edited value (with the trailing 'x') must survive the toggle.
+    // The hand-edited value (with the trailing 'x') must survive navigation.
     expect(plain).toContain('face_detection, auto_taggingx');
   });
 
@@ -216,10 +210,6 @@ describe('NodeRegister — face-detection provider field', () => {
     await flushAsync(100);
 
     stdin.write('\t'); // -> concurrency
-    await flushAsync();
-    stdin.write('\t'); // -> faceProvider
-    await flushAsync();
-    stdin.write(' '); // toggle -> compreface
     await flushAsync();
     stdin.write('\t'); // -> comprefaceUrl
     await flushAsync();
@@ -244,10 +234,6 @@ describe('NodeRegister — face-detection provider field', () => {
     await flushAsync(100);
 
     stdin.write('\t'); // -> concurrency
-    await flushAsync();
-    stdin.write('\t'); // -> faceProvider
-    await flushAsync();
-    stdin.write(' '); // toggle -> compreface
     await flushAsync();
     stdin.write('\t'); // -> comprefaceUrl
     await flushAsync();
@@ -276,25 +262,25 @@ describe('NodeRegister — face-detection provider field', () => {
     expect(savedConfig.node?.comprefaceUrl).toBe('http://sidecar.local:9000');
   });
 
-  it('persists faceProvider=human and no comprefaceUrl when the toggle is left at the default', async () => {
+  it('persists faceProvider=compreface and the default comprefaceUrl when the field is left untouched', async () => {
     const { stdin } = render(
       <NodeRegister config={BASE_CONFIG as never} onBack={() => {}} />,
     );
     await flushAsync(100);
 
-    // Tab straight through to submission without touching the toggle.
+    // Tab straight through to submission without editing anything.
     stdin.write('\t'); // -> concurrency
     await flushAsync();
-    stdin.write('\t'); // -> faceProvider
+    stdin.write('\t'); // -> comprefaceUrl
     await flushAsync();
-    stdin.write('\r'); // Enter on faceProvider advances (no toggle) -> types
+    stdin.write('\r'); // submit comprefaceUrl (unedited default) -> advances to types
     await flushAsync();
     stdin.write('\r'); // submit
     await flushAsync(150);
 
     expect(mockSaveConfig).toHaveBeenCalledTimes(1);
     const savedConfig = mockSaveConfig.mock.calls[0][0] as CliConfig;
-    expect(savedConfig.node?.faceProvider).toBe('human');
-    expect(savedConfig.node?.comprefaceUrl).toBeUndefined();
+    expect(savedConfig.node?.faceProvider).toBe('compreface');
+    expect(savedConfig.node?.comprefaceUrl).toBe(DEFAULT_COMPREFACE_URL);
   });
 });

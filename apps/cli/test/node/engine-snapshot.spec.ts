@@ -189,7 +189,10 @@ describe('NodeEngine snapshot & counters', () => {
     expect(Number.isNaN(Date.parse(snap.lastHeartbeatAt as string))).toBe(false);
   });
 
-  it('getSnapshot defaults faceProvider to human with a null comprefaceUrl', () => {
+  it('getSnapshot defaults faceProvider to compreface with a null comprefaceUrl', () => {
+    // Post-#113, 'compreface' is the only supported face provider — Human/
+    // Rekognition were removed, so an omitted faceProvider always resolves to
+    // 'compreface', not the old 'human' default.
     const engine = new NodeEngine({
       api: stubApi([]).api,
       dispatcher: stubDispatcher(),
@@ -205,11 +208,11 @@ describe('NodeEngine snapshot & counters', () => {
     });
 
     const snap = engine.getSnapshot();
-    expect(snap.faceProvider).toBe('human');
+    expect(snap.faceProvider).toBe('compreface');
     expect(snap.comprefaceUrl).toBeNull();
   });
 
-  it('getSnapshot reports a null comprefaceUrl when faceProvider is explicitly "human" even if a URL is configured', () => {
+  it('getSnapshot surfaces comprefaceUrl even when faceProvider is omitted (compreface is the only provider)', () => {
     const engine = new NodeEngine({
       api: stubApi([]).api,
       dispatcher: stubDispatcher(),
@@ -219,16 +222,17 @@ describe('NodeEngine snapshot & counters', () => {
         eligibleTypes: ['face_detection'],
         pollIntervalMs: 5,
         heartbeatIntervalMs: 60_000,
-        faceProvider: 'human',
-        // comprefaceUrl is only surfaced when faceProvider === 'compreface'.
+        // faceProvider intentionally omitted — comprefaceUrl is no longer
+        // gated on an explicit faceProvider==='compreface' check, since
+        // compreface is unconditionally the only supported provider.
         comprefaceUrl: 'http://localhost:9999',
       },
       detectFn: async () => ({}),
     });
 
     const snap = engine.getSnapshot();
-    expect(snap.faceProvider).toBe('human');
-    expect(snap.comprefaceUrl).toBeNull();
+    expect(snap.faceProvider).toBe('compreface');
+    expect(snap.comprefaceUrl).toBe('http://localhost:9999');
   });
 
   it('getSnapshot surfaces faceProvider "compreface" and its comprefaceUrl', () => {
