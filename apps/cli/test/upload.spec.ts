@@ -539,4 +539,146 @@ describe('uploadFile', () => {
       ).rejects.toThrow('Part 1 failed: storage provider returned HTTP 403 AccessDenied');
     });
   });
+
+  // -------------------------------------------------------------------------
+  // 5. Stale session detected at the COMPLETE step (issue #183)
+  //
+  // When the resume state already covers EVERY part, the part-upload loop is
+  // skipped entirely — so #179's part-PUT detection never runs and the complete
+  // call is the only place a dead session can surface. This is the exact gap
+  // that left files permanently stuck.
+  // -------------------------------------------------------------------------
+
+  describe('stale multipart session — surfaced at the complete step', () => {
+    /** Resume state covering all parts, so NO part PUT is attempted. */
+    const fullyResumed: UploadResumeState = {
+      objectId: 'obj-resumed',
+      uploadId: 'upload-resumed',
+      partSize: PART_SIZE,
+      completedParts: Array.from({ length: TOTAL_PARTS }, (_, i) => ({
+        partNumber: i + 1,
+        eTag: `etag-${i + 1}`,
+      })),
+    };
+
+    /**
+     * Fake api whose FIRST complete call rejects with `completeError` and whose
+     * subsequent calls succeed — modelling recovery via a fresh session.
+     */
+    function makeApiFailingComplete(completeError: unknown) {
+      const { api, postSpy, getSpy, putRawSpy } = makeFakeApi({
+        statusResponse: { uploadId: 'upload-resumed', status: 'uploading' },
+      });
+      let completeCalls = 0;
+      const inner = postSpy.getMockImplementation() as (
+        url: string,
+        body: unknown,
+      ) => Promise<unknown>;
+      (postSpy as jest.Mock).mockImplementation(((url: string, body: unknown) => {
+        if (String(url).includes('/upload/complete')) {
+          completeCalls++;
+          if (completeCalls === 1) return Promise.reject(completeError);
+          return Promise.resolve({});
+        }
+        return inner(url, body);
+      }) as ApiClient['post']);
+      return { api, postSpy, getSpy, putRawSpy };
+    }
+
+    it('recovers from a 409 Conflict by re-initializing the upload', async () => {
+      const { api, postSpy, putRawSpy } = makeApiFailingComplete(
+        new ApiError(409, 'The multipart upload session is no longer valid.'),
+      );
+      const { persistence, onComplete } = makePersistence(fullyResumed);
+
+      const result = await uploadFile(
+        api as unknown as ApiClient,
+        filePath,
+        'image/jpeg',
+        undefined,
+        persistence,
+      );
+
+      // A fresh init ran and the file finished on the new session.
+      expect(
+        postSpy.mock.calls.filter((c) => c[0] === '/api/storage/objects/upload/init'),
+      ).toHaveLength(1);
+      expect(result.objectId).toBe('obj-1');
+      expect(onComplete).toHaveBeenCalled();
+
+      // The whole point: the first pass uploaded NOTHING (all parts resumed),
+      // so every part had to be re-sent on the clean session.
+      expect(putRawSpy).toHaveBeenCalledTimes(TOTAL_PARTS);
+    });
+
+    it('recovers from a legacy 500 carrying the provider message', async () => {
+      // An API deployment older than the 409 mapping still lets the raw S3/R2
+      // error through as a 500 — the CLI must recover against it too.
+      const { api, postSpy } = makeApiFailingComplete(
+        new ApiError(500, 'The specified multipart upload does not exist.'),
+      );
+      const { persistence } = makePersistence(fullyResumed);
+
+      await expect(
+        uploadFile(api as unknown as ApiClient, filePath, 'image/jpeg', undefined, persistence),
+      ).resolves.toEqual({ objectId: 'obj-1' });
+
+      expect(
+        postSpy.mock.calls.filter((c) => c[0] === '/api/storage/objects/upload/init'),
+      ).toHaveLength(1);
+    });
+
+    it('recovers from an InvalidPart 500 (stale ETags in the ledger)', async () => {
+      const { api } = makeApiFailingComplete(
+        new ApiError(500, 'One or more of the specified parts could not be found.'),
+      );
+      const { persistence } = makePersistence(fullyResumed);
+
+      await expect(
+        uploadFile(api as unknown as ApiClient, filePath, 'image/jpeg', undefined, persistence),
+      ).resolves.toEqual({ objectId: 'obj-1' });
+    });
+
+    it('does NOT treat an ordinary 500 as a dead session', async () => {
+      // A genuine server fault must propagate, not silently re-upload the file.
+      const { api, postSpy } = makeApiFailingComplete(
+        new ApiError(500, 'Internal server error'),
+      );
+      const { persistence } = makePersistence(fullyResumed);
+
+      await expect(
+        uploadFile(api as unknown as ApiClient, filePath, 'image/jpeg', undefined, persistence),
+      ).rejects.toThrow(/Internal server error/);
+
+      expect(
+        postSpy.mock.calls.filter((c) => c[0] === '/api/storage/objects/upload/init'),
+      ).toHaveLength(0);
+    });
+
+    it('gives up after one restart when the fresh session also reports a dead upload', async () => {
+      const { api, postSpy } = makeFakeApi({
+        statusResponse: { uploadId: 'upload-resumed', status: 'uploading' },
+      });
+      const inner = postSpy.getMockImplementation() as (
+        url: string,
+        body: unknown,
+      ) => Promise<unknown>;
+      (postSpy as jest.Mock).mockImplementation(((url: string, body: unknown) => {
+        if (String(url).includes('/upload/complete')) {
+          return Promise.reject(new ApiError(409, 'still gone'));
+        }
+        return inner(url, body);
+      }) as ApiClient['post']);
+      const { persistence } = makePersistence(fullyResumed);
+
+      await expect(
+        uploadFile(api as unknown as ApiClient, filePath, 'image/jpeg', undefined, persistence),
+      ).rejects.toThrow(/no longer exists on the storage provider/i);
+
+      // One re-init only — no unbounded loop.
+      expect(
+        postSpy.mock.calls.filter((c) => c[0] === '/api/storage/objects/upload/init'),
+      ).toHaveLength(1);
+    });
+  });
 });
