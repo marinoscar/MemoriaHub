@@ -253,6 +253,7 @@ The CLI validates any token (device-issued or manually supplied) by calling `GET
 | `sync [folder...] --all` | `--all` / `--dry-run` / `-r, --recursive` / `--concurrency <n>` / `--from <date>` / `--to <date>` | Incremental sync of registered or specified folders | Sync ▸ Sync all folders / Sync selected folders |
 | `status` | `--runs` / `--json` | Quick per-folder sync status or recent run history; covers the same underlying data as `reports show overview` / `reports show runs`, just with a fixed, non-extensible output shape | Reports ▸ Folder overview / Recent runs |
 | `retry` | `--all` / `--folder <id\|path>` / `--force` | Retry failed uploads; `--force` resets files blocked at the attempts cap | Sync ▸ Retry failed files |
+| `screenshots [folder...] --all` | `--all` / `--dry-run` / `-r, --recursive` / `--concurrency <n>` / `--move-to <dir>` / `--delete` / `--json` | Find files whose name contains "screenshot" (case-insensitive); list-only by default, or move/delete matches | Tools ▸ Find/Clean Screenshots ▸ |
 | `settings list` | (none) | Print all settings and their current values | Settings ▸ App settings |
 | `settings get <key>` | (none) | Get the current value of one setting | Settings ▸ App settings |
 | `settings set <key> <value>` | (none) | Set a setting value | Settings ▸ App settings |
@@ -769,6 +770,86 @@ GPS presence is read from EXIF using the same full-file read as the capture date
 ### Interactive UI
 
 `organize` is also reachable from the interactive menu under **Tools ▸ Organize folder by date**. It runs a plan → confirm → execute flow: it first computes and shows the full plan (what would move, what would go to `NODATE/`), asks for a `y` confirmation before touching anything (since it moves files), and then executes with a live progress bar.
+
+---
+
+## Find & Clean Screenshots
+
+`screenshots` is a fully offline, local-only command that finds files whose name contains "screenshot" — anywhere, case-insensitively — and, on request, moves or deletes them, so the screenshot clutter that accumulates in photo folders can be swept up without touching real photos and videos.
+
+`screenshots` is entirely local: no PAT and no server connection are required, the same as `scan`/`organize`.
+
+### `memoriahub screenshots`
+
+```bash
+memoriahub screenshots [folder...] [--all] [--dry-run] [-r|--recursive] [--concurrency <n>] [--move-to <dir>] [--delete] [--json]
+```
+
+```bash
+# Find and list screenshots without touching anything (default)
+memoriahub screenshots ~/Pictures
+
+# Preview what --move-to would do before actually moving anything
+memoriahub screenshots ~/Pictures --move-to ~/Pictures/Screenshots --dry-run
+
+# Move matched files into a folder (created if it doesn't exist)
+memoriahub screenshots ~/Pictures --move-to ~/Pictures/Screenshots
+
+# Preview what --delete would remove before committing to it
+memoriahub screenshots ~/Pictures --delete --dry-run
+
+# Permanently delete matched files — no recycle bin
+memoriahub screenshots ~/Pictures --delete
+
+# Recurse into sub-directories of an ad-hoc (not-yet-registered) path
+memoriahub screenshots ~/Pictures -r
+
+# Scan every registered enabled folder
+memoriahub screenshots --all
+
+# Machine-readable totals and match list instead of the summary box + table
+memoriahub screenshots ~/Pictures --json
+```
+
+| Flag | Description |
+|------|-------------|
+| `[folder...]` | One or more folder paths to scan; unknown paths are auto-registered, same as `scan`/`organize`/`sync`. Omit and pass `--all` instead to scan every registered enabled folder. |
+| `--all` | Scan every registered enabled folder instead of specific paths. |
+| `--dry-run` | Preview matched / would-move / would-delete counts for `--move-to`/`--delete` without touching the filesystem; a harmless no-op when combined with the default list-only mode. |
+| `-r`, `--recursive` | Descend into sub-directories when scanning an ad-hoc (not-yet-registered) path. |
+| `--concurrency <n>` | Number of concurrent workers used for the move/delete action pass. |
+| `--move-to <dir>` | Move every matched file into `<dir>` (created if it doesn't exist). |
+| `--delete` | Permanently delete every matched file. |
+| `--json` | Emit `{ mode, dryRun, destDir, totals: { matched, bytes, moved, deleted, skipped, errors }, matches: [{ path, size }, ...] }` instead of the summary box + table. |
+
+`--move-to` and `--delete` are mutually exclusive — passing both is an error.
+
+### Example flow
+
+```bash
+memoriahub screenshots ~/Pictures --move-to ~/Pictures/Screenshots --dry-run
+memoriahub screenshots ~/Pictures --move-to ~/Pictures/Screenshots
+```
+
+The first run previews exactly what would move; the second actually performs the moves.
+
+### Matching and safety
+
+A file matches if its base filename contains "screenshot" anywhere, case-insensitively — `Screenshot 2024-01-02.png`, `img_screenshot_01.jpg`, and `SCREENSHOT.HEIC` all match. Unlike `organize`/`scan`/`sync`, this is **not** restricted to known media/image extensions: every regular file in the scanned folder(s) is inspected by name, since a screenshot could carry any extension.
+
+`--move-to` reuses `organize`'s move logic: a file already sitting exactly at its destination path is skipped (not re-moved), a name collision at the destination appends ` (1)`, ` (2)`, … rather than overwriting, and a move that fails with `EXDEV` (source and destination on different filesystems) falls back to copy-then-delete — the same cross-device safety as `organize`.
+
+**`--delete` has no interactive confirmation in the headless command — it permanently deletes every matched file, with no recycle bin, as soon as the command runs.** Always run with `--dry-run` first to see exactly what would be removed before committing to `--delete`.
+
+### Interactive UI
+
+`screenshots` is also reachable from the interactive menu under **Tools ▸ Find/Clean Screenshots ▸**, which offers three modes:
+
+- **Find screenshots (list only)** — scans and shows a green results screen with the total match count, total size, and a capped sample of matches (12 shown, "… and N more" if truncated). Nothing here is destructive, so there's no confirmation step.
+- **Find & move screenshots** — first prompts for a destination folder path, then scans and shows a plan/confirm screen (matched count, total size, a sample of up to 12 files, the destination path, and a yellow warning that this moves files on disk and isn't automatically reversible). Press `y` to proceed or `q`/`Esc` to cancel — the same plan → confirm → execute flow and warning style as `organize`.
+- **Find & delete screenshots** — scans and shows a plan/confirm screen like Move's, but with a red border and a stronger warning that this is **IRREVERSIBLE**. Instead of a single `y` keypress, confirming requires typing `y` and pressing Enter (mirroring the Factory reset screen's typed-confirmation pattern, used elsewhere in this CLI only for genuinely irreversible actions). `Esc` cancels at any point.
+
+All three modes show live progress during the scan/move/delete pass and end on a done/results screen with counts, plus `[q/Esc] back` / `[h] home`.
 
 ---
 
