@@ -1,6 +1,6 @@
 {
   "name": "@memoriahub/cli",
-  "version": "1.2.15",
+  "version": "1.2.16",
   "description": "CLI importer for MemoriaHub — import and sync photo/video folders",
   "type": "module",
   "bin": {
