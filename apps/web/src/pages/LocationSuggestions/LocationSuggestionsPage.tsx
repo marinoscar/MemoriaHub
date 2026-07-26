@@ -268,7 +268,10 @@ export default function LocationSuggestionsPage() {
         action === 'accept'
           ? await startLocationAcceptRun({ circleId: activeCircleId, threshold: thresholdPct })
           : await startLocationRejectRun({ circleId: activeCircleId, threshold: thresholdPct });
-      navigate(`/location-suggestion-runs/${res.runId}`);
+      // Location-suggestion runs are review runs (issue #190); the old
+      // /location-suggestion-runs/:runId path still resolves via a redirect,
+      // but new links go straight to the shared page.
+      navigate(`/review-runs/${res.runId}`);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to start bulk run');
       setBulkStarting(false);

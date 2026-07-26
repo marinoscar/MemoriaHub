@@ -4,9 +4,10 @@
 // Four backends now expose the same "async run" shape — workflow runs,
 // trash-empty runs, location-suggestion runs and the generic review runs —
 // each with a `run` record carrying five counters, a status, and timestamps.
-// `types/trashEmptyRuns.ts` and `types/locationSuggestionRuns.ts` were already
-// acknowledged clones of one another; this module is the single definition
-// they (and every future run backend) narrow from.
+// `types/trashEmptyRuns.ts` and the since-deleted
+// `types/locationSuggestionRuns.ts` were acknowledged clones of one another;
+// this module is the single definition they (and every future run backend)
+// narrow from.
 //
 // All date-ish fields are typed as `string` because JSON transports ISO 8601.
 // ---------------------------------------------------------------------------
