@@ -179,7 +179,7 @@ export const systemSettingsSchema = z.object({
   pictureEnhancement: z.object({
     defaultQuality: z.enum(['low', 'medium', 'high']).default('high'),
     defaultStrength: z.enum(['subtle', 'balanced', 'strong']).default('balanced'),
-    stampExif: z.boolean().default(false),
+    stampExif: z.boolean().default(true),
     allowReplace: z.boolean().default(true),
     blockReplaceOnDownscale: z.boolean().default(false),
     maxInputMegapixels: z.number().min(1).max(100).default(50),
@@ -187,7 +187,7 @@ export const systemSettingsSchema = z.object({
   }).optional().default({
     defaultQuality: 'high',
     defaultStrength: 'balanced',
-    stampExif: false,
+    stampExif: true,
     allowReplace: true,
     blockReplaceOnDownscale: false,
     maxInputMegapixels: 50,

@@ -498,7 +498,7 @@ export class SystemSettingsService {
         stampExif:
           (dto as any).pictureEnhancement?.stampExif ??
           (current as any).pictureEnhancement?.stampExif ??
-          false,
+          true,
         allowReplace:
           (dto as any).pictureEnhancement?.allowReplace ??
           (current as any).pictureEnhancement?.allowReplace ??

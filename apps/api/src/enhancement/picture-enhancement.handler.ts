@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { EnrichmentJob, MediaType, MediaEnhancementStatus } from '@prisma/client';
 import { Readable } from 'stream';
+import sharp from 'sharp';
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
@@ -11,6 +12,7 @@ import { SystemSettingsService } from '../settings/system-settings/system-settin
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import { closestSupportedSize, sizeToDims } from './enhance-prompt.builder';
+import { ExifCarryoverService } from './exif-carryover.service';
 
 interface PictureEnhancementPayload {
   enhancementId?: string;
@@ -40,6 +42,11 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
     private readonly aiSettings: AiSettingsService,
     private readonly aiProviderRegistry: AiProviderRegistry,
     private readonly systemSettings: SystemSettingsService,
+    // Optional by TYPE only — Nest always injects it (EnhancementModule provides
+    // it). Marked `?` so the metadata stamp is structurally non-essential: a
+    // handler constructed without it still produces a valid enhancement, just
+    // without carried-over EXIF.
+    private readonly exifCarryover?: ExifCarryoverService,
   ) {}
 
   onModuleInit(): void {
@@ -156,15 +163,55 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
       });
 
       const enhancedBuffer = Buffer.from(result.imageBase64, 'base64');
-      const [enhancedWidth, enhancedHeight] = sizeToDims(size);
+
+      // The model does not always return the exact canvas we asked for, so the
+      // REAL pixel dimensions come from the returned bytes; sizeToDims(size) is
+      // only the fallback when they can't be read.
+      const requestedDims = sizeToDims(size);
+      const outputDims = (await this.readDims(enhancedBuffer)) ?? requestedDims;
+
+      // File-level EXIF carryover + AI marker (spec §5.1/§5.4), gated on
+      // pictureEnhancement.stampExif. Done HERE, once, on the staged bytes:
+      // both apply paths (keep_both and replace) reuse this same staged object,
+      // so a single stamp covers both. Best-effort by contract — the service
+      // returns the input buffer on any failure; the extra try/catch is
+      // belt-and-braces so a metadata step can never fail a good enhancement.
+      const stampExif = settings.pictureEnhancement?.stampExif !== false;
+      let finalBuffer: Buffer = enhancedBuffer;
+      if (stampExif) {
+        try {
+          const stamped = await this.exifCarryover?.applyCarryover(
+            originalBuffer,
+            enhancedBuffer,
+            {
+              model: row.model,
+              width: outputDims[0],
+              height: outputDims[1],
+              originalExtension: extensionForMime(mediaItem.storageObject.mimeType),
+            },
+          );
+          if (stamped?.length) finalBuffer = stamped;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `picture_enhancement job ${job.id}: EXIF carryover skipped: ${msg}`,
+          );
+        }
+      }
+
+      // Read the persisted dims off the FINAL bytes so the recorded size always
+      // describes what is actually stored (drives the downscale warning and the
+      // keep_both item's width/height).
+      const [enhancedWidth, enhancedHeight] =
+        (await this.readDims(finalBuffer)) ?? outputDims;
 
       // Stage the enhanced bytes on the ACTIVE provider under a dedicated key.
       const { id: activeProviderId, provider: activeProvider } =
         await this.resolver.getActiveProvider();
       const stagingKey = `enhancements/${row.id}/result.jpg`;
-      await activeProvider.upload(stagingKey, Readable.from(enhancedBuffer), {
+      await activeProvider.upload(stagingKey, Readable.from(finalBuffer), {
         mimeType: 'image/jpeg',
-        contentLength: enhancedBuffer.length,
+        contentLength: finalBuffer.length,
       });
 
       await this.prisma.mediaEnhancement.update({
@@ -178,13 +225,13 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
           originalHeight: mediaItem.height,
           enhancedWidth,
           enhancedHeight,
-          enhancedSize: BigInt(enhancedBuffer.length),
+          enhancedSize: BigInt(finalBuffer.length),
           lastError: null,
         },
       });
 
       this.logger.log(
-        `picture_enhancement job ${job.id}: enhancement ${row.id} ready (${enhancedWidth}x${enhancedHeight}, ${enhancedBuffer.length} bytes)`,
+        `picture_enhancement job ${job.id}: enhancement ${row.id} ready (${enhancedWidth}x${enhancedHeight}, ${finalBuffer.length} bytes)`,
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -198,5 +245,46 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
       // Rethrow so the queue applies its normal retry/backoff.
       throw err;
     }
+  }
+
+  /**
+   * Read a buffer's real pixel dimensions, or `null` if it can't be decoded.
+   * Never throws — the caller falls back to the requested canvas size.
+   */
+  private async readDims(buffer: Buffer): Promise<[number, number] | null> {
+    try {
+      const meta = await sharp(buffer).metadata();
+      if (meta.width && meta.height) return [meta.width, meta.height];
+    } catch {
+      // Not decodable here (e.g. a stub buffer in tests) — fall back.
+    }
+    return null;
+  }
+}
+
+/**
+ * Extension hint for the temp copy of the ORIGINAL passed to ExifTool, so it
+ * type-detects the source exactly as it would in storage. Unknown types get no
+ * extension (ExifTool identifies by content anyway).
+ */
+function extensionForMime(mimeType: string): string {
+  switch (mimeType.toLowerCase()) {
+    case 'image/jpeg':
+    case 'image/jpg':
+      return '.jpg';
+    case 'image/png':
+      return '.png';
+    case 'image/heic':
+      return '.heic';
+    case 'image/heif':
+      return '.heif';
+    case 'image/webp':
+      return '.webp';
+    case 'image/gif':
+      return '.gif';
+    case 'image/tiff':
+      return '.tif';
+    default:
+      return '';
   }
 }

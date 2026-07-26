@@ -156,7 +156,10 @@ export interface SystemSettingsValue {
   pictureEnhancement?: {
     defaultQuality: 'low' | 'medium' | 'high';
     defaultStrength: 'subtle' | 'balanced' | 'strong';
-    /** Whether to embed the file-level EXIF/XMP marker (deferred writer — default false). */
+    /**
+     * Whether to carry the original's EXIF/GPS/IPTC/XMP/ICC onto the enhanced
+     * file and stamp the AI marker (ExifCarryoverService). Default true.
+     */
     stampExif: boolean;
     /** If false, only "keep both" is offered — originals are never overwritten. */
     allowReplace: boolean;
@@ -394,7 +397,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
   pictureEnhancement: {
     defaultQuality: 'high',
     defaultStrength: 'balanced',
-    stampExif: false,
+    stampExif: true,
     allowReplace: true,
     blockReplaceOnDownscale: false,
     maxInputMegapixels: 50,
