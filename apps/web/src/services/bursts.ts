@@ -1,4 +1,5 @@
 import { api } from './api';
+import type { SortOrder } from '../types/media';
 
 /**
  * Maximum number of group ids accepted by a single explicit-id bulk-resolve
@@ -12,6 +13,9 @@ export const BULK_RESOLVE_CHUNK_SIZE = 100;
 const LIST_MAX_PAGE_SIZE = 100;
 
 export type BurstGroupStatus = 'pending' | 'resolved' | 'dismissed';
+
+/** Sortable columns accepted by `GET /media/bursts` (server default: `capturedAt`). */
+export type BurstSortBy = 'capturedAt' | 'confidence' | 'mediaCount';
 
 /** Archive-or-trash action shared by burst and duplicate group resolution. */
 export type GroupResolveAction = 'archive' | 'trash';
@@ -108,11 +112,15 @@ export async function listBurstGroups(params: {
   status?: BurstGroupStatus;
   page?: number;
   pageSize?: number;
+  sortBy?: BurstSortBy;
+  sortOrder?: SortOrder;
 }): Promise<BurstListResponse> {
   const p = new URLSearchParams({ circleId: params.circleId });
   if (params.status) p.set('status', params.status);
   if (params.page) p.set('page', String(params.page));
   if (params.pageSize) p.set('pageSize', String(params.pageSize));
+  if (params.sortBy) p.set('sortBy', params.sortBy);
+  if (params.sortOrder) p.set('sortOrder', params.sortOrder);
   const result = await api.get<{ items: BurstGroupSummary[]; meta: BurstListMeta }>(`/media/bursts?${p.toString()}`);
   return { items: result.items ?? [], meta: result.meta };
 }

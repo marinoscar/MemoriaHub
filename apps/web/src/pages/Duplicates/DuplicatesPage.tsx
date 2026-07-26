@@ -28,7 +28,7 @@ import {
   Delete as DeleteIcon,
   Block as BlockIcon,
 } from '@mui/icons-material';
-import { useNavigate, Link as RouterLink } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link as RouterLink } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
@@ -36,7 +36,14 @@ import { useDuplicateGroups } from '../../hooks/useDuplicates';
 import { GroupBulkResolveToolbar } from '../../components/review/GroupBulkResolveToolbar';
 import { SelectionCheckboxOverlay } from '../../components/review/SelectionCheckboxOverlay';
 import { ConfidenceMeter } from '../../components/review/ConfidenceMeter';
-import type { DuplicateGroupKind, DuplicateGroupSummary, DuplicateResolveAction } from '../../services/duplicates';
+import { ReviewSortSelect } from '../../components/review/ReviewSortSelect';
+import type {
+  DuplicateGroupKind,
+  DuplicateGroupSummary,
+  DuplicateResolveAction,
+  DuplicateSortBy,
+} from '../../services/duplicates';
+import type { SortOrder } from '../../types/media';
 
 const KIND_LABELS: Record<DuplicateGroupKind, string> = {
   exact_variant: 'Exact copy',
@@ -60,6 +67,38 @@ const KIND_FILTERS: Array<{ label: string; value: DuplicateGroupKind | null }> =
   { label: 'Edited variant', value: 'edited' },
   { label: 'Similar', value: 'similar' },
 ];
+
+// ---------------------------------------------------------------------------
+// Sort model. The API defaults to `capturedAt` / `asc`, so those two values are
+// never sent on the wire — an untouched page issues exactly the request it did
+// before this control existed.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_SORT_BY: DuplicateSortBy = 'capturedAt';
+const DEFAULT_SORT_ORDER: SortOrder = 'asc';
+
+const SORT_BY_VALUES: DuplicateSortBy[] = ['capturedAt', 'confidence', 'mediaCount'];
+
+const SORT_OPTIONS = [
+  { value: 'capturedAt:asc', label: 'Captured — Oldest' },
+  { value: 'capturedAt:desc', label: 'Captured — Newest' },
+  { value: 'confidence:desc', label: 'Similarity — Highest' },
+  { value: 'confidence:asc', label: 'Similarity — Lowest' },
+  { value: 'mediaCount:desc', label: 'Largest group' },
+  { value: 'mediaCount:asc', label: 'Smallest group' },
+];
+
+/** Coerce an untrusted URL value to a supported column, else the page default. */
+function parseSortBy(raw: string | null): DuplicateSortBy {
+  return SORT_BY_VALUES.includes(raw as DuplicateSortBy)
+    ? (raw as DuplicateSortBy)
+    : DEFAULT_SORT_BY;
+}
+
+/** Coerce an untrusted URL value to a supported direction, else the page default. */
+function parseSortOrder(raw: string | null): SortOrder {
+  return raw === 'asc' || raw === 'desc' ? raw : DEFAULT_SORT_ORDER;
+}
 
 function CoverStack({ coverUrls, mediaCount }: { coverUrls: string[]; mediaCount: number }) {
   return (
@@ -162,7 +201,14 @@ export default function DuplicatesPage() {
     dismissByThreshold,
     fetchAllPendingIds,
   } = useDuplicateGroups();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [kindFilter, setKindFilter] = useState<DuplicateGroupKind | null>(null);
+  const [sortBy, setSortBy] = useState<DuplicateSortBy>(() =>
+    parseSortBy(searchParams.get('sortBy')),
+  );
+  const [sortOrder, setSortOrder] = useState<SortOrder>(() =>
+    parseSortOrder(searchParams.get('sortOrder')),
+  );
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -182,17 +228,40 @@ export default function DuplicatesPage() {
       status: 'pending',
       kind: kindFilter ?? undefined,
       page,
+      // Only non-default values go on the wire, so the default view's request
+      // is byte-identical to the pre-sort-control one.
+      ...(sortBy !== DEFAULT_SORT_BY ? { sortBy } : {}),
+      ...(sortOrder !== DEFAULT_SORT_ORDER ? { sortOrder } : {}),
     });
-  }, [activeCircleId, kindFilter, page, fetchGroups]);
+  }, [activeCircleId, kindFilter, page, sortBy, sortOrder, fetchGroups]);
+
+  // Mirror a non-default sort to the URL so the view is shareable/restorable.
+  // Built from the existing params so no other query key is clobbered.
+  // `searchParams` is deliberately excluded from the deps — including it would
+  // re-run on every replace and loop.
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams);
+    if (sortBy !== DEFAULT_SORT_BY) params.set('sortBy', sortBy);
+    else params.delete('sortBy');
+    if (sortOrder !== DEFAULT_SORT_ORDER) params.set('sortOrder', sortOrder);
+    else params.delete('sortOrder');
+    setSearchParams(params, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortBy, sortOrder, setSearchParams]);
 
   useEffect(() => {
     setPage(1);
-  }, [kindFilter, activeCircleId]);
+  }, [kindFilter, sortBy, sortOrder, activeCircleId]);
 
-  // Clear selection whenever the visible set changes (filter, page, or circle).
+  // Clear selection whenever the visible set changes (filter, sort, page, or circle).
   useEffect(() => {
     setSelected(new Set());
-  }, [kindFilter, page, activeCircleId]);
+  }, [kindFilter, page, sortBy, sortOrder, activeCircleId]);
+
+  const handleSortChange = (by: string, order: SortOrder) => {
+    setSortBy(parseSortBy(by));
+    setSortOrder(order);
+  };
 
   const handleToggle = (id: string) => {
     setSelected((prev) => {
@@ -363,8 +432,12 @@ export default function DuplicatesPage() {
         canTrash={canTrash}
       />
 
-      {/* Kind filter chips */}
-      <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: 'wrap', rowGap: 1 }}>
+      {/* Kind filter chips (left) + sort control (right) */}
+      <Stack
+        direction="row"
+        spacing={1}
+        sx={{ mb: 2, flexWrap: 'wrap', rowGap: 1, alignItems: 'center' }}
+      >
         {KIND_FILTERS.map((f) => (
           <Chip
             key={f.label}
@@ -375,6 +448,12 @@ export default function DuplicatesPage() {
             onClick={() => setKindFilter(f.value)}
           />
         ))}
+        <Box sx={{ flexGrow: 1 }} />
+        <ReviewSortSelect
+          value={`${sortBy}:${sortOrder}`}
+          onChange={handleSortChange}
+          options={SORT_OPTIONS}
+        />
       </Stack>
 
       {error && (

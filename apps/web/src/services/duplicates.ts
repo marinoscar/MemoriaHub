@@ -1,6 +1,7 @@
 import { api } from './api';
 import { BULK_RESOLVE_CHUNK_SIZE } from './bursts';
 import type { GroupBulkResolveResult, GroupBulkDismissResult } from './bursts';
+import type { SortOrder } from '../types/media';
 
 /** Max page size the list endpoint accepts; used when collecting all ids. */
 const LIST_MAX_PAGE_SIZE = 100;
@@ -8,6 +9,9 @@ const LIST_MAX_PAGE_SIZE = 100;
 export type DuplicateGroupStatus = 'pending' | 'resolved' | 'dismissed';
 export type DuplicateGroupKind = 'exact_variant' | 'edited' | 'similar';
 export type DuplicateResolveAction = 'archive' | 'trash';
+
+/** Sortable columns accepted by `GET /media/duplicates` (server default: `capturedAt`). */
+export type DuplicateSortBy = 'capturedAt' | 'confidence' | 'mediaCount';
 
 export interface DuplicateGroupSummary {
   id: string;
@@ -95,12 +99,16 @@ export async function listDuplicateGroups(params: {
   kind?: DuplicateGroupKind;
   page?: number;
   pageSize?: number;
+  sortBy?: DuplicateSortBy;
+  sortOrder?: SortOrder;
 }): Promise<DuplicateListResponse> {
   const p = new URLSearchParams({ circleId: params.circleId });
   if (params.status) p.set('status', params.status);
   if (params.kind) p.set('kind', params.kind);
   if (params.page) p.set('page', String(params.page));
   if (params.pageSize) p.set('pageSize', String(params.pageSize));
+  if (params.sortBy) p.set('sortBy', params.sortBy);
+  if (params.sortOrder) p.set('sortOrder', params.sortOrder);
   const result = await api.get<DuplicateListResponse>(`/media/duplicates?${p.toString()}`);
   return { items: result.items ?? [], meta: result.meta };
 }

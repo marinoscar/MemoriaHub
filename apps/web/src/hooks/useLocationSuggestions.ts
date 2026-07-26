@@ -8,23 +8,34 @@ import {
 } from '../services/locationSuggestions';
 import type {
   LocationSuggestionStatus,
+  LocationSuggestionSortBy,
   LocationSuggestionSummary,
   LocationSuggestionListMeta,
   AcceptLocationSuggestionResult,
   RejectRevertResult,
 } from '../services/locationSuggestions';
+import type { SortOrder } from '../types/media';
 import { getMedia } from '../services/media';
+
+/**
+ * Params accepted by {@link useLocationSuggestions}'s `fetchSuggestions`.
+ * Named (rather than inlined twice) so the hook's public signature and the
+ * internal `useCallback` implementation cannot drift apart.
+ */
+export interface FetchLocationSuggestionsParams {
+  circleId: string;
+  status?: LocationSuggestionStatus;
+  page?: number;
+  sortBy?: LocationSuggestionSortBy;
+  sortOrder?: SortOrder;
+}
 
 interface UseLocationSuggestionsResult {
   items: LocationSuggestionSummary[];
   meta: LocationSuggestionListMeta | null;
   isLoading: boolean;
   error: string | null;
-  fetchSuggestions: (params: {
-    circleId: string;
-    status?: LocationSuggestionStatus;
-    page?: number;
-  }) => Promise<void>;
+  fetchSuggestions: (params: FetchLocationSuggestionsParams) => Promise<void>;
   accept: (id: string, lat?: number, lng?: number) => Promise<AcceptLocationSuggestionResult>;
   reject: (id: string) => Promise<RejectRevertResult>;
   revert: (id: string) => Promise<RejectRevertResult>;
@@ -39,7 +50,7 @@ export function useLocationSuggestions(): UseLocationSuggestionsResult {
   const [actingIds, setActingIds] = useState<Set<string>>(new Set());
 
   const fetchSuggestions = useCallback(
-    async (params: { circleId: string; status?: LocationSuggestionStatus; page?: number }) => {
+    async (params: FetchLocationSuggestionsParams) => {
       setIsLoading(true);
       setError(null);
       try {
