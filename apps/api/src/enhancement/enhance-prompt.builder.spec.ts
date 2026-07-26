@@ -161,6 +161,119 @@ describe('buildEnhancePrompt', () => {
     const b = buildEnhancePrompt(params, 'strong');
     expect(a).toBe(b);
   });
+
+  it('REGRESSION GUARD: the no-preset prompt is byte-identical to the pre-preset baseline', () => {
+    // Presets (commit db8648d) are additive — an omitted `preset` must produce
+    // EXACTLY the prompt this feature produced before presets existed. Any
+    // diff here means the preset change accidentally altered the no-preset
+    // path.
+    const prompt = buildEnhancePrompt({}, 'balanced');
+
+    expect(prompt).toBe(
+      'Enhance this photograph to make it look its best while remaining true to the original scene. ' +
+        'Noticeably balance exposure and recover shadow and highlight detail, correct white balance and color for natural, non-oversaturated tones, increase clarity and sharpness without introducing halos, reduce luminance and color noise. ' +
+        'Keep the result natural and photorealistic. Do NOT change the composition or crop. Do NOT add, remove, or move any people or objects. ' +
+        "Do NOT alter anyone's face, identity, expression, skin tone, or the number of people. " +
+        'Do NOT add any text, watermark, borders, or artistic filters. ' +
+        'The output must look like a cleaned-up version of the same photo, not a new image.',
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // Presets (spec §4.1, commit db8648d)
+  // -------------------------------------------------------------------------
+
+  describe('presets', () => {
+    it('restore_old_photo: includes the damage-repair clause between the opening sentence and the adjustment sentence', () => {
+      const prompt = buildEnhancePrompt({ preset: 'restore_old_photo' }, 'balanced');
+
+      expect(prompt).toContain(
+        "This is an old or damaged photograph. Repair scratches, dust, creases, tears, stains, and faded areas, and recover lost contrast and detail. Keep the photo's period character — do not modernize it or colorize it unless asked.",
+      );
+      const openingIdx = prompt.indexOf('Enhance this photograph');
+      const presetIdx = prompt.indexOf('This is an old or damaged photograph');
+      const adjustmentIdx = prompt.indexOf('Noticeably balance exposure');
+      expect(openingIdx).toBeLessThan(presetIdx);
+      expect(presetIdx).toBeLessThan(adjustmentIdx);
+    });
+
+    it('low_light: includes the low-light characteristic clause', () => {
+      const prompt = buildEnhancePrompt({ preset: 'low_light' }, 'balanced');
+
+      expect(prompt).toContain(
+        'This photo was taken in low light. Brighten the exposure naturally, recover shadow detail, reduce heavy noise, and correct color casts from artificial lighting, while keeping the night-time or indoor atmosphere believable — do not make it look like daytime.',
+      );
+    });
+
+    it('portrait_polish: includes the portrait-specific clause', () => {
+      const prompt = buildEnhancePrompt({ preset: 'portrait_polish' }, 'balanced');
+
+      expect(prompt).toContain(
+        'This is a portrait. Gently even out skin tone and reduce temporary blemishes while keeping natural skin texture (no plastic smoothing), subtly brighten the eyes, and balance the lighting on the face. Do not reshape facial features, slim the body, or change apparent age.',
+      );
+    });
+
+    describe('colorize_bw', () => {
+      it('includes the colorize clause and OMITS the color/white-balance adjustment clause', () => {
+        const prompt = buildEnhancePrompt({ preset: 'colorize_bw' }, 'balanced');
+
+        expect(prompt).toContain(
+          'Colorize this black-and-white photograph with realistic, historically plausible colors: natural skin tones and a restrained, period-appropriate palette. Preserve the original luminance, contrast, and grain character.',
+        );
+        expect(prompt).not.toContain('correct white balance and color for natural, non-oversaturated tones');
+      });
+
+      it('swaps in the colorized-variant fidelity constraint instead of the default one', () => {
+        const prompt = buildEnhancePrompt({ preset: 'colorize_bw' }, 'balanced');
+
+        expect(prompt).toContain(
+          'The output must look like a faithfully colorized version of the same photo, not a new image.',
+        );
+        expect(prompt).not.toContain(
+          'The output must look like a cleaned-up version of the same photo, not a new image.',
+        );
+      });
+
+      it('keeps every OTHER hard constraint unchanged', () => {
+        const prompt = buildEnhancePrompt({ preset: 'colorize_bw' }, 'balanced');
+
+        expect(prompt).toContain('Keep the result natural and photorealistic.');
+        expect(prompt).toContain('Do NOT change the composition or crop.');
+        expect(prompt).toContain('Do NOT add, remove, or move any people or objects.');
+        expect(prompt).toContain(
+          "Do NOT alter anyone's face, identity, expression, skin tone, or the number of people.",
+        );
+        expect(prompt).toContain('Do NOT add any text, watermark, borders, or artistic filters.');
+      });
+
+      it('still includes the tone/sharpness/denoise clauses (only color is suppressed)', () => {
+        const prompt = buildEnhancePrompt({ preset: 'colorize_bw' }, 'balanced');
+
+        expect(prompt).toContain('balance exposure and recover shadow and highlight detail');
+        expect(prompt).toContain('increase clarity and sharpness without introducing halos');
+        expect(prompt).toContain('reduce luminance and color noise');
+      });
+    });
+
+    it('combines a preset with custom intent + free-text instructions', () => {
+      const params: EnhanceParams = {
+        preset: 'low_light',
+        intent: 'custom',
+        instructions: 'warmer tones please',
+      };
+      const prompt = buildEnhancePrompt(params, 'balanced');
+
+      expect(prompt).toContain('Enhance this photograph while remaining true to the original scene.');
+      expect(prompt).toContain('This photo was taken in low light.');
+      expect(prompt).toContain('Additional guidance: warmer tones please');
+      // Ordering: opening -> preset -> adjustment -> constraints -> instructions
+      const openingIdx = prompt.indexOf('Enhance this photograph while');
+      const presetIdx = prompt.indexOf('This photo was taken in low light');
+      const guidanceIdx = prompt.indexOf('Additional guidance');
+      expect(openingIdx).toBeLessThan(presetIdx);
+      expect(presetIdx).toBeLessThan(guidanceIdx);
+    });
+  });
 });
 
 describe('closestSupportedSize', () => {
