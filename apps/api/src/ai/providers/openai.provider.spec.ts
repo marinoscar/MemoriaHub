@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import OpenAI, { toFile } from 'openai';
 import { isEligibleOpenAiModel, OpenAiProvider } from './openai.provider';
 
 // ---------------------------------------------------------------------------
@@ -234,6 +234,176 @@ describe('OpenAiProvider.embedText', () => {
     await expect(provider.embedText(creds, 'text-embedding-3-small', 'hello')).rejects.toThrow(
       'Rate limit exceeded',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OpenAiProvider.enhanceImage — status/code/retry-after preservation
+// (commit e27f00c "defer rate-limited enhancements instead of stranding
+// them"). Before this fix, enhanceImage's catch block rethrew a plain
+// `new Error(e.message)`, discarding the provider's HTTP status; a genuine
+// OpenAI 429/529 during images.edit was therefore never classified as a rate
+// limit by the queue's classifyRateLimit() (rate-limit.error.ts, which
+// inspects `err.status` and `err.headers['retry-after']`) and instead routed
+// through normal-failure retry/backoff. `rethrowWithProviderStatus` carries
+// status/code/a normalized retry-after header onto every rethrown branch,
+// including the two friendly-message branches (401/404) which previously
+// discarded status entirely.
+// ---------------------------------------------------------------------------
+describe('OpenAiProvider.enhanceImage', () => {
+  const provider = new OpenAiProvider();
+  const creds = { apiKey: 'sk-test', baseUrl: undefined };
+  let mockImagesEdit: jest.Mock;
+
+  const baseReq = {
+    model: 'gpt-image-1',
+    imageBase64: Buffer.from('fake-image-bytes').toString('base64'),
+    mimeType: 'image/jpeg' as const,
+    prompt: 'Enhance this photograph',
+    size: '1024x1024' as const,
+    quality: 'high' as const,
+    inputFidelity: 'high' as const,
+  };
+
+  beforeEach(() => {
+    mockImagesEdit = jest.fn();
+    (toFile as jest.Mock).mockReset();
+    (toFile as jest.Mock).mockResolvedValue('fake-file-handle');
+    MockOpenAI.mockImplementation(
+      () =>
+        ({
+          chat: { completions: { create: mockCreate } },
+          images: { edit: mockImagesEdit },
+        }) as unknown as OpenAI,
+    );
+  });
+
+  it('returns imageBase64/mimeType from a successful edit call', async () => {
+    mockImagesEdit.mockResolvedValueOnce({ data: [{ b64_json: 'enhanced-b64-data' }] });
+
+    const result = await provider.enhanceImage(creds, baseReq);
+
+    expect(result).toEqual({ imageBase64: 'enhanced-b64-data', mimeType: 'image/jpeg' });
+  });
+
+  it('throws when OpenAI returns no image data', async () => {
+    mockImagesEdit.mockResolvedValueOnce({ data: [] });
+
+    await expect(provider.enhanceImage(creds, baseReq)).rejects.toThrow(
+      'OpenAI image edit returned no image data',
+    );
+  });
+
+  it('preserves status:429 on the rethrown error, which is what routes the job to rate-limit deferral', async () => {
+    mockImagesEdit.mockRejectedValueOnce({ status: 429, message: 'Too Many Requests' });
+
+    await expect(provider.enhanceImage(creds, baseReq)).rejects.toMatchObject({
+      status: 429,
+      message: 'Too Many Requests',
+    });
+  });
+
+  it('preserves status:529 (Anthropic-style "Overloaded") the same way as 429', async () => {
+    mockImagesEdit.mockRejectedValueOnce({ status: 529, message: 'Overloaded' });
+
+    await expect(provider.enhanceImage(creds, baseReq)).rejects.toMatchObject({
+      status: 529,
+    });
+  });
+
+  it('preserves the provider error code on the rethrown error', async () => {
+    mockImagesEdit.mockRejectedValueOnce({
+      status: 429,
+      code: 'rate_limit_exceeded',
+      message: 'Slow down',
+    });
+
+    await expect(provider.enhanceImage(creds, baseReq)).rejects.toMatchObject({
+      code: 'rate_limit_exceeded',
+    });
+  });
+
+  it('carries a retry-after value through from a fetch Headers instance', async () => {
+    mockImagesEdit.mockRejectedValueOnce({
+      status: 429,
+      message: 'Too Many Requests',
+      headers: new Headers({ 'retry-after': '30' }),
+    });
+
+    await expect(provider.enhanceImage(creds, baseReq)).rejects.toMatchObject({
+      headers: { 'retry-after': '30' },
+    });
+  });
+
+  it('carries a retry-after value through from a plain header record', async () => {
+    mockImagesEdit.mockRejectedValueOnce({
+      status: 429,
+      message: 'Too Many Requests',
+      headers: { 'retry-after': '15' },
+    });
+
+    await expect(provider.enhanceImage(creds, baseReq)).rejects.toMatchObject({
+      headers: { 'retry-after': '15' },
+    });
+  });
+
+  it('omits headers entirely when neither header shape carries a retry-after value', async () => {
+    mockImagesEdit.mockRejectedValueOnce({
+      status: 429,
+      message: 'Too Many Requests',
+      headers: new Headers(),
+    });
+
+    const result = provider.enhanceImage(creds, baseReq);
+    await expect(result).rejects.toBeInstanceOf(Error);
+    await expect(result).rejects.not.toHaveProperty('headers');
+  });
+
+  it('keeps the friendly "Invalid API key" message on 401 AND now also carries status', async () => {
+    mockImagesEdit.mockRejectedValueOnce({ status: 401, message: 'Unauthorized' });
+
+    await expect(provider.enhanceImage(creds, baseReq)).rejects.toMatchObject({
+      message: 'Invalid API key',
+      status: 401,
+    });
+  });
+
+  it('keeps the friendly "Model not found: <model>" message on 404 AND now also carries status', async () => {
+    mockImagesEdit.mockRejectedValueOnce({ status: 404, message: 'Not found' });
+
+    await expect(
+      provider.enhanceImage(creds, { ...baseReq, model: 'nonexistent-model' }),
+    ).rejects.toMatchObject({
+      message: 'Model not found: nonexistent-model',
+      status: 404,
+    });
+  });
+
+  it('keeps the friendly "Model not found: <model>" message on model_not_found code AND now also carries the code', async () => {
+    mockImagesEdit.mockRejectedValueOnce({ code: 'model_not_found', message: 'Model not found' });
+
+    await expect(
+      provider.enhanceImage(creds, { ...baseReq, model: 'nonexistent-model' }),
+    ).rejects.toMatchObject({
+      message: 'Model not found: nonexistent-model',
+      code: 'model_not_found',
+    });
+  });
+
+  it('falls back to the provider message (with status preserved) for an unrecognized error shape', async () => {
+    mockImagesEdit.mockRejectedValueOnce({ status: 500, message: 'Internal server error' });
+
+    await expect(provider.enhanceImage(creds, baseReq)).rejects.toMatchObject({
+      message: 'Internal server error',
+      status: 500,
+    });
+  });
+
+  it('preserves the original SDK error as `cause` for debugging', async () => {
+    const sdkError = { status: 429, message: 'Rate limit reached' };
+    mockImagesEdit.mockRejectedValueOnce(sdkError);
+
+    await expect(provider.enhanceImage(creds, baseReq)).rejects.toMatchObject({ cause: sdkError });
   });
 });
 

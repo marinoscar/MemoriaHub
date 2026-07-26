@@ -34,6 +34,7 @@ jest.mock('../storage/processing/image-orientation.util', () => ({
 }));
 
 import { Readable } from 'stream';
+import sharp from 'sharp';
 import { EnrichmentJob, JobReason, JobStatus, MediaEnhancementStatus, MediaType } from '@prisma/client';
 import { PictureEnhancementHandler } from './picture-enhancement.handler';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
@@ -134,6 +135,8 @@ describe('PictureEnhancementHandler', () => {
   let mockEnhanceImage: jest.Mock;
   let mockAiProviderRegistry: { get: jest.Mock };
   let mockSystemSettings: { getSettings: jest.Mock };
+  let mockApplyCarryover: jest.Mock;
+  let mockExifCarryover: { applyCarryover: jest.Mock };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -192,6 +195,12 @@ describe('PictureEnhancementHandler', () => {
       }),
     };
 
+    // Pass-through default: mirrors the ExifCarryoverService best-effort
+    // contract (returns the enhanced buffer unchanged) so tests that don't
+    // care about EXIF carryover see identical behavior to before it existed.
+    mockApplyCarryover = jest.fn().mockImplementation(async (_original: Buffer, enhanced: Buffer) => enhanced);
+    mockExifCarryover = { applyCarryover: mockApplyCarryover };
+
     handler = new PictureEnhancementHandler(
       mockRegistry as any,
       mockPrisma as any,
@@ -199,6 +208,7 @@ describe('PictureEnhancementHandler', () => {
       mockAiSettings as any,
       mockAiProviderRegistry as any,
       mockSystemSettings as any,
+      mockExifCarryover as any,
     );
   });
 
@@ -573,6 +583,213 @@ describe('PictureEnhancementHandler', () => {
       );
       expect(failedCall).toBeDefined();
       expect(failedCall![0].data.lastError).toContain('Too Many Requests');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // EXIF carryover gating (commit ff53510 "carry original EXIF onto enhanced
+  // images with an AI stamp"). The base `handler` built in the outer
+  // beforeEach already has a PASS-THROUGH mock ExifCarryoverService injected
+  // (see the outer beforeEach — it returns the enhanced buffer unchanged, so
+  // every other test in this file behaves as if carryover were a no-op).
+  // These tests build their own handler instance with a mock that returns
+  // DISTINGUISHABLE ("stamped-jpeg-bytes") output, so invocation/gating/
+  // failure-handling can be asserted precisely without disturbing the
+  // pass-through default the rest of the file relies on.
+  // -------------------------------------------------------------------------
+
+  describe('EXIF carryover gating', () => {
+    let mockApplyCarryover: jest.Mock;
+    let mockExifCarryover: { applyCarryover: jest.Mock };
+    let handlerWithCarryover: PictureEnhancementHandler;
+
+    beforeEach(() => {
+      mockApplyCarryover = jest
+        .fn()
+        .mockResolvedValue(Buffer.from('stamped-jpeg-bytes'));
+      mockExifCarryover = { applyCarryover: mockApplyCarryover };
+
+      handlerWithCarryover = new PictureEnhancementHandler(
+        mockRegistry as any,
+        mockPrisma as any,
+        mockResolver as any,
+        mockAiSettings as any,
+        mockAiProviderRegistry as any,
+        mockSystemSettings as any,
+        mockExifCarryover as any,
+      );
+    });
+
+    it('invokes carryover when stampExif is explicitly true', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        pictureEnhancement: { defaultQuality: 'high', defaultStrength: 'balanced', stampExif: true },
+      });
+
+      await handlerWithCarryover.process(makeJob());
+
+      expect(mockApplyCarryover).toHaveBeenCalledTimes(1);
+    });
+
+    it('invokes carryover when stampExif is left undefined (defaults to on)', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        pictureEnhancement: { defaultQuality: 'high', defaultStrength: 'balanced' },
+      });
+
+      await handlerWithCarryover.process(makeJob());
+
+      expect(mockApplyCarryover).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips carryover entirely when stampExif is explicitly false', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        pictureEnhancement: { defaultQuality: 'high', defaultStrength: 'balanced', stampExif: false },
+      });
+
+      await handlerWithCarryover.process(makeJob());
+
+      expect(mockApplyCarryover).not.toHaveBeenCalled();
+      // Staged bytes are the plain enhanced bytes, never even offered to carryover.
+      const [, , uploadOpts] = mockUpload.mock.calls[0];
+      expect(uploadOpts).toEqual(expect.objectContaining({ mimeType: 'image/jpeg' }));
+    });
+
+    it('passes the model, real output dims, and an extension hint derived from the source mime type', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        pictureEnhancement: { defaultQuality: 'high', defaultStrength: 'balanced', stampExif: true },
+      });
+
+      await handlerWithCarryover.process(makeJob());
+
+      expect(mockApplyCarryover).toHaveBeenCalledWith(
+        expect.any(Buffer),
+        expect.any(Buffer),
+        expect.objectContaining({ model: 'gpt-image-1', originalExtension: '.jpg' }),
+      );
+    });
+
+    it('a carryover failure is NON-FATAL: the job still reaches ready, using the UNSTAMPED bytes', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        pictureEnhancement: { defaultQuality: 'high', defaultStrength: 'balanced', stampExif: true },
+      });
+      mockApplyCarryover.mockRejectedValue(new Error('exiftool exploded'));
+
+      await handlerWithCarryover.process(makeJob());
+
+      const readyCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.ready,
+      );
+      expect(readyCall).toBeDefined();
+
+      // The bytes actually uploaded to staging are the plain (unstamped)
+      // enhanced bytes, not the (never-produced) stamped bytes.
+      const uploadedStream = mockUpload.mock.calls[0][1];
+      const uploadedBuffer = await streamToBuffer(uploadedStream);
+      expect(uploadedBuffer.toString()).toBe('enhanced-jpeg-bytes');
+    });
+
+    it('falls back to the unstamped bytes when applyCarryover resolves an empty buffer', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        pictureEnhancement: { defaultQuality: 'high', defaultStrength: 'balanced', stampExif: true },
+      });
+      mockApplyCarryover.mockResolvedValue(Buffer.alloc(0));
+
+      await handlerWithCarryover.process(makeJob());
+
+      const uploadedStream = mockUpload.mock.calls[0][1];
+      const uploadedBuffer = await streamToBuffer(uploadedStream);
+      expect(uploadedBuffer.toString()).toBe('enhanced-jpeg-bytes');
+    });
+
+    it('uploads the STAMPED bytes to staging when carryover succeeds', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        pictureEnhancement: { defaultQuality: 'high', defaultStrength: 'balanced', stampExif: true },
+      });
+
+      await handlerWithCarryover.process(makeJob());
+
+      const uploadedStream = mockUpload.mock.calls[0][1];
+      const uploadedBuffer = await streamToBuffer(uploadedStream);
+      expect(uploadedBuffer.toString()).toBe('stamped-jpeg-bytes');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Actual output dimensions read via sharp (vs. the sizeToDims fallback
+  // estimate). The default mock `enhanceImage` returns the non-decodable
+  // string 'enhanced-jpeg-bytes', so every OTHER test in this file only ever
+  // exercises the fallback path (see the "records the staged provider..."
+  // happy-path assertion, which asserts the 1536x1024 REQUESTED canvas size).
+  // These tests use a real, sharp-encoded JPEG to exercise the real-dims path.
+  // -------------------------------------------------------------------------
+
+  describe('actual output dimensions (real decodable bytes)', () => {
+    it('persists the ACTUAL decoded dimensions of the enhanced bytes, not the requested-canvas fallback', async () => {
+      const realJpeg = await sharp({
+        create: { width: 300, height: 200, channels: 3, background: { r: 10, g: 20, b: 30 } },
+      })
+        .jpeg()
+        .toBuffer();
+      mockEnhanceImage.mockResolvedValue({
+        imageBase64: realJpeg.toString('base64'),
+        mimeType: 'image/jpeg',
+      });
+
+      await handler.process(makeJob());
+
+      const readyCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.ready,
+      );
+      expect(readyCall).toBeDefined();
+      expect(readyCall![0].data.enhancedWidth).toBe(300);
+      expect(readyCall![0].data.enhancedHeight).toBe(200);
+      // Distinct from the 1536x1024 canvas fallback that the non-decodable
+      // stub bytes produce elsewhere in this file.
+      expect(readyCall![0].data.enhancedWidth).not.toBe(1536);
+      expect(readyCall![0].data.enhancedHeight).not.toBe(1024);
+      expect(readyCall![0].data.enhancedSize).toBe(BigInt(realJpeg.length));
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Per-run quality override (commit db8648d "add enhancement presets and
+  // per-run quality override")
+  // -------------------------------------------------------------------------
+
+  describe('per-run quality override', () => {
+    it('uses the row params quality over the system-setting default when both are present', async () => {
+      mockPrisma.mediaEnhancement.findUnique.mockResolvedValue(
+        makeEnhancementRow({ params: { quality: 'low' } }),
+      );
+      mockSystemSettings.getSettings.mockResolvedValue({
+        pictureEnhancement: { defaultQuality: 'high', defaultStrength: 'balanced' },
+      });
+
+      await handler.process(makeJob());
+
+      const [, req] = mockEnhanceImage.mock.calls[0];
+      expect(req.quality).toBe('low');
+    });
+
+    it('falls back to the system-setting default quality when no per-run override is present', async () => {
+      mockPrisma.mediaEnhancement.findUnique.mockResolvedValue(makeEnhancementRow({ params: {} }));
+      mockSystemSettings.getSettings.mockResolvedValue({
+        pictureEnhancement: { defaultQuality: 'medium', defaultStrength: 'balanced' },
+      });
+
+      await handler.process(makeJob());
+
+      const [, req] = mockEnhanceImage.mock.calls[0];
+      expect(req.quality).toBe('medium');
+    });
+
+    it('falls back to "high" when neither a per-run override nor a system-setting default is present', async () => {
+      mockPrisma.mediaEnhancement.findUnique.mockResolvedValue(makeEnhancementRow({ params: {} }));
+      mockSystemSettings.getSettings.mockResolvedValue({ pictureEnhancement: {} });
+
+      await handler.process(makeJob());
+
+      const [, req] = mockEnhanceImage.mock.calls[0];
+      expect(req.quality).toBe('high');
     });
   });
 });
