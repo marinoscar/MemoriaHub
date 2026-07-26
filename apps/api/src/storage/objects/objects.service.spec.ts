@@ -5,6 +5,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { Readable } from 'stream';
 
@@ -442,6 +443,76 @@ describe('ObjectsService', () => {
       await expect(
         service.completeUpload(mockStorageObject.id, dto, testUserId),
       ).rejects.toThrow('Upload ID not found');
+    });
+
+    // Issue #183: a multipart session the provider has dropped is a CLIENT-STATE
+    // error. Letting the raw SDK error escape reported it as a 500, which both
+    // misrepresents the condition and denies the client a status it can key
+    // recovery off (it must re-init the upload).
+    describe('stale multipart session', () => {
+      function arrangeCompleteFailure(error: unknown): { parts: Array<{ partNumber: number; eTag: string }> } {
+        const dto = { parts: [{ partNumber: 1, eTag: 'etag1' }] };
+        mockPrisma.storageObject.findUnique.mockResolvedValue({
+          ...mockStorageObject,
+          status: 'pending',
+          s3UploadId: 'upload-123',
+          chunks: [],
+        } as any);
+        mockPrisma.storageObjectChunk.upsert.mockResolvedValue({} as any);
+        mockStorageProvider.completeMultipartUpload.mockRejectedValue(error as never);
+        return dto;
+      }
+
+      it('maps NoSuchUpload to 409 Conflict', async () => {
+        const err = Object.assign(new Error('The specified multipart upload does not exist.'), {
+          name: 'NoSuchUpload',
+        });
+        const dto = arrangeCompleteFailure(err);
+
+        await expect(
+          service.completeUpload(mockStorageObject.id, dto, testUserId),
+        ).rejects.toThrow(ConflictException);
+      });
+
+      it('maps InvalidPart to 409 Conflict', async () => {
+        const err = Object.assign(
+          new Error('One or more of the specified parts could not be found.'),
+          { name: 'InvalidPart' },
+        );
+        const dto = arrangeCompleteFailure(err);
+
+        await expect(
+          service.completeUpload(mockStorageObject.id, dto, testUserId),
+        ).rejects.toThrow(ConflictException);
+      });
+
+      it('recognizes the condition from the message when the SDK omits the code', async () => {
+        // R2's error shapes are not always identical to AWS's, so the message
+        // fallback must carry the classification on its own.
+        const dto = arrangeCompleteFailure(
+          new Error('The specified multipart upload does not exist.'),
+        );
+
+        await expect(
+          service.completeUpload(mockStorageObject.id, dto, testUserId),
+        ).rejects.toThrow(ConflictException);
+      });
+
+      it('leaves an unrelated provider failure untouched', async () => {
+        const err = Object.assign(new Error('We encountered an internal error.'), {
+          name: 'InternalError',
+        });
+        const dto = arrangeCompleteFailure(err);
+
+        // Must NOT be converted to a 409 — a genuine provider fault is a 5xx and
+        // is legitimately retryable by the client.
+        await expect(
+          service.completeUpload(mockStorageObject.id, dto, testUserId),
+        ).rejects.toThrow('We encountered an internal error.');
+        await expect(
+          service.completeUpload(mockStorageObject.id, dto, testUserId),
+        ).rejects.not.toThrow(ConflictException);
+      });
     });
   });
 

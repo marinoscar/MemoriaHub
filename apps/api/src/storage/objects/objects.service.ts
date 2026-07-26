@@ -4,6 +4,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -58,6 +59,34 @@ export interface MultipartFile {
 // Derived/internal storage objects that should not appear in user-facing browse lists.
 // These are auto-generated blobs, not user-uploaded files.
 const DERIVED_KEY_PREFIXES = ['thumbnails/', 'video-faces/'];
+
+/**
+ * S3/R2 error codes meaning the client's multipart session is unusable:
+ *  - NoSuchUpload — the upload id is gone (provider GC'd an abandoned upload)
+ *  - InvalidPart / InvalidPartOrder — the submitted ETags don't belong to it
+ *
+ * Matched on `name` (AWS SDK v3 surfaces the code there) with a message
+ * fallback, since R2's error shapes are not always identical to AWS's.
+ */
+const STALE_MULTIPART_ERROR_NAMES = new Set([
+  'NoSuchUpload',
+  'InvalidPart',
+  'InvalidPartOrder',
+]);
+
+const STALE_MULTIPART_MESSAGE_RE =
+  /multipart upload does not exist|parts could not be found|NoSuchUpload|InvalidPart/i;
+
+/** True when a provider error means the client must re-init the upload. */
+function isStaleMultipartSessionError(error: unknown): boolean {
+  if (error == null || typeof error !== 'object') return false;
+  const name = (error as { name?: unknown }).name;
+  if (typeof name === 'string' && STALE_MULTIPART_ERROR_NAMES.has(name)) {
+    return true;
+  }
+  const message = (error as { message?: unknown }).message;
+  return typeof message === 'string' && STALE_MULTIPART_MESSAGE_RE.test(message);
+}
 
 @Injectable()
 export class ObjectsService {
@@ -326,12 +355,33 @@ export class ObjectsService {
       storageObject.bucket,
     );
 
-    // Complete upload with storage provider
-    await completeProvider.completeMultipartUpload(
-      storageObject.storageKey,
-      storageObject.s3UploadId,
-      parts,
-    );
+    // Complete upload with storage provider.
+    //
+    // A dead client-held session (the provider garbage-collected an abandoned
+    // multipart upload, or the client's persisted ETags belong to one) is a
+    // CLIENT-STATE error, not a server fault. Letting the raw SDK error escape
+    // made Nest report it as a 500, which both misrepresents the condition and
+    // leaves the client no status to key recovery off — it must instead restart
+    // the upload from a fresh init (issue #183).
+    try {
+      await completeProvider.completeMultipartUpload(
+        storageObject.storageKey,
+        storageObject.s3UploadId,
+        parts,
+      );
+    } catch (error) {
+      if (isStaleMultipartSessionError(error)) {
+        this.logger.warn(
+          `Multipart session for object ${objectId} is no longer valid on the ` +
+            `storage provider; the client must re-initialize the upload.`,
+        );
+        throw new ConflictException(
+          'The multipart upload session is no longer valid on the storage ' +
+            'provider. Re-initialize the upload and send the parts again.',
+        );
+      }
+      throw error;
+    }
 
     // Update status to processing
     const updated = await this.prisma.storageObject.update({
