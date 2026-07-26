@@ -21,7 +21,13 @@
  */
 
 import { jest } from '@jest/globals';
-import { startMemoryWatchdog, resolveRestartFraction } from '../../src/node/memory-watchdog.js';
+import {
+  startMemoryWatchdog,
+  resolveRestartFraction,
+  untunedWatchdogOptions,
+  UNTUNED_WATCHDOG_INTERVAL_MS,
+  UNTUNED_RESTART_FRACTION,
+} from '../../src/node/memory-watchdog.js';
 import type { MemoryWatchdogLevel, MemorySample } from '../../src/node/memory-watchdog.js';
 
 describe('startMemoryWatchdog', () => {
@@ -181,6 +187,48 @@ describe('resolveRestartFraction', () => {
       expect(resolveRestartFraction()).toBe(0.9);
     },
   );
+
+  it('uses the caller-supplied fallback instead of 0.9 when env is unset', () => {
+    expect(resolveRestartFraction(undefined, 0.8)).toBe(0.8);
+  });
+
+  it('still lets a valid env value win over the caller-supplied fallback', () => {
+    process.env['MEMORIAHUB_HEAP_RESTART_FRACTION'] = '0.7';
+    expect(resolveRestartFraction(undefined, 0.8)).toBe(0.7);
+  });
+});
+
+describe('untunedWatchdogOptions', () => {
+  let savedRestartFraction: string | undefined;
+
+  beforeEach(() => {
+    savedRestartFraction = process.env['MEMORIAHUB_HEAP_RESTART_FRACTION'];
+    delete process.env['MEMORIAHUB_HEAP_RESTART_FRACTION'];
+  });
+
+  afterEach(() => {
+    if (savedRestartFraction === undefined) delete process.env['MEMORIAHUB_HEAP_RESTART_FRACTION'];
+    else process.env['MEMORIAHUB_HEAP_RESTART_FRACTION'] = savedRestartFraction;
+  });
+
+  it('tightens sampling to 15s and the critical fraction to 0.8 by default', () => {
+    expect(untunedWatchdogOptions()).toEqual({
+      intervalMs: UNTUNED_WATCHDOG_INTERVAL_MS,
+      restartFraction: UNTUNED_RESTART_FRACTION,
+    });
+    expect(UNTUNED_WATCHDOG_INTERVAL_MS).toBe(15_000);
+    expect(UNTUNED_RESTART_FRACTION).toBe(0.8);
+  });
+
+  it('an explicit MEMORIAHUB_HEAP_RESTART_FRACTION still wins over the tightened default', () => {
+    process.env['MEMORIAHUB_HEAP_RESTART_FRACTION'] = '0.95';
+    expect(untunedWatchdogOptions().restartFraction).toBe(0.95);
+  });
+
+  it('env 0 (disable the valve) is respected', () => {
+    process.env['MEMORIAHUB_HEAP_RESTART_FRACTION'] = '0';
+    expect(untunedWatchdogOptions().restartFraction).toBe(0);
+  });
 });
 
 describe('startMemoryWatchdog onCritical', () => {
