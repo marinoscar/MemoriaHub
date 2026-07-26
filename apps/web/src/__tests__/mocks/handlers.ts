@@ -92,6 +92,21 @@ export const handlers = [
     });
   }),
 
+  // Client-visible feature flags (any authenticated user)
+  http.get(`${API_BASE}/features`, () => {
+    return HttpResponse.json({
+      data: {
+        features: {},
+        pictureEnhancement: {
+          enabled: false,
+          allowReplace: true,
+          blockReplaceOnDownscale: false,
+          model: null,
+        },
+      },
+    });
+  }),
+
   // System settings endpoints
   http.get(`${API_BASE}/system-settings`, () => {
     return HttpResponse.json({ data: mockSystemSettings });

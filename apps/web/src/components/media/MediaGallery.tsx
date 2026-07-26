@@ -52,7 +52,7 @@ import { MediaSelectionCheckbox } from './MediaSelectionCheckbox';
 import { MediaLightbox } from './MediaLightbox';
 import { MediaEnhancementDrawer } from './MediaEnhancementDrawer';
 import { BulkActionToolbar } from './BulkActionToolbar';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
+import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { TrashBulkToolbar } from './TrashBulkToolbar';
 import { ArchiveBulkToolbar } from './ArchiveBulkToolbar';
 import { BulkLocationDialog } from './BulkLocationDialog';
@@ -611,8 +611,8 @@ export function MediaGallery({
   // AI Picture Enhancer — trigger from the single-select bar (photo only)
   // -------------------------------------------------------------------------
 
-  const { settings } = useSystemSettings();
-  const enhanceEnabled = Boolean(settings?.features?.pictureEnhancement);
+  const { pictureEnhancement } = useFeatureFlags();
+  const enhanceEnabled = Boolean(pictureEnhancement?.enabled);
   const [enhanceOpen, setEnhanceOpen] = useState(false);
 
   const singleSelectedItem = useMemo<MediaItem | null>(() => {
@@ -1010,6 +1010,15 @@ export function MediaGallery({
           item={singleSelectedItem}
           open={enhanceOpen}
           onClose={() => setEnhanceOpen(false)}
+          modelLabel={pictureEnhancement?.model ?? undefined}
+          replacePolicy={
+            pictureEnhancement
+              ? {
+                  allowReplace: pictureEnhancement.allowReplace,
+                  blockReplaceOnDownscale: pictureEnhancement.blockReplaceOnDownscale,
+                }
+              : undefined
+          }
           onReplaced={() => {
             setEnhanceOpen(false);
             handleBulkSuccess('Photo replaced with the enhanced version');

@@ -51,6 +51,14 @@ interface MediaEnhancementDrawerProps {
   onClose: () => void;
   /** Optional model label, shown in the params step (from ai.features.enhance). */
   modelLabel?: string | null;
+  /**
+   * Server-resolved replace policy (from GET /api/features). Threaded here so
+   * the apply step can hide/disable "replace" when the deployment forbids it.
+   */
+  replacePolicy?: {
+    allowReplace: boolean;
+    blockReplaceOnDownscale: boolean;
+  };
   /** Called after a successful "replace" so the parent can bust its cache/reload. */
   onReplaced?: () => void;
   /** Called after a successful "keep both" with a success message. */
@@ -158,6 +166,8 @@ export function MediaEnhancementDrawer({
   open,
   onClose,
   modelLabel,
+  // `replacePolicy` is accepted and threaded by callers; a follow-up commit
+  // consumes it to hide/disable the Replace action.
   onReplaced,
   onKeptBoth,
 }: MediaEnhancementDrawerProps) {
