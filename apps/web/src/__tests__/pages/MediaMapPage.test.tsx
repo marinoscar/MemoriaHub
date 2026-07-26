@@ -36,8 +36,14 @@
  *     `<button data-testid="marker" data-count data-sample-id>` per
  *     `clusters` entry and reproduces its real click contract: count===1
  *     calls `onOpenItem(sampleId)`, otherwise `onOpenClusterBbox({bbox, lat,
- *     lng, total})` with a small epsilon bbox around the cell (mirrors
- *     `bboxForCell` in the real component).
+ *     lng, total})` with the cluster's REAL member-point extent
+ *     (minLat/minLng/maxLat/maxLng, serialized as
+ *     `minLng,minLat,maxLng,maxLat` — the same `bboxFromExtent` format the
+ *     real `AggregateClusterLayer` now produces per issue #187), not a fixed
+ *     epsilon around the centroid. Using the real extent here is itself part
+ *     of the regression coverage: the original bug's fixed-epsilon bbox was
+ *     baked into this very mock, which is why the empty-drawer defect shipped
+ *     uncaught.
  *   - leaflet: stubs for L.latLngBounds / L.divIcon / L.Icon.Default.
  *   - ../../lib/leaflet-setup: replaced (avoids inline-SVG icon + CSS import).
  *   - services/media: aggregateLocations / listMediaLocations / getThumbnails
@@ -159,9 +165,17 @@ vi.mock('../../components/map/AggregateClusterLayer', () => ({
             if (c.count === 1) {
               onOpenItem(c.sampleId);
             } else {
-              const eps = 0.001;
+              // Real member-point extent, serialized exactly the way the real
+              // AggregateClusterLayer's bboxFromExtent does:
+              // `minLng,minLat,maxLng,maxLat`. Falls back to a tight box
+              // around the centroid only if the cluster carries no extent
+              // (defensive — every fixture below sets one via makeCluster).
+              const bbox =
+                c.minLat !== undefined && c.minLng !== undefined && c.maxLat !== undefined && c.maxLng !== undefined
+                  ? `${c.minLng},${c.minLat},${c.maxLng},${c.maxLat}`
+                  : `${c.lng},${c.lat},${c.lng},${c.lat}`;
               onOpenClusterBbox({
-                bbox: `${c.lng - eps},${c.lat - eps},${c.lng + eps},${c.lat + eps}`,
+                bbox,
                 lat: c.lat,
                 lng: c.lng,
                 total: c.count,
@@ -236,11 +250,20 @@ import MediaMapPage from '../../pages/MediaMapPage';
 // ---------------------------------------------------------------------------
 
 function makeCluster(overrides: Partial<MapCluster> = {}): MapCluster {
+  const lat = overrides.lat ?? 9.9281;
+  const lng = overrides.lng ?? -84.0907;
   return {
-    lat: 9.9281,
-    lng: -84.0907,
+    lat,
+    lng,
     count: 1,
     sampleId: 'item-1',
+    // Default extent is degenerate (min === max, equal to the centroid) —
+    // correct for a single-point/tight cell and a safe default for tests that
+    // don't care about the extent's shape.
+    minLat: lat,
+    maxLat: lat,
+    minLng: lng,
+    maxLng: lng,
     ...overrides,
   };
 }
@@ -536,10 +559,17 @@ describe('MediaMapPage', () => {
         expect(mockGetThumbnails).toHaveBeenCalledWith('circle-1', ['p1', 'p2']);
       });
 
-      // The "Photos here" drawer heading reflects the loaded point count.
+      // The "Photos here" drawer heading reflects the AUTHORITATIVE badge
+      // count (5, from the cluster the user clicked), not the preview fetch's
+      // row count (2) — this is the badge-vs-preview contract fixed by
+      // commit 9805252; asserting `(2)` here is exactly the bug that shipped.
       await waitFor(() => {
-        expect(screen.getByText(/photos here \(2\)/i)).toBeInTheDocument();
+        expect(screen.getByText(/photos here \(5\)/i)).toBeInTheDocument();
       });
+      // total (5) > points rendered (2) => "Show all" must still be offered.
+      expect(
+        screen.getByRole('button', { name: /show all 5 photos/i }),
+      ).toBeInTheDocument();
     });
   });
 
@@ -654,6 +684,153 @@ describe('MediaMapPage', () => {
       // tile role="button" with an aria-label derived from geoLocality/coords.
       expect(screen.queryByText('La Fortuna')).not.toBeInTheDocument();
       expect(screen.queryByLabelText(/^photo taken at/i)).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Issue #187 regression: badge count is authoritative and the drawer
+  // refetches the cluster's REAL member-point extent, not a fixed epsilon
+  // around its centroid.
+  //
+  // The original bug: a cell's photos could be spread across several towns,
+  // so the centroid landed where no photo was taken; a fixed +/-0.001deg
+  // (~222m) box around that centroid then refetched nothing, producing an
+  // empty "Photos here (0)" panel under a badge reading 15. The fix carries
+  // the cell's true bbox (minLat/maxLat/minLng/maxLng) through to the
+  // refetch, and separately stops the panel from overwriting the badge count
+  // with the (possibly short or empty) preview refetch's length.
+  // -------------------------------------------------------------------------
+
+  describe('badge count authority and real cluster extent (issue #187 regression)', () => {
+    it('refetches using the cluster real member-point extent, not a +/-0.001deg box around the centroid, and shows the badge count in the title', async () => {
+      // A wide extent spanning several towns — well outside any +/-0.001deg
+      // box around the centroid (lat 10, lng -85). This is the exact shape of
+      // cell that triggered the original bug.
+      const wideCluster = makeCluster({
+        count: 15,
+        sampleId: 'cluster-wide',
+        lat: 10,
+        lng: -85,
+        minLat: 8.5,
+        maxLat: 11.5,
+        minLng: -87,
+        maxLng: -83,
+      });
+      mockAggregateLocations.mockResolvedValue([wideCluster]);
+      mockListMediaLocations.mockResolvedValue([
+        makeLocation({ id: 'p1' }),
+        makeLocation({ id: 'p2' }),
+      ]);
+      mockGetThumbnails.mockResolvedValue([
+        { id: 'p1', thumbnailUrl: 'https://cdn.example.com/p1.jpg' },
+        { id: 'p2', thumbnailUrl: null },
+      ]);
+
+      render(<MediaMapPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('marker')).toBeInTheDocument();
+      });
+      await userEvent.click(screen.getByTestId('marker'));
+
+      await waitFor(() => {
+        expect(mockListMediaLocations).toHaveBeenCalled();
+      });
+      const [callArgs] = mockListMediaLocations.mock.calls[0];
+      // bboxFromExtent format: minLng,minLat,maxLng,maxLat.
+      expect(callArgs.bbox).toBe('-87,8.5,-83,11.5');
+      // A +/-0.001deg pinhole around the centroid would have been
+      // "-85.001,9.999,-84.999,10.001" — assert the fetched bbox is NOT that.
+      expect(callArgs.bbox).not.toBe('-85.001,9.999,-84.999,10.001');
+
+      // The badge count (15) is authoritative in the title, regardless of how
+      // many preview rows came back.
+      await waitFor(() => {
+        expect(screen.getByText(/photos here \(15\)/i)).toBeInTheDocument();
+      });
+    });
+
+    it('passes limit (CLUSTER_THUMB_LIMIT) on the drawer preview fetch', async () => {
+      mockAggregateLocations.mockResolvedValue([
+        makeCluster({ count: 5, sampleId: 'cluster-a', lat: 10, lng: -85 }),
+      ]);
+      mockListMediaLocations.mockResolvedValue([makeLocation({ id: 'p1' })]);
+      mockGetThumbnails.mockResolvedValue([
+        { id: 'p1', thumbnailUrl: 'https://cdn.example.com/p1.jpg' },
+      ]);
+
+      render(<MediaMapPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('marker')).toBeInTheDocument();
+      });
+      await userEvent.click(screen.getByTestId('marker'));
+
+      await waitFor(() => {
+        expect(mockListMediaLocations).toHaveBeenCalledWith(
+          expect.objectContaining({ limit: 24 }),
+        );
+      });
+    });
+
+    it('a preview refetch returning FEWER rows than the badge count still shows the badge count in the title and offers "Show all"', async () => {
+      mockAggregateLocations.mockResolvedValue([
+        makeCluster({ count: 500, sampleId: 'cluster-huge', lat: 10, lng: -85 }),
+      ]);
+      // Only 24 preview rows come back (e.g. the server-side limit), far
+      // short of the badge's 500.
+      mockListMediaLocations.mockResolvedValue(
+        Array.from({ length: 24 }, (_, i) => makeLocation({ id: `p${i + 1}` })),
+      );
+      mockGetThumbnails.mockResolvedValue(
+        Array.from({ length: 24 }, (_, i) => ({
+          id: `p${i + 1}`,
+          thumbnailUrl: `https://cdn.example.com/p${i + 1}.jpg`,
+        })),
+      );
+
+      render(<MediaMapPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('marker')).toBeInTheDocument();
+      });
+      await userEvent.click(screen.getByTestId('marker'));
+
+      await waitFor(() => {
+        expect(screen.getByText(/photos here \(500\)/i)).toBeInTheDocument();
+      });
+      expect(
+        screen.getByRole('button', { name: /show all 500 photos/i }),
+      ).toBeInTheDocument();
+    });
+
+    it('a preview refetch returning ZERO rows still shows the badge count, renders "Preview unavailable", and still offers "Show all" — the panel can never contradict the badge', async () => {
+      mockAggregateLocations.mockResolvedValue([
+        makeCluster({ count: 15, sampleId: 'cluster-empty-preview', lat: 10, lng: -85 }),
+      ]);
+      mockListMediaLocations.mockResolvedValue([]);
+
+      render(<MediaMapPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('marker')).toBeInTheDocument();
+      });
+      await userEvent.click(screen.getByTestId('marker'));
+
+      // This exact combination — badge showing 15 with a real empty preview
+      // — is the original bug's symptom. The fix's contract: title still
+      // reads the badge count, the grid degrades to explanatory copy instead
+      // of silently rendering nothing, and "Show all" remains the escape
+      // hatch to the real photos.
+      await waitFor(() => {
+        expect(screen.getByText(/photos here \(15\)/i)).toBeInTheDocument();
+      });
+      expect(
+        screen.getByText(/preview unavailable for this area\.?/i),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /show all 15 photos/i }),
+      ).toBeInTheDocument();
     });
   });
 
