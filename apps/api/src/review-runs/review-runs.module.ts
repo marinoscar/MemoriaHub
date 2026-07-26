@@ -10,6 +10,8 @@ import { ReviewRunService } from './review-run.service';
 import { ReviewRunSubjectRegistry } from './review-run-subject.registry';
 import { ReviewRunEvaluateHandler } from './review-run-evaluate.handler';
 import { ReviewRunExecuteBatchHandler } from './review-run-execute-batch.handler';
+import { ReviewRunHistoryPurgeHandler } from './review-run-history-purge.handler';
+import { ReviewRunHistoryPurgeTask } from './review-run-history-purge.task';
 import { BurstGroupReviewStrategy } from './strategies/burst-group.strategy';
 import { DuplicateGroupReviewStrategy } from './strategies/duplicate-group.strategy';
 import { LocationSuggestionReviewStrategy } from './strategies/location-suggestion.strategy';
@@ -47,7 +49,14 @@ import { LocationSuggestionReviewStrategy } from './strategies/location-suggesti
     LocationSuggestionReviewStrategy,
     ReviewRunEvaluateHandler,
     ReviewRunExecuteBatchHandler,
+    ReviewRunHistoryPurgeHandler,
+    ReviewRunHistoryPurgeTask,
   ],
-  exports: [ReviewRunService, ReviewRunEvaluateHandler, ReviewRunExecuteBatchHandler],
+  exports: [
+    ReviewRunService,
+    ReviewRunEvaluateHandler,
+    ReviewRunExecuteBatchHandler,
+    ReviewRunHistoryPurgeHandler,
+  ],
 })
 export class ReviewRunsModule {}

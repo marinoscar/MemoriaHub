@@ -43,6 +43,7 @@ export const JOB_TYPE_LABELS: Record<string, string> = {
   // Review-queue runs — bursts / duplicates / location suggestions (issue #190)
   review_run_evaluate: 'Review run evaluate',
   review_run_execute_batch: 'Review run execute batch',
+  review_run_history_purge: 'Review run history purge',
   // Media Workflow Automation (issue #143)
   workflow_evaluate: 'Workflow evaluate',
   workflow_evaluate_item: 'Workflow evaluate (item)',

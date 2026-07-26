@@ -43,6 +43,7 @@ import { LocationSuggestionRunEvaluateHandler } from '../location-inference/runs
 import { LocationSuggestionRunExecuteBatchHandler } from '../location-inference/runs/location-suggestion-run-execute-batch.handler';
 import { ReviewRunEvaluateHandler } from '../review-runs/review-run-evaluate.handler';
 import { ReviewRunExecuteBatchHandler } from '../review-runs/review-run-execute-batch.handler';
+import { ReviewRunHistoryPurgeHandler } from '../review-runs/review-run-history-purge.handler';
 import { WorkflowEvaluateItemHandler } from '../workflows/runs/workflow-evaluate-item.handler';
 import { WorkflowEvaluateHandler } from '../workflows/runs/workflow-evaluate.handler';
 import { WorkflowExecuteBatchHandler } from '../workflows/runs/workflow-execute-batch.handler';
@@ -74,6 +75,7 @@ const ALL_HANDLER_CLASSES = [
   LocationSuggestionRunExecuteBatchHandler,
   ReviewRunEvaluateHandler,
   ReviewRunExecuteBatchHandler,
+  ReviewRunHistoryPurgeHandler,
   WorkflowEvaluateItemHandler,
   WorkflowEvaluateHandler,
   WorkflowExecuteBatchHandler,
@@ -95,6 +97,7 @@ const DOCUMENTED_SERVER_ONLY_TYPES = [
   'location_suggestion_run_execute_batch',
   'review_run_evaluate',
   'review_run_execute_batch',
+  'review_run_history_purge',
   'storage_insights',
   'storage_migration',
   'trash_empty_evaluate',
@@ -235,6 +238,14 @@ describe('server-only type derivation (drift guard)', () => {
     it('review_run_execute_batch is server-only and system-mode eligible', () => {
       expect(registry.serverOnlyTypes()).toContain('review_run_execute_batch');
       expect(systemModeEligibleTypes(registry, {})).toContain('review_run_execute_batch');
+    });
+
+    it('review_run_history_purge is server-only and system-mode eligible', () => {
+      // Nightly retention + stale-run sweep over review_runs / trash_empty_runs
+      // — a pure SQL sweep with no per-item unit of work for a node, same
+      // precedent as job_history_purge / workflow_history_purge.
+      expect(registry.serverOnlyTypes()).toContain('review_run_history_purge');
+      expect(systemModeEligibleTypes(registry, {})).toContain('review_run_history_purge');
     });
 
     it('duplicate_confidence_backfill is server-only and system-mode eligible', () => {
