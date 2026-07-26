@@ -19,7 +19,12 @@
  *    enqueues at priority 0 with reason=rerun
  */
 
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { DuplicateService } from './duplicate.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -28,8 +33,18 @@ import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { ReviewRunService } from '../review-runs/review-run.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { CircleRole, DuplicateGroupStatus, JobReason, JobStatus, MediaType } from '@prisma/client';
+import {
+  CircleRole,
+  DuplicateGroupStatus,
+  JobReason,
+  JobStatus,
+  MediaType,
+  ReviewRunAction,
+  ReviewRunStatus,
+  ReviewRunSubject,
+} from '@prisma/client';
 import { DuplicateQueryDto } from './dto/duplicate-query.dto';
 import { ResolveDuplicateDto } from './dto/resolve-duplicate.dto';
 import { BulkResolveDuplicateDto } from './dto/bulk-resolve-duplicate.dto';
@@ -43,6 +58,7 @@ import { BulkDismissDuplicateThresholdDto } from './dto/bulk-dismiss-duplicate-t
 const USER_ID = 'user-abc';
 const CIRCLE_ID = 'circle-xyz';
 const GROUP_ID = 'group-111';
+const RUN_ID = 'run-190';
 
 const PERMS_MEDIA_READ = ['media:read'];
 const PERMS_MEDIA_WRITE = ['media:write'];
@@ -154,6 +170,7 @@ describe('DuplicateService', () => {
   let mockEnrichmentJobService: { enqueue: jest.Mock };
   let mockStorageProvider: { getSignedDownloadUrl: jest.Mock; getBucket: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
+  let mockReviewRuns: { createRun: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -181,6 +198,15 @@ describe('DuplicateService', () => {
     // hold without needing per-test findMany rows.
     (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([]);
     (mockPrisma.duplicateGroup.update as jest.Mock).mockResolvedValue({});
+    // Threshold bulk actions now delegate to the shared review-run engine
+    // (issue #190); createRun returns a freshly-created 'evaluating' run.
+    mockReviewRuns = {
+      createRun: jest.fn().mockResolvedValue({
+        id: RUN_ID,
+        status: ReviewRunStatus.evaluating,
+        matchedCount: 0,
+      }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -193,6 +219,7 @@ describe('DuplicateService', () => {
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: StorageProviderResolver, useValue: mockResolver },
+        { provide: ReviewRunService, useValue: mockReviewRuns },
       ],
     }).compile();
 
@@ -1072,471 +1099,107 @@ describe('DuplicateService', () => {
   });
 
   // -------------------------------------------------------------------------
-  // bulkResolveDuplicateGroupsByThreshold
+  // Threshold bulk actions — now thin wrappers over the shared review-run
+  // engine (issue #190). The old read-time confidence scan (and its 500-group
+  // MAX_THRESHOLD_RESOLVE cap) is gone: duplicate confidence is a persisted
+  // column, so eligibility is a SQL predicate inside the review-run strategy.
+  // What DuplicateService still owns is the DTO -> run-input mapping and the
+  // returned run envelope.
   // -------------------------------------------------------------------------
 
   describe('bulkResolveDuplicateGroupsByThreshold', () => {
-    function makeThresholdGroup(overrides: Partial<{
-      id: string;
-      circleId: string;
-      status: DuplicateGroupStatus;
-      suggestedBestItemId: string | null;
-      items: ReturnType<typeof makeMember>[];
-    }> = {}) {
-      return {
-        id: 'group-1',
+    it('starts a duplicate_group resolve_archive run and returns the run envelope', async () => {
+      const result = await service.bulkResolveDuplicateGroupsByThreshold(
+        makeBulkResolveThresholdDto(70, 'archive'),
+        USER_ID,
+        PERMS_MEDIA_WRITE,
+      );
+
+      expect(mockReviewRuns.createRun).toHaveBeenCalledWith({
         circleId: CIRCLE_ID,
-        status: DuplicateGroupStatus.pending,
-        suggestedBestItemId: 'media-1',
-        items: [makeMember({ id: 'media-1' }), makeMember({ id: 'media-2' }), makeMember({ id: 'media-3' })],
-        ...overrides,
-      };
-    }
-
-    function setupThresholdGroups(groups: ReturnType<typeof makeThresholdGroup>[]) {
-      (mockPrisma.duplicateGroup.findMany as jest.Mock).mockResolvedValue(groups);
-      (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
-      (mockPrisma.duplicateGroup.update as jest.Mock).mockResolvedValue({});
-      (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
-    }
-
-    it('calls assertCircleAccess with collaborator role', async () => {
-      const group = makeThresholdGroup();
-      setupThresholdGroups([group]);
-      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ sim: 0.9 }]);
-
-      await service.bulkResolveDuplicateGroupsByThreshold(
-        makeBulkResolveThresholdDto(70),
-        USER_ID,
-        PERMS_MEDIA_WRITE_DELETE,
-      );
-
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
-        USER_ID,
-        CIRCLE_ID,
-        PERMS_MEDIA_WRITE_DELETE,
-        CircleRole.collaborator,
-      );
+        subjectType: ReviewRunSubject.duplicate_group,
+        action: ReviewRunAction.resolve_archive,
+        threshold: 70,
+        userId: USER_ID,
+        perms: PERMS_MEDIA_WRITE,
+      });
+      expect(result.data).toEqual({
+        runId: RUN_ID,
+        status: ReviewRunStatus.evaluating,
+        matchedCount: 0,
+      });
     });
 
-    it('queries only pending groups in the circle, capped at 500 (confidence is not a persisted column)', async () => {
-      setupThresholdGroups([]);
-
-      await service.bulkResolveDuplicateGroupsByThreshold(
-        makeBulkResolveThresholdDto(70),
-        USER_ID,
-        PERMS_MEDIA_WRITE_DELETE,
-      );
-
-      const findManyCall = (mockPrisma.duplicateGroup.findMany as jest.Mock).mock.calls[0][0];
-      expect(findManyCall.where).toEqual({ circleId: CIRCLE_ID, status: DuplicateGroupStatus.pending });
-      expect(findManyCall.take).toBe(500);
-    });
-
-    it('resolves groups whose computed maxSim is >= threshold/100 and skips those below or with null maxSim', async () => {
-      const groupHigh = makeThresholdGroup({
-        id: 'group-high',
-        suggestedBestItemId: 'media-1',
-        items: [makeMember({ id: 'media-1' }), makeMember({ id: 'media-2' })],
-      });
-      const groupLow = makeThresholdGroup({
-        id: 'group-low',
-        suggestedBestItemId: 'media-10',
-        items: [makeMember({ id: 'media-10' }), makeMember({ id: 'media-11' })],
-      });
-      const groupNullConfidence = makeThresholdGroup({
-        id: 'group-null',
-        suggestedBestItemId: 'media-20',
-        items: [makeMember({ id: 'media-20' }), makeMember({ id: 'media-21' })],
-      });
-      setupThresholdGroups([groupHigh, groupLow, groupNullConfidence]);
-
-      // computeGroupKind issues one $queryRaw pairwise-similarity call per
-      // group, in for-loop order: groupHigh, groupLow, groupNullConfidence.
-      (mockPrisma.$queryRaw as jest.Mock)
-        .mockResolvedValueOnce([{ sim: 0.9 }]) // groupHigh: 0.9 >= 0.7 -> eligible
-        .mockResolvedValueOnce([{ sim: 0.5 }]) // groupLow: 0.5 < 0.7 -> skipped
-        .mockResolvedValueOnce([]); // groupNullConfidence: no embedding rows -> maxSim null -> skipped
-
-      const result = await service.bulkResolveDuplicateGroupsByThreshold(
-        makeBulkResolveThresholdDto(70, 'archive'),
-        USER_ID,
-        PERMS_MEDIA_WRITE_DELETE,
-      );
-
-      expect(result.data).toMatchObject({
-        resolvedGroups: 1,
-        skipped: 2,
-        errors: 0,
-        hasMore: false,
-      });
-      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledTimes(1);
-      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: { in: ['media-2'] } },
-          data: { archivedAt: expect.any(Date) },
-        }),
-      );
-    });
-
-    it('keeps suggestedBestItemId and removes the rest (archive path sets archivedAt)', async () => {
-      const group = makeThresholdGroup({
-        suggestedBestItemId: 'media-1',
-        items: [makeMember({ id: 'media-1' }), makeMember({ id: 'media-2' }), makeMember({ id: 'media-3' })],
-      });
-      setupThresholdGroups([group]);
-      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ sim: 0.95 }]);
-
-      const result = await service.bulkResolveDuplicateGroupsByThreshold(
-        makeBulkResolveThresholdDto(70, 'archive'),
-        USER_ID,
-        PERMS_MEDIA_WRITE_DELETE,
-      );
-
-      expect(result.data).toMatchObject({ resolvedGroups: 1, keptCount: 1, removedCount: 2 });
-      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: { in: expect.arrayContaining(['media-2', 'media-3']) } },
-          data: { archivedAt: expect.any(Date) },
-        }),
-      );
-    });
-
-    it('action=trash sets deletedAt (not archivedAt) on non-kept members', async () => {
-      const group = makeThresholdGroup();
-      setupThresholdGroups([group]);
-      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ sim: 0.95 }]);
-
+    it('maps action "trash" to the resolve_trash run action', async () => {
       await service.bulkResolveDuplicateGroupsByThreshold(
         makeBulkResolveThresholdDto(70, 'trash'),
         USER_ID,
         PERMS_MEDIA_WRITE_DELETE,
       );
 
-      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: { in: expect.arrayContaining(['media-2', 'media-3']) } },
-          data: { deletedAt: expect.any(Date) },
-        }),
+      expect(mockReviewRuns.createRun).toHaveBeenCalledWith(
+        expect.objectContaining({ action: ReviewRunAction.resolve_trash }),
       );
     });
 
-    it('throws BadRequestException when action is "trash" but perms lack media:delete', async () => {
-      const group = makeThresholdGroup();
-      setupThresholdGroups([group]);
+    it('does no group scanning, confidence computation or mutation itself', async () => {
+      await service.bulkResolveDuplicateGroupsByThreshold(
+        makeBulkResolveThresholdDto(70, 'archive'),
+        USER_ID,
+        PERMS_MEDIA_WRITE,
+      );
+
+      expect(mockPrisma.duplicateGroup.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaItem.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('propagates the 409 raised by the run service when a run is already active', async () => {
+      mockReviewRuns.createRun.mockRejectedValueOnce(new ConflictException('already running'));
 
       await expect(
         service.bulkResolveDuplicateGroupsByThreshold(
-          makeBulkResolveThresholdDto(70, 'trash'),
+          makeBulkResolveThresholdDto(70, 'archive'),
           USER_ID,
-          PERMS_MEDIA_WRITE, // no media:delete
+          PERMS_MEDIA_WRITE,
         ),
-      ).rejects.toThrow(BadRequestException);
-
-      // Permission check should short-circuit before any group lookup/mutation
-      expect(mockPrisma.duplicateGroup.findMany).not.toHaveBeenCalled();
-      expect(mockPrisma.mediaItem.updateMany).not.toHaveBeenCalled();
-    });
-
-    it('allows action "archive" with only media:write perms (media:delete not required)', async () => {
-      const group = makeThresholdGroup();
-      setupThresholdGroups([group]);
-      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ sim: 0.95 }]);
-
-      const result = await service.bulkResolveDuplicateGroupsByThreshold(
-        makeBulkResolveThresholdDto(70, 'archive'),
-        USER_ID,
-        PERMS_MEDIA_WRITE,
-      );
-
-      expect(result.data.resolvedGroups).toBe(1);
-      expect(result.data.action).toBe('archive');
-    });
-
-    it('skips a high-confidence group whose suggestedBestItemId is no longer a live member', async () => {
-      const group = makeThresholdGroup({
-        suggestedBestItemId: 'media-gone',
-        items: [makeMember({ id: 'media-1' }), makeMember({ id: 'media-2' })],
-      });
-      setupThresholdGroups([group]);
-      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ sim: 0.95 }]);
-
-      const result = await service.bulkResolveDuplicateGroupsByThreshold(
-        makeBulkResolveThresholdDto(70),
-        USER_ID,
-        PERMS_MEDIA_WRITE_DELETE,
-      );
-
-      expect(result.data.resolvedGroups).toBe(0);
-      expect(result.data.skipped).toBe(1);
-      expect(mockPrisma.mediaItem.updateMany).not.toHaveBeenCalled();
-    });
-
-    it('skips a high-confidence group with a null suggestedBestItemId', async () => {
-      const group = makeThresholdGroup({ suggestedBestItemId: null });
-      setupThresholdGroups([group]);
-      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ sim: 0.95 }]);
-
-      const result = await service.bulkResolveDuplicateGroupsByThreshold(
-        makeBulkResolveThresholdDto(70),
-        USER_ID,
-        PERMS_MEDIA_WRITE_DELETE,
-      );
-
-      expect(result.data.resolvedGroups).toBe(0);
-      expect(result.data.skipped).toBe(1);
-    });
-
-    it('increments errors and continues processing when one group fails mid-loop', async () => {
-      const groupA = makeThresholdGroup({
-        id: 'group-a',
-        suggestedBestItemId: 'media-1',
-        items: [makeMember({ id: 'media-1' }), makeMember({ id: 'media-2' })],
-      });
-      const groupB = makeThresholdGroup({
-        id: 'group-b',
-        suggestedBestItemId: 'media-10',
-        items: [makeMember({ id: 'media-10' }), makeMember({ id: 'media-11' })],
-      });
-      setupThresholdGroups([groupA, groupB]);
-      (mockPrisma.$queryRaw as jest.Mock)
-        .mockResolvedValueOnce([{ sim: 0.95 }])
-        .mockResolvedValueOnce([{ sim: 0.95 }]);
-
-      (mockPrisma.mediaItem.updateMany as jest.Mock)
-        .mockRejectedValueOnce(new Error('db boom')) // group-a
-        .mockResolvedValueOnce({ count: 1 }); // group-b
-
-      const result = await service.bulkResolveDuplicateGroupsByThreshold(
-        makeBulkResolveThresholdDto(70, 'archive'),
-        USER_ID,
-        PERMS_MEDIA_WRITE_DELETE,
-      );
-
-      expect(result.data.resolvedGroups).toBe(1);
-      expect(result.data.errors).toBe(1);
-      expect(result.data.skipped).toBe(0);
-      expect(mockPrisma.duplicateGroup.update).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'group-b' } }),
-      );
-    });
-
-    it('hasMore=true when the candidate scan returns exactly MAX_THRESHOLD_RESOLVE (500) groups', async () => {
-      const groups = Array.from({ length: 500 }, (_, i) => makeThresholdGroup({ id: `group-${i}` }));
-      setupThresholdGroups(groups);
-      // maxSim null for every group (no embedding rows) -> all skipped; we only
-      // care about hasMore here, which is driven by the candidate scan size.
-      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-
-      const result = await service.bulkResolveDuplicateGroupsByThreshold(
-        makeBulkResolveThresholdDto(70, 'archive'),
-        USER_ID,
-        PERMS_MEDIA_WRITE_DELETE,
-      );
-
-      expect(result.data.hasMore).toBe(true);
-    });
-
-    it('hasMore=false when the candidate scan returns fewer than MAX_THRESHOLD_RESOLVE groups', async () => {
-      const groups = Array.from({ length: 3 }, (_, i) => makeThresholdGroup({ id: `group-${i}` }));
-      setupThresholdGroups(groups);
-      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-
-      const result = await service.bulkResolveDuplicateGroupsByThreshold(
-        makeBulkResolveThresholdDto(70, 'archive'),
-        USER_ID,
-        PERMS_MEDIA_WRITE_DELETE,
-      );
-
-      expect(result.data.hasMore).toBe(false);
+      ).rejects.toThrow(ConflictException);
     });
   });
 
-  // -------------------------------------------------------------------------
-  // bulkDismissDuplicateGroupsByThreshold
-  // -------------------------------------------------------------------------
-
   describe('bulkDismissDuplicateGroupsByThreshold', () => {
-    function makeThresholdGroup(overrides: Partial<{
-      id: string;
-      circleId: string;
-      status: DuplicateGroupStatus;
-      items: ReturnType<typeof makeMember>[];
-    }> = {}) {
-      return {
-        id: 'group-1',
+    it('starts a duplicate_group dismiss run and returns the run envelope', async () => {
+      const result = await service.bulkDismissDuplicateGroupsByThreshold(
+        makeBulkDismissThresholdDto(60),
+        USER_ID,
+        PERMS_MEDIA_WRITE,
+      );
+
+      expect(mockReviewRuns.createRun).toHaveBeenCalledWith({
         circleId: CIRCLE_ID,
-        status: DuplicateGroupStatus.pending,
-        items: [makeMember({ id: 'media-1' }), makeMember({ id: 'media-2' }), makeMember({ id: 'media-3' })],
-        ...overrides,
-      };
-    }
+        subjectType: ReviewRunSubject.duplicate_group,
+        action: ReviewRunAction.dismiss,
+        threshold: 60,
+        userId: USER_ID,
+        perms: PERMS_MEDIA_WRITE,
+      });
+      expect(result.data).toEqual({
+        runId: RUN_ID,
+        status: ReviewRunStatus.evaluating,
+        matchedCount: 0,
+      });
+    });
 
-    function setupThresholdGroups(groups: ReturnType<typeof makeThresholdGroup>[]) {
-      (mockPrisma.duplicateGroup.findMany as jest.Mock).mockResolvedValue(groups);
-      (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
-      (mockPrisma.duplicateGroup.update as jest.Mock).mockResolvedValue({});
-      (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
-    }
-
-    it('calls assertCircleAccess with collaborator role', async () => {
-      const group = makeThresholdGroup();
-      setupThresholdGroups([group]);
-      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ sim: 0.3 }]);
-
+    it('does no group scanning, confidence computation or mutation itself', async () => {
       await service.bulkDismissDuplicateGroupsByThreshold(
-        makeBulkDismissThresholdDto(70),
+        makeBulkDismissThresholdDto(60),
         USER_ID,
         PERMS_MEDIA_WRITE,
       );
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
-        USER_ID,
-        CIRCLE_ID,
-        PERMS_MEDIA_WRITE,
-        CircleRole.collaborator,
-      );
-    });
-
-    it('queries only pending groups in the circle, capped at 500 (confidence is not a persisted column)', async () => {
-      setupThresholdGroups([]);
-
-      await service.bulkDismissDuplicateGroupsByThreshold(
-        makeBulkDismissThresholdDto(70),
-        USER_ID,
-        PERMS_MEDIA_WRITE,
-      );
-
-      const findManyCall = (mockPrisma.duplicateGroup.findMany as jest.Mock).mock.calls[0][0];
-      expect(findManyCall.where).toEqual({ circleId: CIRCLE_ID, status: DuplicateGroupStatus.pending });
-      expect(findManyCall.take).toBe(500);
-    });
-
-    it('dismisses groups whose computed maxSim is < threshold/100 and skips those at/above it or with null maxSim', async () => {
-      const groupLow = makeThresholdGroup({
-        id: 'group-low',
-        items: [makeMember({ id: 'media-1' }), makeMember({ id: 'media-2' })],
-      });
-      const groupHigh = makeThresholdGroup({
-        id: 'group-high',
-        items: [makeMember({ id: 'media-10' }), makeMember({ id: 'media-11' })],
-      });
-      const groupNullConfidence = makeThresholdGroup({
-        id: 'group-null',
-        items: [makeMember({ id: 'media-20' }), makeMember({ id: 'media-21' })],
-      });
-      setupThresholdGroups([groupLow, groupHigh, groupNullConfidence]);
-
-      // computeGroupKind issues one $queryRaw pairwise-similarity call per
-      // group, in for-loop order: groupLow, groupHigh, groupNullConfidence.
-      (mockPrisma.$queryRaw as jest.Mock)
-        .mockResolvedValueOnce([{ sim: 0.5 }]) // groupLow: 0.5 < 0.7 -> dismissed
-        .mockResolvedValueOnce([{ sim: 0.9 }]) // groupHigh: 0.9 >= 0.7 -> skipped
-        .mockResolvedValueOnce([]); // groupNullConfidence: no embedding rows -> maxSim null -> skipped
-
-      const result = await service.bulkDismissDuplicateGroupsByThreshold(
-        makeBulkDismissThresholdDto(70),
-        USER_ID,
-        PERMS_MEDIA_WRITE,
-      );
-
-      expect(result.data).toMatchObject({
-        dismissedGroups: 1,
-        skipped: 2,
-        errors: 0,
-      });
-      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledTimes(1);
-      expect(mockPrisma.mediaItem.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { duplicateGroupId: 'group-low' },
-          data: { duplicateGroupId: null },
-        }),
-      );
-    });
-
-    it('marks dismissed groups as dismissed and writes a duplicate_group:dismissed audit event', async () => {
-      const group = makeThresholdGroup({
-        id: 'group-low',
-        items: [makeMember({ id: 'media-1' }), makeMember({ id: 'media-2' })],
-      });
-      setupThresholdGroups([group]);
-      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ sim: 0.2 }]);
-
-      const result = await service.bulkDismissDuplicateGroupsByThreshold(
-        makeBulkDismissThresholdDto(70),
-        USER_ID,
-        PERMS_MEDIA_WRITE,
-      );
-
-      expect(result.data).toMatchObject({ dismissedGroups: 1, ungroupedCount: 2, skipped: 0, errors: 0 });
-      expect(mockPrisma.duplicateGroup.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'group-low' },
-          data: expect.objectContaining({
-            status: DuplicateGroupStatus.dismissed,
-            resolvedById: USER_ID,
-            resolvedAt: expect.any(Date),
-          }),
-        }),
-      );
-      expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            actorUserId: USER_ID,
-            action: 'duplicate_group:dismissed',
-            targetType: 'duplicate_group',
-            targetId: 'group-low',
-          }),
-        }),
-      );
-    });
-
-    it('does not re-enqueue duplicate detection (unlike burst dismiss)', async () => {
-      const group = makeThresholdGroup({
-        items: [makeMember({ id: 'media-1' }), makeMember({ id: 'media-2' })],
-      });
-      setupThresholdGroups([group]);
-      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ sim: 0.2 }]);
-
-      await service.bulkDismissDuplicateGroupsByThreshold(
-        makeBulkDismissThresholdDto(70),
-        USER_ID,
-        PERMS_MEDIA_WRITE,
-      );
-
-      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
-    });
-
-    it('increments errors and continues processing when one group fails mid-loop', async () => {
-      const groupA = makeThresholdGroup({
-        id: 'group-a',
-        items: [makeMember({ id: 'media-1' }), makeMember({ id: 'media-2' })],
-      });
-      const groupB = makeThresholdGroup({
-        id: 'group-b',
-        items: [makeMember({ id: 'media-10' }), makeMember({ id: 'media-11' })],
-      });
-      setupThresholdGroups([groupA, groupB]);
-      (mockPrisma.$queryRaw as jest.Mock)
-        .mockResolvedValueOnce([{ sim: 0.2 }])
-        .mockResolvedValueOnce([{ sim: 0.2 }]);
-
-      (mockPrisma.mediaItem.updateMany as jest.Mock)
-        .mockRejectedValueOnce(new Error('db boom')) // group-a
-        .mockResolvedValueOnce({ count: 1 }); // group-b
-
-      const result = await service.bulkDismissDuplicateGroupsByThreshold(
-        makeBulkDismissThresholdDto(70),
-        USER_ID,
-        PERMS_MEDIA_WRITE,
-      );
-
-      expect(result.data.dismissedGroups).toBe(1);
-      expect(result.data.errors).toBe(1);
-      expect(result.data.skipped).toBe(0);
-      expect(mockPrisma.duplicateGroup.update).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'group-b' } }),
-      );
+      expect(mockPrisma.duplicateGroup.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaItem.updateMany).not.toHaveBeenCalled();
     });
   });
 

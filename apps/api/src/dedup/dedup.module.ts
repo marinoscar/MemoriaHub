@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 import { PrismaModule } from '../prisma/prisma.module';
@@ -16,9 +16,21 @@ import { DuplicateConfidenceBackfillHandler } from './duplicate-confidence-backf
 import { VisualEmbeddingService } from './visual-embedding.service';
 import { ReviewInsightsController } from './review-insights.controller';
 import { ReviewInsightsService } from './review-insights.service';
+import { ReviewRunsModule } from '../review-runs/review-runs.module';
 
 @Module({
-  imports: [EnrichmentModule, StorageProvidersModule, PrismaModule, CirclesModule, SettingsModule, MediaModule],
+  imports: [
+    EnrichmentModule,
+    StorageProvidersModule,
+    PrismaModule,
+    CirclesModule,
+    SettingsModule,
+    MediaModule,
+    // Mutual: the duplicate review-run strategy wraps DuplicateService's
+    // primitives while DuplicateService's threshold endpoints start review runs
+    // (issue #190).
+    forwardRef(() => ReviewRunsModule),
+  ],
   controllers: [DuplicateController, AdminDuplicateController, ReviewInsightsController],
   providers: [
     DuplicateService,

@@ -4,8 +4,18 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
-import { BurstGroupStatus, CircleRole, JobReason, JobStatus, MediaType, Prisma } from '@prisma/client';
+import {
+  BurstGroupStatus,
+  CircleRole,
+  JobReason,
+  JobStatus,
+  MediaType,
+  Prisma,
+  ReviewRunAction,
+  ReviewRunSubject,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -24,9 +34,7 @@ import { ResolveBurstDto } from './dto/resolve-burst.dto';
 import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';
 import { BulkResolveBurstThresholdDto } from './dto/bulk-resolve-burst-threshold.dto';
 import { BulkDismissBurstThresholdDto } from './dto/bulk-dismiss-burst-threshold.dto';
-
-/** Hard cap on the number of groups a single threshold-based bulk resolve touches. */
-const MAX_THRESHOLD_RESOLVE = 500;
+import { ReviewRunService } from '../review-runs/review-run.service';
 
 @Injectable()
 export class BurstService {
@@ -42,6 +50,10 @@ export class BurstService {
     private readonly mediaThumbnailService: MediaThumbnailService,
     private readonly systemSettings: SystemSettingsService,
     private readonly duplicateDetectionService: DuplicateDetectionService,
+    // Circular by nature: the review-run strategies wrap this service's
+    // resolve/dismiss primitives, while these threshold endpoints start runs.
+    @Inject(forwardRef(() => ReviewRunService))
+    private readonly reviewRuns: ReviewRunService,
   ) {}
 
   /**
@@ -51,8 +63,13 @@ export class BurstService {
    * burst group was pending. Best-effort: gated by the duplicateDetection
    * feature flag, never throws (a dedup re-enqueue failure must not fail the
    * burst resolve/dismiss action).
+   *
+   * Public so the shared review-run engine can DEFER it: a bulk run passes
+   * `{ deferDuplicateDetection: true }` to the resolve/dismiss primitives below
+   * and calls this once per batch with the union of affected items, instead of
+   * once per group (issue #190).
    */
-  private async reenqueueDuplicateDetection(circleId: string, mediaItemIds: string[]): Promise<void> {
+  async reenqueueDuplicateDetection(circleId: string, mediaItemIds: string[]): Promise<void> {
     if (mediaItemIds.length === 0) return;
     try {
       const dedupOn = await this.systemSettings.isFeatureEnabled(FEATURE_KEYS.DUPLICATE_DETECTION);
@@ -323,13 +340,18 @@ export class BurstService {
    * inputs are already validated (group is pending, keep/remove IDs belong to
    * the group, trash-permission checked). Each call runs its own transaction so
    * a later failure never rolls back earlier successes in a bulk operation.
+   *
+   * Public so the shared review-run engine wraps this exact primitive rather
+   * than forking it (issue #190). Pass `{ deferDuplicateDetection: true }` to
+   * suppress the per-group dedup re-enqueue and batch it at the caller's level.
    */
-  private async resolveOneBurstGroup(
+  async resolveOneBurstGroup(
     group: { id: string; circleId: string },
     keepIds: string[],
     removeIds: string[],
     action: 'archive' | 'trash',
     userId: string,
+    opts: { deferDuplicateDetection?: boolean } = {},
   ): Promise<void> {
     await this.prisma.$transaction([
       // Apply the chosen action to all non-kept members: trash (soft-delete via
@@ -365,7 +387,9 @@ export class BurstService {
     // Surviving (kept) items were excluded from dedup matching while this
     // burst group was pending — now that it's resolved, let them compete for
     // duplicate matches again.
-    await this.reenqueueDuplicateDetection(group.circleId, keepIds);
+    if (!opts.deferDuplicateDetection) {
+      await this.reenqueueDuplicateDetection(group.circleId, keepIds);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -459,104 +483,35 @@ export class BurstService {
   // ---------------------------------------------------------------------------
 
   /**
-   * Bulk-resolve every pending burst group in a circle whose persisted
-   * `confidence` (0–1) is at/above `threshold / 100`. For each eligible group,
-   * keeps its suggested-best item and applies the chosen action to the rest.
+   * Start an async run that resolves every pending burst group in the circle
+   * whose persisted `confidence` (0-1) is at/above `threshold / 100`, keeping
+   * each group's suggested-best item and applying the chosen action to the rest.
    *
-   * Confidence is a persisted Float? column, so the eligibility filter runs in
-   * SQL. The `gte` naturally excludes null-confidence legacy groups — intended.
-   * Bounded to MAX_THRESHOLD_RESOLVE groups per call.
+   * Since issue #190 this is a thin wrapper over the shared review-run engine:
+   * the work is materialized into `review_run_items` by a `review_run_evaluate`
+   * job and applied by chunked `review_run_execute_batch` jobs, so it is
+   * uncapped (the old 500-group MAX_THRESHOLD_RESOLVE is gone), cancellable and
+   * resumable across reloads. Authorization — collaborator, plus media:delete
+   * for `trash` — is enforced inside ReviewRunService.createRun.
    */
   async bulkResolveBurstGroupsByThreshold(
     dto: BulkResolveBurstThresholdDto,
     userId: string,
     perms: string[],
   ) {
-    await this.membership.assertCircleAccess(userId, dto.circleId, perms, CircleRole.collaborator);
-
-    if (dto.action === 'trash' && !perms.includes(PERMISSIONS.MEDIA_DELETE)) {
-      throw new BadRequestException('media:delete permission is required to trash burst items');
-    }
-
-    const groups = await this.prisma.burstGroup.findMany({
-      where: {
-        circleId: dto.circleId,
-        status: BurstGroupStatus.pending,
-        confidence: { gte: dto.threshold / 100 },
-      },
-      take: MAX_THRESHOLD_RESOLVE,
-      select: {
-        id: true,
-        circleId: true,
-        status: true,
-        suggestedBestItemId: true,
-        items: {
-          where: { deletedAt: null },
-          select: { id: true },
-        },
-      },
+    const run = await this.reviewRuns.createRun({
+      circleId: dto.circleId,
+      subjectType: ReviewRunSubject.burst_group,
+      action:
+        dto.action === 'trash'
+          ? ReviewRunAction.resolve_trash
+          : ReviewRunAction.resolve_archive,
+      threshold: dto.threshold,
+      userId,
+      perms,
     });
 
-    let skipped = 0;
-    let errors = 0;
-    let resolvedGroups = 0;
-    let keptCount = 0;
-    let removedCount = 0;
-
-    for (const group of groups) {
-      const liveMemberIds = group.items.map((i) => i.id);
-
-      // A group is skipped when it is not pending, has no suggested-best item,
-      // or its suggested-best item is no longer a live member.
-      if (
-        group.status !== BurstGroupStatus.pending ||
-        !group.suggestedBestItemId ||
-        !liveMemberIds.includes(group.suggestedBestItemId)
-      ) {
-        skipped++;
-        continue;
-      }
-
-      const keepIds = [group.suggestedBestItemId];
-      const removeIds = liveMemberIds.filter((id) => id !== group.suggestedBestItemId);
-
-      try {
-        await this.resolveOneBurstGroup(group, keepIds, removeIds, dto.action, userId);
-        resolvedGroups++;
-        keptCount += keepIds.length;
-        removedCount += removeIds.length;
-      } catch (err) {
-        this.logger.warn(
-          `Failed to resolve burst group ${group.id} in threshold bulk operation: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        errors++;
-      }
-    }
-
-    // Count still-pending eligible groups after this batch resolved some, so the
-    // caller knows whether another pass is needed (a single call is capped at
-    // MAX_THRESHOLD_RESOLVE). Groups that were skipped or errored above remain
-    // pending and are therefore still counted here — correct, as they still
-    // need attention.
-    const remaining = await this.prisma.burstGroup.count({
-      where: {
-        circleId: dto.circleId,
-        status: BurstGroupStatus.pending,
-        confidence: { gte: dto.threshold / 100 },
-      },
-    });
-
-    return {
-      data: {
-        resolvedGroups,
-        keptCount,
-        removedCount,
-        action: dto.action,
-        skipped,
-        errors,
-        remaining,
-      },
-    };
+    return { data: { runId: run.id, status: run.status, matchedCount: run.matchedCount } };
   }
 
   // ---------------------------------------------------------------------------
@@ -602,10 +557,15 @@ export class BurstService {
    * `dismissed`, then re-enqueues duplicate detection so the freed members can
    * compete for duplicate matches. Returns the ungrouped member count. Callers
    * are responsible for their own access / pending-status guards.
+   *
+   * Public so the shared review-run engine wraps this exact primitive rather
+   * than forking it (issue #190). Pass `{ deferDuplicateDetection: true }` to
+   * suppress the per-group dedup re-enqueue and batch it at the caller's level.
    */
-  private async dismissOneBurstGroup(
+  async dismissOneBurstGroup(
     group: { id: string; circleId: string; items: { id: string }[] },
     userId: string,
+    opts: { deferDuplicateDetection?: boolean } = {},
   ): Promise<number> {
     const memberCount = group.items.length;
 
@@ -632,78 +592,41 @@ export class BurstService {
 
     // All members are ungrouped (none deleted) — let them compete for
     // duplicate matches now that the burst group is no longer pending.
-    await this.reenqueueDuplicateDetection(
-      group.circleId,
-      group.items.map((i) => i.id),
-    );
+    if (!opts.deferDuplicateDetection) {
+      await this.reenqueueDuplicateDetection(
+        group.circleId,
+        group.items.map((i) => i.id),
+      );
+    }
 
     return memberCount;
   }
 
   /**
-   * Bulk-dismiss every pending burst group in a circle whose persisted
-   * `confidence` (0–1) is strictly below `threshold / 100`. For each eligible
-   * group, ungroups its members and marks it dismissed (no items are archived
-   * or trashed — dismiss is non-destructive), so dismiss never requires
-   * media:delete.
+   * Start an async run that dismisses every pending burst group in the circle
+   * whose persisted `confidence` (0-1) is strictly below `threshold / 100`.
+   * Members are ungrouped and the group marked dismissed — nothing is archived
+   * or trashed, so dismiss never requires media:delete.
    *
-   * Confidence is a persisted Float? column, so the eligibility filter runs in
-   * SQL. The `lt` naturally excludes null-confidence legacy groups — the mirror
-   * image of resolve's `gte`, which likewise excludes them. Bounded to
-   * MAX_THRESHOLD_RESOLVE groups per call.
+   * Together with the resolve run above, one threshold partitions the pending
+   * queue: resolve >= N%, dismiss < N%. Null-confidence legacy groups are
+   * excluded from BOTH directions.
    */
   async bulkDismissBurstGroupsByThreshold(
     dto: BulkDismissBurstThresholdDto,
     userId: string,
     perms: string[],
   ) {
-    await this.membership.assertCircleAccess(userId, dto.circleId, perms, CircleRole.collaborator);
-
-    const groups = await this.prisma.burstGroup.findMany({
-      where: {
-        circleId: dto.circleId,
-        status: BurstGroupStatus.pending,
-        confidence: { lt: dto.threshold / 100 },
-      },
-      take: MAX_THRESHOLD_RESOLVE,
-      select: {
-        id: true,
-        circleId: true,
-        status: true,
-        items: { select: { id: true } },
-      },
+    const run = await this.reviewRuns.createRun({
+      circleId: dto.circleId,
+      subjectType: ReviewRunSubject.burst_group,
+      action: ReviewRunAction.dismiss,
+      threshold: dto.threshold,
+      userId,
+      perms,
     });
 
-    let skipped = 0;
-    let errors = 0;
-    let dismissedGroups = 0;
-    let ungroupedCount = 0;
-
-    for (const group of groups) {
-      if (group.status !== BurstGroupStatus.pending) {
-        skipped++;
-        continue;
-      }
-
-      try {
-        ungroupedCount += await this.dismissOneBurstGroup(group, userId);
-        dismissedGroups++;
-      } catch (err) {
-        this.logger.warn(
-          `Failed to dismiss burst group ${group.id} in threshold bulk operation: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        errors++;
-      }
-    }
-
-    return {
-      data: {
-        dismissedGroups,
-        ungroupedCount,
-        skipped,
-        errors,
-      },
-    };
+    return { data: { runId: run.id, status: run.status, matchedCount: run.matchedCount } };
   }
 
   // ---------------------------------------------------------------------------

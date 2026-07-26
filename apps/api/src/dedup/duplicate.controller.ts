@@ -99,22 +99,27 @@ export class DuplicateController {
   @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Bulk-resolve duplicate groups at/above a confidence threshold',
+    summary: 'Start a run resolving duplicate groups at/above a confidence threshold',
     description:
-      'Resolves every pending duplicate group in the circle whose read-time ' +
-      'confidence (tightest-pair CLIP similarity, 0–1) is at/above `threshold / 100`, ' +
-      'up to a hard cap of 500 groups. For each eligible group, keeps its ' +
-      'suggested-best item and applies the chosen `action` to the remaining live ' +
-      'members: `archive` sets archivedAt, `trash` soft-deletes (sets deletedAt). ' +
-      'Requires media:write; `action: "trash"` additionally requires media:delete. ' +
-      'The response `data.hasMore` is a boolean (not an exact count — duplicate ' +
-      'confidence is computed at read time, so it cannot be counted cheaply in SQL) ' +
-      'indicating the candidate scan hit the 500-group cap and more may remain.',
+      'Starts an ASYNC review run (issue #190) that resolves every pending ' +
+      'duplicate group in the circle whose `confidence` (tightest-pair CLIP ' +
+      'similarity, 0–1) is at/above `threshold / 100`. Confidence is now a ' +
+      'PERSISTED column, so eligibility is a real SQL predicate and the old ' +
+      '500-group cap is gone; the run is cancellable and resumable across ' +
+      'reloads. For each eligible group the run keeps its suggested-best item ' +
+      'and applies the chosen `action` to the remaining live members: `archive` ' +
+      'sets archivedAt, `trash` soft-deletes (sets deletedAt). Groups whose ' +
+      'confidence is null (uncomputable) are excluded. Requires media:write; ' +
+      '`action: "trash"` additionally requires media:delete. Poll ' +
+      'GET /api/review-runs/:id for progress.',
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Bulk threshold resolve completed; `data` includes `hasMore` (candidate scan hit the cap)',
+    description: 'Review run started; `data` is `{ runId, status, matchedCount }`',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'A duplicate review run is already in progress for this circle',
   })
   @ApiResponse({
     status: 400,
@@ -141,16 +146,24 @@ export class DuplicateController {
   @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Bulk-dismiss duplicate groups below a confidence threshold',
+    summary: 'Start a run dismissing duplicate groups below a confidence threshold',
     description:
-      'Dismisses every pending duplicate group in the circle whose read-time ' +
-      'confidence (tightest-pair CLIP similarity, 0–1) is strictly below ' +
-      '`threshold / 100`, up to a hard cap of 500 groups. Each eligible group is ' +
-      'ungrouped (members return to the pool) and marked dismissed — nothing is ' +
-      'archived or trashed, so this never requires media:delete. Groups whose ' +
-      'confidence cannot be computed are skipped. Requires media:write.',
+      'Starts an ASYNC review run (issue #190) that dismisses every pending ' +
+      'duplicate group in the circle whose persisted `confidence` (0–1) is ' +
+      'strictly below `threshold / 100` — uncapped, cancellable and resumable. ' +
+      'Each eligible group is ungrouped (members return to the pool) and marked ' +
+      'dismissed — nothing is archived or trashed, so this never requires ' +
+      'media:delete. Groups whose confidence is null (uncomputable) are ' +
+      'excluded. Requires media:write. Poll GET /api/review-runs/:id for progress.',
   })
-  @ApiResponse({ status: 200, description: 'Bulk threshold dismiss completed' })
+  @ApiResponse({
+    status: 200,
+    description: 'Review run started; `data` is `{ runId, status, matchedCount }`',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'A duplicate review run is already in progress for this circle',
+  })
   @ApiResponse({ status: 400, description: 'Invalid body' })
   @ApiResponse({ status: 404, description: 'Circle not found or access denied' })
   async bulkDismissDuplicateGroupsByThreshold(

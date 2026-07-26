@@ -4,8 +4,17 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
-import { CircleRole, DuplicateGroupStatus, JobReason, MediaType, Prisma } from '@prisma/client';
+import {
+  CircleRole,
+  DuplicateGroupStatus,
+  JobReason,
+  MediaType,
+  Prisma,
+  ReviewRunAction,
+  ReviewRunSubject,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -22,9 +31,7 @@ import { ResolveDuplicateDto } from './dto/resolve-duplicate.dto';
 import { BulkResolveDuplicateDto } from './dto/bulk-resolve-duplicate.dto';
 import { BulkResolveDuplicateThresholdDto } from './dto/bulk-resolve-duplicate-threshold.dto';
 import { BulkDismissDuplicateThresholdDto } from './dto/bulk-dismiss-duplicate-threshold.dto';
-
-/** Hard cap on the number of groups a single threshold-based bulk resolve touches. */
-const MAX_THRESHOLD_RESOLVE = 500;
+import { ReviewRunService } from '../review-runs/review-run.service';
 
 type DuplicateKind = 'exact_variant' | 'edited' | 'similar';
 
@@ -68,6 +75,10 @@ export class DuplicateService {
     private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
     private readonly mediaThumbnailService: MediaThumbnailService,
+    // Circular by nature: the review-run strategies wrap this service's
+    // resolve/dismiss primitives, while these threshold endpoints start runs.
+    @Inject(forwardRef(() => ReviewRunService))
+    private readonly reviewRuns: ReviewRunService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -193,6 +204,36 @@ export class DuplicateService {
     return { scores, bestId };
   }
 
+  /**
+   * Fire-and-forget read-time write-back of `suggestedBestItemId` and
+   * `confidence` when the freshly-computed values differ from what is stored.
+   *
+   * `DuplicateDetectionService.recomputeGroupMeta` is the authoritative writer
+   * of `confidence` on every membership change (issue #190); this is purely a
+   * self-heal backstop for groups last written before that column existed. It
+   * deliberately never awaits and never throws — a stale display value must not
+   * fail a read.
+   */
+  private persistGroupSelfHeal(
+    group: { id: string; suggestedBestItemId: string | null; confidence: number | null },
+    bestId: string | null,
+    maxSim: number | null,
+  ): void {
+    const bestChanged = bestId !== null && bestId !== group.suggestedBestItemId;
+    const confidenceChanged = maxSim !== group.confidence;
+    if (!bestChanged && !confidenceChanged) return;
+
+    void this.prisma.duplicateGroup
+      .update({
+        where: { id: group.id },
+        data: {
+          ...(bestChanged ? { suggestedBestItemId: bestId } : {}),
+          ...(confidenceChanged ? { confidence: maxSim } : {}),
+        },
+      })
+      .catch(() => undefined);
+  }
+
   private readonly MEMBER_SELECT = {
     id: true,
     metadata: true,
@@ -226,6 +267,7 @@ export class DuplicateService {
         status: true,
         mediaCount: true,
         capturedAt: true,
+        confidence: true,
         suggestedBestItemId: true,
         items: {
           where: { deletedAt: null, archivedAt: null },
@@ -239,11 +281,11 @@ export class DuplicateService {
         const { kind: kindClass, maxSim } = await this.computeGroupKind(group.items);
         const { bestId } = this.computeBestCopyScores(group.items);
 
-        if (bestId && bestId !== group.suggestedBestItemId) {
-          await this.prisma.duplicateGroup
-            .update({ where: { id: group.id }, data: { suggestedBestItemId: bestId } })
-            .catch(() => undefined);
-        }
+        // Fire-and-forget read-time self-heal. DuplicateDetectionService
+        // .recomputeGroupMeta is the authoritative writer of both columns
+        // (issue #190); this is the backstop for rows written before that
+        // existed, and for any drift the backfill job has not reached yet.
+        this.persistGroupSelfHeal(group, bestId, maxSim);
 
         return {
           ...group,
@@ -310,6 +352,7 @@ export class DuplicateService {
         status: true,
         mediaCount: true,
         capturedAt: true,
+        confidence: true,
         suggestedBestItemId: true,
         resolvedById: true,
         resolvedAt: true,
@@ -330,11 +373,8 @@ export class DuplicateService {
     const { scores, bestId } = this.computeBestCopyScores(group.items);
     const suggestedBestItemId = bestId ?? group.suggestedBestItemId;
 
-    if (bestId && bestId !== group.suggestedBestItemId) {
-      await this.prisma.duplicateGroup
-        .update({ where: { id: group.id }, data: { suggestedBestItemId: bestId } })
-        .catch(() => undefined);
-    }
+    // Same fire-and-forget self-heal as the list path.
+    this.persistGroupSelfHeal(group, bestId, maxSim);
 
     // similarityToBest: cosine similarity of each member's embedding to the
     // suggested-best member's embedding (null when either side has no embedding).
@@ -459,8 +499,11 @@ export class DuplicateService {
    * the group, trash-permission checked). Each call runs its own transaction so
    * a later failure never rolls back earlier successes in a bulk operation.
    * Unlike burst resolution, there is no dedup re-enqueue step.
+   *
+   * Public so the shared review-run engine wraps this exact primitive rather
+   * than forking it (issue #190).
    */
-  private async resolveOneDuplicateGroup(
+  async resolveOneDuplicateGroup(
     group: { id: string; circleId: string },
     keepIds: string[],
     removeIds: string[],
@@ -587,106 +630,37 @@ export class DuplicateService {
   // ---------------------------------------------------------------------------
 
   /**
-   * Bulk-resolve every pending duplicate group in a circle whose read-time
-   * confidence (tightest-pair CLIP similarity from computeGroupKind) is at/above
-   * `threshold / 100`. For each eligible group, keeps its suggested-best item
-   * and applies the chosen action to the rest.
+   * Start an async run that resolves every pending duplicate group in the circle
+   * whose confidence (tightest-pair CLIP similarity, 0-1) is at/above
+   * `threshold / 100`, keeping each group's suggested-best item and applying the
+   * chosen action to the rest.
    *
-   * Unlike burst confidence, duplicate confidence is NOT a persisted column —
-   * it is computed at read time via computeGroupKind(members). The candidate set
-   * is therefore CAPPED to MAX_THRESHOLD_RESOLVE groups first; the per-group
-   * computeGroupKind cost (one pairwise SQL query each) is bounded by that cap.
+   * Since issue #190 this is a thin wrapper over the shared review-run engine,
+   * and duplicate confidence is a PERSISTED column (written by
+   * DuplicateDetectionService.recomputeGroupMeta) rather than a read-time
+   * computation — so the eligibility filter is a real SQL predicate, the old
+   * 500-group MAX_THRESHOLD_RESOLVE cap is gone, and the run is cancellable and
+   * resumable. Authorization — collaborator, plus media:delete for `trash` — is
+   * enforced inside ReviewRunService.createRun.
    */
   async bulkResolveDuplicateGroupsByThreshold(
     dto: BulkResolveDuplicateThresholdDto,
     userId: string,
     perms: string[],
   ) {
-    await this.membership.assertCircleAccess(userId, dto.circleId, perms, CircleRole.collaborator);
-
-    if (dto.action === 'trash' && !perms.includes(PERMISSIONS.MEDIA_DELETE)) {
-      throw new BadRequestException('media:delete permission is required to trash duplicate items');
-    }
-
-    const groups = await this.prisma.duplicateGroup.findMany({
-      where: { circleId: dto.circleId, status: DuplicateGroupStatus.pending },
-      take: MAX_THRESHOLD_RESOLVE,
-      select: {
-        id: true,
-        circleId: true,
-        status: true,
-        suggestedBestItemId: true,
-        items: {
-          where: { deletedAt: null, archivedAt: null },
-          select: this.MEMBER_SELECT,
-        },
-      },
+    const run = await this.reviewRuns.createRun({
+      circleId: dto.circleId,
+      subjectType: ReviewRunSubject.duplicate_group,
+      action:
+        dto.action === 'trash'
+          ? ReviewRunAction.resolve_trash
+          : ReviewRunAction.resolve_archive,
+      threshold: dto.threshold,
+      userId,
+      perms,
     });
 
-    const minSim = dto.threshold / 100;
-
-    let skipped = 0;
-    let errors = 0;
-    let resolvedGroups = 0;
-    let keptCount = 0;
-    let removedCount = 0;
-
-    for (const group of groups) {
-      // Read-time confidence gate: skip groups below the threshold (and legacy
-      // groups whose maxSim cannot be computed).
-      const { maxSim } = await this.computeGroupKind(group.items);
-      if (maxSim == null || maxSim < minSim) {
-        skipped++;
-        continue;
-      }
-
-      const liveMemberIds = group.items.map((i) => i.id);
-
-      // Mirror the id-based bulk skip conditions.
-      if (
-        group.status !== DuplicateGroupStatus.pending ||
-        !group.suggestedBestItemId ||
-        !liveMemberIds.includes(group.suggestedBestItemId)
-      ) {
-        skipped++;
-        continue;
-      }
-
-      const keepIds = [group.suggestedBestItemId];
-      const removeIds = liveMemberIds.filter((id) => id !== group.suggestedBestItemId);
-
-      try {
-        await this.resolveOneDuplicateGroup(group, keepIds, removeIds, dto.action, userId);
-        resolvedGroups++;
-        keptCount += keepIds.length;
-        removedCount += removeIds.length;
-      } catch (err) {
-        this.logger.warn(
-          `Failed to resolve duplicate group ${group.id} in threshold bulk operation: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        errors++;
-      }
-    }
-
-    // Unlike burst confidence (a persisted column that can be counted with a
-    // cheap SQL filter), duplicate confidence is computed at READ time via
-    // computeGroupKind — so an exact "remaining eligible" count is not cheaply
-    // computable. Instead signal `hasMore` = whether the initial candidate scan
-    // hit the MAX_THRESHOLD_RESOLVE cap, meaning there may be more eligible
-    // groups beyond this batch and the caller should run again.
-    const hasMore = groups.length === MAX_THRESHOLD_RESOLVE;
-
-    return {
-      data: {
-        resolvedGroups,
-        keptCount,
-        removedCount,
-        action: dto.action,
-        skipped,
-        errors,
-        hasMore,
-      },
-    };
+    return { data: { runId: run.id, status: run.status, matchedCount: run.matchedCount } };
   }
 
   // ---------------------------------------------------------------------------
@@ -732,8 +706,11 @@ export class DuplicateService {
    * `dismissed`, and writes the `duplicate_group:dismissed` audit event. Returns
    * the ungrouped member count. Callers are responsible for their own access /
    * pending-status guards. Unlike burst dismiss, no dedup re-enqueue happens.
+   *
+   * Public so the shared review-run engine wraps this exact primitive rather
+   * than forking it (issue #190).
    */
-  private async dismissOneDuplicateGroup(
+  async dismissOneDuplicateGroup(
     group: { id: string; items: { id: string }[] },
     userId: string,
   ): Promise<number> {
@@ -766,84 +743,31 @@ export class DuplicateService {
   }
 
   /**
-   * Bulk-dismiss every pending duplicate group in a circle whose read-time
-   * confidence (tightest-pair CLIP similarity from computeGroupKind) is strictly
-   * below `threshold / 100`. Each eligible group is ungrouped and marked
-   * dismissed — nothing is archived or trashed, so dismiss never requires
-   * media:delete.
+   * Start an async run that dismisses every pending duplicate group in the
+   * circle whose persisted `confidence` (0-1) is strictly below
+   * `threshold / 100`. Members are ungrouped and the group marked dismissed —
+   * nothing is archived or trashed, so dismiss never requires media:delete.
    *
-   * Unlike burst confidence, duplicate confidence is NOT a persisted column — it
-   * is computed at read time via computeGroupKind(members). The candidate set is
-   * therefore CAPPED to MAX_THRESHOLD_RESOLVE groups first; the per-group
-   * computeGroupKind cost (one pairwise SQL query each) is bounded by that cap.
-   * Groups whose maxSim cannot be computed (null) AND groups at/above the floor
-   * are both skipped — only maxSim strictly below the floor is dismissed, the
-   * mirror image of resolve's `maxSim >= floor` gate.
+   * Together with the resolve run above, one threshold partitions the pending
+   * queue: resolve >= N%, dismiss < N%. Groups whose confidence is null
+   * (uncomputable — fewer than two members carry an embedding) are excluded from
+   * BOTH directions.
    */
   async bulkDismissDuplicateGroupsByThreshold(
     dto: BulkDismissDuplicateThresholdDto,
     userId: string,
     perms: string[],
   ) {
-    await this.membership.assertCircleAccess(userId, dto.circleId, perms, CircleRole.collaborator);
-
-    const groups = await this.prisma.duplicateGroup.findMany({
-      where: { circleId: dto.circleId, status: DuplicateGroupStatus.pending },
-      take: MAX_THRESHOLD_RESOLVE,
-      select: {
-        id: true,
-        circleId: true,
-        status: true,
-        items: {
-          where: { deletedAt: null, archivedAt: null },
-          select: this.MEMBER_SELECT,
-        },
-      },
+    const run = await this.reviewRuns.createRun({
+      circleId: dto.circleId,
+      subjectType: ReviewRunSubject.duplicate_group,
+      action: ReviewRunAction.dismiss,
+      threshold: dto.threshold,
+      userId,
+      perms,
     });
 
-    const maxSimFloor = dto.threshold / 100;
-
-    let skipped = 0;
-    let errors = 0;
-    let dismissedGroups = 0;
-    let ungroupedCount = 0;
-
-    for (const group of groups) {
-      // Read-time confidence gate: dismiss only groups strictly below the floor.
-      // Null/uncomputable maxSim and high-confidence groups are both skipped.
-      const { maxSim } = await this.computeGroupKind(group.items);
-      if (maxSim == null || maxSim >= maxSimFloor) {
-        skipped++;
-        continue;
-      }
-
-      if (group.status !== DuplicateGroupStatus.pending) {
-        skipped++;
-        continue;
-      }
-
-      try {
-        ungroupedCount += await this.dismissOneDuplicateGroup(
-          { id: group.id, items: group.items.map((i) => ({ id: i.id })) },
-          userId,
-        );
-        dismissedGroups++;
-      } catch (err) {
-        this.logger.warn(
-          `Failed to dismiss duplicate group ${group.id} in threshold bulk operation: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        errors++;
-      }
-    }
-
-    return {
-      data: {
-        dismissedGroups,
-        ungroupedCount,
-        skipped,
-        errors,
-      },
-    };
+    return { data: { runId: run.id, status: run.status, matchedCount: run.matchedCount } };
   }
 
   // ---------------------------------------------------------------------------

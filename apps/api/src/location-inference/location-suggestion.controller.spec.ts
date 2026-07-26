@@ -7,10 +7,10 @@
  * location-suggestion.service.spec.ts.
  */
 
-import { LocationSuggestionRunAction } from '@prisma/client';
+import { ReviewRunAction, ReviewRunSubject } from '@prisma/client';
 import { LocationSuggestionController } from './location-suggestion.controller';
 import { LocationSuggestionService } from './location-suggestion.service';
-import { LocationSuggestionRunService } from './runs/location-suggestion-run.service';
+import { ReviewRunService } from '../review-runs/review-run.service';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto';
 import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dto';
@@ -50,7 +50,7 @@ describe('LocationSuggestionController', () => {
     };
     controller = new LocationSuggestionController(
       mockService as unknown as LocationSuggestionService,
-      mockRunService as unknown as LocationSuggestionRunService,
+      mockRunService as unknown as ReviewRunService,
     );
   });
 
@@ -71,13 +71,14 @@ describe('LocationSuggestionController', () => {
 
     const result = await controller.bulkAcceptSuggestions(dto, USER);
 
-    expect(mockRunService.createRun).toHaveBeenCalledWith(
-      dto.circleId,
-      LocationSuggestionRunAction.accept,
-      dto.threshold,
-      USER.id,
-      USER.permissions,
-    );
+    expect(mockRunService.createRun).toHaveBeenCalledWith({
+      circleId: dto.circleId,
+      subjectType: ReviewRunSubject.location_suggestion,
+      action: ReviewRunAction.accept,
+      threshold: dto.threshold,
+      userId: USER.id,
+      perms: USER.permissions,
+    });
     expect(result).toEqual({ data: { runId: 'run-1', status: 'evaluating', matchedCount: 0 } });
   });
 
@@ -87,13 +88,14 @@ describe('LocationSuggestionController', () => {
 
     const result = await controller.bulkRejectSuggestions(dto, USER);
 
-    expect(mockRunService.createRun).toHaveBeenCalledWith(
-      dto.circleId,
-      LocationSuggestionRunAction.reject,
-      dto.threshold,
-      USER.id,
-      USER.permissions,
-    );
+    expect(mockRunService.createRun).toHaveBeenCalledWith({
+      circleId: dto.circleId,
+      subjectType: ReviewRunSubject.location_suggestion,
+      action: ReviewRunAction.reject,
+      threshold: dto.threshold,
+      userId: USER.id,
+      perms: USER.permissions,
+    });
     expect(result).toEqual({ data: { runId: 'run-2', status: 'evaluating', matchedCount: 0 } });
   });
 
