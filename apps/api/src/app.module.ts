@@ -27,6 +27,7 @@ import { InsightsModule } from './insights/insights.module';
 import { BurstModule } from './burst/burst.module';
 import { DedupModule } from './dedup/dedup.module';
 import { LocationInferenceModule } from './location-inference/location-inference.module';
+import { ReviewRunsModule } from './review-runs/review-runs.module';
 import { MetadataModule } from './metadata/metadata.module';
 import { GeoModule } from './geo/geo.module';
 import { EmailModule } from './email/email.module';
@@ -90,6 +91,7 @@ import configuration from './config/configuration';
     BurstModule,
     DedupModule,
     LocationInferenceModule,
+    ReviewRunsModule,
     MetadataModule,
     GeoModule,
     EmailModule,

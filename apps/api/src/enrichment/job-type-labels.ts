@@ -23,6 +23,8 @@ export const JOB_TYPE_LABELS: Record<string, string> = {
   metadata_extraction: 'Metadata extraction',
   social_media_detection: 'Social media detection',
   location_inference: 'Location inference',
+  // Deprecated aliases retained for one release so already-queued rows still
+  // render a friendly label; superseded by review_run_* below (issue #190).
   location_suggestion_run_evaluate: 'Location suggestion run evaluate',
   location_suggestion_run_execute_batch: 'Location suggestion run execute batch',
   face_auto_archive_sweep: 'Face auto-archive sweep',
@@ -38,6 +40,9 @@ export const JOB_TYPE_LABELS: Record<string, string> = {
   trash_empty_evaluate: 'Empty trash evaluate',
   trash_empty_execute_batch: 'Empty trash execute batch',
   job_history_purge: 'Job history purge',
+  // Review-queue runs — bursts / duplicates / location suggestions (issue #190)
+  review_run_evaluate: 'Review run evaluate',
+  review_run_execute_batch: 'Review run execute batch',
   // Media Workflow Automation (issue #143)
   workflow_evaluate: 'Workflow evaluate',
   workflow_evaluate_item: 'Workflow evaluate (item)',
