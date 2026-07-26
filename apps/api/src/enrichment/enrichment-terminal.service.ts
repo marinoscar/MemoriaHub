@@ -49,10 +49,16 @@ const MAX_ATTEMPTS = ENRICHMENT_MAX_ATTEMPTS;
 const RETRY_BASE_MS = getEnvInt('ENRICHMENT_RETRY_BASE_MS', 2_000);
 const RETRY_MAX_MS = getEnvInt('ENRICHMENT_RETRY_MAX_MS', 60_000);
 
-// Rate-limit deferral config
+// Rate-limit deferral config.
+// ENRICHMENT_RATELIMIT_MAX_HITS is exported for the same reason as
+// ENRICHMENT_MAX_ATTEMPTS above: a handler that mirrors job state into its own
+// domain row (e.g. PictureEnhancementHandler → media_enhancements) must be able
+// to predict whether THIS failure is the deferral the queue will requeue or the
+// one it gives up on, so its row never disagrees with the job.
+export const ENRICHMENT_RATELIMIT_MAX_HITS = getEnvInt('ENRICHMENT_RATELIMIT_MAX_HITS', 10);
 const RL_BASE_MS = getEnvInt('ENRICHMENT_RATELIMIT_BASE_MS', 30_000);
 const RL_MAX_MS = getEnvInt('ENRICHMENT_RATELIMIT_MAX_MS', 900_000);
-const RL_MAX_HITS = getEnvInt('ENRICHMENT_RATELIMIT_MAX_HITS', 10);
+const RL_MAX_HITS = ENRICHMENT_RATELIMIT_MAX_HITS;
 
 /** Optional overrides for node-reported failures (the node cannot throw a
  *  RateLimitError instance over the wire, so it reports the classification). */

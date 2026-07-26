@@ -4,6 +4,11 @@ import { Readable } from 'stream';
 import sharp from 'sharp';
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
+import { RateLimitError, classifyRateLimit } from '../enrichment/rate-limit.error';
+import {
+  ENRICHMENT_MAX_ATTEMPTS,
+  ENRICHMENT_RATELIMIT_MAX_HITS,
+} from '../enrichment/enrichment-terminal.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { AiSettingsService } from '../ai/ai-settings.service';
@@ -235,14 +240,53 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+
+      // Classify the failure the SAME way EnrichmentTerminalService will, so
+      // the row's next state always agrees with the job's next state.
+      // (Mirrors AutoTaggingService.embedAndStore's classify-then-rethrow.)
+      const rl = err instanceof RateLimitError ? err : classifyRateLimit(err);
+
+      // Does the queue requeue this job, or is this its last breath?
+      //
+      //  - Rate limit: the deferral path requeues until
+      //    `rateLimitHits + 1 >= ENRICHMENT_RATELIMIT_MAX_HITS`, and it
+      //    UN-CHARGES the claim-time attempt, so a deferral never consumes
+      //    retry budget. `job.rateLimitHits` is the count BEFORE this hit.
+      //  - Normal error: `attempts` is charged at CLAIM time (it means
+      //    "attempts STARTED"), so `job.attempts` already includes the attempt
+      //    that just failed — 1 on the first run. The queue retries while
+      //    `job.attempts < ENRICHMENT_MAX_ATTEMPTS`, i.e. attempt 3 of 3 is
+      //    terminal. Using `<` (not `<=`) here is what keeps the two in step.
+      const queueWillRetry = rl
+        ? job.rateLimitHits + 1 < ENRICHMENT_RATELIMIT_MAX_HITS
+        : job.attempts < ENRICHMENT_MAX_ATTEMPTS;
+
+      // A retryable failure must leave the row ACTIONABLE. process() early-returns
+      // unless the row is pending/processing, so unconditionally tombstoning it as
+      // `failed` here turned every retry — and every rate-limit deferral — into a
+      // silent no-op that burned the job's budget without re-running the work.
       await this.prisma.mediaEnhancement.update({
         where: { id: row.id },
-        data: { status: MediaEnhancementStatus.failed, lastError: msg },
+        data: {
+          status: queueWillRetry
+            ? MediaEnhancementStatus.pending
+            : MediaEnhancementStatus.failed,
+          // Informational while retrying (explains the current backoff), and the
+          // surfaced failure reason once the queue gives up.
+          lastError: msg,
+        },
       });
+
       this.logger.error(
-        `picture_enhancement job ${job.id}: enhancement ${row.id} failed: ${msg}`,
+        `picture_enhancement job ${job.id}: enhancement ${row.id} ${
+          queueWillRetry ? 'failed (will retry)' : 'failed'
+        }${rl ? ' [rate-limited]' : ''}: ${msg}`,
       );
-      // Rethrow so the queue applies its normal retry/backoff.
+
+      // Rethrow the NORMALIZED RateLimitError so the queue takes its deferral
+      // path (backoff + no attempt charged) rather than the retry path; any
+      // other error is rethrown untouched for normal retry/backoff.
+      if (rl) throw rl;
       throw err;
     }
   }
