@@ -519,5 +519,24 @@ describe('uploadFile', () => {
         uploadFile(api as unknown as ApiClient, filePath, 'image/jpeg', undefined, persistence),
       ).rejects.toThrow(/^Part 1 failed:/);
     });
+
+    // A part PUT never touches the MemoriaHub API, so its failures must not be
+    // labelled "API error" — that misdirection cost real diagnostic time.
+    it('attributes a part failure to the storage provider, surfacing its error code', async () => {
+      const { api, putRawSpy } = makeFakeApi({});
+      (putRawSpy as jest.Mock).mockImplementation((() =>
+        Promise.reject(
+          new ApiError(
+            403,
+            '<?xml version="1.0" encoding="UTF-8"?><Error><Code>AccessDenied</Code>' +
+              '<Message>Access Denied</Message></Error>',
+          ),
+        )) as ApiClient['putRaw']);
+      const { persistence } = makePersistence();
+
+      await expect(
+        uploadFile(api as unknown as ApiClient, filePath, 'image/jpeg', undefined, persistence),
+      ).rejects.toThrow('Part 1 failed: storage provider returned HTTP 403 AccessDenied');
+    });
   });
 });

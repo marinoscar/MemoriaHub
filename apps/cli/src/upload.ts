@@ -161,12 +161,32 @@ async function uploadPart(
   try {
     return await api.putRaw(url, buffer, mimeType);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = describeStorageFailure(err);
     if (isStaleUploadSession(err)) {
       throw new StaleUploadSessionError(partNumber, msg);
     }
     throw new Error(`Part ${partNumber} failed: ${msg}`);
   }
+}
+
+/**
+ * Render a failed presigned PUT as a message that names the right system.
+ *
+ * A part PUT goes DIRECTLY to S3/R2 — the MemoriaHub API is not in the path —
+ * but it flows through the same ApiClient plumbing, so its failures arrived
+ * labelled `API error 500: …`. That prefix sent operators debugging their
+ * MemoriaHub deployment when the response actually came from the storage
+ * provider (issue #179). Surface the provider's own error code where S3/R2
+ * supplied one, since that is the detail that identifies the fault.
+ */
+function describeStorageFailure(err: unknown): string {
+  if (!(err instanceof ApiError)) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  const code = /<Code>([^<]+)<\/Code>/.exec(err.serverMessage)?.[1];
+  return code
+    ? `storage provider returned HTTP ${err.status} ${code}`
+    : `storage provider returned HTTP ${err.status}: ${err.serverMessage}`;
 }
 
 /**
