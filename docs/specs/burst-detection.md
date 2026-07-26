@@ -356,6 +356,8 @@ List burst groups for a circle, filtered by status, with member counts, cover th
   - `status` (optional) — filter to `pending` | `resolved` | `dismissed`; defaults to `pending`
   - `page` (optional) — page number, 1-based; default 1
   - `pageSize` (optional) — items per page; default 20, max 100
+  - `sortBy` (optional) — `capturedAt` (default) | `confidence` | `mediaCount`
+  - `sortOrder` (optional) — `asc` (default) | `desc`
 - **Response `200`:**
   ```json
   {
@@ -378,6 +380,8 @@ List burst groups for a circle, filtered by status, with member counts, cover th
   `coverThumbnailUrls` contains up to 4 signed thumbnail URLs for the first 4 group members (sorted by `capturedAt ASC`), for use as a stack preview. `suggestedBestThumbnailUrl` is the signed thumbnail URL for `suggestedBestItemId`.
 
 Only groups with `mediaCount >= burst.minGroupSize` are returned (provisional undersized groups are not surfaced).
+
+**Sorting:** `sortBy=capturedAt` (default) and `sortBy=confidence` both use Prisma's `{ sort, nulls: 'last' }` ordering — a `null` `confidence` (the "legacy groups" case from §4.1's data model, i.e. a group scored before the column existed) or `null` `capturedAt` is treated as "unknown", not "zero", and sorts last in both `asc` and `desc`. `sortBy=mediaCount` is a plain non-null column and needs no such handling. Every ordering appends a trailing `id ASC` (or the requested direction) tiebreaker so offset pagination cannot repeat or drop a group when multiple groups share the same sort value — the default `capturedAt`/`asc` ordering previously had no tiebreaker at all.
 
 #### `GET /api/media/bursts/:id`
 
@@ -617,6 +621,8 @@ A "Review bursts" page (or tab within the existing review area) lists pending bu
 
 Alongside the multi-select toolbar, the page offers "Archive above N" and "Delete above N" score-threshold buttons, pre-filled with `burst.autoResolveThreshold` (§6.1) and adjustable before firing, which call `POST /api/media/bursts/bulk/resolve-by-threshold` (§7.2) to resolve every qualifying pending group without requiring the reviewer to select cards individually. For Admins, the page header also carries a gear icon linking directly to `/admin/settings/bursts` (§8.3) to adjust detection parameters and the auto-resolve threshold.
 
+A `ReviewSortSelect` control (shared with the Duplicates and Location Suggestions pages) lets the reviewer switch between Captured (oldest/newest), Cohesion (highest/lowest — `confidence`), and group size (largest/smallest), backed by the `sortBy`/`sortOrder` params above. The selection is mirrored into the URL query string so a sorted view survives a reload and can be shared; an unrecognized value in the URL falls back to the default (`capturedAt`/`asc`) rather than being sent to the API. Changing the sort resets to page 1 and clears the current multi-select, and only a non-default selection is included on the wire, so an untouched page's request is unchanged from before this control existed.
+
 Opening a group shows a side-by-side or grid view of all members in capture order, each displaying:
 - The thumbnail at a generous size (to allow sharpness differences to be visible).
 - The `burstScore` as a quality indicator (e.g., one to three star rating or a numerical badge).
@@ -693,6 +699,7 @@ Changes to the global `features.burstDetection` setting are tracked via the stan
 - **Backfill — 400 when disabled:** verify `POST /api/admin/bursts/backfill` returns `400` when `features.burstDetection` is `false`.
 - **Backfill — date range:** seed two photos with distinct `capturedAt` dates; call backfill with `from`/`to` scoping to only one date; verify only that photo is enqueued. Verify `from > to` returns 400.
 - **Backfill — on-demand hashing:** seed a photo with `perceptualHash = null` (simulating a legacy upload); run the enrichment job for it; verify `perceptualHash` and `sharpnessScore` are written to the `media_items` row before grouping logic runs.
+- **Sorting:** seed groups with a mix of set and `null` `confidence`; call `GET /api/media/bursts?sortBy=confidence&sortOrder=desc` and verify null-confidence groups appear last; verify `sortBy=mediaCount` orders by group size in both directions; verify an omitted `sortBy`/`sortOrder` reproduces the pre-existing `capturedAt asc` order exactly (regression guard for the default path).
 
 ### RBAC Tests
 
