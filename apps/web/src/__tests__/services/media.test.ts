@@ -229,8 +229,26 @@ describe('aggregateLocations', () => {
   let capturedUrl: URL | null = null;
 
   const mockClusters: MapCluster[] = [
-    { lat: 9.9281, lng: -84.0907, count: 1, sampleId: 'loc-1' },
-    { lat: 48.8566, lng: 2.3522, count: 12, sampleId: 'loc-2' },
+    {
+      lat: 9.9281,
+      lng: -84.0907,
+      count: 1,
+      sampleId: 'loc-1',
+      minLat: 9.9281,
+      maxLat: 9.9281,
+      minLng: -84.0907,
+      maxLng: -84.0907,
+    },
+    {
+      lat: 48.8566,
+      lng: 2.3522,
+      count: 12,
+      sampleId: 'loc-2',
+      minLat: 48.8,
+      maxLat: 48.9,
+      minLng: 2.3,
+      maxLng: 2.4,
+    },
   ];
 
   beforeEach(() => {
