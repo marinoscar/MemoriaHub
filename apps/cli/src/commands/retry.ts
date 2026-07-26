@@ -4,9 +4,10 @@
  * Re-queues failed files and runs the engine for a retry pass.
  *
  * Usage:
- *   memoriahub retry [--all] [--folder <id|path>] [--force]
+ *   memoriahub retry [--all] [--folder <id|path>] [--force] [--circle <id>]
  *
  * --force: also re-queue files blocked at the attempts cap.
+ * --circle: target circle for files whose folder has no bound circle_id.
  */
 
 import { Command } from 'commander';
@@ -31,9 +32,10 @@ export function retryCommand(): Command {
     )
     .option('--all', 'Retry failed files across all folders', false)
     .option('--folder <id|path>', 'Limit retry to a specific folder (ID or path)')
-    .option('--force', 'Also retry files blocked at the attempts cap (resets their attempt count)', false);
+    .option('--force', 'Also retry files blocked at the attempts cap (resets their attempt count)', false)
+    .option('--circle <id>', 'Target circle ID (overrides active circle in config)');
 
-  cmd.action(async (opts: { all: boolean; folder?: string; force: boolean }) => {
+  cmd.action(async (opts: { all: boolean; folder?: string; force: boolean; circle?: string }) => {
     const cfg = requireConfig();
     const api  = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
     const db   = getDb();
@@ -100,6 +102,11 @@ export function retryCommand(): Command {
         folderIds,
         retryFailedOnly: true,
         force: opts.force,
+        // Mirror `sync`: the engine resolves folder.circle_id → this → error.
+        // Omitting it made retry unusable for any folder registered without a
+        // bound circle_id, while pointing at a --circle flag that did not
+        // exist (issue #179).
+        circleId: opts.circle ?? cfg.activeCircleId,
         trigger: 'retry',
       });
     } catch (err) {

@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import { ApiClient } from './api.js';
+import { ApiClient, ApiError } from './api.js';
 
 export interface UploadResult {
   objectId: string;
@@ -111,9 +111,45 @@ function readFileSlice(
 }
 
 /**
- * Upload one part. Transient/throttle retries (429/503/5xx/network) are owned
- * by ApiClient.putRaw via the shared retry + cooldown machinery; here we only
- * add part-number context to a terminal failure. Returns the ETag.
+ * Internal signal: the storage provider no longer knows about this multipart
+ * upload, so the persisted resume state is worthless and the file must be
+ * re-initialized from scratch. Never escapes {@link uploadFile} — it is caught
+ * there and converted into one fresh upload session.
+ */
+class StaleUploadSessionError extends Error {
+  constructor(
+    readonly partNumber: number,
+    readonly detail: string,
+  ) {
+    super(
+      `Multipart upload session no longer exists on the storage provider ` +
+        `(part ${partNumber}): ${detail}`,
+    );
+    this.name = 'StaleUploadSessionError';
+  }
+}
+
+/**
+ * True when a failed presigned part PUT means the multipart upload itself is
+ * gone rather than the part being individually rejected.
+ *
+ * S3/R2 answer a part PUT with 404 only when the upload or the bucket cannot be
+ * found (`NoSuchUpload` / `NoSuchBucket`) — never for a transient condition —
+ * so any 404 here invalidates the session. This is what a stranded upload looks
+ * like after the provider garbage-collected an abandoned multipart upload while
+ * our own DB row still advertised it as resumable (issue #179).
+ */
+function isStaleUploadSession(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 404;
+}
+
+/**
+ * Upload one part. Transient/throttle retries (429/500/502/503/504/network) are
+ * owned by ApiClient.putRaw via the shared retry + cooldown machinery; here we
+ * only add part-number context to a terminal failure. Returns the ETag.
+ *
+ * A 404 is translated into {@link StaleUploadSessionError} so the caller can
+ * restart the upload instead of reporting a permanent per-part failure.
  */
 async function uploadPart(
   api: ApiClient,
@@ -125,9 +161,32 @@ async function uploadPart(
   try {
     return await api.putRaw(url, buffer, mimeType);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = describeStorageFailure(err);
+    if (isStaleUploadSession(err)) {
+      throw new StaleUploadSessionError(partNumber, msg);
+    }
     throw new Error(`Part ${partNumber} failed: ${msg}`);
   }
+}
+
+/**
+ * Render a failed presigned PUT as a message that names the right system.
+ *
+ * A part PUT goes DIRECTLY to S3/R2 — the MemoriaHub API is not in the path —
+ * but it flows through the same ApiClient plumbing, so its failures arrived
+ * labelled `API error 500: …`. That prefix sent operators debugging their
+ * MemoriaHub deployment when the response actually came from the storage
+ * provider (issue #179). Surface the provider's own error code where S3/R2
+ * supplied one, since that is the detail that identifies the fault.
+ */
+function describeStorageFailure(err: unknown): string {
+  if (!(err instanceof ApiError)) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  const code = /<Code>([^<]+)<\/Code>/.exec(err.serverMessage)?.[1];
+  return code
+    ? `storage provider returned HTTP ${err.status} ${code}`
+    : `storage provider returned HTTP ${err.status}: ${err.serverMessage}`;
 }
 
 /**
@@ -191,6 +250,48 @@ async function isServerSessionValid(
 /**
  * Upload a file using the resumable multipart upload flow.
  *
+ * Delegates to {@link runUploadSession}, retrying ONCE from a clean slate when
+ * the storage provider reports that the multipart upload no longer exists.
+ *
+ * Why a retry loop lives here: `isServerSessionValid` can only ask OUR API
+ * whether the upload is still live, and the API answers from its own
+ * `storage_objects` row — it never asks S3/R2. When the provider has garbage-
+ * collected an abandoned multipart upload (which is exactly what happens after
+ * a failed part PUT strands one), the DB still advertises a resumable session
+ * and every subsequent part PUT 404s with `NoSuchUpload`, forever. Detecting
+ * that reactively and re-initializing is the only way the file can recover
+ * without manual intervention (issue #179).
+ *
+ * The re-upload re-sends bytes that were already transferred. That waste is
+ * bounded by a single file and is strictly better than the alternative, which
+ * was losing the file permanently.
+ */
+export async function uploadFile(
+  api: ApiClient,
+  filePath: string,
+  mimeType: string,
+  onProgress?: (fraction: number) => void,
+  persistence?: UploadPersistence,
+): Promise<UploadResult> {
+  try {
+    return await runUploadSession(api, filePath, mimeType, onProgress, persistence);
+  } catch (err) {
+    if (!(err instanceof StaleUploadSessionError)) throw err;
+
+    // Drop the dead session (clears upload_id, part_size and every persisted
+    // part row) so the retry below cannot resume into it again, then run a
+    // single fresh session. A second stale-session failure is a real problem
+    // (e.g. a missing bucket) and propagates to the caller.
+    persistence?.onComplete();
+    return runUploadSession(api, filePath, mimeType, onProgress, persistence, {
+      ignoreResumeState: true,
+    });
+  }
+}
+
+/**
+ * One attempt at the resumable multipart upload flow.
+ *
  * Flow:
  *   1. If `persistence` provides resume state, validate the server session.
  *      - Valid session: skip already-completed parts, continue from there.
@@ -204,13 +305,17 @@ async function isServerSessionValid(
  *      - Call persistence.onPartComplete(partNumber, eTag) immediately.
  *   4. POST :id/upload/complete with the full merged part list.
  *   5. Call persistence.onComplete() to clear in-progress state.
+ *
+ * `opts.ignoreResumeState` forces step 1 to be skipped entirely — used by the
+ * caller's stale-session retry so a known-dead session is never consulted.
  */
-export async function uploadFile(
+async function runUploadSession(
   api: ApiClient,
   filePath: string,
   mimeType: string,
   onProgress?: (fraction: number) => void,
   persistence?: UploadPersistence,
+  opts?: { ignoreResumeState?: boolean },
 ): Promise<UploadResult> {
   const stat = fs.statSync(filePath);
   const fileSize = stat.size;
@@ -231,7 +336,9 @@ export async function uploadFile(
   // ------------------------------------------------------------------
   // 1. Attempt to resume an interrupted upload
   // ------------------------------------------------------------------
-  const resumeState = persistence?.getResumeState() ?? null;
+  const resumeState = opts?.ignoreResumeState
+    ? null
+    : persistence?.getResumeState() ?? null;
   let resumed = false;
 
   if (resumeState) {

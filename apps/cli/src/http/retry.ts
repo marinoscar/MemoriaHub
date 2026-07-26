@@ -2,7 +2,7 @@
  * http/retry.ts — Rate-limit-aware HTTP retry engine.
  *
  * A single retry engine shared by the ApiClient (JSON requests) and the
- * presigned-PUT path. Retries only transient failures — HTTP 429/502/503/504
+ * presigned-PUT path. Retries only transient failures — HTTP 429/500/502/503/504
  * and network errors — with exponential backoff + full jitter, honoring the
  * server's `Retry-After` header as a floor. Non-retryable errors (other 4xx)
  * are rethrown immediately.
@@ -26,8 +26,17 @@ export const DEFAULT_RETRY_CONFIG: RetryConfig = {
   maxMs: 30_000,
 };
 
-/** HTTP statuses that warrant a retry. */
-export const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
+/**
+ * HTTP statuses that warrant a retry.
+ *
+ * 500 is included deliberately. S3 and Cloudflare R2 both return a transient
+ * `500 InternalError` on presigned part PUTs under load, and both document it
+ * as retry-and-it-succeeds. Treating it as permanent failed the part, failed
+ * the whole file, and consumed a sync attempt — see issue #179, where a single
+ * transient 500 was the root cause of files being permanently lost during a
+ * bulk import.
+ */
+export const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 
 /** Transient network error codes that warrant a retry. */
 const RETRYABLE_NET_CODES = new Set([

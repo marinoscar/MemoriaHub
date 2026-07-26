@@ -437,6 +437,12 @@ export class SyncEngine extends TypedEmitter {
     const cap = settings.attemptsCap();
     const isDryRun = opts.dryRun ?? false;
 
+    // Set when a file fails with HTTP 401. An expired/revoked token is not a
+    // per-file condition — every remaining file would fail identically — so the
+    // pool stops dequeuing rather than marching through the queue marking
+    // thousands of untried files failed and burning their attempts (issue #179).
+    let authFailure: string | null = null;
+
     await runPool(workList, concurrency, async (item) => {
       const { fileId, filePath, mimeType, folderId } = item;
 
@@ -716,13 +722,15 @@ export class SyncEngine extends TypedEmitter {
       } catch (err) {
         // Give an actionable message when the token has expired mid-run so the
         // user knows exactly what to do and the last_error is not cryptic.
-        // 401 is intentionally NOT in the retryable set; it is surfaced here as
-        // a permanent failure so the file is marked failed and the run continues.
+        // 401 is intentionally NOT in the retryable set; the file is marked
+        // failed AND the run is aborted (see `authFailure` above) — retrying
+        // the rest of the queue against a dead token can only fail.
         let errorMsg = err instanceof Error ? err.message : String(err);
         if (err instanceof ApiError && err.status === 401) {
           errorMsg =
             'Access token expired or invalid (HTTP 401). ' +
             'Run `memoriahub login` to re-authenticate, then `memoriahub retry` to resume.';
+          authFailure = errorMsg;
         }
         files.setError(fileId, errorMsg);
         files.setStatus(fileId, 'failed');
@@ -736,9 +744,28 @@ export class SyncEngine extends TypedEmitter {
         });
 
         this._emitProgress(files, targetFolderIds, total);
-        // Per-file failure intentionally does NOT propagate — the pool continues.
+        // Per-file failure intentionally does NOT propagate — the pool
+        // continues, unless `authFailure` stopped it (see shouldStop below).
       }
-    });
+    }, () => authFailure !== null);
+
+    // ------------------------------------------------------------------
+    // 5b. Aborted run: the token died mid-flight
+    // ------------------------------------------------------------------
+    // Close out the run record with the counts actually achieved, but do NOT
+    // touch last_sync — the folders were not fully synced, and claiming they
+    // were would make the next run skip work. Files never dequeued keep their
+    // prior status and attempt_count, so `retry` resumes cleanly after login.
+    if (authFailure !== null) {
+      const aborted = files.counts(targetFolderIds);
+      runs.finishRun(runId, {
+        uploaded: aborted.uploaded,
+        skipped:  aborted.skipped + unchangedSkippedCount + outOfRangeSkippedCount,
+        failed:   aborted.failed,
+      });
+      this.emit(EV.ERROR, { message: authFailure });
+      throw new Error(authFailure);
+    }
 
     // ------------------------------------------------------------------
     // 6. Post-run: touch last_sync, finish run, emit run:done
