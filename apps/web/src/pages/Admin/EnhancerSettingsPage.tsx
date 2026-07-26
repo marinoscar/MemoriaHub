@@ -53,7 +53,7 @@ function EnhancerSettingsContent() {
   // Defaults & policy local state
   const [defaultQuality, setDefaultQuality] = useState<Quality>('high');
   const [defaultStrength, setDefaultStrength] = useState<Strength>('balanced');
-  const [stampExif, setStampExif] = useState(false);
+  const [stampExif, setStampExif] = useState(true);
   const [allowReplace, setAllowReplace] = useState(true);
   const [blockReplaceOnDownscale, setBlockReplaceOnDownscale] = useState(false);
   const [maxInputMegapixels, setMaxInputMegapixels] = useState('50');
@@ -87,7 +87,7 @@ function EnhancerSettingsContent() {
     const pe = settings.pictureEnhancement;
     setDefaultQuality(pe?.defaultQuality ?? 'high');
     setDefaultStrength(pe?.defaultStrength ?? 'balanced');
-    setStampExif(pe?.stampExif ?? false);
+    setStampExif(pe?.stampExif ?? true);
     setAllowReplace(pe?.allowReplace ?? true);
     setBlockReplaceOnDownscale(pe?.blockReplaceOnDownscale ?? false);
     setMaxInputMegapixels(String(pe?.maxInputMegapixels ?? 50));
