@@ -76,7 +76,7 @@ function defaultFaceSettings() {
           last4: null,
           baseUrl: 'http://compreface-core:3000',
           region: null,
-          capabilities: { detect: true, embed: true, delegatedRecognize: false },
+          capabilities: { detect: true, embed: true },
         },
       ],
       knownProviders: [],
