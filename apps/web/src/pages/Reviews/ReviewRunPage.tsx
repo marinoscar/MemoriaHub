@@ -36,7 +36,6 @@ import {
   runStatusLabel,
 } from '../../utils/runFormat';
 import type { ReviewRunDetail, ReviewRunItem } from '../../types/reviewRuns';
-import { reviewRunItemSubjectId } from '../../types/reviewRuns';
 
 const ITEMS_PAGE_SIZE = 24;
 
@@ -171,8 +170,7 @@ function terminalSummary(
 /** Display name for a failed run item. */
 function itemLabel(item: ReviewRunItem): string {
   if (item.media?.filename) return item.media.filename;
-  const subjectId = reviewRunItemSubjectId(item);
-  return subjectId ? subjectId.slice(0, 8) : 'Unknown';
+  return item.subjectId ? item.subjectId.slice(0, 8) : 'Unknown';
 }
 
 // ---------------------------------------------------------------------------
@@ -327,7 +325,7 @@ export default function ReviewRunPage() {
                       </TableHead>
                       <TableBody>
                         {items.map((item) => {
-                          const subjectId = reviewRunItemSubjectId(item);
+                          const subjectId = item.subjectId;
                           const href = subjectId
                             ? presentation.subjectLink(subjectId)
                             : null;

@@ -62,18 +62,15 @@ export interface CancelReviewRunResponse {
 /**
  * One subject's outcome within a run.
  *
- * The backing table uses an exclusive arc — exactly one of the three subject
- * columns is populated, matching the run's `subjectType`. `subjectId` is the
- * convenience projection the API serializes; the typed columns are kept
- * optional so a payload carrying either shape resolves (see
- * `reviewRunItemSubjectId`).
+ * The backing table uses an exclusive arc — exactly one of
+ * `burst_group_id` / `duplicate_group_id` / `location_suggestion_id` is
+ * populated, matching the run's `subjectType`. That is a DATABASE-level
+ * integrity concern; the API flattens it to a single `subjectId` before
+ * serializing, so the client never sees the three columns.
  */
 export interface ReviewRunItem extends BaseRunItem {
   subjectType: ReviewRunSubject;
   subjectId: string;
-  burstGroupId?: string | null;
-  duplicateGroupId?: string | null;
-  locationSuggestionId?: string | null;
 }
 
 export type ReviewRunListMeta = RunListMeta;
@@ -84,14 +81,3 @@ export interface ReviewRunItemsResponse {
 }
 
 export type ReviewRunItemsQueryParams = RunItemsQueryParams;
-
-/**
- * Resolve an item's subject id, preferring the flat `subjectId` projection and
- * falling back to whichever exclusive-arc column is populated.
- */
-export function reviewRunItemSubjectId(item: ReviewRunItem): string | null {
-  if (item.subjectId) return item.subjectId;
-  return (
-    item.burstGroupId ?? item.duplicateGroupId ?? item.locationSuggestionId ?? null
-  );
-}
