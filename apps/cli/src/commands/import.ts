@@ -25,9 +25,10 @@ export function importCommand(): Command {
     .description('One-shot import: register a folder and sync it immediately (alias for sync <folder>)')
     .argument('<folder>', 'Path to the folder to import')
     .option('-r, --recursive', 'Descend into sub-directories', false)
-    .option('--dry-run', 'Show what would be uploaded without actually uploading', false);
+    .option('--dry-run', 'Show what would be uploaded without actually uploading', false)
+    .option('--circle <id>', 'Target circle ID (overrides active circle in config)');
 
-  cmd.action(async (folder: string, options: { recursive: boolean; dryRun: boolean }) => {
+  cmd.action(async (folder: string, options: { recursive: boolean; dryRun: boolean; circle?: string }) => {
     const cfg = requireConfig();
     const api  = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
     const db   = getDb();
@@ -62,6 +63,10 @@ export function importCommand(): Command {
       await engine.run({
         folderIds: [f.id],
         dryRun:    options.dryRun,
+        // `import` registers the folder itself, so folder.circle_id is always
+        // null on a first run — without this the command could never resolve a
+        // circle (same defect as `retry`, issue #179).
+        circleId:  options.circle ?? cfg.activeCircleId,
         trigger:   'cli',
       });
     } catch (err) {
